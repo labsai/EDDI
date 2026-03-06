@@ -34,7 +34,7 @@
   --color-sidebar-accent-foreground: #ffffff;
 
   --radius: 0.5rem;
-  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Noto Sans', 'Noto Sans Arabic', 'Noto Sans Thai', 'Noto Sans Devanagari', 'Noto Sans JP', 'Noto Sans KR', 'Noto Sans SC', ui-sans-serif, system-ui, sans-serif;
 }
 
 /* Dark theme overrides */
