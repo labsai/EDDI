@@ -2,6 +2,7 @@ package ai.labs.eddi.modules.langchain.impl;
 
 import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
@@ -73,6 +74,7 @@ public class LangchainTask implements ILifecycleTask {
     private final ChatModelRegistry chatModelRegistry;
     private final ConversationHistoryBuilder conversationHistoryBuilder;
     private final LegacyChatExecutor legacyChatExecutor;
+    private final StreamingLegacyChatExecutor streamingLegacyChatExecutor;
     private final AgentOrchestrator agentOrchestrator;
 
     private static final Logger LOGGER = Logger.getLogger(LangchainTask.class);
@@ -105,6 +107,7 @@ public class LangchainTask implements ILifecycleTask {
         this.chatModelRegistry = new ChatModelRegistry(languageModelApiConnectorBuilders);
         this.conversationHistoryBuilder = new ConversationHistoryBuilder();
         this.legacyChatExecutor = new LegacyChatExecutor();
+        this.streamingLegacyChatExecutor = new StreamingLegacyChatExecutor();
         this.agentOrchestrator = new AgentOrchestrator(
                 calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
@@ -182,6 +185,9 @@ public class LangchainTask implements ILifecycleTask {
         var chatModel = chatModelRegistry.getOrCreate(task.getType(), processedParams);
         prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
 
+        // Detect streaming mode — event sink is set when SSE endpoint is used
+        ConversationEventSink eventSink = memory.getEventSink();
+
         // Execute: try agent mode first, fall back to legacy
         String responseContent;
         Map<String, Object> responseMetadata = new HashMap<>();
@@ -197,9 +203,29 @@ public class LangchainTask implements ILifecycleTask {
                 chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task, memory);
 
         if (agentResult != null) {
+            // Agent mode — tools execute synchronously, stream final response if sink
+            // available
             responseContent = agentResult.response();
             toolTrace = agentResult.trace();
+            // Stream the final agent response if streaming is active
+            if (eventSink != null && responseContent != null) {
+                eventSink.onToken(responseContent);
+            }
+        } else if (eventSink != null) {
+            // Legacy mode with streaming — try to get a streaming model
+            var streamingModel = chatModelRegistry.getOrCreateStreaming(task.getType(), processedParams);
+            if (streamingModel != null) {
+                responseContent = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink);
+            } else {
+                // Streaming not supported by this builder — fall back to sync, emit as single
+                // chunk
+                var chatResult = legacyChatExecutor.execute(chatModel, messages, task);
+                responseContent = chatResult.response();
+                responseMetadata = chatResult.responseMetadata();
+                eventSink.onToken(responseContent);
+            }
         } else {
+            // Standard non-streaming legacy mode
             var chatResult = legacyChatExecutor.execute(chatModel, messages, task);
             responseContent = chatResult.response();
             responseMetadata = chatResult.responseMetadata();

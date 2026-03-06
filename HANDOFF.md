@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-06 by conversation `02683fa7`
+> **Last updated:** 2026-03-06 by conversation `5d197d03`
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -68,6 +68,30 @@
 - `src/main/java/ai/labs/eddi/engine/exception/SneakyThrow.java`
 - `src/main/java/ai/labs/eddi/engine/exception/Resource*ExceptionMapper.java` (4 files)
 
+### Phase 1, Item 5: Streaming API (SSE endpoint, `StreamingChatModel`) ✅
+
+- [x] Two-layer SSE streaming: pipeline step events (`task_start`/`task_complete`) + LLM token events (`token`)
+- [x] `ConversationEventSink` callback interface for all SSE event types
+- [x] `ILanguageModelBuilder.buildStreaming()` in 4 builders (OpenAI, Anthropic, Gemini, Ollama)
+- [x] `ChatModelRegistry.getOrCreateStreaming()` with separate streaming cache
+- [x] `LifecycleManager` emits step events around each `task.execute()` call
+- [x] `StreamingLegacyChatExecutor` bridges langchain4j async streaming with sync lifecycle (CountDownLatch)
+- [x] `LangchainTask` detects streaming via `memory.getEventSink()`, delegates to streaming or sync path
+- [x] `POST /bots/{env}/{botId}/{convId}/stream` SSE endpoint (`RestBotEngineStreaming`)
+- [x] `ConversationService.sayStreaming()` with event sink adapter
+- [x] 22 new tests across 5 test files
+- [x] All ~562 tests pass (0 failures, 0 errors, 4 skipped)
+
+**Key files:**
+
+- `src/main/java/ai/labs/eddi/engine/lifecycle/ConversationEventSink.java`
+- `src/main/java/ai/labs/eddi/modules/langchain/impl/StreamingLegacyChatExecutor.java`
+- `src/main/java/ai/labs/eddi/engine/IRestBotEngineStreaming.java`
+- `src/main/java/ai/labs/eddi/engine/internal/RestBotEngineStreaming.java`
+- `src/test/java/ai/labs/eddi/modules/langchain/impl/StreamingLegacyChatExecutorTest.java`
+- `src/test/java/ai/labs/eddi/modules/langchain/impl/ChatModelRegistryTest.java`
+- `src/test/java/ai/labs/eddi/engine/lifecycle/internal/LifecycleManagerStreamingTest.java`
+
 ### Phase 1, Item 6: Decompose `LangchainTask` ✅
 
 - [x] Created `ChatModelRegistry` — model creation, caching, and lookup
@@ -89,9 +113,7 @@
 
 ## Next Up
 
-### Phase 1, Item 5: Streaming API (SSE endpoint, `StreamingChatModel`) — 🔴 Critical
-
-Add Server-Sent Events (SSE) support for real-time streaming of LLM responses. See `docs/v6-planning/implementation_plan.md` Part 8 Item 2.
+All Phase 1 items complete. Next: Phase 2 (see `docs/v6-planning/implementation_plan.md`).
 
 ## Important Rules
 

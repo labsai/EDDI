@@ -2,7 +2,9 @@ package ai.labs.eddi.modules.langchain.impl.builder;
 
 import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
+import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.time.Duration;
@@ -25,15 +27,33 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {
             builder.modelName(parameters.get(KEY_MODEL));
         }
-
         if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
             builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
         }
-
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
         }
+        if (!isNullOrEmpty(parameters.get(KEY_LOG_RESPONSES))) {
+            builder.logResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_RESPONSES)));
+        }
 
+        return builder.build();
+    }
+
+    @Override
+    public StreamingChatModel buildStreaming(Map<String, String> parameters) {
+        var builder = OllamaStreamingChatModel.builder()
+                .httpClientBuilder(JdkHttpClient.builder());
+
+        if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {
+            builder.modelName(parameters.get(KEY_MODEL));
+        }
+        if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
+            builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
+        }
+        if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
+            builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
+        }
         if (!isNullOrEmpty(parameters.get(KEY_LOG_RESPONSES))) {
             builder.logResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_RESPONSES)));
         }

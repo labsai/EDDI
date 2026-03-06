@@ -2,7 +2,9 @@ package ai.labs.eddi.modules.langchain.impl;
 
 import ai.labs.eddi.modules.langchain.impl.builder.ILanguageModelBuilder;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import jakarta.inject.Provider;
+import org.jboss.logging.Logger;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -13,6 +15,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>
  * Models are cached by (type, parameters) tuple so that identical configs
  * reuse the same model instance. Thread-safe via ConcurrentHashMap.
+ * <p>
+ * Supports both synchronous ({@link ChatModel}) and streaming
+ * ({@link StreamingChatModel}) models with separate caches.
  */
 class ChatModelRegistry {
     private static final String KEY_INCLUDE_FIRST_BOT_MESSAGE = "includeFirstBotMessage";
@@ -22,8 +27,11 @@ class ChatModelRegistry {
     private static final String KEY_ADD_TO_OUTPUT = "addToOutput";
     private static final String KEY_CONVERT_TO_OBJECT = "convertToObject";
 
+    private static final Logger LOGGER = Logger.getLogger(ChatModelRegistry.class);
+
     private final Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders;
     private final Map<ModelCacheKey, ChatModel> modelCache = new ConcurrentHashMap<>(1);
+    private final Map<ModelCacheKey, StreamingChatModel> streamingModelCache = new ConcurrentHashMap<>(1);
 
     ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders) {
         this.languageModelApiConnectorBuilders = languageModelApiConnectorBuilders;
@@ -51,6 +59,34 @@ class ChatModelRegistry {
         modelCache.put(cacheKey, model);
 
         return model;
+    }
+
+    /**
+     * Get or create a StreamingChatModel for the given type and parameters.
+     * Returns {@code null} if the builder does not support streaming.
+     */
+    StreamingChatModel getOrCreateStreaming(String type, Map<String, String> processedParams)
+            throws UnsupportedLangchainTaskException {
+
+        var filteredParams = filterParams(processedParams);
+        var cacheKey = new ModelCacheKey(type, filteredParams);
+
+        if (streamingModelCache.containsKey(cacheKey)) {
+            return streamingModelCache.get(cacheKey);
+        }
+
+        if (!languageModelApiConnectorBuilders.containsKey(type)) {
+            throw new UnsupportedLangchainTaskException(String.format("Type \"%s\" is not supported", type));
+        }
+
+        try {
+            var model = languageModelApiConnectorBuilders.get(type).get().buildStreaming(filteredParams);
+            streamingModelCache.put(cacheKey, model);
+            return model;
+        } catch (UnsupportedOperationException e) {
+            LOGGER.debugf("Streaming not supported for type '%s', falling back to sync", type);
+            return null;
+        }
     }
 
     /**

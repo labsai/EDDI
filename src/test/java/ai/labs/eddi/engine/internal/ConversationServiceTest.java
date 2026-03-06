@@ -355,4 +355,79 @@ class ConversationServiceTest {
 
         verify(propertiesStore).readProperties(USER_ID);
     }
+
+    // --- sayStreaming tests ---
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void sayStreaming_botMismatch_throwsBotMismatchException() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setBotId("different-bot-id");
+        snapshot.setUserId(USER_ID);
+        snapshot.setBotVersion(1);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+
+        var handler = mock(ai.labs.eddi.engine.IConversationService.StreamingResponseHandler.class);
+
+        assertThrows(BotMismatchException.class,
+                () -> conversationService.sayStreaming(ENV, BOT_ID, CONVERSATION_ID,
+                        false, false, List.of(),
+                        new InputData("hello", Map.of()), handler));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void sayStreaming_conversationEnded_throwsConversationEndedException() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setBotId(BOT_ID);
+        snapshot.setUserId(USER_ID);
+        snapshot.setBotVersion(1);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        IBot mockBot = mock(IBot.class);
+        IConversation mockConversation = mock(IConversation.class);
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+        when(botFactory.getBot(ENV, BOT_ID, 1)).thenReturn(mockBot);
+        when(mockBot.continueConversation(any(), any(), any())).thenReturn(mockConversation);
+        when(mockConversation.isEnded()).thenReturn(true);
+
+        var handler = mock(ai.labs.eddi.engine.IConversationService.StreamingResponseHandler.class);
+
+        assertThrows(ConversationEndedException.class,
+                () -> conversationService.sayStreaming(ENV, BOT_ID, CONVERSATION_ID,
+                        false, false, List.of(),
+                        new InputData("hello", Map.of()), handler));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void sayStreaming_validInput_submitsToCoordinator() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setBotId(BOT_ID);
+        snapshot.setUserId(USER_ID);
+        snapshot.setBotVersion(1);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        IBot mockBot = mock(IBot.class);
+        IConversation mockConversation = mock(IConversation.class);
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+        when(botFactory.getBot(ENV, BOT_ID, 1)).thenReturn(mockBot);
+        when(mockBot.continueConversation(any(), any(), any())).thenReturn(mockConversation);
+        when(mockConversation.isEnded()).thenReturn(false);
+
+        var handler = mock(ai.labs.eddi.engine.IConversationService.StreamingResponseHandler.class);
+
+        conversationService.sayStreaming(ENV, BOT_ID, CONVERSATION_ID,
+                false, false, List.of(),
+                new InputData("hello", Map.of()), handler);
+
+        verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any(Callable.class));
+    }
 }

@@ -1,5 +1,6 @@
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
@@ -47,6 +48,22 @@ public interface IConversationMemory extends Serializable {
     void setConversationState(ConversationState conversationState);
 
     Stack<IConversationStep> getRedoCache();
+
+    /**
+     * Get the event sink for streaming SSE events. Returns {@code null} when
+     * no streaming is requested (standard say endpoint).
+     */
+    default ConversationEventSink getEventSink() {
+        return null;
+    }
+
+    /**
+     * Set the event sink for this conversation turn. Called from
+     * {@code ConversationService.sayStreaming()} before lifecycle execution.
+     */
+    default void setEventSink(ConversationEventSink eventSink) {
+        // no-op by default
+    }
 
     interface IConversationStepStack {
         <T> IData<T> getLatestData(String key);

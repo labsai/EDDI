@@ -1,5 +1,6 @@
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.model.ConversationState;
@@ -24,6 +25,9 @@ public class ConversationMemory implements IConversationMemory {
     private final Stack<ConversationOutput> conversationOutputs = new Stack<>();
     private final IConversationProperties conversationProperties = new ConversationProperties(this);
     private ConversationState conversationState;
+
+    /** Transient — never serialized to MongoDB. Set per-turn for SSE streaming. */
+    private transient ConversationEventSink eventSink;
 
     public ConversationMemory(String conversationId, String botId, Integer botVersion, String userId) {
         this(botId, botVersion, userId);
@@ -155,6 +159,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public Stack<IConversationStep> getRedoCache() {
         return redoCache;
+    }
+
+    @Override
+    public ConversationEventSink getEventSink() {
+        return eventSink;
+    }
+
+    @Override
+    public void setEventSink(ConversationEventSink eventSink) {
+        this.eventSink = eventSink;
     }
 
     public final static class ConversationStepStack implements IConversationStepStack {

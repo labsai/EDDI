@@ -94,6 +94,30 @@ public interface IConversationService {
         void onComplete(SimpleConversationMemorySnapshot snapshot);
     }
 
+    /**
+     * Callback for streaming conversation responses via SSE.
+     */
+    interface StreamingResponseHandler {
+        void onTaskStart(String taskId, String taskType, int index);
+
+        void onTaskComplete(String taskId, String taskType, long durationMs, Map<String, Object> summary);
+
+        void onToken(String token);
+
+        void onComplete(SimpleConversationMemorySnapshot snapshot);
+
+        void onError(Throwable error);
+    }
+
+    /**
+     * Process user input with SSE streaming. Token and step events are
+     * delivered via the streamingHandler callback.
+     */
+    void sayStreaming(Environment environment, String botId, String conversationId,
+            Boolean returnDetailed, Boolean returnCurrentStepOnly,
+            List<String> returningFields, InputData inputData,
+            StreamingResponseHandler streamingHandler) throws Exception;
+
     Boolean isUndoAvailable(Environment environment, String botId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException;
 

@@ -2,7 +2,9 @@ package ai.labs.eddi.modules.langchain.impl.builder;
 
 import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.anthropic.AnthropicChatModel;
+import dev.langchain4j.model.anthropic.AnthropicStreamingChatModel;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.time.Duration;
@@ -27,24 +29,47 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
             builder.apiKey(parameters.get(KEY_API_KEY));
         }
-
         if (!isNullOrEmpty(parameters.get(KEY_MODEL_NAME))) {
             builder.modelName(parameters.get(KEY_MODEL_NAME));
         }
-
         if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
             builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
         }
-
         if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
             builder.temperature(
                     Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
         }
-
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
         }
+        if (!isNullOrEmpty(parameters.get(KEY_LOG_RESPONSES))) {
+            builder.logResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_RESPONSES)));
+        }
 
+        return builder.build();
+    }
+
+    @Override
+    public StreamingChatModel buildStreaming(Map<String, String> parameters) {
+        var builder = AnthropicStreamingChatModel.builder()
+                .httpClientBuilder(JdkHttpClient.builder());
+
+        if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
+            builder.apiKey(parameters.get(KEY_API_KEY));
+        }
+        if (!isNullOrEmpty(parameters.get(KEY_MODEL_NAME))) {
+            builder.modelName(parameters.get(KEY_MODEL_NAME));
+        }
+        if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
+            builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
+        }
+        if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
+            builder.temperature(
+                    Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
+        }
+        if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
+            builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
+        }
         if (!isNullOrEmpty(parameters.get(KEY_LOG_RESPONSES))) {
             builder.logResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_RESPONSES)));
         }

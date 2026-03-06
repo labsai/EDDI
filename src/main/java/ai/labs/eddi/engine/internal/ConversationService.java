@@ -7,6 +7,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.IConversationService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConversationLogGenerator;
@@ -325,6 +326,115 @@ public class ConversationService implements IConversationService {
                     return null;
                 };
             }
+
+            Callable<Void> processUserInput = processConversationStep(environment,
+                    conversationMemory,
+                    conversationId,
+                    loggingContext, executeConversation);
+
+            conversationCoordinator.submitInOrder(conversationId, processUserInput);
+        } catch (BotMismatchException | BotNotReadyException | ConversationEndedException e) {
+            processingConversationReferences.remove(createReferenceForMetrics(botId, conversationId));
+            throw e;
+        } catch (Exception e) {
+            LOGGER.error(e.getLocalizedMessage(), e);
+            processingConversationReferences.remove(createReferenceForMetrics(botId, conversationId));
+            throw e;
+        }
+    }
+
+    @Override
+    public void sayStreaming(Environment environment, String botId, String conversationId,
+            Boolean returnDetailed, Boolean returnCurrentStepOnly,
+            List<String> returningFields, InputData inputData,
+            StreamingResponseHandler streamingHandler) throws Exception {
+
+        long startTime = System.nanoTime();
+        try {
+            processingConversationReferences.add(createReferenceForMetrics(botId, conversationId));
+            final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
+            checkConversationMemoryNotNull(conversationMemory, conversationId);
+            var loggingContext = contextLogger.createLoggingContext(environment, botId,
+                    conversationId, conversationMemory.getUserId());
+            Integer botVersion = conversationMemory.getBotVersion();
+            loggingContext.put("botVersion", botVersion.toString());
+            contextLogger.setLoggingContext(loggingContext);
+
+            if (!botId.equals(conversationMemory.getBotId())) {
+                String message = "Supplied botId (%s) is incompatible with conversationId (%s)";
+                message = String.format(message, botId, conversationId);
+                throw new BotMismatchException(message);
+            }
+
+            IBot bot = getBot(environment, botId, botVersion);
+            if (bot == null) {
+                String msg = "Bot not deployed (environment=%s, conversationId=%s, version=%s)";
+                msg = String.format(msg, environment, conversationMemory.getBotId(), botVersion);
+                throw new BotNotReadyException(msg);
+            }
+
+            // Create event sink that delegates to the streaming handler
+            var eventSink = new ConversationEventSink() {
+                @Override
+                public void onTaskStart(String taskId, String taskType, int index) {
+                    streamingHandler.onTaskStart(taskId, taskType, index);
+                }
+
+                @Override
+                public void onTaskComplete(String taskId, String taskType, long durationMs,
+                        Map<String, Object> summary) {
+                    streamingHandler.onTaskComplete(taskId, taskType, durationMs, summary);
+                }
+
+                @Override
+                public void onToken(String token) {
+                    streamingHandler.onToken(token);
+                }
+
+                @Override
+                public void onComplete() {
+                    // Handled separately after memory conversion
+                }
+
+                @Override
+                public void onError(Throwable error) {
+                    streamingHandler.onError(error);
+                }
+            };
+
+            // Set the event sink on memory so LifecycleManager and tasks can use it
+            conversationMemory.setEventSink(eventSink);
+
+            final IConversation conversation = bot.continueConversation(conversationMemory,
+                    createPropertiesHandler(conversationMemory.getUserId()),
+                    returnConversationMemory -> {
+                        SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(
+                                returnConversationMemory,
+                                returnDetailed,
+                                returnCurrentStepOnly,
+                                returningFields);
+                        memorySnapshot.setEnvironment(environment);
+                        cacheConversationState(conversationId, memorySnapshot.getConversationState());
+                        conversationDescriptorStore.updateTimeStamp(conversationId);
+                        recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                        processingConversationReferences.remove(createReferenceForMetrics(botId, conversationId));
+                        streamingHandler.onComplete(memorySnapshot);
+                    });
+
+            if (conversation.isEnded()) {
+                throw new ConversationEndedException("Conversation has ended!");
+            }
+
+            Callable<Void> executeConversation = () -> {
+                try {
+                    contextLogger.setLoggingContext(loggingContext);
+                    conversation.say(inputData.getInput(), inputData.getContext());
+                } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
+                    LOGGER.error(e.getLocalizedMessage(), e);
+                    streamingHandler.onError(e);
+                }
+                return null;
+            };
 
             Callable<Void> processUserInput = processConversationStep(environment,
                     conversationMemory,

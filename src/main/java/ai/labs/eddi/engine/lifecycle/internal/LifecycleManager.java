@@ -167,6 +167,8 @@ public class LifecycleManager implements ILifecycleManager {
 
         checkNotNull(conversationMemory, "conversationMemory");
 
+        var eventSink = conversationMemory.getEventSink();
+
         // Determine which tasks to execute
         List<ILifecycleTask> lifecycleTasks;
         if (isNullOrEmpty(lifecycleTaskTypes)) {
@@ -194,8 +196,22 @@ public class LifecycleManager implements ILifecycleManager {
                 var componentKey = createComponentKey(packageId.getId(), packageId.getVersion(), index);
                 var component = components.getOrDefault(componentKey, null);
 
+                // Emit task_start event if streaming
+                if (eventSink != null) {
+                    eventSink.onTaskStart(task.getId(), task.getType(), index);
+                }
+
+                long taskStartTime = System.nanoTime();
+
                 // Execute the task, transforming the conversation memory
                 task.execute(conversationMemory, component);
+
+                // Emit task_complete event if streaming
+                if (eventSink != null) {
+                    long durationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
+                    var summary = buildTaskSummary(conversationMemory, task);
+                    eventSink.onTaskComplete(task.getId(), task.getType(), durationMs, summary);
+                }
 
                 // Check if task triggered a STOP_CONVERSATION action
                 checkIfStopConversationAction(conversationMemory);
@@ -203,6 +219,22 @@ public class LifecycleManager implements ILifecycleManager {
                 throw new LifecycleException("Error while executing lifecycle!", e);
             }
         }
+    }
+
+    /**
+     * Build a summary map for the task_complete event.
+     * Includes emitted actions for behavior tasks so the Manager UI can display
+     * them.
+     */
+    private java.util.Map<String, Object> buildTaskSummary(IConversationMemory conversationMemory,
+            ILifecycleTask task) {
+        var summary = new java.util.HashMap<String, Object>();
+        // If the task produced actions, include them in the summary
+        IData<java.util.List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(ACTIONS);
+        if (actionData != null && actionData.getResult() != null) {
+            summary.put("actions", actionData.getResult());
+        }
+        return summary;
     }
 
     /**
