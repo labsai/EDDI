@@ -60,7 +60,9 @@ export function AppLayout() {
             "transition-all duration-300"
           )}
         >
-          <Outlet />
+          <div className="mx-auto max-w-screen-2xl">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>
