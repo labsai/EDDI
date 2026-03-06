@@ -37,9 +37,23 @@ All repos are at `c:\dev\git\`. Branch: `feature/version-6.0.0`.
 
 ## 2. Mandatory Workflow Protocol
 
-1. **Before work**: Read this file + `HANDOFF.md`. Check `git log -5` on `feature/version-6.0.0`.
-2. **During work**: Commit often with `feat(v6):`, `fix(v6):`, `refactor(v6):`. Each commit must build (`npm run build`) and pass tests (`npm run test`).
-3. **After work**: Update `HANDOFF.md` with what changed, decisions made, and next steps.
+### Before Starting Any Work — MUST READ
+
+1. **`HANDOFF.md`** (this repo) — **READ FIRST.** Current status, what's done, what's next, design decisions, known issues
+2. **`c:\dev\git\EDDI\docs\changelog.md`** — Ecosystem-wide changelog with implementation log entries across all repos
+3. **Check git**: `git log -5 --oneline` on `feature/version-6.0.0` to see recent commits
+4. **If planning new work**: also read the implementation plan artifact in the Antigravity brain (search for `implementation_plan.md`)
+
+### During Work
+
+- Commit often with `feat(v6):`, `fix(v6):`, `refactor(v6):`. Each commit must build (`npm run build`) and pass tests (`npm run test`).
+- Use `--no-verify` for git commit (old pre-commit hook references removed package)
+
+### After Work (or if interrupted/switching sessions)
+
+- **Update `HANDOFF.md`** with: what changed, current status, what's next
+- **Update `c:\dev\git\EDDI\docs\changelog.md`** with an implementation log entry
+- **Suggest a new conversation** if context is getting long (more than ~15 tool calls deep)
 
 ---
 
