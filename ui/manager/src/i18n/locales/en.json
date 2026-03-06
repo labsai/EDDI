@@ -53,6 +53,21 @@
     "create": "Create",
     "edit": "Edit",
     "search": "Search...",
-    "noResults": "No results found"
+    "noResults": "No results found",
+    "duplicate": "Duplicate"
+  },
+  "bots": {
+    "deploy": "Deploy",
+    "undeploy": "Undeploy",
+    "createBot": "Create Bot",
+    "createTitle": "Create New Bot",
+    "name": "Name",
+    "namePlaceholder": "My Bot",
+    "description": "Description",
+    "descriptionPlaceholder": "Describe what this bot does...",
+    "empty": "No bots yet. Create your first bot!",
+    "confirmDelete": "Are you sure you want to delete this bot?",
+    "count_one": "{{count}} bot",
+    "count_other": "{{count}} bots"
   }
 }

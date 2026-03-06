@@ -20,13 +20,32 @@ export interface DeploymentStatus {
   status: "NOT_FOUND" | "IN_PROGRESS" | "READY" | "ERROR";
 }
 
+/** Parse resource URI to extract id and version */
+export function parseResourceUri(resource: string): {
+  id: string;
+  version: number;
+} {
+  // Format: eddi://ai.labs.bot/botstore/bots/ID?version=VERSION
+  const url = new URL(resource.replace("eddi://", "http://"));
+  const parts = url.pathname.split("/");
+  const id = parts[parts.length - 1]!;
+  const version = parseInt(url.searchParams.get("version") || "1", 10);
+  return { id, version };
+}
+
 // API functions
 export function getBotDescriptors(
   limit = 20,
-  index = 0
+  index = 0,
+  filter = ""
 ): Promise<BotDescriptor[]> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    index: String(index),
+  });
+  if (filter) params.set("filter", filter);
   return api.get<BotDescriptor[]>(
-    `/descriptorstore/bots?limit=${limit}&index=${index}`
+    `/botstore/bots/descriptors?${params.toString()}`
   );
 }
 
@@ -39,12 +58,26 @@ export function createBot(bot: Bot): Promise<{ location: string }> {
   return api.post<{ location: string }>("/botstore/bots", bot);
 }
 
-export function updateBot(id: string, version: number, bot: Bot): Promise<void> {
+export function updateBot(
+  id: string,
+  version: number,
+  bot: Bot
+): Promise<void> {
   return api.put(`/botstore/bots/${id}?version=${version}`, bot);
 }
 
 export function deleteBot(id: string, version: number): Promise<void> {
   return api.delete(`/botstore/bots/${id}?version=${version}`);
+}
+
+export function duplicateBot(
+  id: string,
+  version: number,
+  deepCopy = false
+): Promise<{ location: string }> {
+  return api.post<{ location: string }>(
+    `/botstore/bots/${id}?version=${version}&deepCopy=${deepCopy}`
+  );
 }
 
 export function deployBot(
