@@ -41,6 +41,37 @@ Each entry follows this format:
 
 ## Implementation Log
 
+### 2026-03-06 — Manager UI: Import/Export + Bot Wizard
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 3 — Item #11
+
+**What changed:**
+
+1. **Backup API module** (`backup.ts`) — typed functions for `exportBot` (2-step: POST to create zip, GET to download), `downloadBotZip` (triggers browser file save via `<a download>`), `importBot` (POST with `application/zip` body)
+2. **TanStack Query hooks** (`use-backup.ts`) — `useExportBot` (chained export + download), `useImportBot` (upload zip, invalidates bots cache)
+3. **Bots page** — "Import Bot" button with hidden file input (.zip), "Bot Wizard" CTA link alongside existing "Create Bot"
+4. **Bot card** — "Export" added to context menu dropdown (between Duplicate and Delete)
+5. **Bot detail page** — "Export" button in header actions area
+6. **Bot Wizard page** (`bot-wizard.tsx`) — 4-step guided creation: Template (3 presets: Blank, Q&A, Weather), Info (name/description), Packages (default package toggle), Review & Create/Deploy
+7. **Step progress indicator** — animated circles with checkmarks for completed steps, connecting lines
+8. **Routing** — `/manage/bots/wizard` → BotWizardPage (placed before `/manage/botview/:id` for correct matching)
+9. **i18n** — 40+ new keys under `bots.*` (export/import) and `wizard.*` (all step labels, template names/descriptions)
+10. **MSW handlers** — 3 new handlers for `POST /backup/export/:botId`, `GET /backup/export/:filename`, `POST /backup/import`
+11. **Tests** — 11 new tests: 4 for import/export UI (backup.test.tsx), 7 for wizard flow (bot-wizard.test.tsx)
+
+**Key decisions:**
+
+- **Export is a 2-step flow** — POST triggers backend zip creation, response Location header contains the download URL, second GET fetches the binary
+- **Import uses raw fetch** — `Content-Type: application/zip` requires bypassing the JSON api-client
+- **Wizard is page-internal state** — no separate routes per step, single component with step counter, keeps back/forward simple
+- **Templates are cosmetic placeholders** — all currently create blank bots; future phases can wire template-specific package presets
+
+**Tests:** ✅ 64/64 passing (11 files), TypeScript zero errors, build succeeds
+
+---
+
 ### 2026-03-06 — Manager UI: Resources Pages (Generic CRUD)
 
 **Repo:** EDDI-Manager  
