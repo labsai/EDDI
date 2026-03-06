@@ -41,6 +41,35 @@ Each entry follows this format:
 
 ## Implementation Log
 
+### 2026-03-06 — Manager UI: Resources Pages (Generic CRUD)
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 3 — Item #10
+
+**What changed:**
+
+1. **Generic API layer** (`resources.ts`) — single parameterized CRUD module that drives all 6 resource types: Behavior Rules (`/behaviorstore/behaviorsets`), HTTP Calls (`/httpcallsstore/httpcalls`), Output Sets (`/outputstore/outputsets`), Dictionaries (`/regulardictionarystore/regulardictionaries`), LangChain (`/langchainstore/langchains`), Property Setter (`/propertysetterstore/propertysetters`)
+2. **TanStack Query hooks** (`use-resources.ts`) — `useResourceDescriptors`, `useResource`, `useCreateResource`, `useDeleteResource`, `useDuplicateResource` — all parameterized by type slug, with graceful handling of unknown types (disabled queries instead of throwing)
+3. **Resource Card** (`resource-card.tsx`) — reusable card with dynamic icon mapping, context menu (duplicate/delete)
+4. **Create Resource Dialog** (`create-resource-dialog.tsx`) — creates empty config, navigates to detail page
+5. **Hub Page** (`resources.tsx`) — 6 category cards with icons, descriptions, and item counts
+6. **List Page** (`resource-list.tsx`) — generic: search, card grid, create button, error/empty states
+7. **Detail Page** (`resource-detail.tsx`) — raw JSON viewer, duplicate/delete actions
+8. **Routing** — `/manage/resources/:type` → ResourceListPage, `/manage/resources/:type/:id` → ResourceDetailPage
+9. **i18n** — 20+ new keys under `resources.*` including all 6 type names and descriptions
+10. **MSW handlers** — `createResourceHandlers()` helper generates mock endpoints for all 6 types
+11. **Tests** — 15 new tests for hub, list, and detail pages
+
+**Key decisions:**
+
+- **One solution, six types** — all 6 resource types share identical backend API shape, so a single `ResourceTypeConfig` object drives the entire stack (API → hooks → pages)
+- **Hooks handle unknown types gracefully** — queries are disabled (not thrown) for invalid slugs, allowing pages to render error UI
+
+**Tests:** ✅ 53/53 passing (9 files), TypeScript zero errors, build succeeds
+
+---
+
 ### 2026-03-06 — Manager UI: Chat Panel
 
 **Repo:** EDDI-Manager  
