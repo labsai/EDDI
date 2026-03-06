@@ -1,0 +1,33 @@
+{
+  "targetServerUrl" : "https://api.openweathermap.org/data/2.5/weather",
+  "httpCalls" : [ {
+    "name" : "currentWeather",
+    "actions" : [ "current_weather_in_city" ],
+    "saveResponse" : true,
+    "responseObjectName" : "currentWeather",
+    "fireAndForget" : false,
+    "isBatchCalls" : false,
+    "request" : {
+      "path" : "",
+      "headers" : { },
+      "queryParams" : {
+        "APPID" : "c3366d78c7c0f76d63eb4cdf1384ddbf",
+        "units" : "metric",
+        "q" : "[[${memory.current.input}]]"
+      },
+      "method" : "get",
+      "contentType" : "",
+      "body" : ""
+    },
+    "postResponse" : {
+      "propertyInstructions" : [ {
+        "name" : "currentWeather",
+        "scope" : "step",
+        "fromObjectPath" : "currentWeather",
+        "toObjectPath" : "",
+        "override" : true,
+        "runOnValidationError" : false
+      } ]
+    }
+  } ]
+}

@@ -1,0 +1,25 @@
+{
+  "language": "en",
+  "words": [
+    {
+      "word": "hi",
+      "expressions": "greeting(hi)",
+      "frequency": 0
+    },
+    {
+      "word": "ciao",
+      "expressions": "goodbye(ciao)",
+      "frequency": 0
+    }
+  ],
+  "phrases": [
+    {
+      "phrase": "good morning",
+      "expressions": "greeting(good_morning)"
+    },
+    {
+      "phrase": "good bye",
+      "expressions": "goodbye(see_bye)"
+    }
+  ]
+}

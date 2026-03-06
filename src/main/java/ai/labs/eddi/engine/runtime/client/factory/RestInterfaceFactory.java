@@ -1,13 +1,25 @@
 package ai.labs.eddi.engine.runtime.client.factory;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.rest.client.RestClientBuilder;
 
 import java.net.URI;
 
 @ApplicationScoped
 public class RestInterfaceFactory implements IRestInterfaceFactory {
-    private static final String apiServerURI = "http://127.0.0.1:7070";
+    private final String apiServerURI;
+
+    @Inject
+    public RestInterfaceFactory(@ConfigProperty(name = "quarkus.http.port", defaultValue = "7070") int port) {
+        this.apiServerURI = "http://127.0.0.1:" + port;
+    }
+
+    // CDI proxy constructor
+    public RestInterfaceFactory() {
+        this.apiServerURI = "http://127.0.0.1:7070";
+    }
 
     @Override
     public <T> T get(Class<T> clazz) {

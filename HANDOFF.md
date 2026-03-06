@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-06 by conversation `5d197d03`
+> **Last updated:** 2026-03-06 by conversation `015295f8`
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -111,9 +111,28 @@
 - `src/main/java/ai/labs/eddi/modules/langchain/impl/AgentOrchestrator.java`
 - `src/main/java/ai/labs/eddi/modules/langchain/impl/LangchainTask.java`
 
+### Phase 2: Testing Infrastructure ✅ (commit `0956cefd`)
+
+- [x] Migrated all integration tests from `EDDI-integration-tests` repo into main EDDI repo
+- [x] Created `BaseIntegrationIT` with shared helpers (resource creation, deployment, cleanup)
+- [x] Created `IntegrationTestProfile` with DevServices MongoDB (Testcontainers)
+- [x] `BotEngineIT` (11 tests): welcome, input, context, output, undo/redo, templating, property
+- [x] `BotDeploymentComponentIT` (4 tests): deploy, undeploy, status transitions
+- [x] `ConversationServiceComponentIT` (7 tests): lifecycle, undo/redo, concurrent conversations
+- [x] `ApiContractIT` (10 tests): CRUD contracts for behavior, dictionary, output, package, bot stores
+- [x] `BotUseCaseIT` (2 tests): weather bot import + managed bot API
+- [x] CRUD ITs: `BehaviorCrudIT` (4), `DictionaryCrudIT` (5), `OutputCrudIT` (5)
+- [x] Unit test gaps: `BotFactoryTest`, `BehaviorRulesEvaluationTaskTest`, `RestBotEngineTest`,
+      `ConversationHistoryBuilderTest`, `LegacyChatExecutorTest`
+- [x] Fixed `RestInterfaceFactory` port hardcoded to 7070 → now `@ConfigProperty` injected
+- [x] Weather bot analysis: **confirmed v6.0 compatible** (no backwards compat issue, no migration needed)
+- [x] All 48 integration tests + 620 unit tests = 668 tests pass
+
+> **Note:** `EDDI-integration-tests` repo is now fully superseded. All tests migrated into main repo.
+
 ## Next Up
 
-All Phase 1 items complete. Next: Phase 2 (see `docs/v6-planning/implementation_plan.md`).
+All Phase 1 + Phase 2 items complete. Next: Phase 3 (see `docs/v6-planning/implementation_plan.md`).
 
 ## Important Rules
 

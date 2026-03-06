@@ -1,0 +1,10 @@
+{
+  "intent": "weather-bot",
+  "botDeployments": [
+    {
+      "environment": "unrestricted",
+      "botId": "%s",
+      "initialContext": {}
+    }
+  ]
+}

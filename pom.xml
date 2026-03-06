@@ -5,9 +5,9 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>ai.labs</groupId>
     <artifactId>eddi</artifactId>
-    <version>5.6.0</version>
+    <version>6.0.0</version>
     <properties>
-        <compiler-plugin.version>3.14.1</compiler-plugin.version>
+        <compiler-plugin.version>3.15.0</compiler-plugin.version>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <maven.compiler.release>21</maven.compiler.release>
@@ -27,7 +27,7 @@
         <failsafe-plugin.version>3.5.4</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <war-plugin.version>3.4.0</war-plugin.version>
-        <dependency.version.lombok>1.18.38</dependency.version.lombok>
+        <dependency.version.lombok>1.18.42</dependency.version.lombok>
         <skipITs>true</skipITs>
     </properties>
     <dependencyManagement>
@@ -386,6 +386,9 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${surefire-plugin.version}</version>
                 <configuration>
+                    <excludes>
+                        <exclude>**/*IT.java</exclude>
+                    </excludes>
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                         <!--suppress UnresolvedMavenProperty -->
@@ -406,6 +409,9 @@
                     </execution>
                 </executions>
                 <configuration>
+                    <includes>
+                        <include>**/*IT.java</include>
+                    </includes>
                     <systemPropertyVariables>
                         <native.image.path>${project.build.directory}/${project.build.finalName}-runner
                         </native.image.path>

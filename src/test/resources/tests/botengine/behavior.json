@@ -1,0 +1,156 @@
+{
+  "behaviorGroups": [
+    {
+      "name": "Smalltalk",
+      "behaviorRules": [
+        {
+          "name": "Welcome",
+          "actions": [
+            "welcome"
+          ],
+          "conditions": [
+            {
+              "type": "occurrence",
+              "configs": {
+                "maxTimesOccurred": "0",
+                "behaviorRuleName": "Welcome"
+              },
+              "conditions": []
+            }
+          ]
+        },
+        {
+          "name": "Personal_Greeting",
+          "actions": [
+            "greet_personally"
+          ],
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "greeting(*)",
+                "occurrence": "currentStep"
+              },
+              "conditions": []
+            },
+            {
+              "type": "contextmatcher",
+              "configs": {
+                "contextKey": "userInfo",
+                "contextType": "object",
+                "objectKeyPath": "username"
+              },
+              "conditions": []
+            }
+          ]
+        },
+        {
+          "name": "Greeting",
+          "actions": [
+            "greet"
+          ],
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "greeting(*)",
+                "occurrence": "currentStep"
+              },
+              "conditions": []
+            }
+          ]
+        },
+        {
+          "name": "Goodbye",
+          "actions": [
+            "say_goodbye",
+            "CONVERSATION_END"
+          ],
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "goodbye(*)",
+                "occurrence": "currentStep"
+              },
+              "conditions": []
+            }
+          ]
+        },
+        {
+          "name": "Multiple_Choice",
+          "actions": [
+            "giving_two_options"
+          ],
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "two_options_question(*)",
+                "occurrence": "currentStep"
+              },
+              "conditions": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ContextStuff",
+      "behaviorRules": [
+        {
+          "name": "ContextReaction1",
+          "actions": [
+            "acknowledged_context1"
+          ],
+          "conditions": [
+            {
+              "type": "contextmatcher",
+              "configs": {
+                "contextKey": "someContextKeyString",
+                "contextType": "string",
+                "string": "someContextValue"
+              },
+              "conditions": []
+            }
+          ]
+        },
+        {
+          "name": "ContextReaction2",
+          "actions": [
+            "acknowledged_context2"
+          ],
+          "conditions": [
+            {
+              "type": "contextmatcher",
+              "configs": {
+                "contextKey": "someContextKeyExpressions",
+                "contextType": "expressions",
+                "expressions": "expression(someValue), expression2(someOtherValue)"
+              },
+              "conditions": []
+            }
+          ]
+        },
+        {
+          "name": "ContextReaction3",
+          "actions": [
+            "acknowledged_context3"
+          ],
+          "conditions": [
+            {
+              "type": "contextmatcher",
+              "configs": {
+                "contextKey": "someContextKeyObject",
+                "contextType": "object",
+                "objectKeyPath": "key",
+                "objectValue": "value"
+              },
+              "conditions": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

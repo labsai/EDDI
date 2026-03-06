@@ -23,6 +23,14 @@ public abstract class AbstractMongoResourceStore<T> implements IResourceStore<T>
     protected final HistorizedResourceStore<T> resourceStore;
 
     /**
+     * No-args constructor required by CDI for proxy creation of
+     * {@code @ApplicationScoped} subclasses.
+     */
+    protected AbstractMongoResourceStore() {
+        this.resourceStore = null;
+    }
+
+    /**
      * Standard constructor — creates MongoResourceStorage + HistorizedResourceStore
      * internally.
      * Used by most stores (LangChain, Parser, PropertySetter, HttpCalls, Behavior,

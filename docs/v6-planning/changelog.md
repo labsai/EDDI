@@ -149,6 +149,36 @@ All 4 new classes are package-private helpers (not CDI beans). They are instanti
 - [x] All 540 tests pass (0 failures, 0 errors, 4 skipped)
 - [x] No regressions
 
+### 2026-03-06 — Phase 2: Testing Infrastructure + Weather Bot Fix
+
+**Repo:** EDDI  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 2 — Integration Testing
+
+**What changed:**
+
+- Migrated all integration tests from `EDDI-integration-tests` into main repo
+- Created `BaseIntegrationIT` [NEW]: shared helpers for resource creation, bot deployment, cleanup
+- Created `IntegrationTestProfile` [NEW]: DevServices MongoDB via Testcontainers, fixed test port 8081
+- Created 8 integration test classes [NEW]: `BotEngineIT` (11), `BotDeploymentComponentIT` (4), `ConversationServiceComponentIT` (7), `ApiContractIT` (10), `BotUseCaseIT` (2), `BehaviorCrudIT` (4), `DictionaryCrudIT` (5), `OutputCrudIT` (5)
+- Filled unit test gaps [NEW]: `BehaviorRulesEvaluationTaskTest` (11), `RestBotEngineTest` (14), `ConversationHistoryBuilderTest`, `LegacyChatExecutorTest`
+- `RestInterfaceFactory.java` [MODIFIED]: inject `quarkus.http.port` via `@ConfigProperty` instead of hardcoded 7070
+
+**Design decisions:**
+
+- Fixed test port 8081 instead of random — `RestInterfaceFactory` needs both `quarkus.http.port` and `quarkus.http.test-port` set to same value since `@QuarkusTest` reads config property as configured value, not runtime value
+- Weather bot analysis confirmed v6.0 compatibility — no migration needed. `fromObjectPath` expressions work with PathNavigator
+- `EDDI-integration-tests` repo is now fully superseded
+
+**Testing:**
+
+- [x] Builds cleanly
+- [x] All 48 integration tests pass (0 failures, 0 skipped)
+- [x] All 620 unit tests pass
+- [x] Total: 668 tests, no regressions
+
+**Commit:** `feat: Phase 2 testing infrastructure + weather bot fix` (`0956cefd`)
+
 ### Template for Each Entry
 
 ```markdown
