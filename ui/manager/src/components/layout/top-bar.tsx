@@ -21,7 +21,15 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
   const languages = [
     { code: "en", label: t("language.en") },
     { code: "de", label: t("language.de") },
+    { code: "fr", label: t("language.fr") },
+    { code: "es", label: t("language.es") },
     { code: "ar", label: t("language.ar") },
+    { code: "zh", label: t("language.zh") },
+    { code: "th", label: t("language.th") },
+    { code: "ja", label: t("language.ja") },
+    { code: "ko", label: t("language.ko") },
+    { code: "pt", label: t("language.pt") },
+    { code: "hi", label: t("language.hi") },
   ];
 
   return (

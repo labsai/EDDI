@@ -1,0 +1,218 @@
+{
+  "app": {
+    "title": "EDDI Manager",
+    "description": "Painel de administração da plataforma de IA conversacional EDDI"
+  },
+  "nav": {
+    "dashboard": "Painel",
+    "bots": "Bots",
+    "packages": "Pacotes",
+    "conversations": "Conversas",
+    "chat": "Chat",
+    "resources": "Recursos"
+  },
+  "theme": {
+    "light": "Claro",
+    "dark": "Escuro",
+    "system": "Sistema"
+  },
+  "language": {
+    "label": "Idioma",
+    "en": "English",
+    "de": "Deutsch",
+    "fr": "Français",
+    "es": "Español",
+    "ar": "العربية",
+    "zh": "中文",
+    "th": "ไทย",
+    "ja": "日本語",
+    "ko": "한국어",
+    "pt": "Português",
+    "hi": "हिन्दी"
+  },
+  "pages": {
+    "dashboard": {
+      "title": "Painel",
+      "subtitle": "Visão geral dos seus bots e conversas EDDI"
+    },
+    "bots": {
+      "title": "Bots",
+      "subtitle": "Gerencie seus bots de IA conversacional"
+    },
+    "packages": {
+      "title": "Pacotes",
+      "subtitle": "Configure pacotes e extensões de bots"
+    },
+    "conversations": {
+      "title": "Conversas",
+      "subtitle": "Visualize e gerencie as conversas dos bots"
+    },
+    "resources": {
+      "title": "Recursos",
+      "subtitle": "Gerencie regras de comportamento, dicionários, saídas e mais"
+    },
+    "chat": {
+      "title": "Chat",
+      "subtitle": "Converse com seus bots implantados"
+    }
+  },
+  "common": {
+    "loading": "Carregando...",
+    "error": "Algo deu errado",
+    "retry": "Tentar novamente",
+    "save": "Salvar",
+    "cancel": "Cancelar",
+    "delete": "Excluir",
+    "create": "Criar",
+    "edit": "Editar",
+    "search": "Pesquisar...",
+    "noResults": "Nenhum resultado encontrado",
+    "duplicate": "Duplicar"
+  },
+  "bots": {
+    "deploy": "Implantar",
+    "undeploy": "Desimplantar",
+    "createBot": "Criar bot",
+    "createTitle": "Criar novo bot",
+    "name": "Nome",
+    "namePlaceholder": "Meu Bot",
+    "description": "Descrição",
+    "descriptionPlaceholder": "Descreva o que este bot faz...",
+    "empty": "Nenhum bot ainda. Crie seu primeiro bot!",
+    "confirmDelete": "Tem certeza de que deseja excluir este bot?",
+    "count_one": "{{count}} bot",
+    "count_other": "{{count}} bots",
+    "export": "Exportar",
+    "exporting": "Exportando...",
+    "exportSuccess": "Bot exportado com sucesso",
+    "import": "Importar bot",
+    "importing": "Importando...",
+    "importSuccess": "Bot importado com sucesso",
+    "importError": "Falha ao importar o bot"
+  },
+  "wizard": {
+    "title": "Assistente de Bot",
+    "subtitle": "Crie um novo bot passo a passo",
+    "backToBots": "Voltar para Bots",
+    "step1Title": "Escolher modelo",
+    "step1Desc": "Selecione um ponto de partida para seu bot",
+    "step2Title": "Informações do bot",
+    "step2Desc": "Dê um nome e uma descrição ao seu bot",
+    "step3Title": "Pacotes",
+    "step3Desc": "Configure os pacotes iniciais do seu bot",
+    "step4Title": "Revisar e criar",
+    "step4Desc": "Revise a configuração do bot antes de criar",
+    "templateBlank": "Bot vazio",
+    "templateBlankDesc": "Comece do zero com uma configuração vazia",
+    "templateQA": "Bot de perguntas",
+    "templateQADesc": "Bot pré-configurado para responder perguntas frequentes",
+    "templateWeather": "Bot meteorológico",
+    "templateWeatherDesc": "Bot de exemplo usando chamadas HTTP para buscar dados do clima",
+    "templateLabel": "Modelo",
+    "defaultPackageLabel": "Pacote padrão",
+    "createDefaultPackage": "Criar pacote padrão",
+    "createDefaultPackageDesc": "Um pacote vazio será criado e vinculado ao bot. Você pode adicionar extensões depois.",
+    "next": "Próximo",
+    "back": "Anterior",
+    "createOnly": "Apenas criar",
+    "createAndDeploy": "Criar e implantar"
+  },
+  "packages": {
+    "createPackage": "Criar pacote",
+    "createTitle": "Criar novo pacote",
+    "name": "Nome",
+    "namePlaceholder": "Meu Pacote",
+    "description": "Descrição",
+    "descriptionPlaceholder": "Descreva o que este pacote faz...",
+    "noDescription": "Sem descrição",
+    "empty": "Nenhum pacote ainda. Crie seu primeiro pacote!",
+    "confirmDelete": "Tem certeza de que deseja excluir este pacote?",
+    "count_one": "{{count}} pacote",
+    "count_other": "{{count}} pacotes"
+  },
+  "packageDetail": {
+    "title": "Detalhes do pacote",
+    "backToPackages": "Voltar para Pacotes",
+    "extensions": "Extensões",
+    "noExtensions": "Nenhuma extensão neste pacote",
+    "rawConfig": "Configuração bruta"
+  },
+  "conversations": {
+    "searchPlaceholder": "Pesquisar por ID da conversa...",
+    "id": "Conversa",
+    "bot": "Bot",
+    "state": "Estado",
+    "lastActivity": "Última atividade",
+    "actions": "Ações",
+    "empty": "Nenhuma conversa ainda. Implante um bot e comece a conversar!",
+    "confirmDelete": "Tem certeza de que deseja excluir esta conversa?",
+    "count_one": "{{count}} conversa",
+    "count_other": "{{count}} conversas"
+  },
+  "conversationDetail": {
+    "title": "Conversa",
+    "backToConversations": "Voltar para Conversas",
+    "steps": "Etapas da conversa",
+    "noSteps": "Nenhuma etapa de conversa registrada",
+    "properties": "Propriedades da conversa"
+  },
+  "chat": {
+    "selectBot": "Selecione um bot...",
+    "noBots": "Nenhum bot implantado disponível. Implante um bot primeiro.",
+    "placeholder": "Digite uma mensagem...",
+    "send": "Enviar",
+    "newConversation": "Nova conversa",
+    "endConversation": "Encerrar conversa",
+    "streaming": "Streaming",
+    "thinking": "Pensando...",
+    "connectionError": "Erro de conexão. Tente novamente.",
+    "empty": "Selecione um bot e comece a conversar!",
+    "history": "Histórico",
+    "continueConversation": "Continuar",
+    "noHistory": "Nenhum histórico de conversas."
+  },
+  "resources": {
+    "unnamed": "Recurso sem nome",
+    "noDescription": "Sem descrição",
+    "backToResources": "Voltar para Recursos",
+    "backToList": "Voltar para {{type}}",
+    "unknownType": "Tipo de recurso desconhecido",
+    "rawConfig": "Configuração bruta",
+    "rawConfigHint": "Configuração JSON deste recurso",
+    "create": "Criar {{type}}",
+    "createTitle": "Criar {{type}}",
+    "createDescription": "Criar uma configuração {{type}} vazia. Você pode editá-la após a criação.",
+    "confirmDelete": "Tem certeza de que deseja excluir este(a) {{type}}?",
+    "empty": "Nenhum recurso {{type}} ainda.",
+    "itemCount_one": "{{count}} item",
+    "itemCount_other": "{{count}} itens",
+    "count_one": "{{count}} recurso",
+    "count_other": "{{count}} recursos",
+    "types": {
+      "behavior": {
+        "name": "Regras de comportamento",
+        "description": "Definir regras de fluxo de conversa e lógica de decisão"
+      },
+      "httpcalls": {
+        "name": "Chamadas HTTP",
+        "description": "Configurar integrações de API externas e webhooks"
+      },
+      "output": {
+        "name": "Conjuntos de saída",
+        "description": "Gerenciar modelos de resposta e variantes de saída"
+      },
+      "dictionaries": {
+        "name": "Dicionários",
+        "description": "Definir padrões de reconhecimento de palavras e frases"
+      },
+      "langchain": {
+        "name": "LangChain",
+        "description": "Configurar modelos de agente IA, prompts e vínculos de ferramentas"
+      },
+      "propertysetter": {
+        "name": "Configurador de propriedades",
+        "description": "Definir propriedades de conversa e gerenciar preenchimento de slots"
+      }
+    }
+  }
+}

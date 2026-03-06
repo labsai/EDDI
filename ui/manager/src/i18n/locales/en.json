@@ -20,7 +20,15 @@
     "label": "Language",
     "en": "English",
     "de": "Deutsch",
-    "ar": "العربية"
+    "fr": "Français",
+    "es": "Español",
+    "ar": "العربية",
+    "zh": "中文",
+    "th": "ไทย",
+    "ja": "日本語",
+    "ko": "한국어",
+    "pt": "Português",
+    "hi": "हिन्दी"
   },
   "pages": {
     "dashboard": {

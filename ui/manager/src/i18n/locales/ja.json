@@ -1,0 +1,218 @@
+{
+  "app": {
+    "title": "EDDI マネージャー",
+    "description": "EDDI 会話型AIプラットフォーム管理ダッシュボード"
+  },
+  "nav": {
+    "dashboard": "ダッシュボード",
+    "bots": "ボット",
+    "packages": "パッケージ",
+    "conversations": "会話",
+    "chat": "チャット",
+    "resources": "リソース"
+  },
+  "theme": {
+    "light": "ライト",
+    "dark": "ダーク",
+    "system": "システム"
+  },
+  "language": {
+    "label": "言語",
+    "en": "English",
+    "de": "Deutsch",
+    "fr": "Français",
+    "es": "Español",
+    "ar": "العربية",
+    "zh": "中文",
+    "th": "ไทย",
+    "ja": "日本語",
+    "ko": "한국어",
+    "pt": "Português",
+    "hi": "हिन्दी"
+  },
+  "pages": {
+    "dashboard": {
+      "title": "ダッシュボード",
+      "subtitle": "EDDI ボットと会話の概要"
+    },
+    "bots": {
+      "title": "ボット",
+      "subtitle": "会話型AIボットを管理"
+    },
+    "packages": {
+      "title": "パッケージ",
+      "subtitle": "ボットパッケージと拡張機能を設定"
+    },
+    "conversations": {
+      "title": "会話",
+      "subtitle": "ボットの会話を確認・管理"
+    },
+    "resources": {
+      "title": "リソース",
+      "subtitle": "動作ルール、辞書、出力セットなどを管理"
+    },
+    "chat": {
+      "title": "チャット",
+      "subtitle": "デプロイ済みボットと対話"
+    }
+  },
+  "common": {
+    "loading": "読み込み中...",
+    "error": "エラーが発生しました",
+    "retry": "再試行",
+    "save": "保存",
+    "cancel": "キャンセル",
+    "delete": "削除",
+    "create": "作成",
+    "edit": "編集",
+    "search": "検索...",
+    "noResults": "結果が見つかりません",
+    "duplicate": "複製"
+  },
+  "bots": {
+    "deploy": "デプロイ",
+    "undeploy": "アンデプロイ",
+    "createBot": "ボットを作成",
+    "createTitle": "新しいボットを作成",
+    "name": "名前",
+    "namePlaceholder": "マイボット",
+    "description": "説明",
+    "descriptionPlaceholder": "このボットの機能を説明してください...",
+    "empty": "ボットがまだありません。最初のボットを作成しましょう！",
+    "confirmDelete": "このボットを削除してもよろしいですか？",
+    "count_one": "{{count}} 個のボット",
+    "count_other": "{{count}} 個のボット",
+    "export": "エクスポート",
+    "exporting": "エクスポート中...",
+    "exportSuccess": "ボットのエクスポートが完了しました",
+    "import": "ボットをインポート",
+    "importing": "インポート中...",
+    "importSuccess": "ボットのインポートが完了しました",
+    "importError": "ボットのインポートに失敗しました"
+  },
+  "wizard": {
+    "title": "ボットウィザード",
+    "subtitle": "ステップバイステップで新しいボットを作成",
+    "backToBots": "ボット一覧に戻る",
+    "step1Title": "テンプレートを選択",
+    "step1Desc": "ボットの出発点を選択してください",
+    "step2Title": "ボット情報",
+    "step2Desc": "ボットに名前と説明を付けてください",
+    "step3Title": "パッケージ",
+    "step3Desc": "ボットの初期パッケージを設定",
+    "step4Title": "確認して作成",
+    "step4Desc": "作成前にボットの設定を確認",
+    "templateBlank": "空のボット",
+    "templateBlankDesc": "空の設定から始める",
+    "templateQA": "Q&Aボット",
+    "templateQADesc": "よくある質問に回答するための事前設定済みボット",
+    "templateWeather": "天気ボット",
+    "templateWeatherDesc": "HTTPコールで天気データを取得するサンプルボット",
+    "templateLabel": "テンプレート",
+    "defaultPackageLabel": "デフォルトパッケージ",
+    "createDefaultPackage": "デフォルトパッケージを作成",
+    "createDefaultPackageDesc": "空のパッケージが作成されてボットにリンクされます。後で拡張機能を追加できます。",
+    "next": "次へ",
+    "back": "戻る",
+    "createOnly": "作成のみ",
+    "createAndDeploy": "作成してデプロイ"
+  },
+  "packages": {
+    "createPackage": "パッケージを作成",
+    "createTitle": "新しいパッケージを作成",
+    "name": "名前",
+    "namePlaceholder": "マイパッケージ",
+    "description": "説明",
+    "descriptionPlaceholder": "このパッケージの機能を説明してください...",
+    "noDescription": "説明なし",
+    "empty": "パッケージがまだありません。最初のパッケージを作成しましょう！",
+    "confirmDelete": "このパッケージを削除してもよろしいですか？",
+    "count_one": "{{count}} 個のパッケージ",
+    "count_other": "{{count}} 個のパッケージ"
+  },
+  "packageDetail": {
+    "title": "パッケージ詳細",
+    "backToPackages": "パッケージ一覧に戻る",
+    "extensions": "拡張機能",
+    "noExtensions": "このパッケージに拡張機能はありません",
+    "rawConfig": "生の設定"
+  },
+  "conversations": {
+    "searchPlaceholder": "会話IDで検索...",
+    "id": "会話",
+    "bot": "ボット",
+    "state": "状態",
+    "lastActivity": "最終アクティビティ",
+    "actions": "アクション",
+    "empty": "会話がまだありません。ボットをデプロイしてチャットを始めましょう！",
+    "confirmDelete": "この会話を削除してもよろしいですか？",
+    "count_one": "{{count}} 件の会話",
+    "count_other": "{{count}} 件の会話"
+  },
+  "conversationDetail": {
+    "title": "会話",
+    "backToConversations": "会話一覧に戻る",
+    "steps": "会話ステップ",
+    "noSteps": "会話ステップが記録されていません",
+    "properties": "会話プロパティ"
+  },
+  "chat": {
+    "selectBot": "ボットを選択...",
+    "noBots": "デプロイ済みボットがありません。まずボットをデプロイしてください。",
+    "placeholder": "メッセージを入力...",
+    "send": "送信",
+    "newConversation": "新しい会話",
+    "endConversation": "会話を終了",
+    "streaming": "ストリーミング",
+    "thinking": "考え中...",
+    "connectionError": "接続エラーです。もう一度お試しください。",
+    "empty": "ボットを選択してチャットを始めましょう！",
+    "history": "履歴",
+    "continueConversation": "続行",
+    "noHistory": "会話履歴がありません。"
+  },
+  "resources": {
+    "unnamed": "名前なしリソース",
+    "noDescription": "説明なし",
+    "backToResources": "リソースに戻る",
+    "backToList": "{{type}}に戻る",
+    "unknownType": "不明なリソースタイプ",
+    "rawConfig": "生の設定",
+    "rawConfigHint": "このリソースのJSON設定",
+    "create": "{{type}}を作成",
+    "createTitle": "{{type}}を作成",
+    "createDescription": "空の{{type}}設定を作成します。作成後に編集できます。",
+    "confirmDelete": "この{{type}}を削除してもよろしいですか？",
+    "empty": "{{type}}リソースがまだありません。",
+    "itemCount_one": "{{count}} 個の項目",
+    "itemCount_other": "{{count}} 個の項目",
+    "count_one": "{{count}} 個のリソース",
+    "count_other": "{{count}} 個のリソース",
+    "types": {
+      "behavior": {
+        "name": "動作ルール",
+        "description": "会話フロールールと意思決定ロジックを定義"
+      },
+      "httpcalls": {
+        "name": "HTTPコール",
+        "description": "外部API連携とWebhookを設定"
+      },
+      "output": {
+        "name": "出力セット",
+        "description": "ボット応答テンプレートと出力バリエーションを管理"
+      },
+      "dictionaries": {
+        "name": "辞書",
+        "description": "単語とフレーズの認識パターンを定義"
+      },
+      "langchain": {
+        "name": "LangChain",
+        "description": "AIエージェントモデル、プロンプト、ツールバインディングを設定"
+      },
+      "propertysetter": {
+        "name": "プロパティセッター",
+        "description": "会話プロパティの設定とスロットフィリングの管理"
+      }
+    }
+  }
+}

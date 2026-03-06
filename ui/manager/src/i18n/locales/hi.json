@@ -1,0 +1,218 @@
+{
+  "app": {
+    "title": "EDDI प्रबंधक",
+    "description": "EDDI संवादी AI प्लेटफ़ॉर्म का प्रशासन डैशबोर्ड"
+  },
+  "nav": {
+    "dashboard": "डैशबोर्ड",
+    "bots": "बॉट",
+    "packages": "पैकेज",
+    "conversations": "वार्तालाप",
+    "chat": "चैट",
+    "resources": "संसाधन"
+  },
+  "theme": {
+    "light": "लाइट",
+    "dark": "डार्क",
+    "system": "सिस्टम"
+  },
+  "language": {
+    "label": "भाषा",
+    "en": "English",
+    "de": "Deutsch",
+    "fr": "Français",
+    "es": "Español",
+    "ar": "العربية",
+    "zh": "中文",
+    "th": "ไทย",
+    "ja": "日本語",
+    "ko": "한국어",
+    "pt": "Português",
+    "hi": "हिन्दी"
+  },
+  "pages": {
+    "dashboard": {
+      "title": "डैशबोर्ड",
+      "subtitle": "आपके EDDI बॉट और वार्तालापों का अवलोकन"
+    },
+    "bots": {
+      "title": "बॉट",
+      "subtitle": "अपने संवादी AI बॉट प्रबंधित करें"
+    },
+    "packages": {
+      "title": "पैकेज",
+      "subtitle": "बॉट पैकेज और एक्सटेंशन कॉन्फ़िगर करें"
+    },
+    "conversations": {
+      "title": "वार्तालाप",
+      "subtitle": "बॉट वार्तालाप देखें और प्रबंधित करें"
+    },
+    "resources": {
+      "title": "संसाधन",
+      "subtitle": "व्यवहार नियम, शब्दकोश, आउटपुट और अन्य प्रबंधित करें"
+    },
+    "chat": {
+      "title": "चैट",
+      "subtitle": "अपने तैनात बॉट से बात करें"
+    }
+  },
+  "common": {
+    "loading": "लोड हो रहा है...",
+    "error": "कुछ गलत हो गया",
+    "retry": "पुनः प्रयास करें",
+    "save": "सहेजें",
+    "cancel": "रद्द करें",
+    "delete": "हटाएं",
+    "create": "बनाएं",
+    "edit": "संपादित करें",
+    "search": "खोजें...",
+    "noResults": "कोई परिणाम नहीं मिला",
+    "duplicate": "डुप्लीकेट"
+  },
+  "bots": {
+    "deploy": "तैनात करें",
+    "undeploy": "हटाएं",
+    "createBot": "बॉट बनाएं",
+    "createTitle": "नया बॉट बनाएं",
+    "name": "नाम",
+    "namePlaceholder": "मेरा बॉट",
+    "description": "विवरण",
+    "descriptionPlaceholder": "बताएं कि यह बॉट क्या करता है...",
+    "empty": "अभी कोई बॉट नहीं है। अपना पहला बॉट बनाएं!",
+    "confirmDelete": "क्या आप वाकई इस बॉट को हटाना चाहते हैं?",
+    "count_one": "{{count}} बॉट",
+    "count_other": "{{count}} बॉट",
+    "export": "निर्यात करें",
+    "exporting": "निर्यात हो रहा है...",
+    "exportSuccess": "बॉट सफलतापूर्वक निर्यात हुआ",
+    "import": "बॉट आयात करें",
+    "importing": "आयात हो रहा है...",
+    "importSuccess": "बॉट सफलतापूर्वक आयात हुआ",
+    "importError": "बॉट आयात विफल"
+  },
+  "wizard": {
+    "title": "बॉट विज़ार्ड",
+    "subtitle": "चरण-दर-चरण नया बॉट बनाएं",
+    "backToBots": "बॉट पर वापस जाएं",
+    "step1Title": "टेम्पलेट चुनें",
+    "step1Desc": "अपने बॉट के लिए शुरुआती बिंदु चुनें",
+    "step2Title": "बॉट जानकारी",
+    "step2Desc": "अपने बॉट को नाम और विवरण दें",
+    "step3Title": "पैकेज",
+    "step3Desc": "अपने बॉट के लिए प्रारंभिक पैकेज कॉन्फ़िगर करें",
+    "step4Title": "समीक्षा करें और बनाएं",
+    "step4Desc": "बनाने से पहले बॉट कॉन्फ़िगरेशन की समीक्षा करें",
+    "templateBlank": "खाली बॉट",
+    "templateBlankDesc": "खाली कॉन्फ़िगरेशन के साथ शुरू करें",
+    "templateQA": "प्रश्नोत्तर बॉट",
+    "templateQADesc": "अक्सर पूछे जाने वाले प्रश्नों का उत्तर देने के लिए पूर्व-कॉन्फ़िगर बॉट",
+    "templateWeather": "मौसम बॉट",
+    "templateWeatherDesc": "मौसम डेटा प्राप्त करने के लिए HTTP कॉल का उपयोग करने वाला उदाहरण बॉट",
+    "templateLabel": "टेम्पलेट",
+    "defaultPackageLabel": "डिफ़ॉल्ट पैकेज",
+    "createDefaultPackage": "डिफ़ॉल्ट पैकेज बनाएं",
+    "createDefaultPackageDesc": "एक खाली पैकेज बनाया जाएगा और बॉट से लिंक किया जाएगा। बाद में एक्सटेंशन जोड़ सकते हैं।",
+    "next": "अगला",
+    "back": "पिछला",
+    "createOnly": "केवल बनाएं",
+    "createAndDeploy": "बनाएं और तैनात करें"
+  },
+  "packages": {
+    "createPackage": "पैकेज बनाएं",
+    "createTitle": "नया पैकेज बनाएं",
+    "name": "नाम",
+    "namePlaceholder": "मेरा पैकेज",
+    "description": "विवरण",
+    "descriptionPlaceholder": "बताएं कि यह पैकेज क्या करता है...",
+    "noDescription": "कोई विवरण नहीं",
+    "empty": "अभी कोई पैकेज नहीं है। अपना पहला पैकेज बनाएं!",
+    "confirmDelete": "क्या आप वाकई इस पैकेज को हटाना चाहते हैं?",
+    "count_one": "{{count}} पैकेज",
+    "count_other": "{{count}} पैकेज"
+  },
+  "packageDetail": {
+    "title": "पैकेज विवरण",
+    "backToPackages": "पैकेज पर वापस जाएं",
+    "extensions": "एक्सटेंशन",
+    "noExtensions": "इस पैकेज में कोई एक्सटेंशन नहीं है",
+    "rawConfig": "कच्चा कॉन्फ़िगरेशन"
+  },
+  "conversations": {
+    "searchPlaceholder": "वार्तालाप ID से खोजें...",
+    "id": "वार्तालाप",
+    "bot": "बॉट",
+    "state": "स्थिति",
+    "lastActivity": "अंतिम गतिविधि",
+    "actions": "कार्य",
+    "empty": "अभी कोई वार्तालाप नहीं है। बॉट तैनात करें और चैट शुरू करें!",
+    "confirmDelete": "क्या आप वाकई इस वार्तालाप को हटाना चाहते हैं?",
+    "count_one": "{{count}} वार्तालाप",
+    "count_other": "{{count}} वार्तालाप"
+  },
+  "conversationDetail": {
+    "title": "वार्तालाप",
+    "backToConversations": "वार्तालापों पर वापस जाएं",
+    "steps": "वार्तालाप चरण",
+    "noSteps": "कोई वार्तालाप चरण दर्ज नहीं है",
+    "properties": "वार्तालाप गुण"
+  },
+  "chat": {
+    "selectBot": "बॉट चुनें...",
+    "noBots": "कोई तैनात बॉट उपलब्ध नहीं है। पहले एक बॉट तैनात करें।",
+    "placeholder": "संदेश लिखें...",
+    "send": "भेजें",
+    "newConversation": "नया वार्तालाप",
+    "endConversation": "वार्तालाप समाप्त करें",
+    "streaming": "स्ट्रीमिंग",
+    "thinking": "सोच रहा है...",
+    "connectionError": "कनेक्शन त्रुटि। कृपया पुनः प्रयास करें।",
+    "empty": "बॉट चुनें और चैट शुरू करें!",
+    "history": "इतिहास",
+    "continueConversation": "जारी रखें",
+    "noHistory": "अभी कोई वार्तालाप इतिहास नहीं है।"
+  },
+  "resources": {
+    "unnamed": "बिना नाम का संसाधन",
+    "noDescription": "कोई विवरण नहीं",
+    "backToResources": "संसाधनों पर वापस जाएं",
+    "backToList": "{{type}} पर वापस जाएं",
+    "unknownType": "अज्ञात संसाधन प्रकार",
+    "rawConfig": "कच्चा कॉन्फ़िगरेशन",
+    "rawConfigHint": "इस संसाधन का JSON कॉन्फ़िगरेशन",
+    "create": "{{type}} बनाएं",
+    "createTitle": "{{type}} बनाएं",
+    "createDescription": "एक खाली {{type}} कॉन्फ़िगरेशन बनाएं। बनाने के बाद संपादित कर सकते हैं।",
+    "confirmDelete": "क्या आप वाकई इस {{type}} को हटाना चाहते हैं?",
+    "empty": "अभी कोई {{type}} संसाधन नहीं है।",
+    "itemCount_one": "{{count}} आइटम",
+    "itemCount_other": "{{count}} आइटम",
+    "count_one": "{{count}} संसाधन",
+    "count_other": "{{count}} संसाधन",
+    "types": {
+      "behavior": {
+        "name": "व्यवहार नियम",
+        "description": "वार्तालाप प्रवाह नियम और निर्णय तर्क परिभाषित करें"
+      },
+      "httpcalls": {
+        "name": "HTTP कॉल",
+        "description": "बाहरी API एकीकरण और वेबहुक कॉन्फ़िगर करें"
+      },
+      "output": {
+        "name": "आउटपुट सेट",
+        "description": "बॉट प्रतिक्रिया टेम्पलेट और आउटपुट वेरिएंट प्रबंधित करें"
+      },
+      "dictionaries": {
+        "name": "शब्दकोश",
+        "description": "शब्द और वाक्यांश पहचान पैटर्न परिभाषित करें"
+      },
+      "langchain": {
+        "name": "LangChain",
+        "description": "AI एजेंट मॉडल, प्रॉम्प्ट और टूल बाइंडिंग कॉन्फ़िगर करें"
+      },
+      "propertysetter": {
+        "name": "प्रॉपर्टी सेटर",
+        "description": "वार्तालाप गुण सेट करें और स्लॉट-फ़िलिंग प्रबंधित करें"
+      }
+    }
+  }
+}

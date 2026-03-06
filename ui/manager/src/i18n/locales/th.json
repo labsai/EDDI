@@ -1,0 +1,218 @@
+{
+  "app": {
+    "title": "EDDI Manager",
+    "description": "แผงควบคุมสำหรับแพลตฟอร์ม AI สนทนา EDDI"
+  },
+  "nav": {
+    "dashboard": "แดชบอร์ด",
+    "bots": "บอท",
+    "packages": "แพ็กเกจ",
+    "conversations": "การสนทนา",
+    "chat": "แชท",
+    "resources": "ทรัพยากร"
+  },
+  "theme": {
+    "light": "สว่าง",
+    "dark": "มืด",
+    "system": "ระบบ"
+  },
+  "language": {
+    "label": "ภาษา",
+    "en": "English",
+    "de": "Deutsch",
+    "fr": "Français",
+    "es": "Español",
+    "ar": "العربية",
+    "zh": "中文",
+    "th": "ไทย",
+    "ja": "日本語",
+    "ko": "한국어",
+    "pt": "Português",
+    "hi": "हिन्दी"
+  },
+  "pages": {
+    "dashboard": {
+      "title": "แดชบอร์ด",
+      "subtitle": "ภาพรวมบอทและการสนทนา EDDI ของคุณ"
+    },
+    "bots": {
+      "title": "บอท",
+      "subtitle": "จัดการบอท AI สนทนาของคุณ"
+    },
+    "packages": {
+      "title": "แพ็กเกจ",
+      "subtitle": "กำหนดค่าแพ็กเกจและส่วนขยายบอท"
+    },
+    "conversations": {
+      "title": "การสนทนา",
+      "subtitle": "ดูและจัดการการสนทนาของบอท"
+    },
+    "resources": {
+      "title": "ทรัพยากร",
+      "subtitle": "จัดการกฎพฤติกรรม พจนานุกรม ผลลัพธ์ และอื่นๆ"
+    },
+    "chat": {
+      "title": "แชท",
+      "subtitle": "คุยกับบอทที่ปรับใช้แล้ว"
+    }
+  },
+  "common": {
+    "loading": "กำลังโหลด...",
+    "error": "เกิดข้อผิดพลาด",
+    "retry": "ลองอีกครั้ง",
+    "save": "บันทึก",
+    "cancel": "ยกเลิก",
+    "delete": "ลบ",
+    "create": "สร้าง",
+    "edit": "แก้ไข",
+    "search": "ค้นหา...",
+    "noResults": "ไม่พบผลลัพธ์",
+    "duplicate": "ทำซ้ำ"
+  },
+  "bots": {
+    "deploy": "ปรับใช้",
+    "undeploy": "ยกเลิกการปรับใช้",
+    "createBot": "สร้างบอท",
+    "createTitle": "สร้างบอทใหม่",
+    "name": "ชื่อ",
+    "namePlaceholder": "บอทของฉัน",
+    "description": "คำอธิบาย",
+    "descriptionPlaceholder": "อธิบายว่าบอทนี้ทำอะไร...",
+    "empty": "ยังไม่มีบอท สร้างบอทแรกของคุณ!",
+    "confirmDelete": "คุณแน่ใจหรือไม่ว่าต้องการลบบอทนี้?",
+    "count_one": "{{count}} บอท",
+    "count_other": "{{count}} บอท",
+    "export": "ส่งออก",
+    "exporting": "กำลังส่งออก...",
+    "exportSuccess": "ส่งออกบอทสำเร็จ",
+    "import": "นำเข้าบอท",
+    "importing": "กำลังนำเข้า...",
+    "importSuccess": "นำเข้าบอทสำเร็จ",
+    "importError": "ไม่สามารถนำเข้าบอทได้"
+  },
+  "wizard": {
+    "title": "ตัวช่วยสร้างบอท",
+    "subtitle": "สร้างบอทใหม่ทีละขั้นตอน",
+    "backToBots": "กลับไปที่บอท",
+    "step1Title": "เลือกเทมเพลต",
+    "step1Desc": "เลือกจุดเริ่มต้นสำหรับบอทของคุณ",
+    "step2Title": "ข้อมูลบอท",
+    "step2Desc": "ตั้งชื่อและคำอธิบายบอทของคุณ",
+    "step3Title": "แพ็กเกจ",
+    "step3Desc": "กำหนดค่าแพ็กเกจเริ่มต้นสำหรับบอท",
+    "step4Title": "ตรวจสอบและสร้าง",
+    "step4Desc": "ตรวจสอบการกำหนดค่าบอทก่อนสร้าง",
+    "templateBlank": "บอทว่างเปล่า",
+    "templateBlankDesc": "เริ่มต้นจากศูนย์ด้วยการกำหนดค่าว่างเปล่า",
+    "templateQA": "บอทถาม-ตอบ",
+    "templateQADesc": "บอทกำหนดค่าล่วงหน้าสำหรับตอบคำถามที่พบบ่อย",
+    "templateWeather": "บอทสภาพอากาศ",
+    "templateWeatherDesc": "บอทตัวอย่างที่ใช้การเรียก HTTP เพื่อดึงข้อมูลสภาพอากาศ",
+    "templateLabel": "เทมเพลต",
+    "defaultPackageLabel": "แพ็กเกจเริ่มต้น",
+    "createDefaultPackage": "สร้างแพ็กเกจเริ่มต้น",
+    "createDefaultPackageDesc": "แพ็กเกจว่างจะถูกสร้างและเชื่อมโยงกับบอท คุณสามารถเพิ่มส่วนขยายได้ภายหลัง",
+    "next": "ถัดไป",
+    "back": "ย้อนกลับ",
+    "createOnly": "สร้างเท่านั้น",
+    "createAndDeploy": "สร้างและปรับใช้"
+  },
+  "packages": {
+    "createPackage": "สร้างแพ็กเกจ",
+    "createTitle": "สร้างแพ็กเกจใหม่",
+    "name": "ชื่อ",
+    "namePlaceholder": "แพ็กเกจของฉัน",
+    "description": "คำอธิบาย",
+    "descriptionPlaceholder": "อธิบายว่าแพ็กเกจนี้ทำอะไร...",
+    "noDescription": "ไม่มีคำอธิบาย",
+    "empty": "ยังไม่มีแพ็กเกจ สร้างแพ็กเกจแรกของคุณ!",
+    "confirmDelete": "คุณแน่ใจหรือไม่ว่าต้องการลบแพ็กเกจนี้?",
+    "count_one": "{{count}} แพ็กเกจ",
+    "count_other": "{{count}} แพ็กเกจ"
+  },
+  "packageDetail": {
+    "title": "รายละเอียดแพ็กเกจ",
+    "backToPackages": "กลับไปที่แพ็กเกจ",
+    "extensions": "ส่วนขยาย",
+    "noExtensions": "ไม่มีส่วนขยายในแพ็กเกจนี้",
+    "rawConfig": "การกำหนดค่าดิบ"
+  },
+  "conversations": {
+    "searchPlaceholder": "ค้นหาตาม ID การสนทนา...",
+    "id": "การสนทนา",
+    "bot": "บอท",
+    "state": "สถานะ",
+    "lastActivity": "กิจกรรมล่าสุด",
+    "actions": "การดำเนินการ",
+    "empty": "ยังไม่มีการสนทนา ปรับใช้บอทและเริ่มแชท!",
+    "confirmDelete": "คุณแน่ใจหรือไม่ว่าต้องการลบการสนทนานี้?",
+    "count_one": "{{count}} การสนทนา",
+    "count_other": "{{count}} การสนทนา"
+  },
+  "conversationDetail": {
+    "title": "การสนทนา",
+    "backToConversations": "กลับไปที่การสนทนา",
+    "steps": "ขั้นตอนการสนทนา",
+    "noSteps": "ไม่มีการบันทึกขั้นตอนการสนทนา",
+    "properties": "คุณสมบัติการสนทนา"
+  },
+  "chat": {
+    "selectBot": "เลือกบอท...",
+    "noBots": "ไม่มีบอทที่ปรับใช้แล้ว โปรดปรับใช้บอทก่อน",
+    "placeholder": "พิมพ์ข้อความ...",
+    "send": "ส่ง",
+    "newConversation": "การสนทนาใหม่",
+    "endConversation": "จบการสนทนา",
+    "streaming": "สตรีมมิ่ง",
+    "thinking": "กำลังคิด...",
+    "connectionError": "ข้อผิดพลาดในการเชื่อมต่อ โปรดลองอีกครั้ง",
+    "empty": "เลือกบอทแล้วเริ่มแชท!",
+    "history": "ประวัติ",
+    "continueConversation": "ดำเนินต่อ",
+    "noHistory": "ยังไม่มีประวัติการสนทนา"
+  },
+  "resources": {
+    "unnamed": "ทรัพยากรไม่มีชื่อ",
+    "noDescription": "ไม่มีคำอธิบาย",
+    "backToResources": "กลับไปที่ทรัพยากร",
+    "backToList": "กลับไปที่ {{type}}",
+    "unknownType": "ประเภททรัพยากรไม่รู้จัก",
+    "rawConfig": "การกำหนดค่าดิบ",
+    "rawConfigHint": "การกำหนดค่า JSON สำหรับทรัพยากรนี้",
+    "create": "สร้าง {{type}}",
+    "createTitle": "สร้าง {{type}}",
+    "createDescription": "สร้างการกำหนดค่า {{type}} ว่างเปล่า คุณสามารถแก้ไขได้หลังจากสร้าง",
+    "confirmDelete": "คุณแน่ใจหรือไม่ว่าต้องการลบ {{type}} นี้?",
+    "empty": "ยังไม่มีทรัพยากร {{type}}",
+    "itemCount_one": "{{count}} รายการ",
+    "itemCount_other": "{{count}} รายการ",
+    "count_one": "{{count}} ทรัพยากร",
+    "count_other": "{{count}} ทรัพยากร",
+    "types": {
+      "behavior": {
+        "name": "กฎพฤติกรรม",
+        "description": "กำหนดกฎการไหลของการสนทนาและตรรกะการตัดสินใจ"
+      },
+      "httpcalls": {
+        "name": "การเรียก HTTP",
+        "description": "กำหนดค่าการผสาน API ภายนอกและเว็บฮุค"
+      },
+      "output": {
+        "name": "ชุดผลลัพธ์",
+        "description": "จัดการเทมเพลตการตอบกลับบอทและรูปแบบผลลัพธ์"
+      },
+      "dictionaries": {
+        "name": "พจนานุกรม",
+        "description": "กำหนดรูปแบบการจดจำคำและวลี"
+      },
+      "langchain": {
+        "name": "LangChain",
+        "description": "กำหนดค่าโมเดลเอเจนต์ AI พรอมต์ และการผูกเครื่องมือ"
+      },
+      "propertysetter": {
+        "name": "ตัวตั้งค่าคุณสมบัติ",
+        "description": "ตั้งค่าคุณสมบัติการสนทนาและจัดการการเติมสล็อต"
+      }
+    }
+  }
+}

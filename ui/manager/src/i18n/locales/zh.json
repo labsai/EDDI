@@ -1,0 +1,218 @@
+{
+  "app": {
+    "title": "EDDI 管理面板",
+    "description": "EDDI 会话式 AI 平台管理仪表板"
+  },
+  "nav": {
+    "dashboard": "仪表板",
+    "bots": "机器人",
+    "packages": "包",
+    "conversations": "会话",
+    "chat": "聊天",
+    "resources": "资源"
+  },
+  "theme": {
+    "light": "浅色",
+    "dark": "深色",
+    "system": "跟随系统"
+  },
+  "language": {
+    "label": "语言",
+    "en": "English",
+    "de": "Deutsch",
+    "fr": "Français",
+    "es": "Español",
+    "ar": "العربية",
+    "zh": "中文",
+    "th": "ไทย",
+    "ja": "日本語",
+    "ko": "한국어",
+    "pt": "Português",
+    "hi": "हिन्दी"
+  },
+  "pages": {
+    "dashboard": {
+      "title": "仪表板",
+      "subtitle": "EDDI 机器人和会话概览"
+    },
+    "bots": {
+      "title": "机器人",
+      "subtitle": "管理您的会话式 AI 机器人"
+    },
+    "packages": {
+      "title": "包",
+      "subtitle": "配置机器人包和扩展"
+    },
+    "conversations": {
+      "title": "会话",
+      "subtitle": "查看和管理机器人会话"
+    },
+    "resources": {
+      "title": "资源",
+      "subtitle": "管理行为规则、词典、输出等"
+    },
+    "chat": {
+      "title": "聊天",
+      "subtitle": "与已部署的机器人对话"
+    }
+  },
+  "common": {
+    "loading": "加载中...",
+    "error": "出错了",
+    "retry": "重试",
+    "save": "保存",
+    "cancel": "取消",
+    "delete": "删除",
+    "create": "创建",
+    "edit": "编辑",
+    "search": "搜索...",
+    "noResults": "未找到结果",
+    "duplicate": "复制"
+  },
+  "bots": {
+    "deploy": "部署",
+    "undeploy": "取消部署",
+    "createBot": "创建机器人",
+    "createTitle": "创建新机器人",
+    "name": "名称",
+    "namePlaceholder": "我的机器人",
+    "description": "描述",
+    "descriptionPlaceholder": "描述此机器人的功能...",
+    "empty": "暂无机器人。创建您的第一个机器人！",
+    "confirmDelete": "您确定要删除此机器人吗？",
+    "count_one": "{{count}} 个机器人",
+    "count_other": "{{count}} 个机器人",
+    "export": "导出",
+    "exporting": "正在导出...",
+    "exportSuccess": "机器人导出成功",
+    "import": "导入机器人",
+    "importing": "正在导入...",
+    "importSuccess": "机器人导入成功",
+    "importError": "机器人导入失败"
+  },
+  "wizard": {
+    "title": "机器人向导",
+    "subtitle": "逐步创建新机器人",
+    "backToBots": "返回机器人列表",
+    "step1Title": "选择模板",
+    "step1Desc": "选择您机器人的起点",
+    "step2Title": "机器人信息",
+    "step2Desc": "为您的机器人命名和描述",
+    "step3Title": "包",
+    "step3Desc": "配置机器人的初始包",
+    "step4Title": "审核并创建",
+    "step4Desc": "在创建前审核机器人配置",
+    "templateBlank": "空白机器人",
+    "templateBlankDesc": "从空白配置开始",
+    "templateQA": "问答机器人",
+    "templateQADesc": "预配置的常见问题解答机器人",
+    "templateWeather": "天气机器人",
+    "templateWeatherDesc": "使用 HTTP 调用获取天气数据的示例机器人",
+    "templateLabel": "模板",
+    "defaultPackageLabel": "默认包",
+    "createDefaultPackage": "创建默认包",
+    "createDefaultPackageDesc": "将创建一个空包并链接到机器人。您可以稍后添加扩展。",
+    "next": "下一步",
+    "back": "上一步",
+    "createOnly": "仅创建",
+    "createAndDeploy": "创建并部署"
+  },
+  "packages": {
+    "createPackage": "创建包",
+    "createTitle": "创建新包",
+    "name": "名称",
+    "namePlaceholder": "我的包",
+    "description": "描述",
+    "descriptionPlaceholder": "描述此包的功能...",
+    "noDescription": "无描述",
+    "empty": "暂无包。创建您的第一个包！",
+    "confirmDelete": "您确定要删除此包吗？",
+    "count_one": "{{count}} 个包",
+    "count_other": "{{count}} 个包"
+  },
+  "packageDetail": {
+    "title": "包详情",
+    "backToPackages": "返回包列表",
+    "extensions": "扩展",
+    "noExtensions": "此包中没有扩展",
+    "rawConfig": "原始配置"
+  },
+  "conversations": {
+    "searchPlaceholder": "按会话 ID 搜索...",
+    "id": "会话",
+    "bot": "机器人",
+    "state": "状态",
+    "lastActivity": "最近活动",
+    "actions": "操作",
+    "empty": "暂无会话。部署一个机器人并开始聊天！",
+    "confirmDelete": "您确定要删除此会话吗？",
+    "count_one": "{{count}} 个会话",
+    "count_other": "{{count}} 个会话"
+  },
+  "conversationDetail": {
+    "title": "会话",
+    "backToConversations": "返回会话列表",
+    "steps": "会话步骤",
+    "noSteps": "未记录会话步骤",
+    "properties": "会话属性"
+  },
+  "chat": {
+    "selectBot": "选择机器人...",
+    "noBots": "没有可用的已部署机器人。请先部署一个机器人。",
+    "placeholder": "输入消息...",
+    "send": "发送",
+    "newConversation": "新会话",
+    "endConversation": "结束会话",
+    "streaming": "流式传输",
+    "thinking": "思考中...",
+    "connectionError": "连接错误。请重试。",
+    "empty": "选择一个机器人并开始聊天！",
+    "history": "历史记录",
+    "continueConversation": "继续",
+    "noHistory": "暂无会话历史。"
+  },
+  "resources": {
+    "unnamed": "未命名资源",
+    "noDescription": "无描述",
+    "backToResources": "返回资源",
+    "backToList": "返回{{type}}",
+    "unknownType": "未知资源类型",
+    "rawConfig": "原始配置",
+    "rawConfigHint": "此资源的 JSON 配置",
+    "create": "创建{{type}}",
+    "createTitle": "创建{{type}}",
+    "createDescription": "创建一个空的{{type}}配置。您可以在创建后进行编辑。",
+    "confirmDelete": "您确定要删除此{{type}}吗？",
+    "empty": "暂无{{type}}资源。",
+    "itemCount_one": "{{count}} 个项目",
+    "itemCount_other": "{{count}} 个项目",
+    "count_one": "{{count}} 个资源",
+    "count_other": "{{count}} 个资源",
+    "types": {
+      "behavior": {
+        "name": "行为规则",
+        "description": "定义会话流程规则和决策逻辑"
+      },
+      "httpcalls": {
+        "name": "HTTP 调用",
+        "description": "配置外部 API 集成和 Webhook"
+      },
+      "output": {
+        "name": "输出集",
+        "description": "管理机器人响应模板和输出变体"
+      },
+      "dictionaries": {
+        "name": "词典",
+        "description": "定义词语和短语识别模式"
+      },
+      "langchain": {
+        "name": "LangChain",
+        "description": "配置 AI 代理模型、提示词和工具绑定"
+      },
+      "propertysetter": {
+        "name": "属性设置器",
+        "description": "设置会话属性和管理插槽填充"
+      }
+    }
+  }
+}

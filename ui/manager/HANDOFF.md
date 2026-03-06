@@ -2,13 +2,13 @@
 
 > **Last updated**: 2026-03-06  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Phase 3.11 — Import/Export + Bot Wizard
+> **Last commit**: Phase 3.12 — Finalize i18n (11 languages)
 
 ---
 
 ## Current Status
 
-**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.11 complete.
+**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.12 complete.
 
 ### What's Done
 
@@ -25,11 +25,12 @@
 | 3.9   | Chat Panel: bot selector, SSE streaming toggle, history, markdown         | —         |
 | 3.10  | Resources Pages: generic CRUD for 6 extension types (hub + list + detail) | —         |
 | 3.11  | Import/Export + Bot Wizard: file upload/download, 4-step guided creation  | —         |
+| 3.12  | i18n finalized: 11 languages (en, de, fr, es, ar, zh, th, ja, ko, pt, hi) | —         |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc -b`)
-- **Unit/Component**: 64/64 pass (`npm run test`) — 11 files
+- **Unit/Component**: 74/74 pass (`npm run test`) — 11 files
 - **Build**: Succeeds
 
 ### Files Created (summary)
@@ -45,16 +46,19 @@
 - **Bot Wizard**: `bot-wizard.tsx` (4-step guided creation)
 - **API**: `api-client.ts`, `api/bots.ts`, `api/packages.ts`, `api/descriptors.ts`, `api/conversations.ts`, `api/chat.ts`, `api/resources.ts`, `api/backup.ts`
 - **Hooks**: `use-bots.ts`, `use-packages.ts`, `use-conversations.ts`, `use-chat.ts`, `use-resources.ts`, `use-backup.ts`
-- **i18n**: `config.ts`, `en.json`, `de.json`, `ar.json`
+- **i18n**: `config.ts`, `en.json`, `de.json`, `fr.json`, `es.json`, `ar.json`, `zh.json`, `th.json`, `ja.json`, `ko.json`, `pt.json`, `hi.json`
 - **Tests**: `sidebar.test.tsx`, `top-bar.test.tsx`, `config.test.ts`, `bots.test.tsx`, `bots.test.ts`, `packages.test.tsx`, `conversations.test.tsx`, `chat.test.tsx`, `resources.test.tsx`, `backup.test.tsx`, `bot-wizard.test.tsx`
 - **E2E**: `navigation.spec.ts`, `theme.spec.ts`, `rtl.spec.ts`
 - **MSW**: `handlers.ts` (bots, packages, conversations, resources mocks), `server.ts`
 
 ---
 
-### Phase 3.12: Finalize i18n
+### What's Next: Phase 4 — Chat-UI Rewrite
 
-- Add German (de.json) and Arabic (ar.json) translations for all new keys
+- CRA → Vite migration
+- SSE streaming support
+- Extract shared `@eddi/chat-core` package
+- Dark/light mode + i18n
 
 ---
 
@@ -75,6 +79,5 @@
 
 - Bot/Package detail pages don't have a version picker yet (hardcoded to v1)
 - Keycloak auth adapter not yet wired (keycloak-js 26+ dependency is installed)
-- German and Arabic translations incomplete (only common keys translated)
 - Pre-commit hook references old `pre-commit` npm package — use `--no-verify` for now
 - Package duplicate not implemented (no backend endpoint for it yet)

@@ -8,6 +8,7 @@
     "bots": "Bots",
     "packages": "Pakete",
     "conversations": "Gespräche",
+    "chat": "Chat",
     "resources": "Ressourcen"
   },
   "theme": {
@@ -19,12 +20,20 @@
     "label": "Sprache",
     "en": "English",
     "de": "Deutsch",
-    "ar": "العربية"
+    "fr": "Français",
+    "es": "Español",
+    "ar": "العربية",
+    "zh": "中文",
+    "th": "ไทย",
+    "ja": "日本語",
+    "ko": "한국어",
+    "pt": "Português",
+    "hi": "हिन्दी"
   },
   "pages": {
     "dashboard": {
       "title": "Dashboard",
-      "subtitle": "Übersicht Ihrer EDDI Bots und Gespräche"
+      "subtitle": "Übersicht Ihrer EDDI-Bots und Gespräche"
     },
     "bots": {
       "title": "Bots",
@@ -32,15 +41,19 @@
     },
     "packages": {
       "title": "Pakete",
-      "subtitle": "Konfigurieren Sie Bot-Pakete und Erweiterungen"
+      "subtitle": "Bot-Pakete und Erweiterungen konfigurieren"
     },
     "conversations": {
       "title": "Gespräche",
-      "subtitle": "Anzeigen und Verwalten von Bot-Gesprächen"
+      "subtitle": "Bot-Gespräche anzeigen und verwalten"
     },
     "resources": {
       "title": "Ressourcen",
-      "subtitle": "Verwalten Sie Verhaltensregeln, Wörterbücher, Ausgaben und mehr"
+      "subtitle": "Verhaltensregeln, Wörterbücher, Ausgaben und mehr verwalten"
+    },
+    "chat": {
+      "title": "Chat",
+      "subtitle": "Mit Ihren bereitgestellten Bots sprechen"
     }
   },
   "common": {
@@ -53,6 +66,153 @@
     "create": "Erstellen",
     "edit": "Bearbeiten",
     "search": "Suchen...",
-    "noResults": "Keine Ergebnisse gefunden"
+    "noResults": "Keine Ergebnisse gefunden",
+    "duplicate": "Duplizieren"
+  },
+  "bots": {
+    "deploy": "Bereitstellen",
+    "undeploy": "Deaktivieren",
+    "createBot": "Bot erstellen",
+    "createTitle": "Neuen Bot erstellen",
+    "name": "Name",
+    "namePlaceholder": "Mein Bot",
+    "description": "Beschreibung",
+    "descriptionPlaceholder": "Beschreiben Sie, was dieser Bot tut...",
+    "empty": "Noch keine Bots. Erstellen Sie Ihren ersten Bot!",
+    "confirmDelete": "Möchten Sie diesen Bot wirklich löschen?",
+    "count_one": "{{count}} Bot",
+    "count_other": "{{count}} Bots",
+    "export": "Exportieren",
+    "exporting": "Wird exportiert...",
+    "exportSuccess": "Bot erfolgreich exportiert",
+    "import": "Bot importieren",
+    "importing": "Wird importiert...",
+    "importSuccess": "Bot erfolgreich importiert",
+    "importError": "Bot konnte nicht importiert werden"
+  },
+  "wizard": {
+    "title": "Bot-Assistent",
+    "subtitle": "Erstellen Sie Schritt für Schritt einen neuen Bot",
+    "backToBots": "Zurück zu Bots",
+    "step1Title": "Vorlage wählen",
+    "step1Desc": "Wählen Sie einen Ausgangspunkt für Ihren Bot",
+    "step2Title": "Bot-Informationen",
+    "step2Desc": "Geben Sie Ihrem Bot einen Namen und eine Beschreibung",
+    "step3Title": "Pakete",
+    "step3Desc": "Konfigurieren Sie die anfänglichen Pakete für Ihren Bot",
+    "step4Title": "Überprüfen & Erstellen",
+    "step4Desc": "Überprüfen Sie die Bot-Konfiguration vor dem Erstellen",
+    "templateBlank": "Leerer Bot",
+    "templateBlankDesc": "Beginnen Sie mit einer leeren Bot-Konfiguration",
+    "templateQA": "Frage-Antwort-Bot",
+    "templateQADesc": "Vorkonfigurierter Bot für häufig gestellte Fragen",
+    "templateWeather": "Wetter-Bot",
+    "templateWeatherDesc": "Beispiel-Bot mit HTTP-Aufrufen für Wetterdaten",
+    "templateLabel": "Vorlage",
+    "defaultPackageLabel": "Standardpaket",
+    "createDefaultPackage": "Standardpaket erstellen",
+    "createDefaultPackageDesc": "Ein leeres Paket wird erstellt und mit dem Bot verknüpft. Sie können später Erweiterungen hinzufügen.",
+    "next": "Weiter",
+    "back": "Zurück",
+    "createOnly": "Nur erstellen",
+    "createAndDeploy": "Erstellen & Bereitstellen"
+  },
+  "packages": {
+    "createPackage": "Paket erstellen",
+    "createTitle": "Neues Paket erstellen",
+    "name": "Name",
+    "namePlaceholder": "Mein Paket",
+    "description": "Beschreibung",
+    "descriptionPlaceholder": "Beschreiben Sie, was dieses Paket tut...",
+    "noDescription": "Keine Beschreibung",
+    "empty": "Noch keine Pakete. Erstellen Sie Ihr erstes Paket!",
+    "confirmDelete": "Möchten Sie dieses Paket wirklich löschen?",
+    "count_one": "{{count}} Paket",
+    "count_other": "{{count}} Pakete"
+  },
+  "packageDetail": {
+    "title": "Paketdetails",
+    "backToPackages": "Zurück zu Paketen",
+    "extensions": "Erweiterungen",
+    "noExtensions": "Keine Erweiterungen in diesem Paket",
+    "rawConfig": "Rohkonfiguration"
+  },
+  "conversations": {
+    "searchPlaceholder": "Nach Gesprächs-ID suchen...",
+    "id": "Gespräch",
+    "bot": "Bot",
+    "state": "Status",
+    "lastActivity": "Letzte Aktivität",
+    "actions": "Aktionen",
+    "empty": "Noch keine Gespräche. Stellen Sie einen Bot bereit und beginnen Sie zu chatten!",
+    "confirmDelete": "Möchten Sie dieses Gespräch wirklich löschen?",
+    "count_one": "{{count}} Gespräch",
+    "count_other": "{{count}} Gespräche"
+  },
+  "conversationDetail": {
+    "title": "Gespräch",
+    "backToConversations": "Zurück zu Gesprächen",
+    "steps": "Gesprächsschritte",
+    "noSteps": "Keine Gesprächsschritte aufgezeichnet",
+    "properties": "Gesprächseigenschaften"
+  },
+  "chat": {
+    "selectBot": "Bot auswählen...",
+    "noBots": "Keine bereitgestellten Bots verfügbar. Stellen Sie zuerst einen Bot bereit.",
+    "placeholder": "Nachricht eingeben...",
+    "send": "Senden",
+    "newConversation": "Neues Gespräch",
+    "endConversation": "Gespräch beenden",
+    "streaming": "Streaming",
+    "thinking": "Denkt nach...",
+    "connectionError": "Verbindungsfehler. Bitte erneut versuchen.",
+    "empty": "Wählen Sie einen Bot und beginnen Sie zu chatten!",
+    "history": "Verlauf",
+    "continueConversation": "Fortsetzen",
+    "noHistory": "Noch kein Gesprächsverlauf."
+  },
+  "resources": {
+    "unnamed": "Unbenannte Ressource",
+    "noDescription": "Keine Beschreibung",
+    "backToResources": "Zurück zu Ressourcen",
+    "backToList": "Zurück zu {{type}}",
+    "unknownType": "Unbekannter Ressourcentyp",
+    "rawConfig": "Rohkonfiguration",
+    "rawConfigHint": "JSON-Konfiguration für diese Ressource",
+    "create": "{{type}} erstellen",
+    "createTitle": "{{type}} erstellen",
+    "createDescription": "Erstellen Sie eine leere {{type}}-Konfiguration. Sie können sie nach dem Erstellen bearbeiten.",
+    "confirmDelete": "Möchten Sie diese(n) {{type}} wirklich löschen?",
+    "empty": "Noch keine {{type}}-Ressourcen.",
+    "itemCount_one": "{{count}} Element",
+    "itemCount_other": "{{count}} Elemente",
+    "count_one": "{{count}} Ressource",
+    "count_other": "{{count}} Ressourcen",
+    "types": {
+      "behavior": {
+        "name": "Verhaltensregeln",
+        "description": "Gesprächsflussregeln und Entscheidungslogik definieren"
+      },
+      "httpcalls": {
+        "name": "HTTP-Aufrufe",
+        "description": "Externe API-Integrationen und Webhooks konfigurieren"
+      },
+      "output": {
+        "name": "Ausgabesets",
+        "description": "Bot-Antwortvorlagen und Ausgabevarianten verwalten"
+      },
+      "dictionaries": {
+        "name": "Wörterbücher",
+        "description": "Wort- und Phrasenerkennungsmuster definieren"
+      },
+      "langchain": {
+        "name": "LangChain",
+        "description": "KI-Agentenmodelle, Prompts und Tool-Bindungen konfigurieren"
+      },
+      "propertysetter": {
+        "name": "Eigenschaftssetzer",
+        "description": "Gesprächseigenschaften setzen und Slot-Filling verwalten"
+      }
+    }
   }
 }
