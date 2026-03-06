@@ -28,6 +28,7 @@ export default defineConfig({
       "/bots": "http://localhost:7070",
       "/backup": "http://localhost:7070",
       "/managerresource": "http://localhost:7070",
+      "/managedbots": "http://localhost:7070",
     },
   },
 });

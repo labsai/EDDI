@@ -69,5 +69,44 @@
     "confirmDelete": "Are you sure you want to delete this bot?",
     "count_one": "{{count}} bot",
     "count_other": "{{count}} bots"
+  },
+  "packages": {
+    "createPackage": "Create Package",
+    "createTitle": "Create New Package",
+    "name": "Name",
+    "namePlaceholder": "My Package",
+    "description": "Description",
+    "descriptionPlaceholder": "Describe what this package does...",
+    "noDescription": "No description",
+    "empty": "No packages yet. Create your first package!",
+    "confirmDelete": "Are you sure you want to delete this package?",
+    "count_one": "{{count}} package",
+    "count_other": "{{count}} packages"
+  },
+  "packageDetail": {
+    "title": "Package Detail",
+    "backToPackages": "Back to Packages",
+    "extensions": "Extensions",
+    "noExtensions": "No extensions in this package",
+    "rawConfig": "Raw Configuration"
+  },
+  "conversations": {
+    "searchPlaceholder": "Search by conversation ID...",
+    "id": "Conversation",
+    "bot": "Bot",
+    "state": "State",
+    "lastActivity": "Last Activity",
+    "actions": "Actions",
+    "empty": "No conversations yet. Deploy a bot and start chatting!",
+    "confirmDelete": "Are you sure you want to delete this conversation?",
+    "count_one": "{{count}} conversation",
+    "count_other": "{{count}} conversations"
+  },
+  "conversationDetail": {
+    "title": "Conversation",
+    "backToConversations": "Back to Conversations",
+    "steps": "Conversation Steps",
+    "noSteps": "No conversation steps recorded",
+    "properties": "Conversation Properties"
   }
 }

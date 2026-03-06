@@ -4,7 +4,9 @@ import { DashboardPage } from "@/pages/dashboard";
 import { BotsPage } from "@/pages/bots";
 import { BotDetailPage } from "@/pages/bot-detail";
 import { PackagesPage } from "@/pages/packages";
+import { PackageDetailPage } from "@/pages/package-detail";
 import { ConversationsPage } from "@/pages/conversations";
+import { ConversationDetailPage } from "@/pages/conversation-detail";
 import { ResourcesPage } from "@/pages/resources";
 
 export function App() {
@@ -15,11 +17,11 @@ export function App() {
         <Route path="/manage/bots" element={<BotsPage />} />
         <Route path="/manage/botview/:id" element={<BotDetailPage />} />
         <Route path="/manage/packages" element={<PackagesPage />} />
-        <Route path="/manage/packageview/:id" element={<PackagesPage />} />
+        <Route path="/manage/packageview/:id" element={<PackageDetailPage />} />
         <Route path="/manage/conversations" element={<ConversationsPage />} />
         <Route
           path="/manage/conversationview/:id"
-          element={<ConversationsPage />}
+          element={<ConversationDetailPage />}
         />
         <Route path="/manage/resources" element={<ResourcesPage />} />
         <Route path="/" element={<Navigate to="/manage" replace />} />
@@ -28,3 +30,4 @@ export function App() {
     </Routes>
   );
 }
+

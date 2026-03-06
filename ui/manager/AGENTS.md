@@ -66,15 +66,16 @@ src/
 ├── index.css                  # Tailwind v4 + EDDI tokens
 ├── components/
 │   ├── layout/                # Sidebar, TopBar, AppLayout, ThemeProvider
-│   └── bots/                  # BotCard, CreateBotDialog
-├── hooks/                     # TanStack Query hooks (use-bots, use-packages)
+│   ├── bots/                  # BotCard, CreateBotDialog
+│   └── packages/              # PackageCard, CreatePackageDialog
+├── hooks/                     # TanStack Query hooks (use-bots, use-packages, use-conversations)
 ├── lib/
 │   ├── api-client.ts          # Typed fetch client (base URL from window.location.origin)
-│   ├── api/                   # API modules: bots.ts, packages.ts, descriptors.ts
+│   ├── api/                   # API modules: bots.ts, packages.ts, descriptors.ts, conversations.ts
 │   └── utils.ts               # cn() for Tailwind class merging
-├── pages/                     # Route pages (dashboard, bots, bot-detail, packages, etc.)
+├── pages/                     # Route pages (dashboard, bots, bot-detail, packages, package-detail, conversations, conversation-detail, resources)
 ├── i18n/                      # config.ts + locales/ (en, de, ar)
-└── test/                      # setup.ts, mocks/, test-utils.tsx
+└── test/                      # setup.ts, mocks/ (handlers.ts, server.ts), test-utils.tsx
 e2e/                           # Playwright tests (navigation, theme, RTL)
 ```
 
@@ -85,7 +86,7 @@ e2e/                           # Playwright tests (navigation, theme, RTL)
 ### API Communication
 
 - Base URL: `window.location.origin` (no hardcoded URLs)
-- Vite proxy forwards `/botstore/*`, `/packagestore/*`, `/administration/*` to EDDI backend
+- Vite proxy forwards `/botstore/*`, `/packagestore/*`, `/conversationstore/*`, `/administration/*`, `/managedbots/*` to EDDI backend
 - All API calls through typed modules in `src/lib/api/`
 - Server state via TanStack Query hooks in `src/hooks/`
 
