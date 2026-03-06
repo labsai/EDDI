@@ -30,11 +30,11 @@
 
 ### Before Starting Any Work
 
-1. **Read the planning docs** in [`docs/v6-planning/`](docs/v6-planning/):
-   - [`implementation_plan.md`](docs/v6-planning/implementation_plan.md) — Full architecture audit (14 appendices, A-N) and phased roadmap
-   - [`business-logic-analysis.md`](docs/v6-planning/business-logic-analysis.md) — Configuration model, Bot Father, parser/expression deep dive
-   - [`changelog.md`](docs/v6-planning/changelog.md) — Running log of all changes, decisions, and reasoning across sessions
-   - [`phase0-walkthrough.md`](docs/v6-planning/phase0-walkthrough.md) — Phase 0 completion summary (CORS + PathNavigator)
+1. **Read the planning docs**:
+   - [`docs/changelog.md`](docs/changelog.md) — **READ FIRST.** Running log of all changes, decisions, and reasoning across ALL repos and sessions
+   - [`docs/v6-planning/implementation_plan.md`](docs/v6-planning/implementation_plan.md) — Full architecture audit (14 appendices, A-N) and phased roadmap
+   - [`docs/v6-planning/business-logic-analysis.md`](docs/v6-planning/business-logic-analysis.md) — Configuration model, Bot Father, parser/expression deep dive
+   - If working on **EDDI-Manager**: also read `c:\dev\git\EDDI-Manager\HANDOFF.md` and `c:\dev\git\EDDI-Manager\AGENTS.md`
 2. **Check git status**: Run `git status` and `git log -5 --oneline` to see current branch state and recent work.
 
 ### During Work
@@ -51,7 +51,7 @@
 
 ### After Completing Work (or if interrupted/switching sessions)
 
-6. **Update the changelog**: Edit [`docs/v6-planning/changelog.md`](docs/v6-planning/changelog.md) and add an entry with:
+6. **Update the changelog**: Edit [`docs/changelog.md`](docs/changelog.md) and add an entry with:
    - Date and short title
    - Repo and branch
    - What changed (files + reasoning)
