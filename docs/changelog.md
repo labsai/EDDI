@@ -41,6 +41,34 @@ Each entry follows this format:
 
 ## Implementation Log
 
+### 2026-03-06 — Manager UI: Packages + Conversations Pages
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 3 — Items #6-8
+
+**What changed:**
+
+1. **Packages List Page** — Full rewrite of placeholder: cards grid, search/filter, create dialog, context menu (duplicate/delete)
+2. **Package Detail Page** — Extensions list with type labels, config URI, add/remove, expandable raw JSON, delete
+3. **Conversations List Page** — Table layout with state filter pills (All/Active/In Progress/Ended/Error), search, delete, links to detail view
+4. **Conversation Detail Page** — Step-by-step memory viewer showing user input, actions, bot output per turn, expandable raw JSON per step, conversation properties section
+5. **API modules** — `conversations.ts` (GET descriptors, simple log, raw log, DELETE)
+6. **TanStack Query hooks** — `useConversationDescriptors`, `useSimpleConversation`, `useRawConversation`, `useDeleteConversation`, `useCreatePackage`, `useUpdatePackage`, `useDeletePackage`
+7. **MSW handlers** — Package descriptors, package detail, package CRUD, conversation descriptors, conversation logs
+8. **i18n** — Added all `packages.*`, `packageDetail.*`, `conversations.*`, `conversationDetail.*` keys to en.json
+9. **Routes** — `/manage/packageview/:id` → PackageDetailPage, `/manage/conversationview/:id` → ConversationDetailPage
+10. **Vite proxy** — Added `/managedbots` proxy for future Chat Panel
+
+**Tests:** 31/31 passing (7 files), TypeScript zero errors, build succeeds (421KB JS, 29KB CSS)
+
+**Key decisions:**
+
+- Conversations page uses low-level `/conversationstore/conversations` API for browsing/inspecting
+- Chat Panel (future Phase 3.9) will use `/managedbots/{intent}/{userId}` (managed) or `/bots/{env}/{botId}` (direct)
+
+---
+
 ### 2026-03-06 — Manager UI: Greenfield Scaffold + Layout Shell
 
 **Repo:** EDDI-Manager  
