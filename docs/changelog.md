@@ -41,6 +41,55 @@ Each entry follows this format:
 
 ## Implementation Log
 
+### 2026-03-06 — Manager UI: EDDI Branding, Theme & Font
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 3 — Item #13
+
+**What changed:**
+
+1. **Brand theme restored** — replaced indigo/violet with original EDDI black and gold palette. Primary `#f59e0b` (amber), accent `#fbbf24` (gold), sidebar always dark `#1c1917`, dark mode true blacks `#0c0a09`, light mode warm stone `#fafaf9`
+2. **Noto Sans font** — replaced Inter with Noto Sans + script variants (Arabic, Thai, Devanagari, CJK, Korean) via Google Fonts for universal language coverage
+3. **Original E.DD.I logo** — copied `logo_eddi.png` from EDDI backend repo to `public/`; sidebar shows image when expanded, compact gold "E." badge SVG when collapsed
+4. **System theme fix** — theme provider now has `matchMedia("prefers-color-scheme: dark")` change listener so "system" mode tracks OS preference in real time (was only checking once on mount)
+5. **Wide-screen constraint** — main content area capped at `max-w-screen-2xl` (1536px) to prevent infinite stretching on ultrawide monitors
+6. **Test setup** — added `window.matchMedia` mock to `setup.ts` for JSDOM compatibility
+
+**Key decisions:**
+
+- **Noto Sans over Inter** — single font family covers all 11 supported languages' scripts without missing glyphs
+- **SVG brand mark for collapsed sidebar** — gold rounded square with "E." matches the logo's style at 28×28px
+
+**Tests:** ✅ 74/74 passing, TypeScript zero errors, build succeeds
+
+---
+
+### 2026-03-06 — Manager UI: Finalize i18n (11 Languages)
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 3 — Item #12
+
+**What changed:**
+
+1. **8 new locale files** — `fr.json` (French), `es.json` (Spanish), `zh.json` (Chinese Simplified), `th.json` (Thai), `ja.json` (Japanese), `ko.json` (Korean), `pt.json` (Portuguese BR), `hi.json` (Hindi)
+2. **2 completed locale files** — `de.json` and `ar.json` expanded from ~57 keys to full 219-key parity with `en.json`
+3. **`en.json`** — added language labels for all 8 new locales
+4. **`config.ts`** — registered all 11 locales with imports and resource entries
+5. **`top-bar.tsx`** — language selector expanded from 3 to 11 options
+6. **`config.test.ts`** — added key parity regression tests: recursively compares every locale against `en.json` to prevent future key drift (10 new tests)
+
+**Key decisions:**
+
+- **11 languages chosen for global coverage** — en, de, fr, es, ar (RTL), zh, th, ja, ko, pt, hi (~4.5 billion native speakers)
+- **Key parity test as regression guard** — any new key added to en.json will cause tests to fail until all 10 locales are updated
+- **Hindi uses Devanagari script** — no special rendering needed, standard Unicode
+
+**Tests:** ✅ 74/74 passing (11 files), TypeScript zero errors, build succeeds
+
+---
+
 ### 2026-03-06 — Manager UI: Import/Export + Bot Wizard
 
 **Repo:** EDDI-Manager  
