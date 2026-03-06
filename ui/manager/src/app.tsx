@@ -7,6 +7,7 @@ import { PackagesPage } from "@/pages/packages";
 import { PackageDetailPage } from "@/pages/package-detail";
 import { ConversationsPage } from "@/pages/conversations";
 import { ConversationDetailPage } from "@/pages/conversation-detail";
+import { ChatPage } from "@/pages/chat";
 import { ResourcesPage } from "@/pages/resources";
 
 export function App() {
@@ -23,6 +24,7 @@ export function App() {
           path="/manage/conversationview/:id"
           element={<ConversationDetailPage />}
         />
+        <Route path="/manage/chat" element={<ChatPage />} />
         <Route path="/manage/resources" element={<ResourcesPage />} />
         <Route path="/" element={<Navigate to="/manage" replace />} />
         <Route path="*" element={<Navigate to="/manage" replace />} />

@@ -66,3 +66,21 @@
     font-family: var(--font-sans);
   }
 }
+
+/* Chat prose overrides */
+@layer components {
+  .prose pre {
+    background-color: var(--color-muted);
+    border: 1px solid var(--color-border);
+  }
+
+  .prose code {
+    color: var(--color-primary);
+    font-weight: 500;
+  }
+
+  .prose a {
+    color: var(--color-primary);
+    text-decoration: underline;
+  }
+}

@@ -5,6 +5,7 @@ import {
   Bot,
   Package,
   MessageSquare,
+  MessageCircle,
   FileCode,
   PanelLeftClose,
   PanelLeft,
@@ -20,6 +21,7 @@ const navItems = [
     icon: MessageSquare,
     labelKey: "nav.conversations",
   },
+  { path: "/manage/chat", icon: MessageCircle, labelKey: "nav.chat" },
   { path: "/manage/resources", icon: FileCode, labelKey: "nav.resources" },
 ] as const;
 

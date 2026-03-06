@@ -181,4 +181,54 @@ export const handlers = [
   http.delete("*/conversationstore/conversations/:id", () => {
     return new HttpResponse(null, { status: 204 });
   }),
+
+  // --- Chat / Bot Engine ---
+
+  // Start conversation
+  http.post("*/bots/:env/:botId", ({ params }) => {
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `/bots/${params.env}/${params.botId}/conv-${Date.now()}`,
+      },
+    });
+  }),
+
+  // Send message (text/plain or JSON) — returns snapshot
+  http.post("*/bots/:env/:botId/:conversationId", () => {
+    return HttpResponse.json({
+      botId: "bot1",
+      botVersion: 1,
+      conversationId: "conv-mock",
+      conversationState: "READY",
+      environment: "unrestricted",
+      conversationSteps: [
+        {
+          input: "",
+          output: "Thanks for your message! How can I help?",
+          actions: ["respond"],
+        },
+      ],
+    });
+  }),
+
+  // Read conversation (GET)
+  http.get("*/bots/:env/:botId/:conversationId", () => {
+    return HttpResponse.json({
+      botId: "bot1",
+      botVersion: 1,
+      conversationId: "conv-mock",
+      conversationState: "READY",
+      environment: "unrestricted",
+      conversationSteps: [
+        {
+          output: "Welcome! How can I help you today?",
+          actions: ["welcome"],
+        },
+      ],
+      conversationProperties: {
+        botName: "Support Bot",
+      },
+    });
+  }),
 ];

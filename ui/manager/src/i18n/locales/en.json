@@ -8,6 +8,7 @@
     "bots": "Bots",
     "packages": "Packages",
     "conversations": "Conversations",
+    "chat": "Chat",
     "resources": "Resources"
   },
   "theme": {
@@ -41,6 +42,10 @@
     "resources": {
       "title": "Resources",
       "subtitle": "Manage behavior rules, dictionaries, outputs, and more"
+    },
+    "chat": {
+      "title": "Chat",
+      "subtitle": "Talk to your deployed bots"
     }
   },
   "common": {
@@ -108,5 +113,20 @@
     "steps": "Conversation Steps",
     "noSteps": "No conversation steps recorded",
     "properties": "Conversation Properties"
+  },
+  "chat": {
+    "selectBot": "Select a bot...",
+    "noBots": "No deployed bots available. Deploy a bot first.",
+    "placeholder": "Type a message...",
+    "send": "Send",
+    "newConversation": "New Conversation",
+    "endConversation": "End Conversation",
+    "streaming": "Streaming",
+    "thinking": "Thinking...",
+    "connectionError": "Connection error. Please try again.",
+    "empty": "Select a bot and start chatting!",
+    "history": "History",
+    "continueConversation": "Continue",
+    "noHistory": "No conversation history yet."
   }
 }
