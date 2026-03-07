@@ -179,6 +179,35 @@ All 4 new classes are package-private helpers (not CDI beans). They are instanti
 
 **Commit:** `feat: Phase 2 testing infrastructure + weather bot fix` (`0956cefd`)
 
+### 2026-03-07 — Phase 3.16: Package Editor with Drag-and-Drop Pipeline Builder
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 3 — Item #16
+
+**What changed:**
+
+- `extensions.ts` [NEW]: API module for `GET /extensionstore/extensions` + `EXTENSION_TYPE_INFO` registry mapping 7 extension types to labels, icons, and pipeline order
+- `use-extensions-store.ts` [NEW]: TanStack Query hook for fetching available extension types (5-minute cache)
+- `pipeline-builder.tsx` [NEW]: `@dnd-kit` sortable list component — drag handles with pointer + keyboard sensors, step numbers, type icons, `eddi://` URI parsing to resource detail links, remove buttons
+- `add-extension-dialog.tsx` [NEW]: Modal listing available extension types from `/extensionstore/extensions` with search filter and pipeline-order sorting
+- `package-detail.tsx` [REWRITE]: Full editor with drag-and-drop pipeline builder, version picker, add/remove extensions, save/discard with dirty-state tracking, delete, collapsible raw JSON viewer
+- `packages.ts` [MODIFIED]: Added `getPackageVersions()` for version picker
+- `use-packages.ts` [MODIFIED]: Added `usePackageVersions()` hook
+- `handlers.ts` [MODIFIED]: MSW handlers for `GET /extensionstore/extensions` (7 types) and `PUT /packagestore/packages/:id`
+- `en.json` + 10 locales [MODIFIED]: Added `packageEditor.*` i18n keys
+- `package-detail.test.tsx` [NEW]: 6 component tests (heading, pipeline items, add button, save/discard, delete)
+
+**Design decision:**
+Side-sheet extension inspector deferred to Phase 3.17–3.18. For now, clicking an extension shows its config URI as a link to the existing resource detail page. This keeps the Phase 3.16 scope focused on pipeline reordering and the add/remove workflow.
+
+**Testing:**
+
+- [x] Builds cleanly (`npx tsc -b` clean, `npm run build` succeeds)
+- [x] All 105 tests pass (14 test files)
+- [x] Verified in browser — packages page, create dialog, error states render correctly
+- [x] No regressions
+
 ### Template for Each Entry
 
 ```markdown
