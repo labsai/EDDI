@@ -326,6 +326,95 @@ export const handlers = [
   }),
 
   // --- Resource Stores ---
+  // Specific handlers for behavior and httpcalls with realistic mock data
+  http.get("*/behaviorstore/behaviorsets/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    // Don't match descriptor endpoints
+    if (url.pathname.endsWith("/descriptors") || includePrevious) {
+      return;
+    }
+    return HttpResponse.json({
+      appendActions: true,
+      expressionsAsActions: false,
+      behaviorGroups: [
+        {
+          name: "Greeting Rules",
+          executionStrategy: "currentStepOnly",
+          behaviorRules: [
+            {
+              name: "greeting_rule",
+              actions: ["greet"],
+              conditions: [
+                {
+                  type: "inputmatcher",
+                  configs: {
+                    expressions: "greeting(*)",
+                    occurrence: "currentStep",
+                  },
+                },
+              ],
+            },
+            {
+              name: "fallback_rule",
+              actions: ["fallback"],
+              conditions: [
+                {
+                  type: "negation",
+                  configs: {},
+                  conditions: [
+                    {
+                      type: "actionmatcher",
+                      configs: { actions: "greet" },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+  }),
+
+  http.get("*/httpcallsstore/httpcalls/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (url.pathname.endsWith("/descriptors") || includePrevious) {
+      return;
+    }
+    return HttpResponse.json({
+      targetServerUrl: "https://api.example.com",
+      httpCalls: [
+        {
+          name: "get_weather",
+          description: "Fetch current weather data for a city",
+          parameters: { city: "City name to look up" },
+          actions: ["get_weather"],
+          saveResponse: true,
+          responseObjectName: "weatherData",
+          fireAndForget: false,
+          request: {
+            path: "/weather?city=[[${city}]]",
+            method: "GET",
+            headers: {
+              Authorization: "Bearer [[${apiKey}]]",
+            },
+            queryParams: {},
+            contentType: "application/json",
+            body: "",
+          },
+          preRequest: { propertyInstructions: [] },
+          postResponse: {
+            propertyInstructions: [],
+            outputBuildInstructions: [],
+            qrBuildInstructions: [],
+          },
+        },
+      ],
+    });
+  }),
+
   // Generic descriptor handlers for all 6 resource types
   ...createResourceHandlers("behaviorstore", "behaviorsets", "behavior"),
   ...createResourceHandlers("httpcallsstore", "httpcalls", "httpcalls"),

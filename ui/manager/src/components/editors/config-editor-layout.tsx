@@ -30,8 +30,18 @@ export interface ConfigEditorLayoutProps {
   saveError?: string;
   /** Read-only mode */
   readOnly?: boolean;
-  /** Slot for the form view (Phase 3.17–3.18 editors) */
+  /** Static children for the form view (fallback placeholder if absent) */
   children?: React.ReactNode;
+  /**
+   * Render prop for form editors that need two-way data binding.
+   * Receives the current parsed data and an onChange callback.
+   * When provided, this takes precedence over static children.
+   */
+  renderFormEditor?: (
+    parsedData: unknown,
+    onChange: (updated: unknown) => void,
+    readOnly: boolean
+  ) => React.ReactNode;
 }
 
 type EditorTab = "form" | "json";
@@ -57,15 +67,24 @@ export function ConfigEditorLayout({
   saveError,
   readOnly = false,
   children,
+  renderFormEditor,
 }: ConfigEditorLayoutProps) {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<EditorTab>("json");
+  const hasFormEditor = !!(renderFormEditor || children);
+  const [activeTab, setActiveTab] = useState<EditorTab>(
+    hasFormEditor ? "form" : "json"
+  );
   const [editedData, setEditedData] = useState(data);
 
   // Reset edited data when the source data changes (version switch, initial load)
   useMemo(() => {
     setEditedData(data);
   }, [data]);
+
+  // Handler for form editors to push data changes
+  const handleFormChange = useCallback((updated: unknown) => {
+    setEditedData(JSON.stringify(updated, null, 2));
+  }, []);
 
   const isDirty = editedData !== data;
 
@@ -186,7 +205,25 @@ export function ConfigEditorLayout({
       <div className="rounded-xl border bg-card shadow-sm">
         {activeTab === "form" ? (
           <div className="p-6" data-testid="form-view">
-            {children || (
+            {renderFormEditor ? (
+              (() => {
+                try {
+                  const parsed = JSON.parse(editedData);
+                  return renderFormEditor(parsed, handleFormChange, readOnly);
+                } catch {
+                  return (
+                    <div className="text-sm text-destructive">
+                      {t(
+                        "editor.invalidJson",
+                        "Invalid JSON — switch to the JSON tab to fix."
+                      )}
+                    </div>
+                  );
+                }
+              })()
+            ) : children ? (
+              children
+            ) : (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <FormInput className="h-10 w-10 text-muted-foreground/50" />
                 <p className="mt-3 text-sm text-muted-foreground">

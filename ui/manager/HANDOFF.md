@@ -2,13 +2,13 @@
 
 > **Last updated**: 2026-03-07  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Phase 3.16 — Package Editor with Drag-and-Drop Pipeline Builder
+> **Last commit**: Phase 3.17 — Behavior Rules & HTTP Calls Editors
 
 ---
 
 ## Current Status
 
-**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.16 complete.
+**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.17 complete.
 
 ### What's Done
 
@@ -30,11 +30,12 @@
 | 3.14  | JSON Editor, Version Picker, Cascade Save: Monaco, Form↔JSON toggle, config→package→bot cascade                  | —         |
 | 3.15  | Bot Editor: version picker, env badges (unrestricted/restricted/test), deploy per-env, duplicate, export         | —         |
 | 3.16  | Package Editor: drag-and-drop pipeline builder (`@dnd-kit`), add/remove extensions, save/discard, version picker | —         |
+| 3.17  | Behavior Rules & HTTP Calls Editors: form-based editors with render prop, Form↔JSON sync, 14 new tests           | —         |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc -b`)
-- **Unit/Component**: 105/105 pass (`npm run test`) — 14 files
+- **Unit/Component**: 119/119 pass (`npm run test`) — 16 files
 - **Build**: Succeeds
 
 ### Files Created (summary)
@@ -55,7 +56,7 @@
 - **Tests**: `sidebar.test.tsx`, `top-bar.test.tsx`, `config.test.ts`, `bots.test.tsx`, `bots.test.ts`, `packages.test.tsx`, `conversations.test.tsx`, `chat.test.tsx`, `resources.test.tsx`, `backup.test.tsx`, `bot-wizard.test.tsx`, `package-detail.test.tsx`
 - **E2E**: `navigation.spec.ts`, `theme.spec.ts`, `rtl.spec.ts`
 - **MSW**: `handlers.ts` (bots, packages, conversations, resources, extension store mocks), `server.ts`
-- **Editors**: `json-editor.tsx`, `version-picker.tsx`, `config-editor-layout.tsx`, `update-usage-dialog.tsx`, `pipeline-builder.tsx`, `add-extension-dialog.tsx`
+- **Editors**: `json-editor.tsx`, `version-picker.tsx`, `config-editor-layout.tsx`, `update-usage-dialog.tsx`, `pipeline-builder.tsx`, `add-extension-dialog.tsx`, `behavior-editor.tsx`, `httpcalls-editor.tsx`
 - **Cascade**: `cascade-save.ts`, `resource-usage.ts`
 
 ---

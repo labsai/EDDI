@@ -116,7 +116,7 @@ Modal listing available extension types from `/extensionstore/extensions`. Group
 
 ---
 
-### Phase 3.17 — Extension Editors: Behavior Rules & HTTP Calls
+### Phase 3.17 — Extension Editors: Behavior Rules & HTTP Calls ✅
 
 The two most complex extension types get dedicated form editors.
 
@@ -137,6 +137,9 @@ Generic wrapper: loads config by type + ID + version, renders the right editor c
 - **Per-call form**: URL template, method, headers (key-value), body template, pre/post request instructions
 - **Action binding**: which actions trigger this call
 - **Save**: `PUT /httpcallsstore/httpcalls/{id}`
+
+> [!NOTE]
+> **Completed 2026-03-07.** Both editors use a `renderFormEditor` render prop on `ConfigEditorLayout` for two-way Form↔JSON sync. 14 new tests, 119 total. Pre/post instructions shown as JSON preview — full sub-editors deferred to Phase 3.19.
 
 ---
 

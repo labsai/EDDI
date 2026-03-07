@@ -32,6 +32,14 @@ import {
   type ResourceUsage,
 } from "@/lib/api/resource-usage";
 import type { CascadeContext } from "@/lib/api/cascade-save";
+import {
+  BehaviorEditor,
+  type BehaviorConfig,
+} from "@/components/editors/behavior-editor";
+import {
+  HttpCallsEditor,
+  type HttpCallsConfig,
+} from "@/components/editors/httpcalls-editor";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   GitBranch,
@@ -339,6 +347,25 @@ export function ResourceDetailPage() {
               cascadeSave.isError
                 ? t("editor.saveError", "Failed to save")
                 : undefined
+            }
+            renderFormEditor={
+              type === "behavior"
+                ? (parsed, onFormChange, ro) => (
+                    <BehaviorEditor
+                      data={parsed as BehaviorConfig}
+                      onChange={onFormChange}
+                      readOnly={ro}
+                    />
+                  )
+                : type === "httpcalls"
+                  ? (parsed, onFormChange, ro) => (
+                      <HttpCallsEditor
+                        data={parsed as HttpCallsConfig}
+                        onChange={onFormChange}
+                        readOnly={ro}
+                      />
+                    )
+                  : undefined
             }
           />
           {showUsageDialog && (
