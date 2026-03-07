@@ -1,13 +1,16 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getBotDescriptors,
+  getBotDescriptorsWithVersions,
   getBot,
   createBot,
+  updateBot,
   deleteBot,
   duplicateBot,
   deployBot,
   undeployBot,
   getDeploymentStatus,
+  getDeploymentStatuses,
   type Bot,
   type BotDescriptor,
   parseResourceUri,
@@ -42,6 +45,52 @@ export function useDeploymentStatus(botId: string, environment = "unrestricted")
     refetchInterval: (query) => {
       // Poll every 3s while deploying
       return query.state.data?.status === "IN_PROGRESS" ? 3000 : false;
+    },
+  });
+}
+
+export function useBotVersions(botId: string) {
+  return useQuery({
+    queryKey: [...BOTS_KEY, "versions", botId],
+    queryFn: () => getBotDescriptorsWithVersions(botId),
+    enabled: !!botId,
+    select: (descriptors) =>
+      descriptors
+        .map((d) => ({
+          version: parseResourceUri(d.resource).version,
+          lastModifiedOn: d.lastModifiedOn,
+        }))
+        .sort((a, b) => b.version - a.version),
+  });
+}
+
+export function useUpdateBot() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      version,
+      bot,
+    }: {
+      id: string;
+      version: number;
+      bot: Bot;
+    }) => updateBot(id, version, bot),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: BOTS_KEY });
+    },
+  });
+}
+
+export function useDeploymentStatuses(botId: string) {
+  return useQuery({
+    queryKey: [...BOTS_KEY, "deploymentStatuses", botId],
+    queryFn: () => getDeploymentStatuses(botId),
+    enabled: !!botId,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data?.some((d) => d.status === "IN_PROGRESS")) return 3000;
+      return false;
     },
   });
 }

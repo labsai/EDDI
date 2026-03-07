@@ -1,5 +1,8 @@
 import { api } from "../api-client";
 
+export const ENVIRONMENTS = ["unrestricted", "restricted", "test"] as const;
+export type Environment = (typeof ENVIRONMENTS)[number];
+
 // Types matching EDDI backend
 export interface BotDescriptor {
   resource: string;
@@ -46,6 +49,14 @@ export function getBotDescriptors(
   if (filter) params.set("filter", filter);
   return api.get<BotDescriptor[]>(
     `/botstore/bots/descriptors?${params.toString()}`
+  );
+}
+
+export function getBotDescriptorsWithVersions(
+  botId: string
+): Promise<BotDescriptor[]> {
+  return api.get<BotDescriptor[]>(
+    `/botstore/bots/descriptors?includePreviousVersions=true&filter=${botId}`
   );
 }
 
@@ -104,5 +115,31 @@ export function getDeploymentStatus(
 ): Promise<DeploymentStatus> {
   return api.get<DeploymentStatus>(
     `/administration/${environment}/deploymentstatus/${botId}`
+  );
+}
+
+export interface EnvironmentStatus {
+  environment: Environment;
+  status: DeploymentStatus["status"];
+}
+
+export async function getDeploymentStatuses(
+  botId: string
+): Promise<EnvironmentStatus[]> {
+  const results = await Promise.allSettled(
+    ENVIRONMENTS.map(async (env) => {
+      try {
+        const result = await getDeploymentStatus(env, botId);
+        return { environment: env, status: result.status };
+      } catch {
+        return { environment: env, status: "NOT_FOUND" as const };
+      }
+    })
+  );
+
+  return results.map((r, i) =>
+    r.status === "fulfilled"
+      ? r.value
+      : { environment: ENVIRONMENTS[i]!, status: "NOT_FOUND" as const }
   );
 }

@@ -66,12 +66,15 @@ export const handlers = [
   }),
 
   // Get bot
-  http.get("*/botstore/bots/:id", () => {
+  http.get("*/botstore/bots/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const version = parseInt(url.searchParams.get("version") ?? "1", 10);
     return HttpResponse.json({
       packages: [
         "eddi://ai.labs.package/packagestore/packages/pkg1?version=1",
       ],
       channels: [],
+      _version: version,
     });
   }),
 
@@ -83,6 +86,45 @@ export const handlers = [
   // Deploy bot
   http.post("*/administration/:env/deploy/:botId", () => {
     return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Undeploy bot
+  http.post("*/administration/:env/undeploy/:botId", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Update bot
+  http.put("*/botstore/bots/:id", ({ request, params }) => {
+    const url = new URL(request.url);
+    const currentVersion = parseInt(
+      url.searchParams.get("version") ?? "1",
+      10
+    );
+    const newVersion = currentVersion + 1;
+    return new HttpResponse(null, {
+      status: 200,
+      headers: {
+        Location: `eddi://ai.labs.bot/botstore/bots/${params.id}?version=${newVersion}`,
+      },
+    });
+  }),
+
+  // Duplicate bot
+  http.post("*/botstore/bots/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const deepCopy = url.searchParams.get("deepCopy");
+    const newId = `dup-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `eddi://ai.labs.bot/botstore/bots/${newId}?version=1${deepCopy ? "&deepCopy=true" : ""}`,
+      },
+    });
+  }),
+
+  // Delete bot
+  http.delete("*/botstore/bots/:id", () => {
+    return new HttpResponse(null, { status: 204 });
   }),
 
   // Package descriptors

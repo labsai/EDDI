@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
@@ -16,19 +16,25 @@ import {
   ExternalLink,
   Settings,
   Download,
+  Copy,
+  Server,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   useBot,
   useDeploymentStatus,
+  useDeploymentStatuses,
   useDeployBot,
   useUndeployBot,
   useDeleteBot,
+  useDuplicateBot,
+  useBotVersions,
 } from "@/hooks/use-bots";
 import { useExportBot } from "@/hooks/use-backup";
 import { usePackageDescriptors, useUpdateBotPackages } from "@/hooks/use-packages";
-import { parseResourceUri } from "@/lib/api/bots";
+import { parseResourceUri, type EnvironmentStatus } from "@/lib/api/bots";
 
+/* ─── Status config for environment badges ─── */
 const statusConfig = {
   READY: { icon: Rocket, label: "Deployed", color: "text-emerald-500", bg: "bg-emerald-500/10" },
   IN_PROGRESS: { icon: Clock, label: "Deploying...", color: "text-amber-500", bg: "bg-amber-500/10" },
@@ -36,19 +42,31 @@ const statusConfig = {
   NOT_FOUND: { icon: Square, label: "Not deployed", color: "text-muted-foreground", bg: "bg-muted" },
 };
 
+const envLabels: Record<string, string> = {
+  unrestricted: "botDetail.envUnrestricted",
+  restricted: "botDetail.envRestricted",
+  test: "botDetail.envTest",
+};
+
+/* ─── Main page ─── */
 export function BotDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
   const navigate = useNavigate();
 
-  const [version] = useState(1); // TODO: version picker
+  const [version, setVersion] = useState(1);
   const [showAddPackage, setShowAddPackage] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const { data: bot, isLoading, isError, refetch } = useBot(id!, version);
   const { data: deployment } = useDeploymentStatus(id!);
+  const { data: envStatuses } = useDeploymentStatuses(id!);
+  const { data: versions } = useBotVersions(id!);
+
   const deployMutation = useDeployBot();
   const undeployMutation = useUndeployBot();
   const deleteMutation = useDeleteBot();
+  const duplicateMutation = useDuplicateBot();
   const updatePackagesMutation = useUpdateBotPackages();
   const exportMutation = useExportBot();
 
@@ -57,6 +75,14 @@ export function BotDetailPage() {
   const StatusIcon = config.icon;
   const isDeployed = status === "READY";
   const isBusy = deployMutation.isPending || undeployMutation.isPending || status === "IN_PROGRESS";
+
+  // Clear save message after 3s
+  useEffect(() => {
+    if (saveMessage) {
+      const timer = setTimeout(() => setSaveMessage(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [saveMessage]);
 
   function handleDeploy() {
     deployMutation.mutate({ botId: id!, version });
@@ -70,6 +96,20 @@ export function BotDetailPage() {
     if (window.confirm(t("bots.confirmDelete"))) {
       await deleteMutation.mutateAsync({ id: id!, version });
       navigate("/manage/bots");
+    }
+  }
+
+  async function handleDuplicate() {
+    try {
+      const result = await duplicateMutation.mutateAsync({
+        id: id!,
+        version,
+        deepCopy: true,
+      });
+      const { id: newId } = parseResourceUri(result.location);
+      navigate(`/manage/botview/${newId}`);
+    } catch {
+      // Error handled by mutation state
     }
   }
 
@@ -89,6 +129,10 @@ export function BotDetailPage() {
     });
     setShowAddPackage(false);
   }
+
+  const handleVersionChange = useCallback((v: number) => {
+    setVersion(v);
+  }, []);
 
   if (isLoading) {
     return (
@@ -122,11 +166,23 @@ export function BotDetailPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           <BackLink />
-          <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
+          <div className="flex items-center gap-3">
             <Bot className="h-8 w-8 text-primary" />
-            {t("botDetail.title", "Bot Detail")}
-          </h1>
-          <p className="font-mono text-sm text-muted-foreground">ID: {id}</p>
+            <div>
+              <h1 className="text-3xl font-bold text-foreground">
+                {t("botDetail.title", "Bot Detail")}
+              </h1>
+              <p className="font-mono text-sm text-muted-foreground">ID: {id}</p>
+            </div>
+          </div>
+          {/* Version picker */}
+          {versions && versions.length > 0 && (
+            <VersionSelect
+              versions={versions}
+              current={version}
+              onChange={handleVersionChange}
+            />
+          )}
         </div>
 
         {/* Actions */}
@@ -138,6 +194,7 @@ export function BotDetailPage() {
               config.bg,
               config.color
             )}
+            data-testid="deployment-status"
           >
             <StatusIcon className="h-4 w-4" />
             {config.label}
@@ -154,12 +211,26 @@ export function BotDetailPage() {
                 : "bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90",
               isBusy && "cursor-not-allowed opacity-50"
             )}
+            data-testid="deploy-btn"
           >
             {isBusy
               ? t("common.loading")
               : isDeployed
                 ? t("bots.undeploy")
                 : t("bots.deploy")}
+          </button>
+
+          {/* Duplicate */}
+          <button
+            onClick={handleDuplicate}
+            disabled={duplicateMutation.isPending}
+            className="rounded-lg border border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
+            data-testid="duplicate-bot-btn"
+          >
+            <Copy className="h-4 w-4 inline-block me-1.5" />
+            {duplicateMutation.isPending
+              ? t("botDetail.duplicating")
+              : t("botDetail.duplicate")}
           </button>
 
           {/* Export */}
@@ -179,11 +250,37 @@ export function BotDetailPage() {
           <button
             onClick={handleDelete}
             className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
+            data-testid="delete-bot-btn"
           >
             <Trash2 className="h-4 w-4" />
           </button>
         </div>
       </div>
+
+      {/* Save feedback */}
+      {saveMessage && (
+        <div
+          className={cn(
+            "rounded-lg px-4 py-2 text-sm font-medium transition-all",
+            saveMessage.type === "success"
+              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+              : "bg-destructive/10 text-destructive"
+          )}
+          data-testid="save-feedback"
+        >
+          {saveMessage.text}
+        </div>
+      )}
+
+      {/* Environment Status Badges */}
+      {envStatuses && envStatuses.length > 0 && (
+        <EnvironmentBadges
+          statuses={envStatuses}
+          onDeploy={(env) => deployMutation.mutate({ environment: env, botId: id!, version })}
+          onUndeploy={(env) => undeployMutation.mutate({ environment: env, botId: id! })}
+          isBusy={isBusy}
+        />
+      )}
 
       {/* Packages section */}
       <section className="rounded-xl border bg-card shadow-sm">
@@ -200,6 +297,7 @@ export function BotDetailPage() {
           <button
             onClick={() => setShowAddPackage(!showAddPackage)}
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
+            data-testid="add-package-btn"
           >
             <Plus className="h-4 w-4" />
             {t("botDetail.addPackage", "Add Package")}
@@ -266,6 +364,8 @@ export function BotDetailPage() {
   );
 }
 
+/* ─── Sub-components ─── */
+
 function BackLink() {
   const { t } = useTranslation();
   return (
@@ -279,6 +379,121 @@ function BackLink() {
   );
 }
 
+/* ─── Version selector ─── */
+function VersionSelect({
+  versions,
+  current,
+  onChange,
+}: {
+  versions: { version: number; lastModifiedOn: number }[];
+  current: number;
+  onChange: (v: number) => void;
+}) {
+  if (versions.length <= 1) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
+        data-testid="version-badge"
+      >
+        v{current}
+      </span>
+    );
+  }
+
+  return (
+    <select
+      value={current}
+      onChange={(e) => onChange(Number(e.target.value))}
+      className="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
+      data-testid="version-picker"
+    >
+      {versions.map((v) => (
+        <option key={v.version} value={v.version}>
+          v{v.version}
+          {v.lastModifiedOn
+            ? ` — ${formatRelativeTime(v.lastModifiedOn)}`
+            : ""}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function formatRelativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(timestamp).toLocaleDateString();
+}
+
+/* ─── Environment Status Badges ─── */
+function EnvironmentBadges({
+  statuses,
+  onDeploy,
+  onUndeploy,
+  isBusy,
+}: {
+  statuses: EnvironmentStatus[];
+  onDeploy: (env: string) => void;
+  onUndeploy: (env: string) => void;
+  isBusy: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <section className="rounded-xl border bg-card shadow-sm" data-testid="env-badges">
+      <div className="flex items-center gap-2 border-b border-border px-5 py-3">
+        <Server className="h-5 w-5 text-primary" />
+        <h2 className="text-sm font-semibold text-foreground">
+          {t("botDetail.environments", "Environments")}
+        </h2>
+      </div>
+      <div className="grid grid-cols-1 gap-0 divide-y divide-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        {statuses.map(({ environment, status }) => {
+          const conf = statusConfig[status];
+          const Icon = conf.icon;
+          const isUp = status === "READY";
+          return (
+            <div key={environment} className="flex items-center justify-between gap-3 px-5 py-3">
+              <div className="flex items-center gap-2">
+                <div className={cn("rounded-full p-1.5", conf.bg)}>
+                  <Icon className={cn("h-3.5 w-3.5", conf.color)} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    {t(envLabels[environment] ?? environment)}
+                  </p>
+                  <p className={cn("text-xs", conf.color)}>
+                    {conf.label}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => (isUp ? onUndeploy(environment) : onDeploy(environment))}
+                disabled={isBusy}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                  isUp
+                    ? "bg-destructive/10 text-destructive hover:bg-destructive/20"
+                    : "bg-primary/10 text-primary hover:bg-primary/20",
+                  isBusy && "cursor-not-allowed opacity-50"
+                )}
+              >
+                {isUp ? t("bots.undeploy") : t("bots.deploy")}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/* ─── Add Package Panel ─── */
 function AddPackagePanel({
   currentPackages,
   onAdd,
@@ -351,6 +566,7 @@ function AddPackagePanel({
   );
 }
 
+/* ─── Raw Config Section ─── */
 function RawConfigSection({ bot }: { bot: { packages?: string[]; channels?: string[] } }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);

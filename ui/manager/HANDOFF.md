@@ -2,13 +2,13 @@
 
 > **Last updated**: 2026-03-07  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Phase 3.14 — JSON Editor, Version Picker, Cascade Save
+> **Last commit**: Phase 3.15 — Bot Editor, Version Picker, Env Badges, Duplicate
 
 ---
 
 ## Current Status
 
-**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.14 complete.
+**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.15 complete.
 
 ### What's Done
 
@@ -28,11 +28,12 @@
 | 3.12  | i18n finalized: 11 languages (en, de, fr, es, ar, zh, th, ja, ko, pt, hi)                                | —         |
 | 3.13  | EDDI branding: black/gold theme, Noto Sans font, original logo, system theme fix, wide-screen constraint | —         |
 | 3.14  | JSON Editor, Version Picker, Cascade Save: Monaco, Form↔JSON toggle, config→package→bot cascade          | —         |
+| 3.15  | Bot Editor: version picker, env badges (unrestricted/restricted/test), deploy per-env, duplicate, export | —         |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc -b`)
-- **Unit/Component**: 90/90 pass (`npm run test`) — 12 files
+- **Unit/Component**: 99/99 pass (`npm run test`) — 13 files
 - **Build**: Succeeds
 
 ### Files Created (summary)
@@ -97,7 +98,7 @@ Phase 3.14 (editor foundation + cascade save) is complete. The next phases build
 
 ## Known Issues / TODOs
 
-- Bot/Package detail pages don't have a version picker yet (hardcoded to v1)
+- Bot/Package detail pages now have version picker
 - Keycloak auth adapter not yet wired (keycloak-js 26+ dependency is installed)
 - Pre-commit hook references old `pre-commit` npm package — use `--no-verify` for now
 - Package duplicate not implemented (no backend endpoint for it yet)
