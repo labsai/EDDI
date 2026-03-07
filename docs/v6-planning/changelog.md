@@ -208,6 +208,32 @@ Side-sheet extension inspector deferred to Phase 3.17–3.18. For now, clicking 
 - [x] Verified in browser — packages page, create dialog, error states render correctly
 - [x] No regressions
 
+### 2026-03-07 — Phase 3.17: Behavior Rules & HTTP Calls Editors
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 3 — Item #17
+
+**What changed:**
+
+- `behavior-editor.tsx` [NEW]: Form editor for `BehaviorConfiguration` — groups accordion → rule cards with action tag input → recursive condition editors (6 types: inputmatcher, actionmatcher, negation, connector, occurrence, dynamicValueMatcher) with key-value config pairs and nested conditions
+- `httpcalls-editor.tsx` [NEW]: Form editor for `HttpCallsConfiguration` — server URL, collapsible call cards with color-coded method badge, request builder (method, path, content type, headers/queryParams KV, body textarea), LLM agent parameters, options toggles, pre/post JSON preview
+- `config-editor-layout.tsx` [MODIFIED]: `renderFormEditor` render prop for two-way Form↔JSON binding; default tab = "Form" when editor exists
+- `resource-detail.tsx` [MODIFIED]: Wires both editors via `renderFormEditor` prop keyed by resource type
+- `handlers.ts` [MODIFIED]: Realistic MSW mock data for behavior (1 group, 2 rules, 3 conditions) and httpcalls (1 call with full request)
+- `en.json` + 10 locales [MODIFIED]: 60+ new i18n keys (`behaviorEditor.*`, `httpcallsEditor.*`, `editor.invalidJson`)
+- `resource-detail-behavior.test.tsx` [NEW]: 7 tests
+- `resource-detail-httpcalls.test.tsx` [NEW]: 7 tests
+
+**Design decision:**
+Render prop pattern on `ConfigEditorLayout` — form editors receive parsed data and push changes back as objects, which the layout serializes to JSON. This keeps Form↔JSON in perfect sync without extra state management. Pre/post instructions rendered as JSON preview for now; full sub-editors deferred to Phase 3.19.
+
+**Testing:**
+
+- [x] Builds cleanly (`npx tsc -b` clean, `npm run build` succeeds)
+- [x] All 119 tests pass (16 test files)
+- [x] No regressions
+
 ### Template for Each Entry
 
 ```markdown
