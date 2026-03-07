@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getPackageDescriptors,
   getPackage,
+  getPackageVersions,
   createPackage,
   updatePackage,
   deletePackage,
@@ -22,6 +23,15 @@ export function usePackage(id: string, version: number) {
     queryKey: [...PACKAGES_KEY, id, version],
     queryFn: () => getPackage(id, version),
     enabled: !!id && version > 0,
+  });
+}
+
+/** Fetch all versions of a specific package (for version picker) */
+export function usePackageVersions(id: string) {
+  return useQuery({
+    queryKey: [...PACKAGES_KEY, id, "versions"],
+    queryFn: () => getPackageVersions(id),
+    enabled: !!id,
   });
 }
 

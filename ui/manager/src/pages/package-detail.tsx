@@ -1,60 +1,162 @@
-import { useState } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   Package,
-  Settings,
+  Plus,
   Trash2,
   RefreshCw,
   AlertCircle,
-  ChevronDown,
-  ChevronUp,
-  Puzzle,
+  Settings,
+  Save,
+  Undo2,
 } from "lucide-react";
-import { usePackage, useUpdatePackage, useDeletePackage } from "@/hooks/use-packages";
+import { cn } from "@/lib/utils";
+import {
+  usePackage,
+  useUpdatePackage,
+  useDeletePackage,
+  usePackageVersions,
+} from "@/hooks/use-packages";
+
+import { parseResourceUri } from "@/lib/api/bots";
 import type { PackageExtension } from "@/lib/api/packages";
+import type { ExtensionDescriptor } from "@/lib/api/extensions";
+import {
+  PipelineBuilder,
+  type PipelineItem,
+} from "@/components/editors/pipeline-builder";
+import { AddExtensionDialog } from "@/components/editors/add-extension-dialog";
 
-/** Map extension type IDs to human-readable labels */
-const extensionTypeLabels: Record<string, string> = {
-  "ai.labs.parser": "Parser",
-  "ai.labs.behavior": "Behavior Rules",
-  "ai.labs.property": "Property Setter",
-  "ai.labs.httpcalls": "HTTP Calls",
-  "ai.labs.langchain": "LangChain",
-  "ai.labs.output": "Output",
-  "ai.labs.output.template": "Output Template",
-};
 
-function getExtensionLabel(type: string): string {
-  return extensionTypeLabels[type] || type;
-}
-
+/* ─── Main page ─── */
 export function PackageDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
   const navigate = useNavigate();
 
-  const [version] = useState(1); // TODO: version picker
+  const [version, setVersion] = useState(1);
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [localExtensions, setLocalExtensions] = useState<
+    PackageExtension[] | null
+  >(null);
+  const [saveMessage, setSaveMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
 
-  const { data: pkg, isLoading, isError, refetch } = usePackage(id!, version);
+  const {
+    data: pkg,
+    isLoading,
+    isError,
+    refetch,
+  } = usePackage(id!, version);
+  const { data: versionDescriptors } = usePackageVersions(id!);
   const updateMutation = useUpdatePackage();
   const deleteMutation = useDeletePackage();
 
-  function handleRemoveExtension(index: number) {
-    if (!pkg) return;
-    const updated = pkg.packageExtensions.filter((_, i) => i !== index);
-    updateMutation.mutate({
-      id: id!,
-      version,
-      config: { packageExtensions: updated },
-    });
-  }
+  // Version picker data
+  const versions = useMemo(() => {
+    if (!versionDescriptors) return [];
+    return versionDescriptors
+      .map((d) => {
+        const { version: v } = parseResourceUri(d.resource);
+        return { version: v, lastModifiedOn: d.lastModifiedOn };
+      })
+      .sort((a, b) => b.version - a.version);
+  }, [versionDescriptors]);
+
+  // Use local state if user has made edits, otherwise use server data
+  const currentExtensions = useMemo(
+    () => localExtensions ?? pkg?.packageExtensions ?? [],
+    [localExtensions, pkg?.packageExtensions]
+  );
+  const serverExtensions = pkg?.packageExtensions ?? [];
+  const isDirty =
+    localExtensions !== null &&
+    JSON.stringify(localExtensions) !== JSON.stringify(serverExtensions);
+
+  // Build pipeline items from current extensions
+  const pipelineItems: PipelineItem[] = currentExtensions.map((ext, i) => ({
+    id: `ext-${i}`,
+    index: i,
+    extension: ext,
+  }));
+
+  // Reset local state when server data changes (version switch)
+  useEffect(() => {
+    setLocalExtensions(null);
+  }, [pkg?.packageExtensions]);
+
+  // Clear save message after 3s
+  useEffect(() => {
+    if (saveMessage) {
+      const timer = setTimeout(() => setSaveMessage(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [saveMessage]);
+
+  const handleReorder = useCallback(
+    (newItems: PipelineItem[]) => {
+      setLocalExtensions(newItems.map((item) => item.extension));
+    },
+    []
+  );
+
+  const handleRemoveExtension = useCallback(
+    (index: number) => {
+      const updated = currentExtensions.filter((_, i) => i !== index);
+      setLocalExtensions(updated);
+    },
+    [currentExtensions]
+  );
+
+  const handleAddExtension = useCallback(
+    (descriptor: ExtensionDescriptor) => {
+      const newExt: PackageExtension = {
+        type: descriptor.type,
+        extensions: {},
+        config: {},
+      };
+      setLocalExtensions([...currentExtensions, newExt]);
+      setShowAddDialog(false);
+    },
+    [currentExtensions]
+  );
+
+  const handleSave = useCallback(async () => {
+    if (!isDirty || !localExtensions) return;
+    try {
+      await updateMutation.mutateAsync({
+        id: id!,
+        version,
+        config: { packageExtensions: localExtensions },
+      });
+      setSaveMessage({
+        type: "success",
+        text: t("packageEditor.saved", "Package saved successfully"),
+      });
+      setLocalExtensions(null);
+    } catch {
+      setSaveMessage({
+        type: "error",
+        text: t("packageEditor.saveError", "Failed to save package"),
+      });
+    }
+  }, [isDirty, localExtensions, updateMutation, id, version, t]);
+
+  const handleDiscard = useCallback(() => {
+    setLocalExtensions(null);
+  }, []);
 
   async function handleDelete() {
     if (
       window.confirm(
-        t("packages.confirmDelete", "Are you sure you want to delete this package?")
+        t(
+          "packages.confirmDelete",
+          "Are you sure you want to delete this package?"
+        )
       )
     ) {
       await deleteMutation.mutateAsync({ id: id!, version });
@@ -62,6 +164,12 @@ export function PackageDetailPage() {
     }
   }
 
+  const handleVersionChange = useCallback((v: number) => {
+    setVersion(v);
+    setLocalExtensions(null);
+  }, []);
+
+  /* ─── Loading / Error states ─── */
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -96,71 +204,136 @@ export function PackageDetailPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           <BackLink />
-          <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
+          <div className="flex items-center gap-3">
             <Package className="h-8 w-8 text-primary" />
-            {t("packageDetail.title", "Package Detail")}
-          </h1>
-          <p className="font-mono text-sm text-muted-foreground">ID: {id}</p>
+            <div>
+              <h1 className="text-3xl font-bold text-foreground">
+                {t("packageEditor.title", "Package Editor")}
+              </h1>
+              <p className="font-mono text-sm text-muted-foreground">
+                ID: {id}
+              </p>
+            </div>
+          </div>
+
+          {/* Version picker */}
+          {versions.length > 0 && (
+            <VersionSelect
+              versions={versions}
+              current={version}
+              onChange={handleVersionChange}
+              disabled={isDirty}
+            />
+          )}
         </div>
 
         {/* Actions */}
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary">
-            v{version}
-          </span>
+          {/* Save feedback */}
+          {saveMessage && (
+            <span
+              className={cn(
+                "text-xs font-medium",
+                saveMessage.type === "success"
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-destructive"
+              )}
+              data-testid="save-feedback"
+            >
+              {saveMessage.type === "success" ? "✓" : "✕"} {saveMessage.text}
+            </span>
+          )}
+
+          {/* Dirty indicator */}
+          {isDirty && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
+              data-testid="dirty-indicator"
+            >
+              <AlertCircle className="h-3 w-3" />
+              {t("editor.dirty", "Unsaved changes")}
+            </span>
+          )}
+
+          {/* Discard */}
+          <button
+            onClick={handleDiscard}
+            disabled={!isDirty || updateMutation.isPending}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-input px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-all hover:bg-secondary active:scale-[0.98] disabled:opacity-50"
+            data-testid="discard-btn"
+          >
+            <Undo2 className="h-4 w-4" />
+            {t("editor.discard", "Discard")}
+          </button>
+
+          {/* Save */}
+          <button
+            onClick={handleSave}
+            disabled={!isDirty || updateMutation.isPending}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
+            data-testid="save-btn"
+          >
+            <Save className="h-4 w-4" />
+            {updateMutation.isPending
+              ? t("editor.saving", "Saving...")
+              : t("editor.save", "Save")}
+          </button>
+
+          {/* Delete */}
           <button
             onClick={handleDelete}
             className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
+            data-testid="delete-pkg-btn"
           >
             <Trash2 className="h-4 w-4" />
           </button>
         </div>
       </div>
 
-      {/* Extensions section */}
+      {/* Pipeline section */}
       <section className="rounded-xl border bg-card shadow-sm">
         <div className="flex items-center justify-between border-b border-border p-5">
           <div className="flex items-center gap-2">
-            <Puzzle className="h-5 w-5 text-primary" />
+            <Package className="h-5 w-5 text-primary" />
             <h2 className="text-lg font-semibold text-foreground">
-              {t("packageDetail.extensions", "Extensions")}
+              {t("packageEditor.pipeline", "Extension Pipeline")}
             </h2>
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-              {pkg.packageExtensions?.length ?? 0}
+              {currentExtensions.length}
             </span>
           </div>
+          <button
+            onClick={() => setShowAddDialog(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
+            data-testid="add-extension-btn"
+          >
+            <Plus className="h-4 w-4" />
+            {t("packageEditor.addExtension", "Add Extension")}
+          </button>
         </div>
 
-        {/* Extension list */}
-        <div className="divide-y divide-border">
-          {(!pkg.packageExtensions || pkg.packageExtensions.length === 0) && (
-            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-              <Puzzle className="h-10 w-10 opacity-50" />
-              <p className="mt-3 text-sm">
-                {t(
-                  "packageDetail.noExtensions",
-                  "No extensions in this package"
-                )}
-              </p>
-            </div>
-          )}
-
-          {pkg.packageExtensions?.map((ext, index) => (
-            <ExtensionRow
-              key={index}
-              extension={ext}
-              onRemove={() => handleRemoveExtension(index)}
-              isRemoving={updateMutation.isPending}
-            />
-          ))}
-        </div>
+        <PipelineBuilder
+          items={pipelineItems}
+          onChange={handleReorder}
+          onRemove={handleRemoveExtension}
+          disabled={updateMutation.isPending}
+        />
       </section>
+
+      {/* Add extension dialog */}
+      <AddExtensionDialog
+        open={showAddDialog}
+        onClose={() => setShowAddDialog(false)}
+        onSelect={handleAddExtension}
+      />
 
       {/* Raw config (collapsible) */}
       <RawConfigSection config={pkg} />
     </div>
   );
 }
+
+/* ─── Sub-components ─── */
 
 function BackLink() {
   const { t } = useTranslation();
@@ -175,65 +348,58 @@ function BackLink() {
   );
 }
 
-function ExtensionRow({
-  extension,
-  onRemove,
-  isRemoving,
+function VersionSelect({
+  versions,
+  current,
+  onChange,
+  disabled,
 }: {
-  extension: PackageExtension;
-  onRemove: () => void;
-  isRemoving: boolean;
+  versions: { version: number; lastModifiedOn?: number }[];
+  current: number;
+  onChange: (v: number) => void;
+  disabled?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const configUri = extension.config?.["uri"] as string | undefined;
-  const parsedUri = configUri ? parseConfigUri(configUri) : null;
+  if (versions.length <= 1) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
+        data-testid="version-badge"
+      >
+        v{current}
+      </span>
+    );
+  }
 
   return (
-    <div className="px-5 py-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3 min-w-0">
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="rounded-md p-1 text-muted-foreground hover:bg-secondary transition-colors"
-          >
-            {expanded ? (
-              <ChevronUp className="h-4 w-4" />
-            ) : (
-              <ChevronDown className="h-4 w-4" />
-            )}
-          </button>
-          <Settings className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">
-              {getExtensionLabel(extension.type)}
-            </p>
-            {parsedUri && (
-              <p className="text-xs text-muted-foreground truncate">
-                {parsedUri}
-              </p>
-            )}
-          </div>
-        </div>
-        <button
-          onClick={onRemove}
-          disabled={isRemoving}
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
-          title="Remove extension"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
-      </div>
-
-      {/* Expanded config view */}
-      {expanded && (
-        <div className="mt-3 ms-10 rounded-lg bg-secondary p-3">
-          <pre className="overflow-x-auto text-xs text-foreground">
-            {JSON.stringify(extension, null, 2)}
-          </pre>
-        </div>
-      )}
-    </div>
+    <select
+      value={current}
+      onChange={(e) => onChange(Number(e.target.value))}
+      disabled={disabled}
+      className="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 disabled:opacity-50"
+      data-testid="version-picker"
+    >
+      {versions.map((v) => (
+        <option key={v.version} value={v.version}>
+          v{v.version}
+          {v.lastModifiedOn
+            ? ` — ${formatRelativeTime(v.lastModifiedOn)}`
+            : ""}
+        </option>
+      ))}
+    </select>
   );
+}
+
+function formatRelativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(timestamp).toLocaleDateString();
 }
 
 function RawConfigSection({
@@ -269,14 +435,4 @@ function RawConfigSection({
       )}
     </section>
   );
-}
-
-function parseConfigUri(uri: string): string | null {
-  try {
-    const url = new URL(uri.replace("eddi://", "http://"));
-    const parts = url.pathname.split("/");
-    return parts[parts.length - 1] || null;
-  } catch {
-    return uri;
-  }
 }

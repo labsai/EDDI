@@ -58,3 +58,12 @@ export function updatePackage(
 export function deletePackage(id: string, version: number): Promise<void> {
   return api.delete(`/packagestore/packages/${id}?version=${version}`);
 }
+
+/** Get all versions of a specific package (for version picker) */
+export function getPackageVersions(
+  id: string
+): Promise<BotDescriptor[]> {
+  return api.get<BotDescriptor[]>(
+    `/packagestore/packages/descriptors?filter=${id}&includePreviousVersions=true`
+  );
+}

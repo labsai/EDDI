@@ -296,6 +296,35 @@ export const handlers = [
     });
   }),
 
+  // --- Extension Store ---
+  http.get("*/extensionstore/extensions", () => {
+    return HttpResponse.json([
+      { type: "ai.labs.parser", displayName: "Parser", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "ai.labs.behavior", displayName: "Behavior Rules", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "ai.labs.property", displayName: "Property Setter", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "ai.labs.httpcalls", displayName: "HTTP Calls", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "ai.labs.langchain", displayName: "LangChain", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "ai.labs.output", displayName: "Output", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "ai.labs.output.template", displayName: "Output Template", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+    ]);
+  }),
+
+  // Update package
+  http.put("*/packagestore/packages/:id", ({ request, params }) => {
+    const url = new URL(request.url);
+    const currentVersion = parseInt(
+      url.searchParams.get("version") ?? "1",
+      10
+    );
+    const newVersion = currentVersion + 1;
+    return new HttpResponse(null, {
+      status: 200,
+      headers: {
+        Location: `eddi://ai.labs.package/packagestore/packages/${params.id}?version=${newVersion}`,
+      },
+    });
+  }),
+
   // --- Resource Stores ---
   // Generic descriptor handlers for all 6 resource types
   ...createResourceHandlers("behaviorstore", "behaviorsets", "behavior"),

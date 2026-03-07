@@ -2,38 +2,39 @@
 
 > **Last updated**: 2026-03-07  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Phase 3.15 — Bot Editor, Version Picker, Env Badges, Duplicate
+> **Last commit**: Phase 3.16 — Package Editor with Drag-and-Drop Pipeline Builder
 
 ---
 
 ## Current Status
 
-**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.15 complete.
+**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.16 complete.
 
 ### What's Done
 
-| Phase | Description                                                                                              | Commit    |
-| ----- | -------------------------------------------------------------------------------------------------------- | --------- |
-| 3.1   | Study existing Manager + implementation plan                                                             | —         |
-| 3.2   | Vite + React 19 + Tailwind v4 + ESLint + Vitest + Playwright scaffold                                    | `020007e` |
-| 3.3   | Layout shell: sidebar, top bar, dark/light/system theme, i18n w/ RTL                                     | `020007e` |
-| 3.4   | Bots page: bot cards, deployment status, search, create dialog                                           | `e47b0fb` |
-| 3.5   | Bot Detail page: package management, deployment, raw config viewer                                       | `dadc669` |
-| 3.6   | Package Detail page: extensions list, raw JSON viewer                                                    | `938aa6e` |
-| 3.7   | Packages list page: cards grid, search, create dialog                                                    | `938aa6e` |
-| 3.8   | Conversations page: list w/ filters, conversation detail viewer                                          | `938aa6e` |
-| 3.9   | Chat Panel: bot selector, SSE streaming toggle, history, markdown                                        | —         |
-| 3.10  | Resources Pages: generic CRUD for 6 extension types (hub + list + detail)                                | —         |
-| 3.11  | Import/Export + Bot Wizard: file upload/download, 4-step guided creation                                 | —         |
-| 3.12  | i18n finalized: 11 languages (en, de, fr, es, ar, zh, th, ja, ko, pt, hi)                                | —         |
-| 3.13  | EDDI branding: black/gold theme, Noto Sans font, original logo, system theme fix, wide-screen constraint | —         |
-| 3.14  | JSON Editor, Version Picker, Cascade Save: Monaco, Form↔JSON toggle, config→package→bot cascade          | —         |
-| 3.15  | Bot Editor: version picker, env badges (unrestricted/restricted/test), deploy per-env, duplicate, export | —         |
+| Phase | Description                                                                                                      | Commit    |
+| ----- | ---------------------------------------------------------------------------------------------------------------- | --------- |
+| 3.1   | Study existing Manager + implementation plan                                                                     | —         |
+| 3.2   | Vite + React 19 + Tailwind v4 + ESLint + Vitest + Playwright scaffold                                            | `020007e` |
+| 3.3   | Layout shell: sidebar, top bar, dark/light/system theme, i18n w/ RTL                                             | `020007e` |
+| 3.4   | Bots page: bot cards, deployment status, search, create dialog                                                   | `e47b0fb` |
+| 3.5   | Bot Detail page: package management, deployment, raw config viewer                                               | `dadc669` |
+| 3.6   | Package Detail page: extensions list, raw JSON viewer                                                            | `938aa6e` |
+| 3.7   | Packages list page: cards grid, search, create dialog                                                            | `938aa6e` |
+| 3.8   | Conversations page: list w/ filters, conversation detail viewer                                                  | `938aa6e` |
+| 3.9   | Chat Panel: bot selector, SSE streaming toggle, history, markdown                                                | —         |
+| 3.10  | Resources Pages: generic CRUD for 6 extension types (hub + list + detail)                                        | —         |
+| 3.11  | Import/Export + Bot Wizard: file upload/download, 4-step guided creation                                         | —         |
+| 3.12  | i18n finalized: 11 languages (en, de, fr, es, ar, zh, th, ja, ko, pt, hi)                                        | —         |
+| 3.13  | EDDI branding: black/gold theme, Noto Sans font, original logo, system theme fix, wide-screen constraint         | —         |
+| 3.14  | JSON Editor, Version Picker, Cascade Save: Monaco, Form↔JSON toggle, config→package→bot cascade                  | —         |
+| 3.15  | Bot Editor: version picker, env badges (unrestricted/restricted/test), deploy per-env, duplicate, export         | —         |
+| 3.16  | Package Editor: drag-and-drop pipeline builder (`@dnd-kit`), add/remove extensions, save/discard, version picker | —         |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc -b`)
-- **Unit/Component**: 99/99 pass (`npm run test`) — 13 files
+- **Unit/Component**: 105/105 pass (`npm run test`) — 14 files
 - **Build**: Succeeds
 
 ### Files Created (summary)
@@ -48,33 +49,35 @@
 - **Resources**: `resource-card.tsx`, `create-resource-dialog.tsx`, `resources.tsx` (hub), `resource-list.tsx`, `resource-detail.tsx`
 - **Backup**: `api/backup.ts` (export/download/import), `use-backup.ts` (hooks)
 - **Bot Wizard**: `bot-wizard.tsx` (4-step guided creation)
-- **API**: `api-client.ts`, `api/bots.ts`, `api/packages.ts`, `api/descriptors.ts`, `api/conversations.ts`, `api/chat.ts`, `api/resources.ts`, `api/backup.ts`
-- **Hooks**: `use-bots.ts`, `use-packages.ts`, `use-conversations.ts`, `use-chat.ts`, `use-resources.ts`, `use-backup.ts`
+- **API**: `api-client.ts`, `api/bots.ts`, `api/packages.ts`, `api/descriptors.ts`, `api/conversations.ts`, `api/chat.ts`, `api/resources.ts`, `api/backup.ts`, `api/extensions.ts`
+- **Hooks**: `use-bots.ts`, `use-packages.ts`, `use-conversations.ts`, `use-chat.ts`, `use-resources.ts`, `use-backup.ts`, `use-extensions-store.ts`
 - **i18n**: `config.ts`, `en.json`, `de.json`, `fr.json`, `es.json`, `ar.json`, `zh.json`, `th.json`, `ja.json`, `ko.json`, `pt.json`, `hi.json`
-- **Tests**: `sidebar.test.tsx`, `top-bar.test.tsx`, `config.test.ts`, `bots.test.tsx`, `bots.test.ts`, `packages.test.tsx`, `conversations.test.tsx`, `chat.test.tsx`, `resources.test.tsx`, `backup.test.tsx`, `bot-wizard.test.tsx`
+- **Tests**: `sidebar.test.tsx`, `top-bar.test.tsx`, `config.test.ts`, `bots.test.tsx`, `bots.test.ts`, `packages.test.tsx`, `conversations.test.tsx`, `chat.test.tsx`, `resources.test.tsx`, `backup.test.tsx`, `bot-wizard.test.tsx`, `package-detail.test.tsx`
 - **E2E**: `navigation.spec.ts`, `theme.spec.ts`, `rtl.spec.ts`
-- **MSW**: `handlers.ts` (bots, packages, conversations, resources mocks), `server.ts`
-- **Editors**: `json-editor.tsx`, `version-picker.tsx`, `config-editor-layout.tsx`, `update-usage-dialog.tsx`
+- **MSW**: `handlers.ts` (bots, packages, conversations, resources, extension store mocks), `server.ts`
+- **Editors**: `json-editor.tsx`, `version-picker.tsx`, `config-editor-layout.tsx`, `update-usage-dialog.tsx`, `pipeline-builder.tsx`, `add-extension-dialog.tsx`
 - **Cascade**: `cascade-save.ts`, `resource-usage.ts`
 
 ---
 
-### What's Next: Phases 3.15–3.19 — Editors & Polish
+### What's Next: Phases 3.17–3.19 — Extension Editors & Polish
 
-Phase 3.14 (editor foundation + cascade save) is complete. The next phases build **type-specific form editors** on top of the `ConfigEditorLayout` architecture.
+Phases 3.14–3.16 (editor foundation, bot editor, package editor) are complete. The next phases build **type-specific form editors** that render inside the package editor pipeline.
 
 **📄 Reference docs:**
 
 - [Detailed editing layer plan](docs/editing-layer-plan.md)
-- [UX research analysis](docs/ux-research-analysis.md) — competitive analysis across Voiceflow, n8n, Langflow, Dify, Botpress, LangSmith, Make.com. Validated our approach, added 3 refinements.
+- [UX research analysis](docs/ux-research-analysis.md) — competitive analysis across Voiceflow, n8n, Langflow, Dify, Botpress, LangSmith, Make.com
+- [EDDI v6 implementation plan](file:///c:/dev/git/EDDI/docs/v6-planning/implementation_plan.md) — backend architecture & roadmap
+- [Business logic analysis](file:///c:/dev/git/EDDI/docs/v6-planning/business-logic-analysis.md) — extension types, pipeline model, Bot Father pattern
 
-| Phase | Description                                                                                                                          | Dependencies             |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
-| 3.15  | **Bot Editor** — inline edit, deploy/undeploy, **environment status badges** (not duplicate cards)                                   | 3.14 ✅                  |
-| 3.16  | **Package Editor** — drag-and-drop pipeline builder, **side-sheet extension inspector** (not page navigation)                        | 3.14 ✅, `@dnd-kit/core` |
-| 3.17  | **Behavior Rules & HTTP Calls Editors** — sheet-embeddable components, condition builder, action editor, optional `cmdk` var picker  | 3.16                     |
-| 3.18  | **LangChain, Output, Property Setter, Dictionary Editors** — sheet-embeddable components, model config, prompt editor, output groups | 3.16                     |
-| 3.19  | **Polish, i18n, Tests** — ~100+ new keys per locale, editor tests, MSW handlers, `cmdk` autocomplete polish                          | 3.17, 3.18               |
+| Phase | Description                                                                                                                          | Dependencies |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------ |
+| 3.15  | **Bot Editor** — inline edit, deploy/undeploy, **environment status badges**                                                         | 3.14 ✅      |
+| 3.16  | **Package Editor** — drag-and-drop pipeline builder, add/remove extensions, version picker, save/discard                             | 3.14 ✅      |
+| 3.17  | **Behavior Rules & HTTP Calls Editors** — sheet-embeddable components, condition builder, action editor, optional `cmdk` var picker  | 3.16 ✅      |
+| 3.18  | **LangChain, Output, Property Setter, Dictionary Editors** — sheet-embeddable components, model config, prompt editor, output groups | 3.16 ✅      |
+| 3.19  | **Polish, i18n, Tests** — ~100+ new keys per locale, editor tests, MSW handlers, `cmdk` autocomplete polish                          | 3.17, 3.18   |
 
 **After 3.19**: Phase 4 — Chat-UI Rewrite (CRA → Vite, SSE streaming, `@eddi/chat-core`)
 
