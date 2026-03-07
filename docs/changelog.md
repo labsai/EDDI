@@ -41,6 +41,49 @@ Each entry follows this format:
 
 ## Implementation Log
 
+### 2026-03-06 — Manager UI: JSON Editor, Version Picker & Config Editor Layout
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 3 — Item #14
+
+**What changed:**
+
+1. **Monaco JSON Editor** (`json-editor.tsx`) — Monaco-based editor wrapper with EDDI dark/light theme auto-detection via `useTheme()`, auto-format on mount, configurable read-only mode, loading spinner
+2. **Version Picker** (`version-picker.tsx`) — Dropdown showing version numbers with relative timestamps ("3h ago"). Renders as badge when only one version exists, select when multiple
+3. **Config Editor Layout** (`config-editor-layout.tsx`) — Shared editor chrome with `[ Form | JSON ]` tab toggle. Both tabs share a single `useState` object for synchronized editing. Header shows type icon, resource name, version picker, save/discard buttons. Dirty-state detection via deep comparison. Form tab shows placeholder ("Visual editor coming soon") for Phase 3.17–3.18
+4. **`useUpdateResource` hook** — Mutation calling `PUT /{store}/{plural}/{id}?version={version}`, invalidates queries on success
+5. **Resource Detail page** — Rewrote from `<pre>` JSON dump to full `ConfigEditorLayout` with save/discard/dirty-state. All hooks moved above early returns for Rules of Hooks compliance
+6. **i18n** — 15 new keys under `editor.*` in all 11 locale files (formTab, jsonTab, save, discard, dirty, etc.)
+7. **Tests** — 16 new tests: VersionPicker (3), ConfigEditorLayout (7), ResourceDetailPage integration (4), updated resources.test.tsx (2)
+8. **Dependency** — `@monaco-editor/react` installed (brings in `monaco-editor` as peer)
+
+**Key decisions:**
+
+- **Monaco mocked in tests** — JSDOM can't render the Monaco canvas, so tests use a `<textarea>` mock via `vi.mock("@monaco-editor/react")`
+- **Form↔JSON toggle architecture** — `config-editor-layout.tsx` is the foundation for all Phases 3.15–3.18 editors. Extension-specific form editors will be passed as `children` prop
+- **JSON tab default** — Since no form editors exist yet, JSON tab is the default active tab
+
+**Tests:** ✅ 90/90 passing (12 files), TypeScript zero errors, build succeeds
+
+#### Phase 3.14b — Version Cascade & Deferred Items
+
+9. **Location header fix** (`api-client.ts`) — Capture Location header on `200 OK` responses (not just `201`), enabling version tracking for PUT updates
+10. **Cascade save** (`cascade-save.ts`) — Saves config, then walks package→bot chain updating version URIs. Parses new versions from Location headers
+11. **Resource usage scanner** (`resource-usage.ts`) — Finds all packages/bots referencing a given config, enabling the "update in bots" post-save dialog
+12. **Update usage dialog** (`update-usage-dialog.tsx`) — Amber-themed post-save dialog showing affected bots/packages with checkboxes for selective cascade
+13. **Version picker data** (`getResourceVersions`) — API function calling descriptors with `includePreviousVersions=true`
+14. **Hooks** — `useResourceVersions` (version picker), `useCascadeSave` (cascade mutation)
+15. **Dual-path cascade** in `resource-detail.tsx`:
+    - **Path A** (from bot/package): auto-cascade via `?pkgId=…&pkgVer=…&botId=…&botVer=…` query params
+    - **Path B** (from resource view): post-save usage dialog showing affected bots
+16. **MSW handlers** — PUT returns Location header with incremented version; GET descriptors supports `includePreviousVersions` + `filter` params
+17. **i18n** — 7 new cascade keys in all 11 locales
+
+**Return types updated:** `updateResource`, `updatePackage`, `updateBot` now return `{ location: string }` to capture backend version URIs.
+
+---
+
 ### 2026-03-06 — Manager UI: EDDI Branding, Theme & Font
 
 **Repo:** EDDI-Manager  
@@ -51,7 +94,7 @@ Each entry follows this format:
 
 1. **Brand theme restored** — replaced indigo/violet with original EDDI black and gold palette. Primary `#f59e0b` (amber), accent `#fbbf24` (gold), sidebar always dark `#1c1917`, dark mode true blacks `#0c0a09`, light mode warm stone `#fafaf9`
 2. **Noto Sans font** — replaced Inter with Noto Sans + script variants (Arabic, Thai, Devanagari, CJK, Korean) via Google Fonts for universal language coverage
-3. **Original E.DD.I logo** — copied `logo_eddi.png` from EDDI backend repo to `public/`; sidebar shows image when expanded, compact gold "E." badge SVG when collapsed
+3. **Original E.D.D.I logo** — copied `logo_eddi.png` from EDDI backend repo to `public/`; sidebar shows image when expanded, compact gold "E." badge SVG when collapsed
 4. **System theme fix** — theme provider now has `matchMedia("prefers-color-scheme: dark")` change listener so "system" mode tracks OS preference in real time (was only checking once on mount)
 5. **Wide-screen constraint** — main content area capped at `max-w-screen-2xl` (1536px) to prevent infinite stretching on ultrawide monitors
 6. **Test setup** — added `window.matchMedia` mock to `setup.ts` for JSDOM compatibility
