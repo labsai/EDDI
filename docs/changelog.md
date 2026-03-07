@@ -41,6 +41,36 @@ Each entry follows this format:
 
 ## Implementation Log
 
+### 2026-03-07 — Manager UI: Bot Editor (Version Picker, Env Badges, Duplicate)
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 3 — Item #15
+
+**What changed:**
+
+1. **Bot API** (`bots.ts`) — Added `getBotDescriptorsWithVersions()` for fetching all versions of a bot, `getDeploymentStatuses()` for fetching deployment status across unrestricted/restricted/test environments simultaneously, plus `ENVIRONMENTS` and `Environment` type exports
+2. **Bot hooks** (`use-bots.ts`) — Added `useBotVersions` (version picker data with sort), `useUpdateBot` (save mutation), `useDeploymentStatuses` (multi-env polling)
+3. **Bot Detail page** (`bot-detail.tsx`) — Major rewrite from read-only page to full editor:
+   - **Version picker** with relative timestamps (replaces hardcoded v1)
+   - **Environment status badges** — 3-column grid showing unrestricted/restricted/test deploy states with per-env deploy/undeploy buttons
+   - **Duplicate button** with deep copy and auto-navigation to the clone
+   - **Save feedback toast** with auto-dismiss
+   - All existing functionality preserved (deploy/undeploy, export, delete, package add/remove)
+4. **MSW handlers** — Added bot PUT (returns incremented version), duplicate POST (returns new bot ID), undeploy POST, delete handlers
+5. **i18n** — 23 new keys under `botDetail.*` in all 11 locale files (env labels, duplicate, save feedback)
+6. **Tests** — 9 new tests for BotDetailPage (bot-detail.test.tsx): renders title, status badge, all action buttons, env badges, package section
+
+**Key decisions:**
+
+- **Environment badges vs duplicate cards** — Per UX research, show a single card with environment columns instead of duplicating bot cards per environment. Each environment row has its own deploy/undeploy button
+- **Version picker is local state** — Switching versions re-fetches bot data via `useBot(id, version)` query. No URL param for version to keep URLs clean
+- **Test uses Routes wrapper** — Component requires `useParams()`, so tests wrap in `<Routes><Route path="...">` for proper param injection
+
+**Tests:** ✅ 99/99 passing (13 files), TypeScript zero errors, build succeeds
+
+---
+
 ### 2026-03-06 — Manager UI: JSON Editor, Version Picker & Config Editor Layout
 
 **Repo:** EDDI-Manager  
