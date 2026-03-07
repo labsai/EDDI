@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { ResourcesPage } from "@/pages/resources";
@@ -8,6 +8,24 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { render } from "@testing-library/react";
+
+// Monaco doesn't render in JSDOM, so we mock it
+vi.mock("@monaco-editor/react", () => ({
+  default: ({
+    value,
+    onChange,
+  }: {
+    value: string;
+    onChange?: (val: string) => void;
+  }) => (
+    <textarea
+      data-testid="monaco-mock"
+      value={value}
+      onChange={(e) => onChange?.(e.target.value)}
+      aria-label="JSON editor"
+    />
+  ),
+}));
 
 function renderWithRoute(path: string, element: React.ReactElement) {
   const queryClient = new QueryClient({
@@ -151,13 +169,14 @@ describe("ResourceDetailPage", () => {
     expect(screen.getByText("Duplicate")).toBeInTheDocument();
   });
 
-  it("loads and displays raw JSON config", async () => {
+  it("loads and displays config editor layout", async () => {
     renderWithRoute(
       "/manage/resources/behavior/res1",
       <ResourceDetailPage />
     );
     await waitFor(() => {
-      expect(screen.getByText("Raw Configuration")).toBeInTheDocument();
+      expect(screen.getByTestId("config-editor-layout")).toBeInTheDocument();
     });
   });
 });
+

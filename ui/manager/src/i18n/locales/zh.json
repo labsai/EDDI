@@ -214,5 +214,27 @@
         "description": "设置会话属性和管理插槽填充"
       }
     }
+  },
+  "editor": {
+    "formTab": "表单",
+    "jsonTab": "JSON",
+    "save": "保存",
+    "discard": "放弃",
+    "saving": "保存中...",
+    "saved": "保存成功",
+    "saveError": "保存失败",
+    "dirty": "未保存的更改",
+    "version": "版本",
+    "versionPicker": "选择版本",
+    "readOnly": "只读",
+    "formPlaceholder": "可视化编辑器即将推出。请使用JSON选项卡进行编辑。",
+    "jsonSchema": "架构验证已启用",
+    "cascadeMode": "更改将级联到父包和机器人",
+    "usedInBots": "在{{count}}个机器人中使用",
+    "updateUsageHint": "将选中的包和机器人更新到新版本？",
+    "updateUsage": "更新所选",
+    "skipUpdate": "跳过",
+    "cascading": "更新中...",
+    "cascadeSuccess": "级联更新完成"
   }
 }

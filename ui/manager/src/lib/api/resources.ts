@@ -107,7 +107,7 @@ export function updateResource(
   id: string,
   version: number,
   body: unknown
-): Promise<void> {
+): Promise<{ location: string }> {
   return api.put(`${basePath(rt)}/${id}?version=${version}`, body);
 }
 
@@ -126,5 +126,15 @@ export function duplicateResource(
 ): Promise<{ location: string }> {
   return api.post<{ location: string }>(
     `${basePath(rt)}/${id}?version=${version}`
+  );
+}
+
+/** Get all versions of a specific resource */
+export function getResourceVersions(
+  rt: ResourceTypeConfig,
+  id: string
+): Promise<BotDescriptor[]> {
+  return api.get<BotDescriptor[]>(
+    `${basePath(rt)}/descriptors?filter=${id}&includePreviousVersions=true`
   );
 }

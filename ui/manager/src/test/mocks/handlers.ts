@@ -295,7 +295,30 @@ function createResourceHandlers(
   ];
 
   return [
-    http.get(`*/${store}/${plural}/descriptors`, () => {
+    http.get(`*/${store}/${plural}/descriptors`, ({ request }) => {
+      const url = new URL(request.url);
+      const includePrevious = url.searchParams.get("includePreviousVersions");
+      const filter = url.searchParams.get("filter");
+
+      if (includePrevious === "true" && filter) {
+        // Return multiple versions for a specific resource
+        return HttpResponse.json([
+          {
+            resource: `eddi://ai.labs.${label}/${store}/${plural}/${filter}?version=2`,
+            name: `${label} Config`,
+            description: `${label} configuration`,
+            createdOn: Date.now() - 86400000,
+            lastModifiedOn: Date.now(),
+          },
+          {
+            resource: `eddi://ai.labs.${label}/${store}/${plural}/${filter}?version=1`,
+            name: `${label} Config`,
+            description: `${label} configuration`,
+            createdOn: Date.now() - 172800000,
+            lastModifiedOn: Date.now() - 86400000,
+          },
+        ]);
+      }
       return HttpResponse.json(mockDescriptors);
     }),
     http.get(`*/${store}/${plural}/:id`, () => {
@@ -309,8 +332,19 @@ function createResourceHandlers(
         },
       });
     }),
-    http.put(`*/${store}/${plural}/:id`, () => {
-      return new HttpResponse(null, { status: 200 });
+    http.put(`*/${store}/${plural}/:id`, ({ request, params }) => {
+      const url = new URL(request.url);
+      const currentVersion = parseInt(
+        url.searchParams.get("version") ?? "1",
+        10
+      );
+      const newVersion = currentVersion + 1;
+      return new HttpResponse(null, {
+        status: 200,
+        headers: {
+          Location: `eddi://ai.labs.${label}/${store}/${plural}/${params.id}?version=${newVersion}`,
+        },
+      });
     }),
     http.delete(`*/${store}/${plural}/:id`, () => {
       return new HttpResponse(null, { status: 204 });

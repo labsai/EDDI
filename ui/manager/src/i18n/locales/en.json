@@ -214,5 +214,27 @@
         "description": "Set conversation properties and manage slot-filling"
       }
     }
+  },
+  "editor": {
+    "formTab": "Form",
+    "jsonTab": "JSON",
+    "save": "Save",
+    "discard": "Discard",
+    "saving": "Saving...",
+    "saved": "Saved successfully",
+    "saveError": "Failed to save",
+    "dirty": "Unsaved changes",
+    "version": "Version",
+    "versionPicker": "Select version",
+    "readOnly": "Read-only",
+    "formPlaceholder": "Visual editor coming soon. Use the JSON tab to edit.",
+    "jsonSchema": "Schema validation active",
+    "cascadeMode": "Changes will cascade to parent package and bot",
+    "usedInBots": "Used in {{count}} bot(s)",
+    "updateUsageHint": "Update the selected packages and bots to use the new version?",
+    "updateUsage": "Update Selected",
+    "skipUpdate": "Skip",
+    "cascading": "Updating...",
+    "cascadeSuccess": "Cascade update complete"
   }
 }

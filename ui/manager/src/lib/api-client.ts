@@ -54,10 +54,16 @@ class ApiClient {
       return undefined as T;
     }
 
-    // Handle Location header (POST returns created resource URI)
+    // Handle Location header (POST 201, PUT 200 with new version)
     const location = response.headers.get("Location");
-    if (location && response.status === 201) {
-      return { location } as T;
+    if (location && (response.status === 200 || response.status === 201)) {
+      // Try to also parse JSON body if present, merge with location
+      try {
+        const body = await response.json();
+        return { ...body, location } as T;
+      } catch {
+        return { location } as T;
+      }
     }
 
     return response.json();

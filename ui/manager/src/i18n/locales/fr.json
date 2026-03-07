@@ -214,5 +214,27 @@
         "description": "Définir les propriétés de conversation et gérer le remplissage de créneaux"
       }
     }
+  },
+  "editor": {
+    "formTab": "Formulaire",
+    "jsonTab": "JSON",
+    "save": "Enregistrer",
+    "discard": "Annuler",
+    "saving": "Enregistrement...",
+    "saved": "Enregistré avec succès",
+    "saveError": "Échec de l'enregistrement",
+    "dirty": "Modifications non enregistrées",
+    "version": "Version",
+    "versionPicker": "Sélectionner la version",
+    "readOnly": "Lecture seule",
+    "formPlaceholder": "Éditeur visuel bientôt disponible. Utilisez l'onglet JSON pour modifier.",
+    "jsonSchema": "Validation de schéma active",
+    "cascadeMode": "Les modifications seront propagées au package et au bot parent",
+    "usedInBots": "Utilisé dans {{count}} bot(s)",
+    "updateUsageHint": "Mettre à jour les packages et bots sélectionnés vers la nouvelle version ?",
+    "updateUsage": "Mettre à jour la sélection",
+    "skipUpdate": "Ignorer",
+    "cascading": "Mise à jour...",
+    "cascadeSuccess": "Mise à jour en cascade terminée"
   }
 }

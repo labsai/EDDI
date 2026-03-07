@@ -1,14 +1,14 @@
 # EDDI Manager — Handoff Document
 
-> **Last updated**: 2026-03-06  
+> **Last updated**: 2026-03-07  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Phase 3.13 — EDDI branding, Noto Sans, system theme fix
+> **Last commit**: Phase 3.14 — JSON Editor, Version Picker, Cascade Save
 
 ---
 
 ## Current Status
 
-**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.13 complete.
+**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.14 complete.
 
 ### What's Done
 
@@ -27,11 +27,12 @@
 | 3.11  | Import/Export + Bot Wizard: file upload/download, 4-step guided creation                                 | —         |
 | 3.12  | i18n finalized: 11 languages (en, de, fr, es, ar, zh, th, ja, ko, pt, hi)                                | —         |
 | 3.13  | EDDI branding: black/gold theme, Noto Sans font, original logo, system theme fix, wide-screen constraint | —         |
+| 3.14  | JSON Editor, Version Picker, Cascade Save: Monaco, Form↔JSON toggle, config→package→bot cascade          | —         |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc -b`)
-- **Unit/Component**: 74/74 pass (`npm run test`) — 11 files
+- **Unit/Component**: 90/90 pass (`npm run test`) — 12 files
 - **Build**: Succeeds
 
 ### Files Created (summary)
@@ -52,21 +53,27 @@
 - **Tests**: `sidebar.test.tsx`, `top-bar.test.tsx`, `config.test.ts`, `bots.test.tsx`, `bots.test.ts`, `packages.test.tsx`, `conversations.test.tsx`, `chat.test.tsx`, `resources.test.tsx`, `backup.test.tsx`, `bot-wizard.test.tsx`
 - **E2E**: `navigation.spec.ts`, `theme.spec.ts`, `rtl.spec.ts`
 - **MSW**: `handlers.ts` (bots, packages, conversations, resources mocks), `server.ts`
+- **Editors**: `json-editor.tsx`, `version-picker.tsx`, `config-editor-layout.tsx`, `update-usage-dialog.tsx`
+- **Cascade**: `cascade-save.ts`, `resource-usage.ts`
 
 ---
 
-### What's Next: Phases 3.14–3.19 — Editing Layer
+### What's Next: Phases 3.15–3.19 — Editors & Polish
 
-The current UI is a **read-only dashboard**. These phases add the **editing layer** — the core value of the Manager.
+Phase 3.14 (editor foundation + cascade save) is complete. The next phases build **type-specific form editors** on top of the `ConfigEditorLayout` architecture.
 
-| Phase | Description                                                                                                                   | Dependencies           |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| 3.14  | **JSON Editor & Version Picker** — Monaco editor, schema validation, version dropdown, generic extension CRUD API             | `@monaco-editor/react` |
-| 3.15  | **Bot Editor** — inline edit name/desc, add/remove packages, deploy/undeploy via `/administration`, deployment status polling | 3.14                   |
-| 3.16  | **Package Editor** — drag-and-drop extension pipeline builder, add/remove/reorder lifecycle tasks                             | 3.14, `@dnd-kit/core`  |
-| 3.17  | **Behavior Rules & HTTP Calls Editors** — condition builder, action editor, URL template editor, pre/post instructions        | 3.16                   |
-| 3.18  | **LangChain, Output, Property Setter, Dictionary Editors** — model config, prompt editor, output groups, expression mapping   | 3.16                   |
-| 3.19  | **Polish, i18n, Tests** — ~100+ new keys per locale, editor tests, MSW handlers, documentation                                | 3.17, 3.18             |
+**📄 Reference docs:**
+
+- [Detailed editing layer plan](docs/editing-layer-plan.md)
+- [UX research analysis](docs/ux-research-analysis.md) — competitive analysis across Voiceflow, n8n, Langflow, Dify, Botpress, LangSmith, Make.com. Validated our approach, added 3 refinements.
+
+| Phase | Description                                                                                                                          | Dependencies             |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
+| 3.15  | **Bot Editor** — inline edit, deploy/undeploy, **environment status badges** (not duplicate cards)                                   | 3.14 ✅                  |
+| 3.16  | **Package Editor** — drag-and-drop pipeline builder, **side-sheet extension inspector** (not page navigation)                        | 3.14 ✅, `@dnd-kit/core` |
+| 3.17  | **Behavior Rules & HTTP Calls Editors** — sheet-embeddable components, condition builder, action editor, optional `cmdk` var picker  | 3.16                     |
+| 3.18  | **LangChain, Output, Property Setter, Dictionary Editors** — sheet-embeddable components, model config, prompt editor, output groups | 3.16                     |
+| 3.19  | **Polish, i18n, Tests** — ~100+ new keys per locale, editor tests, MSW handlers, `cmdk` autocomplete polish                          | 3.17, 3.18               |
 
 **After 3.19**: Phase 4 — Chat-UI Rewrite (CRA → Vite, SSE streaming, `@eddi/chat-core`)
 

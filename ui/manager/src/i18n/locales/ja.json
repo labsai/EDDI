@@ -214,5 +214,27 @@
         "description": "会話プロパティの設定とスロットフィリングの管理"
       }
     }
+  },
+  "editor": {
+    "formTab": "フォーム",
+    "jsonTab": "JSON",
+    "save": "保存",
+    "discard": "破棄",
+    "saving": "保存中...",
+    "saved": "正常に保存されました",
+    "saveError": "保存に失敗しました",
+    "dirty": "未保存の変更",
+    "version": "バージョン",
+    "versionPicker": "バージョンを選択",
+    "readOnly": "読み取り専用",
+    "formPlaceholder": "ビジュアルエディターは近日公開予定です。JSONタブで編集してください。",
+    "jsonSchema": "スキーマ検証が有効",
+    "cascadeMode": "変更は親パッケージとボットに反映されます",
+    "usedInBots": "{{count}}個のボットで使用中",
+    "updateUsageHint": "選択したパッケージとボットを新しいバージョンに更新しますか？",
+    "updateUsage": "選択を更新",
+    "skipUpdate": "スキップ",
+    "cascading": "更新中...",
+    "cascadeSuccess": "カスケード更新完了"
   }
 }

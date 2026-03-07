@@ -1,4 +1,5 @@
-import { useParams, Link } from "react-router-dom";
+import { useState, useCallback } from "react";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
@@ -15,10 +16,22 @@ import {
   Copy,
 } from "lucide-react";
 import { getResourceType } from "@/lib/api/resources";
-import { useResource, useDeleteResource, useDuplicateResource } from "@/hooks/use-resources";
-import { cn } from "@/lib/utils";
+import {
+  useResource,
+  useResourceVersions,
+  useDeleteResource,
+  useDuplicateResource,
+  useCascadeSave,
+} from "@/hooks/use-resources";
 import { useNavigate } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
+import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
+import { UpdateUsageDialog } from "@/components/editors/update-usage-dialog";
+import {
+  findResourceUsage,
+  type ResourceUsage,
+} from "@/lib/api/resource-usage";
+import type { CascadeContext } from "@/lib/api/cascade-save";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   GitBranch,
@@ -31,6 +44,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
 
 export function ResourceDetailPage() {
   const { type, id } = useParams<{ type: string; id: string }>();
+  const [searchParams] = useSearchParams();
   const { t } = useTranslation();
   const navigate = useNavigate();
 
@@ -38,14 +52,153 @@ export function ResourceDetailPage() {
   const Icon = ICON_MAP[rt?.icon ?? ""] ?? FileCode;
   const typeName = rt ? t(`${rt.labelKey}.name`) : type ?? "";
 
-  // Always default to version 1 for now
+  // Cascade context from URL search params (set when navigating from bot/package)
+  const cascadeContext: CascadeContext | undefined = (() => {
+    const pkgId = searchParams.get("pkgId");
+    const pkgVer = searchParams.get("pkgVer");
+    const botId = searchParams.get("botId");
+    const botVer = searchParams.get("botVer");
+    if (pkgId && pkgVer && botId && botVer) {
+      return {
+        packageId: pkgId,
+        packageVersion: parseInt(pkgVer, 10),
+        botId: botId,
+        botVersion: parseInt(botVer, 10),
+      };
+    }
+    return undefined;
+  })();
+
+  // Version state
+  const [currentVersion, setCurrentVersion] = useState(1);
+
+  // Data hooks
   const { data, isLoading, isError, refetch } = useResource(
     type ?? "",
     id ?? "",
-    1
+    currentVersion
   );
+  const { data: versionDescriptors } = useResourceVersions(type ?? "", id ?? "");
   const deleteMutation = useDeleteResource(type ?? "");
   const duplicateMutation = useDuplicateResource(type ?? "");
+  const cascadeSave = useCascadeSave(type ?? "");
+
+  // Save feedback state
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Usage dialog state (Path B: from resource view, after save)
+  const [usages, setUsages] = useState<ResourceUsage[]>([]);
+  const [showUsageDialog, setShowUsageDialog] = useState(false);
+  const [isCascading, setIsCascading] = useState(false);
+  const [newResourceVersion, setNewResourceVersion] = useState<number | null>(null);
+
+  // Build version list from descriptors
+  const versions = versionDescriptors
+    ? versionDescriptors.map((d) => {
+        const match = d.resource?.match(/\?version=(\d+)/);
+        return {
+          version: match ? parseInt(match[1] ?? "1", 10) : 1,
+          lastModifiedOn: d.lastModifiedOn,
+        };
+      })
+    : [{ version: currentVersion }];
+
+  // All hooks are above — safe to do early returns below
+
+  const handleSave = useCallback(
+    async (jsonString: string) => {
+      setSaveSuccess(false);
+      try {
+        const parsed = JSON.parse(jsonString);
+
+        if (cascadeContext) {
+          // Path A: Auto-cascade (navigated from bot/package)
+          cascadeSave.mutate(
+            {
+              id: id ?? "",
+              version: currentVersion,
+              body: parsed,
+              context: cascadeContext,
+            },
+            {
+              onSuccess: (result) => {
+                setSaveSuccess(true);
+                setCurrentVersion(result.newResourceVersion);
+                setTimeout(() => setSaveSuccess(false), 3000);
+              },
+            }
+          );
+        } else {
+          // Path B: Save config only, then offer usage dialog
+          cascadeSave.mutate(
+            {
+              id: id ?? "",
+              version: currentVersion,
+              body: parsed,
+            },
+            {
+              onSuccess: async (result) => {
+                setSaveSuccess(true);
+                setNewResourceVersion(result.newResourceVersion);
+                setCurrentVersion(result.newResourceVersion);
+                setTimeout(() => setSaveSuccess(false), 3000);
+
+                // Check if any bots/packages reference this
+                if (rt) {
+                  try {
+                    const found = await findResourceUsage(
+                      id ?? "",
+                      rt.store,
+                      rt.plural
+                    );
+                    if (found.length > 0) {
+                      setUsages(found);
+                      setShowUsageDialog(true);
+                    }
+                  } catch {
+                    // Silently skip usage lookup failures
+                  }
+                }
+              },
+            }
+          );
+        }
+      } catch {
+        // Invalid JSON — shouldn't happen, ConfigEditorLayout validates
+      }
+    },
+    [id, currentVersion, cascadeSave, cascadeContext, rt]
+  );
+
+  const handleCascadeConfirm = useCallback(
+    async (selected: ResourceUsage[]) => {
+      if (newResourceVersion === null || !rt) return;
+      setIsCascading(true);
+
+      try {
+        for (const usage of selected) {
+          await cascadeSave.mutateAsync({
+            id: id ?? "",
+            version: newResourceVersion,
+            body: {}, // Body not needed — config already saved in step 1
+            context: {
+              packageId: usage.packageId,
+              packageVersion: usage.packageVersion,
+              botId: usage.botId,
+              botVersion: usage.botVersion,
+            },
+          });
+        }
+      } catch {
+        // Some cascades may fail — that's okay
+      } finally {
+        setIsCascading(false);
+        setShowUsageDialog(false);
+        setUsages([]);
+      }
+    },
+    [id, newResourceVersion, rt, cascadeSave]
+  );
 
   if (!rt) {
     return (
@@ -74,7 +227,7 @@ export function ResourceDetailPage() {
       )
     ) {
       deleteMutation.mutate(
-        { id: id ?? "", version: 1 },
+        { id: id ?? "", version: currentVersion },
         { onSuccess: () => navigate(`/manage/resources/${type}`) }
       );
     }
@@ -82,7 +235,7 @@ export function ResourceDetailPage() {
 
   function handleDuplicate() {
     duplicateMutation.mutate(
-      { id: id ?? "", version: 1 },
+      { id: id ?? "", version: currentVersion },
       {
         onSuccess: (result) => {
           const parts = result.location.split("/");
@@ -110,7 +263,7 @@ export function ResourceDetailPage() {
         })}
       </Link>
 
-      {/* Header */}
+      {/* Header with actions */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
@@ -118,6 +271,14 @@ export function ResourceDetailPage() {
             {typeName}
           </h1>
           <p className="mt-1 font-mono text-xs text-muted-foreground">{id}</p>
+          {cascadeContext && (
+            <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+              {t(
+                "editor.cascadeMode",
+                "Changes will cascade to parent package and bot"
+              )}
+            </p>
+          )}
         </div>
         <div className="flex gap-2">
           <button
@@ -162,26 +323,36 @@ export function ResourceDetailPage() {
       )}
 
       {!isLoading && !isError && data !== undefined && (
-        <div className="rounded-xl border bg-card shadow-sm">
-          <div className="border-b border-border px-6 py-4">
-            <h2 className="text-lg font-semibold text-foreground">
-              {t("resources.rawConfig", "Raw Configuration")}
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              {t("resources.rawConfigHint", "JSON configuration for this resource")}
-            </p>
-          </div>
-          <div className="p-6">
-            <pre
-              className={cn(
-                "overflow-x-auto rounded-lg bg-muted/50 p-4 text-sm text-foreground",
-                "font-mono leading-relaxed"
-              )}
-            >
-              {JSON.stringify(data, null, 2)}
-            </pre>
-          </div>
-        </div>
+        <>
+          <ConfigEditorLayout
+            typeName={typeName}
+            typeIcon={Icon}
+            resourceId={id ?? ""}
+            data={JSON.stringify(data, null, 2)}
+            versions={versions}
+            currentVersion={currentVersion}
+            onVersionChange={setCurrentVersion}
+            onSave={handleSave}
+            isSaving={cascadeSave.isPending}
+            saveSuccess={saveSuccess}
+            saveError={
+              cascadeSave.isError
+                ? t("editor.saveError", "Failed to save")
+                : undefined
+            }
+          />
+          {showUsageDialog && (
+            <UpdateUsageDialog
+              usages={usages}
+              isUpdating={isCascading}
+              onConfirm={handleCascadeConfirm}
+              onDismiss={() => {
+                setShowUsageDialog(false);
+                setUsages([]);
+              }}
+            />
+          )}
+        </>
       )}
     </div>
   );

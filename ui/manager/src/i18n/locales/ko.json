@@ -214,5 +214,27 @@
         "description": "대화 속성 설정 및 슬롯 채우기 관리"
       }
     }
+  },
+  "editor": {
+    "formTab": "양식",
+    "jsonTab": "JSON",
+    "save": "저장",
+    "discard": "취소",
+    "saving": "저장 중...",
+    "saved": "저장 완료",
+    "saveError": "저장 실패",
+    "dirty": "저장되지 않은 변경 사항",
+    "version": "버전",
+    "versionPicker": "버전 선택",
+    "readOnly": "읽기 전용",
+    "formPlaceholder": "비주얼 에디터가 곧 제공됩니다. JSON 탭을 사용하여 편집하세요.",
+    "jsonSchema": "스키마 유효성 검사 활성화",
+    "cascadeMode": "변경 사항이 상위 패키지와 봇에 전파됩니다",
+    "usedInBots": "{{count}}개 봇에서 사용 중",
+    "updateUsageHint": "선택한 패키지와 봇을 새 버전으로 업데이트하시겠습니까?",
+    "updateUsage": "선택 업데이트",
+    "skipUpdate": "건너뛰기",
+    "cascading": "업데이트 중...",
+    "cascadeSuccess": "연쇄 업데이트 완료"
   }
 }

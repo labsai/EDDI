@@ -62,7 +62,7 @@ export function updateBot(
   id: string,
   version: number,
   bot: Bot
-): Promise<void> {
+): Promise<{ location: string }> {
   return api.put(`/botstore/bots/${id}?version=${version}`, bot);
 }
 

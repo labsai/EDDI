@@ -48,7 +48,7 @@ export function updatePackage(
   id: string,
   version: number,
   config: PackageConfiguration
-): Promise<void> {
+): Promise<{ location: string }> {
   return api.put(
     `/packagestore/packages/${id}?version=${version}`,
     config

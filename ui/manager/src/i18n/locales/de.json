@@ -214,5 +214,27 @@
         "description": "Gesprächseigenschaften setzen und Slot-Filling verwalten"
       }
     }
+  },
+  "editor": {
+    "formTab": "Formular",
+    "jsonTab": "JSON",
+    "save": "Speichern",
+    "discard": "Verwerfen",
+    "saving": "Speichern...",
+    "saved": "Erfolgreich gespeichert",
+    "saveError": "Speichern fehlgeschlagen",
+    "dirty": "Ungespeicherte Änderungen",
+    "version": "Version",
+    "versionPicker": "Version auswählen",
+    "readOnly": "Schreibgeschützt",
+    "formPlaceholder": "Visueller Editor kommt bald. Verwenden Sie den JSON-Tab zum Bearbeiten.",
+    "jsonSchema": "Schema-Validierung aktiv",
+    "cascadeMode": "Änderungen werden an übergeordnetes Paket und Bot weitergegeben",
+    "usedInBots": "Wird in {{count}} Bot(s) verwendet",
+    "updateUsageHint": "Ausgewählte Pakete und Bots auf die neue Version aktualisieren?",
+    "updateUsage": "Auswahl aktualisieren",
+    "skipUpdate": "Überspringen",
+    "cascading": "Aktualisiere...",
+    "cascadeSuccess": "Kaskaden-Update abgeschlossen"
   }
 }

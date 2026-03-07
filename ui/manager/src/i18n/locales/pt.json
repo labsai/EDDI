@@ -214,5 +214,27 @@
         "description": "Definir propriedades de conversa e gerenciar preenchimento de slots"
       }
     }
+  },
+  "editor": {
+    "formTab": "Formulário",
+    "jsonTab": "JSON",
+    "save": "Salvar",
+    "discard": "Descartar",
+    "saving": "Salvando...",
+    "saved": "Salvo com sucesso",
+    "saveError": "Falha ao salvar",
+    "dirty": "Alterações não salvas",
+    "version": "Versão",
+    "versionPicker": "Selecionar versão",
+    "readOnly": "Somente leitura",
+    "formPlaceholder": "Editor visual em breve. Use a aba JSON para editar.",
+    "jsonSchema": "Validação de esquema ativa",
+    "cascadeMode": "Alterações serão propagadas ao pacote e bot pai",
+    "usedInBots": "Usado em {{count}} bot(s)",
+    "updateUsageHint": "Atualizar os pacotes e bots selecionados para a nova versão?",
+    "updateUsage": "Atualizar selecionados",
+    "skipUpdate": "Pular",
+    "cascading": "Atualizando...",
+    "cascadeSuccess": "Atualização em cascata concluída"
   }
 }

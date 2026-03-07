@@ -214,5 +214,27 @@
         "description": "Configurar propiedades de conversación y gestionar el llenado de slots"
       }
     }
+  },
+  "editor": {
+    "formTab": "Formulario",
+    "jsonTab": "JSON",
+    "save": "Guardar",
+    "discard": "Descartar",
+    "saving": "Guardando...",
+    "saved": "Guardado correctamente",
+    "saveError": "Error al guardar",
+    "dirty": "Cambios sin guardar",
+    "version": "Versión",
+    "versionPicker": "Seleccionar versión",
+    "readOnly": "Solo lectura",
+    "formPlaceholder": "Editor visual próximamente. Use la pestaña JSON para editar.",
+    "jsonSchema": "Validación de esquema activa",
+    "cascadeMode": "Los cambios se propagarán al paquete y bot padre",
+    "usedInBots": "Usado en {{count}} bot(s)",
+    "updateUsageHint": "¿Actualizar los paquetes y bots seleccionados a la nueva versión?",
+    "updateUsage": "Actualizar seleccionados",
+    "skipUpdate": "Omitir",
+    "cascading": "Actualizando...",
+    "cascadeSuccess": "Actualización en cascada completada"
   }
 }
