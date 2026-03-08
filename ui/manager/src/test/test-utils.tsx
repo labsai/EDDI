@@ -1,6 +1,6 @@
 import { render, type RenderOptions } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import type { ReactElement } from "react";
 
@@ -37,6 +37,37 @@ export function renderWithProviders(
 
   return {
     ...render(ui, { wrapper: Wrapper, ...options }),
+    queryClient,
+  };
+}
+
+/**
+ * Render a page component inside MemoryRouter with a route pattern.
+ * Centralises boilerplate duplicated across 10+ page-level test files.
+ *
+ * @param path - The initial URL, e.g. "/manage/resources/behavior/res1"
+ * @param element - The JSX element to render at the route
+ * @param routePattern - The React Router pattern, defaults to `path`
+ */
+export function renderPage(
+  path: string,
+  element: ReactElement,
+  routePattern?: string
+) {
+  const queryClient = createTestQueryClient();
+
+  return {
+    ...render(
+      <MemoryRouter initialEntries={[path]}>
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
+            <Routes>
+              <Route path={routePattern ?? path} element={element} />
+            </Routes>
+          </ThemeProvider>
+        </QueryClientProvider>
+      </MemoryRouter>
+    ),
     queryClient,
   };
 }

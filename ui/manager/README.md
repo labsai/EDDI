@@ -1,111 +1,94 @@
-# EDDI-CONFIG-UI
+# EDDI Manager
 
-## Setup
+> Admin dashboard for the [EDDI](https://github.com/labsai/EDDI) conversational AI platform.
 
-```
+## Tech Stack
+
+| Layer              | Technology                                   |
+| ------------------ | -------------------------------------------- |
+| **Build**          | Vite 6                                       |
+| **UI**             | React 19 + TypeScript 5 (strict mode)        |
+| **Styling**        | Tailwind CSS v4 + CSS variables (black/gold) |
+| **State (server)** | TanStack Query v5                            |
+| **State (UI)**     | React hooks (`useState` / `useCallback`)     |
+| **Routing**        | React Router v7                              |
+| **i18n**           | react-i18next — 11 locales with RTL support  |
+| **Editor**         | Monaco (`@monaco-editor/react`)              |
+| **DnD**            | @dnd-kit (package pipeline builder)          |
+| **Tests**          | Vitest + React Testing Library + MSW         |
+
+## Prerequisites
+
+- **Node.js** ≥ 20
+- **npm** ≥ 10
+- EDDI backend running on `localhost:7070` (for dev proxy)
+
+## Quick Start
+
+```bash
 npm install
+npm run dev          # Vite dev server on http://localhost:5173
 ```
 
-## Development
+The Vite proxy forwards all API calls to the EDDI backend at `localhost:7070`.
 
-Run `npm start` to run the packager and have the app run in your default browser.
+## Testing & Build
 
-## Build
-
-```
-[NODE_ENV=<*development*,staging,production>] npm run build
-```
-
-### Run Docker Compose
-
-Build eddi-config-ui local docker image:
-
-```
-docker-compose -f docker-compose.yml -f docker-compose.local.yml -p config-local build
+```bash
+npx tsc -b           # TypeScript type-check (zero errors expected)
+npm run test          # Vitest unit + component tests
+npm run build         # Production build
 ```
 
-Run docker-compose with locally build image:
+## Architecture
 
 ```
-docker-compose -f docker-compose.yml -f docker-compose.local.yml -p config-local up -d
+src/
+├── components/
+│   ├── editors/              # Form editors + shared editor chrome
+│   │   ├── config-editor-layout.tsx   # Tabs (Form|JSON), version picker, save
+│   │   ├── behavior-editor.tsx        # Behavior rules form editor
+│   │   ├── httpcalls-editor.tsx       # HTTP calls form editor
+│   │   ├── langchain-editor.tsx       # LangChain/AI config editor
+│   │   ├── output-editor.tsx          # Output sets editor
+│   │   ├── propertysetter-editor.tsx  # Property setter editor
+│   │   ├── dictionary-editor.tsx      # Dictionary editor
+│   │   ├── pipeline-builder.tsx       # Drag-and-drop extension pipeline
+│   │   └── version-picker.tsx         # Version dropdown
+│   └── layout/                # Sidebar, top-bar, theme-provider
+├── hooks/                     # TanStack Query hooks
+├── lib/
+│   ├── api/                   # Typed API modules
+│   └── api-client.ts          # Base fetch wrapper
+├── i18n/locales/              # 11 locale JSON files
+├── pages/                     # Route pages
+│   └── __tests__/             # Component tests
+└── test/mocks/
+    ├── handlers.ts            # MSW request handlers
+    └── server.ts              # MSW server setup
 ```
 
-Shutting down locally build eddi-config-ui:
+### Key Patterns
 
-```
-docker-compose -f docker-compose.yml -f docker-compose.local.yml -p config-local down
-```
+- **Editor Render Prop**: All editors plug into `ConfigEditorLayout` via `renderFormEditor` in `resource-detail.tsx`
+- **Generic CRUD**: `src/lib/api/resources.ts` provides typed CRUD for all 6 extension types
+- **API base URL**: `window.location.origin` — no hardcoded URLs
+- **Logical CSS**: Uses `ps-*`/`pe-*`/`ms-*`/`me-*` for RTL support
+- **i18n**: Auto-detects RTL, sets `dir` on `<html>`, supports 11 languages
 
-Run latest eddi-config-ui from docker-hub:
+### Supported Locales
 
-```
-docker-compose up
-```
+English, German, French, Spanish, Arabic (RTL), Chinese, Thai, Japanese, Korean, Portuguese, Hindi
 
-### Run the Docker locally
+## Branch
 
-This will run the docker image locally.
+All v6 development is on `feature/version-6.0.0`.
 
-```
-docker run -p "7071:7071" name_of_container
-```
+## Related Repos
 
-You can change the environments by using this command.
-Change `EDDI_API_URL=localhost:7070` to whatever path you like.
+- [EDDI](https://github.com/labsai/EDDI) — Backend engine (Java 21, Quarkus, MongoDB)
+- [eddi-chat-ui](https://github.com/labsai/eddi-chat-ui) — Standalone chat widget
 
-```
-docker run -e  "EDDI_API_URL=localhost:7070" -p "7071:7071" name_of_container
-```
+## License
 
-This image is suppose to work with [**EDDI**](https://github.com/labsai/EDDI).
-You will need it to be running in the background with bots added to it, in order for it to run properly
-
-### Deploy project to Google Cloud Storage (https://levelup.gitconnected.com/how-to-deploy-react-applications-to-google-cloud-storage-59ac226409d6)
-
-Install Google Cloud SDK (https://cloud.google.com/sdk/docs/install)
-Download .tar.gz, extract and run
-
-```
-./google-cloud-sdk/install.sh
-```
-
-Ask for google cloud json file project owner/manager (eddi-199312-55e1244b735f.json)
-
-This command will allow us to interact with our bucket
-without the need of authenticating with our personal credentials, using our previously generated service account key
-
-```
-gcloud auth activate-service-account --key-file eddi-199312-55e1244b735f.json
-```
-
-Build project (files will be generated to dist folder)
-
-```
-yarn build
-```
-
-Sync up (deploy) our local files to our bucket
-
-```
-gsutil cp -r dist/* gs://manager-labs-ai
-gsutil cp -p differ-140008 -r dist/* gs://bot-manager-differ
-```
-
-To show bucket info
-
-```
-gsutil ls -L -b gs://manager-labs-ai
-```
-
-To create a new bucket (gsutil mb -p PROJECT_ID gs://BUCKET_NAME)
-
-```
-gsutil mb -p differ-140008 gs://bot-manager-differ
-
-```
-
-To get bucket size
-
-```
-gsutil du -s gs://
-```
+See [LICENSE](LICENSE) for details.

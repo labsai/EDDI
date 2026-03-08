@@ -174,7 +174,7 @@ Generic wrapper: loads config by type + ID + version, renders the right editor c
 
 ---
 
-### Phase 3.19 — Polish, i18n, Tests & Documentation
+### Phase 3.19 — Polish, i18n, Tests & Documentation ✅
 
 #### i18n
 
@@ -195,6 +195,9 @@ Generic wrapper: loads config by type + ID + version, renders the right editor c
 - Update HANDOFF.md with Phases 3.14–3.19
 - Changelog entries for each phase
 - Update manager README with editor architecture overview
+
+> [!NOTE]
+> **Completed 2026-03-08.** Added API-layer unit tests (`resources.test.ts`, 10 tests), dashboard tests (3 tests), `renderPage` helper to `test-utils.tsx`, duplicate POST MSW handler, and rewrote `README.md` with v6 architecture overview. 160 total tests pass across 22 files.
 
 ---
 

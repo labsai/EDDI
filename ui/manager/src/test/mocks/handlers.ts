@@ -608,5 +608,14 @@ function createResourceHandlers(
     http.delete(`*/${store}/${plural}/:id`, () => {
       return new HttpResponse(null, { status: 204 });
     }),
+    // Duplicate resource (POST with :id)
+    http.post(`*/${store}/${plural}/:id`, ({ params }) => {
+      return new HttpResponse(null, {
+        status: 201,
+        headers: {
+          Location: `/${store}/${plural}/dup-${params.id}?version=1`,
+        },
+      });
+    }),
   ];
 }

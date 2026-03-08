@@ -1,14 +1,14 @@
 # EDDI Manager — Handoff Document
 
-> **Last updated**: 2026-03-07  
+> **Last updated**: 2026-03-08  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Phase 3.18 — LangChain, Output, Property Setter, Dictionary Editors
+> **Last commit**: Phase 3.19 — Polish, Tests & Documentation
 
 ---
 
 ## Current Status
 
-**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.18 complete.
+**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.19 complete.
 
 ### What's Done
 
@@ -32,11 +32,12 @@
 | 3.16  | Package Editor: drag-and-drop pipeline builder (`@dnd-kit`), add/remove extensions, save/discard, version picker | —         |
 | 3.17  | Behavior Rules & HTTP Calls Editors: form-based editors with render prop, Form↔JSON sync, 14 new tests           | —         |
 | 3.18  | LangChain, Output, Property Setter, Dictionary Editors: 4 form editors, MSW mocks, 29 new tests                  | —         |
+| 3.19  | Polish, Tests & Documentation: API-layer tests, dashboard test, renderPage helper, README rewrite                | —         |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc -b`)
-- **Unit/Component**: 147/147 pass (`npm run test`) — 20 files
+- **Unit/Component**: 160/160 pass (`npm run test`) — 22 files
 - **Build**: Succeeds
 
 ### Files Created (summary)
@@ -62,26 +63,18 @@
 
 ---
 
-### What's Next: Phases 3.17–3.19 — Extension Editors & Polish
+### What's Next: Phase 4 — Chat-UI Rewrite
 
-Phases 3.14–3.16 (editor foundation, bot editor, package editor) are complete. The next phases build **type-specific form editors** that render inside the package editor pipeline.
+Phase 3 (Manager UI Rewrite) is **complete** through Phase 3.19.
+
+**Phase 4**: Chat-UI Rewrite — migrate `eddi-chat-ui` from CRA to Vite, add SSE streaming, extract `@eddi/chat-core` shared package.
 
 **📄 Reference docs:**
 
-- [Detailed editing layer plan](docs/editing-layer-plan.md)
+- [Editing layer plan](docs/editing-layer-plan.md) — Phases 3.14–3.19 (all ✅)
 - [UX research analysis](docs/ux-research-analysis.md) — competitive analysis across Voiceflow, n8n, Langflow, Dify, Botpress, LangSmith, Make.com
 - [EDDI v6 implementation plan](file:///c:/dev/git/EDDI/docs/v6-planning/implementation_plan.md) — backend architecture & roadmap
 - [Business logic analysis](file:///c:/dev/git/EDDI/docs/v6-planning/business-logic-analysis.md) — extension types, pipeline model, Bot Father pattern
-
-| Phase | Description                                                                                                                          | Dependencies |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------ |
-| 3.15  | **Bot Editor** — inline edit, deploy/undeploy, **environment status badges**                                                         | 3.14 ✅      |
-| 3.16  | **Package Editor** — drag-and-drop pipeline builder, add/remove extensions, version picker, save/discard                             | 3.14 ✅      |
-| 3.17  | **Behavior Rules & HTTP Calls Editors** — sheet-embeddable components, condition builder, action editor, optional `cmdk` var picker  | 3.16 ✅      |
-| 3.18  | **LangChain, Output, Property Setter, Dictionary Editors** — sheet-embeddable components, model config, prompt editor, output groups | 3.16 ✅      |
-| 3.19  | **Polish, i18n, Tests** — ~100+ new keys per locale, editor tests, MSW handlers, `cmdk` autocomplete polish                          | 3.17, 3.18   |
-
-**After 3.19**: Phase 4 — Chat-UI Rewrite (CRA → Vite, SSE streaming, `@eddi/chat-core`)
 
 ---
 

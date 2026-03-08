@@ -180,7 +180,7 @@ All phases tracked in [`HANDOFF.md`](HANDOFF.md):
 | 3.16     | Package Editor (drag-and-drop pipeline)                       | ✅     |
 | 3.17     | Behavior Rules & HTTP Calls Editors                           | ✅     |
 | 3.18     | LangChain, Output, Property Setter, Dictionary Editors        | ✅     |
-| 3.19     | Polish, remaining tests, documentation                        | Next   |
+| 3.19     | Polish, remaining tests, documentation                        | ✅     |
 
 **After 3.19**: Phase 4 (Chat-UI Rewrite) or further backend work.
 
