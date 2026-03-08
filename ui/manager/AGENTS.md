@@ -4,34 +4,32 @@
 
 ## 1. Project Context
 
-**EDDI Manager** is the admin dashboard for the EDDI conversational AI platform. It is a **greenfield rewrite** (v6.0.0) as a modern React SPA.
+**EDDI Manager** is the admin dashboard for the [EDDI](https://github.com/labsai/EDDI) conversational AI platform. It is a **React/TypeScript SPA** served from the EDDI backend.
 
-### Tech Stack (v6.0.0 — Current)
+### Ecosystem (5 repos, all under `c:\dev\git\`)
 
-| Layer              | Technology                                   |
-| ------------------ | -------------------------------------------- |
-| **Build**          | Vite 6                                       |
-| **UI**             | React 19 + TypeScript 5.7 (strict)           |
-| **Styling**        | Tailwind CSS v4 + CSS variables for theming  |
-| **Components**     | shadcn/ui + Radix UI primitives              |
-| **State (server)** | TanStack Query v5                            |
-| **State (UI)**     | Zustand                                      |
-| **Routing**        | React Router v6                              |
-| **i18n**           | react-i18next (en, de, ar with auto LTR/RTL) |
-| **Linting**        | ESLint flat config                           |
-| **Test (unit)**    | Vitest + React Testing Library + MSW         |
-| **Test (E2E)**     | Playwright                                   |
-| **Auth**           | keycloak-js 26+ (to be wired)                |
+| Repo                       | Tech                      | Purpose                                            |
+| -------------------------- | ------------------------- | -------------------------------------------------- |
+| **EDDI**                   | Java 21, Quarkus, MongoDB | Backend engine, REST API, lifecycle pipeline       |
+| **EDDI-Manager** (this)    | React 19, Vite, Tailwind  | Admin dashboard — bots, packages, extensions, chat |
+| **eddi-chat-ui**           | React, TypeScript         | Standalone chat widget                             |
+| **eddi-website**           | HTML → migrating to Astro | Marketing site at eddi.labs.ai                     |
+| **EDDI-integration-tests** | Java                      | End-to-end API tests                               |
 
-### Ecosystem
+### Tech Stack
 
-| Repo               | Relationship                                                             |
-| ------------------ | ------------------------------------------------------------------------ |
-| **EDDI** (backend) | Manager calls EDDI's REST API via Vite proxy (dev) or same-origin (prod) |
-| **eddi-chat-ui**   | Shares chat rendering logic — extracting shared `@eddi/chat-core`        |
-| **eddi-website**   | Separate marketing site at eddi.labs.ai                                  |
-
-All repos are at `c:\dev\git\`. Branch: `feature/version-6.0.0`.
+| Layer              | Technology                                                             |
+| ------------------ | ---------------------------------------------------------------------- |
+| **Build**          | Vite 6                                                                 |
+| **UI**             | React 19 + TypeScript 5 (strict)                                       |
+| **Styling**        | Tailwind CSS v4 + CSS variables (black/gold)                           |
+| **State (server)** | TanStack Query v5                                                      |
+| **State (UI)**     | `useState` / `useCallback` (no Zustand needed)                         |
+| **Routing**        | React Router v7                                                        |
+| **i18n**           | react-i18next (11 locales: en, de, fr, es, ar, zh, th, ja, ko, pt, hi) |
+| **Test (unit)**    | Vitest + React Testing Library + MSW                                   |
+| **Editor**         | Monaco (@monaco-editor/react)                                          |
+| **DnD**            | @dnd-kit (package pipeline builder)                                    |
 
 ---
 
@@ -39,55 +37,127 @@ All repos are at `c:\dev\git\`. Branch: `feature/version-6.0.0`.
 
 ### Before Starting Any Work — MUST READ
 
-1. **`HANDOFF.md`** (this repo) — **READ FIRST.** Current status, what's done, what's next, design decisions, known issues
-2. **`c:\dev\git\EDDI\docs\changelog.md`** — Ecosystem-wide changelog with implementation log entries across all repos
-3. **Check git**: `git log -5 --oneline` on `feature/version-6.0.0` to see recent commits
-4. **If planning new work**: also read the implementation plan artifact in the Antigravity brain (search for `implementation_plan.md`)
+1. **[`HANDOFF.md`](HANDOFF.md)** — **READ FIRST.** Current status, completed phases, test counts, what's next
+2. **[`docs/editing-layer-plan.md`](docs/editing-layer-plan.md)** — Phases 3.14–3.19 plan (editors, cascade save)
+3. **EDDI backend**: [`AGENTS.md`](../EDDI/AGENTS.md) and [`docs/v6-planning/changelog.md`](../EDDI/docs/v6-planning/changelog.md) for cross-repo context
+4. **Check git**: `git log -5 --oneline` on `feature/version-6.0.0`
 
 ### During Work
 
-- Commit often with `feat(v6):`, `fix(v6):`, `refactor(v6):`. Each commit must build (`npm run build`) and pass tests (`npm run test`).
+- **Branch**: `feature/version-6.0.0` — do NOT commit to `main`
+- **Commit often** with conventional commits: `feat(v6): Phase X.XX - description`
+- **Each commit must pass** all three checks:
+  ```bash
+  npx tsc -b          # Zero TypeScript errors
+  npm run test         # All tests pass
+  npm run build        # Production build succeeds
+  ```
 - Use `--no-verify` for git commit (old pre-commit hook references removed package)
 
-### After Work (or if interrupted/switching sessions)
+### After Completing Work
 
-- **Update `HANDOFF.md`** with: what changed, current status, what's next
-- **Update `c:\dev\git\EDDI\docs\changelog.md`** with an implementation log entry
-- **Suggest a new conversation** if context is getting long (more than ~15 tool calls deep)
+1. **Update `HANDOFF.md`**: new phase row, test counts, last commit
+2. **Update `docs/editing-layer-plan.md`**: add ✅ and completion note to finished phases
+3. **Suggest a new conversation** if a phase is complete or context is long
 
 ---
 
-## 3. Project Structure
+## 3. Architecture & Patterns
+
+### File Structure
 
 ```
 src/
-├── app.tsx                    # React Router routes
-├── main.tsx                   # Entry point (providers)
-├── index.css                  # Tailwind v4 + EDDI tokens
 ├── components/
-│   ├── layout/                # Sidebar, TopBar, AppLayout, ThemeProvider
-│   ├── bots/                  # BotCard, CreateBotDialog
-│   ├── packages/              # PackageCard, CreatePackageDialog
-│   └── resources/             # ResourceCard, CreateResourceDialog
-├── hooks/                     # TanStack Query hooks (use-bots, use-packages, use-conversations, use-chat, use-resources)
+│   ├── editors/              # Form editors + shared editor chrome
+│   │   ├── config-editor-layout.tsx   # Tabs (Form|JSON), version picker, save
+│   │   ├── behavior-editor.tsx        # Phase 3.17
+│   │   ├── httpcalls-editor.tsx       # Phase 3.17
+│   │   ├── langchain-editor.tsx       # Phase 3.18
+│   │   ├── output-editor.tsx          # Phase 3.18
+│   │   ├── propertysetter-editor.tsx  # Phase 3.18
+│   │   └── dictionary-editor.tsx      # Phase 3.18
+│   ├── layout/                # Sidebar, top-bar, theme-provider
+│   └── ui/                    # Reusable UI primitives
+├── hooks/                     # TanStack Query hooks
 ├── lib/
-│   ├── api-client.ts          # Typed fetch client (base URL from window.location.origin)
-│   ├── api/                   # API modules: bots.ts, packages.ts, descriptors.ts, conversations.ts, chat.ts, resources.ts
-│   └── utils.ts               # cn() for Tailwind class merging
-├── pages/                     # Route pages (dashboard, bots, bot-detail, packages, package-detail, conversations, conversation-detail, chat, resources, resource-list, resource-detail)
-├── i18n/                      # config.ts + locales/ (en, de, ar)
-└── test/                      # setup.ts, mocks/ (handlers.ts, server.ts), test-utils.tsx
-e2e/                           # Playwright tests (navigation, theme, RTL)
+│   ├── api/                   # API modules (bots.ts, resources.ts, etc.)
+│   └── api-client.ts          # Base fetch wrapper
+├── i18n/locales/              # 11 locale JSON files
+├── pages/
+│   ├── __tests__/             # Vitest component tests
+│   └── resource-detail.tsx    # Wires editors via renderFormEditor
+└── test/mocks/
+    ├── handlers.ts            # MSW request handlers
+    └── server.ts              # MSW server setup
 ```
 
----
+### Key Patterns
 
-## 4. Code Conventions
+#### 1. Editor Render Prop
+
+All extension editors plug into `ConfigEditorLayout` via `renderFormEditor` in `resource-detail.tsx`:
+
+```tsx
+<ConfigEditorLayout
+  renderFormEditor={
+    type === 'behavior'
+      ? (parsed, onFormChange, ro) => (
+          <BehaviorEditor data={parsed} onChange={onFormChange} readOnly={ro} />
+        )
+      : type === 'langchain'
+        ? (parsed, onFormChange, ro) => (
+            <LangchainEditor
+              data={parsed}
+              onChange={onFormChange}
+              readOnly={ro}
+            />
+          )
+        : undefined // Falls back to JSON-only
+  }
+/>
+```
+
+To add a new editor: create the component, add the type check in the ternary, add MSW handler, add i18n keys, add test file.
+
+#### 2. Resource Type Config
+
+All 6 extension types are in `src/lib/api/resources.ts` as `RESOURCE_TYPES`:
+
+| Slug               | Store                    | Plural                |
+| ------------------ | ------------------------ | --------------------- |
+| `behavior`         | `behaviorstore`          | `behaviorsets`        |
+| `httpcalls`        | `httpcallsstore`         | `httpcalls`           |
+| `output`           | `outputstore`            | `outputsets`          |
+| **`dictionaries`** | `regulardictionarystore` | `regulardictionaries` |
+| `langchain`        | `langchainstore`         | `langchains`          |
+| `propertysetter`   | `propertysetterstore`    | `propertysetters`     |
+
+> **⚠️ Important**: The URL slug for dictionaries is `dictionaries`, not `regulardictionary`.
+
+#### 3. MSW Mock Handlers
+
+- All handlers are in `src/test/mocks/handlers.ts`
+- Specific GET handlers go **before** the generic `createResourceHandlers` block
+- Include realistic mock data matching the backend Java model
+
+#### 4. i18n
+
+- Each editor has its own namespace: `langchainEditor.*`, `outputEditor.*`, etc.
+- Add to `en.json` first, then propagate to all 10 other locale files
+- Fallback values are inline in the component: `t("key", "Fallback")`
+
+#### 5. Tests
+
+- Located in `src/pages/__tests__/`
+- Use `renderPage(type)` helper with `MemoryRouter` + `QueryClient` + `ThemeProvider`
+- Assert on `data-testid` attributes
+- Naming: `resource-detail-{type}.test.tsx`
 
 ### API Communication
 
 - Base URL: `window.location.origin` (no hardcoded URLs)
-- Vite proxy forwards `/botstore/*`, `/packagestore/*`, `/conversationstore/*`, `/administration/*`, `/managedbots/*`, `/behaviorstore/*`, `/httpcallsstore/*`, `/outputstore/*`, `/regulardictionarystore/*`, `/langchainstore/*`, `/propertysetterstore/*` to EDDI backend
+- Vite proxy forwards all store paths to EDDI backend in dev mode
 - All API calls through typed modules in `src/lib/api/`
 - Server state via TanStack Query hooks in `src/hooks/`
 
@@ -95,17 +165,45 @@ e2e/                           # Playwright tests (navigation, theme, RTL)
 
 - Use **logical properties**: `ps-*` / `pe-*` / `ms-*` / `me-*` / `start-*` / `end-*`
 - Never use `pl-*` / `pr-*` / `ml-*` / `mr-*` / `left-*` / `right-*`
-- `border-e` instead of `border-r` for sidebar borders
 
-### DO NOT
+---
 
-- Do NOT use MUI, Redux, recompose, or any old code patterns
-- Do NOT use `moment.js` — use native `Intl` or `date-fns`
-- Do NOT hardcode the API URL
-- Do NOT use `left`/`right` in CSS — use logical properties for RTL
+## 4. Development Phases
+
+All phases tracked in [`HANDOFF.md`](HANDOFF.md):
+
+| Phase    | Description                                                   | Status |
+| -------- | ------------------------------------------------------------- | ------ |
+| 3.1–3.13 | Read-only dashboard (layout, bots, packages, chat, resources) | ✅     |
+| 3.14     | JSON Editor, Version Picker, Cascade Save                     | ✅     |
+| 3.15     | Bot Editor (deploy, duplicate, version picker)                | ✅     |
+| 3.16     | Package Editor (drag-and-drop pipeline)                       | ✅     |
+| 3.17     | Behavior Rules & HTTP Calls Editors                           | ✅     |
+| 3.18     | LangChain, Output, Property Setter, Dictionary Editors        | ✅     |
+| 3.19     | Polish, remaining tests, documentation                        | Next   |
+
+**After 3.19**: Phase 4 (Chat-UI Rewrite) or further backend work.
 
 ---
 
 ## 5. Handoff Protocol
 
-Read `HANDOFF.md`, check `git log -5`, update `HANDOFF.md` after work. See also EDDI/AGENTS.md Section 5 for the full protocol.
+**Picking up from a previous session:**
+
+1. Read `HANDOFF.md`
+2. `git log -5 --oneline` on `feature/version-6.0.0`
+3. `git status` for uncommitted changes
+4. Check which phase is next from Section 4
+
+**Ending a session:**
+
+1. Commit all working code (`wip:` prefix if incomplete)
+2. Update `HANDOFF.md` with completed work + test counts
+3. Suggest new conversation if a phase is done or context is long
+
+### DO NOT
+
+- Do NOT use MUI, Redux, recompose, or old code patterns
+- Do NOT use `moment.js` — use native `Intl` or `date-fns`
+- Do NOT hardcode the API URL
+- Do NOT use `left`/`right` CSS — use logical properties for RTL
