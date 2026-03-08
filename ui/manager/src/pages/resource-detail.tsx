@@ -40,6 +40,22 @@ import {
   HttpCallsEditor,
   type HttpCallsConfig,
 } from "@/components/editors/httpcalls-editor";
+import {
+  LangchainEditor,
+  type LangchainConfig,
+} from "@/components/editors/langchain-editor";
+import {
+  OutputEditor,
+  type OutputConfig,
+} from "@/components/editors/output-editor";
+import {
+  PropertySetterEditor,
+  type PropertySetterConfig,
+} from "@/components/editors/propertysetter-editor";
+import {
+  DictionaryEditor,
+  type DictionaryConfig,
+} from "@/components/editors/dictionary-editor";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   GitBranch,
@@ -365,7 +381,39 @@ export function ResourceDetailPage() {
                         readOnly={ro}
                       />
                     )
-                  : undefined
+                  : type === "langchain"
+                    ? (parsed, onFormChange, ro) => (
+                        <LangchainEditor
+                          data={parsed as LangchainConfig}
+                          onChange={onFormChange}
+                          readOnly={ro}
+                        />
+                      )
+                    : type === "output"
+                      ? (parsed, onFormChange, ro) => (
+                          <OutputEditor
+                            data={parsed as OutputConfig}
+                            onChange={onFormChange}
+                            readOnly={ro}
+                          />
+                        )
+                      : type === "propertysetter"
+                        ? (parsed, onFormChange, ro) => (
+                            <PropertySetterEditor
+                              data={parsed as PropertySetterConfig}
+                              onChange={onFormChange}
+                              readOnly={ro}
+                            />
+                          )
+                        : type === "dictionaries"
+                          ? (parsed, onFormChange, ro) => (
+                              <DictionaryEditor
+                                data={parsed as DictionaryConfig}
+                                onChange={onFormChange}
+                                readOnly={ro}
+                              />
+                            )
+                          : undefined
             }
           />
           {showUsageDialog && (

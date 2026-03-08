@@ -2,13 +2,13 @@
 
 > **Last updated**: 2026-03-07  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Phase 3.17 — Behavior Rules & HTTP Calls Editors
+> **Last commit**: Phase 3.18 — LangChain, Output, Property Setter, Dictionary Editors
 
 ---
 
 ## Current Status
 
-**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.17 complete.
+**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.18 complete.
 
 ### What's Done
 
@@ -31,11 +31,12 @@
 | 3.15  | Bot Editor: version picker, env badges (unrestricted/restricted/test), deploy per-env, duplicate, export         | —         |
 | 3.16  | Package Editor: drag-and-drop pipeline builder (`@dnd-kit`), add/remove extensions, save/discard, version picker | —         |
 | 3.17  | Behavior Rules & HTTP Calls Editors: form-based editors with render prop, Form↔JSON sync, 14 new tests           | —         |
+| 3.18  | LangChain, Output, Property Setter, Dictionary Editors: 4 form editors, MSW mocks, 29 new tests                  | —         |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc -b`)
-- **Unit/Component**: 119/119 pass (`npm run test`) — 16 files
+- **Unit/Component**: 147/147 pass (`npm run test`) — 20 files
 - **Build**: Succeeds
 
 ### Files Created (summary)

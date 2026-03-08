@@ -143,7 +143,7 @@ Generic wrapper: loads config by type + ID + version, renders the right editor c
 
 ---
 
-### Phase 3.18 — Extension Editors: LangChain, Output, Property Setter, Dictionary
+### Phase 3.18 — Extension Editors: LangChain, Output, Property Setter, Dictionary ✅
 
 #### [NEW] `src/components/editors/langchain-editor.tsx`
 
@@ -170,7 +170,7 @@ Generic wrapper: loads config by type + ID + version, renders the right editor c
 - **Save**: `PUT /regulardictionarystore/regulardictionaries/{id}`
 
 > [!NOTE]
-> Parser and Properties editors are lower priority — can start with JSON-only editor using the shared Monaco component from Phase 3.14.
+> **Completed 2026-03-07.** All 4 editors use the same `renderFormEditor` render prop pattern. MSW handlers with realistic mock data, ~80 i18n keys across 11 locales, 28 new tests. 147 total tests pass across 20 files. Parser and Properties editors remain lower priority — JSON-only for now.
 
 ---
 
@@ -180,6 +180,9 @@ Generic wrapper: loads config by type + ID + version, renders the right editor c
 
 - Add all new editor labels to all 11 locale files (~100+ new keys per locale)
 - Key parity tests will catch any drift
+
+> [!NOTE]
+> **Folded into 3.17-3.18.** Each phase now includes its own i18n keys, MSW handlers, and tests rather than deferring to a separate phase.
 
 #### Tests
 

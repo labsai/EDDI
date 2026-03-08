@@ -415,6 +415,105 @@ export const handlers = [
     });
   }),
 
+  // LangChain mock data
+  http.get("*/langchainstore/langchains/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    return HttpResponse.json({
+      tasks: [
+        {
+          actions: ["help", "chat"],
+          id: "main-chat",
+          type: "openai",
+          description: "Main AI assistant task",
+          parameters: {
+            systemMessage: "You are a helpful assistant.",
+            addToOutput: "true",
+            logSizeLimit: "20",
+          },
+          enableBuiltInTools: true,
+          builtInToolsWhitelist: ["calculator", "datetime"],
+          tools: [
+            "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/weather?version=1",
+          ],
+          conversationHistoryLimit: 10,
+          maxBudgetPerConversation: 1.0,
+          enableCostTracking: true,
+          enableToolCaching: true,
+          enableRateLimiting: true,
+          defaultRateLimit: 100,
+        },
+      ],
+    });
+  }),
+
+  // Output mock data
+  http.get("*/outputstore/outputsets/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    return HttpResponse.json({
+      lang: "en",
+      outputSet: [
+        {
+          action: "greet",
+          timesOccurred: 0,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "Hello! How can I help you?", delay: 0 },
+                { type: "text", text: "Hi there! What can I do for you?", delay: 0 },
+              ],
+            },
+          ],
+          quickReplies: [
+            { value: "Tell me more", expressions: "more_info", isDefault: false },
+            { value: "Goodbye", expressions: "bye", isDefault: false },
+          ],
+        },
+      ],
+    });
+  }),
+
+  // Property setter mock data
+  http.get("*/propertysetterstore/propertysetters/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    return HttpResponse.json({
+      setOnActions: [
+        {
+          actions: ["greet"],
+          setProperties: [
+            { name: "user_greeted", valueString: "true", scope: "conversation", override: true },
+            { name: "greeting_count", valueString: "[[${greeting_count}]] + 1", scope: "longTerm", fromObjectPath: "", override: true },
+          ],
+        },
+      ],
+    });
+  }),
+
+  // Dictionary mock data
+  http.get("*/regulardictionarystore/regulardictionaries/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    return HttpResponse.json({
+      lang: "en",
+      words: [
+        { word: "hello", expressions: "greeting(hello)", frequency: 0 },
+        { word: "hi", expressions: "greeting(hi)", frequency: 0 },
+      ],
+      phrases: [
+        { phrase: "good morning", expressions: "greeting(good_morning)" },
+      ],
+      regExs: [
+        { regEx: "\\d{5}", expressions: "zipcode(zipcode)" },
+      ],
+    });
+  }),
+
   // Generic descriptor handlers for all 6 resource types
   ...createResourceHandlers("behaviorstore", "behaviorsets", "behavior"),
   ...createResourceHandlers("httpcallsstore", "httpcalls", "httpcalls"),
