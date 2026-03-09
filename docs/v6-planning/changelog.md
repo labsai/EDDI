@@ -364,6 +364,44 @@ Phase 3 (Manager UI Rewrite) is complete (3.1–3.21). Phase 4 roadmap confirmed
 
 **Files updated:** `HANDOFF.md`, `AGENTS.md`, `changelog.md`
 
+### 2026-03-09 — Phase 4.1: Keycloak Auth Adapter
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 4 — Item #1
+
+**What changed:**
+
+- `keycloak-js@26` [NEW DEP]: Official Keycloak JavaScript adapter
+- `docker-compose.keycloak.yml` [NEW]: Local Keycloak 26 dev environment on port 8180 with auto-imported realm
+- `keycloak/eddi-realm.json` [NEW]: Pre-configured realm `eddi` — client `eddi-manager` (public SPA), roles (admin/editor/viewer), test users (eddi/eddi, viewer/viewer)
+- `docker-compose.keycloakenabled.yml` [DELETED]: Referenced dead `sso.labs.ai` SSO
+- `docker-compose.keycloakenabled.local.yml` [DELETED]: Same — obsolete
+- `auth-config.ts` [NEW]: Three-tier config reader: Vite env → `window.__EDDI_AUTH__` global → default `'none'`
+- `auth-context.ts` [NEW]: React context + types (separated from component for Fast Refresh)
+- `auth-provider.tsx` [NEW]: Two-branch provider — `'none'` renders children immediately, `'keycloak'` handles init lifecycle with loading screen, PKCE S256, token refresh, profile loading
+- `use-auth.ts` [NEW]: `useAuth()` + `useHasRole()` hooks
+- `main.tsx` [MODIFIED]: Wraps app tree in `<AuthProvider>` (above QueryClientProvider)
+- `sidebar.tsx` [MODIFIED]: User profile section (avatar initials, name, email, logout button) — hidden when auth disabled
+- `top-bar.tsx` [MODIFIED]: User avatar + dropdown menu with logout — hidden when auth disabled
+- `en.json` + 10 locales [MODIFIED]: `auth.*` i18n keys (login, logout, loading, sessionExpired, profile, guest)
+- `setup.ts` [MODIFIED]: Global `vi.mock('keycloak-js')` so all tests pass without Keycloak
+- `auth-provider.test.tsx` [NEW]: 4 tests (disabled auth rendering, authenticated state, loading state, no user section)
+
+**Design decisions:**
+
+- **Auth is optional** — default is `'none'` (no login required). Enabled via `VITE_AUTH_METHOD=keycloak` or `window.__EDDI_AUTH__`
+- **Local Keycloak via docker-compose** — one command (`docker compose -f docker-compose.keycloak.yml up`) gives a fully configured SSO with realm, client, roles, and test users
+- **PKCE S256** for all auth flows — modern security best practice, no client secret needed
+- **Context split** — `AuthContext` in separate `auth-context.ts` file to satisfy React Fast Refresh (contexts can't be in the same file as components)
+
+**Testing:**
+
+- [x] TypeScript: zero errors
+- [x] All 164 tests pass (23 test files)
+- [x] Build succeeds
+- [x] No regressions
+
 ### Template for Each Entry
 
 ```markdown
