@@ -116,8 +116,8 @@ export async function createAndDeployBot(
       `${API_BASE}/administration/unrestricted/deploymentstatus/${bot.id}?version=${bot.version}`
     );
     if (statusRes.ok()) {
-      const statusText = await statusRes.text();
-      if (statusText.includes("READY")) break;
+      const body = await statusRes.json();
+      if (body.status === "READY") break;
     }
     await new Promise((r) => setTimeout(r, 1000));
   }

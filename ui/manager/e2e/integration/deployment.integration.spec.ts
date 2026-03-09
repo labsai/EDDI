@@ -13,7 +13,8 @@ import {
  *
  * Key API behaviors:
  * - POST /administration/unrestricted/deploy returns 202 (accepted)
- * - GET /administration/unrestricted/deploymentstatus returns plain text (not JSON)
+ * - GET /administration/unrestricted/deploymentstatus returns JSON {"status":"READY"}
+ *   (use ?format=text for plain text, deprecated)
  */
 test.describe("Deployment — Real Backend", () => {
   test.describe.configure({ timeout: 120_000, mode: "serial" });
@@ -83,23 +84,22 @@ test.describe("Deployment — Real Backend", () => {
         `${API_BASE}/administration/unrestricted/deploymentstatus/${testBotId}?version=${testBotVersion}`
       );
       if (statusRes.ok()) {
-        const text = await statusRes.text();
-        if (text.includes("READY")) break;
+        const body = await statusRes.json();
+        if (body.status === "READY") break;
       }
       await new Promise((r) => setTimeout(r, 1000));
     }
   });
 
-  test("Get deployment status returns READY (plain text)", async ({
+  test("Get deployment status returns READY (JSON)", async ({
     request,
   }) => {
     const res = await request.get(
       `${API_BASE}/administration/unrestricted/deploymentstatus/${testBotId}?version=${testBotVersion}`
     );
     expect(res.ok()).toBeTruthy();
-    // EDDI returns deployment status as plain text, not JSON
-    const statusText = await res.text();
-    expect(statusText).toContain("READY");
+    const body = await res.json();
+    expect(body).toHaveProperty("status", "READY");
   });
 
   test("Deployment status for non-deployed environment returns NOT_FOUND", async ({
@@ -109,8 +109,8 @@ test.describe("Deployment — Real Backend", () => {
       `${API_BASE}/administration/test/deploymentstatus/${testBotId}?version=${testBotVersion}`
     );
     if (res.ok()) {
-      const statusText = await res.text();
-      expect(statusText).toContain("NOT_FOUND");
+      const body = await res.json();
+      expect(body.status).toBe("NOT_FOUND");
     } else {
       expect([404, 400]).toContain(res.status());
     }
@@ -130,8 +130,8 @@ test.describe("Deployment — Real Backend", () => {
       `${API_BASE}/administration/unrestricted/deploymentstatus/${testBotId}?version=${testBotVersion}`
     );
     if (statusRes.ok()) {
-      const statusText = await statusRes.text();
-      expect(statusText).toContain("NOT_FOUND");
+      const body = await statusRes.json();
+      expect(body.status).toBe("NOT_FOUND");
     }
   });
 });

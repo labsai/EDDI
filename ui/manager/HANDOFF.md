@@ -87,18 +87,16 @@ Phase 3 (Manager UI Rewrite) is functionally complete through Phase 3.21. Phase 
 | 4.4   | **JSON Schema Enrichment** — populate mock schemas with real field definitions for better dev-mode autocomplete; validate against backend `/jsonSchema` endpoints          | ⬜     |
 | 4.5   | **Production Build Optimization** — bundle analysis, code splitting, lazy loading, tree-shaking audit, lighthouse performance score                                        | ⬜     |
 
-### ⚡ Immediate Next Steps — N.7 Backend API Consistency Fixes (EDDI repo)
+### ✅ N.7 Backend API Consistency Fixes — DONE (2026-03-09, EDDI + Manager)
 
-**Do these BEFORE Phase 4.4.** These are small, focused fixes in the EDDI Java backend discovered during Phase 4.3 integration testing. Details in [implementation_plan.md §N.7](file:///c:/dev/git/EDDI/docs/v6-planning/implementation_plan.md).
+| Fix       | Resolution                                                                                             |
+| --------- | ------------------------------------------------------------------------------------------------------ |
+| **N.7.1** | ✅ Verified: backend returns 201. The 200 was Vite dev proxy stripping status code. No fix needed.     |
+| **N.7.2** | ✅ Added `?permanent=true` to all 8 store DELETE endpoints. Default stays soft-delete.                 |
+| **N.7.3** | ✅ `getDeploymentStatus` returns JSON `{"status":"READY"}` by default. `?format=text` backward compat. |
+| **N.7.4** | ✅ Deferred — Quarkus dev-mode issue, `/q/health/live` workaround sufficient.                          |
 
-| Fix       | Issue                                            | Key Files                                                   | Notes                                                                                                                                       |
-| --------- | ------------------------------------------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| **N.7.1** | Duplicate POST returns 200 instead of 201        | `RestBotStore.java`, `RestPackageStore.java`                | ⚠️ `restVersionInfo.create()` already returns `Response.created(201)` — **verify if Vite proxy strips it**. Test against port 7070 directly |
-| **N.7.2** | DELETE inconsistent across stores (soft vs hard) | `RestVersionInfo.java`, LangChain MongoDB store             | LangChain returns 404 for older versions, others return 409. Proposal: `?permanent=true` param                                              |
-| **N.7.3** | Deployment status returns plain text not JSON    | `IRestBotAdministration.java`, `RestBotAdministration.java` | Change `@Produces(TEXT_PLAIN)` → JSON. **Breaking**: update `TestCaseRuntime.java` too                                                      |
-| **N.7.4** | Health endpoint returns HTML on failure          | Quarkus dev-mode issue                                      | **Defer** — `/q/health/live` workaround is sufficient                                                                                       |
-
-**How to start**: Build EDDI from source (`.\mvnw.cmd quarkus:dev -DskipTests "-Dquarkus.http.port=7070"`), verify N.7.1 with direct curl, then fix N.7.2 and N.7.3. Run EDDI integration tests (`.\mvnw.cmd test`) + Manager integration tests (`npm run test:integration`) to verify.
+Manager tests updated: `integration-helpers.ts` and `deployment.integration.spec.ts` now parse JSON.
 
 **Phase 5+ (future):**
 
@@ -141,12 +139,3 @@ Phase 3 (Manager UI Rewrite) is functionally complete through Phase 3.21. Phase 
 - Pre-commit hook references old `pre-commit` npm package — use `--no-verify` for now
 - Package duplicate not implemented (no backend endpoint for it yet)
 - JSON Schema mock data is minimal (empty `properties`); real schemas come from backend at runtime
-
-### Backend API Issues Found During Integration Testing (2026-03-09)
-
-| Issue                                       | Current Behavior                                                                        | Expected                                     | Proposal                                               |
-| ------------------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------ |
-| **Duplicate POST status code**              | Returns 200                                                                             | Should return **201** (new resource created) | Fix status codes in `RestBotStore`, `RestPackageStore` |
-| **DELETE inconsistency across stores**      | Most stores soft-delete (409 if newer version exists), but LangChain hard-deletes (404) | Consistent behavior across all stores        | Add `?permanent=true` query param for hard delete      |
-| **Deployment status format**                | Returns plain text (`READY`, `NOT_FOUND`)                                               | JSON for consistency with other endpoints    | Wrap in `{"status": "READY"}`                          |
-| **Health endpoint on dev-services failure** | Returns HTML error page                                                                 | JSON error body                              | Quarkus dev mode issue — may need custom error handler |
