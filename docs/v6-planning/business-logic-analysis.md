@@ -221,11 +221,11 @@ STEP 4 (User: "Hello! I am your assistant."):
 
 ### API Issues Found
 
-| Issue                                | Severity  | Description                                                                                                                                                                                                                    |
-| ------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **POST say returns 500**             | 🟡 Medium | The POST to `/bots/{env}/{botId}/{convId}` with `AsyncResponse` consistently returns 500, but the conversation processes correctly. The state is visible via GET. This is an `AsyncResponse` timeout issue in `RestBotEngine`. |
-| **hexString error on detailed read** | 🟢 Low    | `GET /bots/{env}/{botId}/{convId}?returnDetailed=true` fails with "hexString has 24 characters" — likely a MongoDB ObjectId parsing issue in the detailed response serialization.                                              |
-| **No error body on 500**             | 🟡 Medium | 500 responses return no JSON error body, making debugging difficult. The server log at INFO level shows no stack traces.                                                                                                       |
+| Issue                                | Severity  | Description                                                                                                                                                                                                                                                  |
+| ------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **~~POST say returns 500~~**         | ✅ Fixed  | ~~The POST to `/bots/{env}/{botId}/{convId}` with `AsyncResponse` consistently returned 500.~~ **FIXED in v6**: Now returns 200 with a full conversation JSON snapshot including `conversationState: "READY"`. Confirmed via integration tests (2026-03-09). |
+| **hexString error on detailed read** | 🟢 Low    | `GET /bots/{env}/{botId}/{convId}?returnDetailed=true` fails with "hexString has 24 characters" — likely a MongoDB ObjectId parsing issue in the detailed response serialization.                                                                            |
+| **No error body on 500**             | 🟡 Medium | 500 responses return no JSON error body, making debugging difficult. The server log at INFO level shows no stack traces.                                                                                                                                     |
 
 ---
 
@@ -270,7 +270,7 @@ For EDDI's use case, **NATS** is the strongest fit:
 ### What Needs Improvement
 
 - ⚠️ URI-based references with hardcoded string positions are fragile
-- ⚠️ The `AsyncResponse` pattern causes 500 errors even when conversations process correctly
+- ~~⚠️ The `AsyncResponse` pattern causes 500 errors even when conversations process correctly~~ — **FIXED in v6** (returns 200 with JSON snapshot)
 - ⚠️ No error bodies in 500 responses makes debugging nearly impossible
 - ⚠️ Every LLM provider requires its own complete package copy (7 near-identical packages in Bot Father)
 - ⚠️ Packages execute strictly sequentially — no way to conditionally skip or parallelize
@@ -279,7 +279,7 @@ For EDDI's use case, **NATS** is the strongest fit:
 ### v6 Opportunities from This Analysis
 
 1. **Package inheritance/templates**: Instead of 7 duplicate packages for each LLM, define a base package with parameter overrides
-2. **Robust response handling**: Replace `AsyncResponse` with reactive streams (SSE/WebSocket)
+2. ~~**Robust response handling**: Replace `AsyncResponse` with reactive streams (SSE/WebSocket)~~ — **Done in v6** (POST /say now returns synchronous 200 with conversation snapshot)
 3. **Structured error responses**: Always return JSON error bodies with actionable messages
 4. **Reference system overhaul**: Replace hardcoded URI string manipulation with proper URI builders or a reference registry
 5. **Conditional package execution**: Allow packages to declare activation conditions (skip if not needed)

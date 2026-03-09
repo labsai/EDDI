@@ -21,7 +21,7 @@
         <langchain4j.version>1.11.0</langchain4j.version>
         <langchain4j-libs.version>1.11.0</langchain4j-libs.version>
         <infinispan.version>15.1.7.Final</infinispan.version>
-        <jandex-maven-plugin.version>3.3.1</jandex-maven-plugin.version>
+        <jandex-maven-plugin.version>3.5.3</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.5.4</surefire-plugin.version>
         <failsafe-plugin.version>3.5.4</failsafe-plugin.version>

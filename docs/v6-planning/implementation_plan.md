@@ -53,7 +53,7 @@ private final Map<Deployment.Environment, ConcurrentHashMap<BotId, IBot>> enviro
 **Problems:**
 
 - **Violates Single Responsibility**: REST request handling, conversation lifecycle management, memory loading, metrics recording, state caching — all in one class
-- **AsyncResponse pattern is fragile**: Timeout handlers, manual `response.resume()` calls, error handling scattered through callbacks
+- ~~**AsyncResponse pattern is fragile**: Timeout handlers, manual `response.resume()` calls, error handling scattered through callbacks~~ — **Fixed in v6**: POST /say now returns synchronous 200 with full conversation JSON snapshot
 - **No separation of controller/service**: Makes it impossible to call conversation logic from non-REST contexts (e.g., webhooks, MCP, scheduled tasks)
 
 **v6 Proposal:** Extract into:
@@ -2243,3 +2243,44 @@ Before starting implementation:
 - [ ] Chat UI builds cleanly (`npm run build`)
 - [ ] Node.js 20+ and npm 10+ installed
 - [ ] Git configured with conventional commit hooks (optional: [commitlint](https://commitlint.js.org/))
+
+---
+
+### N.7 Backend API Consistency Improvements (from Phase 4.3 Integration Testing)
+
+Issues discovered during real-backend integration testing (2026-03-09). These are non-blocking but should be addressed for API quality.
+
+#### N.7.1 Duplicate POST Returns 200 Instead of 201
+
+**Current**: `POST /botstore/bots/{id}?version={v}&deepCopy=false` returns `200`  
+**Expected**: `201 Created` with `Location` header (it already includes the location)  
+**Files**: `RestBotStore.java`, `RestPackageStore.java` — any store with duplicate/copy endpoints  
+**Fix**: Change response status to `201`
+
+#### N.7.2 DELETE Inconsistency Across Stores
+
+**Current behavior varies by store type:**
+
+- Most stores: soft-delete (marks as deleted, returns `200`). Returns `409 Conflict` if a newer version exists — even if the newer version is also soft-deleted
+- LangChain store: appears to hard-delete (returns `200` for latest version, `404` for older versions)
+
+**Proposal**:
+
+- Default: soft-delete (current majority behavior)
+- Add `?permanent=true` query param for hard-delete (cascading cleanup of all versions)
+- Soft-delete of resources should cascade to check if any bot/package still references them
+- Standardize so LangChain store uses the same soft-delete pattern
+
+#### N.7.3 Deployment Status Returns Plain Text
+
+**Current**: `GET /administration/{env}/deploymentstatus/{botId}?version={v}` returns plain text body: `READY`, `NOT_FOUND`, `IN_PROGRESS`, etc.  
+**Expected**: JSON: `{"status": "READY"}` or `{"status": "NOT_FOUND"}`  
+**Files**: `RestBotAdministration.java`  
+**Fix**: Wrap in JSON object, set `Content-Type: application/json`
+
+#### N.7.4 Health Endpoint Returns HTML on Dev-Services Failure
+
+**Current**: When Quarkus dev-services fail to start (e.g., port 27017 occupied), `/q/health` returns an HTML error page instead of JSON  
+**Impact**: Health check consumers (integration tests, monitoring) can't parse the response  
+**Workaround**: Use `/q/health/live` (liveness-only) which is more reliable  
+**Fix**: Configure Quarkus error handler to always return JSON for health endpoints
