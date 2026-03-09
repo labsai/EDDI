@@ -150,8 +150,8 @@ public class RestBotStore implements IRestBotStore {
     }
 
     @Override
-    public Response deleteBot(String id, Integer version) {
-        return restVersionInfo.delete(id, version);
+    public Response deleteBot(String id, Integer version, Boolean permanent) {
+        return restVersionInfo.delete(id, version, permanent);
     }
 
     @Override

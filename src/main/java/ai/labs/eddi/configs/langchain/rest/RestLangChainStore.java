@@ -10,7 +10,6 @@ import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -30,8 +29,8 @@ public class RestLangChainStore implements IRestLangChainStore {
 
     @Inject
     public RestLangChainStore(ILangChainStore httpCallsStore,
-                              IDocumentDescriptorStore documentDescriptorStore,
-                              IJsonSchemaCreator jsonSchemaCreator) {
+            IDocumentDescriptorStore documentDescriptorStore,
+            IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, httpCallsStore, documentDescriptorStore);
         this.httpCallsStore = httpCallsStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
@@ -67,8 +66,8 @@ public class RestLangChainStore implements IRestLangChainStore {
     }
 
     @Override
-    public Response deleteLangChain(String id, Integer version) {
-        return restVersionInfo.delete(id, version);
+    public Response deleteLangChain(String id, Integer version, Boolean permanent) {
+        return restVersionInfo.delete(id, version, permanent);
     }
 
     @Override

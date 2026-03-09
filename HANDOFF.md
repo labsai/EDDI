@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-06 by conversation `015295f8`
+> **Last updated:** 2026-03-09 by conversation `ed2313be`
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -130,15 +130,28 @@
 
 > **Note:** `EDDI-integration-tests` repo is now fully superseded. All tests migrated into main repo.
 
+### Phase 3: API Consistency Fixes (N.7) ✅
+
+- [x] **N.7.1** — Verified `restVersionInfo.create()` returns 201; duplicate POST 200 was Vite proxy issue. No backend change needed.
+- [x] **N.7.2** — Added `?permanent=true` query parameter to all 8 store DELETE endpoints (interfaces + implementations). Default stays soft-delete.
+- [x] **N.7.3** — `getDeploymentStatus` now returns JSON `{"status":"READY"}` by default. `?format=text` backward compat. Updated `TestCaseRuntime`, all integration tests, and Manager integration tests.
+- [x] **N.7.4** — Deferred — Quarkus dev-mode HTML health response; `/q/health/live` workaround sufficient.
+
+**Key files:**
+
+- `IRestBotAdministration.java`, `RestBotAdministration.java` — deployment status JSON
+- `RestVersionInfo.java` — `delete(id, version, permanent)` overload
+- All 8 `IRest*Store` interfaces and `Rest*Store` implementations — `?permanent` param
+- All integration tests updated for JSON deployment status
+
 ## Next Up
 
-All Phase 1 + Phase 2 items complete. Next: Phase 3 (see `docs/v6-planning/implementation_plan.md`).
+All Phase 1 + Phase 2 + N.7 items complete. Next: Phase 3 Manager (see `docs/v6-planning/implementation_plan.md`), then Phase 4.4+.
 
 ## Important Rules
 
 - All work on **`feature/version-6.0.0`** branch (never `main`)
 - Read `AGENTS.md` for development order and guidelines
-- Read `GEMINI.md` (user rules) for Java coding standards
 - Read `docs/v6-planning/` for architecture analysis, changelog, and business logic analysis
 - Commit often with conventional commits
 - Run `.\mvnw test` before committing

@@ -76,10 +76,18 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
     }
 
     public Response delete(String id, Integer version) {
+        return delete(id, version, false);
+    }
+
+    public Response delete(String id, Integer version, boolean permanent) {
         version = validateParameters(id, version);
 
         try {
-            resourceStore.delete(id, version);
+            if (permanent) {
+                resourceStore.deleteAllPermanently(id);
+            } else {
+                resourceStore.delete(id, version);
+            }
             return Response.ok().build();
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException
                 | IResourceStore.ResourceNotFoundException e) {

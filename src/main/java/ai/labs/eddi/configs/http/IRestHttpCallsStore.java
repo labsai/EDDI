@@ -16,7 +16,8 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3) HttpCalls", authorizations = {@Authorization(value = "eddi_auth")})
+// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3)
+// HttpCalls", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/httpcallsstore/httpcalls")
 @Tag(name = "03. Httpcalls", description = "lifecycle extension for package")
 public interface IRestHttpCallsStore extends IRestVersionInfo {
@@ -35,24 +36,23 @@ public interface IRestHttpCallsStore extends IRestVersionInfo {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of httpCalls descriptors.")
     List<DocumentDescriptor> readHttpCallsDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-                                                      @QueryParam("index") @DefaultValue("0") Integer index,
-                                                      @QueryParam("limit") @DefaultValue("20") Integer limit);
+            @QueryParam("index") @DefaultValue("0") Integer index,
+            @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read httpCalls.")
     HttpCallsConfiguration readHttpCalls(@PathParam("id") String id,
-                                         @Parameter(name = "version", required = true, example = "1")
-                                         @QueryParam("version") Integer version);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update httpCalls.")
     Response updateHttpCalls(@PathParam("id") String id,
-                             @Parameter(name = "version", required = true, example = "1")
-                             @QueryParam("version") Integer version, HttpCallsConfiguration httpCallsConfiguration);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            HttpCallsConfiguration httpCallsConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -68,6 +68,6 @@ public interface IRestHttpCallsStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(description = "Delete httpCalls.")
     Response deleteHttpCalls(@PathParam("id") String id,
-                             @Parameter(name = "version", required = true, example = "1")
-                             @QueryParam("version") Integer version);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
 }

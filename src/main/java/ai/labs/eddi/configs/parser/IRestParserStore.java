@@ -17,7 +17,8 @@ import java.util.List;
  * @author ginccc
  */
 
-// @Api(value = "Configurations -> Endpoint Parser Only", authorizations = {@Authorization(value = "eddi_auth")})
+// @Api(value = "Configurations -> Endpoint Parser Only", authorizations =
+// {@Authorization(value = "eddi_auth")})
 @Path("/parserstore/parsers")
 @Tag(name = "12. Standalone NLP", description = "lifecycle extension for package")
 public interface IRestParserStore extends IRestVersionInfo {
@@ -29,9 +30,8 @@ public interface IRestParserStore extends IRestVersionInfo {
     @APIResponse(responseCode = "200", description = "Array of DocumentDescriptors")
     @Operation(description = "Read list of parser descriptors.")
     List<DocumentDescriptor> readParserDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-                                                   @QueryParam("index") @DefaultValue("0") Integer index,
-                                                   @QueryParam("limit") @DefaultValue("20") Integer limit);
-
+            @QueryParam("index") @DefaultValue("0") Integer index,
+            @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
@@ -39,17 +39,15 @@ public interface IRestParserStore extends IRestVersionInfo {
     @APIResponse(responseCode = "200", description = "configuration of parser")
     @Operation(description = "Read parser.")
     ParserConfiguration readParser(@PathParam("id") String id,
-                                   @Parameter(name = "version", required = true, example = "1")
-                                   @QueryParam("version") Integer version);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update parser.")
     Response updateParser(@PathParam("id") String id,
-                          @Parameter(name = "version", required = true, example = "1")
-                          @QueryParam("version") Integer version,
-                          ParserConfiguration parserConfiguration);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            ParserConfiguration parserConfiguration);
 
     /**
      * example parser json config:
@@ -78,7 +76,8 @@ public interface IRestParserStore extends IRestVersionInfo {
      * {
      * "type": "eddi://ai.labs.parser.dictionaries.regular",
      * "config": {
-     * "uri": "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/<INSERT_ID_OF_DICTIONARY>?version=<VERSION_NUMBER>"
+     * "uri":
+     * "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/<INSERT_ID_OF_DICTIONARY>?version=<VERSION_NUMBER>"
      * }
      * }
      * ],
@@ -95,7 +94,8 @@ public interface IRestParserStore extends IRestVersionInfo {
      * ]}
      * }
      *
-     * @param parserConfiguration configuration of parser (which dictionaries and which corrections algorithms in which order)
+     * @param parserConfiguration configuration of parser (which dictionaries and
+     *                            which corrections algorithms in which order)
      * @return an array of expressions representing the found solutions
      */
     @POST
@@ -112,6 +112,6 @@ public interface IRestParserStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(description = "Delete parser.")
     Response deleteParser(@PathParam("id") String id,
-                          @Parameter(name = "version", required = true, example = "1")
-                          @QueryParam("version") Integer version);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
 }

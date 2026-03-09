@@ -8,26 +8,22 @@ import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
-import org.jboss.logging.Logger;
-import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
+
 import java.util.List;
+
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 /**
  * @author ginccc
  */
-
 @ApplicationScoped
 public class RestBehaviorStore implements IRestBehaviorStore {
     private final IBehaviorStore behaviorStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<BehaviorConfiguration> restVersionInfo;
-
-    private static final Logger log = Logger.getLogger(RestBehaviorStore.class);
 
     @Inject
     public RestBehaviorStore(IBehaviorStore behaviorStore,
@@ -68,8 +64,8 @@ public class RestBehaviorStore implements IRestBehaviorStore {
     }
 
     @Override
-    public Response deleteBehaviorRuleSet(String id, Integer version) {
-        return restVersionInfo.delete(id, version);
+    public Response deleteBehaviorRuleSet(String id, Integer version, Boolean permanent) {
+        return restVersionInfo.delete(id, version, permanent);
     }
 
     @Override

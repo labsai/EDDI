@@ -82,8 +82,8 @@ public class RestRegularDictionaryStore implements IRestRegularDictionaryStore {
     }
 
     @Override
-    public Response deleteRegularDictionary(String id, Integer version) {
-        return restVersionInfo.delete(id, version);
+    public Response deleteRegularDictionary(String id, Integer version, Boolean permanent) {
+        return restVersionInfo.delete(id, version, permanent);
     }
 
     @Override

@@ -23,7 +23,7 @@ public class RestParserStore implements IRestParserStore {
 
     @Inject
     public RestParserStore(IParserStore parserStore,
-                           IDocumentDescriptorStore documentDescriptorStore) {
+            IDocumentDescriptorStore documentDescriptorStore) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, parserStore, documentDescriptorStore);
         this.parserStore = parserStore;
     }
@@ -49,8 +49,8 @@ public class RestParserStore implements IRestParserStore {
     }
 
     @Override
-    public Response deleteParser(String id, Integer version) {
-        return restVersionInfo.delete(id, version);
+    public Response deleteParser(String id, Integer version, Boolean permanent) {
+        return restVersionInfo.delete(id, version, permanent);
     }
 
     @Override

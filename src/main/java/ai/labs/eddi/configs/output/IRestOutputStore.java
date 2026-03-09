@@ -17,7 +17,8 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3) Output", authorizations = {@Authorization(value = "eddi_auth")})
+// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3)
+// Output", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/outputstore/outputsets")
 @Tag(name = "05. Output", description = "lifecycle extension for package")
 public interface IRestOutputStore extends IRestVersionInfo {
@@ -37,38 +38,36 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of output descriptors.")
     List<DocumentDescriptor> readOutputDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-                                                   @QueryParam("index") @DefaultValue("0") Integer index,
-                                                   @QueryParam("limit") @DefaultValue("20") Integer limit);
+            @QueryParam("index") @DefaultValue("0") Integer index,
+            @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read output.")
     OutputConfigurationSet readOutputSet(@PathParam("id") String id,
-                                         @Parameter(name = "version", required = true, example = "1")
-                                         @QueryParam("version") Integer version,
-                                         @QueryParam("filter") @DefaultValue("") String filter,
-                                         @QueryParam("order") @DefaultValue("") String order,
-                                         @QueryParam("index") @DefaultValue("0") Integer index,
-                                         @QueryParam("limit") @DefaultValue("0") Integer limit);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            @QueryParam("filter") @DefaultValue("") String filter,
+            @QueryParam("order") @DefaultValue("") String order,
+            @QueryParam("index") @DefaultValue("0") Integer index,
+            @QueryParam("limit") @DefaultValue("0") Integer limit);
 
     @GET
     @Path("/{id}/outputKeys")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read output keys.")
     List<String> readOutputKeys(@PathParam("id") String id,
-                                @Parameter(name = "version", required = true, example = "1")
-                                @QueryParam("version") Integer version,
-                                @QueryParam("filter") @DefaultValue("") String filter,
-                                @QueryParam("limit") @DefaultValue("20") Integer limit);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            @QueryParam("filter") @DefaultValue("") String filter,
+            @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update output.")
     Response updateOutputSet(@PathParam("id") String id,
-                             @Parameter(name = "version", required = true, example = "1")
-                             @QueryParam("version") Integer version, OutputConfigurationSet outputConfigurationSet);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            OutputConfigurationSet outputConfigurationSet);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -84,13 +83,13 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(description = "Delete output.")
     Response deleteOutputSet(@PathParam("id") String id,
-                             @Parameter(name = "version", required = true, example = "1")
-                             @QueryParam("version") Integer version);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
 
     @PATCH
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     Response patchOutputSet(@PathParam("id") String id,
-                            @Parameter(name = "version", required = true, example = "1")
-                            @QueryParam("version") Integer version, List<PatchInstruction<OutputConfigurationSet>> patchInstructions);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            List<PatchInstruction<OutputConfigurationSet>> patchInstructions);
 }

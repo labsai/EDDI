@@ -39,8 +39,9 @@ class BotDeploymentComponentIT extends BaseIntegrationIT {
 
                 // Poll for READY
                 for (int i = 0; i < 30; i++) {
-                        Response response = given().accept(ContentType.TEXT)
-                                        .get(String.format("administration/unrestricted/deploymentstatus/%s?version=%s",
+                        Response response = given()
+                                        .get(String.format(
+                                                        "administration/unrestricted/deploymentstatus/%s?version=%s&format=text",
                                                         botId.id(), botId.version()));
                         String status = response.getBody().print().trim();
                         if ("READY".equals(status)) {
@@ -83,13 +84,13 @@ class BotDeploymentComponentIT extends BaseIntegrationIT {
                 deployBot(botId.id(), botId.version());
 
                 Response response = given()
-                                .accept(ContentType.TEXT)
                                 .get(String.format("administration/unrestricted/deploymentstatus/%s?version=%s",
                                                 botId.id(), botId.version()));
 
                 response.then().assertThat()
                                 .statusCode(200)
-                                .body(equalTo("READY"));
+                                .contentType(ContentType.JSON)
+                                .body("status", equalTo("READY"));
         }
 
         // ==================== Helpers ====================

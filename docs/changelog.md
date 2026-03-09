@@ -41,6 +41,32 @@ Each entry follows this format:
 
 ## Implementation Log
 
+### 2026-03-09 — Backend API Consistency Fixes (N.7)
+
+**Repo:** EDDI + EDDI-Manager
+**Branch:** `feature/version-6.0.0`
+**Phase:** N.7 (Backend fixes discovered during Phase 4.3 integration testing)
+
+**What changed:**
+
+1. **N.7.1 — Duplicate POST status code**: Verified `RestVersionInfo.create()` returns 201. The 200 observed in Manager tests was caused by Vite dev proxy stripping 201→200. No backend change needed.
+2. **N.7.2 — DELETE `?permanent=true`**: Added optional `?permanent=true` query parameter to all 8 store DELETE endpoints. Soft delete remains default. When `permanent=true`, calls `resourceStore.deleteAllPermanently(id)`.
+   - Modified: `RestVersionInfo.java`, all 8 `IRest*Store` interfaces and `Rest*Store` implementations
+3. **N.7.3 — Deployment status JSON** (**BREAKING**): `GET /administration/{env}/deploymentstatus/{botId}` now returns `{"status":"READY"}` (JSON) instead of plain text `READY`. Use `?format=text` for backward compatibility (deprecated).
+   - Modified: `IRestBotAdministration.java`, `RestBotAdministration.java`, `TestCaseRuntime.java`
+   - Tests: `BotDeploymentComponentIT`, `BaseIntegrationIT`, `BotUseCaseIT`, `BotEngineIT`
+   - Manager: `integration-helpers.ts`, `deployment.integration.spec.ts`
+4. **N.7.4 — Health endpoint**: Deferred — Quarkus dev-mode issue, `/q/health/live` workaround sufficient.
+
+**Key decisions:**
+
+- **`?format` query param over Accept header** — simpler for curl/debugging, avoids Content-Negotiation complexity
+- **`?permanent=false` default** — backward compatible, no existing client behavior changes
+
+**Testing:** Maven `compile -q` passes (exit 0). Manager TypeScript compiles clean. Full integration tests pending.
+
+---
+
 ### 2026-03-07 — Manager UI: Bot Editor (Version Picker, Env Badges, Duplicate)
 
 **Repo:** EDDI-Manager  

@@ -8,31 +8,27 @@ import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
-import org.jboss.logging.Logger;
-import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
+
 import java.util.List;
+
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 /**
  * @author ginccc
  */
-
 @ApplicationScoped
 public class RestPropertySetterStore implements IRestPropertySetterStore {
     private final IPropertySetterStore propertySetterStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<PropertySetterConfiguration> restVersionInfo;
 
-    private static final Logger log = Logger.getLogger(RestPropertySetterStore.class);
-
     @Inject
     public RestPropertySetterStore(IPropertySetterStore propertySetterStore,
-                                   IDocumentDescriptorStore documentDescriptorStore,
-                                   IJsonSchemaCreator jsonSchemaCreator) {
+            IDocumentDescriptorStore documentDescriptorStore,
+            IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, propertySetterStore, documentDescriptorStore);
         this.propertySetterStore = propertySetterStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
@@ -58,7 +54,8 @@ public class RestPropertySetterStore implements IRestPropertySetterStore {
     }
 
     @Override
-    public Response updatePropertySetter(String id, Integer version, PropertySetterConfiguration propertySetterConfiguration) {
+    public Response updatePropertySetter(String id, Integer version,
+            PropertySetterConfiguration propertySetterConfiguration) {
         return restVersionInfo.update(id, version, propertySetterConfiguration);
     }
 
@@ -68,8 +65,8 @@ public class RestPropertySetterStore implements IRestPropertySetterStore {
     }
 
     @Override
-    public Response deletePropertySetter(String id, Integer version) {
-        return restVersionInfo.delete(id, version);
+    public Response deletePropertySetter(String id, Integer version, Boolean permanent) {
+        return restVersionInfo.delete(id, version, permanent);
     }
 
     @Override

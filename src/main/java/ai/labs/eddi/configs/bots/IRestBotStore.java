@@ -17,80 +17,79 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (4) Bots", authorizations = {@Authorization(value = "eddi_auth")})
+// @Api(value = "Configurations -> (4) Bots", authorizations =
+// {@Authorization(value = "eddi_auth")})
 @Path("/botstore/bots")
 @Tag(name = "07. Bots", description = "bot configuration")
 public interface IRestBotStore extends IRestVersionInfo {
-    String resourceURI = "eddi://ai.labs.bot/botstore/bots/";
+        String resourceURI = "eddi://ai.labs.bot/botstore/bots/";
 
-    @GET
-    @Path("/jsonSchema")
-    @Produces(MediaType.APPLICATION_JSON)
-    @APIResponse(responseCode = "200", description = "JSON Schema (for validation).")
-    @Operation(description = "Read JSON Schema for bot definition.")
-    Response readJsonSchema();
+        @GET
+        @Path("/jsonSchema")
+        @Produces(MediaType.APPLICATION_JSON)
+        @APIResponse(responseCode = "200", description = "JSON Schema (for validation).")
+        @Operation(description = "Read JSON Schema for bot definition.")
+        Response readJsonSchema();
 
-    @GET
-    @Path("descriptors")
-    @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Read list of bot descriptors.")
-    List<DocumentDescriptor> readBotDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-                                                @QueryParam("index") @DefaultValue("0") Integer index,
-                                                @QueryParam("limit") @DefaultValue("20") Integer limit);
+        @GET
+        @Path("descriptors")
+        @Produces(MediaType.APPLICATION_JSON)
+        @Operation(description = "Read list of bot descriptors.")
+        List<DocumentDescriptor> readBotDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
+                        @QueryParam("index") @DefaultValue("0") Integer index,
+                        @QueryParam("limit") @DefaultValue("20") Integer limit);
 
-    @POST
-    @Path("descriptors")
-    @Consumes(MediaType.TEXT_PLAIN)
-    @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Read list of bot descriptors including a given packageUri.")
-    List<DocumentDescriptor> readBotDescriptors(
-            @QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index,
-            @QueryParam("limit") @DefaultValue("20") Integer limit,
-            @Parameter(name = "body", example = "eddi://ai.labs.package/packagestore/packages/ID?version=VERSION")
-            @DefaultValue("") String containingPackageUri,
-            @QueryParam("includePreviousVersions") @DefaultValue("false") Boolean includePreviousVersions);
+        @POST
+        @Path("descriptors")
+        @Consumes(MediaType.TEXT_PLAIN)
+        @Produces(MediaType.APPLICATION_JSON)
+        @Operation(description = "Read list of bot descriptors including a given packageUri.")
+        List<DocumentDescriptor> readBotDescriptors(
+                        @QueryParam("filter") @DefaultValue("") String filter,
+                        @QueryParam("index") @DefaultValue("0") Integer index,
+                        @QueryParam("limit") @DefaultValue("20") Integer limit,
+                        @Parameter(name = "body", example = "eddi://ai.labs.package/packagestore/packages/ID?version=VERSION") @DefaultValue("") String containingPackageUri,
+                        @QueryParam("includePreviousVersions") @DefaultValue("false") Boolean includePreviousVersions);
 
-    @GET
-    @Path("/{id}")
-    @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Read bot.")
-    BotConfiguration readBot(@PathParam("id") String id,
-                             @Parameter(name = "version", required = true, example = "1")
-                             @QueryParam("version") Integer version);
+        @GET
+        @Path("/{id}")
+        @Produces(MediaType.APPLICATION_JSON)
+        @Operation(description = "Read bot.")
+        BotConfiguration readBot(@PathParam("id") String id,
+                        @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
 
-    @PUT
-    @Path("/{id}")
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Operation(description = "Update bot.")
-    Response updateBot(@PathParam("id") String id,
-                       @Parameter(name = "version", required = true, example = "1")
-                       @QueryParam("version") Integer version, BotConfiguration botConfiguration);
+        @PUT
+        @Path("/{id}")
+        @Consumes(MediaType.APPLICATION_JSON)
+        @Operation(description = "Update bot.")
+        Response updateBot(@PathParam("id") String id,
+                        @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+                        BotConfiguration botConfiguration);
 
-    @PUT
-    @Path("/{id}/updateResourceUri")
-    @Consumes(MediaType.TEXT_PLAIN)
-    @Operation(description = "Update references to other resources within this bot resource.")
-    Response updateResourceInBot(@PathParam("id") String id,
-                                 @Parameter(name = "version", required = true, example = "1")
-                                 @QueryParam("version") Integer version, URI resourceURI);
+        @PUT
+        @Path("/{id}/updateResourceUri")
+        @Consumes(MediaType.TEXT_PLAIN)
+        @Operation(description = "Update references to other resources within this bot resource.")
+        Response updateResourceInBot(@PathParam("id") String id,
+                        @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+                        URI resourceURI);
 
-    @POST
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Operation(description = "Create bot.")
-    Response createBot(BotConfiguration botConfiguration);
+        @POST
+        @Consumes(MediaType.APPLICATION_JSON)
+        @Operation(description = "Create bot.")
+        Response createBot(BotConfiguration botConfiguration);
 
-    @POST
-    @Path("/{id}")
-    @Operation(description = "Duplicate this bot.")
-    Response duplicateBot(@PathParam("id") String id,
-                          @QueryParam("version") Integer version,
-                          @QueryParam("deepCopy") @DefaultValue("false") Boolean deepCopy);
+        @POST
+        @Path("/{id}")
+        @Operation(description = "Duplicate this bot.")
+        Response duplicateBot(@PathParam("id") String id,
+                        @QueryParam("version") Integer version,
+                        @QueryParam("deepCopy") @DefaultValue("false") Boolean deepCopy);
 
-    @DELETE
-    @Path("/{id}")
-    @Operation(description = "Delete bot.")
-    Response deleteBot(@PathParam("id") String id,
-                       @Parameter(name = "version", required = true, example = "1")
-                       @QueryParam("version") Integer version);
+        @DELETE
+        @Path("/{id}")
+        @Operation(description = "Delete bot.")
+        Response deleteBot(@PathParam("id") String id,
+                        @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+                        @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
 }

@@ -16,7 +16,8 @@ import static ai.labs.eddi.engine.model.Deployment.Environment;
 /**
  * @author ginccc
  */
-// @Api(value = "Bot Administration", authorizations = {@Authorization(value = "eddi_auth")})
+// @Api(value = "Bot Administration", authorizations = {@Authorization(value =
+// "eddi_auth")})
 @Path("/administration")
 @Tag(name = "08. Bot Administration", description = "Deploy & Undeploy Bots")
 public interface IRestBotAdministration {
@@ -24,35 +25,33 @@ public interface IRestBotAdministration {
     @Path("/{environment}/deploy/{botId}")
     @Operation(description = "Deploy bot.")
     Response deployBot(@PathParam("environment") Environment environment,
-                       @PathParam("botId") String botId,
-                       @Parameter(name = "version", required = true, example = "1")
-                       @QueryParam("version") Integer version,
-                       @QueryParam("autoDeploy") @DefaultValue("true") Boolean autoDeploy);
+            @PathParam("botId") String botId,
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            @QueryParam("autoDeploy") @DefaultValue("true") Boolean autoDeploy);
 
     @POST
     @Path("/{environment}/undeploy/{botId}")
     @Operation(description = "Undeploy bot.")
     Response undeployBot(@PathParam("environment") Environment environment,
-                         @PathParam("botId") String botId,
-                         @Parameter(name = "version", required = true, example = "1")
-                         @QueryParam("version") Integer version,
-                         @QueryParam("endAllActiveConversations") @DefaultValue("false") Boolean endAllActiveConversations,
-                         @QueryParam("undeployThisAndAllPreviousBotVersions") @DefaultValue("false") Boolean undeployThisAndAllPreviousBotVersions);
+            @PathParam("botId") String botId,
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            @QueryParam("endAllActiveConversations") @DefaultValue("false") Boolean endAllActiveConversations,
+            @QueryParam("undeployThisAndAllPreviousBotVersions") @DefaultValue("false") Boolean undeployThisAndAllPreviousBotVersions);
 
     @GET
     @NoCache
     @Path("/{environment}/deploymentstatus/{botId}")
-    @Produces(MediaType.TEXT_PLAIN)
-    @Operation(description = "Get deployment status.")
-    String getDeploymentStatus(@PathParam("environment") Environment environment,
-                               @PathParam("botId") String botId,
-                               @Parameter(name = "version", required = true, example = "1")
-                               @QueryParam("version") Integer version);
+    @Produces({ MediaType.APPLICATION_JSON, MediaType.TEXT_PLAIN })
+    @Operation(description = "Get deployment status. Returns JSON by default. Use ?format=text for plain text (deprecated).")
+    Response getDeploymentStatus(@PathParam("environment") Environment environment,
+            @PathParam("botId") String botId,
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            @QueryParam("format") @DefaultValue("json") String format);
 
     @GET
     @NoCache
     @Path("/{environment}/deploymentstatus")
     @Produces(MediaType.APPLICATION_JSON)
-    List<BotDeploymentStatus> getDeploymentStatuses(@PathParam("environment")
-                                                    @DefaultValue("unrestricted") Environment environment);
+    List<BotDeploymentStatus> getDeploymentStatuses(
+            @PathParam("environment") @DefaultValue("unrestricted") Environment environment);
 }

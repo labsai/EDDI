@@ -49,12 +49,12 @@ public class RestBotAdministration implements IRestBotAdministration {
 
     @Inject
     public RestBotAdministration(IRuntime runtime,
-                                 IBotFactory botFactory,
-                                 IDeploymentStore deploymentStore,
-                                 IConversationMemoryStore conversationMemoryStore,
-                                 IRestConversationStore restConversationStore,
-                                 IDocumentDescriptorStore documentDescriptorStore,
-                                 IDeploymentListener deploymentListener) {
+            IBotFactory botFactory,
+            IDeploymentStore deploymentStore,
+            IConversationMemoryStore conversationMemoryStore,
+            IRestConversationStore restConversationStore,
+            IDocumentDescriptorStore documentDescriptorStore,
+            IDeploymentListener deploymentListener) {
         this.runtime = runtime;
         this.botFactory = botFactory;
         this.deploymentStore = deploymentStore;
@@ -66,7 +66,7 @@ public class RestBotAdministration implements IRestBotAdministration {
 
     @Override
     public Response deployBot(final Deployment.Environment environment,
-                              final String botId, final Integer version, final Boolean autoDeploy) {
+            final String botId, final Integer version, final Boolean autoDeploy) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(version, "version");
@@ -82,7 +82,7 @@ public class RestBotAdministration implements IRestBotAdministration {
     }
 
     private void deploy(final Deployment.Environment environment,
-                        final String botId, final Integer version, final Boolean autoDeploy) {
+            final String botId, final Integer version, final Boolean autoDeploy) {
         Callable<Void> deployBot = () -> {
             try {
                 if (EnumSet.of(NOT_FOUND, ERROR).contains(checkDeploymentStatus(environment, botId, version))) {
@@ -108,7 +108,8 @@ public class RestBotAdministration implements IRestBotAdministration {
         runtime.submitCallable(deployBot, ThreadContext.getResources());
     }
 
-    private void handleDeploymentException(Exception e, String botId, Integer version, Deployment.Environment environment) {
+    private void handleDeploymentException(Exception e, String botId, Integer version,
+            Deployment.Environment environment) {
         deploymentListener.onDeploymentEvent(new DeploymentEvent(botId, version, environment, ERROR));
 
         if (e instanceof ServiceException) {
@@ -123,7 +124,7 @@ public class RestBotAdministration implements IRestBotAdministration {
 
     @Override
     public Response undeployBot(Deployment.Environment environment, String botId, Integer version,
-                                Boolean endAllActiveConversations, Boolean undeployThisAndAllPreviousBotVersions) {
+            Boolean endAllActiveConversations, Boolean undeployThisAndAllPreviousBotVersions) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(version, "version");
@@ -137,12 +138,14 @@ public class RestBotAdministration implements IRestBotAdministration {
                         restConversationStore.endActiveConversations(activeConversations);
                     } else {
                         var message = getConflictExplanations(botId, version, activeConversationCount);
-                        return Response.status(Response.Status.CONFLICT).entity(message).type(MediaType.TEXT_PLAIN).build();
+                        return Response.status(Response.Status.CONFLICT).entity(message).type(MediaType.TEXT_PLAIN)
+                                .build();
                     }
                 }
 
                 undeploy(environment, botId, version);
-                log.info(String.format("Successfully undeployed bot (botId=%s, botVersion=%s, environment=%s)", botId, version, environment));
+                log.info(String.format("Successfully undeployed bot (botId=%s, botVersion=%s, environment=%s)", botId,
+                        version, environment));
             } while (undeployThisAndAllPreviousBotVersions && version-- > 1);
 
             return Response.accepted().build();
@@ -155,12 +158,12 @@ public class RestBotAdministration implements IRestBotAdministration {
     private static String getConflictExplanations(String botId, Integer version, Long activeConversationCount) {
         var message = """
                 %s active (thus not ENDED) conversation(s) going on with this bot!\
-                
+
                 Check GET /conversationstore/conversations/active/%s?botVersion=%s \
                 to see active conversations and end conversations with \
                 POST /conversationstore/conversations/end , \
                 providing the list you receive with GET\
-                
+
                 In order to end all active conversations, the query param 'endAllActiveConversations' \
                 can be set to true.""";
         message = String.format(message, activeConversationCount, botId, version);
@@ -189,12 +192,21 @@ public class RestBotAdministration implements IRestBotAdministration {
     }
 
     @Override
-    public String getDeploymentStatus(Deployment.Environment environment, String botId, Integer version) {
+    public Response getDeploymentStatus(Deployment.Environment environment,
+            String botId,
+            Integer version,
+            String format) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(version, "version");
 
-        return checkDeploymentStatus(environment, botId, version).toString();
+        String status = checkDeploymentStatus(environment, botId, version).toString();
+
+        if ("text".equalsIgnoreCase(format)) {
+            return Response.ok(status, MediaType.TEXT_PLAIN).build();
+        }
+
+        return Response.ok(Map.of("status", status), MediaType.APPLICATION_JSON).build();
     }
 
     @Override
@@ -219,7 +231,8 @@ public class RestBotAdministration implements IRestBotAdministration {
             Collections.reverse(botDeploymentStatuses);
 
             return botDeploymentStatuses;
-        } catch (ServiceException | IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+        } catch (ServiceException | IResourceStore.ResourceStoreException
+                | IResourceStore.ResourceNotFoundException e) {
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }

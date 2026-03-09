@@ -36,7 +36,7 @@ public class TestCaseRuntime {
 
     @Inject
     public TestCaseRuntime(IRestInterfaceFactory restInterfaceFactory, IRuntime runtime,
-                           ITestCaseStore testCaseStore, IConversationMemoryStore conversationMemoryStore) {
+            ITestCaseStore testCaseStore, IConversationMemoryStore conversationMemoryStore) {
         this.restInterfaceFactory = restInterfaceFactory;
         this.runtime = runtime;
         this.testCaseStore = testCaseStore;
@@ -55,7 +55,8 @@ public class TestCaseRuntime {
                 ConversationMemorySnapshot actual = runTestCase(testCase.getBotId(), testCase);
                 testCase.setActual(actual);
                 testCase.setLastRun(new Date(System.currentTimeMillis()));
-                testCase.setTestCaseState(testCase.getExpected().equals(testCase.getActual()) ? TestCaseState.SUCCESS : TestCaseState.FAILED);
+                testCase.setTestCaseState(testCase.getExpected().equals(testCase.getActual()) ? TestCaseState.SUCCESS
+                        : TestCaseState.FAILED);
                 testCaseStore.storeTestCase(id, testCase);
             } catch (Exception e) {
                 testCaseStore.setTestCaseState(id, TestCaseState.ERROR);
@@ -69,7 +70,9 @@ public class TestCaseRuntime {
         IRestBotAdministration restBotAdministration = restInterfaceFactory.get(IRestBotAdministration.class);
         String deploymentStatus;
         do {
-            deploymentStatus = restBotAdministration.getDeploymentStatus(Deployment.Environment.test, botId, botVersion);
+            Response response = restBotAdministration.getDeploymentStatus(Deployment.Environment.test, botId,
+                    botVersion, "text");
+            deploymentStatus = response.readEntity(String.class);
             if (Objects.equals(deploymentStatus, Deployment.Status.IN_PROGRESS.toString())) {
                 Thread.sleep(1000);
             } else {
@@ -84,8 +87,11 @@ public class TestCaseRuntime {
         IRestBotAdministration restBotAdministration = restInterfaceFactory.get(IRestBotAdministration.class);
         restBotAdministration.deployBot(Deployment.Environment.test, botId, botVersion, false);
         while (true) {
-            //wait until deployment has finished
-            if (!Objects.equals(restBotAdministration.getDeploymentStatus(Deployment.Environment.test, botId, botVersion), Deployment.Status.IN_PROGRESS.toString())) {
+            // wait until deployment has finished
+            Response response = restBotAdministration.getDeploymentStatus(Deployment.Environment.test, botId,
+                    botVersion, "text");
+            String status = response.readEntity(String.class);
+            if (!Objects.equals(status, Deployment.Status.IN_PROGRESS.toString())) {
                 break;
             } else {
                 Thread.sleep(1000);
@@ -96,15 +102,19 @@ public class TestCaseRuntime {
     private ConversationMemorySnapshot runTestCase(String botId, TestCase testCase) throws Exception {
         IRestBotEngine botEngine = restInterfaceFactory.get(IRestBotEngine.class);
 
-        Response ConversationResponse = botEngine.startConversation(Deployment.Environment.test, botId, "testCaseRunner");
+        Response ConversationResponse = botEngine.startConversation(Deployment.Environment.test, botId,
+                "testCaseRunner");
         URI conversationURI = ConversationResponse.getLocation();
         String conversationURIPath = conversationURI.getPath();
         String conversationId = conversationURIPath.substring(conversationURIPath.lastIndexOf("/") + 1);
         ConversationMemorySnapshot expected = testCase.getExpected();
-        List<ConversationMemorySnapshot.ConversationStepSnapshot> expectedConversationSteps = expected.getConversationSteps();
-        //we skip the first one, since the initial run has already been done at this point (at startConversation)
+        List<ConversationMemorySnapshot.ConversationStepSnapshot> expectedConversationSteps = expected
+                .getConversationSteps();
+        // we skip the first one, since the initial run has already been done at this
+        // point (at startConversation)
         for (int i = 1; i < expectedConversationSteps.size(); i++) {
-            ConversationMemorySnapshot.ConversationStepSnapshot expectedConversationStep = expectedConversationSteps.get(i);
+            ConversationMemorySnapshot.ConversationStepSnapshot expectedConversationStep = expectedConversationSteps
+                    .get(i);
             String input = getFirstInput(expectedConversationStep);
             if (RuntimeUtilities.isNullOrEmpty(input)) {
                 input = " ";
@@ -112,7 +122,8 @@ public class TestCaseRuntime {
             botEngine.say(Deployment.Environment.test, botId, conversationId,
                     true, false,
                     Collections.emptyList(), input, new MockAsyncResponse());
-            while (botEngine.getConversationState(Deployment.Environment.test, conversationId) == ConversationState.IN_PROGRESS) {
+            while (botEngine.getConversationState(Deployment.Environment.test,
+                    conversationId) == ConversationState.IN_PROGRESS) {
                 Thread.sleep(1000);
             }
         }

@@ -16,7 +16,8 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3) LangChain", authorizations = {@Authorization(value = "eddi_auth")})
+// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3)
+// LangChain", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/langchainstore/langchains")
 @Tag(name = "03. LangChains", description = "lifecycle extension for package")
 public interface IRestLangChainStore extends IRestVersionInfo {
@@ -35,24 +36,23 @@ public interface IRestLangChainStore extends IRestVersionInfo {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of langChain descriptors.")
     List<DocumentDescriptor> readLangChainDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-                                                      @QueryParam("index") @DefaultValue("0") Integer index,
-                                                      @QueryParam("limit") @DefaultValue("20") Integer limit);
+            @QueryParam("index") @DefaultValue("0") Integer index,
+            @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read langChain.")
     LangChainConfiguration readLangChain(@PathParam("id") String id,
-                                         @Parameter(name = "version", required = true, example = "1")
-                                         @QueryParam("version") Integer version);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update langChain.")
     Response updateLangChain(@PathParam("id") String id,
-                             @Parameter(name = "version", required = true, example = "1")
-                             @QueryParam("version") Integer version, LangChainConfiguration langChainConfiguration);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            LangChainConfiguration langChainConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -68,6 +68,6 @@ public interface IRestLangChainStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(description = "Delete langChain.")
     Response deleteLangChain(@PathParam("id") String id,
-                             @Parameter(name = "version", required = true, example = "1")
-                             @QueryParam("version") Integer version);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
 }

@@ -151,8 +151,8 @@ public class RestPackageStore implements IRestPackageStore {
     }
 
     @Override
-    public Response deletePackage(String id, Integer version) {
-        return restVersionInfo.delete(id, version);
+    public Response deletePackage(String id, Integer version, Boolean permanent) {
+        return restVersionInfo.delete(id, version, permanent);
     }
 
     @Override

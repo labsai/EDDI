@@ -84,8 +84,8 @@ public class RestOutputStore implements IRestOutputStore {
     }
 
     @Override
-    public Response deleteOutputSet(String id, Integer version) {
-        return restVersionInfo.delete(id, version);
+    public Response deleteOutputSet(String id, Integer version, Boolean permanent) {
+        return restVersionInfo.delete(id, version, permanent);
     }
 
     @Override

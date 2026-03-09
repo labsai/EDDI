@@ -16,7 +16,8 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (0) PropertySetter", authorizations = {@Authorization(value = "eddi_auth")})
+// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (0)
+// PropertySetter", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/propertysetterstore/propertysetters")
 @Tag(name = "03. Properties", description = "lifecycle extension for package")
 public interface IRestPropertySetterStore extends IRestVersionInfo {
@@ -35,24 +36,23 @@ public interface IRestPropertySetterStore extends IRestVersionInfo {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of propertySetter descriptors.")
     List<DocumentDescriptor> readPropertySetterDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-                                                           @QueryParam("index") @DefaultValue("0") Integer index,
-                                                           @QueryParam("limit") @DefaultValue("20") Integer limit);
+            @QueryParam("index") @DefaultValue("0") Integer index,
+            @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read propertySetter.")
     PropertySetterConfiguration readPropertySetter(@PathParam("id") String id,
-                                                   @Parameter(name = "version", required = true, example = "1")
-                                                   @QueryParam("version") Integer version);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update propertySetter.")
     Response updatePropertySetter(@PathParam("id") String id,
-                                  @Parameter(name = "version", required = true, example = "1")
-                                  @QueryParam("version") Integer version, PropertySetterConfiguration propertySetterConfiguration);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            PropertySetterConfiguration propertySetterConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -68,6 +68,6 @@ public interface IRestPropertySetterStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(description = "Delete propertySetter.")
     Response deletePropertySetter(@PathParam("id") String id,
-                                  @Parameter(name = "version", required = true, example = "1")
-                                  @QueryParam("version") Integer version);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
 }

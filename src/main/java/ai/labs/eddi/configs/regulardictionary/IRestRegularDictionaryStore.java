@@ -17,7 +17,8 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (1) Regular Dictionary", authorizations = {@Authorization(value = "eddi_auth")})
+// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (1)
+// Regular Dictionary", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/regulardictionarystore/regulardictionaries")
 @Tag(name = "01. Regular Dictionary", description = "lifecycle extension for package")
 public interface IRestRegularDictionaryStore extends IRestVersionInfo {
@@ -36,8 +37,8 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @APIResponse(responseCode = "200", description = "Array of DocumentDescriptors")
     @Operation(description = "Read list of regular dictionary descriptors.")
     List<DocumentDescriptor> readRegularDictionaryDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-                                                              @QueryParam("index") @DefaultValue("0") Integer index,
-                                                              @QueryParam("limit") @DefaultValue("20") Integer limit);
+            @QueryParam("index") @DefaultValue("0") Integer index,
+            @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
@@ -45,33 +46,30 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @APIResponse(responseCode = "200", description = "configuration of regular dictionary")
     @Operation(description = "Read regular dictionary.")
     RegularDictionaryConfiguration readRegularDictionary(@PathParam("id") String id,
-                                                         @Parameter(name = "version", required = true, example = "1")
-                                                         @QueryParam("version") Integer version,
-                                                         @QueryParam("filter") @DefaultValue("") String filter,
-                                                         @QueryParam("order") @DefaultValue("") String order,
-                                                         @QueryParam("index") @DefaultValue("0") Integer index,
-                                                         @QueryParam("limit") @DefaultValue("20") Integer limit);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            @QueryParam("filter") @DefaultValue("") String filter,
+            @QueryParam("order") @DefaultValue("") String order,
+            @QueryParam("index") @DefaultValue("0") Integer index,
+            @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}/expressions")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read expressions of regular dictionary.")
     List<String> readExpressions(@PathParam("id") String id,
-                                 @Parameter(name = "version", required = true, example = "1")
-                                 @QueryParam("version") Integer version,
-                                 @QueryParam("filter") @DefaultValue("") String filter,
-                                 @QueryParam("order") @DefaultValue("") String order,
-                                 @QueryParam("index") @DefaultValue("0") Integer index,
-                                 @QueryParam("limit") @DefaultValue("20") Integer limit);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            @QueryParam("filter") @DefaultValue("") String filter,
+            @QueryParam("order") @DefaultValue("") String order,
+            @QueryParam("index") @DefaultValue("0") Integer index,
+            @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update regular dictionary.")
     Response updateRegularDictionary(@PathParam("id") String id,
-                                     @Parameter(name = "version", required = true, example = "1")
-                                     @QueryParam("version") Integer version, RegularDictionaryConfiguration regularDictionaryConfiguration);
-
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            RegularDictionaryConfiguration regularDictionaryConfiguration);
 
     /**
      * example dictionary json config:
@@ -94,7 +92,8 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
      * }
      *
      * @param regularDictionaryConfiguration dictionary resource to be created
-     * @return no content, http code 201, see Location header for URI of the created resource
+     * @return no content, http code 201, see Location header for URI of the created
+     *         resource
      */
 
     @POST
@@ -111,15 +110,14 @@ public interface IRestRegularDictionaryStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(description = "Delete regular dictionary.")
     Response deleteRegularDictionary(@PathParam("id") String id,
-                                     @Parameter(name = "version", required = true, example = "1")
-                                     @QueryParam("version") Integer version);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
 
     @PATCH
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Partial update regular dictionary.")
     Response patchRegularDictionary(@PathParam("id") String id,
-                                    @Parameter(name = "version", required = true, example = "1")
-                                    @QueryParam("version") Integer version,
-                                    List<PatchInstruction<RegularDictionaryConfiguration>> patchInstructions);
+            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+            List<PatchInstruction<RegularDictionaryConfiguration>> patchInstructions);
 }
