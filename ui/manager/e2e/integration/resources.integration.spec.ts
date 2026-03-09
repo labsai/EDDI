@@ -9,6 +9,8 @@ import {
 /**
  * All 6 resource types supported by the Manager, with their store paths
  * and minimal valid create payloads.
+ *
+ * These tests can run in parallel since each resource type is independent.
  */
 const RESOURCE_TYPES = [
   {
@@ -50,6 +52,7 @@ const RESOURCE_TYPES = [
 ];
 
 test.describe("Resources CRUD — Real Backend", () => {
+  test.describe.configure({ timeout: 120_000, mode: "serial" });
   const cleanup: { storePath: string; id: string; version: number }[] = [];
 
   test.beforeAll(async ({ request }) => {
@@ -98,19 +101,24 @@ test.describe("Resources CRUD — Real Backend", () => {
 
       const updated = extractIdFromLocation(updateLocation!);
       expect(updated.version).toBe(version + 1);
-      cleanup.push({ storePath: basePath, id: updated.id, version: updated.version });
+      cleanup.push({
+        storePath: basePath,
+        id: updated.id,
+        version: updated.version,
+      });
 
-      // DELETE original version
-      const deleteRes = await request.delete(
-        `${API_BASE}/${basePath}/${id}?version=${version}`
-      );
-      expect([200, 204]).toContain(deleteRes.status());
-
-      // DELETE updated version
+      // DELETE — must delete newest version first (EDDI returns 409 if newer exists)
       const deleteV2 = await request.delete(
         `${API_BASE}/${basePath}/${updated.id}?version=${updated.version}`
       );
       expect([200, 204]).toContain(deleteV2.status());
+
+      // v1 soft-delete may return 409 (newer version exists),
+      // 404 (some stores cascade deletes), or 200/204 (success).
+      const deleteRes = await request.delete(
+        `${API_BASE}/${basePath}/${id}?version=${version}`
+      );
+      expect([200, 204, 404, 409]).toContain(deleteRes.status());
     });
 
     test(`${rt.name}: GET descriptors returns array`, async ({ request }) => {

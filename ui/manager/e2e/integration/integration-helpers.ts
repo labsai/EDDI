@@ -8,8 +8,10 @@ import { type APIRequestContext, expect } from "@playwright/test";
 export const API_BASE = "http://localhost:3000";
 
 /**
- * Poll the EDDI health endpoint until the backend is ready.
- * Tries directly against EDDI (7070) since health check is not proxied.
+ * Poll the EDDI liveness endpoint until the backend is ready.
+ * Uses /q/health/live (liveness-only) instead of /q/health to avoid
+ * blocking on the @Readiness BotsReadinessHealthCheck which may report
+ * DOWN if there's stale deployment state pointing to nonexistent bots.
  */
 export async function waitForBackend(
   request: APIRequestContext,
@@ -18,7 +20,9 @@ export async function waitForBackend(
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      const res = await request.get("http://localhost:7070/q/health");
+      const res = await request.get("http://localhost:7070/q/health/live", {
+        timeout: 5000,
+      });
       if (res.ok()) {
         const body = await res.json();
         if (body.status === "UP") return;
@@ -26,7 +30,7 @@ export async function waitForBackend(
     } catch {
       // Backend not up yet
     }
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(
     `Backend did not become healthy within ${timeoutMs / 1000}s`
@@ -35,25 +39,18 @@ export async function waitForBackend(
 
 /**
  * Parse an eddi:// URI or Location header to extract resource ID and version.
- * Examples:
- *   "eddi://ai.labs.bot/botstore/bots/abc123?version=1" → { id: "abc123", version: 1 }
- *   "/botstore/bots/abc123?version=1" → { id: "abc123", version: 1 }
+ *
+ * Real backend behavior:
+ *   CREATE:  "eddi://ai.labs.bot/botstore/bots/abc123"           → { id: "abc123", version: 1 }
+ *   UPDATE:  "eddi://ai.labs.bot/botstore/bots/abc123?version=2" → { id: "abc123", version: 2 }
+ *   CONV:    "eddi://ai.labs.conversation/conversationstore/conversations/abc123" → { id: "abc123", version: 1 }
  */
 export function extractIdFromLocation(location: string): {
   id: string;
   version: number;
 } {
-  const normalized = location
-    .replace("eddi://ai.labs.bot", "")
-    .replace("eddi://ai.labs.package", "")
-    .replace("eddi://ai.labs.behavior", "")
-    .replace("eddi://ai.labs.httpcalls", "")
-    .replace("eddi://ai.labs.output", "")
-    .replace("eddi://ai.labs.regulardictionary", "")
-    .replace("eddi://ai.labs.langchain", "")
-    .replace("eddi://ai.labs.property", "")
-    .replace("eddi://ai.labs.parser", "")
-    .replace("eddi://ai.labs.conversation", "");
+  // Strip eddi:// prefix — match anything up to the first store path
+  const normalized = location.replace(/^eddi:\/\/[^/]+/, "");
 
   const url = new URL(normalized, "http://dummy");
   const parts = url.pathname.split("/").filter(Boolean);
@@ -63,7 +60,7 @@ export function extractIdFromLocation(location: string): {
 }
 
 /**
- * Delete a resource for cleanup. Silently ignores 404.
+ * Delete a resource for cleanup. Silently ignores errors.
  */
 export async function cleanupResource(
   request: APIRequestContext,
@@ -79,17 +76,56 @@ export async function cleanupResource(
 }
 
 /**
- * Assert that a response returned a Location header with an eddi:// URI.
+ * Create a bot + package, deploy, and return all IDs for testing.
+ * Used by conversation and deployment tests to be fully self-contained.
  */
-export function expectLocationHeader(
-  headers: { [key: string]: string },
-  storePrefix: string
-) {
-  const location =
-    headers["location"] || headers["Location"] || "";
-  expect(location).toContain(storePrefix);
-  return location;
-}
+export async function createAndDeployBot(
+  request: APIRequestContext
+): Promise<{
+  botId: string;
+  botVersion: number;
+  packageId: string;
+  packageVersion: number;
+}> {
+  // Create package
+  const pkgRes = await request.post(`${API_BASE}/packagestore/packages`, {
+    data: { packageExtensions: [] },
+  });
+  expect(pkgRes.status()).toBe(201);
+  const pkgLoc = pkgRes.headers()["location"]!;
+  const pkg = extractIdFromLocation(pkgLoc);
 
-/** Unique test prefix to identify test-created resources */
-export const TEST_PREFIX = `__integration_test_${Date.now()}`;
+  // Create bot referencing the package
+  const botRes = await request.post(`${API_BASE}/botstore/bots`, {
+    data: { packages: [pkgLoc] },
+  });
+  expect(botRes.status()).toBe(201);
+  const botLoc = botRes.headers()["location"]!;
+  const bot = extractIdFromLocation(botLoc);
+
+  // Deploy
+  const deployRes = await request.post(
+    `${API_BASE}/administration/unrestricted/deploy/${bot.id}?version=${bot.version}`
+  );
+  expect([200, 202]).toContain(deployRes.status());
+
+  // Wait for deployment to complete
+  const start = Date.now();
+  while (Date.now() - start < 15_000) {
+    const statusRes = await request.get(
+      `${API_BASE}/administration/unrestricted/deploymentstatus/${bot.id}?version=${bot.version}`
+    );
+    if (statusRes.ok()) {
+      const statusText = await statusRes.text();
+      if (statusText.includes("READY")) break;
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+
+  return {
+    botId: bot.id,
+    botVersion: bot.version,
+    packageId: pkg.id,
+    packageVersion: pkg.version,
+  };
+}

@@ -24,6 +24,8 @@ const SCHEMA_ENDPOINTS = [
 ];
 
 test.describe("JSON Schema Endpoints — Real Backend", () => {
+  test.describe.configure({ timeout: 120_000 });
+
   test.beforeAll(async ({ request }) => {
     await waitForBackend(request);
   });

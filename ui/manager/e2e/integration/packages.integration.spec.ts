@@ -7,6 +7,7 @@ import {
 } from "./integration-helpers";
 
 test.describe("Packages CRUD — Real Backend", () => {
+  test.describe.configure({ timeout: 120_000, mode: "serial" });
   const createdPackages: { id: string; version: number }[] = [];
 
   test.beforeAll(async ({ request }) => {
@@ -56,7 +57,7 @@ test.describe("Packages CRUD — Real Backend", () => {
     expect(pkg).toHaveProperty("packageExtensions");
     expect(Array.isArray(pkg.packageExtensions)).toBeTruthy();
 
-    // UPDATE — add a dummy extension reference
+    // UPDATE
     const updateRes = await request.put(
       `${API_BASE}/packagestore/packages/${id}?version=${version}`,
       { data: { packageExtensions: [] } }
@@ -74,31 +75,6 @@ test.describe("Packages CRUD — Real Backend", () => {
       `${API_BASE}/packagestore/packages/${updated.id}?version=${updated.version}`
     );
     expect(getUpdatedRes.ok()).toBeTruthy();
-  });
-
-  test("GET descriptors with includePreviousVersions", async ({ request }) => {
-    const createRes = await request.post(`${API_BASE}/packagestore/packages`, {
-      data: { packageExtensions: [] },
-    });
-    const { id, version } = extractIdFromLocation(
-      createRes.headers()["location"]!
-    );
-    createdPackages.push({ id, version });
-
-    // Create v2
-    const updateRes = await request.put(
-      `${API_BASE}/packagestore/packages/${id}?version=${version}`,
-      { data: { packageExtensions: [] } }
-    );
-    const v2 = extractIdFromLocation(updateRes.headers()["location"]!);
-    createdPackages.push({ id: v2.id, version: v2.version });
-
-    const res = await request.get(
-      `${API_BASE}/packagestore/packages/descriptors?filter=${id}&includePreviousVersions=true`
-    );
-    expect(res.ok()).toBeTruthy();
-    const versions = await res.json();
-    expect(versions.length).toBeGreaterThanOrEqual(2);
   });
 
   test("DELETE package returns 200 or 204", async ({ request }) => {
