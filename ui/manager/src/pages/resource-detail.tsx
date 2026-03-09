@@ -1,10 +1,8 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, type ReactNode } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
-  ArrowLeft,
-  RefreshCw,
-  AlertCircle,
   FileCode,
   GitBranch,
   Globe,
@@ -15,6 +13,11 @@ import {
   Trash2,
   Copy,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { AlertDialog } from "@/components/ui/alert-dialog";
+import { ErrorState } from "@/components/shared/error-state";
+import { BackLink } from "@/components/shared/back-link";
 import { getResourceType } from "@/lib/api/resources";
 import {
   useResource,
@@ -31,6 +34,7 @@ import {
   findResourceUsage,
   type ResourceUsage,
 } from "@/lib/api/resource-usage";
+import { useJsonSchema } from "@/hooks/use-json-schema";
 import type { CascadeContext } from "@/lib/api/cascade-save";
 import {
   BehaviorEditor,
@@ -64,6 +68,31 @@ const ICON_MAP: Record<string, LucideIcon> = {
   BookOpen,
   Brain,
   Settings,
+};
+
+// Clean editor lookup — replaces the 6-level nested ternary
+const EDITOR_MAP: Record<
+  string,
+  (parsed: unknown, onChange: (val: unknown) => void, readOnly: boolean) => ReactNode
+> = {
+  behavior: (p, o, r) => (
+    <BehaviorEditor data={p as BehaviorConfig} onChange={o} readOnly={r} />
+  ),
+  httpcalls: (p, o, r) => (
+    <HttpCallsEditor data={p as HttpCallsConfig} onChange={o} readOnly={r} />
+  ),
+  langchain: (p, o, r) => (
+    <LangchainEditor data={p as LangchainConfig} onChange={o} readOnly={r} />
+  ),
+  output: (p, o, r) => (
+    <OutputEditor data={p as OutputConfig} onChange={o} readOnly={r} />
+  ),
+  propertysetter: (p, o, r) => (
+    <PropertySetterEditor data={p as PropertySetterConfig} onChange={o} readOnly={r} />
+  ),
+  dictionaries: (p, o, r) => (
+    <DictionaryEditor data={p as DictionaryConfig} onChange={o} readOnly={r} />
+  ),
 };
 
 export function ResourceDetailPage() {
@@ -106,9 +135,13 @@ export function ResourceDetailPage() {
   const deleteMutation = useDeleteResource(type ?? "");
   const duplicateMutation = useDuplicateResource(type ?? "");
   const cascadeSave = useCascadeSave(type ?? "");
+  const { data: jsonSchema } = useJsonSchema(type);
 
   // Save feedback state
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Delete dialog state
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   // Usage dialog state (Path B: from resource view, after save)
   const [usages, setUsages] = useState<ResourceUsage[]>([]);
@@ -146,9 +179,8 @@ export function ResourceDetailPage() {
             },
             {
               onSuccess: (result) => {
-                setSaveSuccess(true);
+                toast.success(t("editor.saved"));
                 setCurrentVersion(result.newResourceVersion);
-                setTimeout(() => setSaveSuccess(false), 3000);
               },
             }
           );
@@ -162,10 +194,9 @@ export function ResourceDetailPage() {
             },
             {
               onSuccess: async (result) => {
-                setSaveSuccess(true);
+                toast.success(t("editor.saved"));
                 setNewResourceVersion(result.newResourceVersion);
                 setCurrentVersion(result.newResourceVersion);
-                setTimeout(() => setSaveSuccess(false), 3000);
 
                 // Check if any bots/packages reference this
                 if (rt) {
@@ -226,35 +257,34 @@ export function ResourceDetailPage() {
 
   if (!rt) {
     return (
-      <div className="flex flex-col items-center justify-center py-20">
-        <AlertCircle className="h-12 w-12 text-destructive" />
-        <p className="mt-4 text-lg font-medium text-destructive">
-          {t("resources.unknownType", "Unknown resource type")}
-        </p>
-        <Link
-          to="/manage/resources"
-          className="mt-4 text-sm text-primary hover:underline"
-        >
-          {t("resources.backToResources", "← Back to Resources")}
-        </Link>
+      <div className="space-y-4 py-20">
+        <ErrorState message={t("resources.unknownType", "Unknown resource type")} />
+        <div className="text-center">
+          <Link
+            to="/manage/resources"
+            className="text-sm text-primary hover:underline"
+          >
+            {t("resources.backToResources", "← Back to Resources")}
+          </Link>
+        </div>
       </div>
     );
   }
 
+
+
   function handleDelete() {
-    if (
-      window.confirm(
-        t("resources.confirmDelete", {
-          type: typeName,
-          defaultValue: `Are you sure you want to delete this ${typeName}?`,
-        })
-      )
-    ) {
-      deleteMutation.mutate(
-        { id: id ?? "", version: currentVersion },
-        { onSuccess: () => navigate(`/manage/resources/${type}`) }
-      );
-    }
+    deleteMutation.mutate(
+      { id: id ?? "", version: currentVersion },
+      {
+        onSuccess: () => {
+          toast.success(t("common.delete") + " ✓");
+          navigate(`/manage/resources/${type}`);
+        },
+        onError: () => toast.error(t("common.error")),
+      }
+    );
+    setShowDeleteDialog(false);
   }
 
   function handleDuplicate() {
@@ -262,12 +292,14 @@ export function ResourceDetailPage() {
       { id: id ?? "", version: currentVersion },
       {
         onSuccess: (result) => {
+          toast.success(t("common.duplicate") + " ✓");
           const parts = result.location.split("/");
           const newId = (parts[parts.length - 1] ?? "").split("?")[0];
           if (newId) {
             navigate(`/manage/resources/${type}/${newId}`);
           }
         },
+        onError: () => toast.error(t("common.error")),
       }
     );
   }
@@ -275,17 +307,13 @@ export function ResourceDetailPage() {
   return (
     <div className="space-y-6">
       {/* Back link */}
-      <Link
+      <BackLink
         to={`/manage/resources/${type}`}
-        className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-        data-testid="back-to-list"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        {t("resources.backToList", {
+        label={t("resources.backToList", {
           type: typeName,
           defaultValue: `Back to ${typeName}`,
         })}
-      </Link>
+      />
 
       {/* Header with actions */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -305,45 +333,42 @@ export function ResourceDetailPage() {
           )}
         </div>
         <div className="flex gap-2">
-          <button
+          <Button
+            variant="outline"
             onClick={handleDuplicate}
             disabled={duplicateMutation.isPending}
-            className="inline-flex items-center gap-2 rounded-lg border border-input px-4 py-2.5 text-sm font-medium text-foreground shadow-sm transition-all hover:bg-secondary active:scale-[0.98] disabled:opacity-50"
           >
             <Copy className="h-4 w-4" />
             {t("common.duplicate")}
-          </button>
-          <button
-            onClick={handleDelete}
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={() => setShowDeleteDialog(true)}
             disabled={deleteMutation.isPending}
-            className="inline-flex items-center gap-2 rounded-lg bg-destructive/10 px-4 py-2.5 text-sm font-medium text-destructive shadow-sm transition-all hover:bg-destructive/20 active:scale-[0.98] disabled:opacity-50"
           >
             <Trash2 className="h-4 w-4" />
             {t("common.delete")}
-          </button>
+          </Button>
         </div>
       </div>
 
       {/* Content */}
       {isLoading && (
-        <div className="flex items-center justify-center py-20">
-          <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+        <div className="space-y-4">
+          <div className="flex gap-4">
+            <Skeleton className="h-10 w-32" />
+            <Skeleton className="h-10 w-32" />
+          </div>
+          <Skeleton className="h-[400px] w-full rounded-xl" />
         </div>
       )}
 
       {isError && (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-destructive/30 bg-destructive/5 py-16">
-          <AlertCircle className="h-12 w-12 text-destructive" />
-          <p className="mt-4 text-lg font-medium text-destructive">
-            {t("common.error")}
-          </p>
-          <button
-            onClick={() => refetch()}
-            className="mt-4 rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
-          >
-            {t("common.retry")}
-          </button>
-        </div>
+        <ErrorState
+          message={t("common.error")}
+          onRetry={() => refetch()}
+          retryLabel={t("common.retry")}
+        />
       )}
 
       {!isLoading && !isError && data !== undefined && (
@@ -364,57 +389,8 @@ export function ResourceDetailPage() {
                 ? t("editor.saveError", "Failed to save")
                 : undefined
             }
-            renderFormEditor={
-              type === "behavior"
-                ? (parsed, onFormChange, ro) => (
-                    <BehaviorEditor
-                      data={parsed as BehaviorConfig}
-                      onChange={onFormChange}
-                      readOnly={ro}
-                    />
-                  )
-                : type === "httpcalls"
-                  ? (parsed, onFormChange, ro) => (
-                      <HttpCallsEditor
-                        data={parsed as HttpCallsConfig}
-                        onChange={onFormChange}
-                        readOnly={ro}
-                      />
-                    )
-                  : type === "langchain"
-                    ? (parsed, onFormChange, ro) => (
-                        <LangchainEditor
-                          data={parsed as LangchainConfig}
-                          onChange={onFormChange}
-                          readOnly={ro}
-                        />
-                      )
-                    : type === "output"
-                      ? (parsed, onFormChange, ro) => (
-                          <OutputEditor
-                            data={parsed as OutputConfig}
-                            onChange={onFormChange}
-                            readOnly={ro}
-                          />
-                        )
-                      : type === "propertysetter"
-                        ? (parsed, onFormChange, ro) => (
-                            <PropertySetterEditor
-                              data={parsed as PropertySetterConfig}
-                              onChange={onFormChange}
-                              readOnly={ro}
-                            />
-                          )
-                        : type === "dictionaries"
-                          ? (parsed, onFormChange, ro) => (
-                              <DictionaryEditor
-                                data={parsed as DictionaryConfig}
-                                onChange={onFormChange}
-                                readOnly={ro}
-                              />
-                            )
-                          : undefined
-            }
+            renderFormEditor={EDITOR_MAP[type ?? ""]}
+            jsonSchema={jsonSchema}
           />
           {showUsageDialog && (
             <UpdateUsageDialog
@@ -429,6 +405,18 @@ export function ResourceDetailPage() {
           )}
         </>
       )}
+
+      {/* Delete confirmation */}
+      <AlertDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        title={t("resources.confirmDelete", { type: typeName })}
+        description={t("resources.confirmDelete", { type: typeName })}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={handleDelete}
+        isPending={deleteMutation.isPending}
+      />
     </div>
   );
 }

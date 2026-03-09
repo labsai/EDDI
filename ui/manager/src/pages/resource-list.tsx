@@ -1,12 +1,10 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   Search,
   Plus,
-  RefreshCw,
-  AlertCircle,
-  ArrowLeft,
   FileCode,
   GitBranch,
   Globe,
@@ -23,6 +21,12 @@ import { CreateResourceDialog } from "@/components/resources/create-resource-dia
 import { cn } from "@/lib/utils";
 import type { BotDescriptor } from "@/lib/api/bots";
 import type { LucideIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { AlertDialog } from "@/components/ui/alert-dialog";
+import { BackLink } from "@/components/shared/back-link";
+import { EmptyState } from "@/components/shared/empty-state";
+import { ErrorState } from "@/components/shared/error-state";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   GitBranch,
@@ -38,6 +42,7 @@ export function ResourceListPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
 
   const rt = getResourceType(type ?? "");
 
@@ -52,17 +57,13 @@ export function ResourceListPage() {
 
   if (!rt) {
     return (
-      <div className="flex flex-col items-center justify-center py-20">
-        <AlertCircle className="h-12 w-12 text-destructive" />
-        <p className="mt-4 text-lg font-medium text-destructive">
-          {t("resources.unknownType", "Unknown resource type")}
-        </p>
-        <Link
-          to="/manage/resources"
-          className="mt-4 text-sm text-primary hover:underline"
-        >
-          {t("resources.backToResources", "← Back to Resources")}
-        </Link>
+      <div className="space-y-4 py-20">
+        <ErrorState message={t("resources.unknownType")} />
+        <div className="text-center">
+          <Link to="/manage/resources" className="text-sm text-primary hover:underline">
+            {t("resources.backToResources")}
+          </Link>
+        </div>
       </div>
     );
   }
@@ -76,33 +77,38 @@ export function ResourceListPage() {
   });
 
   function handleDelete(id: string, version: number) {
-    if (
-      window.confirm(
-        t("resources.confirmDelete", {
-          type: typeName,
-          defaultValue: `Are you sure you want to delete this ${typeName}?`,
-        })
-      )
-    ) {
-      deleteMutation.mutate({ id, version });
+    setDeleteTarget({ id, version });
+  }
+
+  function confirmDelete() {
+    if (deleteTarget) {
+      deleteMutation.mutate(deleteTarget, {
+        onSuccess: () => {
+          toast.success(t("common.delete") + " ✓");
+          setDeleteTarget(null);
+        },
+        onError: () => toast.error(t("common.error")),
+      });
     }
   }
 
   function handleDuplicate(id: string, version: number) {
-    duplicateMutation.mutate({ id, version });
+    duplicateMutation.mutate(
+      { id, version },
+      {
+        onSuccess: () => toast.success(t("common.duplicate") + " ✓"),
+        onError: () => toast.error(t("common.error")),
+      }
+    );
   }
 
   return (
     <div className="space-y-6">
       {/* Back link */}
-      <Link
+      <BackLink
         to="/manage/resources"
-        className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-        data-testid="back-to-resources"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        {t("resources.backToResources", "Back to Resources")}
-      </Link>
+        label={t("resources.backToResources")}
+      />
 
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -115,14 +121,13 @@ export function ResourceListPage() {
             {t(`${rt.labelKey}.description`)}
           </p>
         </div>
-        <button
+        <Button
           onClick={() => setCreateOpen(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow-md active:scale-[0.98]"
           data-testid="create-resource-btn"
         >
           <Plus className="h-4 w-4" />
-          {t("resources.create", { type: typeName, defaultValue: `Create ${typeName}` })}
-        </button>
+          {t("resources.create", { type: typeName })}
+        </Button>
       </div>
 
       {/* Search bar */}
@@ -140,60 +145,45 @@ export function ResourceListPage() {
 
       {/* Content */}
       {isLoading && (
-        <div className="flex items-center justify-center py-20">
-          <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+        <div
+          className={cn(
+            "grid gap-4",
+            "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+          )}
+        >
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="rounded-xl border border-border bg-card p-5 space-y-3">
+              <Skeleton className="h-5 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-4 w-full" />
+            </div>
+          ))}
         </div>
       )}
 
       {isError && (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-destructive/30 bg-destructive/5 py-16">
-          <AlertCircle className="h-12 w-12 text-destructive" />
-          <p className="mt-4 text-lg font-medium text-destructive">
-            {t("common.error")}
-          </p>
-          <button
-            onClick={() => refetch()}
-            className="mt-4 rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
-          >
-            {t("common.retry")}
-          </button>
-        </div>
+        <ErrorState
+          message={t("common.error")}
+          onRetry={() => refetch()}
+          retryLabel={t("common.retry")}
+        />
       )}
 
       {!isLoading && !isError && enrichedItems.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border py-16">
-          <Icon className="h-12 w-12 text-muted-foreground/50" />
-          <p className="mt-4 text-lg font-medium text-muted-foreground">
-            {search
-              ? t("common.noResults")
-              : t("resources.empty", {
-                  type: typeName,
-                  defaultValue: `No ${typeName} resources yet.`,
-                })}
-          </p>
-          {!search && (
-            <button
-              onClick={() => setCreateOpen(true)}
-              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              <Plus className="h-4 w-4" />
-              {t("resources.create", { type: typeName, defaultValue: `Create ${typeName}` })}
-            </button>
-          )}
-        </div>
+        <EmptyState
+          icon={Icon}
+          title={search ? t("common.noResults") : t("resources.empty", { type: typeName })}
+          actionLabel={!search ? t("resources.create", { type: typeName }) : undefined}
+          onAction={!search ? () => setCreateOpen(true) : undefined}
+        />
       )}
 
       {!isLoading && !isError && enrichedItems.length > 0 && (
         <>
-          {/* Results count */}
-          <p className="text-sm text-muted-foreground">
-            {t("resources.count", {
-              count: enrichedItems.length,
-              defaultValue: `${enrichedItems.length} resource(s)`,
-            })}
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {t("resources.count", { count: enrichedItems.length })}
           </p>
 
-          {/* Resource grid */}
           <div
             className={cn(
               "grid gap-4",
@@ -221,6 +211,18 @@ export function ResourceListPage() {
         onClose={() => setCreateOpen(false)}
         typeSlug={type ?? ""}
         typeName={typeName}
+      />
+
+      {/* Delete confirmation */}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title={t("resources.confirmDelete", { type: typeName })}
+        description={t("resources.confirmDelete", { type: typeName })}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={confirmDelete}
+        isPending={deleteMutation.isPending}
       />
     </div>
   );

@@ -1,26 +1,40 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { DashboardPage } from "@/pages/dashboard";
 
+// Mock the dashboard hooks since they need API calls
+vi.mock("@/hooks/use-dashboard", () => ({
+  useDashboardStats: () => ({
+    data: { botCount: 5, packageCount: 3, conversationCount: 42, resourceCount: 0 },
+    isLoading: false,
+  }),
+  useRecentBots: () => ({
+    data: [],
+    isLoading: false,
+  }),
+}));
+
+vi.mock("@/hooks/use-bots", () => ({
+  groupBotsByName: () => [],
+}));
+
 describe("DashboardPage", () => {
   it("renders page heading", () => {
     renderWithProviders(<DashboardPage />);
-    // i18n key renders as-is when translation is missing (fallback to key)
     expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
   });
 
-  it("renders all four stat cards", () => {
+  it("renders stat cards with real data", () => {
     renderWithProviders(<DashboardPage />);
-    expect(screen.getByText("Active Bots")).toBeInTheDocument();
-    expect(screen.getByText("Conversations Today")).toBeInTheDocument();
-    expect(screen.getByText("Avg Response Time")).toBeInTheDocument();
-    expect(screen.getByText("Total Cost")).toBeInTheDocument();
+    expect(screen.getByText("5")).toBeInTheDocument();
+    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.getByText("42")).toBeInTheDocument();
   });
 
-  it("shows placeholder values for stats", () => {
+  it("renders quick action buttons", () => {
     renderWithProviders(<DashboardPage />);
-    const dashes = screen.getAllByText("—");
-    expect(dashes).toHaveLength(4);
+    // Quick actions section exists
+    expect(screen.getByText("Bot Wizard")).toBeInTheDocument();
   });
 });

@@ -9,7 +9,10 @@
     "packages": "패키지",
     "conversations": "대화",
     "chat": "채팅",
-    "resources": "리소스"
+    "resources": "리소스",
+    "sectionManagement": "Management",
+    "sectionDevelopment": "Development",
+    "sectionOperations": "Operations"
   },
   "theme": {
     "light": "라이트",
@@ -33,7 +36,14 @@
   "pages": {
     "dashboard": {
       "title": "대시보드",
-      "subtitle": "EDDI 봇 및 대화 개요"
+      "subtitle": "EDDI 봇 및 대화 개요",
+      "activeBots": "Active Bots",
+      "totalPackages": "Packages",
+      "totalResources": "Resources",
+      "totalConversations": "Conversations",
+      "quickActions": "Quick Actions",
+      "recentBots": "Recent Bots",
+      "noRecentBots": "No bots yet. Create your first bot!"
     },
     "bots": {
       "title": "봇",

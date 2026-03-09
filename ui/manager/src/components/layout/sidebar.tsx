@@ -12,17 +12,32 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const navItems = [
-  { path: "/manage", icon: LayoutDashboard, labelKey: "nav.dashboard" },
-  { path: "/manage/bots", icon: Bot, labelKey: "nav.bots" },
-  { path: "/manage/packages", icon: Package, labelKey: "nav.packages" },
+const navSections = [
   {
-    path: "/manage/conversations",
-    icon: MessageSquare,
-    labelKey: "nav.conversations",
+    labelKey: "nav.sectionManagement",
+    items: [
+      { path: "/manage", icon: LayoutDashboard, labelKey: "nav.dashboard" },
+      { path: "/manage/bots", icon: Bot, labelKey: "nav.bots" },
+      { path: "/manage/packages", icon: Package, labelKey: "nav.packages" },
+    ],
   },
-  { path: "/manage/chat", icon: MessageCircle, labelKey: "nav.chat" },
-  { path: "/manage/resources", icon: FileCode, labelKey: "nav.resources" },
+  {
+    labelKey: "nav.sectionDevelopment",
+    items: [
+      { path: "/manage/resources", icon: FileCode, labelKey: "nav.resources" },
+      { path: "/manage/chat", icon: MessageCircle, labelKey: "nav.chat" },
+    ],
+  },
+  {
+    labelKey: "nav.sectionOperations",
+    items: [
+      {
+        path: "/manage/conversations",
+        icon: MessageSquare,
+        labelKey: "nav.conversations",
+      },
+    ],
+  },
 ] as const;
 
 interface SidebarProps {
@@ -74,27 +89,42 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         )}
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 space-y-1 p-2">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.path}
-            to={item.path}
-            end={item.path === "/manage"}
-            className={({ isActive }) =>
-              cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                "hover:bg-sidebar-accent/10 hover:text-sidebar-accent",
-                isActive
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground",
-                collapsed && "justify-center px-2"
-              )
-            }
-          >
-            <item.icon className="h-5 w-5 shrink-0" />
-            {!collapsed && <span>{t(item.labelKey)}</span>}
-          </NavLink>
+      {/* Navigation with section groupings */}
+      <nav className="flex-1 overflow-y-auto p-2">
+        {navSections.map((section, idx) => (
+          <div key={section.labelKey} className={cn(idx > 0 && "mt-4")}>
+            {/* Section label (hidden when collapsed) */}
+            {!collapsed && (
+              <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
+                {t(section.labelKey)}
+              </p>
+            )}
+            {collapsed && idx > 0 && (
+              <div className="mx-3 mb-2 border-t border-sidebar-border" />
+            )}
+            <div className="space-y-0.5">
+              {section.items.map((item) => (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  end={item.path === "/manage"}
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+                      "hover:bg-sidebar-accent/10 hover:text-sidebar-accent",
+                      isActive
+                        ? "border-s-2 border-sidebar-accent bg-sidebar-accent/10 text-sidebar-accent"
+                        : "border-s-2 border-transparent text-sidebar-foreground",
+                      collapsed && "justify-center px-2"
+                    )
+                  }
+                >
+                  <item.icon className="h-5 w-5 shrink-0" />
+                  {!collapsed && <span>{t(item.labelKey)}</span>}
+                </NavLink>
+              ))}
+            </div>
+          </div>
         ))}
       </nav>
 
@@ -103,7 +133,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         <button
           onClick={onToggle}
           data-testid="sidebar-toggle"
-          className="flex w-full items-center justify-center rounded-lg p-2.5 text-sidebar-foreground transition-colors hover:bg-sidebar-accent/10 hover:text-sidebar-accent"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="flex w-full items-center justify-center rounded-lg p-2.5 text-sidebar-foreground transition-all hover:bg-sidebar-accent/10 hover:text-sidebar-accent active:scale-[0.98]"
         >
           {collapsed ? (
             <PanelLeft className="h-5 w-5" />

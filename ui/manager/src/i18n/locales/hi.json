@@ -9,7 +9,10 @@
     "packages": "पैकेज",
     "conversations": "वार्तालाप",
     "chat": "चैट",
-    "resources": "संसाधन"
+    "resources": "संसाधन",
+    "sectionManagement": "Management",
+    "sectionDevelopment": "Development",
+    "sectionOperations": "Operations"
   },
   "theme": {
     "light": "लाइट",
@@ -33,7 +36,14 @@
   "pages": {
     "dashboard": {
       "title": "डैशबोर्ड",
-      "subtitle": "आपके EDDI बॉट और वार्तालापों का अवलोकन"
+      "subtitle": "आपके EDDI बॉट और वार्तालापों का अवलोकन",
+      "activeBots": "Active Bots",
+      "totalPackages": "Packages",
+      "totalResources": "Resources",
+      "totalConversations": "Conversations",
+      "quickActions": "Quick Actions",
+      "recentBots": "Recent Bots",
+      "noRecentBots": "No bots yet. Create your first bot!"
     },
     "bots": {
       "title": "बॉट",

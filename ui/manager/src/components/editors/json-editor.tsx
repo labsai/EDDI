@@ -1,5 +1,5 @@
 import { useTheme } from "@/components/layout/theme-provider";
-import Editor, { type OnMount } from "@monaco-editor/react";
+import Editor, { type OnMount, type BeforeMount } from "@monaco-editor/react";
 import { useCallback, useRef } from "react";
 import type { editor } from "monaco-editor";
 
@@ -14,6 +14,8 @@ export interface JsonEditorProps {
   height?: string;
   /** Test ID for integration testing */
   testId?: string;
+  /** Optional JSON Schema object for validation and autocomplete */
+  jsonSchema?: object;
 }
 
 /**
@@ -26,6 +28,7 @@ export function JsonEditor({
   readOnly = false,
   height = "500px",
   testId = "json-editor",
+  jsonSchema,
 }: JsonEditorProps) {
   const { resolvedTheme } = useTheme();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
@@ -39,6 +42,27 @@ export function JsonEditor({
       }, 100);
     },
     []
+  );
+
+  const handleBeforeMount: BeforeMount = useCallback(
+    (monaco) => {
+      // Configure JSON schema for validation and autocomplete
+      monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+        validate: true,
+        allowComments: false,
+        trailingCommas: "error",
+        schemas: jsonSchema
+          ? [
+              {
+                uri: "eddi://schema/resource.json",
+                fileMatch: ["*"],
+                schema: jsonSchema as Record<string, unknown>,
+              },
+            ]
+          : [],
+      });
+    },
+    [jsonSchema]
   );
 
   const handleChange = useCallback(
@@ -58,6 +82,7 @@ export function JsonEditor({
         theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
         value={value}
         onChange={handleChange}
+        beforeMount={handleBeforeMount}
         onMount={handleMount}
         options={{
           readOnly,

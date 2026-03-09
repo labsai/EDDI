@@ -22,6 +22,7 @@ export default defineConfig({
       "/langchainstore": "http://localhost:7070",
       "/propertysetterstore": "http://localhost:7070",
       "/parserstore": "http://localhost:7070",
+      "/extensionstore": "http://localhost:7070",
       "/conversationstore": "http://localhost:7070",
       "/descriptorstore": "http://localhost:7070",
       "/administration": "http://localhost:7070",

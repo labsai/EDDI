@@ -9,7 +9,10 @@
     "packages": "แพ็กเกจ",
     "conversations": "การสนทนา",
     "chat": "แชท",
-    "resources": "ทรัพยากร"
+    "resources": "ทรัพยากร",
+    "sectionManagement": "Management",
+    "sectionDevelopment": "Development",
+    "sectionOperations": "Operations"
   },
   "theme": {
     "light": "สว่าง",
@@ -33,7 +36,14 @@
   "pages": {
     "dashboard": {
       "title": "แดชบอร์ด",
-      "subtitle": "ภาพรวมบอทและการสนทนา EDDI ของคุณ"
+      "subtitle": "ภาพรวมบอทและการสนทนา EDDI ของคุณ",
+      "activeBots": "Active Bots",
+      "totalPackages": "Packages",
+      "totalResources": "Resources",
+      "totalConversations": "Conversations",
+      "quickActions": "Quick Actions",
+      "recentBots": "Recent Bots",
+      "noRecentBots": "No bots yet. Create your first bot!"
     },
     "bots": {
       "title": "บอท",

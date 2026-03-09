@@ -37,23 +37,23 @@
   --font-sans: 'Noto Sans', 'Noto Sans Arabic', 'Noto Sans Thai', 'Noto Sans Devanagari', 'Noto Sans JP', 'Noto Sans KR', 'Noto Sans SC', ui-sans-serif, system-ui, sans-serif;
 }
 
-/* Dark theme overrides */
+/* Dark theme overrides — deep charcoal for premium enterprise feel */
 .dark {
-  --color-background: #0c0a09;
+  --color-background: #09090b;
   --color-foreground: #fafaf9;
-  --color-card: #1c1917;
+  --color-card: #18181b;
   --color-card-foreground: #fafaf9;
-  --color-popover: #1c1917;
+  --color-popover: #18181b;
   --color-popover-foreground: #fafaf9;
-  --color-border: #292524;
-  --color-input: #292524;
-  --color-secondary: #292524;
+  --color-border: #27272a;
+  --color-input: #27272a;
+  --color-secondary: #27272a;
   --color-secondary-foreground: #fafaf9;
-  --color-muted: #292524;
-  --color-muted-foreground: #a8a29e;
-  --color-sidebar: #0c0a09;
-  --color-sidebar-foreground: #d6d3d1;
-  --color-sidebar-border: #1c1917;
+  --color-muted: #27272a;
+  --color-muted-foreground: #a1a1aa;
+  --color-sidebar: #09090b;
+  --color-sidebar-foreground: #d4d4d8;
+  --color-sidebar-border: #18181b;
 }
 
 /* Base styles */

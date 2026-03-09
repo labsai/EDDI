@@ -42,6 +42,8 @@ export interface ConfigEditorLayoutProps {
     onChange: (updated: unknown) => void,
     readOnly: boolean
   ) => React.ReactNode;
+  /** Optional JSON Schema for Monaco validation and autocomplete */
+  jsonSchema?: object;
 }
 
 type EditorTab = "form" | "json";
@@ -68,6 +70,7 @@ export function ConfigEditorLayout({
   readOnly = false,
   children,
   renderFormEditor,
+  jsonSchema,
 }: ConfigEditorLayoutProps) {
   const { t } = useTranslation();
   const hasFormEditor = !!(renderFormEditor || children);
@@ -242,6 +245,7 @@ export function ConfigEditorLayout({
               onChange={readOnly ? undefined : handleJsonChange}
               readOnly={readOnly}
               height="500px"
+              jsonSchema={jsonSchema}
             />
           </div>
         )}

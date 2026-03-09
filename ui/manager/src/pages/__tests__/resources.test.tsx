@@ -114,7 +114,7 @@ describe("ResourceListPage", () => {
       "/manage/resources/behavior",
       <ResourceListPage />
     );
-    expect(screen.getByTestId("back-to-resources")).toBeInTheDocument();
+    expect(screen.getByTestId("back-to-list")).toBeInTheDocument();
   });
 
   it("shows error for unknown type", () => {

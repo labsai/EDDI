@@ -9,7 +9,10 @@
     "packages": "Paquets",
     "conversations": "Conversations",
     "chat": "Chat",
-    "resources": "Ressources"
+    "resources": "Ressources",
+    "sectionManagement": "Management",
+    "sectionDevelopment": "Development",
+    "sectionOperations": "Operations"
   },
   "theme": {
     "light": "Clair",
@@ -33,7 +36,14 @@
   "pages": {
     "dashboard": {
       "title": "Tableau de bord",
-      "subtitle": "Vue d'ensemble de vos bots et conversations EDDI"
+      "subtitle": "Vue d'ensemble de vos bots et conversations EDDI",
+      "activeBots": "Active Bots",
+      "totalPackages": "Packages",
+      "totalResources": "Resources",
+      "totalConversations": "Conversations",
+      "quickActions": "Quick Actions",
+      "recentBots": "Recent Bots",
+      "noRecentBots": "No bots yet. Create your first bot!"
     },
     "bots": {
       "title": "Bots",

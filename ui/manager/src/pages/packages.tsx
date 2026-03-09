@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Package, Search, Plus, RefreshCw, AlertCircle } from "lucide-react";
+import { Package, Search, Plus } from "lucide-react";
+import { toast } from "sonner";
 import {
   usePackageDescriptors,
   useDeletePackage,
@@ -10,11 +11,17 @@ import { CreatePackageDialog } from "@/components/packages/create-package-dialog
 import { parseResourceUri } from "@/lib/api/bots";
 import { cn } from "@/lib/utils";
 import type { BotDescriptor } from "@/lib/api/bots";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { AlertDialog } from "@/components/ui/alert-dialog";
+import { EmptyState } from "@/components/shared/empty-state";
+import { ErrorState } from "@/components/shared/error-state";
 
 export function PackagesPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
 
   const { data: packages, isLoading, isError, refetch } =
     usePackageDescriptors(100, 0, search);
@@ -26,12 +33,18 @@ export function PackagesPage() {
   });
 
   function handleDelete(id: string, version: number) {
-    if (
-      window.confirm(
-        t("packages.confirmDelete", "Are you sure you want to delete this package?")
-      )
-    ) {
-      deleteMutation.mutate({ id, version });
+    setDeleteTarget({ id, version });
+  }
+
+  function confirmDelete() {
+    if (deleteTarget) {
+      deleteMutation.mutate(deleteTarget, {
+        onSuccess: () => {
+          toast.success(t("common.delete") + " ✓");
+          setDeleteTarget(null);
+        },
+        onError: () => toast.error(t("common.error")),
+      });
     }
   }
 
@@ -54,14 +67,13 @@ export function PackagesPage() {
             {t("pages.packages.subtitle")}
           </p>
         </div>
-        <button
+        <Button
           onClick={() => setCreateOpen(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow-md active:scale-[0.98]"
           data-testid="create-package-btn"
         >
           <Plus className="h-4 w-4" />
-          {t("packages.createPackage", "Create Package")}
-        </button>
+          {t("packages.createPackage")}
+        </Button>
       </div>
 
       {/* Search bar */}
@@ -79,57 +91,45 @@ export function PackagesPage() {
 
       {/* Content */}
       {isLoading && (
-        <div className="flex items-center justify-center py-20">
-          <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+        <div
+          className={cn(
+            "grid gap-4",
+            "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+          )}
+        >
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="rounded-xl border border-border bg-card p-5 space-y-3">
+              <Skeleton className="h-5 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-4 w-full" />
+            </div>
+          ))}
         </div>
       )}
 
       {isError && (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-destructive/30 bg-destructive/5 py-16">
-          <AlertCircle className="h-12 w-12 text-destructive" />
-          <p className="mt-4 text-lg font-medium text-destructive">
-            {t("common.error")}
-          </p>
-          <button
-            onClick={() => refetch()}
-            className="mt-4 rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
-          >
-            {t("common.retry")}
-          </button>
-        </div>
+        <ErrorState
+          message={t("common.error")}
+          onRetry={() => refetch()}
+          retryLabel={t("common.retry")}
+        />
       )}
 
       {!isLoading && !isError && enrichedPackages.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border py-16">
-          <Package className="h-12 w-12 text-muted-foreground/50" />
-          <p className="mt-4 text-lg font-medium text-muted-foreground">
-            {search
-              ? t("common.noResults")
-              : t("packages.empty", "No packages yet. Create your first package!")}
-          </p>
-          {!search && (
-            <button
-              onClick={() => setCreateOpen(true)}
-              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              <Plus className="h-4 w-4" />
-              {t("packages.createPackage", "Create Package")}
-            </button>
-          )}
-        </div>
+        <EmptyState
+          icon={Package}
+          title={search ? t("common.noResults") : t("packages.empty")}
+          actionLabel={!search ? t("packages.createPackage") : undefined}
+          onAction={!search ? () => setCreateOpen(true) : undefined}
+        />
       )}
 
       {!isLoading && !isError && enrichedPackages.length > 0 && (
         <>
-          {/* Results count */}
-          <p className="text-sm text-muted-foreground">
-            {t("packages.count", {
-              count: enrichedPackages.length,
-              defaultValue: "{{count}} package(s)",
-            })}
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {t("packages.count", { count: enrichedPackages.length })}
           </p>
 
-          {/* Package grid */}
           <div
             className={cn(
               "grid gap-4",
@@ -153,6 +153,18 @@ export function PackagesPage() {
       <CreatePackageDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
+      />
+
+      {/* Delete confirmation */}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title={t("packages.confirmDelete")}
+        description={t("packages.confirmDelete")}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={confirmDelete}
+        isPending={deleteMutation.isPending}
       />
     </div>
   );

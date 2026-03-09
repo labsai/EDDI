@@ -1,17 +1,24 @@
 import { useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Bot, Search, Plus, RefreshCw, AlertCircle, Upload, Wand2 } from "lucide-react";
+import { Bot, Search, Plus, Upload, Wand2 } from "lucide-react";
+import { toast } from "sonner";
 import { useBotDescriptors, useDeleteBot, useDuplicateBot, groupBotsByName } from "@/hooks/use-bots";
 import { useImportBot } from "@/hooks/use-backup";
 import { BotCard } from "@/components/bots/bot-card";
 import { CreateBotDialog } from "@/components/bots/create-bot-dialog";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { AlertDialog } from "@/components/ui/alert-dialog";
+import { EmptyState } from "@/components/shared/empty-state";
+import { ErrorState } from "@/components/shared/error-state";
 import { cn } from "@/lib/utils";
 
 export function BotsPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: bots, isLoading, isError, refetch } = useBotDescriptors(100, 0, search);
@@ -22,7 +29,10 @@ export function BotsPage() {
   function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (file) {
-      importMutation.mutate(file);
+      importMutation.mutate(file, {
+        onSuccess: () => toast.success(t("bots.importSuccess")),
+        onError: () => toast.error(t("bots.importError")),
+      });
       e.target.value = ""; // reset for re-upload
     }
   }
@@ -30,13 +40,29 @@ export function BotsPage() {
   const groupedBots = bots ? groupBotsByName(bots) : [];
 
   function handleDelete(id: string, version: number) {
-    if (window.confirm(t("bots.confirmDelete", "Are you sure you want to delete this bot?"))) {
-      deleteMutation.mutate({ id, version });
+    setDeleteTarget({ id, version });
+  }
+
+  function confirmDelete() {
+    if (deleteTarget) {
+      deleteMutation.mutate(deleteTarget, {
+        onSuccess: () => {
+          toast.success(t("common.delete") + " ✓");
+          setDeleteTarget(null);
+        },
+        onError: () => toast.error(t("common.error")),
+      });
     }
   }
 
   function handleDuplicate(id: string, version: number) {
-    duplicateMutation.mutate({ id, version, deepCopy: true });
+    duplicateMutation.mutate(
+      { id, version, deepCopy: true },
+      {
+        onSuccess: () => toast.success(t("botDetail.duplicateSuccess")),
+        onError: () => toast.error(t("common.error")),
+      }
+    );
   }
 
   return (
@@ -53,17 +79,17 @@ export function BotsPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
+          <Button
+            variant="outline"
             onClick={() => fileInputRef.current?.click()}
             disabled={importMutation.isPending}
-            className="inline-flex items-center gap-2 rounded-lg border border-input px-4 py-2.5 text-sm font-medium text-foreground transition-all hover:bg-secondary active:scale-[0.98] disabled:opacity-50"
             data-testid="import-bot-btn"
           >
             <Upload className="h-4 w-4" />
             {importMutation.isPending
-              ? t("bots.importing", "Importing...")
-              : t("bots.import", "Import Bot")}
-          </button>
+              ? t("bots.importing")
+              : t("bots.import")}
+          </Button>
           <input
             ref={fileInputRef}
             type="file"
@@ -72,22 +98,19 @@ export function BotsPage() {
             className="hidden"
             data-testid="import-file-input"
           />
-          <Link
-            to="/manage/bots/wizard"
-            className="inline-flex items-center gap-2 rounded-lg border border-primary/30 px-4 py-2.5 text-sm font-medium text-primary transition-all hover:bg-primary/10 active:scale-[0.98]"
-            data-testid="bot-wizard-btn"
-          >
-            <Wand2 className="h-4 w-4" />
-            {t("wizard.title", "Bot Wizard")}
-          </Link>
-          <button
+          <Button variant="outline" asChild data-testid="bot-wizard-btn">
+            <Link to="/manage/bots/wizard">
+              <Wand2 className="h-4 w-4" />
+              {t("wizard.title")}
+            </Link>
+          </Button>
+          <Button
             onClick={() => setCreateOpen(true)}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow-md active:scale-[0.98]"
             data-testid="create-bot-btn"
           >
             <Plus className="h-4 w-4" />
-            {t("bots.createBot", "Create Bot")}
-          </button>
+            {t("bots.createBot")}
+          </Button>
         </div>
       </div>
 
@@ -106,51 +129,45 @@ export function BotsPage() {
 
       {/* Content */}
       {isLoading && (
-        <div className="flex items-center justify-center py-20">
-          <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+        <div
+          className={cn(
+            "grid gap-4",
+            "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+          )}
+        >
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="rounded-xl border border-border bg-card p-5 space-y-3">
+              <Skeleton className="h-5 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-8 w-1/3" />
+            </div>
+          ))}
         </div>
       )}
 
       {isError && (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-destructive/30 bg-destructive/5 py-16">
-          <AlertCircle className="h-12 w-12 text-destructive" />
-          <p className="mt-4 text-lg font-medium text-destructive">
-            {t("common.error")}
-          </p>
-          <button
-            onClick={() => refetch()}
-            className="mt-4 rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
-          >
-            {t("common.retry")}
-          </button>
-        </div>
+        <ErrorState
+          message={t("common.error")}
+          onRetry={() => refetch()}
+          retryLabel={t("common.retry")}
+        />
       )}
 
       {!isLoading && !isError && groupedBots.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border py-16">
-          <Bot className="h-12 w-12 text-muted-foreground/50" />
-          <p className="mt-4 text-lg font-medium text-muted-foreground">
-            {search
-              ? t("common.noResults")
-              : t("bots.empty", "No bots yet. Create your first bot!")}
-          </p>
-          {!search && (
-            <button
-              onClick={() => setCreateOpen(true)}
-              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              <Plus className="h-4 w-4" />
-              {t("bots.createBot", "Create Bot")}
-            </button>
-          )}
-        </div>
+        <EmptyState
+          icon={Bot}
+          title={search ? t("common.noResults") : t("bots.empty")}
+          actionLabel={!search ? t("bots.createBot") : undefined}
+          onAction={!search ? () => setCreateOpen(true) : undefined}
+        />
       )}
 
       {!isLoading && !isError && groupedBots.length > 0 && (
         <>
           {/* Results count */}
-          <p className="text-sm text-muted-foreground">
-            {t("bots.count", { count: groupedBots.length, defaultValue: "{{count}} bot(s)" })}
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {t("bots.count", { count: groupedBots.length })}
           </p>
 
           {/* Bot grid */}
@@ -175,6 +192,18 @@ export function BotsPage() {
 
       {/* Create dialog */}
       <CreateBotDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title={t("bots.confirmDelete")}
+        description={t("bots.confirmDelete")}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={confirmDelete}
+        isPending={deleteMutation.isPending}
+      />
     </div>
   );
 }

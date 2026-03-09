@@ -9,7 +9,10 @@
     "packages": "包",
     "conversations": "会话",
     "chat": "聊天",
-    "resources": "资源"
+    "resources": "资源",
+    "sectionManagement": "Management",
+    "sectionDevelopment": "Development",
+    "sectionOperations": "Operations"
   },
   "theme": {
     "light": "浅色",
@@ -33,7 +36,14 @@
   "pages": {
     "dashboard": {
       "title": "仪表板",
-      "subtitle": "EDDI 机器人和会话概览"
+      "subtitle": "EDDI 机器人和会话概览",
+      "activeBots": "Active Bots",
+      "totalPackages": "Packages",
+      "totalResources": "Resources",
+      "totalConversations": "Conversations",
+      "quickActions": "Quick Actions",
+      "recentBots": "Recent Bots",
+      "noRecentBots": "No bots yet. Create your first bot!"
     },
     "bots": {
       "title": "机器人",

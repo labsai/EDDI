@@ -4,8 +4,6 @@ import { Link } from "react-router-dom";
 import {
   MessageSquare,
   Search,
-  RefreshCw,
-  AlertCircle,
   ExternalLink,
   Trash2,
   Circle,
@@ -14,12 +12,18 @@ import {
   AlertTriangle,
   Filter,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
   useConversationDescriptors,
   useDeleteConversation,
 } from "@/hooks/use-conversations";
 import { parseConversationUri, type ConversationState } from "@/lib/api/conversations";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { AlertDialog } from "@/components/ui/alert-dialog";
+import { EmptyState } from "@/components/shared/empty-state";
+import { ErrorState } from "@/components/shared/error-state";
 
 const stateConfig: Record<
   ConversationState,
@@ -65,6 +69,7 @@ export function ConversationsPage() {
   const [stateFilter, setStateFilter] = useState<ConversationState | "ALL">(
     "ALL"
   );
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const { data: conversations, isLoading, isError, refetch } =
     useConversationDescriptors(
@@ -76,16 +81,18 @@ export function ConversationsPage() {
     );
   const deleteMutation = useDeleteConversation();
 
-  function handleDelete(id: string) {
-    if (
-      window.confirm(
-        t(
-          "conversations.confirmDelete",
-          "Are you sure you want to delete this conversation?"
-        )
-      )
-    ) {
-      deleteMutation.mutate({ id });
+  function confirmDelete() {
+    if (deleteTarget) {
+      deleteMutation.mutate(
+        { id: deleteTarget },
+        {
+          onSuccess: () => {
+            toast.success(t("common.delete") + " ✓");
+            setDeleteTarget(null);
+          },
+          onError: () => toast.error(t("common.error")),
+        }
+      );
     }
   }
 
@@ -110,10 +117,7 @@ export function ConversationsPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={t(
-              "conversations.searchPlaceholder",
-              "Search by conversation ID..."
-            )}
+            placeholder={t("conversations.searchPlaceholder")}
             className="w-full rounded-lg border border-input bg-background py-2.5 ps-10 pe-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
             data-testid="conversation-search"
           />
@@ -123,65 +127,59 @@ export function ConversationsPage() {
         <div className="flex items-center gap-1.5">
           <Filter className="h-4 w-4 text-muted-foreground" />
           {stateFilters.map((sf) => (
-            <button
+            <Button
               key={sf.value}
+              variant={stateFilter === sf.value ? "primary" : "secondary"}
+              size="sm"
+              className="rounded-full"
               onClick={() => setStateFilter(sf.value)}
-              className={cn(
-                "rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                stateFilter === sf.value
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-              )}
             >
               {sf.label}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
 
       {/* Content */}
       {isLoading && (
-        <div className="flex items-center justify-center py-20">
-          <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+        <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+          <div className="space-y-0">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4 border-b border-border px-5 py-4">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-5 w-16 rounded-full" />
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="ml-auto h-6 w-6" />
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
       {isError && (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-destructive/30 bg-destructive/5 py-16">
-          <AlertCircle className="h-12 w-12 text-destructive" />
-          <p className="mt-4 text-lg font-medium text-destructive">
-            {t("common.error")}
-          </p>
-          <button
-            onClick={() => refetch()}
-            className="mt-4 rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
-          >
-            {t("common.retry")}
-          </button>
-        </div>
+        <ErrorState
+          message={t("common.error")}
+          onRetry={() => refetch()}
+          retryLabel={t("common.retry")}
+        />
       )}
 
       {!isLoading && !isError && (!conversations || conversations.length === 0) && (
-        <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border py-16">
-          <MessageSquare className="h-12 w-12 text-muted-foreground/50" />
-          <p className="mt-4 text-lg font-medium text-muted-foreground">
-            {search || stateFilter !== "ALL"
+        <EmptyState
+          icon={MessageSquare}
+          title={
+            search || stateFilter !== "ALL"
               ? t("common.noResults")
-              : t(
-                  "conversations.empty",
-                  "No conversations yet. Deploy a bot and start chatting!"
-                )}
-          </p>
-        </div>
+              : t("conversations.empty")
+          }
+        />
       )}
 
       {!isLoading && !isError && conversations && conversations.length > 0 && (
         <>
-          <p className="text-sm text-muted-foreground">
-            {t("conversations.count", {
-              count: conversations.length,
-              defaultValue: "{{count}} conversation(s)",
-            })}
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {t("conversations.count", { count: conversations.length })}
           </p>
 
           {/* Conversation table */}
@@ -190,19 +188,19 @@ export function ConversationsPage() {
               <thead>
                 <tr className="border-b border-border bg-secondary/50">
                   <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    {t("conversations.id", "Conversation")}
+                    {t("conversations.id")}
                   </th>
                   <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    {t("conversations.bot", "Bot")}
+                    {t("conversations.bot")}
                   </th>
                   <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    {t("conversations.state", "State")}
+                    {t("conversations.state")}
                   </th>
                   <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    {t("conversations.lastActivity", "Last Activity")}
+                    {t("conversations.lastActivity")}
                   </th>
                   <th className="px-5 py-3 text-end text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    {t("conversations.actions", "Actions")}
+                    {t("conversations.actions")}
                   </th>
                 </tr>
               </thead>
@@ -251,21 +249,20 @@ export function ConversationsPage() {
                       <td className="px-5 py-3">
                         <span className="text-sm text-muted-foreground">
                           {conv.lastModifiedOn
-                            ? new Date(
-                                conv.lastModifiedOn
-                              ).toLocaleString()
+                            ? new Date(conv.lastModifiedOn).toLocaleString()
                             : "—"}
                         </span>
                       </td>
                       <td className="px-5 py-3 text-end">
-                        <button
-                          onClick={() => handleDelete(convId)}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => setDeleteTarget(convId)}
                           disabled={deleteMutation.isPending}
-                          className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
-                          title={t("common.delete")}
                         >
                           <Trash2 className="h-4 w-4" />
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                   );
@@ -275,6 +272,18 @@ export function ConversationsPage() {
           </div>
         </>
       )}
+
+      {/* Delete confirmation */}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title={t("conversations.confirmDelete")}
+        description={t("conversations.confirmDelete")}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={confirmDelete}
+        isPending={deleteMutation.isPending}
+      />
     </div>
   );
 }

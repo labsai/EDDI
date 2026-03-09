@@ -60,6 +60,29 @@ const CONVERSATIONS_MOCK = [
 ];
 
 export const handlers = [
+  // JSON Schema endpoints for bots and packages
+  http.get("*/botstore/bots/jsonSchema", () => {
+    return HttpResponse.json({
+      $schema: "http://json-schema.org/draft-04/schema#",
+      type: "object",
+      title: "BotConfiguration",
+      properties: {
+        packages: { type: "array", items: { type: "string" } },
+        channels: { type: "array", items: { type: "object" } },
+      },
+    });
+  }),
+  http.get("*/packagestore/packages/jsonSchema", () => {
+    return HttpResponse.json({
+      $schema: "http://json-schema.org/draft-04/schema#",
+      type: "object",
+      title: "PackageConfiguration",
+      properties: {
+        packageExtensions: { type: "array", items: { type: "object" } },
+      },
+    });
+  }),
+
   // Bot descriptors
   http.get("*/botstore/bots/descriptors", () => {
     return HttpResponse.json(BOTS_MOCK);
@@ -554,6 +577,15 @@ function createResourceHandlers(
   ];
 
   return [
+    // JSON Schema endpoint
+    http.get(`*/${store}/${plural}/jsonSchema`, () => {
+      return HttpResponse.json({
+        $schema: "http://json-schema.org/draft-04/schema#",
+        type: "object",
+        title: `${label}Configuration`,
+        properties: {},
+      });
+    }),
     http.get(`*/${store}/${plural}/descriptors`, ({ request }) => {
       const url = new URL(request.url);
       const includePrevious = url.searchParams.get("includePreviousVersions");
