@@ -11,8 +11,8 @@ import {
  * Fully self-contained — creates and deploys its own bot,
  * no dependency on Bot Father.
  *
- * KEY FINDING: POST /bots/{env}/{botId}/{convId} returns 200 in v6 —
- * the AsyncResponse 500 issue documented in business-logic-analysis.md is FIXED.
+ * POST /bots/{env}/{botId}/{convId} returns 200 with full conversation JSON
+ * snapshot in v6. (The pre-v6 AsyncResponse 500 timeout issue is resolved.)
  */
 test.describe("Conversations — Real Backend", () => {
   test.describe.configure({ timeout: 120_000, mode: "serial" });
@@ -106,8 +106,7 @@ test.describe("Conversations — Real Backend", () => {
     // Wait for initial processing
     await new Promise((r) => setTimeout(r, 2000));
 
-    // Send message — this used to return 500 (AsyncResponse timeout),
-    // now returns 200 with full conversation snapshot in v6!
+    // Send message — returns 200 with full conversation snapshot
     const sayRes = await request.post(
       `${API_BASE}/bots/unrestricted/${botId}/${conversationId}`,
       {

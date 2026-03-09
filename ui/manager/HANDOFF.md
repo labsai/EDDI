@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-03-09  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Phase 4.3 — Real-Backend Integration Testing
+> **Last commit**: Phase 4.3 — Real-Backend Integration Testing (all 44 tests pass)
 
 ---
 
@@ -42,7 +42,7 @@
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
 - **Unit/Component**: 164/164 pass (`npm run test`) — 23 files
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
-- **Integration**: 46 tests (`npm run test:integration`) — 6 spec files, requires live EDDI backend
+- **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds
 
 ### Files Created (summary)
@@ -79,13 +79,13 @@
 
 Phase 3 (Manager UI Rewrite) is functionally complete through Phase 3.21. Phase 4 focuses on hardening, testing, and production readiness.
 
-| Phase | Description                                                                                                                                                       | Status |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| 4.1   | **Keycloak Auth Adapter** — wire `keycloak-js` 26+, login/logout flow, token refresh, route guards, role-based UI                                                 | ✅     |
-| 4.2   | **E2E Test Suite (Playwright)** — 75 tests across 11 spec files covering dashboard, bots, packages, conversations, chat, resources, navigation, theme, RTL        | ✅     |
-| 4.3   | **Real-Backend Integration Testing** — 46 Playwright API tests: CRUD round-trips for bots/packages/6 resource types, conversations, deployment, JSON schemas      | ✅     |
-| 4.4   | **JSON Schema Enrichment** — populate mock schemas with real field definitions for better dev-mode autocomplete; validate against backend `/jsonSchema` endpoints | ⬜     |
-| 4.5   | **Production Build Optimization** — bundle analysis, code splitting, lazy loading, tree-shaking audit, lighthouse performance score                               | ⬜     |
+| Phase | Description                                                                                                                                                                | Status |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| 4.1   | **Keycloak Auth Adapter** — wire `keycloak-js` 26+, login/logout flow, token refresh, route guards, role-based UI                                                          | ✅     |
+| 4.2   | **E2E Test Suite (Playwright)** — 75 tests across 11 spec files covering dashboard, bots, packages, conversations, chat, resources, navigation, theme, RTL                 | ✅     |
+| 4.3   | **Real-Backend Integration Testing** — 44 Playwright API tests: CRUD round-trips, conversations (POST /say 200 ✅), deployment, JSON schemas. All pass in parallel (28.8s) | ✅     |
+| 4.4   | **JSON Schema Enrichment** — populate mock schemas with real field definitions for better dev-mode autocomplete; validate against backend `/jsonSchema` endpoints          | ⬜     |
+| 4.5   | **Production Build Optimization** — bundle analysis, code splitting, lazy loading, tree-shaking audit, lighthouse performance score                                        | ⬜     |
 
 **Phase 5+ (future):**
 
@@ -128,3 +128,12 @@ Phase 3 (Manager UI Rewrite) is functionally complete through Phase 3.21. Phase 
 - Pre-commit hook references old `pre-commit` npm package — use `--no-verify` for now
 - Package duplicate not implemented (no backend endpoint for it yet)
 - JSON Schema mock data is minimal (empty `properties`); real schemas come from backend at runtime
+
+### Backend API Issues Found During Integration Testing (2026-03-09)
+
+| Issue                                       | Current Behavior                                                                        | Expected                                     | Proposal                                               |
+| ------------------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------ |
+| **Duplicate POST status code**              | Returns 200                                                                             | Should return **201** (new resource created) | Fix status codes in `RestBotStore`, `RestPackageStore` |
+| **DELETE inconsistency across stores**      | Most stores soft-delete (409 if newer version exists), but LangChain hard-deletes (404) | Consistent behavior across all stores        | Add `?permanent=true` query param for hard delete      |
+| **Deployment status format**                | Returns plain text (`READY`, `NOT_FOUND`)                                               | JSON for consistency with other endpoints    | Wrap in `{"status": "READY"}`                          |
+| **Health endpoint on dev-services failure** | Returns HTML error page                                                                 | JSON error body                              | Quarkus dev mode issue — may need custom error handler |
