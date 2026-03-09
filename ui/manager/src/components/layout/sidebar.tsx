@@ -9,8 +9,10 @@ import {
   FileCode,
   PanelLeftClose,
   PanelLeft,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
 
 const navSections = [
   {
@@ -47,6 +49,17 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { t } = useTranslation();
+  const { method, user, logout } = useAuth();
+  const showUser = method === "keycloak" && user;
+
+  /** User initials for avatar */
+  const initials = showUser
+    ? [user.firstName, user.lastName]
+        .filter(Boolean)
+        .map((n) => n[0])
+        .join("")
+        .toUpperCase() || user.username[0]?.toUpperCase() || "?"
+    : "";
 
   return (
     <aside
@@ -127,6 +140,46 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           </div>
         ))}
       </nav>
+
+      {/* User profile section (only when auth is enabled) */}
+      {showUser && (
+        <div className="border-t border-sidebar-border p-2">
+          <div
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2.5",
+              collapsed && "justify-center px-2"
+            )}
+            data-testid="sidebar-user"
+          >
+            {/* Avatar */}
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-xs font-bold text-sidebar">
+              {initials}
+            </div>
+            {!collapsed && (
+              <div className="flex min-w-0 flex-1 items-center justify-between">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-sidebar-foreground">
+                    {user.fullName || user.username}
+                  </p>
+                  {user.email && (
+                    <p className="truncate text-xs text-sidebar-foreground/60">
+                      {user.email}
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={logout}
+                  data-testid="sidebar-logout"
+                  title={t("auth.logout", "Logout")}
+                  className="ms-2 shrink-0 rounded-md p-1.5 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/10 hover:text-sidebar-accent"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Collapse toggle */}
       <div className="border-t border-sidebar-border p-2">

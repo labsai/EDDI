@@ -2,13 +2,14 @@
 
 > **Last updated**: 2026-03-09  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Phase 3.21 — Mock Data, Backend Integration & JSON Schema
+> **Last commit**: Phase 4.1 — Keycloak Auth Adapter
 
 ---
 
 ## Current Status
 
-**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.21 complete.
+**Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.21 complete.  
+**Phase 4 (Hardening)**: Phase 4.1 complete.
 
 ### What's Done
 
@@ -39,7 +40,7 @@
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 160/160 pass (`npm run test`) — 22 files
+- **Unit/Component**: 164/164 pass (`npm run test`) — 23 files
 - **Build**: Succeeds
 
 ### Files Created (summary)
@@ -65,6 +66,8 @@
 - **MSW**: `handlers.ts` (bots, packages, conversations, resources, schemas, extension store mocks), `server.ts`, `browser.ts`
 - **Editors**: `json-editor.tsx` (with JSON schema support), `version-picker.tsx`, `config-editor-layout.tsx`, `update-usage-dialog.tsx`, `pipeline-builder.tsx`, `add-extension-dialog.tsx`, `behavior-editor.tsx`, `httpcalls-editor.tsx`, `langchain-editor.tsx`, `output-editor.tsx`, `propertysetter-editor.tsx`, `dictionary-editor.tsx`
 - **Cascade**: `cascade-save.ts`, `resource-usage.ts`
+- **Auth**: `auth-context.ts`, `auth-provider.tsx` (optional Keycloak), `use-auth.ts`, `auth-config.ts`
+- **Keycloak**: `docker-compose.keycloak.yml` (local dev), `keycloak/eddi-realm.json` (auto-import realm)
 
 ---
 
@@ -74,7 +77,7 @@ Phase 3 (Manager UI Rewrite) is functionally complete through Phase 3.21. Phase 
 
 | Phase | Description                                                                                                                                                       | Status |
 | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| 4.1   | **Keycloak Auth Adapter** — wire `keycloak-js` 26+, login/logout flow, token refresh, route guards, role-based UI                                                 | ⬜     |
+| 4.1   | **Keycloak Auth Adapter** — wire `keycloak-js` 26+, login/logout flow, token refresh, route guards, role-based UI                                                 | ✅     |
 | 4.2   | **E2E Test Suite (Playwright)** — expand `navigation.spec.ts`, `theme.spec.ts`, `rtl.spec.ts` into full coverage of bots, packages, editors, chat                 | ⬜     |
 | 4.3   | **Real-Backend Integration Testing** — start EDDI on `localhost:7070`, Manager auto-detects and uses real API, validate full CRUD round-trips                     | ⬜     |
 | 4.4   | **JSON Schema Enrichment** — populate mock schemas with real field definitions for better dev-mode autocomplete; validate against backend `/jsonSchema` endpoints | ⬜     |
@@ -110,12 +113,14 @@ Phase 3 (Manager UI Rewrite) is functionally complete through Phase 3.21. Phase 
 11. **Main content max-width** 1536px (`max-w-screen-2xl`) — prevents infinite stretching on ultrawide monitors
 12. **MSW auto-detection** — `main.tsx` probes backend with 1.5s timeout; starts MSW browser worker if unreachable
 13. **JSON Schema from backend** — all 8 config stores expose `/jsonSchema`; fetched once per session, fed to Monaco `setDiagnosticsOptions`
+14. **Optional Keycloak auth** — default is `'none'` (no login). Enabled via `VITE_AUTH_METHOD=keycloak`. Config priority: Vite env → `window.__EDDI_AUTH__` → `'none'`
+15. **Local Keycloak docker-compose** — `docker compose -f docker-compose.keycloak.yml up` gives a fully configured Keycloak 26 on port 8180 with realm, client, roles, test users
+16. **PKCE S256** for all auth flows — no client secret needed, modern browser security best practice
 
 ---
 
 ## Known Issues / TODOs
 
-- Keycloak auth adapter not yet wired (keycloak-js 26+ dependency is installed)
 - Pre-commit hook references old `pre-commit` npm package — use `--no-verify` for now
 - Package duplicate not implemented (no backend endpoint for it yet)
 - JSON Schema mock data is minimal (empty `properties`); real schemas come from backend at runtime

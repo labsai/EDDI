@@ -3,6 +3,14 @@
     "title": "EDDI 管理面板",
     "description": "EDDI 会话式 AI 平台管理仪表板"
   },
+  "auth": {
+    "login": "Login",
+    "logout": "Logout",
+    "loading": "Authenticating…",
+    "sessionExpired": "Session expired. Please login again.",
+    "profile": "Profile",
+    "guest": "Guest"
+  },
   "nav": {
     "dashboard": "仪表板",
     "bots": "机器人",

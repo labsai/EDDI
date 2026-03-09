@@ -1,8 +1,18 @@
+import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, Link } from "react-router-dom";
-import { Moon, Sun, Monitor, Globe, Menu, ChevronRight } from "lucide-react";
+import {
+  Moon,
+  Sun,
+  Monitor,
+  Globe,
+  Menu,
+  ChevronRight,
+  LogOut,
+} from "lucide-react";
 import { useTheme } from "./theme-provider";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
 
 interface TopBarProps {
   onMenuClick: () => void;
@@ -51,6 +61,27 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
   const { theme, setTheme } = useTheme();
   const { t, i18n } = useTranslation();
   const breadcrumbs = useBreadcrumbs();
+  const { method, user, logout } = useAuth();
+  const showUser = method === "keycloak" && user;
+
+  // User dropdown state
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (
+        userMenuRef.current &&
+        !userMenuRef.current.contains(e.target as Node)
+      ) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [userMenuOpen]);
 
   const themeOptions = [
     { value: "light" as const, icon: Sun, label: t("theme.light") },
@@ -71,6 +102,15 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
     { code: "pt", label: t("language.pt") },
     { code: "hi", label: t("language.hi") },
   ];
+
+  /** User initials for avatar */
+  const initials = showUser
+    ? [user.firstName, user.lastName]
+        .filter(Boolean)
+        .map((n) => n[0])
+        .join("")
+        .toUpperCase() || user.username[0]?.toUpperCase() || "?"
+    : "";
 
   return (
     <header className="flex h-16 items-center justify-between border-b border-border bg-card px-4">
@@ -153,6 +193,54 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
             </button>
           ))}
         </div>
+
+        {/* User dropdown (only when auth enabled) */}
+        {showUser && (
+          <div className="relative" ref={userMenuRef}>
+            <button
+              onClick={() => setUserMenuOpen((prev) => !prev)}
+              data-testid="user-menu-trigger"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground transition-opacity hover:opacity-80"
+              title={user.fullName || user.username}
+            >
+              {initials}
+            </button>
+
+            {userMenuOpen && (
+              <div
+                className="absolute inset-e-0 top-full z-50 mt-2 w-56 rounded-lg border border-border bg-card p-1 shadow-lg"
+                data-testid="user-menu-dropdown"
+              >
+                {/* User info */}
+                <div className="border-b border-border px-3 py-2.5">
+                  <p className="text-sm font-medium text-foreground">
+                    {user.fullName || user.username}
+                  </p>
+                  {user.email && (
+                    <p className="text-xs text-muted-foreground">
+                      {user.email}
+                    </p>
+                  )}
+                </div>
+
+                {/* Menu items */}
+                <div className="py-1">
+                  <button
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      logout();
+                    }}
+                    data-testid="user-menu-logout"
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition-colors hover:bg-secondary"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    {t("auth.logout", "Logout")}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </header>
   );

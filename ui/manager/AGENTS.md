@@ -183,7 +183,7 @@ All phases tracked in [`HANDOFF.md`](HANDOFF.md):
 | 3.19     | Polish, remaining tests, documentation                                               | ✅     |
 | 3.20     | UI/UX Enterprise Polish (component library, toasts, dark mode)                       | ✅     |
 | 3.21     | MSW Browser Mode, Backend Integration & JSON Schema                                  | ✅     |
-| **4.1**  | **Keycloak Auth Adapter** — login/logout, token refresh, route guards, role-based UI | ⬜     |
+| **4.1**  | **Keycloak Auth Adapter** — login/logout, token refresh, route guards, role-based UI | ✅     |
 | **4.2**  | **E2E Test Suite (Playwright)** — full coverage of bots, packages, editors, chat     | ⬜     |
 | **4.3**  | **Real-Backend Integration Testing** — validate full CRUD with live EDDI             | ⬜     |
 | **4.4**  | **JSON Schema Enrichment** — real field definitions for dev-mode autocomplete        | ⬜     |
