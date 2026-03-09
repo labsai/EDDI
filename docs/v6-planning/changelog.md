@@ -43,6 +43,36 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-09 — Phase 4.2: E2E Test Suite (Playwright)
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 4.2
+
+**What changed:**
+
+- `e2e/e2e-helpers.ts` [NEW]: Shared helpers (`waitForApp`, `expectHeading`) — waits for MSW worker init + skeleton loaders
+- `e2e/dashboard.spec.ts` [NEW]: 6 tests — stat cards, quick actions, recent bots, navigation
+- `e2e/bots.spec.ts` [NEW]: 8 tests — bot cards, search, create dialog, wizard page, import button
+- `e2e/bot-detail.spec.ts` [NEW]: 9 tests — heading, version selector, deployment status, environments, packages, action buttons, raw config
+- `e2e/packages.spec.ts` [NEW]: 10 tests — package cards, search, create, package detail with version selector, add extension, raw config
+- `e2e/conversations.spec.ts` [NEW]: 8 tests — table, state badges, filters, conversation detail, back nav
+- `e2e/chat.spec.ts` [NEW]: 5 tests — heading, bot selector (Radix Select), streaming toggle, bot dropdown
+- `e2e/resources.spec.ts` [NEW]: 20 tests — hub grid (6 types), resource list, detail with back link, 6 individual type tests
+- `e2e/navigation.spec.ts` [MODIFIED]: Added `waitForApp` helper, scoped links to sidebar, added chat route test (6 → 6 tests)
+- `e2e/rtl.spec.ts` [MODIFIED]: Fixed strict mode violation on Arabic text (`.first()`)
+
+**Key decisions:**
+
+1. **MSW auto-detection** — no test fixtures needed; the Vite dev server auto-starts MSW browser worker when the real backend is unreachable
+2. **Text-based selectors** — detail pages (bot-detail, package-detail) use text selectors when `data-testid` isn't present; hub pages (resources) use existing testids
+3. **Scoped selectors** — sidebar nav links scoped to `getByTestId('sidebar')` to avoid strict mode violations from duplicate text in sidebar + content
+4. **`.or()` pattern** — version selectors use `badge.or(picker)` to handle single-version vs multi-version rendering
+
+**Test count:** 75 tests, 0 failures across chromium (single project for speed)
+
+---
+
 ### 2026-03-05 — Typed Memory Accessors
 
 **Repo:** EDDI  
