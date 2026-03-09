@@ -1,0 +1,21 @@
+# Lightweight compose for integration testing — EDDI backend + MongoDB only.
+# Usage: docker compose -f docker-compose.integration.yml up -d
+# Then wait ~30s for EDDI to boot: curl http://localhost:7070/q/health
+services:
+  eddi:
+    image: labsai/eddi:6
+    ports:
+      - "7070:7070"
+    depends_on:
+      - mongodb
+    environment:
+      QUARKUS_HTTP_CORS_ORIGINS: "http://localhost:3000,http://localhost:5173"
+
+  mongodb:
+    image: mongo:6.0
+    restart: always
+    volumes:
+      - integration-mongodb:/data/db
+
+volumes:
+  integration-mongodb:
