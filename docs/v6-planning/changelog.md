@@ -342,6 +342,28 @@ Render prop pattern on `ConfigEditorLayout` — form editors receive parsed data
 - [x] Verified in browser — all pages show MSW mock data when backend is unavailable
 - [x] No regressions
 
+### 2026-03-09 — Phase 4 Roadmap Finalized
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 4 — Hardening & Production Readiness
+
+**What changed:**
+
+Phase 3 (Manager UI Rewrite) is complete (3.1–3.21). Phase 4 roadmap confirmed:
+
+| Phase | Description                                                                                                       | Status |
+| ----- | ----------------------------------------------------------------------------------------------------------------- | ------ |
+| 4.1   | **Keycloak Auth Adapter** — wire `keycloak-js` 26+, login/logout flow, token refresh, route guards, role-based UI | ⬜     |
+| 4.2   | **E2E Test Suite (Playwright)** — full coverage of bots, packages, editors, chat                                  | ⬜     |
+| 4.3   | **Real-Backend Integration Testing** — CRUD round-trips against live EDDI backend                                 | ⬜     |
+| 4.4   | **JSON Schema Enrichment** — real field definitions for dev-mode autocomplete                                     | ⬜     |
+| 4.5   | **Production Build Optimization** — bundle analysis, code splitting, lazy loading                                 | ⬜     |
+
+**Phase 5+**: Chat-UI Rewrite (`eddi-chat-ui`), Website → Astro (`eddi-website`), further backend work.
+
+**Files updated:** `HANDOFF.md`, `AGENTS.md`, `changelog.md`
+
 ### Template for Each Entry
 
 ```markdown
