@@ -33,6 +33,6 @@ test.describe("RTL Layout", () => {
     await page.getByTestId("language-selector").selectOption("ar");
 
     // Check Arabic text is displayed
-    await expect(page.getByText("لوحة التحكم")).toBeVisible();
+    await expect(page.getByText("لوحة التحكم").first()).toBeVisible();
   });
 });
