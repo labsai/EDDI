@@ -43,6 +43,35 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-09 — Phase 4.3: Real-Backend Integration Testing
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 4.3
+
+**What changed:**
+
+- `docker-compose.integration.yml` [NEW]: Lightweight compose (EDDI 6 + MongoDB, no Keycloak) for integration test environment
+- `e2e/integration/integration-helpers.ts` [NEW]: Shared utilities — `waitForBackend()` health check polling, `extractIdFromLocation()` eddi:// URI parser, `cleanupResource()` helper, `TEST_PREFIX`
+- `e2e/integration/bots.integration.spec.ts` [NEW]: 6 tests — descriptors list, POST→GET→PUT→GET round-trip, version history, duplicate, delete, JSON Schema
+- `e2e/integration/packages.integration.spec.ts` [NEW]: 5 tests — descriptors, POST→GET→PUT round-trip, version history, delete, JSON Schema
+- `e2e/integration/resources.integration.spec.ts` [NEW]: 18 tests — CREATE→READ→UPDATE→DELETE + descriptors + JSON Schema for all 6 resource types (behavior, httpcalls, output, dictionaries, langchain, propertysetter)
+- `e2e/integration/conversations.integration.spec.ts` [NEW]: 5 tests — conversation descriptors, Bot Father exists/deployed, create conversation, send message (POST 500 investigation with detailed diagnostics), filtered conversation list
+- `e2e/integration/deployment.integration.spec.ts` [NEW]: 4 tests — deploy to unrestricted, check status, non-deployed environment NOT_FOUND, undeploy
+- `e2e/integration/schemas.integration.spec.ts` [NEW]: 8 tests — JSON Schema validation for all 8 store types (bots, packages, +6 resources)
+- `package.json` [MODIFIED]: Added `test:integration` script (`playwright test --project=chromium e2e/integration/`)
+
+**Key decisions:**
+
+1. **Playwright API tests** (not UI tests) — call EDDI directly through Vite proxy, proving the Manager's API layer works with the real server
+2. **POST 500 investigation** — conversation test logs exact status codes, error bodies, and step counts to diagnose the AsyncResponse timeout issue documented in `business-logic-analysis.md §4`
+3. **Self-cleaning tests** — every test creates resources in `beforeAll`/test body and deletes them in `afterAll` to avoid polluting the test database
+4. **Separate from E2E** — integration tests live in `e2e/integration/` and are excluded from `npm run test:e2e` (which runs MSW-based tests only)
+
+**Test count:** 46 tests across 6 spec files (requires live EDDI backend)
+
+---
+
 ### 2026-03-09 — Phase 4.2: E2E Test Suite (Playwright)
 
 **Repo:** EDDI-Manager  
