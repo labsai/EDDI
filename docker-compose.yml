@@ -1,6 +1,6 @@
 services:
   eddi:
-    image: labsai/eddi:5
+    image: labsai/eddi:6
 #    environment:
 #      - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"
     ports:
