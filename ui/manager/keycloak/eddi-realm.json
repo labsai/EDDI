@@ -37,11 +37,13 @@
       "baseUrl": "/",
       "redirectUris": [
         "http://localhost:5173/*",
-        "http://localhost:7071/*"
+        "http://localhost:7071/*",
+        "http://localhost:3000/*"
       ],
       "webOrigins": [
         "http://localhost:5173",
-        "http://localhost:7071"
+        "http://localhost:7071",
+        "http://localhost:3000"
       ],
       "defaultClientScopes": [
         "web-origins",
@@ -72,6 +74,16 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "eddi-backend",
+      "name": "EDDI Backend",
+      "description": "Bearer-only client for backend API token validation",
+      "enabled": true,
+      "bearerOnly": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false
     }
   ],
   "users": [
