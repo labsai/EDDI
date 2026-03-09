@@ -402,6 +402,25 @@ Phase 3 (Manager UI Rewrite) is complete (3.1–3.21). Phase 4 roadmap confirmed
 - [x] Build succeeds
 - [x] No regressions
 
+### 2026-03-09 — Phase 4.1b: Full-Stack Keycloak Docker-Compose
+
+**Repo:** EDDI + EDDI-Manager  
+**Branch:** `feature/version-6.0.0`
+
+**What changed:**
+
+- `application.properties` [MODIFIED]: `quarkus.oidc.enabled=true` (build-time), `quarkus.oidc.tenant-enabled=false` (runtime toggle)
+- `RestBotManagement.java` [MODIFIED]: Reads `quarkus.oidc.tenant-enabled` instead of `quarkus.oidc.enabled`
+- `IntegrationTestProfile.java` [MODIFIED]: Updated to override `tenant-enabled`
+- `docker-compose.keycloak.yml` [MODIFIED]: Full stack — Keycloak 26 + EDDI backend (`labsai/eddi:6`, OIDC enabled) + MongoDB
+- `eddi-realm.json` [MODIFIED]: Added `eddi-backend` bearer-only client, `localhost:3000` to redirect/webOrigins
+
+**Design decisions:**
+
+- `quarkus.oidc.enabled` is build-time — switched to `quarkus.oidc.tenant-enabled` (runtime) for the actual auth toggle
+- Backend uses bearer-only client (validates tokens, never initiates login)
+- One `docker compose -f docker-compose.keycloak.yml up` brings up everything with auth
+
 ### Template for Each Entry
 
 ```markdown
