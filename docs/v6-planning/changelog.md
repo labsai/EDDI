@@ -51,24 +51,29 @@ _Entries will be added here as implementation progresses._
 
 **What changed:**
 
-- `docker-compose.integration.yml` [NEW]: Lightweight compose (EDDI 6 + MongoDB, no Keycloak) for integration test environment
-- `e2e/integration/integration-helpers.ts` [NEW]: Shared utilities — `waitForBackend()` health check polling, `extractIdFromLocation()` eddi:// URI parser, `cleanupResource()` helper, `TEST_PREFIX`
-- `e2e/integration/bots.integration.spec.ts` [NEW]: 6 tests — descriptors list, POST→GET→PUT→GET round-trip, version history, duplicate, delete, JSON Schema
-- `e2e/integration/packages.integration.spec.ts` [NEW]: 5 tests — descriptors, POST→GET→PUT round-trip, version history, delete, JSON Schema
-- `e2e/integration/resources.integration.spec.ts` [NEW]: 18 tests — CREATE→READ→UPDATE→DELETE + descriptors + JSON Schema for all 6 resource types (behavior, httpcalls, output, dictionaries, langchain, propertysetter)
-- `e2e/integration/conversations.integration.spec.ts` [NEW]: 5 tests — conversation descriptors, Bot Father exists/deployed, create conversation, send message (POST 500 investigation with detailed diagnostics), filtered conversation list
-- `e2e/integration/deployment.integration.spec.ts` [NEW]: 4 tests — deploy to unrestricted, check status, non-deployed environment NOT_FOUND, undeploy
-- `e2e/integration/schemas.integration.spec.ts` [NEW]: 8 tests — JSON Schema validation for all 8 store types (bots, packages, +6 resources)
-- `package.json` [MODIFIED]: Added `test:integration` script (`playwright test --project=chromium e2e/integration/`)
+- `docker-compose.integration.yml` [NEW]: Lightweight compose (EDDI latest + MongoDB) for integration test environment; alternative: run EDDI from source with `mvnw quarkus:dev`
+- `e2e/integration/integration-helpers.ts` [NEW]: `waitForBackend()` (polls `/q/health/live`), `extractIdFromLocation()` (regex-based eddi:// parser), `createAndDeployBot()` (self-contained test setup), `cleanupResource()`
+- `e2e/integration/bots.integration.spec.ts` [NEW]: 5 tests — descriptors, CRUD round-trip, duplicate, delete, JSON Schema
+- `e2e/integration/packages.integration.spec.ts` [NEW]: 4 tests — descriptors, CRUD round-trip, delete, JSON Schema
+- `e2e/integration/resources.integration.spec.ts` [NEW]: 18 tests — CRUD + descriptors + JSON Schema for all 6 resource types
+- `e2e/integration/conversations.integration.spec.ts` [NEW]: 5 tests — descriptors, create conversation, **send message (200 ✅)**, read state, filtered list
+- `e2e/integration/deployment.integration.spec.ts` [NEW]: 4 tests — deploy (202), status (plain text READY), non-deployed NOT_FOUND, undeploy
+- `e2e/integration/schemas.integration.spec.ts` [NEW]: 8 tests — JSON Schema for all 8 store types
+- `package.json` [MODIFIED]: Added `test:integration` script
 
-**Key decisions:**
+**Key findings from live testing:**
 
-1. **Playwright API tests** (not UI tests) — call EDDI directly through Vite proxy, proving the Manager's API layer works with the real server
-2. **POST 500 investigation** — conversation test logs exact status codes, error bodies, and step counts to diagnose the AsyncResponse timeout issue documented in `business-logic-analysis.md §4`
-3. **Self-cleaning tests** — every test creates resources in `beforeAll`/test body and deletes them in `afterAll` to avoid polluting the test database
-4. **Separate from E2E** — integration tests live in `e2e/integration/` and are excluded from `npm run test:e2e` (which runs MSW-based tests only)
+1. **POST /say returns 200 in v6 — AsyncResponse 500 is FIXED** ✅ The conversation endpoint returns a full JSON snapshot with `conversationState: "READY"` instead of the 500 timeout documented in `business-logic-analysis.md §4`
+2. **Duplicate POST returns 200** — should return **201** (new resource created). Backend fix pending.
+3. **DELETE is soft-delete** — returns 409 if a newer version exists (even if that version is also soft-deleted). **Inconsistent across stores**: LangChain returns 404 for older versions after deleting newer. Proposal: add `?permanent=true` query param.
+4. **Deployment status returns plain text** (`READY`, `NOT_FOUND`) not JSON. May want to standardize.
+5. **Health endpoint** (`/q/health`) returns HTML error page when Quarkus dev-services fails (e.g., port conflict) instead of a proper JSON error. The liveness endpoint (`/q/health/live`) is more reliable.
 
-**Test count:** 46 tests across 6 spec files (requires live EDDI backend)
+**Parallelism strategy:**
+
+- 6 spec files run **in parallel across workers** (10 workers default)
+- Tests within each spec run **serially** (shared cleanup state)
+- Total: **44 tests, 28.8s**, all passing
 
 ---
 
