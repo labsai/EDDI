@@ -172,17 +172,24 @@ All 6 extension types are in `src/lib/api/resources.ts` as `RESOURCE_TYPES`:
 
 All phases tracked in [`HANDOFF.md`](HANDOFF.md):
 
-| Phase    | Description                                                   | Status |
-| -------- | ------------------------------------------------------------- | ------ |
-| 3.1–3.13 | Read-only dashboard (layout, bots, packages, chat, resources) | ✅     |
-| 3.14     | JSON Editor, Version Picker, Cascade Save                     | ✅     |
-| 3.15     | Bot Editor (deploy, duplicate, version picker)                | ✅     |
-| 3.16     | Package Editor (drag-and-drop pipeline)                       | ✅     |
-| 3.17     | Behavior Rules & HTTP Calls Editors                           | ✅     |
-| 3.18     | LangChain, Output, Property Setter, Dictionary Editors        | ✅     |
-| 3.19     | Polish, remaining tests, documentation                        | ✅     |
+| Phase    | Description                                                                          | Status |
+| -------- | ------------------------------------------------------------------------------------ | ------ |
+| 3.1–3.13 | Read-only dashboard (layout, bots, packages, chat, resources)                        | ✅     |
+| 3.14     | JSON Editor, Version Picker, Cascade Save                                            | ✅     |
+| 3.15     | Bot Editor (deploy, duplicate, version picker)                                       | ✅     |
+| 3.16     | Package Editor (drag-and-drop pipeline)                                              | ✅     |
+| 3.17     | Behavior Rules & HTTP Calls Editors                                                  | ✅     |
+| 3.18     | LangChain, Output, Property Setter, Dictionary Editors                               | ✅     |
+| 3.19     | Polish, remaining tests, documentation                                               | ✅     |
+| 3.20     | UI/UX Enterprise Polish (component library, toasts, dark mode)                       | ✅     |
+| 3.21     | MSW Browser Mode, Backend Integration & JSON Schema                                  | ✅     |
+| **4.1**  | **Keycloak Auth Adapter** — login/logout, token refresh, route guards, role-based UI | ⬜     |
+| **4.2**  | **E2E Test Suite (Playwright)** — full coverage of bots, packages, editors, chat     | ⬜     |
+| **4.3**  | **Real-Backend Integration Testing** — validate full CRUD with live EDDI             | ⬜     |
+| **4.4**  | **JSON Schema Enrichment** — real field definitions for dev-mode autocomplete        | ⬜     |
+| **4.5**  | **Production Build Optimization** — bundle analysis, code splitting, lazy loading    | ⬜     |
 
-**After 3.19**: Phase 4 (Chat-UI Rewrite) or further backend work.
+**Phase 5+**: Chat-UI Rewrite (`eddi-chat-ui`), Website migration to Astro (`eddi-website`), further backend work.
 
 ---
 

@@ -68,19 +68,25 @@
 
 ---
 
-### What's Next
+### What's Next — Phase 4: Hardening & Production Readiness
 
-Phase 3 (Manager UI Rewrite) is functionally complete through Phase 3.21.
+Phase 3 (Manager UI Rewrite) is functionally complete through Phase 3.21. Phase 4 focuses on hardening, testing, and production readiness.
 
-**Potential Phase 4 items:**
+| Phase | Description                                                                                                                                                       | Status |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| 4.1   | **Keycloak Auth Adapter** — wire `keycloak-js` 26+, login/logout flow, token refresh, route guards, role-based UI                                                 | ⬜     |
+| 4.2   | **E2E Test Suite (Playwright)** — expand `navigation.spec.ts`, `theme.spec.ts`, `rtl.spec.ts` into full coverage of bots, packages, editors, chat                 | ⬜     |
+| 4.3   | **Real-Backend Integration Testing** — start EDDI on `localhost:7070`, Manager auto-detects and uses real API, validate full CRUD round-trips                     | ⬜     |
+| 4.4   | **JSON Schema Enrichment** — populate mock schemas with real field definitions for better dev-mode autocomplete; validate against backend `/jsonSchema` endpoints | ⬜     |
+| 4.5   | **Production Build Optimization** — bundle analysis, code splitting, lazy loading, tree-shaking audit, lighthouse performance score                               | ⬜     |
 
-- Keycloak auth adapter wiring (keycloak-js 26+ dependency already installed)
-- E2E test suite expansion with Playwright
-- Real-backend integration testing (Start EDDI on `localhost:7070`, Manager auto-detects and uses real API)
-- JSON Schema validation — enrich mock schemas with real field definitions for better dev-mode autocomplete
-- Production build optimization (bundle size, lazy loading)
+**Phase 5+ (future):**
 
-**📄 Reference docs for next conversation:**
+- Chat-UI Rewrite (`eddi-chat-ui` repo)
+- Website migration to Astro (`eddi-website` repo)
+- Further EDDI backend work
+
+**📄 Reference docs:**
 
 - [Editing layer plan](docs/editing-layer-plan.md) — Phases 3.14–3.19 (all ✅)
 - [UX research analysis](docs/ux-research-analysis.md) — competitive analysis across Voiceflow, n8n, Langflow, Dify, Botpress, LangSmith, Make.com
