@@ -49,9 +49,9 @@ public class RestBotManagement implements IRestBotManagement {
 
     @Inject
     public RestBotManagement(IRestBotEngine restBotEngine,
-                             IUserConversationStore userConversationStore,
-                             IRestBotTriggerStore restBotManagementStore,
-                             @ConfigProperty(name = "quarkus.oidc.enabled") boolean checkForUserAuthentication) {
+            IUserConversationStore userConversationStore,
+            IRestBotTriggerStore restBotManagementStore,
+            @ConfigProperty(name = "quarkus.oidc.tenant-enabled") boolean checkForUserAuthentication) {
         this.restBotEngine = restBotEngine;
         this.userConversationStore = userConversationStore;
         this.restBotManagementStore = restBotManagementStore;
@@ -60,10 +60,10 @@ public class RestBotManagement implements IRestBotManagement {
 
     @Override
     public void loadConversationMemory(String intent, String userId, String language,
-                                       Boolean returnDetailed,
-                                       Boolean returnCurrentStepOnly,
-                                       List<String> returningFields,
-                                       AsyncResponse asyncResponse) {
+            Boolean returnDetailed,
+            Boolean returnCurrentStepOnly,
+            List<String> returningFields,
+            AsyncResponse asyncResponse) {
 
         try {
             var userConversationResult = initUserConversation(intent, userId, language);
@@ -71,12 +71,11 @@ public class RestBotManagement implements IRestBotManagement {
 
             checkUserAuthIfApplicable(userConversation);
 
-            var memorySnapshot =
-                    restBotEngine.readConversation(userConversation.getEnvironment(),
-                            userConversation.getBotId(),
-                            userConversation.getConversationId(),
-                            returnDetailed,
-                            returnCurrentStepOnly, returningFields);
+            var memorySnapshot = restBotEngine.readConversation(userConversation.getEnvironment(),
+                    userConversation.getBotId(),
+                    userConversation.getConversationId(),
+                    returnDetailed,
+                    returnCurrentStepOnly, returningFields);
 
             Property languageProperty = extractLanguageProperty(memorySnapshot);
             if (!userConversationResult.isNewlyCreatedConversation() &&
@@ -104,15 +103,15 @@ public class RestBotManagement implements IRestBotManagement {
 
     @Override
     public void sayWithinContext(String intent,
-                                 String userId,
-                                 Boolean returnDetailed,
-                                 Boolean returnCurrentStepOnly,
-                                 List<String> returningFields,
-                                 InputData inputData,
-                                 AsyncResponse response) {
+            String userId,
+            Boolean returnDetailed,
+            Boolean returnCurrentStepOnly,
+            List<String> returningFields,
+            InputData inputData,
+            AsyncResponse response) {
         try {
-            var userConversation =
-                    initUserConversation(intent, userId, extractLanguage(inputData)).getUserConversation();
+            var userConversation = initUserConversation(intent, userId, extractLanguage(inputData))
+                    .getUserConversation();
 
             checkUserAuthIfApplicable(userConversation);
 
@@ -280,7 +279,7 @@ public class RestBotManagement implements IRestBotManagement {
             } catch (ResourceAlreadyExistsException e) {
                 throw new CannotCreateConversationException(
                         String.format("Cannot create conversation for botId=%s in environment=%s (httpCode=%s), " +
-                                        "Conversation already exists",
+                                "Conversation already exists",
                                 botId,
                                 botDeployment.getEnvironment(),
                                 responseHttpCode));
@@ -297,7 +296,7 @@ public class RestBotManagement implements IRestBotManagement {
     }
 
     private UserConversation createUserConversation(String intent, String userId,
-                                                    BotDeployment botDeployment, String conversationId)
+            BotDeployment botDeployment, String conversationId)
             throws ResourceAlreadyExistsException, IResourceStore.ResourceStoreException {
 
         UserConversation userConversation = new UserConversation(
@@ -331,7 +330,7 @@ public class RestBotManagement implements IRestBotManagement {
     private void storeUserConversation(UserConversation userConversation)
             throws ResourceAlreadyExistsException, IResourceStore.ResourceStoreException {
 
-            userConversationStore.createUserConversation(userConversation);
+        userConversationStore.createUserConversation(userConversation);
 
     }
 
