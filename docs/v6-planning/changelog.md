@@ -234,6 +234,114 @@ Render prop pattern on `ConfigEditorLayout` — form editors receive parsed data
 - [x] All 119 tests pass (16 test files)
 - [x] No regressions
 
+### 2026-03-08 — Phase 3.18: LangChain, Output, Property Setter, Dictionary Editors
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 3 — Item #18
+
+**What changed:**
+
+- `langchain-editor.tsx` [NEW]: Form editor for LangChain configuration — tasks management, model parameters, tool references, built-in tools whitelist
+- `output-editor.tsx` [NEW]: Form editor for Output Sets — action-grouped outputs with text alternatives, quick replies, and delay settings
+- `propertysetter-editor.tsx` [NEW]: Form editor for Property Setter — action-triggered property assignments with scope selection
+- `dictionary-editor.tsx` [NEW]: Form editor for Regular Dictionaries — words, phrases, and regex patterns with expression mapping
+- `handlers.ts` [MODIFIED]: Added realistic MSW mock data for langchain, output, propertysetter, and dictionary resources
+- 10 locale files [MODIFIED]: 80+ new i18n keys for all 4 editors
+
+**Testing:**
+
+- [x] Builds cleanly
+- [x] All 160 tests pass (22 test files)
+- [x] No regressions
+
+### 2026-03-08 — Phase 3.19: Polish, Tests & Documentation
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 3 — Item #19
+
+**What changed:**
+
+- `resources.test.ts` [NEW]: 10 API-layer tests for generic resource CRUD
+- `dashboard.test.tsx` [NEW]: Dashboard component test with hook mocking
+- `renderPage` test helper [NEW]: DRY utility wrapping providers for page tests
+- `README.md` [REWRITTEN]: Architecture overview, quickstart, and technology stack
+- `HANDOFF.md` [UPDATED]: Phase 3.19 completion documented
+
+**Testing:**
+
+- [x] Builds cleanly
+- [x] All 160 tests pass (22 test files)
+- [x] No regressions
+
+### 2026-03-08 — Phase 3.20: UI/UX Enterprise Polish
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 3 — Item #20
+
+**What changed:**
+
+- **Foundation UI Components** (6 new): `button.tsx` (cva variants), `card.tsx` (compound), `badge.tsx`, `skeleton.tsx`, `input.tsx`, `alert-dialog.tsx` (replaces `window.confirm()`)
+- **Shared Components** (3 new): `back-link.tsx`, `empty-state.tsx`, `error-state.tsx`
+- `index.css` [MODIFIED]: Deep charcoal dark mode (`#09090b`), premium aesthetic
+- `main.tsx` [MODIFIED]: Sonner `<Toaster />` at app root for global toast notifications
+- `sidebar.tsx` [MODIFIED]: Section groupings (Management/Development/Operations), active accent states
+- `top-bar.tsx` [MODIFIED]: Dynamic breadcrumb navigation from URL path
+- `utils.ts` [MODIFIED]: Centralized `formatRelativeTime` and `statusConfig`
+- **5 pages refactored**: `bots.tsx`, `packages.tsx`, `conversations.tsx`, `resource-list.tsx`, `resource-detail.tsx` — all now use Button, Skeleton, AlertDialog, shared Empty/Error states, and toast notifications
+- `dashboard.tsx` [REWRITTEN]: Real API data with stat cards, quick action buttons, recent bots grid
+- `dashboard.ts` [NEW]: Dashboard API aggregation layer
+- `use-dashboard.ts` [NEW]: TanStack Query hooks for dashboard stats/recent bots
+- 11 locale files [MODIFIED]: New sidebar and dashboard i18n keys
+
+**Design decisions:**
+
+- `cva` (class-variance-authority) + Radix UI primitives for consistent design system
+- `sonner` for toast notifications over native alerts
+- Skeleton shimmer loaders prioritized over spinners
+- `AlertDialog` replaces `window.confirm()` for accessible confirmation dialogs
+
+**Testing:**
+
+- [x] TypeScript: zero errors
+- [x] All 160 tests pass (22 test files)
+- [x] Verified in browser — all pages render correctly
+- [x] No regressions
+
+### 2026-03-09 — Phase 3.21: MSW Browser Mode, Backend Integration & JSON Schema
+
+**Repo:** EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 3 — Item #21
+
+**What changed:**
+
+- `browser.ts` [NEW]: MSW browser worker using `setupWorker()` from `msw/browser`, reuses existing test handlers
+- `main.tsx` [MODIFIED]: `startApp()` async boot — probes backend with 1.5s timeout; if unreachable, dynamically imports and starts MSW browser worker so dev UI works without a running backend
+- `vite.config.ts` [MODIFIED]: Added missing `/extensionstore` proxy to `localhost:7070`
+- `schemas.ts` [NEW]: API functions to fetch JSON Schema from backend's `/{store}/{plural}/jsonSchema` endpoints, with in-memory cache
+- `use-json-schema.ts` [NEW]: TanStack Query hook with `staleTime: Infinity` (schemas are static)
+- `json-editor.tsx` [MODIFIED]: `jsonSchema` prop + `beforeMount` callback configures Monaco `setDiagnosticsOptions` for validation and autocomplete
+- `config-editor-layout.tsx` [MODIFIED]: `jsonSchema` prop passthrough to `JsonEditor`
+- `resource-detail.tsx` [MODIFIED]: Calls `useJsonSchema(type)` and passes schema to `ConfigEditorLayout`
+- `handlers.ts` [MODIFIED]: Mock schema handlers for all 8 resource types + bots + packages
+- `public/mockServiceWorker.js` [NEW]: MSW service worker script (auto-generated by `npx msw init`)
+
+**Design decisions:**
+
+- MSW auto-detection over manual flag: the app probes the backend to decide whether to mock — no env vars needed
+- JSON Schema fetched once, cached forever (schemas don't change at runtime)
+- Monaco `setDiagnosticsOptions` provides both validation (red squiggles) and autocomplete (Ctrl+Space) from a single schema
+
+**Testing:**
+
+- [x] TypeScript: zero errors
+- [x] All 160 tests pass (22 test files)
+- [x] Verified in browser — all pages show MSW mock data when backend is unavailable
+- [x] No regressions
+
 ### Template for Each Entry
 
 ```markdown
