@@ -9,7 +9,7 @@
 ## Current Status
 
 **Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.21 complete.  
-**Phase 4 (Hardening)**: Phase 4.1 + 4.2 + 4.3 complete.
+**Phase 4 (Hardening)**: Phase 4.1 + 4.2 + 4.3 + 4.4 + 4.5 complete.
 
 ### What's Done
 
@@ -36,6 +36,9 @@
 | 3.19  | Polish, Tests & Documentation: API-layer tests, dashboard test, renderPage helper, README rewrite                                                                                                                                  | —         |
 | 3.20  | UI/UX Enterprise Polish: unified component library (Button/Card/Badge/Skeleton/AlertDialog), Sonner toasts, Charcoal dark mode, sidebar sections, breadcrumbs, shared EmptyState/ErrorState/BackLink, dashboard with real API data | —         |
 | 3.21  | MSW Browser Mode + JSON Schema: auto-detect backend, mock data in dev, Vite proxy fix, Monaco JSON schema validation/autocomplete from backend `/jsonSchema` endpoints                                                             | —         |
+| 4.4a  | Backend: migrate from kjetland/jackson-jsonSchema to victools/jsonschema-generator v4.38.0 (Draft 2020-12). Removed scala-library dep, migrated all annotations (11 files changed)                                                  | EDDI repo |
+| 4.4b  | Manager: enrich all 8 MSW mock schemas (bot, package, behavior, httpcalls, output, dictionary, langchain, propertysetter) with real field definitions matching backend Java models                                                   | `3013459` |
+| 4.5   | Production build optimization: React.lazy code splitting for 12 routes, PageLoader Suspense fallback, vendor chunk splitting (react, ui, editor, query, i18n) in vite.config.ts                                                     | latest    |
 
 ### Test Status
 
