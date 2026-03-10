@@ -41,6 +41,39 @@ Each entry follows this format:
 
 ## Implementation Log
 
+### 2026-03-10 — Phase 5: Event Bus Abstraction + NATS JetStream Adapter
+
+**Repo:** EDDI
+**Branch:** `feature/version-6.0.0`
+**Phase:** 5 — Items #27-28
+
+**What changed:**
+
+1. **`IEventBus` interface** — abstract event bus with `submitInOrder`, `start`, `shutdown` methods. Decouples conversation ordering from transport.
+2. **`IConversationCoordinator` refactored** — now extends `IEventBus`, preserving backward compatibility. All injection sites continue working without changes.
+3. **`InMemoryConversationCoordinator`** — renamed from `ConversationCoordinator`, annotated `@DefaultBean` so it's the default when no NATS config exists. Zero behavior change.
+4. **`NatsConversationCoordinator`** — JetStream-based implementation, activated via `@LookupIfProperty(eddi.messaging.type=nats)`. Uses NATS for durable ordering while executing callables in-process. Handles NATS publish failures gracefully (falls back to local execution).
+5. **`NatsHealthCheck`** — Quarkus `@Readiness` health check at `/q/health/ready`, reports NATS connection status.
+6. **`NatsMetrics`** — Micrometer counters/timers: `eddi_nats_publish_count`, `eddi_nats_publish_duration`, `eddi_nats_consume_count`, `eddi_nats_consume_duration`, `eddi_nats_dead_letter_count`.
+7. **`pom.xml`** — Added `io.nats:jnats:2.25.2` dependency.
+8. **`application.properties`** — Added `eddi.messaging.type=in-memory` (default), `eddi.nats.url`, `eddi.nats.stream-name`, `eddi.nats.max-retries`, `eddi.nats.ack-wait-seconds`.
+9. **`docker-compose.nats.yml`** — NATS 2.10-alpine + MongoDB + EDDI for local development.
+10. **Fix** — Removed stale `javax.validation.constraints.NotNull` import from `RegularDictionaryConfiguration.java` (pre-existing issue).
+11. **Tests** — 8 new `NatsConversationCoordinatorTest` unit tests covering ordering, multi-conversation independence, NATS failure resilience, subject sanitization, and health status.
+
+**Key decisions:**
+
+- **Direct `jnats` over SmallRye Reactive Messaging** — more control over JetStream stream configuration, no extra Quarkus extension overhead
+- **`@LookupIfProperty` over CDI `@Alternative`** — cleaner activation, no `beans.xml` needed, Quarkus-idiomatic
+- **In-process callable execution** — NATS serves as distributed ordering primitive now; full message serialization for cross-instance consumption is a future enhancement
+- **Subject-per-conversation** — `eddi.conversation.<sanitizedId>` ensures per-conversation ordering without shared queue contention
+- **WorkQueue retention** — messages auto-deleted after consumption, 24h TTL, file-based storage
+
+**Testing:** ✅ All 639 tests pass (0 failures, 0 errors, 4 skipped)
+**Commit:** `e220f4c0`
+
+---
+
 ### 2026-03-09 — Backend API Consistency Fixes (N.7)
 
 **Repo:** EDDI + EDDI-Manager

@@ -152,9 +152,33 @@
 - [x] `OpenAILanguageModelBuilder`: migrated to `JdkHttpClient.builder()`
 - [x] `GeminiLanguageModelBuilder`, `OllamaLanguageModelBuilder`: also migrated to JDK HttpClient
 
+### Phase 5, Items 5.27-5.28: Event Bus Abstraction + NATS JetStream Adapter ✅ (commit `e220f4c0`)
+
+- [x] Created `IEventBus` interface — abstract event bus for conversation ordering
+- [x] Refactored `IConversationCoordinator` to extend `IEventBus` (backward compatible)
+- [x] Renamed `ConversationCoordinator` → `InMemoryConversationCoordinator` (`@DefaultBean`)
+- [x] Created `NatsConversationCoordinator` — JetStream durable ordering, `@LookupIfProperty(eddi.messaging.type=nats)`
+- [x] Created `NatsHealthCheck` — Quarkus readiness check at `/q/health/ready`
+- [x] Created `NatsMetrics` — Micrometer counters/timers for publish/consume
+- [x] Added `io.nats:jnats` 2.25.2 dependency
+- [x] Added `eddi.messaging.type` config (`in-memory` default, `nats` option)
+- [x] Added `docker-compose.nats.yml` for local NATS JetStream development
+- [x] Fixed pre-existing `javax.validation.constraints.NotNull` import in `RegularDictionaryConfiguration`
+- [x] 8 new `NatsConversationCoordinatorTest` unit tests
+- [x] All 639 tests pass (0 failures, 0 errors, 4 skipped)
+
+**Key files:**
+
+- `src/main/java/ai/labs/eddi/engine/runtime/IEventBus.java`
+- `src/main/java/ai/labs/eddi/engine/runtime/internal/InMemoryConversationCoordinator.java`
+- `src/main/java/ai/labs/eddi/engine/runtime/internal/NatsConversationCoordinator.java`
+- `src/main/java/ai/labs/eddi/engine/runtime/internal/NatsHealthCheck.java`
+- `src/main/java/ai/labs/eddi/engine/runtime/internal/NatsMetrics.java`
+- `docker-compose.nats.yml`
+
 ## Next Up
 
-All Phase 1 + Phase 2 + N.7 items complete. Chat UI rewrite and Bot Father enhancements done. Next: Phase 4.4 (JSON Schema Enrichment), Phase 4.5 (Production Build Optimization), then Phase 5+ (see `docs/v6-planning/implementation_plan.md`).
+Phase 5, Item 5.29 (Async Conversation Processing): dead-letter handling, Testcontainers NATS integration test. Then Phase 6 (PostgreSQL), Phase 7 (MCP), etc. See `docs/v6-planning/implementation_plan.md`.
 
 ## Important Rules
 
