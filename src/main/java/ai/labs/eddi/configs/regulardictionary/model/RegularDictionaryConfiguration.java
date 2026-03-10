@@ -7,7 +7,6 @@ import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import lombok.Getter;
 import lombok.Setter;
 
-import javax.validation.constraints.NotNull;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -37,7 +36,6 @@ public class RegularDictionaryConfiguration {
                 "A word of a natural language such as German or English" +
                         " that you want the parser to recognize (e.g. hello).")
 
-        @NotNull
         private String word;
         @JsonPropertyDescription(
                 "Prolog like expressions describing the meaning of this word " +
@@ -75,7 +73,6 @@ public class RegularDictionaryConfiguration {
         @JsonPropertyDescription(
                 "A regular expression (regEx) e.g. \"(\\\\w)(\\\\s+)([\\\\.,])\"")
 
-        @NotNull
         private String regEx;
         @JsonPropertyDescription(
                 "Prolog like expressions describing the meaning of this word " +
@@ -112,7 +109,6 @@ public class RegularDictionaryConfiguration {
         @JsonPropertyDescription(
                 "A phrase of a natural language such as German or English" +
                         " that you want the parser to recognize (e.g. good morning).")
-        @NotNull
         protected String phrase;
 
         @JsonPropertyDescription(

@@ -1,10 +1,11 @@
 package ai.labs.eddi.engine.runtime;
 
-import java.util.concurrent.Callable;
-
 /**
+ * Conversation coordinator — ensures sequential message processing per conversation.
+ * Extends {@link IEventBus} to inherit the pluggable event bus contract.
+ *
  * @author ginccc
  */
-public interface IConversationCoordinator {
-    void submitInOrder(String conversationId, Callable<Void> callable);
+public interface IConversationCoordinator extends IEventBus {
+    // submitInOrder is inherited from IEventBus
 }

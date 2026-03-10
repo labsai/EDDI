@@ -1,0 +1,48 @@
+# Docker Compose for NATS JetStream + EDDI + MongoDB
+# Usage: docker compose -f docker-compose.nats.yml up
+#
+# This extends the default docker-compose.yml with NATS JetStream for
+# durable, scalable conversation message ordering (Phase 5).
+
+services:
+  nats:
+    image: nats:2.10-alpine
+    command: ["--jetstream", "--store_dir=/data", "-m", "8222"]
+    ports:
+      - "4222:4222"   # Client connections
+      - "8222:8222"   # HTTP monitoring
+    volumes:
+      - nats-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  mongodb:
+    image: mongo:7.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    restart: unless-stopped
+
+  eddi:
+    image: labsai/eddi:6.0.0
+    ports:
+      - "7070:7070"
+    environment:
+      EDDI_MESSAGING_TYPE: nats
+      EDDI_NATS_URL: nats://nats:4222
+      MONGODB_CONNECTIONSTRING: mongodb://mongodb:27017/eddi?retryWrites=true&w=majority
+    depends_on:
+      nats:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  nats-data:
+  mongo-data:

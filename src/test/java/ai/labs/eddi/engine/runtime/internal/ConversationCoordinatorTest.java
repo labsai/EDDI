@@ -15,7 +15,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 /**
- * Tests for ConversationCoordinator, focusing on:
+ * Tests for InMemoryConversationCoordinator, focusing on:
  * - L3 fix: Race condition in submitInOrder (synchronized isEmpty+offer+submit)
  * - Sequential ordering guarantee per conversation
  * - Concurrent conversations handled independently
@@ -23,12 +23,12 @@ import static org.mockito.Mockito.*;
 class ConversationCoordinatorTest {
 
     private IRuntime runtime;
-    private ConversationCoordinator coordinator;
+    private InMemoryConversationCoordinator coordinator;
 
     @BeforeEach
     void setUp() {
         runtime = mock(IRuntime.class);
-        coordinator = new ConversationCoordinator(runtime);
+        coordinator = new InMemoryConversationCoordinator(runtime);
     }
 
     @Test
