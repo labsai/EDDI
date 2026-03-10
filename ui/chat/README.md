@@ -1,70 +1,100 @@
-# Getting Started with EDDI Chat UI
+# EDDI Chat UI
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A standalone, configurable chat widget for [EDDI](https://github.com/labsai/EDDI) conversational AI bots. Built with React 19, TypeScript, and Vite.
 
-## Available Scripts
+## Features
 
-In the project directory, you can run:
+- 💬 **Rich markdown** — Tables, code blocks, bold/italic, links, lists
+- 🌊 **SSE streaming** — Real-time token-by-token bot responses with thinking indicator
+- 🎨 **Dark/Light themes** — Toggle via UI or query parameters
+- ⚡ **Quick replies** — Pill buttons for suggested responses
+- ↩↪ **Undo/Redo** — Step through conversation history
+- 🔧 **Configurable** — All features togglable via URL query parameters
+- 📱 **Responsive** — Mobile-first design with adaptive breakpoints
+- 🎭 **Demo mode** — Full showcase without a running backend
 
-### `npm start`
+## Quick Start
 
-Runs the app in the development mode.\
-Open `http://localhost:3000/chat/managedbots/:intent/:userId` or `http://localhost:3000/chat/:environment/:botId?userId=:userId` to view it in your browser.
+```bash
+npm install
+npm run dev        # http://localhost:5174
+```
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+### URL Patterns
 
-### `npm test`
+| URL                                 | Description               |
+| ----------------------------------- | ------------------------- |
+| `/chat/:environment/:botId`         | Connect to a specific bot |
+| `/chat/demo/showcase`               | Demo mode with mock data  |
+| `/chat/managedbots/:intent/:userId` | Managed bot mode          |
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+### Query Parameters
 
-### `npm run build`
+| Parameter             | Example                     | Effect                             |
+| --------------------- | --------------------------- | ---------------------------------- |
+| `hideUndo`            | `?hideUndo=true`            | Hide undo button                   |
+| `hideRedo`            | `?hideRedo=true`            | Hide redo button                   |
+| `hideNewConversation` | `?hideNewConversation=true` | Hide restart button                |
+| `hideLogo`            | `?hideLogo=true`            | Show text title instead of logo    |
+| `hideQuickReplies`    | `?hideQuickReplies=true`    | Hide quick reply buttons           |
+| `theme`               | `?theme=light`              | Set initial theme (`dark`/`light`) |
+| `title`               | `?title=My%20Bot`           | Override header title              |
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+## Development
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+```bash
+npm run dev          # Dev server (port 5174) with proxy to EDDI backend
+npm run build        # Production build
+npx vitest run       # Run tests (42 tests)
+npx tsc --noEmit     # Type check
+```
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+### Project Structure
 
-### `npm run eject`
+```
+src/
+├── api/              # API layer (fetch + SSE streaming)
+│   ├── chat-api.ts       # Real EDDI backend API
+│   └── demo-api.ts       # Mock API for demo mode
+├── components/       # React components
+│   ├── ChatWidget.tsx    # Main orchestrator
+│   ├── ChatHeader.tsx    # Logo, actions, theme toggle
+│   ├── MessageBubble.tsx # Message rendering with Markdown
+│   ├── ChatInput.tsx     # Auto-grow textarea + send
+│   ├── QuickReplies.tsx  # Suggested reply pills
+│   ├── Indicators.tsx    # Typing + Thinking indicators
+│   └── ScrollToBottom.tsx
+├── hooks/
+│   └── useTheme.ts       # Theme management
+├── store/
+│   └── chat-store.tsx    # Context + useReducer
+├── styles/
+│   ├── variables.css     # CSS custom properties (design tokens)
+│   └── chat.css          # Component styles (BEM naming)
+└── types.ts              # Shared types
+```
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+## Embedding
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+The chat UI can be embedded in any HTML page via iframe:
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+```html
+<iframe
+  src="https://your-eddi-server/chat/unrestricted/your-bot-id?hideNewConversation=true&theme=dark"
+  style="width: 400px; height: 600px; border: none; border-radius: 12px;"
+></iframe>
+```
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+## Backend Integration
 
-## Learn More
+The production build is deployed into the EDDI Quarkus backend at:
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+```
+EDDI/src/main/resources/META-INF/resources/
+```
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+This makes the chat UI available at `http://your-eddi-server/chat.html`.
 
-### Code Splitting
+## License
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+Part of the EDDI project — see [EDDI License](https://github.com/labsai/EDDI/blob/master/LICENSE).
