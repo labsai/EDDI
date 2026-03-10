@@ -186,8 +186,8 @@ All phases tracked in [`HANDOFF.md`](HANDOFF.md):
 | **4.1**  | **Keycloak Auth Adapter** — login/logout, token refresh, route guards, role-based UI | ✅     |
 | **4.2**  | **E2E Test Suite (Playwright)** — full coverage of bots, packages, editors, chat     | ✅     |
 | **4.3**  | **Real-Backend Integration Testing** — validate full CRUD with live EDDI             | ✅     |
-| **4.4**  | **JSON Schema Enrichment** — real field definitions for dev-mode autocomplete        | ⬜     |
-| **4.5**  | **Production Build Optimization** — bundle analysis, code splitting, lazy loading    | ⬜     |
+| **4.4**  | **JSON Schema Enrichment** — victools migration + mock schema enrichment              | ✅     |
+| **4.5**  | **Production Build + Dashboard** — single bundle, loading indicator, old dashboard → Manager redirect | ✅     |
 
 **Phase 5+**: NATS JetStream, PostgreSQL/DB-agnostic, MCP Server+Client, Multi-Bot Orchestration, Persistent User Memory, CI/CD (see EDDI `AGENTS.md` for full roadmap). Website migration to Astro is **last**.
 

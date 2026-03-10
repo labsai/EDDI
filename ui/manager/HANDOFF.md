@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-03-10  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Chat panel SSE streaming + undo/redo support
+> **Last commit**: Replace old dashboard with Manager, add OpenAPI + Docs sidebar links
 
 ---
 
@@ -36,9 +36,10 @@
 | 3.19  | Polish, Tests & Documentation: API-layer tests, dashboard test, renderPage helper, README rewrite                                                                                                                                  | —         |
 | 3.20  | UI/UX Enterprise Polish: unified component library (Button/Card/Badge/Skeleton/AlertDialog), Sonner toasts, Charcoal dark mode, sidebar sections, breadcrumbs, shared EmptyState/ErrorState/BackLink, dashboard with real API data | —         |
 | 3.21  | MSW Browser Mode + JSON Schema: auto-detect backend, mock data in dev, Vite proxy fix, Monaco JSON schema validation/autocomplete from backend `/jsonSchema` endpoints                                                             | —         |
-| 4.4a  | Backend: migrate from kjetland/jackson-jsonSchema to victools/jsonschema-generator v4.38.0 (Draft 2020-12). Removed scala-library dep, migrated all annotations (11 files changed)                                                  | EDDI repo |
+| 4.4a  | Backend: migrate from kjetland/jackson-jsonSchema to victools/jsonschema-generator v4.38.0 (Draft 2020-12). `JsonSchemaCreatorTest` (11 tests). Both victools deps at 4.38.0 (Jackson 2.x) | EDDI repo |
 | 4.4b  | Manager: enrich all 8 MSW mock schemas (bot, package, behavior, httpcalls, output, dictionary, langchain, propertysetter) with real field definitions matching backend Java models                                                   | `3013459` |
-| 4.5   | Production build optimization: React.lazy code splitting for 12 routes, PageLoader Suspense fallback, vendor chunk splitting (react, ui, editor, query, i18n) in vite.config.ts                                                     | latest    |
+| 4.5   | Reverted to single bundle (no code splitting) — admin dashboard prioritizes simplicity over micro-optimization. Single JS (1.2 MB, mainly Monaco) + single CSS                                                                       | latest    |
+| —     | **Dashboard replacement**: old Bootstrap/jQuery `index.html` → redirect to `/manage`. OpenAPI + Docs external links in sidebar. Branded loading indicator. Removed bootstrap, jQuery, moment, KaTeX, Slick, old webpack bundles      | latest    |
 
 ### Test Status
 
@@ -87,8 +88,8 @@ Phase 3 (Manager UI Rewrite) is functionally complete through Phase 3.21. Phase 
 | 4.1   | **Keycloak Auth Adapter** — wire `keycloak-js` 26+, login/logout flow, token refresh, route guards, role-based UI                                                          | ✅     |
 | 4.2   | **E2E Test Suite (Playwright)** — 75 tests across 11 spec files covering dashboard, bots, packages, conversations, chat, resources, navigation, theme, RTL                 | ✅     |
 | 4.3   | **Real-Backend Integration Testing** — 44 Playwright API tests: CRUD round-trips, conversations (POST /say 200 ✅), deployment, JSON schemas. All pass in parallel (28.8s) | ✅     |
-| 4.4   | **JSON Schema Enrichment** — populate mock schemas with real field definitions for better dev-mode autocomplete; validate against backend `/jsonSchema` endpoints          | ⬜     |
-| 4.5   | **Production Build Optimization** — bundle analysis, code splitting, lazy loading, tree-shaking audit, lighthouse performance score                                        | ⬜     |
+| 4.4   | **JSON Schema Enrichment** — backend victools migration + mock schema enrichment + `JsonSchemaCreatorTest` (11 tests)                                                                     | ✅     |
+| 4.5   | **Production Build** — single bundle (no code splitting), loading indicator, old dashboard replaced with Manager redirect                                                                  | ✅     |
 
 ### ✅ N.7 Backend API Consistency Fixes — DONE (2026-03-09, EDDI + Manager)
 
@@ -148,4 +149,4 @@ Manager tests updated: `integration-helpers.ts` and `deployment.integration.spec
 
 - Pre-commit hook references old `pre-commit` npm package — use `--no-verify` for now
 - Package duplicate not implemented (no backend endpoint for it yet)
-- JSON Schema mock data is minimal (empty `properties`); real schemas come from backend at runtime
+- `index.html` now redirects to `/manage` — Quarkus must serve `manage.html` at `/manage` route (check `application.properties`)
