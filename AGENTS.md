@@ -94,8 +94,8 @@ Phase 4: Chat-UI Rewrite + Hardening ✅
   22. SSE streaming support                           3 SP
   23. Manager chat panel SSE + undo/redo              3 SP
   24. Keycloak Auth, E2E tests, integration tests     8 SP
-  25. JSON Schema Enrichment                          2 SP  ⬜
-  26. Production Build Optimization                   3 SP  ⬜
+  25. JSON Schema Enrichment                          2 SP  ✅
+  26. Production Build + Dashboard Replacement          3 SP  ✅
 
 Phase 5: NATS JetStream Message Queue
   27. Event bus abstraction over current in-process    3 SP

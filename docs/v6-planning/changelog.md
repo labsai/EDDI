@@ -83,6 +83,41 @@ _Entries will be added here as implementation progresses._
 - Bot Father tool whitelisting uses predefined quick-reply presets (calculator+web, all tools, etc.) plus custom JSON array input
 - Chat UI uses vanilla CSS over Tailwind to stay framework-agnostic for future React Native conversion
 
+### 2026-03-10 — Phase 4.4/4.5: JSON Schema Migration, Build Optimization, Dashboard Replacement
+
+**Repos:** EDDI, EDDI-Manager  
+**Branch:** `feature/version-6.0.0`  
+**Phase:** 4 — Items #4, #5
+
+**What changed:**
+
+**EDDI (backend):**
+- `pom.xml`: Migrated from `kjetland/jackson-jsonSchema` to `victools/jsonschema-generator` + `jsonschema-module-jackson` v4.38.0 (Jackson 2.x compatible, Draft 2020-12)
+- `JsonSchemaCreator.java` [REWRITTEN]: victools-based schema generation replacing kjetland
+- `RegularDictionaryConfiguration.java` + output types: Replaced kjetland annotations (`@JsonSchemaDescription`, `@JsonSchemaDefault`, `@JsonSchemaInject`, `@JsonSchemaTitle`) with Jackson-standard (`@JsonPropertyDescription`, `@JsonClassDescription`, `@JsonProperty(defaultValue)`)
+- `JsonSchemaCreatorTest.java` [NEW]: 11 parameterized tests verifying Draft 2020-12 schema generation for all 7 config types
+- `index.html` [REPLACED]: Old Bootstrap/jQuery dashboard → redirect to `/manage`
+- `manage.html` [REWRITTEN]: New Manager SPA entry with branded loading indicator (EDDI logo + gold spinner)
+- **Asset cleanup**: Removed 60+ stale files (old webpack bundles, bootstrap, jQuery, moment, KaTeX fonts, Slick fonts, code-split chunks). Down from 80+ to 17 files in `META-INF/resources/`
+- Deployed fresh Chat-UI + Manager builds to `scripts/js/` and `scripts/css/`
+
+**EDDI-Manager:**
+- `handlers.ts`: Enriched all 8 MSW mock schemas with realistic Draft 2020-12 field definitions
+- `App.tsx`: Reverted React.lazy code splitting → static imports (simpler for admin dashboard)
+- `vite.config.ts`: Removed manualChunks vendor splitting → single bundle output
+- `sidebar.tsx`: Added external links section with OpenAPI (`/q/swagger-ui`) and Documentation (`docs.labs.ai`) links
+
+**Design decisions:**
+- **Single bundle over code splitting**: Admin dashboard prioritizes simplicity/maintainability. 1.2 MB JS (mainly Monaco Editor) gzips to ~350 KB — acceptable for admin use
+- **victools 4.38.0** not 5.0.0: v5.0.0 requires Jackson 3.x (namespace `tools.jackson.*`) which is incompatible with Quarkus's Jackson 2.x
+- **Dashboard replacement**: Old EDDI dashboard was duplicating functionality already in Manager; external links (Swagger, Docs) added to sidebar instead
+
+**Testing:**
+
+- [x] Backend: all tests pass including 11 new `JsonSchemaCreatorTest` cases
+- [x] Manager: `npx tsc --noEmit` ✅, 17/17 tests pass, build succeeds
+- [x] Both repos committed with clean working trees
+
 ### 2026-03-09 — Phase 4.3: Real-Backend Integration Testing
 
 **Repo:** EDDI-Manager  
