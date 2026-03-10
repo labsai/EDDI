@@ -59,26 +59,297 @@ const CONVERSATIONS_MOCK = [
   },
 ];
 
+// --- Enriched JSON Schemas (matching victools Draft 2020-12 output) ---
+const RESOURCE_SCHEMAS: Record<string, object> = {
+  behavior: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "BehaviorConfiguration",
+    properties: {
+      appendActions: { type: "boolean", description: "Whether to append actions from behavior rules to existing actions" },
+      expressionsAsActions: { type: "boolean", description: "Whether to use expressions as actions" },
+      behaviorGroups: {
+        type: "array",
+        description: "Groups of behavior rules",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Name of the behavior group" },
+            executionStrategy: { type: "string", description: "Execution strategy: currentStepOnly or allSteps" },
+            behaviorRules: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string", description: "Rule name" },
+                  actions: { type: "array", items: { type: "string" }, description: "Actions to trigger" },
+                  conditions: { type: "array", items: { type: "object" }, description: "Conditions to evaluate" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  httpcalls: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "HttpCallsConfiguration",
+    properties: {
+      targetServerUrl: { type: "string", description: "Base URL of the target server" },
+      httpCalls: {
+        type: "array",
+        description: "List of HTTP call definitions",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Name of the HTTP call" },
+            description: { type: "string", description: "Description of what this call does" },
+            actions: { type: "array", items: { type: "string" }, description: "Actions that trigger this call" },
+            saveResponse: { type: "boolean", description: "Whether to save the response" },
+            responseObjectName: { type: "string", description: "Key to store response under" },
+            fireAndForget: { type: "boolean", description: "Whether to wait for response" },
+            request: {
+              type: "object",
+              properties: {
+                path: { type: "string", description: "URL path (supports Thymeleaf templates)" },
+                method: { type: "string", description: "HTTP method (GET, POST, PUT, DELETE, PATCH)" },
+                headers: { type: "object", additionalProperties: { type: "string" } },
+                contentType: { type: "string" },
+                body: { type: "string" },
+                queryParams: { type: "object", additionalProperties: { type: "string" } },
+              },
+            },
+            preRequest: { type: "object", properties: { propertyInstructions: { type: "array" } } },
+            postResponse: {
+              type: "object",
+              properties: {
+                propertyInstructions: { type: "array" },
+                outputBuildInstructions: { type: "array" },
+                qrBuildInstructions: { type: "array" },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  output: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "OutputConfigurationSet",
+    properties: {
+      lang: { type: "string", description: "Language code (e.g. en, de, fr)" },
+      outputSet: {
+        type: "array",
+        description: "List of output configurations",
+        items: {
+          type: "object",
+          properties: {
+            action: { type: "string", description: "Action that triggers this output" },
+            timesOccurred: { type: "integer", description: "Number of occurrences to match (0 = any)" },
+            outputs: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  valueAlternatives: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        type: { type: "string", description: "Output type: text, image, quickReply, button, etc." },
+                        text: { type: "string" },
+                        delay: { type: "integer" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            quickReplies: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  value: { type: "string", description: "Display text" },
+                  expressions: { type: "string", description: "Expression to evaluate" },
+                  isDefault: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  dictionary: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "RegularDictionaryConfiguration",
+    properties: {
+      lang: { type: "string", description: "Language code" },
+      words: {
+        type: "array",
+        description: "Word definitions",
+        items: {
+          type: "object",
+          description: "A word definition of the dictionary.",
+          properties: {
+            word: { type: "string", description: "A word of a natural language that you want the parser to recognize (e.g. hello)." },
+            expressions: { type: "string", description: "Prolog like expressions describing the meaning of this word (e.g. greeting(hello))" },
+            frequency: { type: "integer", description: "Word frequency weight" },
+          },
+        },
+      },
+      phrases: {
+        type: "array",
+        description: "Phrase definitions",
+        items: {
+          type: "object",
+          description: "A phrase definition of the dictionary.",
+          properties: {
+            phrase: { type: "string", description: "A phrase to recognize (e.g. good morning)." },
+            expressions: { type: "string", description: "Prolog like expressions describing the meaning" },
+          },
+        },
+      },
+      regExs: {
+        type: "array",
+        description: "Regular expression definitions",
+        items: {
+          type: "object",
+          description: "A RegEx definition of the dictionary.",
+          properties: {
+            regEx: { type: "string", description: "A regular expression pattern" },
+            expressions: { type: "string", description: "Prolog like expressions describing the meaning" },
+          },
+        },
+      },
+    },
+  },
+  langchain: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "LangChainConfiguration",
+    properties: {
+      tasks: {
+        type: "array",
+        description: "List of LangChain tasks",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Unique task identifier" },
+            type: { type: "string", description: "LLM provider: openai, anthropic, gemini, ollama, huggingface" },
+            description: { type: "string", description: "Task description" },
+            actions: { type: "array", items: { type: "string" }, description: "Actions that trigger this task" },
+            parameters: {
+              type: "object",
+              description: "Provider-specific parameters",
+              properties: {
+                systemMessage: { type: "string", description: "System prompt for the LLM" },
+                addToOutput: { type: "string", description: "Whether to add response to output" },
+                logSizeLimit: { type: "string", description: "Maximum conversation log entries" },
+              },
+              additionalProperties: { type: "string" },
+            },
+            tools: { type: "array", items: { type: "string" }, description: "URIs to HTTP calls configs used as tools" },
+            enableBuiltInTools: { type: "boolean", description: "Whether to enable built-in tools" },
+            builtInToolsWhitelist: { type: "array", items: { type: "string" }, description: "Whitelist of built-in tool names" },
+            conversationHistoryLimit: { type: "integer", description: "Max conversation history entries sent to LLM" },
+            maxBudgetPerConversation: { type: "number", description: "Maximum cost budget per conversation" },
+            enableCostTracking: { type: "boolean" },
+            enableToolCaching: { type: "boolean" },
+            enableRateLimiting: { type: "boolean" },
+            defaultRateLimit: { type: "integer", description: "Default rate limit per minute" },
+          },
+        },
+      },
+    },
+  },
+  propertysetter: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "PropertySetterConfiguration",
+    properties: {
+      setOnActions: {
+        type: "array",
+        description: "List of property setter definitions triggered by actions",
+        items: {
+          type: "object",
+          properties: {
+            actions: { type: "array", items: { type: "string" }, description: "Actions that trigger this setter" },
+            setProperties: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string", description: "Property name" },
+                  valueString: { type: "string", description: "Value to set (supports Thymeleaf expressions)" },
+                  scope: { type: "string", description: "Scope: conversation, longTerm, or step" },
+                  fromObjectPath: { type: "string", description: "Path to read value from" },
+                  override: { type: "boolean", description: "Whether to override existing value" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
 export const handlers = [
   // JSON Schema endpoints for bots and packages
   http.get("*/botstore/bots/jsonSchema", () => {
     return HttpResponse.json({
-      $schema: "http://json-schema.org/draft-04/schema#",
+      $schema: "https://json-schema.org/draft/2020-12/schema",
       type: "object",
       title: "BotConfiguration",
       properties: {
-        packages: { type: "array", items: { type: "string" } },
-        channels: { type: "array", items: { type: "object" } },
+        packages: {
+          type: "array",
+          description: "List of package URIs that make up this bot",
+          items: { type: "string", format: "uri" },
+        },
+        channels: {
+          type: "array",
+          description: "Channel connectors for this bot",
+          items: {
+            type: "object",
+            properties: {
+              type: { type: "string", description: "Channel type identifier" },
+              config: { type: "object", additionalProperties: true, description: "Channel-specific configuration" },
+            },
+          },
+        },
       },
     });
   }),
   http.get("*/packagestore/packages/jsonSchema", () => {
     return HttpResponse.json({
-      $schema: "http://json-schema.org/draft-04/schema#",
+      $schema: "https://json-schema.org/draft/2020-12/schema",
       type: "object",
       title: "PackageConfiguration",
       properties: {
-        packageExtensions: { type: "array", items: { type: "object" } },
+        packageExtensions: {
+          type: "array",
+          description: "List of extensions in this package",
+          items: {
+            type: "object",
+            properties: {
+              type: { type: "string", description: "Extension type (e.g. ai.labs.behavior, ai.labs.langchain)" },
+              extensions: { type: "object", additionalProperties: true, description: "Extension-specific configuration" },
+              config: {
+                type: "object",
+                properties: {
+                  uri: { type: "string", format: "uri", description: "Resource URI for this extension" },
+                },
+              },
+            },
+          },
+        },
       },
     });
   }),
@@ -579,8 +850,12 @@ function createResourceHandlers(
   return [
     // JSON Schema endpoint
     http.get(`*/${store}/${plural}/jsonSchema`, () => {
+      const schema = RESOURCE_SCHEMAS[label];
+      if (schema) {
+        return HttpResponse.json(schema);
+      }
       return HttpResponse.json({
-        $schema: "http://json-schema.org/draft-04/schema#",
+        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         title: `${label}Configuration`,
         properties: {},
