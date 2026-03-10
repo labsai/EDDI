@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-09 by conversation `ed2313be`
+> **Last updated:** 2026-03-10
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -144,9 +144,17 @@
 - All 8 `IRest*Store` interfaces and `Rest*Store` implementations — `?permanent` param
 - All integration tests updated for JSON deployment status
 
+### Chat UI Vite Build + Bot Father Enhancements ✅
+
+- [x] Deployed new Vite chat-ui production build to `META-INF/resources/` (replaces old CRA build)
+- [x] `chat.html` updated for new Vite bundle entry points
+- [x] Bot Father OpenAI flow: added timeout, built-in tools (whitelist), and conversation history limit steps
+- [x] `OpenAILanguageModelBuilder`: migrated to `JdkHttpClient.builder()`
+- [x] `GeminiLanguageModelBuilder`, `OllamaLanguageModelBuilder`: also migrated to JDK HttpClient
+
 ## Next Up
 
-All Phase 1 + Phase 2 + N.7 items complete. Next: Phase 3 Manager (see `docs/v6-planning/implementation_plan.md`), then Phase 4.4+.
+All Phase 1 + Phase 2 + N.7 items complete. Chat UI rewrite and Bot Father enhancements done. Next: Phase 4.4 (JSON Schema Enrichment), Phase 4.5 (Production Build Optimization), then Phase 5+ (see `docs/v6-planning/implementation_plan.md`).
 
 ## Important Rules
 

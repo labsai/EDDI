@@ -43,6 +43,46 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-10 — Chat UI Vite Rewrite + Bot Father Enhancements + Manager Chat SSE
+
+**Repos:** EDDI, EDDI-Manager, eddi-chat-ui
+**Branch:** `feature/version-6.0.0`
+
+**What changed:**
+
+**eddi-chat-ui (full CRA → Vite rewrite):**
+- Migrated from Create React App to Vite 6 + React 19 + TypeScript 5.7
+- New component architecture: `ChatWidget.tsx` (orchestrator), `ChatHeader.tsx`, `MessageBubble.tsx`, `ChatInput.tsx`, `QuickReplies.tsx`, `Indicators.tsx`, `ScrollToBottom.tsx`
+- Context + useReducer state management (`chat-store.tsx`) replacing prop drilling
+- SSE streaming support via `AsyncGenerator` in `chat-api.ts`
+- Demo mode (`demo-api.ts`) for `/chat/demo/showcase`
+- Vanilla CSS with BEM naming and CSS custom properties (dark/light tokens)
+- Query parameter customization: `hideUndo`, `hideRedo`, `hideNewConversation`, `hideLogo`, `theme`, `title`
+- Vitest unit tests with jsdom
+
+**EDDI (backend):**
+- Deployed new Vite chat-ui production build to `META-INF/resources/` (replaces old CRA build)
+- Old CRA assets deleted: `asset-manifest.json`, `manifest.json`, `main.*.css`, `main.*.js`
+- New Vite assets added: `chat-ui.*.css`, `chat-ui.*.js`
+- `chat.html` updated to reference new Vite bundle entry points
+- Bot Father OpenAI flow enhanced with 3 new configuration steps:
+  - **Timeout**: Asks user for API timeout value after temperature
+  - **Built-in Tools**: Enable/disable tools + whitelist selection (calculator, websearch, datetime, weather, etc.)
+  - **Conversation History Limit**: Context window size (10/20/unlimited/custom)
+- `OpenAILanguageModelBuilder.java`: Migrated to `JdkHttpClient.builder()` (native Java HTTP client)
+- Property setter, behavior rules, httpcalls, and output configs all updated consistently across the OpenAI flow
+
+**EDDI-Manager:**
+- `chat.ts`: Added `undoConversation()` and `redoConversation()` API functions
+- `use-chat.ts`: SSE streaming integration with real-time token rendering, undo/redo support
+- `chat-panel.tsx`: Undo/redo buttons, SSE streaming toggle, improved message rendering
+- `en.json`: New i18n keys for undo/redo
+
+**Design decisions:**
+- JDK HttpClient chosen over OkHttp to reduce transitive dependencies in the Quarkus native image
+- Bot Father tool whitelisting uses predefined quick-reply presets (calculator+web, all tools, etc.) plus custom JSON array input
+- Chat UI uses vanilla CSS over Tailwind to stay framework-agnostic for future React Native conversion
+
 ### 2026-03-09 — Phase 4.3: Real-Backend Integration Testing
 
 **Repo:** EDDI-Manager  
