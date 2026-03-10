@@ -10,6 +10,25 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "react-vendor": ["react", "react-dom", "react-router-dom"],
+          "ui-vendor": [
+            "lucide-react",
+            "sonner",
+            "clsx",
+            "tailwind-merge",
+            "class-variance-authority",
+          ],
+          "editor-vendor": ["monaco-editor"],
+          "query-vendor": ["@tanstack/react-query"],
+          "i18n-vendor": ["i18next", "react-i18next"],
+        },
+      },
+    },
+  },
   server: {
     port: 3000,
     proxy: {
