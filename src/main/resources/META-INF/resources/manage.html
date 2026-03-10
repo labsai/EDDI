@@ -1,19 +1,57 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <title>E.D.D.I Manager</title>
-
-    <meta charset="UTF-8"/>
-    <meta http-equiv="x-ua-compatible" content="ie=edge"/>
-    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-
-    <link rel="icon" href="/img/favicon.ico"/>
-    <link rel="stylesheet" id="default" href="/scripts/css/bootstrap-3.3.6.min.css"/>
-
-    <script defer="defer" src="/scripts/js/app.6896084ec04e3a8e0237.js"></script>
-    <script defer="defer" src="/scripts/js/vendor.6896084ec04e3a8e0237.js"></script>
-</head>
-<body>
-<div id="root"></div>
-</body>
+<!doctype html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="/img/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="EDDI Manager — Admin dashboard for the EDDI conversational AI platform" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,100..900;1,100..900&family=Noto+Sans+Arabic:wght@100..900&family=Noto+Sans+Thai:wght@100..900&family=Noto+Sans+Devanagari:wght@100..900&family=Noto+Sans+JP:wght@100..900&family=Noto+Sans+KR:wght@100..900&family=Noto+Sans+SC:wght@100..900&family=Noto+Sans+TC:wght@100..900&display=swap" rel="stylesheet" />
+    <title>EDDI Manager</title>
+    <script type="module" crossorigin src="/scripts/js/index-ClPauJGN.js"></script>
+    <link rel="stylesheet" crossorigin href="/scripts/css/index-CJX9Qo7g.css">
+    <style>
+      /* Inline loading indicator — visible until React mounts and replaces #root content */
+      .app-loader {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        background: #111113;
+        color: #a1a1aa;
+        font-family: 'Noto Sans', system-ui, sans-serif;
+        gap: 1.5rem;
+      }
+      .app-loader img {
+        width: 120px;
+        opacity: 0.9;
+      }
+      .app-loader-spinner {
+        width: 32px;
+        height: 32px;
+        border: 3px solid #27272a;
+        border-top-color: #d4a843;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      .app-loader-text {
+        font-size: 0.875rem;
+        letter-spacing: 0.05em;
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
+  </head>
+  <body class="min-h-screen bg-background text-foreground antialiased">
+    <div id="root">
+      <div class="app-loader">
+        <img src="/img/logo_eddi.png" alt="EDDI" />
+        <div class="app-loader-spinner"></div>
+        <div class="app-loader-text">Loading EDDI Manager…</div>
+      </div>
+    </div>
+  </body>
 </html>
