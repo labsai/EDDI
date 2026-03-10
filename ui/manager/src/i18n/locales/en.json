@@ -223,7 +223,9 @@
     "empty": "Select a bot and start chatting!",
     "history": "History",
     "continueConversation": "Continue",
-    "noHistory": "No conversation history yet."
+    "noHistory": "No conversation history yet.",
+    "undo": "Undo last message",
+    "redo": "Redo message"
   },
   "resources": {
     "unnamed": "Unnamed Resource",

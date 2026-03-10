@@ -1,8 +1,8 @@
 # EDDI Manager — Handoff Document
 
-> **Last updated**: 2026-03-09  
+> **Last updated**: 2026-03-10  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Phase 4.3 — Real-Backend Integration Testing (all 44 tests pass)
+> **Last commit**: Chat panel SSE streaming + undo/redo support
 
 ---
 
@@ -98,9 +98,16 @@ Phase 3 (Manager UI Rewrite) is functionally complete through Phase 3.21. Phase 
 
 Manager tests updated: `integration-helpers.ts` and `deployment.integration.spec.ts` now parse JSON.
 
+### Chat Panel SSE Streaming + Undo/Redo ✅ (2026-03-10)
+
+- [x] `chat.ts`: Added `undoConversation()` and `redoConversation()` API functions
+- [x] `use-chat.ts`: SSE streaming integration with real-time token rendering, undo/redo support
+- [x] `chat-panel.tsx`: Undo/redo buttons, SSE streaming toggle, improved message rendering
+- [x] `en.json`: New i18n keys for undo/redo
+
 **Phase 5+ (future):**
 
-- Chat-UI Rewrite (`eddi-chat-ui` repo)
+- Chat-UI Rewrite (`eddi-chat-ui` repo) — ✅ Vite rewrite complete, deployed to EDDI backend
 - Website migration to Astro (`eddi-website` repo)
 - Further EDDI backend work
 

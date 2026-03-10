@@ -211,3 +211,35 @@ export async function endConversation(
     throw new Error(`Failed to end conversation: ${response.statusText}`);
   }
 }
+
+/** Undo the last conversation step. */
+export async function undoConversation(
+  environment: string,
+  botId: string,
+  conversationId: string
+): Promise<SimpleConversationMemorySnapshot> {
+  const response = await fetch(
+    buildUrl(`/bots/${environment}/${botId}/undo/${conversationId}`),
+    { method: "POST" }
+  );
+  if (!response.ok) {
+    throw new Error(`Failed to undo: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/** Redo a previously undone step. */
+export async function redoConversation(
+  environment: string,
+  botId: string,
+  conversationId: string
+): Promise<SimpleConversationMemorySnapshot> {
+  const response = await fetch(
+    buildUrl(`/bots/${environment}/${botId}/redo/${conversationId}`),
+    { method: "POST" }
+  );
+  if (!response.ok) {
+    throw new Error(`Failed to redo: ${response.statusText}`);
+  }
+  return response.json();
+}

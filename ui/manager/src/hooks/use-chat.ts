@@ -6,10 +6,15 @@ import {
   sendMessage,
   sendMessageStreaming,
   endConversation as endConversationApi,
+  undoConversation as undoConversationApi,
+  redoConversation as redoConversationApi,
   type ChatMessage,
   type SSEEvent,
 } from "@/lib/api/chat";
-import { getConversationDescriptors } from "@/lib/api/conversations";
+import {
+  getConversationDescriptors,
+  type SimpleConversationMemorySnapshot,
+} from "@/lib/api/conversations";
 import {
   getBotDescriptors,
   getDeploymentStatus,
@@ -25,7 +30,11 @@ interface ChatState {
   selectedBotId: string | null;
   selectedBotName: string | null;
   isProcessing: boolean;
+  isThinking: boolean;
   streamingEnabled: boolean;
+  undoAvailable: boolean;
+  redoAvailable: boolean;
+  quickReplies: string[];
 
   // Actions
   setSelectedBot: (botId: string | null, botName: string | null) => void;
@@ -34,8 +43,12 @@ interface ChatState {
   appendToLastBotMessage: (token: string) => void;
   finishStreaming: () => void;
   setProcessing: (v: boolean) => void;
+  setThinking: (v: boolean) => void;
   toggleStreaming: () => void;
   clearMessages: () => void;
+  setUndoRedo: (undo: boolean, redo: boolean) => void;
+  setQuickReplies: (replies: string[]) => void;
+  replaceMessages: (messages: ChatMessage[]) => void;
   reset: () => void;
 }
 
@@ -53,7 +66,11 @@ export const useChatStore = create<ChatState>((set) => ({
   selectedBotId: null,
   selectedBotName: null,
   isProcessing: false,
+  isThinking: false,
   streamingEnabled: loadStreamingPref(),
+  undoAvailable: false,
+  redoAvailable: false,
+  quickReplies: [],
 
   setSelectedBot: (botId, botName) =>
     set({
@@ -90,6 +107,8 @@ export const useChatStore = create<ChatState>((set) => ({
 
   setProcessing: (v) => set({ isProcessing: v }),
 
+  setThinking: (v) => set({ isThinking: v }),
+
   toggleStreaming: () =>
     set((s) => {
       const next = !s.streamingEnabled;
@@ -101,7 +120,13 @@ export const useChatStore = create<ChatState>((set) => ({
       return { streamingEnabled: next };
     }),
 
-  clearMessages: () => set({ messages: [], conversationId: null }),
+  clearMessages: () => set({ messages: [], conversationId: null, undoAvailable: false, redoAvailable: false, quickReplies: [] }),
+
+  setUndoRedo: (undo, redo) => set({ undoAvailable: undo, redoAvailable: redo }),
+
+  setQuickReplies: (replies) => set({ quickReplies: replies }),
+
+  replaceMessages: (messages) => set({ messages }),
 
   reset: () =>
     set({
@@ -110,6 +135,10 @@ export const useChatStore = create<ChatState>((set) => ({
       selectedBotId: null,
       selectedBotName: null,
       isProcessing: false,
+      isThinking: false,
+      undoAvailable: false,
+      redoAvailable: false,
+      quickReplies: [],
     }),
 }));
 
@@ -268,6 +297,7 @@ export function useSendMessage() {
 function handleSSEEvent(event: SSEEvent, store: typeof useChatStore) {
   switch (event.type) {
     case "token":
+      store.getState().setThinking(false);
       store.getState().appendToLastBotMessage(event.data);
       break;
     case "done":
@@ -279,8 +309,37 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore) {
         .appendToLastBotMessage(`\n\n⚠️ Error: ${event.data}`);
       store.getState().finishStreaming();
       break;
-    // task_start / task_complete are pipeline progress — ignore for now
+    case "task_start":
+      store.getState().setThinking(true);
+      break;
+    case "task_complete":
+      store.getState().setThinking(false);
+      break;
   }
+}
+
+/** Helper: rebuild messages from a conversation snapshot */
+function snapshotToMessages(snapshot: SimpleConversationMemorySnapshot): ChatMessage[] {
+  const messages: ChatMessage[] = [];
+  for (const step of snapshot.conversationSteps ?? []) {
+    if (step.input) {
+      messages.push({
+        id: `user-${messages.length}-${Date.now()}`,
+        role: "user",
+        content: step.input,
+        timestamp: Date.now(),
+      });
+    }
+    if (step.output) {
+      messages.push({
+        id: `bot-${messages.length}-${Date.now()}`,
+        role: "bot",
+        content: step.output,
+        timestamp: Date.now(),
+      });
+    }
+  }
+  return messages;
 }
 
 /** Fetch conversation history for the selected bot. */
@@ -314,30 +373,53 @@ export function useLoadConversation() {
         false
       );
 
-      // Convert all steps to ChatMessages
-      const messages: ChatMessage[] = [];
-      for (const step of snapshot.conversationSteps ?? []) {
-        if (step.input) {
-          messages.push({
-            id: `user-${messages.length}-${Date.now()}`,
-            role: "user",
-            content: step.input,
-            timestamp: Date.now(),
-          });
-        }
-        if (step.output) {
-          messages.push({
-            id: `bot-${messages.length}-${Date.now()}`,
-            role: "bot",
-            content: step.output,
-            timestamp: Date.now(),
-          });
-        }
-      }
-      for (const msg of messages) {
-        store.getState().addMessage(msg);
-      }
+      const messages = snapshotToMessages(snapshot);
+      store.getState().replaceMessages(messages);
+      store.getState().setUndoRedo(
+        snapshot.conversationSteps.length > 0,
+        (snapshot.redoCache?.length ?? 0) > 0
+      );
 
+      return snapshot;
+    },
+  });
+}
+
+/** Undo the last conversation step. */
+export function useUndoConversation() {
+  const store = useChatStore;
+  return useMutation({
+    mutationFn: async () => {
+      const { selectedBotId, conversationId } = store.getState();
+      if (!selectedBotId || !conversationId) throw new Error("No active conversation");
+
+      const snapshot = await undoConversationApi("unrestricted", selectedBotId, conversationId);
+      const messages = snapshotToMessages(snapshot);
+      store.getState().replaceMessages(messages);
+      store.getState().setUndoRedo(
+        snapshot.conversationSteps.length > 0,
+        (snapshot.redoCache?.length ?? 0) > 0
+      );
+      return snapshot;
+    },
+  });
+}
+
+/** Redo a previously undone step. */
+export function useRedoConversation() {
+  const store = useChatStore;
+  return useMutation({
+    mutationFn: async () => {
+      const { selectedBotId, conversationId } = store.getState();
+      if (!selectedBotId || !conversationId) throw new Error("No active conversation");
+
+      const snapshot = await redoConversationApi("unrestricted", selectedBotId, conversationId);
+      const messages = snapshotToMessages(snapshot);
+      store.getState().replaceMessages(messages);
+      store.getState().setUndoRedo(
+        snapshot.conversationSteps.length > 0,
+        (snapshot.redoCache?.length ?? 0) > 0
+      );
       return snapshot;
     },
   });

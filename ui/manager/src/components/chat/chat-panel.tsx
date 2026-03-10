@@ -6,6 +6,8 @@ import {
   useStartConversation,
   useSendMessage,
   useEndConversation,
+  useUndoConversation,
+  useRedoConversation,
 } from "@/hooks/use-chat";
 import { ChatMessage } from "./chat-message";
 import { ChatInput } from "./chat-input";
@@ -19,6 +21,9 @@ import {
   StopCircle,
   MessageSquarePlus,
   Loader2,
+  Undo2,
+  Redo2,
+  Brain,
 } from "lucide-react";
 
 export function ChatPanel() {
@@ -34,6 +39,10 @@ export function ChatPanel() {
   const selectedBotName = useChatStore((s) => s.selectedBotName);
   const conversationId = useChatStore((s) => s.conversationId);
   const isProcessing = useChatStore((s) => s.isProcessing);
+  const isThinking = useChatStore((s) => s.isThinking);
+  const undoAvailable = useChatStore((s) => s.undoAvailable);
+  const redoAvailable = useChatStore((s) => s.redoAvailable);
+  const quickReplies = useChatStore((s) => s.quickReplies);
   const setSelectedBot = useChatStore((s) => s.setSelectedBot);
 
   // Queries & mutations
@@ -41,6 +50,8 @@ export function ChatPanel() {
   const startConversation = useStartConversation();
   const sendMessage = useSendMessage();
   const endConversation = useEndConversation();
+  const undoConversation = useUndoConversation();
+  const redoConversation = useRedoConversation();
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -65,7 +76,6 @@ export function ChatPanel() {
     (botId: string, botName: string) => {
       setSelectedBot(botId, botName);
       setBotSelectorOpen(false);
-      // Auto-start a conversation
       startConversation.mutate({ botId });
     },
     [setSelectedBot, startConversation]
@@ -80,6 +90,13 @@ export function ChatPanel() {
   const handleSend = useCallback(
     (message: string) => {
       sendMessage.mutate({ message });
+    },
+    [sendMessage]
+  );
+
+  const handleQuickReply = useCallback(
+    (reply: string) => {
+      sendMessage.mutate({ message: reply });
     },
     [sendMessage]
   );
@@ -176,7 +193,7 @@ export function ChatPanel() {
           {/* Streaming toggle */}
           <StreamingToggle />
 
-          {/* Actions */}
+          {/* Top bar actions */}
           {conversationId && (
             <>
               <button
@@ -219,10 +236,69 @@ export function ChatPanel() {
               {messages.map((msg) => (
                 <ChatMessage key={msg.id} message={msg} />
               ))}
+
+              {/* Thinking indicator */}
+              {isThinking && (
+                <div className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground animate-pulse">
+                  <Brain className="h-4 w-4" />
+                  <span className="italic">{t("chat.thinking")}</span>
+                </div>
+              )}
+
               <div ref={messagesEndRef} />
             </div>
           )}
         </div>
+
+        {/* Quick replies */}
+        {quickReplies.length > 0 && !isProcessing && (
+          <div className="flex flex-wrap gap-2 border-t border-border px-4 py-2">
+            {quickReplies.map((reply, i) => (
+              <button
+                key={`${reply}-${i}`}
+                onClick={() => handleQuickReply(reply)}
+                className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/15"
+                data-testid="quick-reply-btn"
+              >
+                {reply}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Undo / Redo action bar — near the input */}
+        {conversationId && (
+          <div className="flex items-center gap-1 border-t border-border px-4 py-1">
+            <button
+              onClick={() => undoConversation.mutate()}
+              disabled={!undoAvailable || isProcessing}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
+                undoAvailable && !isProcessing
+                  ? "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  : "text-muted-foreground/30 cursor-not-allowed"
+              )}
+              title={t("chat.undo")}
+              data-testid="undo-btn"
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => redoConversation.mutate()}
+              disabled={!redoAvailable || isProcessing}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
+                redoAvailable && !isProcessing
+                  ? "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  : "text-muted-foreground/30 cursor-not-allowed"
+              )}
+              title={t("chat.redo")}
+              data-testid="redo-btn"
+            >
+              <Redo2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Input */}
         <ChatInput
