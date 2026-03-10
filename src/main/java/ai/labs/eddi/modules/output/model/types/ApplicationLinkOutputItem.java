@@ -1,7 +1,6 @@
 package ai.labs.eddi.modules.output.model.types;
 
 import ai.labs.eddi.modules.output.model.OutputItem;
-import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaTitle;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -9,7 +8,6 @@ import java.util.Objects;
 
 @Getter
 @Setter
-@JsonSchemaTitle("applicationLink")
 public class ApplicationLinkOutputItem extends OutputItem {
     private String path;
     private String label;
