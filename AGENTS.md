@@ -68,60 +68,72 @@ Follow this order unless the user explicitly requests something different.
 **Backend first, then testing, then frontend. Website last.**
 
 ```
-Phase 0: Security Quick Wins (6 SP)
+Phase 0: Security Quick Wins (6 SP) ✅
   0a. Restrict CORS origins                          1 SP
   0b. Create PathNavigator (replace OGNL calls)      5 SP
 
-Phase 1: Backend Foundation (20 SP)
+Phase 1: Backend Foundation (20 SP) ✅
   1. Extract ConversationService from RestBotEngine   5 SP
   2. Decompose LangchainTask into focused classes     5 SP
   3. Add SSE streaming API endpoint                   5 SP
   4. Typed memory accessors (MemoryKey<T>)            3 SP
   5. Extract ConfigurationLoader utility              2 SP
 
-Phase 2: Testing Infrastructure (14 SP)
+Phase 2: Testing Infrastructure (14 SP) ✅
   6. Migrate integration tests to main repo (JUnit5) 3 SP
   7. Add @QuarkusTest + Testcontainers component tests 3 SP
   8. Fill unit test gaps (SizeMatcher, tasks, etc.)   3 SP
   9. API contract tests (JSON Schema)                 2 SP
   10. Langchain/agent integration test (WireMock)     3 SP
 
-Phase 3: Manager (Greenfield Rewrite) (36 SP)
-  11. Study existing Manager, document patterns       2 SP
-  12. Init Vite + shadcn/ui + Tailwind + i18n         2 SP
-  13. Layout shell (sidebar, responsive, dark/light)  3 SP
-  14. Bots page (cards, health, dedup)                5 SP
-  15. Bot detail page (packages, config editor)       5 SP
-  16. Chat panel (shared @eddi/chat-core + SSE)       5 SP
-  17. Conversations page (pagination, search, export) 3 SP
-  18. Resources pages                                 3 SP
-  19. i18n + RTL                                      3 SP
-  20. Import/export UI + bot creation wizard          5 SP
+Phase 3: Manager (Greenfield Rewrite) (36 SP) ✅
+  11-20. Full Manager UI rewrite (3.1-3.21)
 
-Phase 4: Chat-UI Rewrite (10 SP)
+Phase 4: Chat-UI Rewrite + Hardening ✅
   21. CRA → Vite migration                            2 SP
   22. SSE streaming support                           3 SP
-  23. Extract shared @eddi/chat-core package           3 SP
-  24. Dark/light mode + i18n                          2 SP
+  23. Manager chat panel SSE + undo/redo              3 SP
+  24. Keycloak Auth, E2E tests, integration tests     8 SP
+  25. JSON Schema Enrichment                          2 SP  ⬜
+  26. Production Build Optimization                   3 SP  ⬜
 
-Phase 5: Website — Astro Migration (14 SP)
-  25. Scaffold Astro + Tailwind + i18n                2 SP
-  26. Migrate content into components                 3 SP
-  27. Dark/light + RTL                                3 SP
-  28. Documentation pages (Content Collections)       5 SP
-  29. GitHub Actions deployment                       1 SP
+Phase 5: NATS JetStream Message Queue
+  27. Event bus abstraction over current in-process    3 SP
+  28. NATS JetStream adapter                           5 SP
+  29. Async conversation processing                    3 SP
 
-Phase 6: CI/CD (8 SP)
-  30. GitHub Actions for EDDI (replace CircleCI)      3 SP
-  31. GitHub Actions for Manager + Chat-UI + Website  5 SP
+Phase 6: PostgreSQL / DB-Agnostic Architecture
+  30. Repository interface abstraction                 5 SP
+  31. PostgreSQL adapter (Panache or JDBC)              8 SP
+  32. Migration tooling (MongoDB → PostgreSQL)          5 SP
+
+Phase 7: MCP Server + Client
+  33. MCP Server — expose EDDI tools via MCP           5 SP
+  34. MCP Client — consume external MCP tools          5 SP
+
+Phase 8: Multi-Bot Orchestration + Cascading Routing
+  35. Bot-to-bot routing rules                         5 SP
+  36. Cascading conversation context                   3 SP
+  37. Orchestrator bot pattern                          3 SP
+
+Phase 9: Persistent User Memory + Multi-Channel Adapters
+  38. Cross-conversation user memory store             5 SP
+  39. Channel adapter abstraction                      3 SP
+  40. WhatsApp/Telegram/Slack adapters                  5 SP
+
+Phase 10: CI/CD (8 SP)
+  41. GitHub Actions for EDDI (replace CircleCI)      3 SP
+  42. GitHub Actions for Manager + Chat-UI + Website  5 SP
+
+Phase 11: Website — Astro Migration (14 SP) [LAST]
+  43. Scaffold Astro + Tailwind + i18n                2 SP
+  44. Migrate content into components                 3 SP
+  45. Dark/light + RTL                                3 SP
+  46. Documentation pages (Content Collections)       5 SP
+  47. GitHub Actions deployment                       1 SP
 
 Deferred (post v6.0):
-  - NATS JetStream message queue
-  - PostgreSQL / DB-agnostic architecture
   - Redis distributed cache
-  - MCP Server + Client
-  - Multi-bot orchestration, cascading routing
-  - Persistent user memory, multi-channel adapters
   - Helm chart + OpenTelemetry
 ```
 

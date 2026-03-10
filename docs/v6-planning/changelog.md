@@ -562,6 +562,8 @@ _For recording decisions that come up during implementation that aren't in the p
 | 2026-03-05 | Use Astro (not Expo) for website                                      | Static site on GitHub Pages           | Expo would add unnecessary abstraction for a marketing site |
 | 2026-03-05 | Use AI complexity scale (🟢/🟡/🔴/⚫) instead of human time estimates | AI will do all implementation work    | Human hours are meaningless for AI execution                |
 | 2026-03-05 | Docs already published at docs.labs.ai                                | Third-party tool reads `docs/` folder | Could migrate to Astro Content Collections later            |
+| 2026-03-10 | Move NATS, Postgres, MCP, multi-bot, persistent memory into v6.0       | All are core platform capabilities    | Only Redis cache and Helm/OTel deferred post-6.0            |
+| 2026-03-10 | Website migration is last phase (Phase 11) before v6.0 GA             | Website is standalone, lowest priority | Could interleave with backend work                          |
 |            |                                                                       |                                       |                                                             |
 
 ---
