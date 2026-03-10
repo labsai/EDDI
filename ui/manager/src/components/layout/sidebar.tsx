@@ -10,6 +10,9 @@ import {
   PanelLeftClose,
   PanelLeft,
   LogOut,
+  ExternalLink,
+  BookOpen,
+  FileJson,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -39,6 +42,21 @@ const navSections = [
         labelKey: "nav.conversations",
       },
     ],
+  },
+] as const;
+
+const externalLinks = [
+  {
+    href: "/q/swagger-ui",
+    icon: FileJson,
+    labelKey: "nav.openapi",
+    fallback: "OpenAPI",
+  },
+  {
+    href: "https://docs.labs.ai",
+    icon: BookOpen,
+    labelKey: "nav.docs",
+    fallback: "Documentation",
   },
 ] as const;
 
@@ -140,6 +158,39 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           </div>
         ))}
       </nav>
+
+      {/* External links */}
+      <div className="border-t border-sidebar-border p-2">
+        {!collapsed && (
+          <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
+            {t("nav.sectionExternal", "External")}
+          </p>
+        )}
+        <div className="space-y-0.5">
+          {externalLinks.map((link) => (
+            <a
+              key={link.href}
+              href={link.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+                "border-s-2 border-transparent text-sidebar-foreground",
+                "hover:bg-sidebar-accent/10 hover:text-sidebar-accent",
+                collapsed && "justify-center px-2"
+              )}
+            >
+              <link.icon className="h-5 w-5 shrink-0" />
+              {!collapsed && (
+                <span className="flex items-center gap-1.5">
+                  {t(link.labelKey, link.fallback)}
+                  <ExternalLink className="h-3 w-3 opacity-50" />
+                </span>
+              )}
+            </a>
+          ))}
+        </div>
+      </div>
 
       {/* User profile section (only when auth is enabled) */}
       {showUser && (
