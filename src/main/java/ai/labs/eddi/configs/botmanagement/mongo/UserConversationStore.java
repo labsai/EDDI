@@ -11,6 +11,7 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
@@ -18,10 +19,13 @@ import org.bson.Document;
 import java.io.IOException;
 
 /**
+ * MongoDB implementation of {@link IUserConversationStore}.
+ * Annotated {@code @DefaultBean} so PostgreSQL can override.
+ *
  * @author ginccc
  */
-
 @ApplicationScoped
+@DefaultBean
 public class UserConversationStore implements IUserConversationStore {
     private static final String COLLECTION_USER_CONVERSATIONS = "userconversations";
     private static final String INTENT_FIELD = "intent";

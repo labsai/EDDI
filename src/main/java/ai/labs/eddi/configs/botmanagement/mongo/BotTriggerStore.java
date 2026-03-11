@@ -11,6 +11,7 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
@@ -20,10 +21,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
+ * MongoDB implementation of {@link IBotTriggerStore}.
+ * Annotated {@code @DefaultBean} so PostgreSQL can override.
+ *
  * @author ginccc
  */
-
 @ApplicationScoped
+@DefaultBean
 public class BotTriggerStore implements IBotTriggerStore {
     private static final String COLLECTION_BOT_TRIGGERS = "bottriggers";
     private static final String INTENT_FIELD = "intent";

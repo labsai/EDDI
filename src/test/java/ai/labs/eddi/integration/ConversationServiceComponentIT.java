@@ -18,7 +18,7 @@ import static org.hamcrest.Matchers.*;
  */
 @QuarkusTest
 @TestProfile(IntegrationTestProfile.class)
-class ConversationServiceComponentIT extends BaseIntegrationIT {
+public class ConversationServiceComponentIT extends BaseIntegrationIT {
 
     private static final String TEST_USER_ID = "componentTestUser";
 

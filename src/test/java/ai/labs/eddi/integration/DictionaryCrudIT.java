@@ -16,7 +16,7 @@ import static org.hamcrest.Matchers.equalTo;
 @QuarkusTest
 @TestProfile(IntegrationTestProfile.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class DictionaryCrudIT extends BaseIntegrationIT {
+public class DictionaryCrudIT extends BaseIntegrationIT {
 
     private static final String ROOT_PATH = "/regulardictionarystore/regulardictionaries/";
     private static final String RESOURCE_URI = "eddi://ai.labs.regulardictionary" + ROOT_PATH;

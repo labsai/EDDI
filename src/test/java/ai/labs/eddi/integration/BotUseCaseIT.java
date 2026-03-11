@@ -22,7 +22,7 @@ import static org.hamcrest.Matchers.*;
  */
 @QuarkusTest
 @TestProfile(IntegrationTestProfile.class)
-class BotUseCaseIT extends BaseIntegrationIT {
+public class BotUseCaseIT extends BaseIntegrationIT {
 
     private static ResourceId weatherBotId;
     private static boolean botImported = false;

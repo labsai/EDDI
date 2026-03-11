@@ -30,7 +30,7 @@ import static org.hamcrest.Matchers.*;
  */
 @QuarkusTest
 @TestProfile(IntegrationTestProfile.class)
-class BotEngineIT extends BaseIntegrationIT {
+public class BotEngineIT extends BaseIntegrationIT {
 
         private static final String TEST_USER_ID = "testUser";
 

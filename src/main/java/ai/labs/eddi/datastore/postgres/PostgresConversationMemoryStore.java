@@ -6,7 +6,7 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.ConversationState;
-import io.quarkus.arc.lookup.LookupIfProperty;
+import io.quarkus.arc.profile.IfBuildProfile;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -28,7 +28,7 @@ import static ai.labs.eddi.engine.model.ConversationState.ENDED;
  * with extracted indexed columns for efficient querying.
  */
 @ApplicationScoped
-@LookupIfProperty(name = "eddi.datastore.type", stringValue = "postgres")
+@IfBuildProfile("postgres")
 public class PostgresConversationMemoryStore implements IConversationMemoryStore,
         IResourceStore<ConversationMemorySnapshot> {
 
@@ -49,20 +49,22 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     private final DataSource dataSource;
     private final IJsonSerialization jsonSerialization;
+    private volatile boolean schemaInitialized = false;
 
     @Inject
     public PostgresConversationMemoryStore(DataSource dataSource, IJsonSerialization jsonSerialization) {
         this.dataSource = dataSource;
         this.jsonSerialization = jsonSerialization;
-        initSchema();
     }
 
-    private void initSchema() {
+    private synchronized void ensureSchema() {
+        if (schemaInitialized) return;
         try (Connection conn = dataSource.getConnection();
              Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
             stmt.execute(CREATE_INDEX_STATE);
             stmt.execute(CREATE_INDEX_BOT);
+            schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize conversation_memories table", e);
         }
@@ -70,6 +72,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) {
+        ensureSchema();
         try {
             String json = jsonSerialization.serialize(snapshot);
             String conversationId = snapshot.getConversationId();
@@ -140,6 +143,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     @Override
     public List<ConversationMemorySnapshot> loadActiveConversationMemorySnapshot(String botId, Integer botVersion)
             throws IResourceStore.ResourceStoreException {
+        ensureSchema();
         String sql = "SELECT data FROM conversation_memories " +
                 "WHERE bot_id = ? AND bot_version = ? AND conversation_state != ?";
         try (Connection conn = dataSource.getConnection();
@@ -162,6 +166,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public void setConversationState(String conversationId, ConversationState conversationState) {
+        ensureSchema();
         String sql = "UPDATE conversation_memories SET conversation_state = ? WHERE id = ?::uuid";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -175,6 +180,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public void deleteConversationMemorySnapshot(String conversationId) {
+        ensureSchema();
         String sql = "DELETE FROM conversation_memories WHERE id = ?::uuid";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -187,6 +193,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public ConversationState getConversationState(String conversationId) {
+        ensureSchema();
         String sql = "SELECT conversation_state FROM conversation_memories WHERE id = ?::uuid";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -204,6 +211,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public Long getActiveConversationCount(String botId, Integer botVersion) {
+        ensureSchema();
         String sql = "SELECT COUNT(*) FROM conversation_memories " +
                 "WHERE bot_id = ? AND bot_version = ? AND conversation_state != ?";
         try (Connection conn = dataSource.getConnection();
@@ -222,6 +230,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public List<String> getEndedConversationIds() {
+        ensureSchema();
         String sql = "SELECT id FROM conversation_memories WHERE conversation_state = ?";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {

@@ -17,7 +17,7 @@ import static org.hamcrest.Matchers.*;
  */
 @QuarkusTest
 @TestProfile(IntegrationTestProfile.class)
-class BotDeploymentComponentIT extends BaseIntegrationIT {
+public class BotDeploymentComponentIT extends BaseIntegrationIT {
 
         private static final java.util.List<ResourceId> createdBots = new java.util.ArrayList<>();
 

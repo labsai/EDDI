@@ -6,10 +6,16 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+/**
+ * MongoDB implementation of {@link IMigrationLogStore}.
+ * Annotated {@code @DefaultBean} so PostgreSQL can override.
+ */
 @ApplicationScoped
+@DefaultBean
 public class MigrationLogStore implements IMigrationLogStore {
     private static final String COLLECTION_MIGRATION_LOG = "migrationlog";
     private final MongoCollection<MigrationLog> collection;

@@ -16,7 +16,7 @@ import static org.hamcrest.Matchers.equalTo;
 @QuarkusTest
 @TestProfile(IntegrationTestProfile.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class BehaviorCrudIT extends BaseIntegrationIT {
+public class BehaviorCrudIT extends BaseIntegrationIT {
 
     private static final String ROOT_PATH = "/behaviorstore/behaviorsets/";
     private static final String RESOURCE_URI = "eddi://ai.labs.behavior" + ROOT_PATH;

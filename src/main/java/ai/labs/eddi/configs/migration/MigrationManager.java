@@ -9,6 +9,7 @@ import org.bson.types.ObjectId;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.Arrays;
@@ -24,6 +25,7 @@ import static java.lang.Boolean.parseBoolean;
 import static java.lang.String.format;
 
 @ApplicationScoped
+@DefaultBean
 public class MigrationManager implements IMigrationManager {
     private static final Logger LOGGER = Logger.getLogger(MigrationManager.class);
 

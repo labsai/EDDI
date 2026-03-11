@@ -16,7 +16,7 @@ import static org.hamcrest.Matchers.endsWith;
 @QuarkusTest
 @TestProfile(IntegrationTestProfile.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class OutputCrudIT extends BaseIntegrationIT {
+public class OutputCrudIT extends BaseIntegrationIT {
 
     private static final String ROOT_PATH = "/outputstore/outputsets/";
     private static final String RESOURCE_URI = "eddi://ai.labs.output" + ROOT_PATH;

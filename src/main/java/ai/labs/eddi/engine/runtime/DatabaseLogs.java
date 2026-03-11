@@ -5,6 +5,7 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
@@ -17,7 +18,12 @@ import java.util.List;
 import java.util.logging.Handler;
 import java.util.logging.LogRecord;
 
+/**
+ * MongoDB implementation of {@link IDatabaseLogs}.
+ * Annotated {@code @DefaultBean} so PostgreSQL can override.
+ */
 @ApplicationScoped
+@DefaultBean
 public class DatabaseLogs extends Handler implements IDatabaseLogs {
     private static final String COLLECTION_NAME = "logs";
     private static final String CONTEXT_MAP_BOT_ID = "botId";

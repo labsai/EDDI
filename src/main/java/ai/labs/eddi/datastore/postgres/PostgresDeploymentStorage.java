@@ -4,7 +4,7 @@ import ai.labs.eddi.configs.deployment.IDeploymentStorage;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.model.Deployment.Environment;
-import io.quarkus.arc.lookup.LookupIfProperty;
+import io.quarkus.arc.profile.IfBuildProfile;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -19,7 +19,7 @@ import java.util.List;
  * Uses a dedicated {@code deployments} table with composite PK.
  */
 @ApplicationScoped
-@LookupIfProperty(name = "eddi.datastore.type", stringValue = "postgres")
+@IfBuildProfile("postgres")
 public class PostgresDeploymentStorage implements IDeploymentStorage {
 
     private static final String CREATE_TABLE = """
@@ -33,17 +33,19 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
             """;
 
     private final DataSource dataSource;
+    private volatile boolean schemaInitialized = false;
 
     @Inject
     public PostgresDeploymentStorage(DataSource dataSource) {
         this.dataSource = dataSource;
-        initSchema();
     }
 
-    private void initSchema() {
+    private synchronized void ensureSchema() {
+        if (schemaInitialized) return;
         try (Connection conn = dataSource.getConnection();
              Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
+            schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize deployments table", e);
         }
@@ -52,6 +54,7 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
     @Override
     public void setDeploymentInfo(String environment, String botId, Integer botVersion,
                                    DeploymentInfo.DeploymentStatus deploymentStatus) {
+        ensureSchema();
         String sql = """
                 INSERT INTO deployments (environment, bot_id, bot_version, deployment_status)
                 VALUES (?, ?, ?, ?)
@@ -73,6 +76,7 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
     @Override
     public DeploymentInfo readDeploymentInfo(String environment, String botId, Integer botVersion)
             throws IResourceStore.ResourceStoreException {
+        ensureSchema();
         String sql = "SELECT environment, bot_id, bot_version, deployment_status FROM deployments " +
                 "WHERE environment = ? AND bot_id = ? AND bot_version = ?";
         try (Connection conn = dataSource.getConnection();
@@ -99,6 +103,7 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
     @Override
     public List<DeploymentInfo> readDeploymentInfos(String deploymentStatus)
             throws IResourceStore.ResourceStoreException {
+        ensureSchema();
         List<DeploymentInfo> results = new ArrayList<>();
         String sql = deploymentStatus != null
                 ? "SELECT environment, bot_id, bot_version, deployment_status FROM deployments WHERE deployment_status = ?"

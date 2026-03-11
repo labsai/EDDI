@@ -9,13 +9,18 @@ import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import org.bson.Document;
 
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 /**
+ * MongoDB implementation of {@link IPropertiesStore}.
+ * Annotated {@code @DefaultBean} so PostgreSQL can override.
+ *
  * @author ginccc
  */
 @ApplicationScoped
+@DefaultBean
 public class PropertiesStore implements IPropertiesStore {
     private static final String COLLECTION_PROPERTIES = "properties";
     private static final String USER_ID = "userId";

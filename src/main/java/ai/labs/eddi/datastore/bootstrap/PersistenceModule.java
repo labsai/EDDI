@@ -23,16 +23,24 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import io.quarkus.arc.DefaultBean;
 
 import static org.bson.codecs.configuration.CodecRegistries.*;
 
 /**
+ * MongoDB persistence module. Produces the {@link MongoDatabase} CDI bean.
+ * <p>
+ * Annotated {@code @DefaultBean} so it is NOT activated when
+ * PostgreSQL mode overrides the datastore layer.
+ *
  * @author ginccc
  */
 @ApplicationScoped
+@DefaultBean
 public class PersistenceModule {
     @Produces
     @ApplicationScoped
+    @DefaultBean
     public MongoDatabase provideMongoDB(@ConfigProperty(name = "mongodb.connectionString") String connectionString,
                                         @ConfigProperty(name = "mongodb.database") String database) {
             BsonFactory bsonFactory = new BsonFactory();

@@ -1,6 +1,6 @@
 package ai.labs.eddi.datastore.postgres;
 
-import io.quarkus.arc.lookup.LookupIfProperty;
+import io.quarkus.arc.profile.IfBuildProfile;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.health.HealthCheck;
@@ -20,7 +20,7 @@ import java.sql.Statement;
  */
 @Readiness
 @ApplicationScoped
-@LookupIfProperty(name = "eddi.datastore.type", stringValue = "postgres")
+@IfBuildProfile("postgres")
 public class PostgresHealthCheck implements HealthCheck {
 
     private final DataSource dataSource;

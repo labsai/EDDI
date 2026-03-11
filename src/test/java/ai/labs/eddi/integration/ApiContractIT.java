@@ -17,7 +17,7 @@ import static org.hamcrest.Matchers.*;
  */
 @QuarkusTest
 @TestProfile(IntegrationTestProfile.class)
-class ApiContractIT extends BaseIntegrationIT {
+public class ApiContractIT extends BaseIntegrationIT {
 
         // ==================== CRUD Endpoint Contracts ====================
 
