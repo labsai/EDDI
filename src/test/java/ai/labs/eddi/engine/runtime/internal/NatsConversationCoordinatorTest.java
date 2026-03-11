@@ -1,10 +1,12 @@
 package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.runtime.IRuntime;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Timer;
 import io.nats.client.Connection;
 import io.nats.client.JetStream;
-import io.nats.client.JetStreamApiException;
 import io.nats.client.api.PublishAck;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -20,8 +22,8 @@ import static org.mockito.Mockito.*;
 /**
  * Unit tests for {@link NatsConversationCoordinator}.
  *
- * <p>Tests verify local ordering and execution logic without requiring
- * a running NATS server. JetStream interactions are mocked.</p>
+ * <p>Tests verify local ordering, retry/dead-letter logic, and metrics
+ * without requiring a running NATS server. JetStream interactions are mocked.</p>
  */
 class NatsConversationCoordinatorTest {
 
@@ -29,18 +31,45 @@ class NatsConversationCoordinatorTest {
     private JetStream jetStream;
     private PublishAck publishAck;
     private NatsConversationCoordinator coordinator;
+    private NatsMetrics natsMetrics;
+    private Counter publishCount;
+    private Timer publishDuration;
+    private Counter consumeCount;
+    private Timer consumeDuration;
+    private Counter deadLetterCount;
 
     @BeforeEach
-    void setUp() throws IOException, JetStreamApiException, NoSuchFieldException, IllegalAccessException {
+    @SuppressWarnings("unchecked")
+    void setUp() throws Exception {
         runtime = mock(IRuntime.class);
         jetStream = mock(JetStream.class);
         publishAck = mock(PublishAck.class);
 
+        // Mock metrics
+        natsMetrics = mock(NatsMetrics.class);
+        publishCount = mock(Counter.class);
+        publishDuration = mock(Timer.class);
+        consumeCount = mock(Counter.class);
+        consumeDuration = mock(Timer.class);
+        deadLetterCount = mock(Counter.class);
+
+        when(natsMetrics.getPublishCount()).thenReturn(publishCount);
+        when(natsMetrics.getPublishDuration()).thenReturn(publishDuration);
+        when(natsMetrics.getConsumeCount()).thenReturn(consumeCount);
+        when(natsMetrics.getConsumeDuration()).thenReturn(consumeDuration);
+        when(natsMetrics.getDeadLetterCount()).thenReturn(deadLetterCount);
+
+        Instance<NatsMetrics> metricsInstance = mock(Instance.class);
+        when(metricsInstance.isResolvable()).thenReturn(true);
+        when(metricsInstance.get()).thenReturn(natsMetrics);
+
         // Create coordinator with mocked dependencies (skip start() since that needs real NATS)
         coordinator = new NatsConversationCoordinator(
                 runtime,
+                metricsInstance,
                 "nats://localhost:4222",
                 "EDDI_CONVERSATIONS",
+                "EDDI_DEAD_LETTERS",
                 3,
                 60
         );
@@ -133,11 +162,11 @@ class NatsConversationCoordinatorTest {
 
         verify(runtime, times(1)).submitCallable(eq(task1), callbackCaptor.capture(), isNull());
 
-        // Simulate task1 failure
+        // Simulate task1 failure — first failure triggers retry, not next task
         callbackCaptor.getValue().onFailure(new RuntimeException("boom"));
 
-        // task2 should still proceed
-        verify(runtime, times(1)).submitCallable(eq(task2), any(), isNull());
+        // task1 should be retried (attempt 1 of 3)
+        verify(runtime, times(2)).submitCallable(eq(task1), any(), isNull());
     }
 
     @Test
@@ -167,5 +196,82 @@ class NatsConversationCoordinatorTest {
 
         assertTrue(coordinator.isConnected());
         assertEquals("CONNECTED", coordinator.getConnectionStatus());
+    }
+
+    // ==================== Dead-Letter Tests ====================
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldRetryTaskBeforeDeadLettering() throws Exception {
+        Callable<Void> failingTask = () -> { throw new RuntimeException("fail"); };
+
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor =
+                ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+
+        coordinator.submitInOrder("conv-retry", failingTask);
+
+        // First execution
+        verify(runtime, times(1)).submitCallable(eq(failingTask), callbackCaptor.capture(), isNull());
+
+        // Simulate failure (attempt 1)
+        callbackCaptor.getValue().onFailure(new RuntimeException("fail"));
+        verify(runtime, times(2)).submitCallable(eq(failingTask), callbackCaptor.capture(), isNull());
+
+        // Simulate failure (attempt 2)
+        callbackCaptor.getValue().onFailure(new RuntimeException("fail"));
+        verify(runtime, times(3)).submitCallable(eq(failingTask), callbackCaptor.capture(), isNull());
+
+        // No dead-letter yet — still have 1 more attempt
+        verify(jetStream, never()).publish(startsWith("eddi.deadletter."), any(byte[].class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldDeadLetterAfterMaxRetries() throws Exception {
+        Callable<Void> failingTask = () -> { throw new RuntimeException("persistent failure"); };
+
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor =
+                ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+
+        coordinator.submitInOrder("conv-dl", failingTask);
+
+        // Exhaust all retries (maxRetries=3)
+        for (int i = 0; i < coordinator.getMaxRetries(); i++) {
+            verify(runtime, times(i + 1)).submitCallable(eq(failingTask), callbackCaptor.capture(), isNull());
+            callbackCaptor.getValue().onFailure(new RuntimeException("persistent failure"));
+        }
+
+        // Should publish to dead-letter subject
+        verify(jetStream).publish(eq("eddi.deadletter.conv-dl"), any(byte[].class));
+        verify(deadLetterCount).increment();
+    }
+
+    @Test
+    void shouldIncrementPublishMetricsOnSubmit() throws Exception {
+        Callable<Void> task = () -> null;
+
+        coordinator.submitInOrder("conv-metrics", task);
+
+        // Publish metrics should be recorded
+        verify(publishCount).increment();
+        verify(publishDuration).record(any(java.time.Duration.class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldIncrementConsumeMetricsOnCompletion() throws Exception {
+        Callable<Void> task = () -> null;
+
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor =
+                ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+
+        coordinator.submitInOrder("conv-consume", task);
+        verify(runtime).submitCallable(eq(task), callbackCaptor.capture(), isNull());
+
+        // Simulate successful completion
+        callbackCaptor.getValue().onComplete(null);
+
+        verify(consumeCount).increment();
+        verify(consumeDuration).record(any(java.time.Duration.class));
     }
 }

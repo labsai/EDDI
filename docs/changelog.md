@@ -41,6 +41,34 @@ Each entry follows this format:
 
 ## Implementation Log
 
+### 2026-03-11 — Phase 5 Item #29: Async Conversation Processing (Dead-Letter + Metrics + Testcontainers IT)
+
+**Repo:** EDDI
+**Branch:** `feature/version-6.0.0`
+**Phase:** 5 — Item #29
+
+**What changed:**
+
+1. **Dead-letter handling** (`NatsConversationCoordinator.java`) — Tasks that fail are now retried up to `maxRetries` (configurable, default 3). After all retries exhausted, the message is published to a dead-letter JetStream stream (`EDDI_DEAD_LETTERS`) with 30-day `Limits` retention for operator inspection and replay. Payload includes conversationId, error message, and timestamp.
+2. **`NatsMetrics` wiring** — coordinator now injects `NatsMetrics` via `Instance<>` (optional CDI). Publish operations record `eddi_nats_publish_count` + `eddi_nats_publish_duration`. Task completions record `eddi_nats_consume_count` + `eddi_nats_consume_duration`. Dead-letter routing increments `eddi_nats_dead_letter_count`.
+3. **`RetryableCallable` wrapper** — inner class tracks per-callable retry attempt count, enabling retry-then-dead-letter behavior without extra state maps.
+4. **Dead-letter stream creation** — `start()` method now creates/updates both the main conversation stream and the dead-letter stream during NATS initialization.
+5. **`application.properties`** — Added `eddi.nats.dead-letter-stream-name=EDDI_DEAD_LETTERS`.
+6. **`pom.xml`** — Added `org.testcontainers:testcontainers:2.0.3` and `org.testcontainers:testcontainers-junit-jupiter:2.0.3` (test scope).
+7. **Unit tests** — 12 tests in `NatsConversationCoordinatorTest` (was 8): added `shouldRetryTaskBeforeDeadLettering`, `shouldDeadLetterAfterMaxRetries`, `shouldIncrementPublishMetricsOnSubmit`, `shouldIncrementConsumeMetricsOnCompletion`. Existing `shouldProcessNextTaskAfterFailure` updated for retry behavior.
+8. **Integration test** (`NatsConversationCoordinatorIT.java`) — 5 Testcontainers tests with real NATS 2.10-alpine: sequential execution, concurrent conversations, dead-letter routing, dead-letter payload verification, connection status.
+
+**Key decisions:**
+
+- **`Instance<NatsMetrics>` over direct injection** — keeps metrics optional and avoids CDI resolution errors when NATS is disabled
+- **Per-callable `RetryableCallable` over Map** — simpler lifecycle, no cleanup needed, GC-friendly
+- **30-day dead-letter retention** — gives operators ample time for inspection; main stream keeps 24h WorkQueue retention
+- **Testcontainers 2.x naming** — `testcontainers-junit-jupiter` (not `junit-jupiter`) per the 2.0 migration guide
+
+**Testing:** ✅ All 643 tests pass (0 failures, 0 errors, 4 skipped). +4 new unit tests vs previous 639.
+
+---
+
 ### 2026-03-10 — Phase 5: Event Bus Abstraction + NATS JetStream Adapter
 
 **Repo:** EDDI

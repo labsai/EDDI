@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-10
+> **Last updated:** 2026-03-11
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -176,9 +176,21 @@
 - `src/main/java/ai/labs/eddi/engine/runtime/internal/NatsMetrics.java`
 - `docker-compose.nats.yml`
 
+### Phase 5, Item 5.29: Async Conversation Processing ✅
+
+- [x] Dead-letter handling: retry up to `maxRetries`, then route to `EDDI_DEAD_LETTERS` stream (30-day retention)
+- [x] `NatsMetrics` wired into coordinator (publish/consume/dead-letter counters and timers)
+- [x] `RetryableCallable` wrapper for per-task retry tracking
+- [x] Dead-letter stream created during `start()` with `Limits` retention
+- [x] `eddi.nats.dead-letter-stream-name` config property added
+- [x] `org.testcontainers:testcontainers:2.0.3` + `testcontainers-junit-jupiter:2.0.3` added
+- [x] 12 unit tests in `NatsConversationCoordinatorTest` (+4 new)
+- [x] 5 Testcontainers integration tests in `NatsConversationCoordinatorIT`
+- [x] All 643 tests pass (0 failures, 0 errors, 4 skipped)
+
 ## Next Up
 
-Phase 5, Item 5.29 (Async Conversation Processing): dead-letter handling, Testcontainers NATS integration test. Then Phase 6 (PostgreSQL), Phase 7 (MCP), etc. See `docs/v6-planning/implementation_plan.md`.
+Phase 6 (PostgreSQL / DB-Agnostic Architecture), Phase 7 (MCP Server + Client), etc. See `docs/v6-planning/implementation_plan.md`.
 
 ## Important Rules
 
