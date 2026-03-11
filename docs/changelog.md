@@ -41,6 +41,23 @@ Each entry follows this format:
 
 ## Implementation Log
 
+### 2026-03-11 — Session Wrap-Up: Next Steps Documented
+
+**Repo:** EDDI
+**Branch:** `feature/version-6.0.0`
+
+**What was identified:**
+
+Two follow-up items added to the roadmap before proceeding to Phase 7 (MCP):
+
+1. **6A. MongoDB sync driver migration (5 SP)**: The current MongoDB layer uses `mongodb-driver-reactivestreams` but blocks every call with `Observable.fromPublisher(...).blockingFirst()`. This is an anti-pattern — all the complexity of RxJava3 with none of the non-blocking benefits. 13 files need to be migrated to `mongodb-driver-sync`. Since EDDI's lifecycle pipeline is inherently synchronous (`ILifecycleTask.execute()`), the sync driver is the correct choice.
+
+2. **6B. PostgreSQL integration test parity (3 SP)**: All 48 integration tests only run against MongoDB via `IntegrationTestProfile` (hardcoded `mongodb://` connection). The PostgreSQL storage implementations are unit-tested but never integration-tested end-to-end. Need `PostgresIntegrationTestProfile` to run all ITs against both databases.
+
+**Files affected by 6A:** `MongoResourceStorage`, `MongoDeploymentStorage`, `ConversationMemoryStore`, `DescriptorStore` (mongo), `ResourceFilter`, `ResourceUtilities`, `PropertiesStore`, `BotTriggerStore`, `UserConversationStore`, `TestCaseStore`, `MigrationManager`, `MigrationLogStore`, `DatabaseLogs`
+
+---
+
 ### 2026-03-11 — Phase 6 Item #32: Full Store Migration (5 SP)
 
 **Repo:** EDDI

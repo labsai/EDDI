@@ -107,6 +107,10 @@ Phase 6: PostgreSQL / DB-Agnostic Architecture ✅
   30. Repository interface abstraction                 5 SP  ✅
   31. PostgreSQL adapter (Panache or JDBC)              8 SP  ✅
   32. Migration tooling (MongoDB → PostgreSQL)          5 SP  ✅
+  6A. MongoDB sync driver migration                    5 SP
+      (replace reactive+blocking with sync driver, 13 files)
+  6B. PostgreSQL integration test parity               3 SP
+      (run all 48 ITs against both MongoDB and PostgreSQL)
 
 Phase 7: MCP Server + Client
   33. MCP Server — expose EDDI tools via MCP           5 SP
