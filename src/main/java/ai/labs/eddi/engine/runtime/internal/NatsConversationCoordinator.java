@@ -5,7 +5,7 @@ import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import io.nats.client.*;
 import io.nats.client.api.*;
-import io.quarkus.arc.lookup.LookupIfProperty;
+import io.quarkus.arc.profile.IfBuildProfile;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -44,7 +44,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * @see ai.labs.eddi.engine.runtime.IEventBus
  */
 @ApplicationScoped
-@LookupIfProperty(name = "eddi.messaging.type", stringValue = "nats")
+@IfBuildProfile("nats")
 public class NatsConversationCoordinator implements IConversationCoordinator {
 
     private static final Logger log = Logger.getLogger(NatsConversationCoordinator.class);

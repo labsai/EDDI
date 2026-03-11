@@ -3,7 +3,7 @@ package ai.labs.eddi.engine.runtime.internal;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
-import io.quarkus.arc.lookup.LookupIfProperty;
+import io.quarkus.arc.profile.IfBuildProfile;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -24,7 +24,7 @@ import jakarta.inject.Inject;
  * @since 6.0.0
  */
 @ApplicationScoped
-@LookupIfProperty(name = "eddi.messaging.type", stringValue = "nats")
+@IfBuildProfile("nats")
 public class NatsMetrics {
 
     private final MeterRegistry meterRegistry;

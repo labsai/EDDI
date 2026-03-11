@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.runtime.internal;
 
-import io.quarkus.arc.lookup.LookupIfProperty;
+import io.quarkus.arc.profile.IfBuildProfile;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.health.HealthCheck;
@@ -17,7 +17,7 @@ import org.eclipse.microprofile.health.Readiness;
  */
 @Readiness
 @ApplicationScoped
-@LookupIfProperty(name = "eddi.messaging.type", stringValue = "nats")
+@IfBuildProfile("nats")
 public class NatsHealthCheck implements HealthCheck {
 
     private final NatsConversationCoordinator natsCoordinator;
