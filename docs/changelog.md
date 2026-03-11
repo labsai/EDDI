@@ -41,6 +41,37 @@ Each entry follows this format:
 
 ## Implementation Log
 
+### 2026-03-11 — Phase 6 Item #30: Repository Interface Abstraction (DB-Agnostic)
+
+**Repo:** EDDI
+**Branch:** `feature/version-6.0.0`
+**Phase:** 6 — Item #30 (5 SP)
+
+**What changed:**
+
+Introduced a factory-based abstraction layer so that the datastore can support multiple database backends. The core change is a new `IResourceStorageFactory` interface that replaces direct `MongoDatabase` injection in config stores.
+
+| Component | Change |
+|---|---|
+| `IResourceStorageFactory` | New interface — single injection point for storage creation |
+| `MongoResourceStorageFactory` | `@DefaultBean` — creates `MongoResourceStorage`, exposes `getDatabase()` |
+| `AbstractResourceStore<T>` | New DB-agnostic base class (in `datastore` package) |
+| `HistorizedResourceStore<T>` | Moved from `datastore.mongo` → `datastore` (zero MongoDB deps) |
+| `ModifiableHistorizedResourceStore<T>` | Same move |
+| `AbstractMongoResourceStore<T>` | Now extends `AbstractResourceStore`, `@Deprecated` |
+| `ConversationMemoryStore` | Added `@DefaultBean` for future override |
+| `application.properties` | New `eddi.datastore.type=mongodb` config |
+
+**Design decisions:**
+- Factory pattern (vs CDI alternatives) — mirrors the `@LookupIfProperty` pattern used for NATS
+- Backward-compatible wrappers in `mongo` package — all 9 config stores continue working unchanged
+- `ConversationMemoryStore` gets `@DefaultBean` only — its `IConversationMemoryStore` interface is already well-defined
+- `BotStore`/`PackageStore` inner classes with custom queries remain MongoDB-specific for now
+
+**Tests:** 684 total (0 failures, 0 errors, 4 skipped) — 19 new tests added
+
+---
+
 ### 2026-03-11 — Phase 5 Item #30: Coordinator Dashboard + Dead-Letter Admin
 
 **Repos:** EDDI + EDDI-Manager

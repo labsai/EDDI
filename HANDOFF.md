@@ -214,9 +214,36 @@
 
 - `src/pages/coordinator.tsx`, `src/lib/api/coordinator.ts`, `src/hooks/use-coordinator.ts`
 
+### Phase 6, Item 6.30: Repository Interface Abstraction ✅ (commit `e8d09f77`)
+
+- [x] Created `IResourceStorageFactory` — factory interface for creating DB-agnostic storage backends
+- [x] Created `MongoResourceStorageFactory` — MongoDB impl (`@DefaultBean`), single injection point for `MongoDatabase`
+- [x] Created `AbstractResourceStore<T>` — DB-agnostic base class for config stores (replaces `AbstractMongoResourceStore`)
+- [x] Relocated `HistorizedResourceStore<T>` from `datastore.mongo` → `datastore` package (zero MongoDB deps)
+- [x] Relocated `ModifiableHistorizedResourceStore<T>` from `datastore.mongo` → `datastore` package
+- [x] `AbstractMongoResourceStore<T>` — now extends `AbstractResourceStore`, marked `@Deprecated`
+- [x] `mongo.HistorizedResourceStore` / `mongo.ModifiableHistorizedResourceStore` — thin backward-compat wrappers
+- [x] Added `@DefaultBean` to `ConversationMemoryStore` (allows future PostgreSQL override)
+- [x] Added `eddi.datastore.type=mongodb` config property to `application.properties`
+- [x] 19 new tests: `HistorizedResourceStoreTest` (10), `AbstractResourceStoreTest` (7), `MongoResourceStorageFactoryTest` (2)
+- [x] All 684 tests pass (0 failures, 0 errors, 4 skipped)
+
+**Key files (new):**
+
+- `src/main/java/ai/labs/eddi/datastore/IResourceStorageFactory.java`
+- `src/main/java/ai/labs/eddi/datastore/mongo/MongoResourceStorageFactory.java`
+- `src/main/java/ai/labs/eddi/datastore/AbstractResourceStore.java`
+- `src/main/java/ai/labs/eddi/datastore/HistorizedResourceStore.java`
+- `src/main/java/ai/labs/eddi/datastore/ModifiableHistorizedResourceStore.java`
+
+**Key files (modified):**
+
+- `src/main/java/ai/labs/eddi/datastore/mongo/AbstractMongoResourceStore.java` — extends AbstractResourceStore, @Deprecated
+- `src/main/java/ai/labs/eddi/engine/memory/ConversationMemoryStore.java` — added @DefaultBean
+
 ## Next Up
 
-Phase 6 (PostgreSQL / DB-Agnostic Architecture), Phase 7 (MCP Server + Client), etc. See `docs/v6-planning/implementation_plan.md` and `AGENTS.md` for the full roadmap.
+Phase 6 Item #31 (PostgreSQL Adapter), Phase 7 (MCP Server + Client), etc. See `docs/v6-planning/implementation_plan.md` and `AGENTS.md` for the full roadmap.
 
 ## Important Rules
 
