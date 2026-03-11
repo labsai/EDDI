@@ -926,3 +926,64 @@ function createResourceHandlers(
     }),
   ];
 }
+
+// --- Coordinator Admin Mock Data ---
+const COORDINATOR_STATUS_MOCK = {
+  coordinatorType: "in-memory",
+  connected: true,
+  connectionStatus: "CONNECTED",
+  activeConversations: 2,
+  totalProcessed: 1247,
+  totalDeadLettered: 3,
+  queueDepths: {
+    "conv-abc123": 2,
+    "conv-def456": 1,
+  },
+};
+
+const DEAD_LETTERS_MOCK = [
+  {
+    id: "1",
+    conversationId: "conv-fail-001",
+    error: "Connection timeout to external API",
+    timestamp: Date.now() - 3600000,
+    payload: '{"conversationId":"conv-fail-001","error":"Connection timeout to external API","timestamp":' + (Date.now() - 3600000) + '}',
+  },
+  {
+    id: "2",
+    conversationId: "conv-fail-002",
+    error: "LLM rate limit exceeded",
+    timestamp: Date.now() - 7200000,
+    payload: '{"conversationId":"conv-fail-002","error":"LLM rate limit exceeded","timestamp":' + (Date.now() - 7200000) + '}',
+  },
+  {
+    id: "3",
+    conversationId: "conv-fail-003",
+    error: "NullPointerException in BehaviorRulesEvaluationTask",
+    timestamp: Date.now() - 86400000,
+    payload: '{"conversationId":"conv-fail-003","error":"NullPointerException in BehaviorRulesEvaluationTask","timestamp":' + (Date.now() - 86400000) + '}',
+  },
+];
+
+export const coordinatorHandlers = [
+  http.get("*/administration/coordinator/status", () => {
+    return HttpResponse.json(COORDINATOR_STATUS_MOCK);
+  }),
+
+  http.get("*/administration/coordinator/dead-letters", () => {
+    return HttpResponse.json(DEAD_LETTERS_MOCK);
+  }),
+
+  http.post("*/administration/coordinator/dead-letters/:entryId/replay", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.delete("*/administration/coordinator/dead-letters/:entryId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.delete("*/administration/coordinator/dead-letters", () => {
+    return HttpResponse.json(0);
+  }),
+];
+

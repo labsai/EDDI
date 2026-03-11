@@ -12,6 +12,7 @@ import { ResourcesPage } from "@/pages/resources";
 import { ResourceListPage } from "@/pages/resource-list";
 import { ResourceDetailPage } from "@/pages/resource-detail";
 import { BotWizardPage } from "@/pages/bot-wizard";
+import { CoordinatorPage } from "@/pages/coordinator";
 
 export function App() {
   return (
@@ -24,6 +25,7 @@ export function App() {
         <Route path="/manage/packages" element={<PackagesPage />} />
         <Route path="/manage/packageview/:id" element={<PackageDetailPage />} />
         <Route path="/manage/conversations" element={<ConversationsPage />} />
+        <Route path="/manage/coordinator" element={<CoordinatorPage />} />
         <Route
           path="/manage/conversationview/:id"
           element={<ConversationDetailPage />}

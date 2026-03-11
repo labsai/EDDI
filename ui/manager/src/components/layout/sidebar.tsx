@@ -13,6 +13,7 @@ import {
   ExternalLink,
   BookOpen,
   FileJson,
+  Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -40,6 +41,11 @@ const navSections = [
         path: "/manage/conversations",
         icon: MessageSquare,
         labelKey: "nav.conversations",
+      },
+      {
+        path: "/manage/coordinator",
+        icon: Activity,
+        labelKey: "nav.coordinator",
       },
     ],
   },
