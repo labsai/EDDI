@@ -252,7 +252,7 @@
 - [x] Created `PostgresHealthCheck` — readiness check at `/q/health/ready`
 - [x] Migrated 7 stores from `AbstractMongoResourceStore` → `AbstractResourceStore` + `IResourceStorageFactory`:
   `LangChainStore`, `ParserStore`, `PropertySetterStore`, `HttpCallsStore`, `BehaviorStore`, `OutputStore`, `RegularDictionaryStore`
-- [x] `BotStore`/`PackageStore` remain on deprecated `AbstractMongoResourceStore` (custom MongoDB queries)
+- [x] `BotStore`/`PackageStore` now also migrated to `AbstractResourceStore` + `IResourceStorageFactory`
 - [x] Added PostgreSQL datasource config to `application.properties` (inactive by default)
 - [x] Created `docker-compose.postgres.yml` for local development
 - [x] 15 new tests: `PostgresResourceStorageTest` (12), `PostgresResourceStorageFactoryTest` (3)
@@ -275,9 +275,40 @@
 - `src/main/java/ai/labs/eddi/configs/output/mongo/OutputStore.java`
 - `src/main/java/ai/labs/eddi/configs/regulardictionary/mongo/RegularDictionaryStore.java`
 
+### Phase 6, Item 6.32: Full Store Migration — All Stores DB-Agnostic ✅
+
+- [x] Added `findResourceIdsContaining()`, `findHistoryResourceIdsContaining()`, `findResources()` to `IResourceStorage`
+- [x] Implemented in `MongoResourceStorage` (MongoDB `$in`, regex, pagination)
+- [x] Implemented in `PostgresResourceStorage` (JSONB `@>`, `~`, SQL pagination)
+- [x] `BotStore` migrated from `AbstractMongoResourceStore` → `AbstractResourceStore` + `IResourceStorageFactory`
+- [x] `PackageStore` — same migration pattern, removed inner MongoDB classes
+- [x] Created `IDeploymentStorage` interface (DB-agnostic)
+- [x] Created `MongoDeploymentStorage` (`@DefaultBean`) — extracted MongoDB logic from DeploymentStore
+- [x] Created `PostgresDeploymentStorage` (`@LookupIfProperty`) — JDBC with `INSERT...ON CONFLICT`, dedicated `deployments` table
+- [x] `DeploymentStore` — refactored to thin delegate to `IDeploymentStorage`
+- [x] Created DB-agnostic `DescriptorStore` in `datastore` package (uses `IResourceStorageFactory` + `IResourceStorage.findResources()`)
+- [x] Updated `DocumentDescriptorStore`, `ConversationDescriptorStore`, `TestCaseDescriptorStore` to use `IResourceStorageFactory`
+- [x] Created `PostgresConversationMemoryStore` — JSONB storage with indexed columns (bot_id, bot_version, conversation_state)
+- [x] All 701 tests pass (0 failures, 0 errors, 4 skipped). `mvnw verify` succeeds.
+
+**Key files (new):**
+
+- `src/main/java/ai/labs/eddi/configs/deployment/IDeploymentStorage.java`
+- `src/main/java/ai/labs/eddi/configs/deployment/mongo/MongoDeploymentStorage.java`
+- `src/main/java/ai/labs/eddi/datastore/DescriptorStore.java`
+- `src/main/java/ai/labs/eddi/datastore/postgres/PostgresDeploymentStorage.java`
+- `src/main/java/ai/labs/eddi/datastore/postgres/PostgresConversationMemoryStore.java`
+
+**Key files (modified):**
+
+- `BotStore.java`, `PackageStore.java` — extends `AbstractResourceStore`
+- `DeploymentStore.java` — thin delegate to `IDeploymentStorage`
+- `DocumentDescriptorStore.java`, `ConversationDescriptorStore.java`, `TestCaseDescriptorStore.java` — use `IResourceStorageFactory`
+- `IResourceStorage.java`, `MongoResourceStorage.java`, `PostgresResourceStorage.java` — new query methods
+
 ## Next Up
 
-Phase 6 Item #32 (Migration Tooling — MongoDB → PostgreSQL), Phase 7 (MCP Server + Client), etc. See `docs/v6-planning/implementation_plan.md` and `AGENTS.md` for the full roadmap.
+Phase 6 Item #33 (Migration Tooling — MongoDB → PostgreSQL), Phase 7 (MCP Server + Client), etc. See `docs/v6-planning/implementation_plan.md` and `AGENTS.md` for the full roadmap.
 
 ## Important Rules
 

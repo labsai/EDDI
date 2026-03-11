@@ -2,6 +2,8 @@ package ai.labs.eddi.datastore;
 
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * @author ginccc
@@ -31,6 +33,45 @@ public interface IResourceStorage<T> {
 
     Integer getCurrentVersion(String id);
 
+    /**
+     * Find resource IDs where the JSON data contains the given value at the given path.
+     * Used by BotStore/PackageStore for "find configs containing resource" queries.
+     *
+     * @param jsonPath the JSON field/array path (e.g. "packages", "packageExtensions.config.uri")
+     * @param value    the value to search for within the field
+     * @return list of matching resource IDs with their current versions
+     */
+    default List<IResourceStore.IResourceId> findResourceIdsContaining(String jsonPath, String value) {
+        return Collections.emptyList();
+    }
+
+    /**
+     * Find resource IDs where the JSON data contains the given value at the given path,
+     * searching in the history collection as well.
+     *
+     * @param jsonPath the JSON field/array path
+     * @param value    the value to search for
+     * @return list of matching resource IDs with versions from history
+     */
+    default List<IResourceStore.IResourceId> findHistoryResourceIdsContaining(String jsonPath, String value) {
+        return Collections.emptyList();
+    }
+
+    /**
+     * Filter and paginate resources by field values, with optional regex matching.
+     * Used by DescriptorStore for listing/searching descriptors.
+     *
+     * @param filters   the filter criteria (field/value pairs, strings are treated as regex)
+     * @param sortField field to sort by (descending)
+     * @param skip      number of results to skip
+     * @param limit     maximum number of results
+     * @return list of matching resource IDs
+     */
+    default List<IResourceStore.IResourceId> findResources(
+            IResourceFilter.QueryFilters[] filters, String sortField, int skip, int limit) {
+        return Collections.emptyList();
+    }
+
     interface IResource<T> extends IResourceStore.IResourceId {
 
         T getData() throws IOException;
@@ -43,3 +84,4 @@ public interface IResourceStorage<T> {
 
     }
 }
+

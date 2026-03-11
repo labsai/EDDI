@@ -1,10 +1,10 @@
 package ai.labs.eddi.configs.descriptor.mongo;
 
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.eddi.datastore.mongo.DescriptorStore;
+import ai.labs.eddi.datastore.DescriptorStore;
+import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
-import com.mongodb.reactivestreams.client.MongoDatabase;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -20,8 +20,8 @@ public class DocumentDescriptorStore implements IDocumentDescriptorStore {
     private final DescriptorStore<DocumentDescriptor> descriptorStore;
 
     @Inject
-    public DocumentDescriptorStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
-        descriptorStore = new DescriptorStore<>(database, documentBuilder, DocumentDescriptor.class);
+    public DocumentDescriptorStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
+        descriptorStore = new DescriptorStore<>(storageFactory, documentBuilder, DocumentDescriptor.class);
     }
 
     @Override

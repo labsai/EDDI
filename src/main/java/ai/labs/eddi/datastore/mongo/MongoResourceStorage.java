@@ -1,6 +1,8 @@
 package ai.labs.eddi.datastore.mongo;
 
+import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStorage;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.IndexOptions;
@@ -15,6 +17,7 @@ import org.bson.types.ObjectId;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.List;
 import java.util.NoSuchElementException;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
@@ -211,6 +214,85 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     public void store(IHistoryResource resource) {
         HistoryResource historyResource = checkInternalHistoryResource(resource);
         Observable.fromPublisher(historyCollection.insertOne(historyResource.getMongoDocument())).blockingFirst();
+    }
+
+    @Override
+    public List<IResourceStore.IResourceId> findResourceIdsContaining(String jsonPath, String value) {
+        Document filter = new Document(jsonPath,
+                new Document("$in", java.util.Collections.singletonList(value)));
+
+        List<IResourceStore.IResourceId> results = new java.util.LinkedList<>();
+        Observable.fromPublisher(currentCollection.find(filter)).subscribe(doc -> {
+            String id = doc.getObjectId(ID_FIELD).toString();
+            Integer version = doc.getInteger(VERSION_FIELD);
+            results.add(createResourceId(id, version));
+        });
+        return results;
+    }
+
+    @Override
+    public List<IResourceStore.IResourceId> findHistoryResourceIdsContaining(String jsonPath, String value) {
+        Document filter = new Document(jsonPath,
+                new Document("$in", java.util.Collections.singletonList(value)));
+
+        List<IResourceStore.IResourceId> results = new java.util.LinkedList<>();
+        Observable.fromPublisher(historyCollection.find(filter)).subscribe(doc -> {
+            Object idObject = doc.get(ID_FIELD);
+            if (idObject instanceof Document idDoc) {
+                String id = idDoc.getObjectId(ID_FIELD).toString();
+                Integer version = idDoc.getInteger(VERSION_FIELD);
+                results.add(createResourceId(id, version));
+            }
+        });
+        return results;
+    }
+
+    @Override
+    public List<IResourceStore.IResourceId> findResources(
+            IResourceFilter.QueryFilters[] allQueryFilters, String sortField, int skip, int limit) {
+
+        List<Bson> connectedFilters = new java.util.ArrayList<>();
+        for (IResourceFilter.QueryFilters queryFilters : allQueryFilters) {
+            List<Bson> filters = new java.util.ArrayList<>();
+            for (IResourceFilter.QueryFilter queryFilter : queryFilters.getQueryFilters()) {
+                if (queryFilter.getFilter() instanceof String) {
+                    filters.add(Filters.regex(queryFilter.getField(), queryFilter.getFilter().toString()));
+                } else {
+                    filters.add(Filters.eq(queryFilter.getField(), queryFilter.getFilter()));
+                }
+            }
+            if (queryFilters.getConnectingType() == IResourceFilter.QueryFilters.ConnectingType.AND) {
+                connectedFilters.add(Filters.and(filters));
+            } else {
+                connectedFilters.add(Filters.or(filters));
+            }
+        }
+
+        Bson query = Filters.and(connectedFilters);
+        Document sort = sortField != null ? new Document(sortField, -1) : new Document();
+        int effectiveLimit = limit < 1 ? 20 : limit;
+
+        var publisher = currentCollection.find(query.toBsonDocument()).sort(sort)
+                .limit(effectiveLimit).skip(skip > 0 ? skip : 0);
+
+        List<IResourceStore.IResourceId> results = new java.util.LinkedList<>();
+        Observable.fromPublisher(publisher).blockingIterable().forEach(doc -> {
+            String id = doc.get(ID_FIELD).toString();
+            Object versionField = doc.get(VERSION_FIELD);
+            Integer version = Integer.parseInt(versionField.toString());
+            results.add(createResourceId(id, version));
+        });
+
+        return results;
+    }
+
+    private static IResourceStore.IResourceId createResourceId(String id, Integer version) {
+        return new IResourceStore.IResourceId() {
+            @Override
+            public String getId() { return id; }
+            @Override
+            public Integer getVersion() { return version; }
+        };
     }
 
     private Resource checkInternalResource(IResource currentResource) {

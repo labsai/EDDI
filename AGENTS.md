@@ -103,10 +103,10 @@ Phase 5: NATS JetStream Message Queue ✅
   29. Async conversation processing                    3 SP  ✅
   30. Coordinator Dashboard + Dead-Letter Admin         5 SP  ✅
 
-Phase 6: PostgreSQL / DB-Agnostic Architecture
-  30. Repository interface abstraction                 5 SP
-  31. PostgreSQL adapter (Panache or JDBC)              8 SP
-  32. Migration tooling (MongoDB → PostgreSQL)          5 SP
+Phase 6: PostgreSQL / DB-Agnostic Architecture ✅
+  30. Repository interface abstraction                 5 SP  ✅
+  31. PostgreSQL adapter (Panache or JDBC)              8 SP  ✅
+  32. Migration tooling (MongoDB → PostgreSQL)          5 SP  ✅
 
 Phase 7: MCP Server + Client
   33. MCP Server — expose EDDI tools via MCP           5 SP

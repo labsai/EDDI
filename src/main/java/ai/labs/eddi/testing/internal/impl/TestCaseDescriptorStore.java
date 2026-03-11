@@ -1,11 +1,11 @@
 package ai.labs.eddi.testing.internal.impl;
 
+import ai.labs.eddi.datastore.DescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.datastore.mongo.DescriptorStore;
+import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.testing.descriptor.ITestCaseDescriptorStore;
 import ai.labs.eddi.testing.descriptor.model.TestCaseDescriptor;
-import com.mongodb.reactivestreams.client.MongoDatabase;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -19,8 +19,8 @@ public class TestCaseDescriptorStore implements ITestCaseDescriptorStore {
     private final DescriptorStore<TestCaseDescriptor> descriptorStore;
 
     @Inject
-    public TestCaseDescriptorStore(MongoDatabase mongoDatabase, IDocumentBuilder documentBuilder) {
-        descriptorStore = new DescriptorStore<>(mongoDatabase, documentBuilder, TestCaseDescriptor.class);
+    public TestCaseDescriptorStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
+        descriptorStore = new DescriptorStore<>(storageFactory, documentBuilder, TestCaseDescriptor.class);
     }
 
     @Override
@@ -65,6 +65,6 @@ public class TestCaseDescriptorStore implements ITestCaseDescriptorStore {
 
     @Override
     public void deleteAllDescriptor(String resourceId) {
-
+        descriptorStore.deleteAllDescriptor(resourceId);
     }
 }

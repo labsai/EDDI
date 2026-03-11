@@ -41,6 +41,46 @@ Each entry follows this format:
 
 ## Implementation Log
 
+### 2026-03-11 — Phase 6 Item #32: Full Store Migration (5 SP)
+
+**Repo:** EDDI
+**Branch:** `feature/version-6.0.0`
+**Phase:** 6 — Item #32 (5 SP)
+
+**What changed:**
+
+Completed the full migration of ALL remaining stores from MongoDB-only to DB-agnostic, eliminating the hybrid approach. Every datastore now transparently supports MongoDB or PostgreSQL based on `eddi.datastore.type` configuration.
+
+| Component | Change |
+|---|---|
+| `IResourceStorage` | Added `findResourceIdsContaining()`, `findHistoryResourceIdsContaining()`, `findResources()` query methods |
+| `MongoResourceStorage` | Implements new queries with MongoDB `$in`, regex, pagination |
+| `PostgresResourceStorage` | Implements new queries with JSONB `@>`, `~`, SQL pagination |
+| `BotStore` | Migrated from `AbstractMongoResourceStore` → `AbstractResourceStore` + `IResourceStorageFactory` |
+| `PackageStore` | Same migration, removed inner MongoDB utility classes |
+| `IDeploymentStorage` | New DB-agnostic interface for deployment persistence |
+| `MongoDeploymentStorage` | New `@DefaultBean` — extracted MongoDB logic from `DeploymentStore` |
+| `PostgresDeploymentStorage` | New `@LookupIfProperty` — JDBC with `INSERT...ON CONFLICT`, dedicated `deployments` table |
+| `DeploymentStore` | Refactored to thin delegate to `IDeploymentStorage` |
+| `DescriptorStore` (datastore pkg) | New DB-agnostic descriptor store using `IResourceStorageFactory` + `findResources()` |
+| `DocumentDescriptorStore` | Injects `IResourceStorageFactory` instead of `MongoDatabase` |
+| `ConversationDescriptorStore` | Same — `updateTimeStamp()` reads/modifies/saves via abstraction |
+| `TestCaseDescriptorStore` | Same migration |
+| `PostgresConversationMemoryStore` | New — JSONB with indexed columns (bot_id, bot_version, conversation_state) |
+
+**Design decisions:**
+
+| # | Decision | Reasoning |
+|---|---|---|
+| 1 | Add query methods to `IResourceStorage` | `BotStore`/`PackageStore` used custom MongoDB containment queries; abstracting these makes them DB-agnostic |
+| 2 | `IDeploymentStorage` as separate interface | DeploymentStore has its own data model (not versioned resources) — doesn't fit `IResourceStorage` |
+| 3 | `PostgresConversationMemoryStore` with extracted indexed columns | JSONB for full snapshot data, but bot_id/bot_version/conversation_state extracted as columns for indexed queries |
+| 4 | `DescriptorStore` moved to `datastore` package | Was in `datastore.mongo` — breaking the package dependency to make it framework-agnostic |
+
+**Tests:** All 701 tests pass (0 failures, 0 errors, 4 skipped). `mvnw verify` succeeds.
+
+---
+
 ### 2026-03-11 — Phase 6 Item #31: PostgreSQL Adapter (8 SP)
 
 **Repo:** EDDI
@@ -67,8 +107,8 @@ Implemented a PostgreSQL storage backend as an alternative to MongoDB for EDDI's
 |---|---|---|
 | 1 | Single `resources` + `resources_history` tables with JSONB `data` column | Keeps the generic `IResourceStorage` contract intact without per-type schema complexity |
 | 2 | Uses `IJsonSerialization` instead of `IDocumentBuilder` | `IDocumentBuilder.toDocument()` returns `org.bson.Document` — MongoDB-specific; `IJsonSerialization` is pure JSON |
-| 3 | BotStore/PackageStore stay on `AbstractMongoResourceStore` | Custom MongoDB containment queries need SQL equivalents (Phase 6.32) |
-| 4 | ConversationMemoryStore stays MongoDB | Complex aggregation, custom interface; separate migration effort |
+| 3 | BotStore/PackageStore stayed on `AbstractMongoResourceStore` initially | Custom containment queries needed SQL equivalents — resolved in Phase 6.32 |
+| 4 | ConversationMemoryStore stayed MongoDB initially | Complex aggregation, custom interface — resolved in Phase 6.32 |
 | 5 | `@LookupIfProperty` for activation | Same pattern as NATS (`eddi.messaging.type`), no code changes to switch backends |
 
 **Tests:** 15 new (12 PostgresResourceStorageTest, 3 PostgresResourceStorageFactoryTest). All 699 tests pass.

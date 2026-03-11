@@ -17,6 +17,7 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 public abstract class AbstractResourceStore<T> implements IResourceStore<T> {
 
     protected final HistorizedResourceStore<T> resourceStore;
+    protected final IResourceStorage<T> resourceStorage;
 
     /**
      * No-args constructor required by CDI for proxy creation of
@@ -24,30 +25,30 @@ public abstract class AbstractResourceStore<T> implements IResourceStore<T> {
      */
     protected AbstractResourceStore() {
         this.resourceStore = null;
+        this.resourceStorage = null;
     }
 
     /**
      * Standard constructor - creates storage via factory, wraps in HistorizedResourceStore.
      * Used by most stores (LangChain, Parser, PropertySetter, HttpCalls, Behavior,
-     * Output, RegularDictionary).
+     * Output, RegularDictionary, Bot, Package).
      */
     protected AbstractResourceStore(IResourceStorageFactory storageFactory,
                                     String collectionName,
                                     IDocumentBuilder documentBuilder,
                                     Class<T> documentType,
                                     String... indexes) {
-        IResourceStorage<T> resourceStorage = storageFactory.create(
+        this.resourceStorage = storageFactory.create(
                 collectionName, documentBuilder, documentType, indexes);
         this.resourceStore = new HistorizedResourceStore<>(resourceStorage);
     }
 
     /**
      * Constructor for subclasses that build custom HistorizedResourceStore instances.
-     * Used by BotStore and PackageStore which have inner classes extending
-     * the storage implementation.
      */
     protected AbstractResourceStore(HistorizedResourceStore<T> resourceStore) {
         this.resourceStore = resourceStore;
+        this.resourceStorage = null;
     }
 
     @Override

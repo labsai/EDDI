@@ -3,48 +3,39 @@ package ai.labs.eddi.configs.packages.mongo;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.packages.IPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
-import ai.labs.eddi.configs.utilities.ResourceUtilities;
-import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.datastore.mongo.AbstractMongoResourceStore;
-import ai.labs.eddi.datastore.mongo.HistorizedResourceStore;
-import ai.labs.eddi.datastore.mongo.MongoResourceStorage;
-import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.datastore.AbstractResourceStore;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.IResourceStorageFactory;
+import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import com.mongodb.reactivestreams.client.MongoDatabase;
+
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-
+import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.List;
-
-import static com.mongodb.client.model.Filters.*;
+import java.util.stream.Collectors;
 
 /**
  * @author ginccc
  */
 @ApplicationScoped
-public class PackageStore extends AbstractMongoResourceStore<PackageConfiguration> implements IPackageStore {
+public class PackageStore extends AbstractResourceStore<PackageConfiguration> implements IPackageStore {
     public static final String PACKAGE_EXTENSIONS_FIELD = "packageExtensions";
+    public static final String PACKAGE_EXTENSIONS_CONFIG_URI_FIELD = "packageExtensions.config.uri";
+    public static final String PACKAGE_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD =
+            "packageExtensions.extensions.dictionaries.config.uri";
+
     private final IDocumentDescriptorStore documentDescriptorStore;
-    private final PackageHistorizedResourceStore packageResourceStore;
 
     @Inject
-    public PackageStore(MongoDatabase database, IDocumentBuilder documentBuilder,
+    public PackageStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder,
             IDocumentDescriptorStore documentDescriptorStore) {
-        super(createPackageResourceStore(database, documentBuilder, documentDescriptorStore));
+        super(storageFactory, "packages", documentBuilder, PackageConfiguration.class,
+                PACKAGE_EXTENSIONS_CONFIG_URI_FIELD, PACKAGE_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD);
         this.documentDescriptorStore = documentDescriptorStore;
-        this.packageResourceStore = (PackageHistorizedResourceStore) this.resourceStore;
-    }
-
-    private static PackageHistorizedResourceStore createPackageResourceStore(MongoDatabase database,
-            IDocumentBuilder documentBuilder,
-            IDocumentDescriptorStore documentDescriptorStore) {
-        RuntimeUtilities.checkNotNull(database, "database");
-        PackageMongoResourceStorage mongoResourceStorage = new PackageMongoResourceStorage(database, "packages",
-                documentBuilder, PackageConfiguration.class, documentDescriptorStore);
-        return new PackageHistorizedResourceStore(mongoResourceStorage);
     }
 
     @Override
@@ -78,10 +69,29 @@ public class PackageStore extends AbstractMongoResourceStore<PackageConfiguratio
 
         do {
             resourceURI = resourceURIPart + version;
-            List<IResourceStore.IResourceId> packagesContainingResource = packageResourceStore
-                    .getPackageDescriptorsContainingResource(resourceURI);
-            for (IResourceStore.IResourceId packageId : packagesContainingResource) {
 
+            // Search both config URI paths in current + history
+            List<IResourceStore.IResourceId> allIds = new LinkedList<>();
+
+            // Search in config.uri field
+            allIds.addAll(resourceStorage.findResourceIdsContaining(
+                    PACKAGE_EXTENSIONS_CONFIG_URI_FIELD, resourceURI));
+            allIds.addAll(resourceStorage.findHistoryResourceIdsContaining(
+                    PACKAGE_EXTENSIONS_CONFIG_URI_FIELD, resourceURI));
+
+            // Search in dictionaries config.uri field
+            allIds.addAll(resourceStorage.findResourceIdsContaining(
+                    PACKAGE_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD, resourceURI));
+            allIds.addAll(resourceStorage.findHistoryResourceIdsContaining(
+                    PACKAGE_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD, resourceURI));
+
+            // Sort and deduplicate
+            Comparator<IResourceStore.IResourceId> comparator =
+                    Comparator.comparing(IResourceStore.IResourceId::getId)
+                            .thenComparingInt(IResourceStore.IResourceId::getVersion).reversed();
+            allIds = allIds.stream().sorted(comparator).collect(Collectors.toList());
+
+            for (IResourceStore.IResourceId packageId : allIds) {
                 if (packageId.getVersion() < getCurrentResourceId(packageId.getId()).getVersion()) {
                     continue;
                 }
@@ -91,15 +101,13 @@ public class PackageStore extends AbstractMongoResourceStore<PackageConfiguratio
                             var id = RestUtilities.extractResourceId(resource.getResource()).getId();
                             return id.equals(packageId.getId());
                         });
-
                 if (alreadyContainsResource) {
                     continue;
                 }
 
                 try {
                     var packageDescriptor = documentDescriptorStore.readDescriptor(
-                            packageId.getId(),
-                            packageId.getVersion());
+                            packageId.getId(), packageId.getVersion());
                     ret.add(packageDescriptor);
                 } catch (ResourceNotFoundException e) {
                     // skip, as this resource is not available anymore due to deletion
@@ -110,48 +118,5 @@ public class PackageStore extends AbstractMongoResourceStore<PackageConfiguratio
         } while (includePreviousVersions && version >= 1);
 
         return ret;
-    }
-
-    private static class PackageMongoResourceStorage extends MongoResourceStorage<PackageConfiguration> {
-
-        public static final String PACKAGE_EXTENSIONS_CONFIG_URI_FIELD = "packageExtensions.config.uri";
-        public static final String PACKAGE_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD = "packageExtensions.extensions.dictionaries.config.uri";
-        private final IDocumentDescriptorStore documentDescriptorStore;
-
-        PackageMongoResourceStorage(MongoDatabase database, String collectionName,
-                IDocumentBuilder documentBuilder, Class<PackageConfiguration> documentType,
-                IDocumentDescriptorStore documentDescriptorStore) {
-
-            super(database, collectionName, documentBuilder, documentType,
-                    PACKAGE_EXTENSIONS_CONFIG_URI_FIELD, PACKAGE_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD);
-            this.documentDescriptorStore = documentDescriptorStore;
-        }
-
-        List<IResourceStore.IResourceId> getPackageDescriptorsContainingResource(String resourceURI)
-                throws IResourceStore.ResourceNotFoundException {
-
-            // Building a filter to search in arrays and nested objects
-            var filter = or(
-                    elemMatch(PACKAGE_EXTENSIONS_FIELD, eq(PACKAGE_EXTENSIONS_CONFIG_URI_FIELD, resourceURI)),
-                    elemMatch(PACKAGE_EXTENSIONS_FIELD,
-                            eq(PACKAGE_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD, resourceURI)));
-
-            return ResourceUtilities.getAllConfigsContainingResources(filter,
-                    currentCollection, historyCollection, documentDescriptorStore);
-        }
-    }
-
-    private static class PackageHistorizedResourceStore extends HistorizedResourceStore<PackageConfiguration> {
-        private final PackageMongoResourceStorage resourceStorage;
-
-        PackageHistorizedResourceStore(PackageMongoResourceStorage resourceStorage) {
-            super(resourceStorage);
-            this.resourceStorage = resourceStorage;
-        }
-
-        List<IResourceStore.IResourceId> getPackageDescriptorsContainingResource(String resourceURI)
-                throws IResourceStore.ResourceNotFoundException {
-            return resourceStorage.getPackageDescriptorsContainingResource(resourceURI);
-        }
     }
 }

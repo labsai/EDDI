@@ -1,11 +1,16 @@
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStorage;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 
 import javax.sql.DataSource;
 import java.io.IOException;
 import java.sql.*;
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.UUID;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
@@ -284,6 +289,109 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
         } catch (SQLException e) {
             throw new RuntimeException("Failed to get current version", e);
         }
+    }
+
+    @Override
+    public List<IResourceStore.IResourceId> findResourceIdsContaining(String jsonPath, String value) {
+        // Use JSONB containment: data->'jsonPath' @> '["value"]'::jsonb
+        String sql = "SELECT id, version FROM resources " +
+                "WHERE collection_name = ? AND data->'" + sanitizeJsonPath(jsonPath) + "' @> ?::jsonb";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, collectionName);
+            ps.setString(2, "[\"" + value + "\"]");
+            return extractResourceIds(ps);
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to find resources containing value", e);
+        }
+    }
+
+    @Override
+    public List<IResourceStore.IResourceId> findHistoryResourceIdsContaining(String jsonPath, String value) {
+        String sql = "SELECT id, version FROM resources_history " +
+                "WHERE collection_name = ? AND data->'" + sanitizeJsonPath(jsonPath) + "' @> ?::jsonb";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, collectionName);
+            ps.setString(2, "[\"" + value + "\"]");
+            return extractResourceIds(ps);
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to find history resources containing value", e);
+        }
+    }
+
+    @Override
+    public List<IResourceStore.IResourceId> findResources(
+            IResourceFilter.QueryFilters[] allQueryFilters, String sortField, int skip, int limit) {
+
+        StringBuilder sql = new StringBuilder("SELECT id, version FROM resources WHERE collection_name = ?");
+        List<Object> params = new ArrayList<>();
+        params.add(collectionName);
+
+        for (IResourceFilter.QueryFilters queryFilters : allQueryFilters) {
+            List<String> clauses = new ArrayList<>();
+            for (IResourceFilter.QueryFilter qf : queryFilters.getQueryFilters()) {
+                if (qf.getFilter() instanceof String filterStr) {
+                    // Regex filter → use SQL LIKE on JSONB field cast to text
+                    clauses.add("data->>'" + sanitizeJsonPath(qf.getField()) + "' ~ ?");
+                    params.add(filterStr);
+                } else if (qf.getFilter() instanceof Boolean boolVal) {
+                    clauses.add("COALESCE((data->>'" + sanitizeJsonPath(qf.getField()) + "')::boolean, false) = ?");
+                    params.add(boolVal);
+                } else {
+                    clauses.add("data->>'" + sanitizeJsonPath(qf.getField()) + "' = ?");
+                    params.add(qf.getFilter().toString());
+                }
+            }
+            String connector = queryFilters.getConnectingType() == IResourceFilter.QueryFilters.ConnectingType.AND
+                    ? " AND " : " OR ";
+            sql.append(" AND (").append(String.join(connector, clauses)).append(")");
+        }
+
+        if (sortField != null) {
+            sql.append(" ORDER BY data->>'" + sanitizeJsonPath(sortField) + "' DESC");
+        }
+
+        int effectiveLimit = limit < 1 ? 20 : limit;
+        sql.append(" LIMIT ").append(effectiveLimit);
+        if (skip > 0) {
+            sql.append(" OFFSET ").append(skip);
+        }
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+            for (int i = 0; i < params.size(); i++) {
+                Object param = params.get(i);
+                if (param instanceof Boolean b) {
+                    ps.setBoolean(i + 1, b);
+                } else {
+                    ps.setString(i + 1, param.toString());
+                }
+            }
+            return extractResourceIds(ps);
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to find resources", e);
+        }
+    }
+
+    private List<IResourceStore.IResourceId> extractResourceIds(PreparedStatement ps) throws SQLException {
+        List<IResourceStore.IResourceId> results = new LinkedList<>();
+        try (ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                String id = rs.getString("id");
+                int version = rs.getInt("version");
+                results.add(new IResourceStore.IResourceId() {
+                    @Override public String getId() { return id; }
+                    @Override public Integer getVersion() { return version; }
+                });
+            }
+        }
+        return results;
+    }
+
+    private String sanitizeJsonPath(String path) {
+        // Prevent SQL injection in JSON path
+        return path.replaceAll("[^a-zA-Z0-9_.]", "");
     }
 
     @SuppressWarnings("unchecked")

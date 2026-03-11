@@ -4,50 +4,38 @@ import ai.labs.eddi.configs.bots.IBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.descriptor.mongo.DocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.eddi.configs.utilities.ResourceUtilities;
-import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.datastore.mongo.AbstractMongoResourceStore;
-import ai.labs.eddi.datastore.mongo.HistorizedResourceStore;
-import ai.labs.eddi.datastore.mongo.MongoResourceStorage;
-import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.datastore.AbstractResourceStore;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.IResourceStorageFactory;
+import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import com.mongodb.reactivestreams.client.MongoDatabase;
-import org.bson.Document;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 
 /**
  * @author ginccc
  */
-
 @ApplicationScoped
-public class BotStore extends AbstractMongoResourceStore<BotConfiguration> implements IBotStore {
+public class BotStore extends AbstractResourceStore<BotConfiguration> implements IBotStore {
     public static final String PACKAGES_FIELD = "packages";
+    private static final String PACKAGE_RESOURCE_URI = "eddi://ai.labs.package/packagestore/packages/";
+    private static final String VERSION_QUERY_PARAM = "?version=";
+
     private final IDocumentDescriptorStore documentDescriptorStore;
-    private final BotHistorizedResourceStore botResourceStore;
 
     @Inject
-    public BotStore(MongoDatabase database, IDocumentBuilder documentBuilder,
+    public BotStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder,
             DocumentDescriptorStore documentDescriptorStore) {
-        super(createBotResourceStore(database, documentBuilder, documentDescriptorStore));
+        super(storageFactory, "bots", documentBuilder, BotConfiguration.class, PACKAGES_FIELD);
         this.documentDescriptorStore = documentDescriptorStore;
-        this.botResourceStore = (BotHistorizedResourceStore) this.resourceStore;
-    }
-
-    private static BotHistorizedResourceStore createBotResourceStore(MongoDatabase database,
-            IDocumentBuilder documentBuilder,
-            IDocumentDescriptorStore documentDescriptorStore) {
-        RuntimeUtilities.checkNotNull(database, "database");
-        BotMongoResourceStorage resourceStorage = new BotMongoResourceStorage(database, "bots", documentBuilder,
-                BotConfiguration.class, documentDescriptorStore);
-        return new BotHistorizedResourceStore(resourceStorage);
     }
 
     @Override
@@ -72,18 +60,30 @@ public class BotStore extends AbstractMongoResourceStore<BotConfiguration> imple
 
         List<DocumentDescriptor> ret = new LinkedList<>();
         do {
-            List<IResourceStore.IResourceId> botIdsContainingPackageUri = botResourceStore
-                    .getBotIdsContainingPackage(packageId, packageVersion);
+            String packageUri = PACKAGE_RESOURCE_URI + packageId + VERSION_QUERY_PARAM + packageVersion;
 
-            for (IResourceStore.IResourceId botId : botIdsContainingPackageUri) {
+            // Search in current resources
+            List<IResourceStore.IResourceId> currentIds =
+                    resourceStorage.findResourceIdsContaining(PACKAGES_FIELD, packageUri);
+            // Search in history
+            List<IResourceStore.IResourceId> historyIds =
+                    resourceStorage.findHistoryResourceIdsContaining(PACKAGES_FIELD, packageUri);
 
+            // Merge and sort
+            List<IResourceStore.IResourceId> allIds = new LinkedList<>(currentIds);
+            allIds.addAll(historyIds);
+            Comparator<IResourceStore.IResourceId> comparator =
+                    Comparator.comparing(IResourceStore.IResourceId::getId)
+                            .thenComparingInt(IResourceStore.IResourceId::getVersion).reversed();
+            allIds = allIds.stream().sorted(comparator).collect(Collectors.toList());
+
+            for (IResourceStore.IResourceId botId : allIds) {
                 if (botId.getVersion() < getCurrentResourceId(botId.getId()).getVersion()) {
                     continue;
                 }
 
                 boolean alreadyContainsResource = ret.stream().anyMatch(
                         descriptor -> extractResourceId(descriptor.getResource()).getId().equals(botId.getId()));
-
                 if (alreadyContainsResource) {
                     continue;
                 }
@@ -100,46 +100,5 @@ public class BotStore extends AbstractMongoResourceStore<BotConfiguration> imple
         } while (includePreviousVersions && packageVersion >= 1);
 
         return ret;
-    }
-
-    private static class BotMongoResourceStorage extends MongoResourceStorage<BotConfiguration> {
-        private static final String packageResourceURI = "eddi://ai.labs.package/packagestore/packages/";
-        private static final String versionQueryParam = "?version=";
-        private final IDocumentDescriptorStore documentDescriptorStore;
-
-        BotMongoResourceStorage(MongoDatabase database, String collectionName,
-                IDocumentBuilder documentBuilder,
-                Class<BotConfiguration> botConfigurationClass,
-                IDocumentDescriptorStore documentDescriptorStore) {
-
-            super(database, collectionName, documentBuilder, botConfigurationClass, PACKAGES_FIELD);
-            this.documentDescriptorStore = documentDescriptorStore;
-        }
-
-        List<IResourceStore.IResourceId> getBotIdsContainingPackageUri(String packageId, Integer packageVersion)
-                throws IResourceStore.ResourceNotFoundException {
-
-            String searchedForPackageUri = String.join("",
-                    packageResourceURI, packageId, versionQueryParam, String.valueOf(packageVersion));
-            Document filter = new Document(PACKAGES_FIELD,
-                    new Document("$in", Collections.singletonList(searchedForPackageUri)));
-
-            return ResourceUtilities.getAllConfigsContainingResources(filter,
-                    currentCollection, historyCollection, documentDescriptorStore);
-        }
-    }
-
-    private static class BotHistorizedResourceStore extends HistorizedResourceStore<BotConfiguration> {
-        private final BotMongoResourceStorage resourceStorage;
-
-        BotHistorizedResourceStore(BotMongoResourceStorage resourceStorage) {
-            super(resourceStorage);
-            this.resourceStorage = resourceStorage;
-        }
-
-        List<IResourceStore.IResourceId> getBotIdsContainingPackage(String packageId, Integer packageVersion)
-                throws IResourceStore.ResourceNotFoundException {
-            return resourceStorage.getBotIdsContainingPackageUri(packageId, packageVersion);
-        }
     }
 }
