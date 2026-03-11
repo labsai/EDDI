@@ -75,10 +75,10 @@ public class BotUseCaseIT extends BaseIntegrationIT {
         String intent = "weather-bot";
         String userId = "12345";
 
-        // Register bot trigger
+        // Register bot trigger (create via POST)
         given().contentType(ContentType.JSON)
                 .body(String.format(load("useCases/botdeployment.json"), weatherBotId.id()))
-                .put("/bottriggerstore/bottriggers/" + intent);
+                .post("/bottriggerstore/bottriggers");
 
         // End any existing conversation
         given().post("/managedbots/" + intent + "/" + userId + "/endConversation");
