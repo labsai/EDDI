@@ -41,6 +41,40 @@ Each entry follows this format:
 
 ## Implementation Log
 
+### 2026-03-11 — Phase 6 Item #31: PostgreSQL Adapter (8 SP)
+
+**Repo:** EDDI
+**Branch:** `feature/version-6.0.0`
+**Phase:** 6 — Item #31 (8 SP)
+
+**What changed:**
+
+Implemented a PostgreSQL storage backend as an alternative to MongoDB for EDDI's configuration stores. All 7 "simple" stores now use the factory pattern and automatically work with either MongoDB or PostgreSQL depending on configuration.
+
+| Component | Change |
+|---|---|
+| `PostgresResourceStorage<T>` | New — JDBC + JSONB implementation of `IResourceStorage<T>` |
+| `PostgresResourceStorageFactory` | New — `@LookupIfProperty(eddi.datastore.type=postgres)`, creates PostgresResourceStorage |
+| `PostgresHealthCheck` | New — `@Readiness` health check for PostgreSQL connection |
+| 7 config stores | Migrated from `AbstractMongoResourceStore` → `AbstractResourceStore` + `IResourceStorageFactory` |
+| `pom.xml` | Added `quarkus-jdbc-postgresql`, `quarkus-agroal`, `testcontainers:postgresql` |
+| `application.properties` | Added PostgreSQL datasource config (inactive by default) |
+| `docker-compose.postgres.yml` | New — PostgreSQL 16 + MongoDB + EDDI for local development |
+
+**Design decisions:**
+
+| # | Decision | Reasoning |
+|---|---|---|
+| 1 | Single `resources` + `resources_history` tables with JSONB `data` column | Keeps the generic `IResourceStorage` contract intact without per-type schema complexity |
+| 2 | Uses `IJsonSerialization` instead of `IDocumentBuilder` | `IDocumentBuilder.toDocument()` returns `org.bson.Document` — MongoDB-specific; `IJsonSerialization` is pure JSON |
+| 3 | BotStore/PackageStore stay on `AbstractMongoResourceStore` | Custom MongoDB containment queries need SQL equivalents (Phase 6.32) |
+| 4 | ConversationMemoryStore stays MongoDB | Complex aggregation, custom interface; separate migration effort |
+| 5 | `@LookupIfProperty` for activation | Same pattern as NATS (`eddi.messaging.type`), no code changes to switch backends |
+
+**Tests:** 15 new (12 PostgresResourceStorageTest, 3 PostgresResourceStorageFactoryTest). All 699 tests pass.
+
+---
+
 ### 2026-03-11 — Phase 6 Item #30: Repository Interface Abstraction (DB-Agnostic)
 
 **Repo:** EDDI

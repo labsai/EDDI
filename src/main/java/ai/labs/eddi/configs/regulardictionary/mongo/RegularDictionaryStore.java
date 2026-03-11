@@ -2,12 +2,12 @@ package ai.labs.eddi.configs.regulardictionary.mongo;
 
 import ai.labs.eddi.configs.regulardictionary.IRegularDictionaryStore;
 import ai.labs.eddi.configs.regulardictionary.model.RegularDictionaryConfiguration;
+import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.datastore.mongo.AbstractMongoResourceStore;
+import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.mongo.ResultManipulator;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import com.mongodb.reactivestreams.client.MongoDatabase;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -19,15 +19,15 @@ import java.util.List;
  * @author ginccc
  */
 @ApplicationScoped
-public class RegularDictionaryStore extends AbstractMongoResourceStore<RegularDictionaryConfiguration>
+public class RegularDictionaryStore extends AbstractResourceStore<RegularDictionaryConfiguration>
         implements IRegularDictionaryStore {
 
     private static final WordComparator WORD_COMPARATOR = new WordComparator();
     private static final PhraseComparator PHRASE_COMPARATOR = new PhraseComparator();
 
     @Inject
-    public RegularDictionaryStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
-        super(database, "regulardictionaries", documentBuilder, RegularDictionaryConfiguration.class);
+    public RegularDictionaryStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
+        super(storageFactory, "regulardictionaries", documentBuilder, RegularDictionaryConfiguration.class);
     }
 
     @Override

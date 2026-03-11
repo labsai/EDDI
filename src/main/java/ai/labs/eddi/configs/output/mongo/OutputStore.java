@@ -3,11 +3,11 @@ package ai.labs.eddi.configs.output.mongo;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
+import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.datastore.mongo.AbstractMongoResourceStore;
+import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.mongo.ResultManipulator;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
-import com.mongodb.reactivestreams.client.MongoDatabase;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -21,14 +21,14 @@ import static ai.labs.eddi.utils.RuntimeUtilities.*;
  * @author ginccc
  */
 @ApplicationScoped
-public class OutputStore extends AbstractMongoResourceStore<OutputConfigurationSet>
+public class OutputStore extends AbstractResourceStore<OutputConfigurationSet>
         implements IOutputStore {
 
     private static final OutputComparator OUTPUT_COMPARATOR = new OutputComparator();
 
     @Inject
-    public OutputStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
-        super(database, "outputs", documentBuilder, OutputConfigurationSet.class);
+    public OutputStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
+        super(storageFactory, "outputs", documentBuilder, OutputConfigurationSet.class);
     }
 
     @Override

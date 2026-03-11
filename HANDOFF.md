@@ -241,9 +241,43 @@
 - `src/main/java/ai/labs/eddi/datastore/mongo/AbstractMongoResourceStore.java` — extends AbstractResourceStore, @Deprecated
 - `src/main/java/ai/labs/eddi/engine/memory/ConversationMemoryStore.java` — added @DefaultBean
 
+### Phase 6, Item 6.31: PostgreSQL Adapter ✅
+
+- [x] Added Maven dependencies: `quarkus-jdbc-postgresql`, `quarkus-agroal`, `testcontainers:postgresql`
+- [x] Created `PostgresResourceStorage<T>` — JDBC + JSONB implementation of `IResourceStorage<T>`
+  - Auto-creates `resources` + `resources_history` tables via `CREATE TABLE IF NOT EXISTS`
+  - Uses `IJsonSerialization` for clean JSON↔object conversion
+  - UUID-based IDs, version tracking, soft-delete support
+- [x] Created `PostgresResourceStorageFactory` — `@LookupIfProperty(eddi.datastore.type=postgres)`
+- [x] Created `PostgresHealthCheck` — readiness check at `/q/health/ready`
+- [x] Migrated 7 stores from `AbstractMongoResourceStore` → `AbstractResourceStore` + `IResourceStorageFactory`:
+  `LangChainStore`, `ParserStore`, `PropertySetterStore`, `HttpCallsStore`, `BehaviorStore`, `OutputStore`, `RegularDictionaryStore`
+- [x] `BotStore`/`PackageStore` remain on deprecated `AbstractMongoResourceStore` (custom MongoDB queries)
+- [x] Added PostgreSQL datasource config to `application.properties` (inactive by default)
+- [x] Created `docker-compose.postgres.yml` for local development
+- [x] 15 new tests: `PostgresResourceStorageTest` (12), `PostgresResourceStorageFactoryTest` (3)
+- [x] All 699 tests pass (0 failures, 0 errors, 4 skipped)
+
+**Key files (new):**
+
+- `src/main/java/ai/labs/eddi/datastore/postgres/PostgresResourceStorage.java`
+- `src/main/java/ai/labs/eddi/datastore/postgres/PostgresResourceStorageFactory.java`
+- `src/main/java/ai/labs/eddi/datastore/postgres/PostgresHealthCheck.java`
+- `docker-compose.postgres.yml`
+
+**Key files (migrated):**
+
+- `src/main/java/ai/labs/eddi/configs/langchain/mongo/LangChainStore.java`
+- `src/main/java/ai/labs/eddi/configs/parser/mongo/ParserStore.java`
+- `src/main/java/ai/labs/eddi/configs/propertysetter/mongo/PropertySetterStore.java`
+- `src/main/java/ai/labs/eddi/configs/http/mongo/HttpCallsStore.java`
+- `src/main/java/ai/labs/eddi/configs/behavior/mongo/BehaviorStore.java`
+- `src/main/java/ai/labs/eddi/configs/output/mongo/OutputStore.java`
+- `src/main/java/ai/labs/eddi/configs/regulardictionary/mongo/RegularDictionaryStore.java`
+
 ## Next Up
 
-Phase 6 Item #31 (PostgreSQL Adapter), Phase 7 (MCP Server + Client), etc. See `docs/v6-planning/implementation_plan.md` and `AGENTS.md` for the full roadmap.
+Phase 6 Item #32 (Migration Tooling — MongoDB → PostgreSQL), Phase 7 (MCP Server + Client), etc. See `docs/v6-planning/implementation_plan.md` and `AGENTS.md` for the full roadmap.
 
 ## Important Rules
 

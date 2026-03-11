@@ -4,10 +4,10 @@ import ai.labs.eddi.configs.behavior.IBehaviorStore;
 import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
 import ai.labs.eddi.configs.behavior.model.BehaviorGroupConfiguration;
 import ai.labs.eddi.configs.behavior.model.BehaviorRuleConfiguration;
-import ai.labs.eddi.datastore.mongo.AbstractMongoResourceStore;
+import ai.labs.eddi.datastore.AbstractResourceStore;
+import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import com.mongodb.reactivestreams.client.MongoDatabase;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -19,12 +19,12 @@ import java.util.stream.Collectors;
  * @author ginccc
  */
 @ApplicationScoped
-public class BehaviorStore extends AbstractMongoResourceStore<BehaviorConfiguration>
+public class BehaviorStore extends AbstractResourceStore<BehaviorConfiguration>
         implements IBehaviorStore {
 
     @Inject
-    public BehaviorStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
-        super(database, "behaviorrulesets", documentBuilder, BehaviorConfiguration.class);
+    public BehaviorStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
+        super(storageFactory, "behaviorrulesets", documentBuilder, BehaviorConfiguration.class);
     }
 
     @Override

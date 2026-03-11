@@ -3,9 +3,9 @@ package ai.labs.eddi.configs.http.mongo;
 import ai.labs.eddi.configs.http.IHttpCallsStore;
 import ai.labs.eddi.configs.http.model.HttpCall;
 import ai.labs.eddi.configs.http.model.HttpCallsConfiguration;
-import ai.labs.eddi.datastore.mongo.AbstractMongoResourceStore;
+import ai.labs.eddi.datastore.AbstractResourceStore;
+import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
-import com.mongodb.reactivestreams.client.MongoDatabase;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -17,12 +17,12 @@ import java.util.stream.Collectors;
  * @author ginccc
  */
 @ApplicationScoped
-public class HttpCallsStore extends AbstractMongoResourceStore<HttpCallsConfiguration>
+public class HttpCallsStore extends AbstractResourceStore<HttpCallsConfiguration>
         implements IHttpCallsStore {
 
     @Inject
-    public HttpCallsStore(MongoDatabase database, IDocumentBuilder documentBuilder) {
-        super(database, "httpcalls", documentBuilder, HttpCallsConfiguration.class);
+    public HttpCallsStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
+        super(storageFactory, "httpcalls", documentBuilder, HttpCallsConfiguration.class);
     }
 
     @Override
