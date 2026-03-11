@@ -1,5 +1,6 @@
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import io.nats.client.*;
@@ -14,9 +15,11 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * NATS JetStream-backed implementation of {@link IConversationCoordinator}.
@@ -64,6 +67,8 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
      * Key: conversationId, Value: queue of callables waiting execution.
      */
     private final Map<String, BlockingQueue<RetryableCallable>> conversationQueues = new ConcurrentHashMap<>();
+    private final AtomicLong totalProcessed = new AtomicLong(0);
+    private final AtomicLong totalDeadLettered = new AtomicLong(0);
 
     @Inject
     public NatsConversationCoordinator(
@@ -217,6 +222,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
             @Override
             public void onComplete(Void result) {
                 recordConsumeMetrics(consumeStart);
+                totalProcessed.incrementAndGet();
                 submitNext(conversationId, queue);
             }
 
@@ -264,6 +270,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
             jetStream.publish(deadLetterSubject, payload.getBytes());
             log.infof("Published dead-letter for conversation %s to %s", conversationId, deadLetterSubject);
 
+            totalDeadLettered.incrementAndGet();
             getMetrics().ifPresent(m -> m.getDeadLetterCount().increment());
         } catch (IOException | JetStreamApiException e) {
             log.errorf(e, "Failed to publish dead-letter for conversation %s", conversationId);
@@ -306,22 +313,122 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
         }
     }
 
-    /**
-     * @return true if connected to NATS
-     */
+    // ==================== Status Methods ====================
+
+    @Override
+    public String getCoordinatorType() {
+        return "nats";
+    }
+
+    @Override
     public boolean isConnected() {
         return natsConnection != null &&
                 natsConnection.getStatus() == Connection.Status.CONNECTED;
     }
 
-    /**
-     * @return the NATS connection status string
-     */
+    @Override
     public String getConnectionStatus() {
         if (natsConnection == null) {
             return "NOT_INITIALIZED";
         }
         return natsConnection.getStatus().name();
+    }
+
+    @Override
+    public Map<String, Integer> getQueueDepths() {
+        Map<String, Integer> depths = new LinkedHashMap<>();
+        conversationQueues.forEach((id, q) -> {
+            int size = q.size();
+            if (size > 0) {
+                depths.put(id, size);
+            }
+        });
+        return depths;
+    }
+
+    @Override
+    public long getTotalProcessed() {
+        return totalProcessed.get();
+    }
+
+    @Override
+    public long getTotalDeadLettered() {
+        return totalDeadLettered.get();
+    }
+
+    // ==================== Dead-Letter Methods ====================
+
+    @Override
+    public List<DeadLetterEntry> getDeadLetters() {
+        List<DeadLetterEntry> entries = new ArrayList<>();
+        if (natsConnection == null || jetStream == null) return entries;
+
+        try {
+            JetStreamSubscription sub = jetStream.subscribe(DEAD_LETTER_PREFIX + "*");
+            Message msg;
+            while ((msg = sub.nextMessage(Duration.ofMillis(500))) != null) {
+                String payload = new String(msg.getData(), StandardCharsets.UTF_8);
+                String subject = msg.getSubject();
+                String convId = subject.replace(DEAD_LETTER_PREFIX, "");
+
+                entries.add(new DeadLetterEntry(
+                        String.valueOf(msg.metaData() != null ? msg.metaData().streamSequence() : entries.size()),
+                        convId,
+                        extractField(payload, "error"),
+                        extractTimestamp(payload),
+                        payload
+                ));
+            }
+            sub.unsubscribe();
+        } catch (Exception e) {
+            log.warnf(e, "Failed to list dead-letter entries");
+        }
+        return entries;
+    }
+
+    @Override
+    public boolean discardDeadLetter(String entryId) {
+        // For NATS, we can't selectively delete individual messages from a stream.
+        // Instead, we log it and let the operator know.
+        log.infof("Dead-letter %s acknowledged (NATS stream messages expire via retention policy)", entryId);
+        return true;
+    }
+
+    @Override
+    public int purgeDeadLetters() {
+        if (natsConnection == null) return 0;
+        try {
+            JetStreamManagement jsm = natsConnection.jetStreamManagement();
+            PurgeResponse response = jsm.purgeStream(deadLetterStreamName);
+            int purged = (int) response.getPurged();
+            log.infof("Purged %d dead-letter messages from stream %s", purged, deadLetterStreamName);
+            return purged;
+        } catch (IOException | JetStreamApiException e) {
+            log.errorf(e, "Failed to purge dead-letter stream %s", deadLetterStreamName);
+            return 0;
+        }
+    }
+
+    private String extractField(String json, String field) {
+        String key = "\"" + field + "\":\"";
+        int start = json.indexOf(key);
+        if (start < 0) return "unknown";
+        start += key.length();
+        int end = json.indexOf("\"", start);
+        return end > start ? json.substring(start, end) : "unknown";
+    }
+
+    private long extractTimestamp(String json) {
+        String key = "\"timestamp\":";
+        int start = json.indexOf(key);
+        if (start < 0) return 0;
+        start += key.length();
+        int end = json.indexOf("}", start);
+        try {
+            return Long.parseLong(json.substring(start, end).trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     /**
@@ -331,11 +438,11 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
         return maxRetries;
     }
 
-    private java.util.Optional<NatsMetrics> getMetrics() {
+    private Optional<NatsMetrics> getMetrics() {
         if (metricsInstance != null && metricsInstance.isResolvable()) {
-            return java.util.Optional.of(metricsInstance.get());
+            return Optional.of(metricsInstance.get());
         }
-        return java.util.Optional.empty();
+        return Optional.empty();
     }
 
     /**
