@@ -6,11 +6,10 @@ import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import ai.labs.eddi.utils.StringUtilities;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
-import com.mongodb.reactivestreams.client.MongoCollection;
-import com.mongodb.reactivestreams.client.MongoDatabase;
-import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 
 import java.util.LinkedList;
@@ -44,13 +43,13 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         this.descriptorResourceStore = new ModifiableHistorizedResourceStore<>(resourceStorage);
         this.resourceFilter = new ResourceFilter<>(descriptorCollection, descriptorResourceStore);
 
-        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_RESOURCE), new IndexOptions().unique(true))).blockingFirst();
-        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_USER_ID), new IndexOptions().unique(false))).blockingFirst();
-        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_NAME), new IndexOptions().unique(false))).blockingFirst();
-        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_BOT_NAME), new IndexOptions().unique(false))).blockingFirst();
-        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_DESCRIPTION), new IndexOptions().unique(false))).blockingFirst();
-        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_LAST_MODIFIED), new IndexOptions().unique(false))).blockingFirst();
-        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_DELETED), new IndexOptions().unique(false))).blockingFirst();
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_RESOURCE), new IndexOptions().unique(true));
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_USER_ID), new IndexOptions().unique(false));
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_NAME), new IndexOptions().unique(false));
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_BOT_NAME), new IndexOptions().unique(false));
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_DESCRIPTION), new IndexOptions().unique(false));
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_LAST_MODIFIED), new IndexOptions().unique(false));
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_DELETED), new IndexOptions().unique(false));
     }
 
     @Override

@@ -5,7 +5,7 @@ import ai.labs.eddi.datastore.HistorizedResourceStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import com.mongodb.reactivestreams.client.MongoDatabase;
+import com.mongodb.client.MongoDatabase;
 
 /**
  * MongoDB-specific base class for configuration stores.

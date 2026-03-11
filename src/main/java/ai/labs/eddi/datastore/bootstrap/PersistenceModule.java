@@ -7,12 +7,11 @@ import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.ReadPreference;
 import com.mongodb.WriteConcern;
-import com.mongodb.reactivestreams.client.MongoClients;
-import com.mongodb.reactivestreams.client.MongoDatabase;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoDatabase;
 import de.undercouch.bson4jackson.BsonFactory;
 import de.undercouch.bson4jackson.BsonParser;
-import io.quarkus.mongodb.impl.ReactiveMongoClientImpl;
-import io.quarkus.mongodb.reactive.ReactiveMongoClient;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.ws.rs.Produces;
 import org.bson.BsonInvalidOperationException;
@@ -39,11 +38,10 @@ public class PersistenceModule {
             BsonFactory bsonFactory = new BsonFactory();
             bsonFactory.enable(BsonParser.Feature.HONOR_DOCUMENT_LENGTH);
 
-
-            ReactiveMongoClient client = new ReactiveMongoClientImpl(MongoClients.create(buildMongoClientOptions(ReadPreference.nearest(), connectionString, bsonFactory)));
+            MongoClient client = MongoClients.create(buildMongoClientOptions(ReadPreference.nearest(), connectionString, bsonFactory));
             registerMongoClientShutdownHook(client);
 
-            return client.getDatabase(database).unwrap();
+            return client.getDatabase(database);
     }
 
     private MongoClientSettings buildMongoClientOptions(ReadPreference readPreference,
@@ -69,7 +67,7 @@ public class PersistenceModule {
                 .readPreference(readPreference).build();
     }
 
-    private void registerMongoClientShutdownHook(final ReactiveMongoClient mongoClient) {
+    private void registerMongoClientShutdownHook(final MongoClient mongoClient) {
         Runtime.getRuntime().addShutdownHook(new Thread("ShutdownHook_MongoClient") {
             @Override
             public void run() {
@@ -108,3 +106,4 @@ public class PersistenceModule {
         }
     }
 }
+

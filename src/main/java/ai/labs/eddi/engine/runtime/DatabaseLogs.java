@@ -3,9 +3,8 @@ package ai.labs.eddi.engine.runtime;
 import ai.labs.eddi.engine.model.DatabaseLog;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import com.mongodb.reactivestreams.client.MongoCollection;
-import com.mongodb.reactivestreams.client.MongoDatabase;
-import io.reactivex.rxjava3.core.Observable;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
@@ -63,7 +62,7 @@ public class DatabaseLogs extends Handler implements IDatabaseLogs {
         if (userId != null) {
             document.put(CONTEXT_MAP_USER_ID, userId);
         }
-        Observable.fromPublisher(logsCollection.insertOne(document)).blockingFirst();
+        logsCollection.insertOne(document);
     }
 
     private Document createFilter(Environment environment, String botId, Integer botVersion, String conversationId, String userId) {
@@ -86,15 +85,15 @@ public class DatabaseLogs extends Handler implements IDatabaseLogs {
 
     private List<DatabaseLog> getLogs(Document filter, Integer skip, Integer limit) {
         List<DatabaseLog> ret = new ArrayList<>();
-        Observable<Document> observable = limit > 0 ? Observable.fromPublisher(logsCollection.find(filter).limit(limit).sort(new Document(TIMESTAMP, 1))) :
-                                                        Observable.fromPublisher(logsCollection.find(filter).sort(new Document(TIMESTAMP, 1)))  ;
+        var iterable = logsCollection.find(filter).sort(new Document(TIMESTAMP, 1));
+        if (limit > 0) {
+            iterable.limit(limit);
+        }
         if (skip > 0) {
-            observable = observable.skip(skip);
+            iterable.skip(skip);
         }
 
-        Iterable<Document> documents = observable.blockingIterable();
-
-        for (Document document : documents) {
+        for (Document document : iterable) {
             var databaseLog = new DatabaseLog();
             document.keySet().forEach(key -> databaseLog.put(key, document.get(key)));
             databaseLog.remove("_id");

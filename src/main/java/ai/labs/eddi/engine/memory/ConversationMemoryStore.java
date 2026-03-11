@@ -4,11 +4,10 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.ConversationState;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
-import com.mongodb.reactivestreams.client.MongoCollection;
-import com.mongodb.reactivestreams.client.MongoDatabase;
-import io.reactivex.rxjava3.core.Observable;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -19,8 +18,6 @@ import org.bson.types.ObjectId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.NoSuchElementException;
-import java.util.stream.Collectors;
 
 import static ai.labs.eddi.engine.model.Context.ContextType.valueOf;
 import static ai.labs.eddi.engine.model.ConversationState.ENDED;
@@ -52,26 +49,20 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     public ConversationMemoryStore(MongoDatabase database) {
         this.conversationCollectionDocument = database.getCollection(CONVERSATION_COLLECTION, Document.class);
         this.conversationCollectionObject = database.getCollection(CONVERSATION_COLLECTION, ConversationMemorySnapshot.class);
-        Observable.fromPublisher(
-                conversationCollectionDocument.createIndex(Indexes.ascending(KEY_CONVERSATION_STATE))
-        ).blockingFirst();
-        Observable.fromPublisher(
-                conversationCollectionDocument.createIndex(Indexes.ascending(KEY_BOT_ID))
-        ).blockingFirst();
-        Observable.fromPublisher(
-                conversationCollectionDocument.createIndex(Indexes.ascending(KEY_BOT_VERSION))
-        ).blockingFirst();
+        conversationCollectionDocument.createIndex(Indexes.ascending(KEY_CONVERSATION_STATE));
+        conversationCollectionDocument.createIndex(Indexes.ascending(KEY_BOT_ID));
+        conversationCollectionDocument.createIndex(Indexes.ascending(KEY_BOT_VERSION));
     }
 
     @Override
     public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) {
         String conversationId = snapshot.getConversationId();
         if (conversationId != null) {
-            Observable.fromPublisher(conversationCollectionObject.replaceOne(
-                    new Document(OBJECT_ID, new ObjectId(conversationId)), snapshot)).blockingFirst();
+            conversationCollectionObject.replaceOne(
+                    new Document(OBJECT_ID, new ObjectId(conversationId)), snapshot);
         } else {
             snapshot.setId(new ObjectId().toString());
-            Observable.fromPublisher(conversationCollectionObject.insertOne(snapshot)).blockingFirst();
+            conversationCollectionObject.insertOne(snapshot);
         }
 
         return snapshot.getConversationId();
@@ -79,8 +70,12 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId) {
-        var memorySnapshot = Observable.fromPublisher(conversationCollectionObject.find(
-                new Document(OBJECT_ID, new ObjectId(conversationId))).first()).blockingFirst();
+        var memorySnapshot = conversationCollectionObject.find(
+                new Document(OBJECT_ID, new ObjectId(conversationId))).first();
+
+        if (memorySnapshot == null) {
+            return null;
+        }
 
         for (var conversationStep : memorySnapshot.getConversationSteps()) {
             for (var aPackage : conversationStep.getPackages()) {
@@ -113,8 +108,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             query.put(KEY_BOT_VERSION, botVersion);
             query.put(KEY_CONVERSATION_STATE, new Document("$ne", ENDED.toString()));
 
-            var ret = Observable.fromPublisher(conversationCollectionObject.find(query)).blockingIterable();
-            ret.forEach(retRet::add);
+            conversationCollectionObject.find(query).forEach(retRet::add);
             return retRet;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
@@ -126,28 +120,27 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         var updateConversationStateField =
                 new Document("$set", new Document(KEY_CONVERSATION_STATE, conversationState.name()));
 
-        Observable.fromPublisher(conversationCollectionDocument.updateOne(
-                new Document(OBJECT_ID, new ObjectId(conversationId)), updateConversationStateField)).blockingFirst();
+        conversationCollectionDocument.updateOne(
+                new Document(OBJECT_ID, new ObjectId(conversationId)), updateConversationStateField);
     }
 
     @Override
     public void deleteConversationMemorySnapshot(String conversationId) {
-        Observable.fromPublisher(conversationCollectionDocument.deleteOne(
-                new Document(OBJECT_ID, new ObjectId(conversationId)))).blockingFirst();
+        conversationCollectionDocument.deleteOne(
+                new Document(OBJECT_ID, new ObjectId(conversationId)));
     }
 
     @Override
     public ConversationState getConversationState(String conversationId) {
-        try {
-            Document conversationMemoryDocument = Observable.fromPublisher(conversationCollectionDocument.find(
-                            new Document(OBJECT_ID, new ObjectId(conversationId))).
-                    projection(new Document(KEY_CONVERSATION_STATE, 1).append(OBJECT_ID, 0)).
-                    first()).blockingFirst();
-            if (conversationMemoryDocument.containsKey(KEY_CONVERSATION_STATE)) {
-                return ConversationState.valueOf(conversationMemoryDocument.get(KEY_CONVERSATION_STATE).toString());
-            }
-        } catch (NoSuchElementException ne) {
+        Document conversationMemoryDocument = conversationCollectionDocument.find(
+                        new Document(OBJECT_ID, new ObjectId(conversationId))).
+                projection(new Document(KEY_CONVERSATION_STATE, 1).append(OBJECT_ID, 0)).
+                first();
+        if (conversationMemoryDocument == null) {
             return null;
+        }
+        if (conversationMemoryDocument.containsKey(KEY_CONVERSATION_STATE)) {
+            return ConversationState.valueOf(conversationMemoryDocument.get(KEY_CONVERSATION_STATE).toString());
         }
         return null;
     }
@@ -156,14 +149,15 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     public Long getActiveConversationCount(String botId, Integer botVersion) {
         Bson query = Filters.and(Filters.eq(KEY_BOT_ID, botId), Filters.eq(KEY_BOT_VERSION, botVersion),
                 Filters.not(new Document(KEY_CONVERSATION_STATE, ENDED.toString())));
-        return Observable.fromPublisher(conversationCollectionDocument.countDocuments(query)).blockingFirst();
+        return conversationCollectionDocument.countDocuments(query);
     }
 
     @Override
     public List<String> getEndedConversationIds() {
-        return Observable.fromPublisher(
-                conversationCollectionDocument.find(Filters.eq(KEY_CONVERSATION_STATE, ENDED.toString()))
-        ).blockingStream().map(document -> document.get(OBJECT_ID).toString()).collect(Collectors.toList());
+        List<String> ids = new ArrayList<>();
+        conversationCollectionDocument.find(Filters.eq(KEY_CONVERSATION_STATE, ENDED.toString()))
+                .forEach(document -> ids.add(document.get(OBJECT_ID).toString()));
+        return ids;
     }
 
     @Override

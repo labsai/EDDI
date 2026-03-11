@@ -2,9 +2,8 @@ package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
-import com.mongodb.reactivestreams.client.MongoCollection;
-import com.mongodb.reactivestreams.client.MongoDatabase;
-import io.reactivex.rxjava3.core.Observable;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -196,15 +195,11 @@ public class MigrationManager implements IMigrationManager {
                                      MongoCollection<Document> collection,
                                      MongoCollection<Document> collectionHistory) {
 
-        Observable<Document> observable = Observable.fromPublisher(collection.find());
-        Iterable<Document> documents = observable.blockingIterable();
-        var migrationHasExecuted = migrateDocuments(documentType, documents, migration, collection, false);
+        var migrationHasExecuted = migrateDocuments(documentType, collection.find(), migration, collection, false);
 
         if (collectionHistory != null) {
-            observable = Observable.fromPublisher(collectionHistory.find());
-            Iterable<Document> historyDocuments = observable.blockingIterable();
             migrationHasExecuted =
-                    migrateDocuments(documentType, historyDocuments, migration, collectionHistory, true)
+                    migrateDocuments(documentType, collectionHistory.find(), migration, collectionHistory, true)
                             || migrationHasExecuted;
         }
         return migrationHasExecuted;
@@ -489,11 +484,11 @@ public class MigrationManager implements IMigrationManager {
             idObject.put(VERSION_FIELD, version);
 
             var query = eq(ID_FIELD, idObject);
-            Observable.fromPublisher(collection.replaceOne(query, document)).blockingFirst();
+            collection.replaceOne(query, document);
         } else {
             id = document.get(ID_FIELD).toString();
             var query = eq(ID_FIELD, new ObjectId(id));
-            Observable.fromPublisher(collection.replaceOne(query, document)).blockingFirst();
+            collection.replaceOne(query, document);
         }
 
         var message =

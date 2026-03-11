@@ -6,9 +6,8 @@ import ai.labs.eddi.testing.ITestCaseStore;
 import ai.labs.eddi.testing.model.TestCase;
 import ai.labs.eddi.testing.model.TestCaseState;
 import com.mongodb.BasicDBObject;
-import com.mongodb.reactivestreams.client.MongoCollection;
-import com.mongodb.reactivestreams.client.MongoDatabase;
-import io.reactivex.rxjava3.core.Observable;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 import org.jboss.logging.Logger;
@@ -17,7 +16,6 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.Date;
-import java.util.NoSuchElementException;
 
 /**
  * @author ginccc
@@ -49,7 +47,7 @@ public class TestCaseStore implements ITestCaseStore {
                 document.put("_id", new ObjectId(id));
             }
 
-            Observable.fromPublisher(testcaseCollection.insertOne(document)).blockingFirst();
+            testcaseCollection.insertOne(document);
 
             return document.get("_id").toString();
         } catch (IOException e) {
@@ -61,14 +59,15 @@ public class TestCaseStore implements ITestCaseStore {
     @Override
     public TestCase loadTestCase(String id) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         try {
-            Document document = Observable.fromPublisher(testcaseCollection.find(new Document("_id", new ObjectId(id))).first()).blockingFirst();
+            Document document = testcaseCollection.find(new Document("_id", new ObjectId(id))).first();
+            if (document == null) {
+                String message = "Could not find TestCase (id=%s)";
+                message = String.format(message, id);
+                throw new IResourceStore.ResourceNotFoundException(message);
+            }
             document.remove("_id");
 
             return jsonSerialization.deserialize(document.toString(), TestCase.class);
-        } catch (NoSuchElementException ne) {
-            String message = "Could not find TestCase (id=%s)";
-            message = String.format(message, id);
-            throw new IResourceStore.ResourceNotFoundException(message);
         } catch (IOException ioe) {
             log.debug(ioe.getLocalizedMessage(), ioe);
             throw new IResourceStore.ResourceStoreException(ioe.getLocalizedMessage(), ioe);
@@ -85,12 +84,11 @@ public class TestCaseStore implements ITestCaseStore {
     }
 
     public TestCaseState getTestCaseState(String id) {
-        try {
-            Document conversationMemoryDocument = Observable.fromPublisher(testcaseCollection.find(new Document("_id", new ObjectId(id))).first()).blockingFirst();
-            return TestCaseState.valueOf(conversationMemoryDocument.get(TESTCASE_STATE_FIELD).toString());
-        } catch (NoSuchElementException ne) {
+        Document conversationMemoryDocument = testcaseCollection.find(new Document("_id", new ObjectId(id))).first();
+        if (conversationMemoryDocument == null) {
             return null;
         }
+        return TestCaseState.valueOf(conversationMemoryDocument.get(TESTCASE_STATE_FIELD).toString());
     }
 
     @Override

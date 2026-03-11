@@ -5,9 +5,8 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
-import com.mongodb.reactivestreams.client.FindPublisher;
-import com.mongodb.reactivestreams.client.MongoCollection;
-import io.reactivex.rxjava3.core.Observable;
+import com.mongodb.client.FindIterable;
+import com.mongodb.client.MongoCollection;
 import org.bson.Document;
 
 import jakarta.ws.rs.BadRequestException;
@@ -36,7 +35,7 @@ public class ResourceUtilities {
                                                                                     IDocumentDescriptorStore documentDescriptorStore)
             throws IResourceStore.ResourceNotFoundException {
         List<String> currentResourceIds = new LinkedList<>();
-        FindPublisher<Document> documentIterable;
+        FindIterable<Document> documentIterable;
 
         List<IResourceStore.IResourceId> allConfigsContainingResource = new LinkedList<>();
 
@@ -58,16 +57,14 @@ public class ResourceUtilities {
         return allConfigsContainingResource.stream().sorted(comparator).collect(Collectors.toList());
     }
 
-    private static void extractIds(List<String> ids, FindPublisher<Document> documentIterable) {
-        Observable.fromPublisher(documentIterable).
-                subscribe(document -> ids.add(document.getObjectId(MONGO_OBJECT_ID).toString()));
-
+    private static void extractIds(List<String> ids, FindIterable<Document> documentIterable) {
+        documentIterable.forEach(document -> ids.add(document.getObjectId(MONGO_OBJECT_ID).toString()));
     }
 
     private static void extractVersionedIds(List<IResourceStore.IResourceId> versionedIds,
-                                            FindPublisher<Document> documentIterable) {
+                                            FindIterable<Document> documentIterable) {
 
-        Observable.fromPublisher(documentIterable).subscribe(document -> {
+        documentIterable.forEach(document -> {
             Object idObject = document.get(MONGO_OBJECT_ID);
             String objectId = ((Document) idObject).getObjectId(MONGO_OBJECT_ID).toString();
             Integer objectVersion = ((Document) idObject).getInteger(MONGO_OBJECT_VERSION);

@@ -239,11 +239,7 @@
             <version>${infinispan.version}</version>
             <scope>compile</scope>
         </dependency>
-        <dependency>
-            <groupId>io.reactivex.rxjava3</groupId>
-            <artifactId>rxjava</artifactId>
-            <version>3.1.8</version>
-        </dependency>
+        <!-- RxJava3 removed in Phase 6A — sync MongoDB driver replaces reactive+blocking pattern -->
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>

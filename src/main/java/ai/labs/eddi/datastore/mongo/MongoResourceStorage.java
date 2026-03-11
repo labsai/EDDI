@@ -4,13 +4,12 @@ import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.UpdateOptions;
-import com.mongodb.reactivestreams.client.MongoCollection;
-import com.mongodb.reactivestreams.client.MongoDatabase;
-import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
@@ -18,7 +17,6 @@ import org.bson.types.ObjectId;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
-import java.util.NoSuchElementException;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 
@@ -62,9 +60,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     private void ensureIndex(MongoCollection<Document> mongoCollection, Bson indexKey, boolean unique) {
-        Observable.fromPublisher(
-                mongoCollection.createIndex(indexKey, new IndexOptions().unique(unique))
-        ).blockingFirst();
+        mongoCollection.createIndex(indexKey, new IndexOptions().unique(unique));
     }
 
     @Override
@@ -89,19 +85,19 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     public void store(IResource currentResource) {
         Resource resource = checkInternalResource(currentResource);
         if (resource.getId() == null) {
-            Observable.fromPublisher(currentCollection.insertOne(resource.getMongoDocument())).blockingFirst();
+            currentCollection.insertOne(resource.getMongoDocument());
         } else {
-            Observable.fromPublisher(currentCollection.updateOne(
+            currentCollection.updateOne(
                     Filters.eq("_id", new ObjectId(resource.getId())),
                     new Document("$set", resource.getMongoDocument()),
-                    new UpdateOptions().upsert(true))).blockingFirst();
+                    new UpdateOptions().upsert(true));
         }
     }
 
     @Override
     public void createNew(IResource currentResource) {
         Resource resource = checkInternalResource(currentResource);
-        Observable.fromPublisher(currentCollection.insertOne(resource.getMongoDocument())).blockingFirst();
+        currentCollection.insertOne(resource.getMongoDocument());
     }
 
 
@@ -110,18 +106,16 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         Document query = new Document(ID_FIELD, new ObjectId(id));
         query.put(VERSION_FIELD, version);
 
-        try {
-            Observable<Document> observable = Observable.fromPublisher(currentCollection.find(query).first());
-            Document document = observable.blockingFirst();
-            return new Resource(document);
-        } catch (NoSuchElementException ne) {
+        Document document = currentCollection.find(query).first();
+        if (document == null) {
             return null;
         }
+        return new Resource(document);
     }
 
     @Override
     public void remove(String id) {
-        Observable.fromPublisher(currentCollection.deleteOne(new Document(ID_FIELD, new ObjectId(id)))).blockingFirst();
+        currentCollection.deleteOne(new Document(ID_FIELD, new ObjectId(id)));
     }
 
     @Override
@@ -141,7 +135,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         query.put("$lt", endId);
         Document idQuery = new Document();
         idQuery.put(ID_FIELD, query);
-        Observable.fromPublisher(historyCollection.deleteMany(idQuery)).blockingFirst();
+        historyCollection.deleteMany(idQuery);
     }
 
     @Override
@@ -149,13 +143,11 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         Document objectId = new Document(ID_FIELD, new ObjectId(id));
         objectId.put(VERSION_FIELD, version);
 
-        try {
-            Observable<Document> observable = Observable.fromPublisher(historyCollection.find(Filters.eq(ID_FIELD, objectId)).first());
-            Document doc = observable.blockingFirst();
-            return new HistoryResource(doc);
-        } catch (NoSuchElementException ne) {
+        Document doc = historyCollection.find(Filters.eq(ID_FIELD, objectId)).first();
+        if (doc == null) {
             return null;
         }
+        return new HistoryResource(doc);
     }
 
     @Override
@@ -174,12 +166,14 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         Document object = new Document();
         object.put(ID_FIELD, query);
 
-        if (Observable.fromPublisher(historyCollection.countDocuments(object)).blockingFirst() == 0) {
+        if (historyCollection.countDocuments(object) == 0) {
             return null;
         }
 
-
-        Document doc = Observable.fromPublisher(historyCollection.find(object).sort(new Document(ID_FIELD, -1)).limit(1)).blockingFirst();
+        Document doc = historyCollection.find(object).sort(new Document(ID_FIELD, -1)).limit(1).first();
+        if (doc == null) {
+            return null;
+        }
         return new HistoryResource(doc);
     }
 
@@ -202,18 +196,17 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public Integer getCurrentVersion(String id) {
         Document query = new Document(ID_FIELD, new ObjectId(id));
-        try {
-            Document one = Observable.fromPublisher(currentCollection.find(query).first()).blockingFirst();
-            return (Integer) one.get(VERSION_FIELD);
-        } catch (NoSuchElementException ne) {
+        Document one = currentCollection.find(query).first();
+        if (one == null) {
             return -1;
         }
+        return (Integer) one.get(VERSION_FIELD);
     }
 
     @Override
     public void store(IHistoryResource resource) {
         HistoryResource historyResource = checkInternalHistoryResource(resource);
-        Observable.fromPublisher(historyCollection.insertOne(historyResource.getMongoDocument())).blockingFirst();
+        historyCollection.insertOne(historyResource.getMongoDocument());
     }
 
     @Override
@@ -222,10 +215,10 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
                 new Document("$in", java.util.Collections.singletonList(value)));
 
         List<IResourceStore.IResourceId> results = new java.util.LinkedList<>();
-        Observable.fromPublisher(currentCollection.find(filter)).subscribe(doc -> {
-            String id = doc.getObjectId(ID_FIELD).toString();
+        currentCollection.find(filter).forEach(doc -> {
+            String docId = doc.getObjectId(ID_FIELD).toString();
             Integer version = doc.getInteger(VERSION_FIELD);
-            results.add(createResourceId(id, version));
+            results.add(createResourceId(docId, version));
         });
         return results;
     }
@@ -236,12 +229,12 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
                 new Document("$in", java.util.Collections.singletonList(value)));
 
         List<IResourceStore.IResourceId> results = new java.util.LinkedList<>();
-        Observable.fromPublisher(historyCollection.find(filter)).subscribe(doc -> {
+        historyCollection.find(filter).forEach(doc -> {
             Object idObject = doc.get(ID_FIELD);
             if (idObject instanceof Document idDoc) {
-                String id = idDoc.getObjectId(ID_FIELD).toString();
+                String docId = idDoc.getObjectId(ID_FIELD).toString();
                 Integer version = idDoc.getInteger(VERSION_FIELD);
-                results.add(createResourceId(id, version));
+                results.add(createResourceId(docId, version));
             }
         });
         return results;
@@ -272,15 +265,15 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         Document sort = sortField != null ? new Document(sortField, -1) : new Document();
         int effectiveLimit = limit < 1 ? 20 : limit;
 
-        var publisher = currentCollection.find(query.toBsonDocument()).sort(sort)
+        var iterable = currentCollection.find(query.toBsonDocument()).sort(sort)
                 .limit(effectiveLimit).skip(skip > 0 ? skip : 0);
 
         List<IResourceStore.IResourceId> results = new java.util.LinkedList<>();
-        Observable.fromPublisher(publisher).blockingIterable().forEach(doc -> {
-            String id = doc.get(ID_FIELD).toString();
+        iterable.forEach(doc -> {
+            String docId = doc.get(ID_FIELD).toString();
             Object versionField = doc.get(VERSION_FIELD);
             Integer version = Integer.parseInt(versionField.toString());
-            results.add(createResourceId(id, version));
+            results.add(createResourceId(docId, version));
         });
 
         return results;

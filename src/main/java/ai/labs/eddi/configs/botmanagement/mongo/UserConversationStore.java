@@ -7,17 +7,15 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.model.UserConversation;
 import ai.labs.eddi.utils.RuntimeUtilities;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
-import com.mongodb.reactivestreams.client.MongoCollection;
-import com.mongodb.reactivestreams.client.MongoDatabase;
-import io.reactivex.rxjava3.core.Observable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
 
 import java.io.IOException;
-import java.util.NoSuchElementException;
 
 /**
  * @author ginccc
@@ -43,13 +41,11 @@ public class UserConversationStore implements IUserConversationStore {
         this.collection = database.getCollection(COLLECTION_USER_CONVERSATIONS);
         this.documentBuilder = documentBuilder;
         this.userConversationStore = new UserConversationResourceStore();
-        Observable.fromPublisher(
-                collection.createIndex(
-                        Indexes.compoundIndex(
-                                Indexes.ascending(INTENT_FIELD),
-                                Indexes.ascending(USER_ID_FIELD)),
-                        new IndexOptions().unique(true))
-        ).blockingFirst();
+        collection.createIndex(
+                Indexes.compoundIndex(
+                        Indexes.ascending(INTENT_FIELD),
+                        Indexes.ascending(USER_ID_FIELD)),
+                new IndexOptions().unique(true));
     }
 
     @Override
@@ -90,10 +86,11 @@ public class UserConversationStore implements IUserConversationStore {
             filter.put(USER_ID_FIELD, userId);
 
             try {
-                Document document = Observable.fromPublisher(collection.find(filter).first()).blockingFirst();
+                Document document = collection.find(filter).first();
+                if (document == null) {
+                    return null;
+                }
                 return documentBuilder.build(document, UserConversation.class);
-            } catch (NoSuchElementException e) {
-                return null;
             } catch (IOException e) {
                 throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
             }
@@ -106,23 +103,20 @@ public class UserConversationStore implements IUserConversationStore {
             filter.put(INTENT_FIELD, userConversation.getIntent());
             filter.put(USER_ID_FIELD, userConversation.getUserId());
 
-
-            try {
-                Observable.fromPublisher(collection.find(filter).first()).blockingFirst();
-
+            Document existing = collection.find(filter).first();
+            if (existing != null) {
                 // a user conversation with the given intent was found, so we throw an error
                 String message = "UserConversation with intent=%s does already exist";
                 message = String.format(message, userConversation.getIntent());
                 throw new ResourceAlreadyExistsException(message);
-            } catch (NoSuchElementException e) {
-                //no user conversation with the given intent has been found, so we create a new one
-                Observable.fromPublisher(collection.insertOne(createDocument(userConversation))).blockingFirst();
             }
 
+            //no user conversation with the given intent has been found, so we create a new one
+            collection.insertOne(createDocument(userConversation));
         }
 
         void deleteUserConversation(String intent, String userId) {
-            Observable.fromPublisher(collection.deleteOne(new Document(INTENT_FIELD, intent).append(USER_ID_FIELD, userId))).blockingFirst();
+            collection.deleteOne(new Document(INTENT_FIELD, intent).append(USER_ID_FIELD, userId));
         }
 
         private Document createDocument(UserConversation userConversation)
