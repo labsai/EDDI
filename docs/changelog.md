@@ -41,6 +41,32 @@ Each entry follows this format:
 
 ## Implementation Log
 
+### 2026-03-11 — Phase 5 Item #30: Coordinator Dashboard + Dead-Letter Admin
+
+**Repos:** EDDI + EDDI-Manager
+**Branch:** `feature/version-6.0.0`
+**Phase:** 5 — Item #30
+
+**What changed:**
+- **Backend REST API** — `IRestCoordinatorAdmin` + `RestCoordinatorAdmin` under `/administration/coordinator/` with SSE endpoint for live status streaming
+- **IConversationCoordinator** — Added default methods for status introspection (type, connection, queue depths, totals) and dead-letter management (list, replay, discard, purge)
+- **InMemoryConversationCoordinator** — Added retry logic (3 attempts), in-memory dead-letter queue (`ConcurrentLinkedDeque`), processed/dead-lettered counters, full dead-letter CRUD
+- **NatsConversationCoordinator** — Added status methods, dead-letter listing (from JetStream), purge (stream purge), counters
+- **DTOs** — `CoordinatorStatus` + `DeadLetterEntry` records in `engine.model`
+- **Manager UI** — Coordinator page at `/manage/coordinator` with status cards, active queue visualization, dead-letter admin table (replay/discard/purge)
+- **Manager Infrastructure** — API module, TanStack Query hooks with SSE, sidebar nav item (Activity icon under Operations), MSW handlers, i18n (11 locales)
+
+**Tests:**
+- Backend: 665 total (22 new — `RestCoordinatorAdminTest` 10 + `InMemoryConversationCoordinatorTest` 12)
+- Manager: 176 total (12 new — `coordinator.test.tsx`)
+
+**Design decisions:**
+- Dead-letter works for **both** coordinator types (user requirement: not NATS-only)
+- SSE poller broadcasts status every 2s (balances responsiveness with overhead)
+- In-memory dead-letter uses `ConcurrentLinkedDeque` (bounded only by JVM memory)
+
+---
+
 ### 2026-03-11 — Phase 5 Item #29: Async Conversation Processing (Dead-Letter + Metrics + Testcontainers IT)
 
 **Repo:** EDDI
