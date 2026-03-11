@@ -97,10 +97,11 @@ Phase 4: Chat-UI Rewrite + Hardening ✅
   25. JSON Schema Enrichment                          2 SP  ✅
   26. Production Build + Dashboard Replacement          3 SP  ✅
 
-Phase 5: NATS JetStream Message Queue
-  27. Event bus abstraction over current in-process    3 SP
-  28. NATS JetStream adapter                           5 SP
-  29. Async conversation processing                    3 SP
+Phase 5: NATS JetStream Message Queue ✅
+  27. Event bus abstraction over current in-process    3 SP  ✅
+  28. NATS JetStream adapter                           5 SP  ✅
+  29. Async conversation processing                    3 SP  ✅
+  30. Coordinator Dashboard + Dead-Letter Admin         5 SP  ✅
 
 Phase 6: PostgreSQL / DB-Agnostic Architecture
   30. Repository interface abstraction                 5 SP

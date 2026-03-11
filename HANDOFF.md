@@ -188,9 +188,35 @@
 - [x] 5 Testcontainers integration tests in `NatsConversationCoordinatorIT`
 - [x] All 643 tests pass (0 failures, 0 errors, 4 skipped)
 
+### Phase 5, Item 5.30: Coordinator Dashboard + Dead-Letter Admin ✅
+
+- [x] `IConversationCoordinator` — default methods for status introspection + dead-letter management
+- [x] `InMemoryConversationCoordinator` — retry logic (3 attempts), dead-letter queue, processed/dead-lettered counters
+- [x] `NatsConversationCoordinator` — status methods, dead-letter listing (JetStream), stream purge
+- [x] `CoordinatorStatus` + `DeadLetterEntry` DTO records
+- [x] `IRestCoordinatorAdmin` + `RestCoordinatorAdmin` — REST API + SSE stream at `/administration/coordinator/`
+- [x] Manager: Coordinator page at `/manage/coordinator` (status cards, queue depths, dead-letter admin table)
+- [x] Manager: API module, TanStack Query hooks with SSE, sidebar nav, MSW handlers, i18n (11 locales)
+- [x] `RestCoordinatorAdminTest` (10 tests), `InMemoryConversationCoordinatorTest` (12 tests), `coordinator.test.tsx` (12 tests)
+- [x] Backend: 665 tests pass, Manager: 176 tests pass
+
+**Key files (backend):**
+
+- `src/main/java/ai/labs/eddi/engine/IRestCoordinatorAdmin.java`
+- `src/main/java/ai/labs/eddi/engine/internal/RestCoordinatorAdmin.java`
+- `src/main/java/ai/labs/eddi/engine/model/CoordinatorStatus.java`
+- `src/main/java/ai/labs/eddi/engine/model/DeadLetterEntry.java`
+- `src/main/java/ai/labs/eddi/engine/runtime/IConversationCoordinator.java`
+- `src/main/java/ai/labs/eddi/engine/runtime/internal/InMemoryConversationCoordinator.java`
+- `src/main/java/ai/labs/eddi/engine/runtime/internal/NatsConversationCoordinator.java`
+
+**Key files (Manager):**
+
+- `src/pages/coordinator.tsx`, `src/lib/api/coordinator.ts`, `src/hooks/use-coordinator.ts`
+
 ## Next Up
 
-Phase 6 (PostgreSQL / DB-Agnostic Architecture), Phase 7 (MCP Server + Client), etc. See `docs/v6-planning/implementation_plan.md`.
+Phase 6 (PostgreSQL / DB-Agnostic Architecture), Phase 7 (MCP Server + Client), etc. See `docs/v6-planning/implementation_plan.md` and `AGENTS.md` for the full roadmap.
 
 ## Important Rules
 
