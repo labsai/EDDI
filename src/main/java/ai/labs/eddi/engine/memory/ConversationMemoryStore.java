@@ -9,6 +9,7 @@ import com.mongodb.client.model.Indexes;
 import com.mongodb.reactivestreams.client.MongoCollection;
 import com.mongodb.reactivestreams.client.MongoDatabase;
 import io.reactivex.rxjava3.core.Observable;
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
@@ -25,9 +26,16 @@ import static ai.labs.eddi.engine.model.Context.ContextType.valueOf;
 import static ai.labs.eddi.engine.model.ConversationState.ENDED;
 
 /**
+ * MongoDB implementation of {@link IConversationMemoryStore}.
+ * <p>
+ * Annotated {@code @DefaultBean} so that future database backends
+ * (e.g., PostgreSQL) can provide an alternative implementation
+ * activated via {@code @LookupIfProperty(name = "eddi.datastore.type", stringValue = "postgres")}.
+ *
  * @author ginccc
  */
 @ApplicationScoped
+@DefaultBean
 public class ConversationMemoryStore implements IConversationMemoryStore, IResourceStore<ConversationMemorySnapshot> {
     private static final String CONVERSATION_COLLECTION = "conversationmemories";
     private static final String OBJECT_ID = "_id";
