@@ -1,15 +1,16 @@
 # EDDI Manager — Handoff Document
 
-> **Last updated**: 2026-03-10  
+> **Last updated**: 2026-03-11  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Replace old dashboard with Manager, add OpenAPI + Docs sidebar links
+> **Last commit**: Phase 5.30 — Coordinator Dashboard + Dead-Letter Admin UI
 
 ---
 
 ## Current Status
 
 **Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.21 complete.  
-**Phase 4 (Hardening)**: Phase 4.1 + 4.2 + 4.3 + 4.4 + 4.5 complete.
+**Phase 4 (Hardening)**: Phase 4.1 + 4.2 + 4.3 + 4.4 + 4.5 complete.  
+**Phase 5 (Backend features with Manager integration)**: Item 5.30 complete (Coordinator Dashboard).
 
 ### What's Done
 
@@ -44,7 +45,7 @@
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 164/164 pass (`npm run test`) — 23 files
+- **Unit/Component**: 176/176 pass (`npm run test`) — 24 files
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds
@@ -76,6 +77,7 @@
 - **Auth**: `auth-context.ts`, `auth-provider.tsx` (optional Keycloak), `use-auth.ts`, `auth-config.ts`
 - **Keycloak**: `docker-compose.keycloak.yml` (local dev), `keycloak/eddi-realm.json` (auto-import realm)
 - **Docker**: `docker-compose.integration.yml` (EDDI + MongoDB for integration tests)
+- **Coordinator**: `coordinator.tsx` (dashboard page), `api/coordinator.ts` (API module), `use-coordinator.ts` (SSE + TanStack hooks), `coordinator.test.tsx` (12 tests)
 
 ---
 
@@ -111,9 +113,14 @@ Manager tests updated: `integration-helpers.ts` and `deployment.integration.spec
 
 **Phase 5+ (future):**
 
+- Phase 6 (PostgreSQL / DB-Agnostic Architecture)
+- Phase 7 (MCP Server + Client)
+- Phase 8 (Multi-Bot Orchestration)
+- Phase 9 (Persistent User Memory)
+- Phase 10 (CI/CD)
+- Phase 11 (Website Astro migration — LAST)
 - Chat-UI Rewrite (`eddi-chat-ui` repo) — ✅ Vite rewrite complete, deployed to EDDI backend
-- Website migration to Astro (`eddi-website` repo)
-- Further EDDI backend work
+- See EDDI `AGENTS.md` for full roadmap
 
 **📄 Reference docs:**
 
