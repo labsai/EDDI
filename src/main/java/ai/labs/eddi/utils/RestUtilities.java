@@ -113,6 +113,11 @@ public class RestUtilities {
                 continue;
             }
 
+            // Allow dashes for UUID format (e.g. "5262b802-dc6c-4008-b54c-7c0b58100f97")
+            if (c == '-') {
+                continue;
+            }
+
             return false;
         }
 

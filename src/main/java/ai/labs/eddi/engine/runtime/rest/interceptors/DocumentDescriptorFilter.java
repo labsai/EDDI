@@ -20,13 +20,13 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.UriInfo;
 import jakarta.ws.rs.ext.Provider;
 import org.jboss.logging.Logger;
-import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.net.URI;
 import java.util.Date;
 
 import static ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore.DESCRIPTOR_STORE_PATH;
 import static ai.labs.eddi.configs.utilities.ResourceUtilities.createDocumentDescriptor;
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 /**
  * @author ginccc
@@ -93,7 +93,9 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
                             return;
                         }
 
-                        if ((isPUT(invokedHttpMethod) || isPATCH(invokedHttpMethod)) && !isDescriptorStore(uriInfo.getPath())) {
+                        if ((isPUT(invokedHttpMethod) || isPATCH(invokedHttpMethod))
+                                && !isDescriptorStore(uriInfo.getPath())
+                                && isResourceIdValid(resourceId)) {
                             var descriptorStore = getDescriptorStore(resourceLocationUri);
                             var resourceDescriptor = (ResourceDescriptor)
                                     descriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion() - 1);
