@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-11
+> **Last updated:** 2026-03-12
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -306,50 +306,45 @@
 - `DocumentDescriptorStore.java`, `ConversationDescriptorStore.java`, `TestCaseDescriptorStore.java` — use `IResourceStorageFactory`
 - `IResourceStorage.java`, `MongoResourceStorage.java`, `PostgresResourceStorage.java` — new query methods
 
+### Phase 6A: MongoDB Sync Driver Migration ✅
+
+- [x] Replaced `mongodb-driver-reactivestreams` + RxJava3 with `mongodb-driver-sync`
+- [x] Migrated 13 files from `Observable.fromPublisher(...).blocking*()` to direct sync API calls
+- [x] Removed `io.reactivex.rxjava3` dependency
+- [x] All tests pass
+
+### Phase 6B: PostgreSQL Integration Test Parity (in progress)
+
+- [x] Created `PostgresIntegrationTestProfile` with `eddi.datastore.type=postgres` + Testcontainers DevServices
+- [x] PG BehaviorCrudIT: 4/4 pass ✅
+- [x] Fixed `RestUtilities.isValidId()` — added `-` for UUID dashes (`e5c68a0b`)
+- [x] Fixed `DocumentDescriptorFilter` — added `isResourceIdValid()` guard on PUT/PATCH (`e5c68a0b`)
+- [x] Added `#uuidUtils.extractId()` + `extractVersion()` to `UUIDWrapper` — DB-agnostic URI parsing (`7fb79bfa`)
+- [x] Updated all 7 Bot Father httpcalls JSONs (70 replacements) + re-zipped `Bot+Father-4.0.0.zip`
+- [x] Added 12 unit tests in `UUIDWrapperTest`
+- [x] Documented `#uuidUtils` in `docs/output-templating.md`
+- [ ] Run remaining PG ITs (Output, Dictionary, Bot Engine, etc.) — needs full parity with 48 MongoDB ITs
+- [x] All 672 tests pass (0 failures)
+
+**Key files:**
+
+- `src/main/java/ai/labs/eddi/utils/RestUtilities.java` — `isValidId()` UUID fix
+- `src/main/java/ai/labs/eddi/engine/runtime/rest/interceptors/DocumentDescriptorFilter.java` — `isResourceIdValid` guard
+- `src/main/java/ai/labs/eddi/modules/templating/impl/dialects/uuid/UUIDWrapper.java` — `extractId/extractVersion`
+- `src/main/resources/initial-bots/Bot+Father-4.0.0.zip` — re-zipped with updated httpcalls
+- `docs/output-templating.md` — `#uuidUtils` documentation
+
 ## Next Up
 
-### Priority A: MongoDB Sync Driver Migration (Pre-requisite)
+### Priority A: Complete PostgreSQL IT Parity
 
-**Problem:** EDDI uses `mongodb-driver-reactivestreams` but blocks every call with `Observable.fromPublisher(...).blockingFirst()`. This defeats the purpose of the reactive driver — all the complexity of RxJava3 with none of the non-blocking benefits.
+**Status:** PG BehaviorCrudIT passes (4/4). Remaining PG ITs need to be created/run for all resource types + bot engine + deployment.
 
-**Solution:** Replace `mongodb-driver-reactivestreams` + RxJava3 with `mongodb-driver-sync`. This is a mechanical refactor.
-
-**Scope:** 13 files use `Observable.fromPublisher(...)`:
-
-| File | Blocking calls |
-|---|---|
-| `MongoResourceStorage.java` | Core CRUD — heaviest usage |
-| `MongoDeploymentStorage.java` | 5 calls (setDeploymentInfo, read, list) |
-| `ConversationMemoryStore.java` | 8+ calls (store, load, state, count) |
-| `DescriptorStore.java` (mongo) | 3 calls (old, to be removed) |
-| `ResourceFilter.java` | 2 calls (query + count) |
-| `ResourceUtilities.java` | 1 call |
-| `PropertiesStore.java` | 3 calls |
-| `BotTriggerStore.java` | 4 calls |
-| `UserConversationStore.java` | 4 calls |
-| `TestCaseStore.java` | 2 calls |
-| `MigrationManager.java` | 3 calls |
-| `MigrationLogStore.java` | 2 calls |
-| `DatabaseLogs.java` | 2 calls |
-
-**Approach:**
-1. Replace `com.mongodb.reactivestreams.client.MongoDatabase/MongoCollection` with `com.mongodb.client.MongoDatabase/MongoCollection`
-2. Remove all `Observable.fromPublisher(...).*blocking*()` wrappers — just call the sync API directly
-3. Remove RxJava3 dependency (`io.reactivex.rxjava3`)
-4. Update `pom.xml`: swap `mongodb-driver-reactivestreams` for `mongodb-driver-sync` (or use Quarkus managed `quarkus-mongodb-client`)
-5. Run all tests to verify
-
-### Priority B: PostgreSQL Integration Test Parity
-
-**Problem:** All 48 integration tests (`*IT.java`) only run against MongoDB via `IntegrationTestProfile`. The PostgreSQL storage implementations have unit tests but are never integration-tested end-to-end.
-
-**Solution:** Create a `PostgresIntegrationTestProfile` and run the existing integration test suite against both databases.
-
-**Approach:**
-1. Create `PostgresIntegrationTestProfile` that sets `eddi.datastore.type=postgres` and configures PostgreSQL via Testcontainers DevServices
-2. Either parameterize each IT class to run with both profiles (JUnit `@ParameterizedTest` or Quarkus profile matrix), or create a parallel test source set
-3. Verify all 48 integration tests pass against PostgreSQL
-4. Add to CI matrix (both backends tested on every push)
+**Scope:**
+- [ ] `PostgresOutputCrudIT`, `PostgresDictionaryCrudIT` — CRUD for remaining resource types
+- [ ] `PostgresBotEngineIT` — full conversation lifecycle
+- [ ] `PostgresBotDeploymentComponentIT`, `PostgresApiContractIT` — deployment + contract tests
+- [ ] Verify all 48 IT equivalents pass against PostgreSQL
 
 ### Then: Phase 7 (MCP Server + Client)
 

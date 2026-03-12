@@ -43,6 +43,35 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-12 — PostgreSQL IT Fixes + DB-Agnostic URI Parsing
+
+**Repo:** EDDI
+**Branch:** `feature/version-6.0.0`
+**Phase:** 6B — PostgreSQL Integration Test Parity
+
+**What changed:**
+
+**Bug fix — UUID validation (`e5c68a0b`):**
+- `RestUtilities.isValidId()` rejected dashes (`-`) in UUIDs, causing `DocumentDescriptorFilter` to receive null IDs on PUT/DELETE responses
+- Added `-` to allowed characters in `isValidId()`
+- Added `isResourceIdValid()` guard on PUT/PATCH handler in `DocumentDescriptorFilter`
+- Fixed PG IT `updateBehavior` (400→200) and `deleteBehavior` (200→404)
+
+**DB-agnostic URI parsing (`7fb79bfa`):**
+- Added `extractId(locationUri)` and `extractVersion(locationUri)` to `UUIDWrapper` (Thymeleaf `#uuidUtils`)
+- Replaced 70 hardcoded `#strings.substring()` offsets across all 7 Bot Father httpcalls JSONs
+- Re-zipped `Bot+Father-4.0.0.zip` for deployment
+- Added 12 unit tests in `UUIDWrapperTest`
+- Documented `#uuidUtils` in `docs/output-templating.md`
+
+**Design decisions:**
+- Added to existing `UUIDWrapper` rather than a new dialect — functions are ID-related and the dialect was already registered
+- `extractId()` uses `lastIndexOf('/')` + `indexOf('?')` — position-independent, works with any ID format
+
+**Testing:**
+- All 672 tests pass (0 failures)
+- PG BehaviorCrudIT: 4/4 ✅
+
 ### 2026-03-10 — Chat UI Vite Rewrite + Bot Father Enhancements + Manager Chat SSE
 
 **Repos:** EDDI, EDDI-Manager, eddi-chat-ui

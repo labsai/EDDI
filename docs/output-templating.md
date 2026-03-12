@@ -74,6 +74,40 @@ Here is how the output templating should be specified **inside of a package.**&#
 
 Make sure the templating is defined after the output, not before.
 
+## Custom Expression Utilities
+
+In addition to the built-in Thymeleaf `#strings`, `#numbers`, etc., EDDI provides custom expression utilities for use in templates (output, httpcalls, property setters).
+
+### `#uuidUtils` — ID & URI Utilities
+
+| Method | Description |
+|--------|-------------|
+| `#uuidUtils.generateUUID()` | Generates a random UUID string |
+| `#uuidUtils.extractId(locationUri)` | Extracts the resource ID from an EDDI location URI |
+| `#uuidUtils.extractVersion(locationUri)` | Extracts the version number from an EDDI location URI |
+
+**`extractId` and `extractVersion`** work with both MongoDB ObjectIds (24-char hex) and PostgreSQL UUIDs (36-char with dashes):
+
+```
+// Input: "http://localhost:7070/behaviorstore/behaviorsets/6740832a2b0f614abcaee7ab?version=1"
+[[${#uuidUtils.extractId(properties.behaviorSetLocation)}]]     → "6740832a2b0f614abcaee7ab"
+[[${#uuidUtils.extractVersion(properties.behaviorSetLocation)}]] → "1"
+
+// Input: "http://localhost:7070/behaviorstore/behaviorsets/f3be2bcd-aff3-41f0-9a1a-cf4eb513dd81?version=2"
+[[${#uuidUtils.extractId(properties.behaviorSetLocation)}]]     → "f3be2bcd-aff3-41f0-9a1a-cf4eb513dd81"
+[[${#uuidUtils.extractVersion(properties.behaviorSetLocation)}]] → "2"
+```
+
+> **Important:** Avoid using `#strings.substring()` with hardcoded offsets to extract IDs from URIs—use `#uuidUtils.extractId()` instead. Hardcoded offsets break when switching between MongoDB (24-char ObjectIds) and PostgreSQL (36-char UUIDs).
+
+### Other Custom Dialects
+
+| Dialect | Expression Object | Purpose |
+|---------|-------------------|---------|
+| `JsonDialect` | `#json` | JSON manipulation utilities |
+| `EncoderDialect` | `#encoder` | Text encoding utilities |
+
 ## _**Additional Information :**_
 
 [Thymeleaf documentation.](https://www.thymeleaf.org/)
+
