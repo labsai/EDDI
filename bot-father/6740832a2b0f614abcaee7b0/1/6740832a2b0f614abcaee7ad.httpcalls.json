@@ -41,7 +41,7 @@
     "preRequest" : {
       "propertyInstructions" : [ {
         "name" : "behaviorId",
-        "valueString" : "[[${#strings.substring(properties.behaviorSetLocation, 51, 75)}]]",
+        "valueString" : "[[${#uuidUtils.extractId(properties.behaviorSetLocation)}]]",
         "scope" : "conversation",
         "fromObjectPath" : "",
         "toObjectPath" : "",
@@ -50,7 +50,7 @@
         "runOnValidationError" : false
       }, {
         "name" : "behaviorVersion",
-        "valueString" : "[[${#strings.substring(properties.behaviorSetLocation, 84)}]]",
+        "valueString" : "[[${#uuidUtils.extractVersion(properties.behaviorSetLocation)}]]",
         "scope" : "conversation",
         "fromObjectPath" : "",
         "toObjectPath" : "",
@@ -111,7 +111,7 @@
     "preRequest" : {
       "propertyInstructions" : [ {
         "name" : "langChainId",
-        "valueString" : "[[${#strings.substring(properties.langChainLocation, 51, 75)}]]",
+        "valueString" : "[[${#uuidUtils.extractId(properties.langChainLocation)}]]",
         "scope" : "conversation",
         "fromObjectPath" : "",
         "toObjectPath" : "",
@@ -120,7 +120,7 @@
         "runOnValidationError" : false
       }, {
         "name" : "langChainVersion",
-        "valueString" : "[[${#strings.substring(properties.langChainLocation, 84)}]]",
+        "valueString" : "[[${#uuidUtils.extractVersion(properties.langChainLocation)}]]",
         "scope" : "conversation",
         "fromObjectPath" : "",
         "toObjectPath" : "",
@@ -181,7 +181,7 @@
     "preRequest" : {
       "propertyInstructions" : [ {
         "name" : "outputSetId",
-        "valueString" : "[[${#strings.substring(properties.outputSetLocation, 45, 69)}]]",
+        "valueString" : "[[${#uuidUtils.extractId(properties.outputSetLocation)}]]",
         "scope" : "conversation",
         "fromObjectPath" : "",
         "toObjectPath" : "",
@@ -190,7 +190,7 @@
         "runOnValidationError" : false
       }, {
         "name" : "outputSetVersion",
-        "valueString" : "[[${#strings.substring(properties.outputSetLocation, 78)}]]",
+        "valueString" : "[[${#uuidUtils.extractVersion(properties.outputSetLocation)}]]",
         "scope" : "conversation",
         "fromObjectPath" : "",
         "toObjectPath" : "",
@@ -251,7 +251,7 @@
     "preRequest" : {
       "propertyInstructions" : [ {
         "name" : "packageId",
-        "valueString" : "[[${#strings.substring(properties.packageLocation, 45, 69)}]]",
+        "valueString" : "[[${#uuidUtils.extractId(properties.packageLocation)}]]",
         "scope" : "conversation",
         "fromObjectPath" : "",
         "toObjectPath" : "",
@@ -260,7 +260,7 @@
         "runOnValidationError" : false
       }, {
         "name" : "packageVersion",
-        "valueString" : "[[${#strings.substring(properties.packageLocation, 78)}]]",
+        "valueString" : "[[${#uuidUtils.extractVersion(properties.packageLocation)}]]",
         "scope" : "conversation",
         "fromObjectPath" : "",
         "toObjectPath" : "",
@@ -321,7 +321,7 @@
     "preRequest" : {
       "propertyInstructions" : [ {
         "name" : "botId",
-        "valueString" : "[[${#strings.substring(properties.botLocation, 33, 57)}]]",
+        "valueString" : "[[${#uuidUtils.extractId(properties.botLocation)}]]",
         "scope" : "conversation",
         "fromObjectPath" : "",
         "toObjectPath" : "",
@@ -330,7 +330,7 @@
         "runOnValidationError" : false
       }, {
         "name" : "botVersion",
-        "valueString" : "[[${#strings.substring(properties.botLocation, 66)}]]",
+        "valueString" : "[[${#uuidUtils.extractVersion(properties.botLocation)}]]",
         "scope" : "conversation",
         "fromObjectPath" : "",
         "toObjectPath" : "",
