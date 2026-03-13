@@ -1,5 +1,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { exportAndDownloadBot, importBot } from "@/lib/api/backup";
+import {
+  exportAndDownloadBot,
+  importBot,
+  previewImport,
+  importBotMerge,
+} from "@/lib/api/backup";
+import type { ImportPreview } from "@/lib/api/backup";
 
 const BOTS_KEY = ["bots"] as const;
 
@@ -19,3 +25,27 @@ export function useImportBot() {
     },
   });
 }
+
+export function usePreviewImport() {
+  return useMutation({
+    mutationFn: (file: File) => previewImport(file),
+  });
+}
+
+export function useImportBotMerge() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      file,
+      selectedOriginIds,
+    }: {
+      file: File;
+      selectedOriginIds?: string[];
+    }) => importBotMerge(file, selectedOriginIds),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: BOTS_KEY });
+    },
+  });
+}
+
+export type { ImportPreview };

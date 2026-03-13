@@ -62,7 +62,7 @@ export async function exportAndDownloadBot(
 }
 
 /**
- * Import a bot from a zip file.
+ * Import a bot from a zip file (create new — default strategy).
  * POST /backup/import with Content-Type: application/zip
  * Returns the Location of the newly created bot.
  */
@@ -75,6 +75,68 @@ export async function importBot(file: File): Promise<string> {
 
   if (!res.ok) {
     throw new Error(`Import failed: ${res.statusText}`);
+  }
+
+  const location = res.headers.get("Location");
+  return location || "";
+}
+
+// ==================== Merge Import Types ====================
+
+export interface ResourceDiff {
+  originId: string;
+  resourceType: string;
+  name: string | null;
+  action: "CREATE" | "UPDATE" | "SKIP";
+  localId: string | null;
+  localVersion: number | null;
+}
+
+export interface ImportPreview {
+  botOriginId: string | null;
+  botName: string | null;
+  resources: ResourceDiff[];
+}
+
+/**
+ * Preview what a merge import would do — does NOT modify data.
+ * POST /backup/import/preview
+ */
+export async function previewImport(file: File): Promise<ImportPreview> {
+  const res = await fetch(`${BASE_URL}/backup/import/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/zip" },
+    body: file,
+  });
+
+  if (!res.ok) {
+    throw new Error(`Preview failed: ${res.statusText}`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Import a bot with merge strategy.
+ * POST /backup/import?strategy=merge&selectedResources=...
+ */
+export async function importBotMerge(
+  file: File,
+  selectedOriginIds?: string[]
+): Promise<string> {
+  const params = new URLSearchParams({ strategy: "merge" });
+  if (selectedOriginIds && selectedOriginIds.length > 0) {
+    params.set("selectedResources", selectedOriginIds.join(","));
+  }
+
+  const res = await fetch(`${BASE_URL}/backup/import?${params}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/zip" },
+    body: file,
+  });
+
+  if (!res.ok) {
+    throw new Error(`Merge import failed: ${res.statusText}`);
   }
 
   const location = res.headers.get("Location");

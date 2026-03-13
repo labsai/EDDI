@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { BotsPage } from "@/pages/bots";
 
 describe("BotsPage — Import/Export", () => {
@@ -14,12 +14,12 @@ describe("BotsPage — Import/Export", () => {
     expect(screen.getByTestId("bot-wizard-btn")).toBeInTheDocument();
   });
 
-  it("has hidden file input for zip import", () => {
+  it("import button opens import dialog on click", async () => {
     renderWithProviders(<BotsPage />);
-    const input = screen.getByTestId("import-file-input") as HTMLInputElement;
-    expect(input).toBeInTheDocument();
-    expect(input.type).toBe("file");
-    expect(input.accept).toBe(".zip");
+    const user = userEvent.setup();
+    const btn = screen.getByTestId("import-bot-btn");
+    await user.click(btn);
+    expect(screen.getByTestId("import-bot-dialog")).toBeInTheDocument();
   });
 
   it("still renders create bot button", () => {

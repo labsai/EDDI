@@ -1,12 +1,12 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Bot, Search, Plus, Upload, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { useBotDescriptors, useDeleteBot, useDuplicateBot, groupBotsByName } from "@/hooks/use-bots";
-import { useImportBot } from "@/hooks/use-backup";
 import { BotCard } from "@/components/bots/bot-card";
 import { CreateBotDialog } from "@/components/bots/create-bot-dialog";
+import { ImportBotDialog } from "@/components/bots/import-bot-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -18,23 +18,15 @@ export function BotsPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: bots, isLoading, isError, refetch } = useBotDescriptors(100, 0, search);
   const deleteMutation = useDeleteBot();
   const duplicateMutation = useDuplicateBot();
-  const importMutation = useImportBot();
 
-  function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) {
-      importMutation.mutate(file, {
-        onSuccess: () => toast.success(t("bots.importSuccess")),
-        onError: () => toast.error(t("bots.importError")),
-      });
-      e.target.value = ""; // reset for re-upload
-    }
+  function handleImportSuccess() {
+    toast.success(t("bots.importSuccess", "Bot imported successfully"));
   }
 
   const groupedBots = bots ? groupBotsByName(bots) : [];
@@ -81,23 +73,12 @@ export function BotsPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={importMutation.isPending}
+            onClick={() => setImportOpen(true)}
             data-testid="import-bot-btn"
           >
             <Upload className="h-4 w-4" />
-            {importMutation.isPending
-              ? t("bots.importing")
-              : t("bots.import")}
+            {t("bots.import", "Import")}
           </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".zip"
-            onChange={handleImport}
-            className="hidden"
-            data-testid="import-file-input"
-          />
           <Button variant="outline" asChild data-testid="bot-wizard-btn">
             <Link to="/manage/bots/wizard">
               <Wand2 className="h-4 w-4" />
@@ -192,6 +173,13 @@ export function BotsPage() {
 
       {/* Create dialog */}
       <CreateBotDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+
+      {/* Import dialog */}
+      <ImportBotDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onSuccess={handleImportSuccess}
+      />
 
       {/* Delete confirmation dialog */}
       <AlertDialog
