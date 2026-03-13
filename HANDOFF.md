@@ -345,6 +345,17 @@
 
 ## Next Up
 
+### Import/Export Merge Strategy ✅ (commits `b0586b2d` + Manager `b8028db`)
+
+- [x] Added `originId` to `DocumentDescriptor` for tracking imported resource origins
+- [x] Added `findByOriginId()` to all descriptor stores
+- [x] `ImportPreview` record + `previewImport` preview endpoint (dry-run diff)
+- [x] `RestImportService` merge strategy — looks up by origin ID, updates existing
+- [x] Selective resource import via `selectedResources` query param
+- [x] Manager `ImportBotDialog` — multi-step wizard (upload → strategy → preview → import)
+- [x] Updated `backup.ts`, `use-backup.ts`, `bots.tsx`, `backup.test.tsx`
+- [x] All tests pass (backend + 24 Manager tests)
+
 ### Phase 6A: MongoDB Sync Driver Migration — Remaining Work
 
 **Status:** Core migration done. Remaining:

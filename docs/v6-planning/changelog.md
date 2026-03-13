@@ -43,6 +43,40 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-13 — Import/Export Merge Strategy + Manager Import Dialog
+
+**Repos:** EDDI, EDDI-Manager
+**Branch:** `feature/version-6.0.0`
+
+**What changed:**
+
+**EDDI (backend) (`b0586b2d`):**
+- `DocumentDescriptor.java` [MODIFIED]: Added `originId` field to track where an imported resource came from
+- `IDescriptorStore.java` [MODIFIED]: Added `findByOriginId(String)` method
+- `DescriptorStore.java` [MODIFIED]: Implemented `findByOriginId` using `IResourceStorage.findResources()`
+- `DocumentDescriptorStore.java`, `TestCaseDescriptorStore.java`, `ConversationDescriptorStore.java` [MODIFIED]: Added `findByOriginId` delegation
+- `ImportPreview.java` [NEW]: Record for merge preview response — bot name, resource diffs (action, type, local ID)
+- `IRestImportService.java` [MODIFIED]: Added `strategy` and `selectedResources` params to `importBot`, new `previewImport` endpoint
+- `RestImportService.java` [REWRITTEN]: Full merge strategy support — looks up existing resources by `originId`, updates instead of creating duplicates. Preview endpoint returns dry-run diff analysis. Selective import via comma-separated origin IDs. Original `strategy=create` behavior preserved as default
+
+**EDDI-Manager (`b8028db`):**
+- `backup.ts` [MODIFIED]: Added `previewImport()` and `importBotMerge()` API functions, `ImportPreview`/`ResourceDiff` types
+- `use-backup.ts` [MODIFIED]: Added `usePreviewImport` and `useImportBotMerge` hooks
+- `import-bot-dialog.tsx` [NEW]: Multi-step import dialog — upload (drag-and-drop), strategy selection (create new vs merge/sync), preview table with resource diffs and selective checkboxes, loading spinner
+- `bots.tsx` [MODIFIED]: Replaced simple file input with `ImportBotDialog` component
+- `backup.test.tsx` [MODIFIED]: Updated test for dialog-based import flow
+
+**Design decisions:**
+- `originId` stored in `DocumentDescriptor` — reuses existing descriptor infrastructure without new tables
+- Default strategy is `create` (backward compatible) — `merge` must be explicitly requested
+- Preview is a separate endpoint (dry run) — never modifies data, lets users inspect what would change
+- Dialog uses multi-step wizard pattern for progressive disclosure
+
+**Testing:**
+- [x] Backend: all tests pass (`.\mvnw test` exit 0)
+- [x] Manager: `npx tsc -b` clean, 24/24 tests pass, `npm run build` succeeds
+- [x] No regressions
+
 ### 2026-03-13 — Phase 6B Complete: PostgreSQL IT Parity (48/48) + BotUseCaseIT Fix
 
 **Repo:** EDDI
