@@ -77,6 +77,29 @@ _Entries will be added here as implementation progresses._
 - [x] Manager: `npx tsc -b` clean, 24/24 tests pass, `npm run build` succeeds
 - [x] No regressions
 
+### 2026-03-14 — Import/Export Merge Strategy: Test Coverage
+
+**Repos:** EDDI, EDDI-Manager
+**Branch:** `feature/version-6.0.0`
+
+**What changed:**
+
+**EDDI (backend):**
+- `ImportMergeIT.java` [NEW]: 7 ordered integration tests covering the full import/export round-trip — create import (verify originId), export to zip, preview merge (verify UPDATE actions), merge import (verify same bot ID reused with incremented version), post-merge preview (no duplicates), selective merge, and create-always-new verification. Requires Docker/Testcontainers to run.
+
+**EDDI-Manager:**
+- `handlers.ts` [MODIFIED]: Added MSW handler for `POST */backup/import/preview` (mock ImportPreview with 4 resources). Updated `POST */backup/import` to support `strategy=merge` query param and return appropriate responses.
+- `import-bot-dialog.test.tsx` [NEW]: 15 component tests using `vi.hoisted()` + `vi.mock()` to isolate hook behavior. Covers: rendering (open/closed), upload (file selection, name/size display), strategy (default/switch/import/onSuccess), preview (mutation call, resource table, action badges, checkboxes, toggle), merge confirm (mutation args, selected IDs, onSuccess), navigation (back button, X close).
+
+**Design decisions:**
+- Used `vi.hoisted()` + `vi.mock()` pattern for dialog tests instead of MSW mutation testing — TanStack Query mutations with File bodies don't reliably propagate through jsdom's fetch. Direct hook mocking gives faster, deterministic tests while MSW handler tests verify network layer separately.
+- Backend IT uses `@TestMethodOrder(OrderAnnotation.class)` for shared state across the import/export round-trip
+
+**Testing:**
+- [x] Backend: `mvnw test-compile` passes (ITs require Docker)
+- [x] Manager: `npx tsc -b` clean, 191/191 tests pass across 25 files
+- [x] No regressions
+
 ### 2026-03-13 — Phase 6B Complete: PostgreSQL IT Parity (48/48) + BotUseCaseIT Fix
 
 **Repo:** EDDI

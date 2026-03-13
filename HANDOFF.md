@@ -354,7 +354,10 @@
 - [x] Selective resource import via `selectedResources` query param
 - [x] Manager `ImportBotDialog` — multi-step wizard (upload → strategy → preview → import)
 - [x] Updated `backup.ts`, `use-backup.ts`, `bots.tsx`, `backup.test.tsx`
-- [x] All tests pass (backend + 24 Manager tests)
+- [x] **Backend test coverage**: `ImportMergeIT.java` — 7 ordered integration tests (create → export → preview → merge → post-merge → selective → create-always-new)
+- [x] **Frontend test coverage**: `import-bot-dialog.test.tsx` — 15 component tests (rendering, upload, strategy, preview table, checkboxes, merge confirm, navigation, close)
+- [x] **MSW handlers**: Added `/backup/import/preview` + updated `/backup/import` with merge strategy support
+- [x] All tests pass (backend compiles, Manager 191 tests pass across 25 files)
 
 ### Phase 6A: MongoDB Sync Driver Migration — Remaining Work
 
