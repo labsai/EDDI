@@ -75,10 +75,14 @@ public class BotUseCaseIT extends BaseIntegrationIT {
         String intent = "weather-bot";
         String userId = "12345";
 
+        // Delete any stale trigger from a previous test run
+        given().delete("/bottriggerstore/bottriggers/" + intent);
+
         // Register bot trigger (create via POST)
         given().contentType(ContentType.JSON)
                 .body(String.format(load("useCases/botdeployment.json"), weatherBotId.id()))
-                .post("/bottriggerstore/bottriggers");
+                .post("/bottriggerstore/bottriggers")
+                .then().statusCode(200);
 
         // End any existing conversation
         given().post("/managedbots/" + intent + "/" + userId + "/endConversation");
@@ -90,6 +94,7 @@ public class BotUseCaseIT extends BaseIntegrationIT {
                 .post("/managedbots/" + intent + "/" + userId);
 
         response.then().assertThat()
+                .statusCode(200)
                 .body("botId", equalTo(weatherBotId.id()))
                 .body("botVersion", equalTo(weatherBotId.version()))
                 .body("conversationSteps[1].conversationStep[1].key", equalTo("actions"))
