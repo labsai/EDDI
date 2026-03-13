@@ -583,7 +583,57 @@ export const handlers = [
     });
   }),
 
-  http.post("*/backup/import", () => {
+  http.post("*/backup/import/preview", () => {
+    return HttpResponse.json({
+      botOriginId: "origin-bot-1",
+      botName: "Weather Bot",
+      resources: [
+        {
+          originId: "origin-bot-1",
+          resourceType: "bot",
+          name: "Weather Bot",
+          action: "UPDATE",
+          localId: "bot1",
+          localVersion: 1,
+        },
+        {
+          originId: "origin-pkg-1",
+          resourceType: "package",
+          name: "Main Package",
+          action: "UPDATE",
+          localId: "pkg1",
+          localVersion: 1,
+        },
+        {
+          originId: "origin-beh-1",
+          resourceType: "behavior",
+          name: "Greeting Rules",
+          action: "CREATE",
+          localId: null,
+          localVersion: null,
+        },
+        {
+          originId: "origin-dict-1",
+          resourceType: "dictionary",
+          name: "English Dictionary",
+          action: "UPDATE",
+          localId: "dict1",
+          localVersion: 1,
+        },
+      ],
+    });
+  }),
+
+  // NOTE: This generic handler must come AFTER the /preview handler
+  http.post("*/backup/import", ({ request }) => {
+    const url = new URL(request.url);
+    const strategy = url.searchParams.get("strategy");
+    if (strategy === "merge") {
+      return new HttpResponse(null, {
+        status: 200,
+        headers: { Location: "/botstore/bots/bot1?version=2" },
+      });
+    }
     return new HttpResponse(null, {
       status: 200,
       headers: { Location: "/botstore/bots/imported-bot?version=1" },

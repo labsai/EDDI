@@ -1,8 +1,8 @@
 # EDDI Manager — Handoff Document
 
-> **Last updated**: 2026-03-11  
+> **Last updated**: 2026-03-14  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Phase 5.30 — Coordinator Dashboard + Dead-Letter Admin UI
+> **Last commit**: Import/Export Merge Strategy — test coverage
 
 ---
 
@@ -45,7 +45,7 @@
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 176/176 pass (`npm run test`) — 24 files
+- **Unit/Component**: 191/191 pass (`npm run test`) — 25 files
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds
@@ -57,7 +57,7 @@
 - **Assets**: `public/logo_eddi.png` (original EDDI wordmark), `public/mockServiceWorker.js` (MSW browser worker)
 - **UI Components**: `button.tsx`, `card.tsx`, `badge.tsx`, `skeleton.tsx`, `input.tsx`, `alert-dialog.tsx`
 - **Shared Components**: `back-link.tsx`, `empty-state.tsx`, `error-state.tsx`
-- **Bots**: `bot-card.tsx`, `create-bot-dialog.tsx`, `bots.tsx`, `bot-detail.tsx`
+- **Bots**: `bot-card.tsx`, `create-bot-dialog.tsx`, `import-bot-dialog.tsx`, `bots.tsx`, `bot-detail.tsx`
 - **Packages**: `package-card.tsx`, `create-package-dialog.tsx`, `packages.tsx`, `package-detail.tsx`
 - **Conversations**: `conversations.tsx`, `conversation-detail.tsx`
 - **Chat**: `chat-panel.tsx`, `chat-message.tsx`, `chat-input.tsx`, `chat-history.tsx`, `streaming-toggle.tsx`, `chat.tsx`
@@ -68,7 +68,7 @@
 - **API**: `api-client.ts`, `api/bots.ts`, `api/packages.ts`, `api/descriptors.ts`, `api/conversations.ts`, `api/chat.ts`, `api/resources.ts`, `api/backup.ts`, `api/extensions.ts`, `api/schemas.ts`
 - **Hooks**: `use-bots.ts`, `use-packages.ts`, `use-conversations.ts`, `use-chat.ts`, `use-resources.ts`, `use-backup.ts`, `use-extensions-store.ts`, `use-dashboard.ts`, `use-json-schema.ts`
 - **i18n**: `config.ts`, `en.json`, `de.json`, `fr.json`, `es.json`, `ar.json`, `zh.json`, `th.json`, `ja.json`, `ko.json`, `pt.json`, `hi.json`
-- **Tests**: `sidebar.test.tsx`, `top-bar.test.tsx`, `config.test.ts`, `bots.test.tsx`, `bots.test.ts`, `packages.test.tsx`, `conversations.test.tsx`, `chat.test.tsx`, `resources.test.tsx`, `backup.test.tsx`, `bot-wizard.test.tsx`, `package-detail.test.tsx`, `dashboard.test.tsx`
+- **Tests**: `sidebar.test.tsx`, `top-bar.test.tsx`, `config.test.ts`, `bots.test.tsx`, `bots.test.ts`, `packages.test.tsx`, `conversations.test.tsx`, `chat.test.tsx`, `resources.test.tsx`, `backup.test.tsx`, `bot-wizard.test.tsx`, `package-detail.test.tsx`, `dashboard.test.tsx`, `import-bot-dialog.test.tsx`
 - **E2E**: `e2e-helpers.ts`, `navigation.spec.ts`, `theme.spec.ts`, `rtl.spec.ts`, `dashboard.spec.ts`, `bots.spec.ts`, `bot-detail.spec.ts`, `packages.spec.ts`, `conversations.spec.ts`, `chat.spec.ts`, `resources.spec.ts`
 - **Integration Tests**: `e2e/integration/integration-helpers.ts`, `bots.integration.spec.ts`, `packages.integration.spec.ts`, `resources.integration.spec.ts`, `conversations.integration.spec.ts`, `deployment.integration.spec.ts`, `schemas.integration.spec.ts`
 - **MSW**: `handlers.ts` (bots, packages, conversations, resources, schemas, extension store mocks), `server.ts`, `browser.ts`
