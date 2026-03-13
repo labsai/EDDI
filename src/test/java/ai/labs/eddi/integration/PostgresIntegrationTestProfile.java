@@ -32,7 +32,10 @@ public class PostgresIntegrationTestProfile implements QuarkusTestProfile {
                 "quarkus.oidc.tenant-enabled", "false",
                 "authorization.enabled", "false",
                 // Test HTTP port — different from MongoDB ITs (8081)
-                "quarkus.http.test-port", "8082"
+                "quarkus.http.test-port", "8082",
+                // Must also set quarkus.http.port so RestInterfaceFactory
+                // (used by /backup/import) connects to the correct port
+                "quarkus.http.port", "8082"
         );
     }
 

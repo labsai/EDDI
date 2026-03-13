@@ -53,7 +53,7 @@ public class ApiContractIT extends BaseIntegrationIT {
 
         @Test
         @DisplayName("GET non-existent resource should return 404")
-        void readNonExistent_returns404() {
+        protected void readNonExistent_returns404() {
                 given().get("/behaviorstore/behaviorsets/000000000000000000000000?version=1")
                                 .then().assertThat()
                                 .statusCode(404);
