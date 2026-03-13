@@ -10,6 +10,7 @@
 - **Backup & Restore**: Protect your bot configurations from accidental deletion or corruption
 - **Version Control**: Store bot configurations alongside code in Git
 - **Environment Migration**: Move bots from development → staging → production
+- **Continuous Sync**: Keep bots synchronized across environments with **merge imports**
 - **Team Collaboration**: Share bots with team members or customers
 - **Disaster Recovery**: Quickly restore bots after system failures
 - **Bot Templates**: Create reusable bot templates for similar use cases
@@ -23,11 +24,22 @@ When you export a bot, EDDI packages:
 - ✅ All extensions (behavior rules, dictionaries, HTTP calls, outputs, etc.)
 - ✅ Version information
 - ✅ Configuration metadata
+- ✅ **Origin IDs** (resource identifiers for merge tracking)
 
 **Note**: Conversations and conversation history are **NOT** exported (only configurations).
 
+### Import Strategies
+
+EDDI supports two import strategies:
+
+| Strategy | Behavior | Use Case |
+|----------|----------|----------|
+| **Create** (default) | Always creates a new bot with new IDs | First-time import, creating copies |
+| **Merge** | Updates existing resources by matching origin IDs | Syncing changes across environments |
+
 ### Export/Import Workflow
 
+**First-time import (Create):**
 ```
 DEVELOPMENT EDDI
     ↓
@@ -45,16 +57,42 @@ PRODUCTION EDDI
     ↓
 4. Upload ZIP file
    POST /backup/import
-   Body: (multipart/form-data with ZIP file)
-   ← Returns: New bot ID
+   Body: (application/zip with ZIP file)
+   ← Returns: New bot ID (Location header)
     ↓
 5. Deploy imported bot
    POST /administration/unrestricted/deploy/{newBotId}?version=1
 ```
 
+**Subsequent imports (Merge/Sync):**
+```
+DEVELOPMENT EDDI  (bot updated since last sync)
+    ↓
+1. Export latest version
+   POST /backup/export/bot123?botVersion=2
+    ↓
+2. Download ZIP
+    ↓
+PRODUCTION EDDI  (has the bot from first import)
+    ↓
+3. Preview what would change
+   POST /backup/import/preview
+   ← Returns: list of resources with CREATE/UPDATE/SKIP actions
+    ↓
+4. Review changes, optionally deselect resources
+    ↓
+5. Merge import (updates existing, no duplicates)
+   POST /backup/import?strategy=merge&selectedResources=origin1,origin2
+   ← Returns: Same bot ID, incremented version
+    ↓
+6. Deploy updated bot
+```
+
 ### Best Practices
 
 - **Version Your Exports**: Include version numbers in filenames: `customer-support-bot-v2.3.zip`
+- **Preview Before Merge**: Always use the preview endpoint before merging to review changes
+- **Selective Merge**: Only merge the resources that actually changed to minimize risk
 - **Document Changes**: Keep a changelog of what changed between exports
 - **Regular Backups**: Schedule automated exports of production bots
 - **Test Imports**: Always test imported bots in a test environment first
@@ -62,7 +100,7 @@ PRODUCTION EDDI
 
 ### Common Scenarios
 
-**Scenario 1: Promoting to Production**
+**Scenario 1: Promoting to Production (first time)**
 ```bash
 # 1. Export from test environment
 curl -X POST http://test.eddi.com/backup/export/bot123?botVersion=1
@@ -70,29 +108,46 @@ curl -X POST http://test.eddi.com/backup/export/bot123?botVersion=1
 # 2. Download the ZIP
 curl -O http://test.eddi.com/backup/export/bot123-1.zip
 
-# 3. Import to production
-curl -X POST -F "file=@bot123-1.zip" http://prod.eddi.com/backup/import
+# 3. Import to production (creates new bot)
+curl -X POST -H "Content-Type: application/zip" \
+  --data-binary @bot123-1.zip http://prod.eddi.com/backup/import
 
 # 4. Deploy in production
 curl -X POST http://prod.eddi.com/administration/restricted/deploy/{newBotId}?version=1
 ```
 
-**Scenario 2: Sharing Bot with Team**
+**Scenario 2: Syncing Updates (merge)**
 ```bash
-# Export bot
-curl -X POST http://localhost:7070/backup/export/bot123?botVersion=1
+# 1. Export updated bot from dev
+curl -X POST http://dev.eddi.com/backup/export/bot123?botVersion=3
+curl -O http://dev.eddi.com/backup/export/bot123-3.zip
 
-# Commit to Git
-git add bot123-1.zip
-git commit -m "Added customer support bot v1"
-git push
+# 2. Preview what would change in production
+curl -X POST -H "Content-Type: application/zip" \
+  --data-binary @bot123-3.zip http://prod.eddi.com/backup/import/preview
 
-# Team member pulls and imports
-git pull
-curl -X POST -F "file=@bot123-1.zip" http://localhost:7070/backup/import
+# 3. Merge import — updates existing resources, no duplicates
+curl -X POST -H "Content-Type: application/zip" \
+  --data-binary @bot123-3.zip "http://prod.eddi.com/backup/import?strategy=merge"
+
+# 4. Redeploy
+curl -X POST http://prod.eddi.com/administration/restricted/deploy/{botId}?version=2
 ```
 
-**Scenario 3: Disaster Recovery**
+**Scenario 3: Selective Merge (only specific resources)**
+```bash
+# Preview first to get the origin IDs
+curl -X POST -H "Content-Type: application/zip" \
+  --data-binary @bot123-3.zip http://prod.eddi.com/backup/import/preview
+# Response includes originId for each resource
+
+# Merge only the behavior rules and HTTP calls (by origin ID)
+curl -X POST -H "Content-Type: application/zip" \
+  --data-binary @bot123-3.zip \
+  "http://prod.eddi.com/backup/import?strategy=merge&selectedResources=origin-beh-1,origin-http-1"
+```
+
+**Scenario 4: Disaster Recovery**
 ```bash
 # Regular automated backup (cron job)
 #!/bin/bash
@@ -104,86 +159,149 @@ aws s3 cp "backups/bot123-$DATE.zip" s3://bot-backups/
 
 # Restore after failure
 aws s3 cp s3://bot-backups/bot123-20250103.zip ./
-curl -X POST -F "file=@bot123-20250103.zip" http://prod.eddi.com/backup/import
+curl -X POST -H "Content-Type: application/zip" \
+  --data-binary @bot123-20250103.zip http://prod.eddi.com/backup/import
 ```
+
+---
+
+## Using the Manager UI
+
+The EDDI Manager provides a guided import wizard accessible from the **Bots** page:
+
+1. **Upload** — Drag-and-drop or browse for a `.zip` export file
+2. **Choose Strategy**:
+   - **Create New Bot** — Always creates a fresh bot (default)
+   - **Merge / Sync** — Updates an existing bot if one with matching origin IDs exists
+3. **Preview** (merge only) — Shows a table of all resources with their planned action:
+   - 🟢 **New** — Resource doesn't exist locally, will be created
+   - 🔵 **Update** — Resource exists locally, will be updated to the imported version
+   - ⚪ **Skip** — Resource is identical, no changes needed
+4. **Select Resources** — Checkboxes let you pick which resources to merge (all selected by default)
+5. **Confirm** — Executes the import
+
+---
+
+## How Merge Tracking Works
+
+When a bot is first imported into an EDDI instance, EDDI stores the **origin ID** of each resource (the ID it had on the source system) in the `DocumentDescriptor`. On subsequent imports with `strategy=merge`:
+
+1. EDDI reads each resource from the ZIP
+2. Looks up the origin ID in the local descriptor store (`findByOriginId`)
+3. If found → **updates** the existing resource (creating a new version)
+4. If not found → **creates** a new resource
+5. The bot itself is updated with references to the (possibly new) resource versions
+
+This means the **bot ID stays the same** across merge imports — only the version increments. Deployments, triggers, and integrations that reference the bot ID continue to work without reconfiguration.
+
+---
 
 ## API Reference
 
-In this tutorial we will explain **importing/exporting** bots. This is a very useful feature that makes bots portable and easy to re-use across different EDDI instances, and allows you to backup, restore, and maintain your bots.
+### Exporting a Chatbot
 
-## Exporting a Chatbot:
+Send a **`POST`** request to export. The response `Location` header contains the download URL.
 
-Exporting a bot is a fairly simple process, send a **`POST`** request to the following API endpoint and you will receive the location of the exported zip file on the response headers, specifically the **`location` header.**
+| Element | Value |
+|---------|-------|
+| HTTP Method | `POST` |
+| API Endpoint | `/backup/export/{botId}?botVersion={version}` |
+| Response | `Location` header with ZIP download URL |
 
-Export Chatbot REST API Endpoint
+**Example:**
+```bash
+curl -X POST http://localhost:7070/backup/export/bot123?botVersion=1
+# Response Header: Location: /backup/export/bot123-1.zip
 
-{% swagger baseUrl="http://localhost:7070" path="/backup/export/:botId?botVersion=:botVersion" method="post" summary="Export a chatbot" %}
-{% swagger-description %}
-
-{% endswagger-description %}
-
-{% swagger-parameter in="path" name="botId" type="string" %}
-Id of the bot you wish to export
-{% endswagger-parameter %}
-
-{% swagger-parameter in="query" name="botVersion" type="string" %}
-Version of the bot
-{% endswagger-parameter %}
-
-{% swagger-response status="200" description="" %}
-```javascript
-{
-"access-control-allow-origin": "*",
-"date": "Mon, 19 Mar 2018 10:41:41 GMT",
-"access-control-allow-headers": "authorization, Content-Type",
-"content-length": "0",
-"location": "http://localhost:7070/backup/export/5aaf90e29f7dd421ac3c7dd4-1.zip",
-"access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-"content-type": null
-}
-```
-{% endswagger-response %}
-{% endswagger %}
-
-### **Example:**
-
-_Request URL:_
-
-`http://localhost:7070/backup/export/5aaf90e29f7dd421ac3c7dd4?botVersion=1`
-
-_Response Body:_ `no content` _Response Code:_ `200` _Response Headers:_
-
-```javascript
-{
-"access-control-allow-origin": "*",
-"date": "Mon, 19 Mar 2018 10:41:41 GMT",
-"access-control-allow-headers": "authorization, Content-Type",
-"content-length": "0",
-"location": "http://localhost:7070/backup/export/5aaf90e29f7dd421ac3c7dd4-1.zip",
-"access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-"content-type": null
-}
+curl -O http://localhost:7070/backup/export/bot123-1.zip
 ```
 
-## Importing a bot:
+### Importing a Chatbot (Create)
 
-Same process as exporting; send a `POST` request to the following API endpoint , you will receive the id of the imported bot on the response headers.
+Upload a ZIP file to create a new bot.
 
-### Import Chatbot REST API Endpoint
+| Element | Value |
+|---------|-------|
+| HTTP Method | `POST` |
+| API Endpoint | `/backup/import` |
+| Content-Type | `application/zip` |
+| Request Body | ZIP file binary |
+| Response | `Location` header with new bot URI |
 
-| Element                  | Value                  |
-| ------------------------ | ---------------------- |
-| Http Method              | `POST`                 |
-| API endpoint             | `/backup/import`       |
-| HTTP Content Type Header | `application/zip`      |
-| Request body             | the `zip` file binary. |
+**Example:**
+```bash
+curl -X POST -H "Content-Type: application/zip" \
+  --data-binary @bot-export.zip http://localhost:7070/backup/import
+```
 
-### **Example**_**:**_
+### Preview Merge Import
 
-For the sake of simplifying things you can use [Postman](https://www.getpostman.com/) to upload the zip file of the exported bot just don't forget to add the **http header** of content type : _**`application/zip`****.**_
+Dry-run analysis: returns what would change without modifying any data.
 
-Take a look at the image below to understand how you can upload the zip file in Postman:
+| Element | Value |
+|---------|-------|
+| HTTP Method | `POST` |
+| API Endpoint | `/backup/import/preview` |
+| Content-Type | `application/zip` |
+| Request Body | ZIP file binary |
+| Response | JSON with resource diff analysis |
 
-![](<.gitbook/assets/postman\_upload\_bin (3).png>)
+**Response format:**
+```json
+{
+  "botOriginId": "original-bot-id-from-source",
+  "botName": "My Bot",
+  "resources": [
+    {
+      "originId": "original-resource-id",
+      "resourceType": "bot",
+      "name": "My Bot",
+      "action": "UPDATE",
+      "localId": "local-bot-id",
+      "localVersion": 1
+    },
+    {
+      "originId": "original-behavior-id",
+      "resourceType": "behavior",
+      "name": "Greeting Rules",
+      "action": "CREATE",
+      "localId": null,
+      "localVersion": null
+    }
+  ]
+}
+```
 
-> **Important:** The bot will not be deployed after import you will have to deploy it yourself by using the corresponding API endpoint, please refer to [Deploying a bot.](deployment-management-of-chatbots.md)
+**Actions:**
+- `CREATE` — No matching local resource found; will be created
+- `UPDATE` — Matching local resource found; will be updated
+- `SKIP` — Resource is unchanged; will be skipped
+
+### Importing a Chatbot (Merge)
+
+Update an existing bot by matching origin IDs.
+
+| Element | Value |
+|---------|-------|
+| HTTP Method | `POST` |
+| API Endpoint | `/backup/import?strategy=merge` |
+| Content-Type | `application/zip` |
+| Request Body | ZIP file binary |
+| Query Params | `strategy=merge`, optional `selectedResources=id1,id2,...` |
+| Response | `Location` header with updated bot URI |
+
+**Example (merge all):**
+```bash
+curl -X POST -H "Content-Type: application/zip" \
+  --data-binary @bot-export.zip "http://localhost:7070/backup/import?strategy=merge"
+```
+
+**Example (selective merge):**
+```bash
+curl -X POST -H "Content-Type: application/zip" \
+  --data-binary @bot-export.zip \
+  "http://localhost:7070/backup/import?strategy=merge&selectedResources=origin-id-1,origin-id-2"
+```
+
+> **Important:** The bot will not be deployed after import — you must deploy it yourself using the [Deployment API](deployment-management-of-chatbots.md).
+
