@@ -67,4 +67,10 @@ public class TestCaseDescriptorStore implements ITestCaseDescriptorStore {
     public void deleteAllDescriptor(String resourceId) {
         descriptorStore.deleteAllDescriptor(resourceId);
     }
+
+    @Override
+    public List<TestCaseDescriptor> findByOriginId(String originId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return descriptorStore.findByOriginId(originId);
+    }
 }

@@ -1,12 +1,11 @@
 package ai.labs.eddi.backup;
 
+import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.engine.model.BotDeploymentStatus;
+import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
-import jakarta.ws.rs.Consumes;
-import jakarta.ws.rs.POST;
-import jakarta.ws.rs.Path;
-import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.*;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.container.Suspended;
 import jakarta.ws.rs.core.MediaType;
@@ -26,5 +25,19 @@ public interface IRestImportService {
 
     @POST
     @Consumes("application/zip")
-    void importBot(InputStream zippedBotConfigFiles, @Suspended AsyncResponse response);
+    @Operation(description = "Import a bot from a zip file. " +
+            "strategy=create (default) always creates new resources. " +
+            "strategy=merge looks up existing resources by origin ID and updates them.")
+    void importBot(InputStream zippedBotConfigFiles,
+                   @QueryParam("strategy") @DefaultValue("create") String strategy,
+                   @QueryParam("selectedResources") String selectedOriginIds,
+                   @Suspended AsyncResponse response);
+
+    @POST
+    @Path("/preview")
+    @Consumes("application/zip")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(description = "Preview what a merge import would do: which resources would be created, " +
+            "updated, or skipped. Does not modify any data.")
+    ImportPreview previewImport(InputStream zippedBotConfigFiles);
 }

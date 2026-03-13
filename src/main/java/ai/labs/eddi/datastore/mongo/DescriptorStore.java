@@ -121,4 +121,10 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return descriptorResourceStore.getCurrentResourceId(id);
     }
+
+    @Override
+    public List<T> findByOriginId(String originId) {
+        // Legacy MongoDB store — not reached in production since all stores use the new DescriptorStore
+        return List.of();
+    }
 }

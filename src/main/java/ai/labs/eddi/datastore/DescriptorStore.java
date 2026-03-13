@@ -123,4 +123,23 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
             throws IResourceStore.ResourceNotFoundException {
         return descriptorResourceStore.getCurrentResourceId(id);
     }
+
+    @Override
+    public List<T> findByOriginId(String originId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+
+        List<IResourceFilter.QueryFilter> queryFilters = new LinkedList<>();
+        queryFilters.add(new IResourceFilter.QueryFilter("originId", originId));
+        queryFilters.add(new IResourceFilter.QueryFilter(FIELD_DELETED, false));
+        IResourceFilter.QueryFilters required = new IResourceFilter.QueryFilters(queryFilters);
+
+        List<IResourceStore.IResourceId> matchingIds =
+                resourceStorage.findResources(new IResourceFilter.QueryFilters[]{required}, FIELD_LAST_MODIFIED, 0, 10);
+
+        List<T> ret = new LinkedList<>();
+        for (IResourceStore.IResourceId resourceId : matchingIds) {
+            ret.add(descriptorResourceStore.read(resourceId.getId(), resourceId.getVersion()));
+        }
+        return ret;
+    }
 }

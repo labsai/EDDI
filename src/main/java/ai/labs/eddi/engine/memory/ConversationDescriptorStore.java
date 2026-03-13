@@ -97,4 +97,10 @@ public class ConversationDescriptorStore implements IConversationDescriptorStore
     public void deleteAllDescriptor(String resourceId) {
         descriptorStore.deleteAllDescriptor(resourceId);
     }
+
+    @Override
+    public List<ConversationDescriptor> findByOriginId(String originId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return descriptorStore.findByOriginId(originId);
+    }
 }

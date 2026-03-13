@@ -2,10 +2,14 @@ package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.backup.IRestImportService;
 import ai.labs.eddi.backup.IZipArchive;
+import ai.labs.eddi.backup.model.ImportPreview;
+import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
+import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import ai.labs.eddi.configs.behavior.IRestBehaviorStore;
 import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
+import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.configs.http.IRestHttpCallsStore;
@@ -21,6 +25,7 @@ import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.regulardictionary.IRestRegularDictionaryStore;
 import ai.labs.eddi.configs.regulardictionary.model.RegularDictionaryConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IRestBotAdministration;
@@ -39,7 +44,6 @@ import jakarta.ws.rs.container.TimeoutHandler;
 import jakarta.ws.rs.core.Response;
 import org.bson.Document;
 import org.jboss.logging.Logger;
-import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.io.*;
 import java.net.URI;
@@ -53,8 +57,10 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static ai.labs.eddi.engine.model.Deployment.Environment.unrestricted;
 import static ai.labs.eddi.utils.RuntimeUtilities.getResourceAsStream;
+import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * @author ginccc
@@ -63,6 +69,9 @@ import static ai.labs.eddi.utils.RuntimeUtilities.getResourceAsStream;
 public class RestImportService extends AbstractBackupService implements IRestImportService {
     private static final Pattern EDDI_URI_PATTERN = Pattern.compile("\"eddi://ai.labs..*?\"");
     private static final String BOT_FILE_ENDING = ".bot.json";
+    private static final String DESCRIPTOR_FILE_ENDING = ".descriptor.json";
+    private static final String STRATEGY_MERGE = "merge";
+
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp", "import"));
     private final IZipArchive zipArchive;
     private final IJsonSerialization jsonSerialization;
@@ -70,6 +79,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final IRestBotAdministration restBotAdministration;
     private final IMigrationManager migrationManager;
     private final IDeploymentListener deploymentListener;
+    private final IDocumentDescriptorStore documentDescriptorStore;
 
     private static final Logger log = Logger.getLogger(RestImportService.class);
 
@@ -79,13 +89,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                              IRestInterfaceFactory restInterfaceFactory,
                              IRestBotAdministration restBotAdministration,
                              IMigrationManager migrationManager,
-                             IDeploymentListener deploymentListener) {
+                             IDeploymentListener deploymentListener,
+                             IDocumentDescriptorStore documentDescriptorStore) {
         this.zipArchive = zipArchive;
         this.jsonSerialization = jsonSerialization;
         this.restInterfaceFactory = restInterfaceFactory;
         this.restBotAdministration = restBotAdministration;
         this.migrationManager = migrationManager;
         this.deploymentListener = deploymentListener;
+        this.documentDescriptorStore = documentDescriptorStore;
     }
 
     @Override
@@ -96,6 +108,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
             for (var botFileName : botExampleFiles) {
                 importBot(getResourceAsStream("/initial-bots/" + botFileName),
+                        "create", null,
                         new MockAsyncResponse() {
                             @Override
                             public boolean resume(Object responseObj) {
@@ -142,12 +155,136 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return filenames;
     }
 
+    // ==================== Preview ====================
+
     @Override
-    public void importBot(InputStream zippedBotConfigFiles, AsyncResponse response) {
+    public ImportPreview previewImport(InputStream zippedBotConfigFiles) {
+        try {
+            File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
+            this.zipArchive.unzip(zippedBotConfigFiles, targetDir);
+            var targetDirPath = targetDir.getPath();
+
+            try (var directoryStream = Files.newDirectoryStream(Paths.get(targetDirPath),
+                    path -> path.toString().endsWith(BOT_FILE_ENDING))) {
+
+                for (Path botFilePath : directoryStream) {
+                    String botFileString = readFile(botFilePath);
+                    String botOriginId = extractIdFromBotFilename(botFilePath);
+                    String botName = readNameFromDescriptor(Paths.get(targetDirPath), botOriginId);
+
+                    List<ResourceDiff> diffs = new ArrayList<>();
+
+                    // Bot itself
+                    diffs.add(buildResourceDiff(botOriginId, "bot", botName));
+
+                    // Packages & their extensions
+                    BotConfiguration botConfiguration =
+                            jsonSerialization.deserialize(botFileString, BotConfiguration.class);
+                    for (URI packageUri : botConfiguration.getPackages()) {
+                        IResourceId packageResourceId = RestUtilities.extractResourceId(packageUri);
+                        if (packageResourceId == null) continue;
+
+                        String packageId = packageResourceId.getId();
+                        String packageVersion = String.valueOf(packageResourceId.getVersion());
+                        String packageName = readNameFromDescriptor(
+                                Paths.get(targetDirPath, packageId, packageVersion), packageId);
+                        diffs.add(buildResourceDiff(packageId, "package", packageName));
+
+                        // Read package file to find extension URIs
+                        var dir = Paths.get(FileUtilities.buildPath(targetDirPath, packageId, packageVersion));
+                        try (var pkgStream = Files.newDirectoryStream(dir,
+                                p -> p.toString().endsWith(".package.json"))) {
+                            for (Path packageFilePath : pkgStream) {
+                                String packageFileString = readFile(packageFilePath);
+                                addExtensionDiffs(diffs, packageFileString, dir);
+                            }
+                        }
+                    }
+
+                    return new ImportPreview(botOriginId, botName, diffs);
+                }
+            }
+
+            return new ImportPreview(null, null, List.of());
+        } catch (Exception e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException("Preview failed: " + e.getMessage(), e);
+        }
+    }
+
+    private void addExtensionDiffs(List<ResourceDiff> diffs, String packageFileString, Path packageDir)
+            throws CallbackMatcher.CallbackMatcherException {
+
+        addDiffsForType(diffs, packageFileString, DICTIONARY_URI_PATTERN, DICTIONARY_EXT, packageDir);
+        addDiffsForType(diffs, packageFileString, BEHAVIOR_URI_PATTERN, BEHAVIOR_EXT, packageDir);
+        addDiffsForType(diffs, packageFileString, HTTPCALLS_URI_PATTERN, HTTPCALLS_EXT, packageDir);
+        addDiffsForType(diffs, packageFileString, LANGCHAIN_URI_PATTERN, LANGCHAIN_EXT, packageDir);
+        addDiffsForType(diffs, packageFileString, PROPERTY_URI_PATTERN, PROPERTY_EXT, packageDir);
+        addDiffsForType(diffs, packageFileString, OUTPUT_URI_PATTERN, OUTPUT_EXT, packageDir);
+    }
+
+    private void addDiffsForType(List<ResourceDiff> diffs, String packageFileString,
+                                 Pattern uriPattern, String ext, Path packageDir)
+            throws CallbackMatcher.CallbackMatcherException {
+
+        List<URI> uris = extractResourcesUris(packageFileString, uriPattern);
+        for (URI uri : uris) {
+            IResourceId resourceId = RestUtilities.extractResourceId(uri);
+            if (resourceId == null) continue;
+            String name = readNameFromDescriptor(packageDir, resourceId.getId());
+            diffs.add(buildResourceDiff(resourceId.getId(), ext, name));
+        }
+    }
+
+    private ResourceDiff buildResourceDiff(String originId, String resourceType, String name) {
+        try {
+            List<DocumentDescriptor> existing = documentDescriptorStore.findByOriginId(originId);
+            if (!existing.isEmpty()) {
+                DocumentDescriptor desc = existing.getFirst();
+                IResourceId localResourceId = RestUtilities.extractResourceId(desc.getResource());
+                if (localResourceId != null) {
+                    return new ResourceDiff(originId, resourceType, name,
+                            DiffAction.UPDATE, localResourceId.getId(), localResourceId.getVersion());
+                }
+            }
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            log.debug("Could not look up origin ID " + originId + ": " + e.getMessage());
+        }
+        return new ResourceDiff(originId, resourceType, name, DiffAction.CREATE, null, null);
+    }
+
+    private String readNameFromDescriptor(Path dir, String resourceId) {
+        try {
+            Path descriptorPath = Paths.get(dir.toString(), resourceId + DESCRIPTOR_FILE_ENDING);
+            if (Files.exists(descriptorPath)) {
+                String content = readFile(descriptorPath);
+                DocumentDescriptor dd = jsonSerialization.deserialize(content, DocumentDescriptor.class);
+                return dd.getName();
+            }
+        } catch (IOException e) {
+            // ignore — name is optional
+        }
+        return null;
+    }
+
+    private String extractIdFromBotFilename(Path botFilePath) {
+        String filename = botFilePath.getFileName().toString();
+        return filename.substring(0, filename.length() - BOT_FILE_ENDING.length());
+    }
+
+    // ==================== Import ====================
+
+    @Override
+    public void importBot(InputStream zippedBotConfigFiles, String strategy,
+                          String selectedOriginIds, AsyncResponse response) {
         try {
             if (response != null) response.setTimeout(60, TimeUnit.SECONDS);
             File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
-            importBotZipFile(zippedBotConfigFiles, targetDir, response);
+
+            Set<String> selectedSet = parseSelectedResources(selectedOriginIds);
+            boolean isMerge = STRATEGY_MERGE.equalsIgnoreCase(strategy);
+
+            importBotZipFile(zippedBotConfigFiles, targetDir, response, isMerge, selectedSet);
         } catch (IOException e) {
             log.error(e.getLocalizedMessage(), e);
             if (response != null) {
@@ -156,7 +293,20 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
-    private void importBotZipFile(InputStream zippedBotConfigFiles, File targetDir, AsyncResponse response)
+    private Set<String> parseSelectedResources(String selectedOriginIds) {
+        if (isNullOrEmpty(selectedOriginIds)) return null;
+        return Arrays.stream(selectedOriginIds.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toSet());
+    }
+
+    private boolean isSelected(Set<String> selectedSet, String originId) {
+        return selectedSet == null || selectedSet.contains(originId);
+    }
+
+    private void importBotZipFile(InputStream zippedBotConfigFiles, File targetDir,
+                                  AsyncResponse response, boolean isMerge, Set<String> selectedSet)
             throws IOException {
 
         this.zipArchive.unzip(zippedBotConfigFiles, targetDir);
@@ -165,14 +315,26 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 path -> path.toString().endsWith(BOT_FILE_ENDING))) {
             directoryStream.forEach(botFilePath -> {
                 try {
+                    String botOriginId = extractIdFromBotFilename(botFilePath);
                     String botFileString = readFile(botFilePath);
                     BotConfiguration botConfiguration =
                             jsonSerialization.deserialize(botFileString, BotConfiguration.class);
                     botConfiguration.getPackages().forEach(packageUri ->
-                            parsePackage(targetDirPath, packageUri, botConfiguration, response));
+                            parsePackage(targetDirPath, packageUri, botConfiguration,
+                                    response, isMerge, selectedSet));
 
-                    URI newBotUri = createNewBot(botConfiguration);
+                    URI newBotUri;
+                    if (isMerge && isSelected(selectedSet, botOriginId)) {
+                        newBotUri = createOrUpdateBot(botConfiguration, botOriginId);
+                    } else {
+                        newBotUri = createNewBot(botConfiguration);
+                    }
+
                     updateDocumentDescriptor(Paths.get(targetDirPath), buildOldBotUri(botFilePath), newBotUri);
+
+                    // Set originId on the new bot's descriptor
+                    setOriginIdOnDescriptor(newBotUri, botOriginId);
+
                     response.resume(Response.ok().location(newBotUri).build());
                 } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException e) {
                     log.error(e.getLocalizedMessage(), e);
@@ -191,7 +353,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private void parsePackage(String targetDirPath, URI packageUri, BotConfiguration
-            botConfiguration, AsyncResponse response) {
+            botConfiguration, AsyncResponse response, boolean isMerge, Set<String> selectedSet) {
         try {
             IResourceId packageResourceId = RestUtilities.extractResourceId(packageUri);
             if (packageResourceId == null) {
@@ -201,7 +363,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             String packageVersion = String.valueOf(packageResourceId.getVersion());
 
             var dir = Paths.get(FileUtilities.buildPath(targetDirPath, packageId, packageVersion));
-            try(var directoryStream = Files.newDirectoryStream(dir,
+            try (var directoryStream = Files.newDirectoryStream(dir,
                     packageFilePath -> packageFilePath.toString().endsWith(".package.json"))) {
                 directoryStream.
                         forEach(packageFilePath -> {
@@ -209,65 +371,86 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                 Path packagePath = packageFilePath.getParent();
                                 String packageFileString = readFile(packageFilePath);
 
-                                // loading old resources, creating them in the new system,
+                                // loading old resources, creating/updating them,
                                 // updating document descriptor and replacing references in package config
 
                                 // ... for dictionaries
                                 List<URI> dictionaryUris = extractResourcesUris(packageFileString, DICTIONARY_URI_PATTERN);
-                                List<URI> newDictionaryUris = createNewDictionaries(
+                                List<URI> newDictionaryUris = createOrUpdateResources(
                                         readResources(dictionaryUris, packagePath,
-                                                DICTIONARY_EXT, RegularDictionaryConfiguration.class));
+                                                DICTIONARY_EXT, RegularDictionaryConfiguration.class),
+                                        dictionaryUris, isMerge, selectedSet,
+                                        this::createNewDictionaries, this::updateDictionary);
 
                                 updateDocumentDescriptor(packagePath, dictionaryUris, newDictionaryUris);
                                 packageFileString = replaceURIs(packageFileString, dictionaryUris, newDictionaryUris);
 
                                 // ... for behavior
                                 List<URI> behaviorUris = extractResourcesUris(packageFileString, BEHAVIOR_URI_PATTERN);
-                                List<URI> newBehaviorUris = createNewBehaviors(
+                                List<URI> newBehaviorUris = createOrUpdateResources(
                                         readResources(behaviorUris, packagePath,
-                                                BEHAVIOR_EXT, BehaviorConfiguration.class));
+                                                BEHAVIOR_EXT, BehaviorConfiguration.class),
+                                        behaviorUris, isMerge, selectedSet,
+                                        this::createNewBehaviors, this::updateBehavior);
 
                                 updateDocumentDescriptor(packagePath, behaviorUris, newBehaviorUris);
                                 packageFileString = replaceURIs(packageFileString, behaviorUris, newBehaviorUris);
 
                                 // ... for http calls
                                 List<URI> httpCallsUris = extractResourcesUris(packageFileString, HTTPCALLS_URI_PATTERN);
-                                List<URI> newHttpCallsUris = createNewHttpCalls(
+                                List<URI> newHttpCallsUris = createOrUpdateResources(
                                         readResources(httpCallsUris, packagePath,
-                                                HTTPCALLS_EXT, HttpCallsConfiguration.class));
+                                                HTTPCALLS_EXT, HttpCallsConfiguration.class),
+                                        httpCallsUris, isMerge, selectedSet,
+                                        this::createNewHttpCalls, this::updateHttpCalls);
 
                                 updateDocumentDescriptor(packagePath, httpCallsUris, newHttpCallsUris);
                                 packageFileString = replaceURIs(packageFileString, httpCallsUris, newHttpCallsUris);
 
                                 // ... for langchain
                                 List<URI> langchainUris = extractResourcesUris(packageFileString, LANGCHAIN_URI_PATTERN);
-                                List<URI> newLangchainUris = createNewLangchain(
+                                List<URI> newLangchainUris = createOrUpdateResources(
                                         readResources(langchainUris, packagePath,
-                                                LANGCHAIN_EXT, LangChainConfiguration.class));
+                                                LANGCHAIN_EXT, LangChainConfiguration.class),
+                                        langchainUris, isMerge, selectedSet,
+                                        this::createNewLangchain, this::updateLangchain);
 
                                 updateDocumentDescriptor(packagePath, langchainUris, newLangchainUris);
                                 packageFileString = replaceURIs(packageFileString, langchainUris, newLangchainUris);
 
                                 // ... for property
                                 List<URI> propertyUris = extractResourcesUris(packageFileString, PROPERTY_URI_PATTERN);
-                                List<URI> newPropertyUris = createNewProperties(
+                                List<URI> newPropertyUris = createOrUpdateResources(
                                         readResources(propertyUris, packagePath,
-                                                PROPERTY_EXT, PropertySetterConfiguration.class));
+                                                PROPERTY_EXT, PropertySetterConfiguration.class),
+                                        propertyUris, isMerge, selectedSet,
+                                        this::createNewProperties, this::updateProperty);
 
                                 updateDocumentDescriptor(packagePath, propertyUris, newPropertyUris);
                                 packageFileString = replaceURIs(packageFileString, propertyUris, newPropertyUris);
 
                                 // ... for output
                                 List<URI> outputUris = extractResourcesUris(packageFileString, OUTPUT_URI_PATTERN);
-                                List<URI> newOutputUris = createNewOutputs(
+                                List<URI> newOutputUris = createOrUpdateResources(
                                         readResources(outputUris, packagePath,
-                                                OUTPUT_EXT, OutputConfigurationSet.class));
+                                                OUTPUT_EXT, OutputConfigurationSet.class),
+                                        outputUris, isMerge, selectedSet,
+                                        this::createNewOutputs, this::updateOutput);
 
                                 updateDocumentDescriptor(packagePath, outputUris, newOutputUris);
                                 packageFileString = replaceURIs(packageFileString, outputUris, newOutputUris);
 
                                 // creating updated package and replacing references in bot config
-                                URI newPackageUri = createNewPackage(packageFileString);
+                                URI newPackageUri;
+                                if (isMerge && isSelected(selectedSet, packageId)) {
+                                    newPackageUri = createOrUpdatePackage(packageFileString, packageId);
+                                } else {
+                                    newPackageUri = createNewPackage(packageFileString);
+                                }
+
+                                // Set originId on the package's descriptor
+                                setOriginIdOnDescriptor(newPackageUri, packageId);
+
                                 updateDocumentDescriptor(packagePath, packageUri, newPackageUri);
                                 botConfiguration.setPackages(botConfiguration.getPackages().stream().
                                         map(uri -> uri.equals(packageUri) ? newPackageUri : uri).
@@ -287,6 +470,157 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             response.resume(new InternalServerErrorException());
         }
     }
+
+    // ==================== Create or Update Logic ====================
+
+    @FunctionalInterface
+    private interface ResourceCreator<T> {
+        List<URI> create(List<T> configs) throws RestInterfaceFactory.RestInterfaceFactoryException;
+    }
+
+    @FunctionalInterface
+    private interface ResourceUpdater<T> {
+        URI update(T config, String localId, Integer localVersion)
+                throws RestInterfaceFactory.RestInterfaceFactoryException;
+    }
+
+    private <T> List<URI> createOrUpdateResources(
+            List<T> configs, List<URI> originUris,
+            boolean isMerge, Set<String> selectedSet,
+            ResourceCreator<T> creator, ResourceUpdater<T> updater)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+
+        if (!isMerge) {
+            // Original behavior: create everything new
+            List<URI> newUris = creator.create(configs);
+            // Set originId on each newly created resource
+            for (int i = 0; i < originUris.size() && i < newUris.size(); i++) {
+                IResourceId origId = RestUtilities.extractResourceId(originUris.get(i));
+                if (origId != null) {
+                    setOriginIdOnDescriptor(newUris.get(i), origId.getId());
+                }
+            }
+            return newUris;
+        }
+
+        // Merge strategy: check each resource for existing local copy
+        List<URI> resultUris = new ArrayList<>();
+        for (int i = 0; i < configs.size(); i++) {
+            T config = configs.get(i);
+            IResourceId origResId = RestUtilities.extractResourceId(originUris.get(i));
+            if (origResId == null) {
+                resultUris.add(originUris.get(i));
+                continue;
+            }
+
+            String originId = origResId.getId();
+            if (!isSelected(selectedSet, originId)) {
+                // Not selected — check if local exists, keep it; otherwise create
+                URI existingUri = findLocalUriByOriginId(originId);
+                resultUris.add(existingUri != null ? existingUri : originUris.get(i));
+                continue;
+            }
+
+            // Try to find existing local resource
+            URI existingUri = findLocalUriByOriginId(originId);
+            if (existingUri != null) {
+                // Update existing
+                IResourceId localResId = RestUtilities.extractResourceId(existingUri);
+                if (localResId != null) {
+                    URI updatedUri = updater.update(config, localResId.getId(), localResId.getVersion());
+                    setOriginIdOnDescriptor(updatedUri, originId);
+                    resultUris.add(updatedUri);
+                    continue;
+                }
+            }
+
+            // No existing resource found — create new
+            List<URI> created = creator.create(List.of(config));
+            if (!created.isEmpty()) {
+                setOriginIdOnDescriptor(created.getFirst(), originId);
+                resultUris.add(created.getFirst());
+            }
+        }
+        return resultUris;
+    }
+
+    private URI findLocalUriByOriginId(String originId) {
+        try {
+            List<DocumentDescriptor> existing = documentDescriptorStore.findByOriginId(originId);
+            if (!existing.isEmpty()) {
+                return existing.getFirst().getResource();
+            }
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            log.debug("Could not look up origin ID " + originId + ": " + e.getMessage());
+        }
+        return null;
+    }
+
+    private URI createOrUpdateBot(BotConfiguration botConfiguration, String botOriginId)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        URI existingUri = findLocalUriByOriginId(botOriginId);
+        if (existingUri != null) {
+            IResourceId localResId = RestUtilities.extractResourceId(existingUri);
+            if (localResId != null) {
+                IRestBotStore restBotStore = getRestResourceStore(IRestBotStore.class);
+                Response updateResponse = restBotStore.updateBot(
+                        localResId.getId(), localResId.getVersion(), botConfiguration);
+                if (updateResponse.getStatus() == 200) {
+                    // updated — new version = old version + 1
+                    int newVersion = localResId.getVersion() + 1;
+                    return URI.create(IRestBotStore.resourceURI + localResId.getId() +
+                            IRestBotStore.versionQueryParam + newVersion);
+                }
+            }
+        }
+        return createNewBot(botConfiguration);
+    }
+
+    private URI createOrUpdatePackage(String packageFileString, String packageOriginId)
+            throws RestInterfaceFactory.RestInterfaceFactoryException, IOException {
+        URI existingUri = findLocalUriByOriginId(packageOriginId);
+        if (existingUri != null) {
+            IResourceId localResId = RestUtilities.extractResourceId(existingUri);
+            if (localResId != null) {
+                PackageConfiguration packageConfiguration =
+                        jsonSerialization.deserialize(packageFileString, PackageConfiguration.class);
+                IRestPackageStore restPackageStore = getRestResourceStore(IRestPackageStore.class);
+                Response updateResponse = restPackageStore.updatePackage(
+                        localResId.getId(), localResId.getVersion(), packageConfiguration);
+                if (updateResponse.getStatus() == 200) {
+                    int newVersion = localResId.getVersion() + 1;
+                    return URI.create(IRestPackageStore.resourceURI + localResId.getId() +
+                            IRestPackageStore.versionQueryParam + newVersion);
+                }
+            }
+        }
+        return createNewPackage(packageFileString);
+    }
+
+    private void setOriginIdOnDescriptor(URI resourceUri, String originId) {
+        try {
+            IResourceId resourceId = RestUtilities.extractResourceId(resourceUri);
+            if (resourceId != null) {
+                DocumentDescriptor descriptor =
+                        documentDescriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion());
+                if (descriptor != null && !originId.equals(descriptor.getOriginId())) {
+                    descriptor.setOriginId(originId);
+                    PatchInstruction<DocumentDescriptor> patchInstruction = new PatchInstruction<>();
+                    patchInstruction.setOperation(PatchInstruction.PatchOperation.SET);
+                    patchInstruction.setDocument(descriptor);
+
+                    IRestDocumentDescriptorStore restDescriptorStore =
+                            getRestResourceStore(IRestDocumentDescriptorStore.class);
+                    restDescriptorStore.patchDescriptor(
+                            resourceId.getId(), resourceId.getVersion(), patchInstruction);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Could not set originId on descriptor for " + resourceUri + ": " + e.getMessage());
+        }
+    }
+
+    // ==================== Resource Creation (original logic) ====================
 
     private URI createNewBot(BotConfiguration botConfiguration)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
@@ -365,6 +699,89 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             return outputResponse.getLocation();
         }).collect(Collectors.toList());
     }
+
+    // ==================== Resource Update (new merge logic) ====================
+
+    private URI updateDictionary(RegularDictionaryConfiguration config, String localId, Integer localVersion)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestRegularDictionaryStore store = getRestResourceStore(IRestRegularDictionaryStore.class);
+        Response response = store.updateRegularDictionary(localId, localVersion, config);
+        if (response.getStatus() == 200) {
+            return URI.create(IRestRegularDictionaryStore.resourceURI + localId +
+                    IRestRegularDictionaryStore.versionQueryParam + (localVersion + 1));
+        }
+        // Fallback: create new
+        Response createResp = store.createRegularDictionary(config);
+        checkIfCreatedResponse(createResp);
+        return createResp.getLocation();
+    }
+
+    private URI updateBehavior(BehaviorConfiguration config, String localId, Integer localVersion)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestBehaviorStore store = getRestResourceStore(IRestBehaviorStore.class);
+        Response response = store.updateBehaviorRuleSet(localId, localVersion, config);
+        if (response.getStatus() == 200) {
+            return URI.create(IRestBehaviorStore.resourceURI + localId +
+                    IRestBehaviorStore.versionQueryParam + (localVersion + 1));
+        }
+        Response createResp = store.createBehaviorRuleSet(config);
+        checkIfCreatedResponse(createResp);
+        return createResp.getLocation();
+    }
+
+    private URI updateHttpCalls(HttpCallsConfiguration config, String localId, Integer localVersion)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestHttpCallsStore store = getRestResourceStore(IRestHttpCallsStore.class);
+        Response response = store.updateHttpCalls(localId, localVersion, config);
+        if (response.getStatus() == 200) {
+            return URI.create(IRestHttpCallsStore.resourceURI + localId +
+                    IRestHttpCallsStore.versionQueryParam + (localVersion + 1));
+        }
+        Response createResp = store.createHttpCalls(config);
+        checkIfCreatedResponse(createResp);
+        return createResp.getLocation();
+    }
+
+    private URI updateLangchain(LangChainConfiguration config, String localId, Integer localVersion)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestLangChainStore store = getRestResourceStore(IRestLangChainStore.class);
+        Response response = store.updateLangChain(localId, localVersion, config);
+        if (response.getStatus() == 200) {
+            return URI.create(IRestLangChainStore.resourceURI + localId +
+                    IRestLangChainStore.versionQueryParam + (localVersion + 1));
+        }
+        Response createResp = store.createLangChain(config);
+        checkIfCreatedResponse(createResp);
+        return createResp.getLocation();
+    }
+
+    private URI updateProperty(PropertySetterConfiguration config, String localId, Integer localVersion)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestPropertySetterStore store = getRestResourceStore(IRestPropertySetterStore.class);
+        Response response = store.updatePropertySetter(localId, localVersion, config);
+        if (response.getStatus() == 200) {
+            return URI.create(IRestPropertySetterStore.resourceURI + localId +
+                    IRestPropertySetterStore.versionQueryParam + (localVersion + 1));
+        }
+        Response createResp = store.createPropertySetter(config);
+        checkIfCreatedResponse(createResp);
+        return createResp.getLocation();
+    }
+
+    private URI updateOutput(OutputConfigurationSet config, String localId, Integer localVersion)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestOutputStore store = getRestResourceStore(IRestOutputStore.class);
+        Response response = store.updateOutputSet(localId, localVersion, config);
+        if (response.getStatus() == 200) {
+            return URI.create(IRestOutputStore.resourceURI + localId +
+                    IRestOutputStore.versionQueryParam + (localVersion + 1));
+        }
+        Response createResp = store.createOutputSet(config);
+        checkIfCreatedResponse(createResp);
+        return createResp.getLocation();
+    }
+
+    // ==================== Shared helpers ====================
 
     private void updateDocumentDescriptor(Path directoryPath, URI oldUri, URI newUri)
             throws RestInterfaceFactory.RestInterfaceFactoryException {

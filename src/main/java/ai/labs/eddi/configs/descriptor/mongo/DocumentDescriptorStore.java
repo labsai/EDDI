@@ -83,4 +83,10 @@ public class DocumentDescriptorStore implements IDocumentDescriptorStore {
     public void deleteAllDescriptor(String resourceId) {
         descriptorStore.deleteAllDescriptor(resourceId);
     }
+
+    @Override
+    public List<DocumentDescriptor> findByOriginId(String originId)
+            throws ResourceStoreException, ResourceNotFoundException {
+        return descriptorStore.findByOriginId(originId);
+    }
 }

@@ -25,4 +25,13 @@ public interface IDescriptorStore<T> {
     void deleteDescriptor(String resourceId, Integer version) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException;
 
     void deleteAllDescriptor(String resourceId);
+
+    /**
+     * Find descriptors by their origin ID (the resource ID from the exporting instance).
+     * Used during merge import to find existing resources that were previously imported.
+     *
+     * @param originId the resource ID from the source instance
+     * @return list of matching descriptors, empty if none found
+     */
+    List<T> findByOriginId(String originId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 }
