@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-12
+> **Last updated:** 2026-03-13
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -313,18 +313,24 @@
 - [x] Removed `io.reactivex.rxjava3` dependency
 - [x] All tests pass
 
-### Phase 6B: PostgreSQL Integration Test Parity (in progress)
+### Phase 6B: PostgreSQL Integration Test Parity ✅ (commit `0eda70d9`, `e77b6f23`)
 
 - [x] Created `PostgresIntegrationTestProfile` with `eddi.datastore.type=postgres` + Testcontainers DevServices
-- [x] PG BehaviorCrudIT: 4/4 pass ✅
+- [x] Created 8 PostgreSQL IT subclasses — all 48/48 tests pass, full parity with MongoDB:
+  - `PostgresBehaviorCrudIT` (4/4), `PostgresOutputCrudIT` (5/5), `PostgresDictionaryCrudIT` (5/5)
+  - `PostgresBotEngineIT` (11/11), `PostgresBotDeploymentComponentIT` (4/4)
+  - `PostgresConversationServiceComponentIT` (7/7), `PostgresApiContractIT` (10/10)
+  - `PostgresBotUseCaseIT` (2/2)
 - [x] Fixed `RestUtilities.isValidId()` — added `-` for UUID dashes (`e5c68a0b`)
 - [x] Fixed `DocumentDescriptorFilter` — added `isResourceIdValid()` guard on PUT/PATCH (`e5c68a0b`)
 - [x] Added `#uuidUtils.extractId()` + `extractVersion()` to `UUIDWrapper` — DB-agnostic URI parsing (`7fb79bfa`)
 - [x] Updated all 7 Bot Father httpcalls JSONs (70 replacements) + re-zipped `Bot+Father-4.0.0.zip`
 - [x] Added 12 unit tests in `UUIDWrapperTest`
 - [x] Documented `#uuidUtils` in `docs/output-templating.md`
-- [ ] Run remaining PG ITs (Output, Dictionary, Bot Engine, etc.) — needs full parity with 48 MongoDB ITs
-- [x] All 672 tests pass (0 failures)
+- [x] Fixed `PostgresIntegrationTestProfile` — added `quarkus.http.port=8082` for `RestInterfaceFactory` (`0eda70d9`)
+- [x] Fixed `PostgresApiContractIT` — overrode `readNonExistent_returns404` with UUID-formatted ID (`0eda70d9`)
+- [x] Fixed `BotUseCaseIT.useBotManagement` — stale trigger cleanup + status assertions (`e77b6f23`)
+- [x] All 96 integration tests pass (48 MongoDB + 48 PostgreSQL)
 
 **Key files:**
 
@@ -332,21 +338,22 @@
 - `src/main/java/ai/labs/eddi/engine/runtime/rest/interceptors/DocumentDescriptorFilter.java` — `isResourceIdValid` guard
 - `src/main/java/ai/labs/eddi/modules/templating/impl/dialects/uuid/UUIDWrapper.java` — `extractId/extractVersion`
 - `src/main/resources/initial-bots/Bot+Father-4.0.0.zip` — re-zipped with updated httpcalls
+- `src/test/java/ai/labs/eddi/integration/PostgresIntegrationTestProfile.java` — PG test profile
+- `src/test/java/ai/labs/eddi/integration/postgres/` — 8 PG IT subclasses
+- `src/test/java/ai/labs/eddi/integration/BotUseCaseIT.java` — stale trigger cleanup
 - `docs/output-templating.md` — `#uuidUtils` documentation
 
 ## Next Up
 
-### Priority A: Complete PostgreSQL IT Parity
+### Phase 6A: MongoDB Sync Driver Migration — Remaining Work
 
-**Status:** PG BehaviorCrudIT passes (4/4). Remaining PG ITs need to be created/run for all resource types + bot engine + deployment.
+**Status:** Core migration done. Remaining:
+- [ ] Run all 48 ITs against both MongoDB and PostgreSQL in CI
 
-**Scope:**
-- [ ] `PostgresOutputCrudIT`, `PostgresDictionaryCrudIT` — CRUD for remaining resource types
-- [ ] `PostgresBotEngineIT` — full conversation lifecycle
-- [ ] `PostgresBotDeploymentComponentIT`, `PostgresApiContractIT` — deployment + contract tests
-- [ ] Verify all 48 IT equivalents pass against PostgreSQL
+### Phase 7: MCP Server + Client
 
-### Then: Phase 7 (MCP Server + Client)
+- [ ] Item 33: MCP Server — expose EDDI tools via MCP (5 SP)
+- [ ] Item 34: MCP Client — consume external MCP tools (5 SP)
 
 See `AGENTS.md` for the full roadmap.
 

@@ -43,6 +43,36 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-13 — Phase 6B Complete: PostgreSQL IT Parity (48/48) + BotUseCaseIT Fix
+
+**Repo:** EDDI
+**Branch:** `feature/version-6.0.0`
+**Phase:** 6B — PostgreSQL Integration Test Parity
+
+**What changed:**
+
+**PostgreSQL IT parity (`0eda70d9`):**
+- Ran all 8 PostgreSQL IT suites — 6 passed immediately, 2 needed fixes
+- `PostgresApiContractIT.readNonExistent_returns404` — base test used MongoDB ObjectId `000...0` which fails PostgreSQL UUID cast → overrode with valid UUID `00000000-0000-0000-0000-000000000000`. Base method changed from package-private to `protected` for cross-package override
+- `PostgresBotUseCaseIT` — `RestInterfaceFactory` connected to port 7070 (default) instead of 8082 because `PostgresIntegrationTestProfile` only set `quarkus.http.test-port` but not `quarkus.http.port` → added `quarkus.http.port=8082`
+- All 48 PostgreSQL ITs pass: Behavior (4), Output (5), Dictionary (5), BotEngine (11), BotDeployment (4), ConversationService (7), ApiContract (10), BotUseCase (2)
+
+**MongoDB BotUseCaseIT fix (`e77b6f23`):**
+- `BotUseCaseIT.useBotManagement` failed because a stale bot trigger from a **previous test run** persisted in MongoDB with an old `botId`. The POST to `/bottriggerstore/bottriggers` returned 409 (already exists), so the managed bot API used the old trigger → 404 because that old bot was no longer deployed → NPE on null `userConversation`
+- Fix: Added `DELETE /bottriggerstore/bottriggers/{intent}` before POST for idempotent setup
+- Added `statusCode(200)` assertions for better error detection
+- This bug was pre-existing but undetected because previous test runs didn't exercise `BotUseCaseIT` in isolation after data accumulated
+
+**Design decisions:**
+- Used `@Override` + `protected` visibility for the PG-specific test rather than modifying the base test, keeping MongoDB tests unchanged
+- `quarkus.http.port` must match `quarkus.http.test-port` in all test profiles because `RestInterfaceFactory` reads the config property, not the runtime-assigned port
+
+**Testing:**
+- [x] All 96 integration tests pass (48 MongoDB + 48 PostgreSQL)
+- [x] No regressions
+
+**Commits:** `0eda70d9`, `e77b6f23`
+
 ### 2026-03-12 — PostgreSQL IT Fixes + DB-Agnostic URI Parsing
 
 **Repo:** EDDI
@@ -636,6 +666,7 @@ _For recording decisions that come up during implementation that aren't in the p
 
 _Track any regressions introduced during implementation for quick debugging._
 
-| Date | Regression | Cause | Fix | Commit |
-| ---- | ---------- | ----- | --- | ------ |
-|      |            |       |     |        |
+| Date       | Regression                                     | Cause                                                              | Fix                                     | Commit     |
+| ---------- | ---------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------- | ---------- |
+| 2026-03-13 | `BotUseCaseIT.useBotManagement` 500/NPE        | Stale bot trigger from previous test run with old botId            | DELETE trigger before POST in test setup | `e77b6f23` |
+|            |                                                |                                                                    |                                         |            |
