@@ -88,9 +88,23 @@ public interface IRestBotStore extends IRestVersionInfo {
 
         @DELETE
         @Path("/{id}")
-        @Operation(description = "Delete bot. Use cascade=true to also delete packages and extension resources not used by other bots.")
+        @Operation(
+                summary = "Delete bot",
+                description = "Delete a bot configuration. When cascade=true, also deletes all referenced packages "
+                        + "and their extension resources (behavior sets, HTTP calls, output sets, langchains, "
+                        + "property setters, dictionaries). Partial cascade failures are logged but do not prevent "
+                        + "the bot itself from being deleted.")
+        @APIResponse(responseCode = "200", description = "Bot deleted successfully.")
+        @APIResponse(responseCode = "404", description = "Bot not found.")
         Response deleteBot(@PathParam("id") String id,
-                        @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
+                        @Parameter(name = "version", required = true, example = "1",
+                                description = "Version of the bot to delete.")
+                        @QueryParam("version") Integer version,
+                        @Parameter(description = "If true, permanently remove from database. "
+                                + "If false (default), soft-delete only.")
                         @QueryParam("permanent") @DefaultValue("false") Boolean permanent,
+                        @Parameter(description = "If true, also delete all packages and extension resources "
+                                + "referenced by this bot. Resources shared with other bots are still deleted — "
+                                + "use with care.")
                         @QueryParam("cascade") @DefaultValue("false") Boolean cascade);
 }

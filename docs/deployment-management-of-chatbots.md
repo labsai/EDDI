@@ -249,3 +249,90 @@ _Response Headers_
 "content-type": "application/json"
 }
 ```
+
+---
+
+## Deleting a Bot
+
+### Simple Delete (Soft-Delete)
+
+Marks the bot as deleted but keeps it in the database. The bot can potentially be restored.
+
+| Element      | Value                                     |
+|-------------|-------------------------------------------|
+| HTTP Method | `DELETE`                                   |
+| API endpoint| `/botstore/bots/{id}?version={version}`    |
+| {id}        | (`Path parameter`) `String` bot ID         |
+| version     | (`Query parameter`) `Integer` version      |
+| permanent   | (`Query parameter`) `Boolean` default `false`. If `true`, permanently removes from database |
+
+```
+DELETE /botstore/bots/5aaf98e19f7dd421ac3c7de9?version=1
+→ 200 OK (soft-deleted)
+
+DELETE /botstore/bots/5aaf98e19f7dd421ac3c7de9?version=1&permanent=true
+→ 200 OK (permanently removed)
+```
+
+### Cascade Delete
+
+Deletes the bot **and all its child resources** in one operation. This is the recommended way to fully clean up a bot and avoid orphaned resources.
+
+```
+Bot
+ └── Package 1
+ │    ├── Behavior Set
+ │    ├── HTTP Calls
+ │    ├── Output Set
+ │    ├── LangChain Config
+ │    ├── Property Setter
+ │    └── Parser (with dictionaries)
+ └── Package 2
+      └── ...
+```
+
+| Element      | Value                                                                          |
+|-------------|--------------------------------------------------------------------------------|
+| HTTP Method | `DELETE`                                                                        |
+| API endpoint| `/botstore/bots/{id}?version={version}&cascade=true&permanent=true`             |
+| cascade     | (`Query parameter`) `Boolean` default `false`. If `true`, deletes packages and all extension resources |
+| permanent   | (`Query parameter`) `Boolean` default `false`. Recommended `true` with cascade  |
+
+#### Example
+
+```
+DELETE /botstore/bots/5aaf98e19f7dd421ac3c7de9?version=1&cascade=true&permanent=true
+→ 200 OK
+```
+
+This will:
+1. Read the bot configuration to discover its packages
+2. For each package, read its extensions and delete all resources (behavior sets, HTTP calls, output sets, langchains, property setters, parser dictionaries)
+3. Delete each package
+4. Delete the bot itself
+
+> **Note:** Cascade delete is error-tolerant. If individual resource deletions fail (e.g., resource already deleted), the operation continues and the bot itself is still deleted. Failures are logged server-side.
+
+> **⚠️ Warning:** Cascade delete does **not** check if resources are shared with other bots. If two bots reference the same package, cascade-deleting one bot will also delete that shared package.
+
+### Cascade Delete for Packages
+
+Packages can also be individually cascade-deleted:
+
+```
+DELETE /packagestore/packages/{id}?version={version}&cascade=true&permanent=true
+→ 200 OK (package + all extension resources deleted)
+```
+
+### Important: Undeploy Before Deleting
+
+If the bot is currently deployed, you should **undeploy** it first:
+
+```
+POST /administration/unrestricted/undeploy/{botId}?endAllActiveConversations=true
+→ 202 Accepted
+
+DELETE /botstore/bots/{botId}?version=1&cascade=true&permanent=true
+→ 200 OK
+```
+

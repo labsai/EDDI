@@ -43,6 +43,33 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-14 — Cascade Delete for Bots & Packages
+
+**Repo:** EDDI
+**Branch:** `feature/version-6.0.0`
+
+**Problem:** Deleting a bot left all its packages and extension resources (behavior sets, HTTP calls, output sets, langchains, property setters, dictionaries) orphaned in the database. Cleanups had to be done manually.
+
+**Solution:** Added `cascade` query parameter to `DELETE /botstore/bots/{id}` and `DELETE /packagestore/packages/{id}`.
+
+**Files modified:**
+- `IRestBotStore.java` — added `cascade` param + enriched OpenAPI annotations
+- `RestBotStore.java` — cascade walks packages, delegates to `RestPackageStore`
+- `IRestPackageStore.java` — added `cascade` param + enriched OpenAPI annotations
+- `RestPackageStore.java` — cascade walks extensions + parser dictionaries, deletes via `ResourceClientLibrary`
+- `IResourceClientLibrary.java` — added `deleteResource(URI, boolean)`
+- `ResourceClientLibrary.java` — `IResourceService.delete()` for all 7 store types
+- `deployment-management-of-chatbots.md` — added deletion section with cascade docs
+
+**Design decisions:**
+- Error-tolerant: partial cascade failures are logged but don't block the parent deletion
+- No shared-resource check (by design — cascade means "delete everything under this bot")
+- Follows same traversal pattern as existing `duplicateBot(deepCopy=true)`
+
+**Tests added:**
+- `RestBotStoreTest` — 5 tests
+- `RestPackageStoreTest` — 6 tests
+
 ### 2026-03-13 — Import/Export Merge Strategy + Manager Import Dialog
 
 **Repos:** EDDI, EDDI-Manager
