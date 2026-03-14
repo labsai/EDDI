@@ -156,6 +156,17 @@ public class RestBotStore implements IRestBotStore {
                 for (URI packageUri : botConfiguration.getPackages()) {
                     IResourceId resourceId = RestUtilities.extractResourceId(packageUri);
                     try {
+                        // Check if this package is referenced by other bots
+                        var referencingBots = botStore.getBotDescriptorsContainingPackage(
+                                resourceId.getId(), resourceId.getVersion(), false);
+                        if (referencingBots.size() > 1) {
+                            log.infof("Skipping cascade-delete of package %s (v%d) — " +
+                                            "still referenced by %d other bot(s)",
+                                    resourceId.getId(), resourceId.getVersion(),
+                                    referencingBots.size() - 1);
+                            continue;
+                        }
+
                         restPackageStore.deletePackage(
                                 resourceId.getId(), resourceId.getVersion(), permanent, true);
                         log.infof("Cascade-deleted package %s (v%d) for bot %s",

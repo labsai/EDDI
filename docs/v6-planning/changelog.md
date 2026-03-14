@@ -63,12 +63,12 @@ _Entries will be added here as implementation progresses._
 
 **Design decisions:**
 - Error-tolerant: partial cascade failures are logged but don't block the parent deletion
-- No shared-resource check (by design — cascade means "delete everything under this bot")
+- **Shared-resource safety**: before deleting, checks if the resource is referenced by other bots/packages. If shared, it is skipped (not deleted)
 - Follows same traversal pattern as existing `duplicateBot(deepCopy=true)`
 
 **Tests added:**
-- `RestBotStoreTest` — 5 tests
-- `RestPackageStoreTest` — 6 tests
+- `RestBotStoreTest` — 6 tests (including shared-package skip)
+- `RestPackageStoreTest` — 7 tests (including shared-resource skip)
 
 ### 2026-03-13 — Import/Export Merge Strategy + Manager Import Dialog
 

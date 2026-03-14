@@ -90,10 +90,11 @@ public interface IRestPackageStore extends IRestVersionInfo {
         @Path("/{id}")
         @Operation(
                 summary = "Delete package",
-                description = "Delete a package configuration. When cascade=true, also deletes all extension "
+                description = "Delete a package configuration. When cascade=true, also deletes extension "
                         + "resources referenced by this package: behavior sets, HTTP calls, output sets, "
                         + "langchains, property setters, and parser dictionaries. "
-                        + "Partial cascade failures are logged but do not prevent the package itself from being deleted.")
+                        + "Shared resources (used by other packages) are skipped. "
+                        + "Partial failures are logged but do not prevent the package from being deleted.")
         @APIResponse(responseCode = "200", description = "Package deleted successfully.")
         @APIResponse(responseCode = "404", description = "Package not found.")
         Response deletePackage(@PathParam("id") String id,

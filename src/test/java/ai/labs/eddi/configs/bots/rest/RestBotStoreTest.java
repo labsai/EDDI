@@ -3,6 +3,7 @@ package ai.labs.eddi.configs.bots.rest;
 import ai.labs.eddi.configs.bots.IBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -47,6 +48,11 @@ class RestBotStoreTest {
                 botStore, restPackageStore, documentDescriptorStore, jsonSchemaCreator);
     }
 
+    /** Helper to create a dummy DocumentDescriptor for reference-count mocking */
+    private DocumentDescriptor dummyDescriptor() {
+        return new DocumentDescriptor();
+    }
+
     @Nested
     @DisplayName("deleteBot")
     class DeleteBotTests {
@@ -56,14 +62,12 @@ class RestBotStoreTest {
         void deleteBot_noCascade() throws Exception {
             restBotStore.deleteBot(BOT_ID, 1, false, false);
 
-            // Package store should NOT be touched when cascade=false
             verify(restPackageStore, never()).deletePackage(anyString(), anyInt(), anyBoolean(), anyBoolean());
-            // Bot itself should be deleted (via restVersionInfo -> botStore.delete)
             verify(botStore).delete(eq(BOT_ID), eq(1));
         }
 
         @Test
-        @DisplayName("should cascade-delete packages when cascade=true")
+        @DisplayName("should cascade-delete packages when cascade=true and packages are not shared")
         void deleteBot_cascade() throws Exception {
             BotConfiguration config = new BotConfiguration();
             config.setPackages(new ArrayList<>(List.of(
@@ -71,15 +75,44 @@ class RestBotStoreTest {
                     URI.create("eddi://ai.labs.package/packagestore/packages/" + PKG2_ID + "?version=1")
             )));
             when(botStore.read(BOT_ID, 1)).thenReturn(config);
+            // Each package is only referenced by this one bot
+            when(botStore.getBotDescriptorsContainingPackage(PKG1_ID, 2, false))
+                    .thenReturn(List.of(dummyDescriptor()));
+            when(botStore.getBotDescriptorsContainingPackage(PKG2_ID, 1, false))
+                    .thenReturn(List.of(dummyDescriptor()));
             when(restPackageStore.deletePackage(anyString(), anyInt(), anyBoolean(), anyBoolean()))
                     .thenReturn(Response.ok().build());
 
             restBotStore.deleteBot(BOT_ID, 1, true, true);
 
-            // Verify both packages were cascade-deleted
             verify(restPackageStore).deletePackage(PKG1_ID, 2, true, true);
             verify(restPackageStore).deletePackage(PKG2_ID, 1, true, true);
-            // Bot itself should also be deleted permanently
+            verify(botStore).deleteAllPermanently(BOT_ID);
+        }
+
+        @Test
+        @DisplayName("should skip cascade-delete of packages shared with other bots")
+        void deleteBot_cascade_skipsSharedPackages() throws Exception {
+            BotConfiguration config = new BotConfiguration();
+            config.setPackages(new ArrayList<>(List.of(
+                    URI.create("eddi://ai.labs.package/packagestore/packages/" + PKG1_ID + "?version=2"),
+                    URI.create("eddi://ai.labs.package/packagestore/packages/" + PKG2_ID + "?version=1")
+            )));
+            when(botStore.read(BOT_ID, 1)).thenReturn(config);
+            // PKG1 is shared with 2 bots — should be SKIPPED
+            when(botStore.getBotDescriptorsContainingPackage(PKG1_ID, 2, false))
+                    .thenReturn(List.of(dummyDescriptor(), dummyDescriptor()));
+            // PKG2 is only in this bot — should be deleted
+            when(botStore.getBotDescriptorsContainingPackage(PKG2_ID, 1, false))
+                    .thenReturn(List.of(dummyDescriptor()));
+            when(restPackageStore.deletePackage(anyString(), anyInt(), anyBoolean(), anyBoolean()))
+                    .thenReturn(Response.ok().build());
+
+            restBotStore.deleteBot(BOT_ID, 1, true, true);
+
+            // Only PKG2 should be deleted — PKG1 is shared
+            verify(restPackageStore, never()).deletePackage(eq(PKG1_ID), anyInt(), anyBoolean(), anyBoolean());
+            verify(restPackageStore).deletePackage(PKG2_ID, 1, true, true);
             verify(botStore).deleteAllPermanently(BOT_ID);
         }
 
@@ -92,19 +125,18 @@ class RestBotStoreTest {
                     URI.create("eddi://ai.labs.package/packagestore/packages/" + PKG2_ID + "?version=1")
             )));
             when(botStore.read(BOT_ID, 1)).thenReturn(config);
-            // pkg1 delete throws, pkg2 succeeds
+            // Both packages only referenced by this bot
+            when(botStore.getBotDescriptorsContainingPackage(anyString(), anyInt(), eq(false)))
+                    .thenReturn(List.of(dummyDescriptor()));
             when(restPackageStore.deletePackage(PKG1_ID, 1, true, true))
                     .thenThrow(new RuntimeException("Package in use"));
             when(restPackageStore.deletePackage(PKG2_ID, 1, true, true))
                     .thenReturn(Response.ok().build());
 
-            // Should not throw — bot delete should still proceed
             assertDoesNotThrow(() -> restBotStore.deleteBot(BOT_ID, 1, true, true));
 
-            // Both packages attempted
             verify(restPackageStore).deletePackage(PKG1_ID, 1, true, true);
             verify(restPackageStore).deletePackage(PKG2_ID, 1, true, true);
-            // Bot itself was still deleted
             verify(botStore).deleteAllPermanently(BOT_ID);
         }
 
@@ -114,12 +146,9 @@ class RestBotStoreTest {
             when(botStore.read(BOT_ID, 1))
                     .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
 
-            // Should not throw — gracefully falls back to deleting bot only
             assertDoesNotThrow(() -> restBotStore.deleteBot(BOT_ID, 1, true, true));
 
-            // No packages deleted (since config couldn't be read)
             verify(restPackageStore, never()).deletePackage(anyString(), anyInt(), anyBoolean(), anyBoolean());
-            // Bot still deleted
             verify(botStore).deleteAllPermanently(BOT_ID);
         }
 

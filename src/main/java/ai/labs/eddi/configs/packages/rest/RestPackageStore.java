@@ -200,6 +200,16 @@ public class RestPackageStore implements IRestPackageStore {
 
     private void deleteResourceSafely(URI resourceUri, boolean permanent) {
         try {
+            // Check if this resource is referenced by other packages
+            var referencingPackages = packageStore.getPackageDescriptorsContainingResource(
+                    resourceUri.toString(), false);
+            if (referencingPackages.size() > 1) {
+                log.infof("Skipping cascade-delete of resource %s — " +
+                        "still referenced by %d other package(s)", resourceUri,
+                        referencingPackages.size() - 1);
+                return;
+            }
+
             resourceClientLibrary.deleteResource(resourceUri, permanent);
             log.infof("Cascade-deleted resource %s", resourceUri);
         } catch (Exception e) {

@@ -90,10 +90,11 @@ public interface IRestBotStore extends IRestVersionInfo {
         @Path("/{id}")
         @Operation(
                 summary = "Delete bot",
-                description = "Delete a bot configuration. When cascade=true, also deletes all referenced packages "
+                description = "Delete a bot configuration. When cascade=true, also deletes referenced packages "
                         + "and their extension resources (behavior sets, HTTP calls, output sets, langchains, "
-                        + "property setters, dictionaries). Partial cascade failures are logged but do not prevent "
-                        + "the bot itself from being deleted.")
+                        + "property setters, dictionaries). Shared resources (packages used by other bots, "
+                        + "extensions used by other packages) are skipped. "
+                        + "Partial failures are logged but do not prevent the bot from being deleted.")
         @APIResponse(responseCode = "200", description = "Bot deleted successfully.")
         @APIResponse(responseCode = "404", description = "Bot not found.")
         Response deleteBot(@PathParam("id") String id,

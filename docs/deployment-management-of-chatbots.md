@@ -313,7 +313,7 @@ This will:
 
 > **Note:** Cascade delete is error-tolerant. If individual resource deletions fail (e.g., resource already deleted), the operation continues and the bot itself is still deleted. Failures are logged server-side.
 
-> **⚠️ Warning:** Cascade delete does **not** check if resources are shared with other bots. If two bots reference the same package, cascade-deleting one bot will also delete that shared package.
+> **Safety:** Cascade delete checks for shared references before deleting each resource. If a package is used by another bot, or an extension resource is used by another package, it will be **skipped** (not deleted). Only resources exclusively owned by the deleted bot are removed.
 
 ### Cascade Delete for Packages
 
