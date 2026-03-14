@@ -16,7 +16,6 @@ import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.net.URI;
@@ -150,7 +149,28 @@ public class RestBotStore implements IRestBotStore {
     }
 
     @Override
-    public Response deleteBot(String id, Integer version, Boolean permanent) {
+    public Response deleteBot(String id, Integer version, Boolean permanent, Boolean cascade) {
+        if (cascade) {
+            try {
+                BotConfiguration botConfiguration = botStore.read(id, version);
+                for (URI packageUri : botConfiguration.getPackages()) {
+                    IResourceId resourceId = RestUtilities.extractResourceId(packageUri);
+                    try {
+                        restPackageStore.deletePackage(
+                                resourceId.getId(), resourceId.getVersion(), permanent, true);
+                        log.infof("Cascade-deleted package %s (v%d) for bot %s",
+                                resourceId.getId(), resourceId.getVersion(), id);
+                    } catch (Exception e) {
+                        log.warnf("Failed to cascade-delete package %s: %s",
+                                resourceId.getId(), e.getMessage());
+                    }
+                }
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                log.warnf("Bot %s (v%d) not found for cascade — deleting bot only", id, version);
+            } catch (IResourceStore.ResourceStoreException e) {
+                log.warnf("Error reading bot %s for cascade: %s", id, e.getMessage());
+            }
+        }
         return restVersionInfo.delete(id, version, permanent);
     }
 

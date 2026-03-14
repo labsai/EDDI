@@ -77,6 +77,32 @@ _Entries will be added here as implementation progresses._
 - [x] Manager: `npx tsc -b` clean, 24/24 tests pass, `npm run build` succeeds
 - [x] No regressions
 
+### 2026-03-14 — ContentEditor: Monaco-Based Content Editing with Fullscreen Expand
+
+**Repo:** EDDI-Manager
+**Branch:** `feature/version-6.0.0`
+
+**What changed:**
+
+- `content-editor.tsx` [NEW]: Reusable Monaco-based editor component replacing cramped `<textarea rows={4}>` fields. Two modes: inline auto-sizing editor (4–20 lines based on content) and fullscreen expand via Radix Dialog. Features: dark/light theme integration (`useTheme()`), RTL/LTR support (logical CSS properties), full i18n (all 11 locales), ARIA accessibility (`aria-live` status bar, `sr-only` descriptions), keyboard navigation (`Ctrl+Shift+F` expand, `Escape` close, Monaco's `Ctrl+F` find). Responsive: 100% on mobile, padded modal on tablet/desktop.
+- `langchain-editor.tsx` [MODIFIED]: System prompt `<textarea>` replaced with `<ContentEditor language="plaintext">`
+- `httpcalls-editor.tsx` [MODIFIED]: Request body `<textarea>` replaced with `<ContentEditor language="json">`
+- `content-editor.test.tsx` [NEW]: 16 unit tests covering rendering, value binding, onChange, status bar counts, expand button (a11y, readOnly, keyboard shortcut tooltip), language prop, placeholder show/hide, fullscreen dialog open/close, read-only badge, aria-live attributes
+- 11 locale files [MODIFIED]: Added `contentEditor.*` namespace (expand, close, lines, chars, fullscreenTitle, fullscreenDescription)
+
+**Design decisions:**
+
+- Leveraged existing `@monaco-editor/react` and `@radix-ui/react-dialog` — zero new dependencies
+- Expand button is visible in readOnly mode too — reviewers viewing long prompts benefit from fullscreen
+- Auto-sizing uses `content.split('\n').length` clamped to `[minLines, maxLines]` — responsive without content shift
+
+**Testing:**
+
+- [x] TypeScript: zero errors (`npx tsc -b`)
+- [x] All 208 tests pass (`npm run test`) — 26 test files
+- [x] Build: succeeds (`npm run build`)
+- [x] Visual verification: inline editor, fullscreen modal, RTL/Arabic, dark/light theme, French i18n — all confirmed
+
 ### 2026-03-14 — Import/Export Merge Strategy: Test Coverage
 
 **Repos:** EDDI, EDDI-Manager

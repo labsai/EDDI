@@ -15,6 +15,8 @@ public interface IResourceClientLibrary {
 
     Response duplicateResource(URI uri) throws ServiceException;
 
+    Response deleteResource(URI uri, boolean permanent) throws ServiceException;
+
     class ResourceClientLibraryException extends RuntimeException {
         public ResourceClientLibraryException(String message, Exception e) {
             super(message, e);

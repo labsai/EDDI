@@ -120,11 +120,40 @@ public class BotDeploymentManagement implements IBotDeploymentManagement {
                             this.deploymentInfos.add(deploymentInfo);
                         } catch (ServiceException | IllegalAccessException e) {
                             LOGGER.error(e.getLocalizedMessage(), e);
+                        } catch (Exception e) {
+                            // Catch any other exception (e.g. IllegalStateException wrapping
+                            // ResourceNotFoundException) so one broken bot doesn't block all others
+                            LOGGER.error(format(
+                                    "Failed to deploy bot (id=%s, version=%d, environment=%s), skipping. Cause: %s",
+                                    deploymentInfo.getBotId(),
+                                    deploymentInfo.getBotVersion(),
+                                    deploymentInfo.getEnvironment(),
+                                    e.getMessage()));
+
+                            // If the root cause is a missing resource, auto-clean the stale record
+                            if (isCausedByResourceNotFound(e)) {
+                                LOGGER.warn(format(
+                                        "Bot config not found for id=%s version=%d — marking deployment as undeployed",
+                                        deploymentInfo.getBotId(), deploymentInfo.getBotVersion()));
+                                deploymentStore.setDeploymentInfo(
+                                        deploymentInfo.getEnvironment().toString(),
+                                        deploymentInfo.getBotId(),
+                                        deploymentInfo.getBotVersion(),
+                                        undeployed);
+                            }
                         }
                     });
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
         }
+    }
+
+    private boolean isCausedByResourceNotFound(Throwable t) {
+        while (t != null) {
+            if (t instanceof ResourceNotFoundException) return true;
+            t = t.getCause();
+        }
+        return false;
     }
 
     @Scheduled(every = "24h", delay = 300)

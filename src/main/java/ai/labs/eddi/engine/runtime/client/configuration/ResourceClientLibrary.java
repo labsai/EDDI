@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.regulardictionary.IRestRegularDictionaryStore;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
+import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -33,6 +34,8 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
     private final IRestOutputStore restOutputStore;
     private final IRestPropertySetterStore restPropertySetterStore;
     private Map<String, IResourceService> restInterfaces;
+
+    private static final Logger log = Logger.getLogger(ResourceClientLibrary.class);
 
     @Inject
     public ResourceClientLibrary(IRestParserStore restParserStore,
@@ -66,6 +69,11 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             public Response duplicate(String id, Integer version) {
                 return restParserStore.duplicateParser(id, version);
             }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restParserStore.deleteParser(id, version, permanent);
+            }
         });
 
         restInterfaces.put("ai.labs.regulardictionary", new IResourceService() {
@@ -77,6 +85,11 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             @Override
             public Response duplicate(String id, Integer version) {
                 return restRegularDictionaryStore.duplicateRegularDictionary(id, version);
+            }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restRegularDictionaryStore.deleteRegularDictionary(id, version, permanent);
             }
         });
 
@@ -90,6 +103,11 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             public Response duplicate(String id, Integer version) {
                 return restBehaviorStore.duplicateBehaviorRuleSet(id, version);
             }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restBehaviorStore.deleteBehaviorRuleSet(id, version, permanent);
+            }
         });
 
         restInterfaces.put("ai.labs.httpcalls", new IResourceService() {
@@ -101,6 +119,11 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             @Override
             public Response duplicate(String id, Integer version) {
                 return restHttpCallsStore.duplicateHttpCalls(id, version);
+            }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restHttpCallsStore.deleteHttpCalls(id, version, permanent);
             }
         });
 
@@ -114,6 +137,11 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             public Response duplicate(String id, Integer version) {
                 return restLangChainStore.duplicateLangChain(id, version);
             }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restLangChainStore.deleteLangChain(id, version, permanent);
+            }
         });
 
         restInterfaces.put("ai.labs.output", new IResourceService() {
@@ -126,6 +154,11 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             public Response duplicate(String id, Integer version) {
                 return restOutputStore.duplicateOutputSet(id, version);
             }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restOutputStore.deleteOutputSet(id, version, permanent);
+            }
         });
 
         restInterfaces.put("ai.labs.property", new IResourceService() {
@@ -137,6 +170,11 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             @Override
             public Response duplicate(String id, Integer version) {
                 return restPropertySetterStore.duplicatePropertySetter(id, version);
+            }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restPropertySetterStore.deletePropertySetter(id, version, permanent);
             }
         });
     }
@@ -167,9 +205,24 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         return proxy.duplicate(resourceId.getId(), resourceId.getVersion());
     }
 
+    @Override
+    public Response deleteResource(URI uri, boolean permanent) throws ServiceException {
+        String type = uri.getHost();
+        IResourceService proxy = restInterfaces.get(type);
+        if (RuntimeUtilities.isNullOrEmpty(proxy)) {
+            log.warnf("Could not find proxy for type '%s' in uri '%s' — skipping delete", type, uri);
+            return Response.ok().build();
+        }
+
+        IResourceId resourceId = RestUtilities.extractResourceId(uri);
+        return proxy.delete(resourceId.getId(), resourceId.getVersion(), permanent);
+    }
+
     private interface IResourceService {
         Object read(String id, Integer version) throws ServiceException;
 
         Response duplicate(String id, Integer version) throws ServiceException;
+
+        Response delete(String id, Integer version, boolean permanent) throws ServiceException;
     }
 }

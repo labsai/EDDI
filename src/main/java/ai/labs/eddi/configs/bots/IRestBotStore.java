@@ -88,8 +88,9 @@ public interface IRestBotStore extends IRestVersionInfo {
 
         @DELETE
         @Path("/{id}")
-        @Operation(description = "Delete bot.")
+        @Operation(description = "Delete bot. Use cascade=true to also delete packages and extension resources not used by other bots.")
         Response deleteBot(@PathParam("id") String id,
                         @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-                        @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
+                        @QueryParam("permanent") @DefaultValue("false") Boolean permanent,
+                        @QueryParam("cascade") @DefaultValue("false") Boolean cascade);
 }

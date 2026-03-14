@@ -17,7 +17,6 @@ import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.net.URI;
@@ -151,8 +150,61 @@ public class RestPackageStore implements IRestPackageStore {
     }
 
     @Override
-    public Response deletePackage(String id, Integer version, Boolean permanent) {
+    public Response deletePackage(String id, Integer version, Boolean permanent, Boolean cascade) {
+        if (cascade) {
+            try {
+                PackageConfiguration packageConfiguration = packageStore.read(id, version);
+                for (var packageExtension : packageConfiguration.getPackageExtensions()) {
+                    // Delete parser dictionaries
+                    URI type = packageExtension.getType();
+                    if (type != null && "ai.labs.parser".equals(type.getHost())) {
+                        deleteParserDictionaries(packageExtension, permanent);
+                    }
+
+                    // Delete main extension resource (via config.uri)
+                    Map<String, Object> config = packageExtension.getConfig();
+                    if (!isNullOrEmpty(config)) {
+                        Object resourceUriObj = config.get(KEY_URI);
+                        if (!isNullOrEmpty(resourceUriObj)) {
+                            deleteResourceSafely(URI.create(resourceUriObj.toString()), permanent);
+                        }
+                    }
+                }
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                log.warnf("Package %s (v%d) not found for cascade — deleting package only", id, version);
+            } catch (IResourceStore.ResourceStoreException e) {
+                log.warnf("Error reading package %s for cascade: %s", id, e.getMessage());
+            }
+        }
         return restVersionInfo.delete(id, version, permanent);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void deleteParserDictionaries(PackageExtension packageExtension, boolean permanent) {
+        var dictionaries = (List<Map<String, Object>>) packageExtension.getExtensions().get("dictionaries");
+        if (!isNullOrEmpty(dictionaries)) {
+            for (var dictionary : dictionaries) {
+                var dictType = dictionary.get("type");
+                if (dictType != null && "ai.labs.parser.dictionaries.regular".equals(URI.create(dictType.toString()).getHost())) {
+                    var config = (Map<String, Object>) dictionary.get("config");
+                    if (!isNullOrEmpty(config)) {
+                        Object dictionaryUriObj = config.get(KEY_URI);
+                        if (!isNullOrEmpty(dictionaryUriObj)) {
+                            deleteResourceSafely(URI.create(dictionaryUriObj.toString()), permanent);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void deleteResourceSafely(URI resourceUri, boolean permanent) {
+        try {
+            resourceClientLibrary.deleteResource(resourceUri, permanent);
+            log.infof("Cascade-deleted resource %s", resourceUri);
+        } catch (Exception e) {
+            log.warnf("Failed to cascade-delete resource %s: %s", resourceUri, e.getMessage());
+        }
     }
 
     @Override
