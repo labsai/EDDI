@@ -343,26 +343,45 @@
 - `src/test/java/ai/labs/eddi/integration/BotUseCaseIT.java` — stale trigger cleanup
 - `docs/output-templating.md` — `#uuidUtils` documentation
 
+### Bot Lifecycle API: Cascade Delete + Orphan Detection ✅
+
+- [x] Added `?cascade=true` to `DELETE /botstore/bots/{id}` and `DELETE /packagestore/packages/{id}`
+- [x] Cascade walks bot → packages → extensions and deletes all children
+- [x] **Shared-resource safety**: checks references before deleting — skips packages used by other bots, extensions used by other packages
+- [x] Added `IResourceClientLibrary.deleteResource(URI, permanent)` for cascade use
+- [x] New admin endpoint: `GET/DELETE /administration/orphans`
+  - GET: scans all 8 store types for unreferenced resources (dry-run report)
+  - DELETE: permanently purges all orphans
+  - Algorithm: enumerate bots → packages → extensions → compare against all descriptors per store
+- [x] DTOs: `OrphanInfo`, `OrphanReport`; interfaces: `IRestOrphanAdmin`, `IRestBotStore`, `IRestPackageStore` updated
+- [x] Enriched OpenAPI annotations with `@Operation`, `@Parameter`, `@APIResponse` descriptions
+- [x] Documentation: deletion + orphan sections in `docs/deployment-management-of-chatbots.md`
+- [x] Tests: `RestBotStoreTest` (6/6), `RestPackageStoreTest` (7/7), `RestOrphanAdminTest` (4/4) — 17 new tests total
+- [x] Full test suite passes
+
+**Key files (new):**
+
+- `src/main/java/ai/labs/eddi/configs/admin/model/OrphanInfo.java`
+- `src/main/java/ai/labs/eddi/configs/admin/model/OrphanReport.java`
+- `src/main/java/ai/labs/eddi/configs/admin/IRestOrphanAdmin.java`
+- `src/main/java/ai/labs/eddi/configs/admin/rest/RestOrphanAdmin.java`
+- `src/test/java/ai/labs/eddi/configs/admin/rest/RestOrphanAdminTest.java`
+- `src/test/java/ai/labs/eddi/configs/bots/rest/RestBotStoreTest.java`
+- `src/test/java/ai/labs/eddi/configs/packages/rest/RestPackageStoreTest.java`
+
+**Key files (modified):**
+
+- `IRestBotStore.java`, `RestBotStore.java` — cascade + shared-resource check
+- `IRestPackageStore.java`, `RestPackageStore.java` — cascade + shared-resource check
+- `IResourceClientLibrary.java`, `ResourceClientLibrary.java` — `deleteResource` method
+- `docs/deployment-management-of-chatbots.md` — deletion + orphan docs
+
 ## Next Up
 
-### Import/Export Merge Strategy ✅ (commits `b0586b2d` + Manager `b8028db`)
+### Bot Lifecycle API — Remaining Phases
 
-- [x] Added `originId` to `DocumentDescriptor` for tracking imported resource origins
-- [x] Added `findByOriginId()` to all descriptor stores
-- [x] `ImportPreview` record + `previewImport` preview endpoint (dry-run diff)
-- [x] `RestImportService` merge strategy — looks up by origin ID, updates existing
-- [x] Selective resource import via `selectedResources` query param
-- [x] Manager `ImportBotDialog` — multi-step wizard (upload → strategy → preview → import)
-- [x] Updated `backup.ts`, `use-backup.ts`, `bots.tsx`, `backup.test.tsx`
-- [x] **Backend test coverage**: `ImportMergeIT.java` — 7 ordered integration tests (create → export → preview → merge → post-merge → selective → create-always-new)
-- [x] **Frontend test coverage**: `import-bot-dialog.test.tsx` — 15 component tests (rendering, upload, strategy, preview table, checkboxes, merge confirm, navigation, close)
-- [x] **MSW handlers**: Added `/backup/import/preview` + updated `/backup/import` with merge strategy support
-- [x] All tests pass (backend compiles, Manager 191 tests pass across 25 files)
-
-### Phase 6A: MongoDB Sync Driver Migration — Remaining Work
-
-**Status:** Core migration done. Remaining:
-- [ ] Run all 48 ITs against both MongoDB and PostgreSQL in CI
+- [ ] **Phase 3: Bulk Delete** — `POST /botstore/bots/bulkDelete` with cascade+permanent options (2 SP)
+- [ ] **Phase 4: Manager UI Multi-Select** — checkboxes on bot cards, bulk action bar (3 SP)
 
 ### Phase 7: MCP Server + Client
 
