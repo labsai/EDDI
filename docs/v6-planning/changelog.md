@@ -43,6 +43,22 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-14 — Orphan Detection & Cleanup Endpoint
+
+**Repo:** EDDI
+**Branch:** `feature/version-6.0.0`
+
+**New endpoint:** `GET/DELETE /administration/orphans`
+
+Scans all stores (packages, behavior sets, HTTP calls, output sets, langchains, property setters, dictionaries, parsers) and finds resources not referenced by any bot or package.
+
+**Files added:**
+- `OrphanInfo.java` — DTO (resourceUri, type, name, deleted)
+- `OrphanReport.java` — DTO (totalOrphans, deletedCount, orphans list)
+- `IRestOrphanAdmin.java` — JAX-RS interface with OpenAPI annotations
+- `RestOrphanAdmin.java` — Implementation: builds referenced-URI set from all bots/packages, compares against all descriptors per store type
+- `RestOrphanAdminTest.java` — 4 unit tests (no-orphans, detects orphans, no-bots, purge)
+
 ### 2026-03-14 — Cascade Delete for Bots & Packages
 
 **Repo:** EDDI

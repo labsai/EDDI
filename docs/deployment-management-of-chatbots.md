@@ -336,3 +336,63 @@ DELETE /botstore/bots/{botId}?version=1&cascade=true&permanent=true
 → 200 OK
 ```
 
+---
+
+## Orphan Detection and Cleanup
+
+Over time, resources can become orphaned — they exist in the database but are no longer referenced by any bot or package. The orphan admin endpoint helps detect and clean up these resources.
+
+### Scan for Orphans (Dry Run)
+
+```
+GET /administration/orphans
+→ 200 OK
+```
+
+Returns a report listing all unreferenced resources across all stores (packages, behavior sets, HTTP calls, output sets, langchains, property setters, dictionaries, parsers).
+
+| Element         | Value                                                                |
+|----------------|----------------------------------------------------------------------|
+| HTTP Method    | `GET`                                                                 |
+| API endpoint   | `/administration/orphans`                                             |
+| includeDeleted | (`Query parameter`) `Boolean` default `false`. Include soft-deleted resources |
+
+**Example Response:**
+
+```json
+{
+  "totalOrphans": 3,
+  "deletedCount": 0,
+  "orphans": [
+    {
+      "resourceUri": "eddi://ai.labs.package/packagestore/packages/abc123?version=1",
+      "type": "ai.labs.package",
+      "name": "Unused Package",
+      "deleted": false
+    },
+    {
+      "resourceUri": "eddi://ai.labs.behavior/behaviorstore/behaviorsets/def456?version=1",
+      "type": "ai.labs.behavior",
+      "name": "Old Behavior Set",
+      "deleted": true
+    }
+  ]
+}
+```
+
+### Purge Orphans
+
+```
+DELETE /administration/orphans
+→ 200 OK
+```
+
+Permanently deletes all orphaned resources. This is **irreversible**.
+
+| Element         | Value                                                                |
+|----------------|----------------------------------------------------------------------|
+| HTTP Method    | `DELETE`                                                              |
+| API endpoint   | `/administration/orphans`                                             |
+| includeDeleted | (`Query parameter`) `Boolean` default `true`. Include soft-deleted resources in purge |
+
+
