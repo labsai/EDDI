@@ -17,6 +17,7 @@
     "packages": "Packages",
     "conversations": "Conversations",
     "coordinator": "Coordinator",
+    "orphans": "Orphans",
     "chat": "Chat",
     "resources": "Resources",
     "sectionManagement": "Management",
@@ -480,5 +481,14 @@
     "discardError": "Failed to discard",
     "purgeSuccess": "Purged all dead-letter entries",
     "purgeError": "Failed to purge"
+  },
+  "contentEditor": {
+    "expand": "Expand",
+    "expandHint": "Expand to fullscreen (Ctrl+Shift+F)",
+    "close": "Done",
+    "lines": "lines",
+    "chars": "chars",
+    "fullscreenTitle": "Content Editor",
+    "fullscreenDescription": "Full-screen content editor. Press Escape to close."
   }
 }

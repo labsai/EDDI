@@ -14,6 +14,7 @@ import {
   BookOpen,
   FileJson,
   Activity,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -46,6 +47,11 @@ const navSections = [
         path: "/manage/coordinator",
         icon: Activity,
         labelKey: "nav.coordinator",
+      },
+      {
+        path: "/manage/orphans",
+        icon: Trash2,
+        labelKey: "nav.orphans",
       },
     ],
   },

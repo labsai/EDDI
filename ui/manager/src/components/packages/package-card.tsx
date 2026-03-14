@@ -85,9 +85,12 @@ export function PackageCard({ pkg, onDuplicate, onDelete }: PackageCardProps) {
           to={`/manage/packageview/${pkg.id}`}
           className="text-lg font-semibold text-foreground hover:text-primary transition-colors"
         >
-          {pkg.name || "Unnamed Package"}
+          {pkg.name || t("packages.unnamed", "Unnamed Package")}
           <ExternalLink className="ms-1 inline h-3.5 w-3.5 opacity-0 group-hover:opacity-50" />
         </Link>
+        <p className="mt-0.5 font-mono text-xs text-muted-foreground/70 truncate" title={pkg.id}>
+          {pkg.id}
+        </p>
         <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
           {pkg.description || t("packages.noDescription", "No description")}
         </p>

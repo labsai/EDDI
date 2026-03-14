@@ -77,8 +77,15 @@ export function updateBot(
   return api.put(`/botstore/bots/${id}?version=${version}`, bot);
 }
 
-export function deleteBot(id: string, version: number): Promise<void> {
-  return api.delete(`/botstore/bots/${id}?version=${version}`);
+export function deleteBot(
+  id: string,
+  version: number,
+  options?: { cascade?: boolean; permanent?: boolean }
+): Promise<void> {
+  const params = new URLSearchParams({ version: String(version) });
+  if (options?.cascade) params.set("cascade", "true");
+  if (options?.permanent) params.set("permanent", "true");
+  return api.delete(`/botstore/bots/${id}?${params}`);
 }
 
 export function duplicateBot(
@@ -94,27 +101,30 @@ export function duplicateBot(
 export function deployBot(
   environment: string,
   botId: string,
-  version?: number
+  version: number
 ): Promise<void> {
-  const versionSuffix = version ? `?version=${version}` : "";
   return api.post(
-    `/administration/${environment}/deploy/${botId}${versionSuffix}`
+    `/administration/${environment}/deploy/${botId}?version=${version}`
   );
 }
 
 export function undeployBot(
   environment: string,
-  botId: string
+  botId: string,
+  version: number
 ): Promise<void> {
-  return api.post(`/administration/${environment}/undeploy/${botId}`);
+  return api.post(
+    `/administration/${environment}/undeploy/${botId}?version=${version}`
+  );
 }
 
 export function getDeploymentStatus(
   environment: string,
-  botId: string
+  botId: string,
+  version: number
 ): Promise<DeploymentStatus> {
   return api.get<DeploymentStatus>(
-    `/administration/${environment}/deploymentstatus/${botId}`
+    `/administration/${environment}/deploymentstatus/${botId}?version=${version}`
   );
 }
 
@@ -124,12 +134,13 @@ export interface EnvironmentStatus {
 }
 
 export async function getDeploymentStatuses(
-  botId: string
+  botId: string,
+  version: number
 ): Promise<EnvironmentStatus[]> {
   const results = await Promise.allSettled(
     ENVIRONMENTS.map(async (env) => {
       try {
-        const result = await getDeploymentStatus(env, botId);
+        const result = await getDeploymentStatus(env, botId, version);
         return { environment: env, status: result.status };
       } catch {
         return { environment: env, status: "NOT_FOUND" as const };

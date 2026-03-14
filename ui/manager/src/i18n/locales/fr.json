@@ -16,7 +16,7 @@
     "bots": "Bots",
     "packages": "Paquets",
     "conversations": "Conversations",
-    "coordinator": "Coordinator",
+    "coordinator": "Coordinator", "orphans": "Orphans",
     "chat": "Chat",
     "resources": "Ressources",
     "sectionManagement": "Management",
@@ -480,5 +480,15 @@
     "discardError": "Failed to discard",
     "purgeSuccess": "Purged all dead-letter entries",
     "purgeError": "Failed to purge"
+  },
+  "contentEditor": {
+    "expand": "Agrandir",
+    "expandHint": "Plein écran (Ctrl+Maj+F)",
+    "close": "Terminé",
+    "lines": "lignes",
+    "chars": "caractères",
+    "fullscreenTitle": "Éditeur de contenu",
+    "fullscreenDescription": "Éditeur plein écran. Échap pour fermer."
   }
 }
+

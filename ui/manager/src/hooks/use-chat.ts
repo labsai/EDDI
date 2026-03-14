@@ -14,6 +14,9 @@ import {
 import {
   getConversationDescriptors,
   type SimpleConversationMemorySnapshot,
+  extractInput,
+  extractOutput,
+  extractQuickReplies,
 } from "@/lib/api/conversations";
 import {
   getBotDescriptors,
@@ -170,7 +173,7 @@ export function useDeployedBots() {
       const deployed: (BotDescriptor & { id: string; version: number })[] = [];
       for (const bot of bots) {
         try {
-          const status = await getDeploymentStatus("unrestricted", bot.id);
+          const status = await getDeploymentStatus("unrestricted", bot.id, bot.version);
           if (status.status === "READY") {
             deployed.push(bot);
           }
@@ -201,20 +204,21 @@ export function useStartConversation() {
       );
 
       // Convert welcome steps to ChatMessages
-      const welcomeMessages: ChatMessage[] = [];
-      for (const step of snapshot.conversationSteps ?? []) {
-        if (step.output) {
-          welcomeMessages.push({
+      const outputs = snapshot.conversationOutputs ?? [];
+      for (const output of outputs) {
+        const text = extractOutput(output);
+        if (text) {
+          store.getState().addMessage({
             id: `welcome-${Date.now()}-${Math.random()}`,
             role: "bot",
-            content: step.output,
+            content: text,
             timestamp: Date.now(),
           });
         }
-      }
-      if (welcomeMessages.length > 0) {
-        for (const msg of welcomeMessages) {
-          store.getState().addMessage(msg);
+        // Extract quick replies from the last output
+        const qr = extractQuickReplies(output);
+        if (qr.length > 0) {
+          store.getState().setQuickReplies(qr);
         }
       }
 
@@ -273,18 +277,24 @@ export function useSendMessage() {
           message
         );
 
-        // Extract bot output from the response
-        const lastStep = snapshot.conversationSteps?.[
-          snapshot.conversationSteps.length - 1
+        // Extract bot output from the last conversationOutput
+        const lastOutput = snapshot.conversationOutputs?.[
+          (snapshot.conversationOutputs?.length ?? 1) - 1
         ];
-        const output = lastStep?.output ?? "";
+        const output = extractOutput(lastOutput);
 
-        state.addMessage({
-          id: `bot-${Date.now()}`,
-          role: "bot",
-          content: output,
-          timestamp: Date.now(),
-        });
+        if (output) {
+          state.addMessage({
+            id: `bot-${Date.now()}`,
+            role: "bot",
+            content: output,
+            timestamp: Date.now(),
+          });
+        }
+
+        // Extract quick replies
+        const qr = extractQuickReplies(lastOutput);
+        state.setQuickReplies(qr);
         state.setProcessing(false);
       }
     },
@@ -321,20 +331,24 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore) {
 /** Helper: rebuild messages from a conversation snapshot */
 function snapshotToMessages(snapshot: SimpleConversationMemorySnapshot): ChatMessage[] {
   const messages: ChatMessage[] = [];
-  for (const step of snapshot.conversationSteps ?? []) {
-    if (step.input) {
+  const outputs = snapshot.conversationOutputs ?? [];
+  for (let i = 0; i < (snapshot.conversationSteps ?? []).length; i++) {
+    const step = snapshot.conversationSteps[i];
+    const input = step ? extractInput(step) : undefined;
+    const output = extractOutput(outputs[i]);
+    if (input) {
       messages.push({
         id: `user-${messages.length}-${Date.now()}`,
         role: "user",
-        content: step.input,
+        content: input,
         timestamp: Date.now(),
       });
     }
-    if (step.output) {
+    if (output) {
       messages.push({
         id: `bot-${messages.length}-${Date.now()}`,
         role: "bot",
-        content: step.output,
+        content: output,
         timestamp: Date.now(),
       });
     }
@@ -377,7 +391,7 @@ export function useLoadConversation() {
       store.getState().replaceMessages(messages);
       store.getState().setUndoRedo(
         snapshot.conversationSteps.length > 0,
-        (snapshot.redoCache?.length ?? 0) > 0
+        snapshot.redoAvailable ?? false
       );
 
       return snapshot;
@@ -398,7 +412,7 @@ export function useUndoConversation() {
       store.getState().replaceMessages(messages);
       store.getState().setUndoRedo(
         snapshot.conversationSteps.length > 0,
-        (snapshot.redoCache?.length ?? 0) > 0
+        snapshot.redoAvailable ?? false
       );
       return snapshot;
     },
@@ -418,7 +432,7 @@ export function useRedoConversation() {
       store.getState().replaceMessages(messages);
       store.getState().setUndoRedo(
         snapshot.conversationSteps.length > 0,
-        (snapshot.redoCache?.length ?? 0) > 0
+        snapshot.redoAvailable ?? false
       );
       return snapshot;
     },

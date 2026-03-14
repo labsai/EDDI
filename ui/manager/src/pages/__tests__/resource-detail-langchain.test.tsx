@@ -59,7 +59,7 @@ describe("LangChain Editor", () => {
     });
   });
 
-  it("renders system prompt textarea", async () => {
+  it("renders system prompt content editor", async () => {
     renderPage("langchain");
     await waitFor(() => {
       expect(screen.getAllByTestId("system-prompt").length).toBeGreaterThan(0);

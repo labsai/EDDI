@@ -16,7 +16,7 @@
     "bots": "ボット",
     "packages": "パッケージ",
     "conversations": "会話",
-    "coordinator": "Coordinator",
+    "coordinator": "Coordinator", "orphans": "Orphans",
     "chat": "チャット",
     "resources": "リソース",
     "sectionManagement": "Management",
@@ -480,5 +480,15 @@
     "discardError": "Failed to discard",
     "purgeSuccess": "Purged all dead-letter entries",
     "purgeError": "Failed to purge"
+  },
+  "contentEditor": {
+    "expand": "展開",
+    "expandHint": "フルスクリーン (Ctrl+Shift+F)",
+    "close": "完了",
+    "lines": "行",
+    "chars": "文字",
+    "fullscreenTitle": "コンテンツエディタ",
+    "fullscreenDescription": "フルスクリーンエディタ。Escapeで閉じます。"
   }
 }
+

@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-03-14  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Import/Export Merge Strategy — test coverage
+> **Last commit**: ContentEditor component — Monaco-based content editing with fullscreen expand
 
 ---
 
@@ -45,7 +45,7 @@
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 191/191 pass (`npm run test`) — 25 files
+- **Unit/Component**: 208/208 pass (`npm run test`) — 26 files
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds
@@ -72,7 +72,7 @@
 - **E2E**: `e2e-helpers.ts`, `navigation.spec.ts`, `theme.spec.ts`, `rtl.spec.ts`, `dashboard.spec.ts`, `bots.spec.ts`, `bot-detail.spec.ts`, `packages.spec.ts`, `conversations.spec.ts`, `chat.spec.ts`, `resources.spec.ts`
 - **Integration Tests**: `e2e/integration/integration-helpers.ts`, `bots.integration.spec.ts`, `packages.integration.spec.ts`, `resources.integration.spec.ts`, `conversations.integration.spec.ts`, `deployment.integration.spec.ts`, `schemas.integration.spec.ts`
 - **MSW**: `handlers.ts` (bots, packages, conversations, resources, schemas, extension store mocks), `server.ts`, `browser.ts`
-- **Editors**: `json-editor.tsx` (with JSON schema support), `version-picker.tsx`, `config-editor-layout.tsx`, `update-usage-dialog.tsx`, `pipeline-builder.tsx`, `add-extension-dialog.tsx`, `behavior-editor.tsx`, `httpcalls-editor.tsx`, `langchain-editor.tsx`, `output-editor.tsx`, `propertysetter-editor.tsx`, `dictionary-editor.tsx`
+- **Editors**: `json-editor.tsx` (with JSON schema support), `content-editor.tsx` (Monaco inline+fullscreen), `version-picker.tsx`, `config-editor-layout.tsx`, `update-usage-dialog.tsx`, `pipeline-builder.tsx`, `add-extension-dialog.tsx`, `behavior-editor.tsx`, `httpcalls-editor.tsx`, `langchain-editor.tsx`, `output-editor.tsx`, `propertysetter-editor.tsx`, `dictionary-editor.tsx`
 - **Cascade**: `cascade-save.ts`, `resource-usage.ts`
 - **Auth**: `auth-context.ts`, `auth-provider.tsx` (optional Keycloak), `use-auth.ts`, `auth-config.ts`
 - **Keycloak**: `docker-compose.keycloak.yml` (local dev), `keycloak/eddi-realm.json` (auto-import realm)

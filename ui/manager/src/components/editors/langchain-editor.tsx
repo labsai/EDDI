@@ -10,6 +10,7 @@ import {
   Bot,
   Zap,
 } from "lucide-react";
+import { ContentEditor } from "./content-editor";
 
 // ─── Types matching LangChainConfiguration backend model ─────────────────────
 
@@ -319,17 +320,17 @@ function TaskEditor({
           <Section
             label={t("langchainEditor.systemPrompt", "System Prompt")}
           >
-            <textarea
+            <ContentEditor
               value={task.parameters?.systemMessage ?? ""}
-              onChange={(e) => updateParam("systemMessage", e.target.value)}
+              onChange={(v) => updateParam("systemMessage", v)}
               readOnly={readOnly}
-              rows={4}
+              language="plaintext"
+              label={t("langchainEditor.systemPrompt", "System Prompt")}
               placeholder={t(
                 "langchainEditor.systemPromptPlaceholder",
                 "You are a helpful assistant..."
               )}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              data-testid="system-prompt"
+              testId="system-prompt"
             />
           </Section>
 

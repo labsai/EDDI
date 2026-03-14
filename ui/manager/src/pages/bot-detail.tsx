@@ -18,6 +18,7 @@ import {
   Download,
   Copy,
   Server,
+  MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -59,8 +60,8 @@ export function BotDetailPage() {
   const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const { data: bot, isLoading, isError, refetch } = useBot(id!, version);
-  const { data: deployment } = useDeploymentStatus(id!);
-  const { data: envStatuses } = useDeploymentStatuses(id!);
+  const { data: deployment } = useDeploymentStatus(id!, version);
+  const { data: envStatuses } = useDeploymentStatuses(id!, version);
   const { data: versions } = useBotVersions(id!);
 
   const deployMutation = useDeployBot();
@@ -89,7 +90,7 @@ export function BotDetailPage() {
   }
 
   function handleUndeploy() {
-    undeployMutation.mutate({ botId: id! });
+    undeployMutation.mutate({ botId: id!, version });
   }
 
   async function handleDelete() {
@@ -220,6 +221,18 @@ export function BotDetailPage() {
                 : t("bots.deploy")}
           </button>
 
+          {/* Chat — only when deployed */}
+          {isDeployed && (
+            <Link
+              to={`/manage/chat?botId=${id}`}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400"
+              data-testid="chat-btn"
+            >
+              <MessageSquare className="h-4 w-4" />
+              {t("bots.chat", "Chat")}
+            </Link>
+          )}
+
           {/* Duplicate */}
           <button
             onClick={handleDuplicate}
@@ -277,7 +290,7 @@ export function BotDetailPage() {
         <EnvironmentBadges
           statuses={envStatuses}
           onDeploy={(env) => deployMutation.mutate({ environment: env, botId: id!, version })}
-          onUndeploy={(env) => undeployMutation.mutate({ environment: env, botId: id! })}
+          onUndeploy={(env) => undeployMutation.mutate({ environment: env, botId: id!, version })}
           isBusy={isBusy}
         />
       )}

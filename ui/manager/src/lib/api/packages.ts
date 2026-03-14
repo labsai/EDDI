@@ -55,8 +55,15 @@ export function updatePackage(
   );
 }
 
-export function deletePackage(id: string, version: number): Promise<void> {
-  return api.delete(`/packagestore/packages/${id}?version=${version}`);
+export function deletePackage(
+  id: string,
+  version: number,
+  options?: { cascade?: boolean; permanent?: boolean }
+): Promise<void> {
+  const params = new URLSearchParams({ version: String(version) });
+  if (options?.cascade) params.set("cascade", "true");
+  if (options?.permanent) params.set("permanent", "true");
+  return api.delete(`/packagestore/packages/${id}?${params}`);
 }
 
 /** Get all versions of a specific package (for version picker) */

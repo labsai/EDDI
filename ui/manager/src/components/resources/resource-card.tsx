@@ -111,6 +111,9 @@ export function ResourceCard({
           {item.name || t("resources.unnamed", "Unnamed Resource")}
           <ExternalLink className="ms-1 inline h-3.5 w-3.5 opacity-0 group-hover:opacity-50" />
         </Link>
+        <p className="mt-0.5 font-mono text-xs text-muted-foreground/70 truncate" title={item.id}>
+          {item.id}
+        </p>
         <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
           {item.description || t("resources.noDescription", "No description")}
         </p>

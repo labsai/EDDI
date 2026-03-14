@@ -37,11 +37,11 @@ export function useBot(id: string, version?: number) {
   });
 }
 
-export function useDeploymentStatus(botId: string, environment = "unrestricted") {
+export function useDeploymentStatus(botId: string, version: number, environment = "unrestricted") {
   return useQuery({
-    queryKey: [...BOTS_KEY, "deployment", environment, botId],
-    queryFn: () => getDeploymentStatus(environment, botId),
-    enabled: !!botId,
+    queryKey: [...BOTS_KEY, "deployment", environment, botId, version],
+    queryFn: () => getDeploymentStatus(environment, botId, version),
+    enabled: !!botId && version > 0,
     refetchInterval: (query) => {
       // Poll every 3s while deploying
       return query.state.data?.status === "IN_PROGRESS" ? 3000 : false;
@@ -82,11 +82,11 @@ export function useUpdateBot() {
   });
 }
 
-export function useDeploymentStatuses(botId: string) {
+export function useDeploymentStatuses(botId: string, version: number) {
   return useQuery({
-    queryKey: [...BOTS_KEY, "deploymentStatuses", botId],
-    queryFn: () => getDeploymentStatuses(botId),
-    enabled: !!botId,
+    queryKey: [...BOTS_KEY, "deploymentStatuses", botId, version],
+    queryFn: () => getDeploymentStatuses(botId, version),
+    enabled: !!botId && version > 0,
     refetchInterval: (query) => {
       const data = query.state.data;
       if (data?.some((d) => d.status === "IN_PROGRESS")) return 3000;
@@ -144,7 +144,7 @@ export function useDeployBot() {
     }: {
       environment?: string;
       botId: string;
-      version?: number;
+      version: number;
     }) => deployBot(environment, botId, version),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: BOTS_KEY });
@@ -158,17 +158,19 @@ export function useUndeployBot() {
     mutationFn: ({
       environment = "unrestricted",
       botId,
+      version,
     }: {
       environment?: string;
       botId: string;
-    }) => undeployBot(environment, botId),
+      version: number;
+    }) => undeployBot(environment, botId, version),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: BOTS_KEY });
     },
   });
 }
 
-/** Group bot descriptors by name, keeping the latest version */
+/** Group bot descriptors by resource ID, keeping the latest version per bot */
 export function groupBotsByName(
   bots: BotDescriptor[]
 ): (BotDescriptor & { id: string; version: number })[] {
@@ -179,9 +181,9 @@ export function groupBotsByName(
 
   for (const bot of bots) {
     const { id, version } = parseResourceUri(bot.resource);
-    const existing = grouped.get(bot.name);
+    const existing = grouped.get(id);
     if (!existing || version > existing.version) {
-      grouped.set(bot.name, { ...bot, id, version });
+      grouped.set(id, { ...bot, id, version });
     }
   }
 

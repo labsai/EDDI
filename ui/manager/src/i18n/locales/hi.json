@@ -16,7 +16,7 @@
     "bots": "बॉट",
     "packages": "पैकेज",
     "conversations": "वार्तालाप",
-    "coordinator": "Coordinator",
+    "coordinator": "Coordinator", "orphans": "Orphans",
     "chat": "चैट",
     "resources": "संसाधन",
     "sectionManagement": "Management",
@@ -480,5 +480,15 @@
     "discardError": "Failed to discard",
     "purgeSuccess": "Purged all dead-letter entries",
     "purgeError": "Failed to purge"
+  },
+  "contentEditor": {
+    "expand": "विस्तार",
+    "expandHint": "पूर्ण स्क्रीन (Ctrl+Shift+F)",
+    "close": "हो गया",
+    "lines": "पंक्तियाँ",
+    "chars": "अक्षर",
+    "fullscreenTitle": "सामग्री संपादक",
+    "fullscreenDescription": "पूर्ण स्क्रीन संपादक। बंद करने के लिए Escape दबाएँ।"
   }
 }
+

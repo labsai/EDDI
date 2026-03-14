@@ -11,12 +11,14 @@ import {
   Clock,
   AlertTriangle,
   Filter,
+  Bot,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
   useConversationDescriptors,
   useDeleteConversation,
+  useConversationStepCount,
 } from "@/hooks/use-conversations";
 import { parseConversationUri, type ConversationState } from "@/lib/api/conversations";
 import { Button } from "@/components/ui/button";
@@ -24,6 +26,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
+import {
+  ViewToggle,
+  getStoredViewMode,
+  setStoredViewMode,
+  type ViewMode,
+} from "@/components/shared/view-toggle";
 
 const stateConfig: Record<
   ConversationState,
@@ -70,6 +78,7 @@ export function ConversationsPage() {
     "ALL"
   );
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [view, setView] = useState<ViewMode>(() => getStoredViewMode("conversations"));
 
   const { data: conversations, isLoading, isError, refetch } =
     useConversationDescriptors(
@@ -96,6 +105,11 @@ export function ConversationsPage() {
     }
   }
 
+  function handleViewChange(mode: ViewMode) {
+    setView(mode);
+    setStoredViewMode("conversations", mode);
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -112,7 +126,7 @@ export function ConversationsPage() {
       {/* Search + Filter bar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
-          <Search className="absolute inset-s-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
             value={search}
@@ -123,20 +137,23 @@ export function ConversationsPage() {
           />
         </div>
 
-        {/* State filter */}
-        <div className="flex items-center gap-1.5">
-          <Filter className="h-4 w-4 text-muted-foreground" />
-          {stateFilters.map((sf) => (
-            <Button
-              key={sf.value}
-              variant={stateFilter === sf.value ? "primary" : "secondary"}
-              size="sm"
-              className="rounded-full"
-              onClick={() => setStateFilter(sf.value)}
-            >
-              {sf.label}
-            </Button>
-          ))}
+        {/* State filter + view toggle */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <Filter className="h-4 w-4 text-muted-foreground" />
+            {stateFilters.map((sf) => (
+              <Button
+                key={sf.value}
+                variant={stateFilter === sf.value ? "primary" : "secondary"}
+                size="sm"
+                className="rounded-full"
+                onClick={() => setStateFilter(sf.value)}
+              >
+                {sf.label}
+              </Button>
+            ))}
+          </div>
+          <ViewToggle view={view} onChange={handleViewChange} />
         </div>
       </div>
 
@@ -150,7 +167,7 @@ export function ConversationsPage() {
                 <Skeleton className="h-4 w-20" />
                 <Skeleton className="h-5 w-16 rounded-full" />
                 <Skeleton className="h-4 w-32" />
-                <Skeleton className="ml-auto h-6 w-6" />
+                <Skeleton className="ms-auto h-6 w-6" />
               </div>
             ))}
           </div>
@@ -182,94 +199,189 @@ export function ConversationsPage() {
             {t("conversations.count", { count: conversations.length })}
           </p>
 
-          {/* Conversation table */}
-          <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border bg-secondary/50">
-                  <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    {t("conversations.id")}
-                  </th>
-                  <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    {t("conversations.bot")}
-                  </th>
-                  <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    {t("conversations.state")}
-                  </th>
-                  <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    {t("conversations.lastActivity")}
-                  </th>
-                  <th className="px-5 py-3 text-end text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    {t("conversations.actions")}
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {conversations.map((conv) => {
-                  const convId = parseConversationUri(conv.resource);
-                  const state = conv.conversationState || "READY";
-                  const config = stateConfig[state];
-                  const StateIcon = config.icon;
+          {view === "card" ? (
+            /* Card grid */
+            <div
+              className={cn(
+                "grid gap-4",
+                "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+              )}
+              data-testid="conversation-grid"
+            >
+              {conversations.map((conv) => {
+                const convId = parseConversationUri(conv.resource);
+                const state = conv.conversationState || "READY";
+                const config = stateConfig[state];
+                const StateIcon = config.icon;
 
-                  return (
-                    <tr
-                      key={conv.resource}
-                      className="hover:bg-secondary/30 transition-colors"
-                    >
-                      <td className="px-5 py-3">
-                        <Link
-                          to={`/manage/conversationview/${convId}`}
-                          className="inline-flex items-center gap-1 text-sm font-medium text-foreground hover:text-primary transition-colors"
-                        >
-                          <span className="font-mono">
-                            {convId.slice(0, 12)}…
+                return (
+                  <Link
+                    key={conv.resource}
+                    to={`/manage/conversationview/${convId}`}
+                    className={cn(
+                      "group flex flex-col rounded-xl border bg-card p-5 shadow-sm transition-all duration-200",
+                      "hover:shadow-md hover:border-primary/30"
+                    )}
+                    data-testid={`conversation-card-${convId}`}
+                  >
+                    {/* State badge */}
+                    <div className="flex items-start justify-between">
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
+                          config.bg,
+                          config.color
+                        )}
+                      >
+                        <StateIcon className="h-3.5 w-3.5" />
+                        {config.label}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setDeleteTarget(convId);
+                        }}
+                        className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive hover:bg-destructive/10 group-hover:opacity-100"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    {/* ID */}
+                    <div className="mt-3">
+                      <p className="font-mono text-sm font-medium text-foreground truncate" title={convId}>
+                        {convId}
+                      </p>
+                    </div>
+
+                    {/* Bot info + Step count */}
+                    {conv.botId && (
+                      <div className="mt-2 flex items-center gap-1.5">
+                        <Bot className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground truncate">
+                          {conv.botId}
+                          {conv.botVersion ? ` v${conv.botVersion}` : ""}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Step count badge */}
+                    <div className="mt-2">
+                      <StepCountBadge conversationId={convId} />
+                    </div>
+
+                    {/* Footer */}
+                    <div className="mt-auto pt-3 border-t border-border">
+                      <span className="text-xs text-muted-foreground">
+                        {conv.lastModifiedOn
+                          ? new Date(conv.lastModifiedOn).toLocaleString()
+                          : "—"}
+                      </span>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          ) : (
+            /* List table */
+            <div
+              className="overflow-hidden rounded-xl border bg-card shadow-sm"
+              data-testid="conversation-list"
+            >
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/50">
+                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      {t("conversations.id")}
+                    </th>
+                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      {t("conversations.bot")}
+                    </th>
+                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      {t("conversations.state")}
+                    </th>
+                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      {t("conversations.steps", "Steps")}
+                    </th>
+                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      {t("conversations.lastActivity")}
+                    </th>
+                    <th className="px-5 py-3 text-end text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      {t("conversations.actions")}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {conversations.map((conv) => {
+                    const convId = parseConversationUri(conv.resource);
+                    const state = conv.conversationState || "READY";
+                    const config = stateConfig[state];
+                    const StateIcon = config.icon;
+
+                    return (
+                      <tr
+                        key={conv.resource}
+                        className="hover:bg-secondary/30 transition-colors"
+                      >
+                        <td className="px-5 py-3">
+                          <Link
+                            to={`/manage/conversationview/${convId}`}
+                            className="inline-flex items-center gap-1 text-sm font-medium text-foreground hover:text-primary transition-colors"
+                          >
+                            <span className="font-mono" title={convId}>
+                              {convId.length > 20 ? `${convId.slice(0, 20)}…` : convId}
+                            </span>
+                            <ExternalLink className="h-3 w-3 opacity-40" />
+                          </Link>
+                        </td>
+                        <td className="px-5 py-3">
+                          <span className="text-sm text-muted-foreground">
+                            {conv.botId
+                              ? `${conv.botId.length > 12 ? conv.botId.slice(0, 12) + "…" : conv.botId}${conv.botVersion ? ` v${conv.botVersion}` : ""}`
+                              : "—"}
                           </span>
-                          <ExternalLink className="h-3 w-3 opacity-40" />
-                        </Link>
-                      </td>
-                      <td className="px-5 py-3">
-                        <span className="text-sm text-muted-foreground">
-                          {conv.botId
-                            ? `${conv.botId} v${conv.botVersion}`
-                            : "—"}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3">
-                        <span
-                          className={cn(
-                            "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium",
-                            config.bg,
-                            config.color
-                          )}
-                        >
-                          <StateIcon className="h-3 w-3" />
-                          {config.label}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3">
-                        <span className="text-sm text-muted-foreground">
-                          {conv.lastModifiedOn
-                            ? new Date(conv.lastModifiedOn).toLocaleString()
-                            : "—"}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3 text-end">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                          onClick={() => setDeleteTarget(convId)}
-                          disabled={deleteMutation.isPending}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                        <td className="px-5 py-3">
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium",
+                              config.bg,
+                              config.color
+                            )}
+                          >
+                            <StateIcon className="h-3 w-3" />
+                            {config.label}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3">
+                          <StepCountBadge conversationId={convId} />
+                        </td>
+                        <td className="px-5 py-3">
+                          <span className="text-sm text-muted-foreground">
+                            {conv.lastModifiedOn
+                              ? new Date(conv.lastModifiedOn).toLocaleString()
+                              : "—"}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-end">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => setDeleteTarget(convId)}
+                            disabled={deleteMutation.isPending}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </>
       )}
 
@@ -285,5 +397,22 @@ export function ConversationsPage() {
         isPending={deleteMutation.isPending}
       />
     </div>
+  );
+}
+
+/** Lazily loads and displays the step count for a conversation. */
+function StepCountBadge({ conversationId }: { conversationId: string }) {
+  const { data: count, isLoading } = useConversationStepCount(conversationId);
+
+  if (isLoading) {
+    return <span className="inline-block h-4 w-8 animate-pulse rounded bg-secondary" />;
+  }
+
+  if (count === undefined || count === null) return <span className="text-xs text-muted-foreground">—</span>;
+
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+      {count} {count === 1 ? "step" : "steps"}
+    </span>
   );
 }

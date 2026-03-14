@@ -8,6 +8,7 @@ import {
   X,
   Globe,
 } from "lucide-react";
+import { ContentEditor } from "./content-editor";
 
 // ─── Types matching HttpCallsConfiguration backend model ─────────────────────
 
@@ -480,16 +481,17 @@ function HttpCallEditor({
             label={t("httpcallsEditor.body", "Request Body")}
             defaultOpen={!!call.request.body}
           >
-            <textarea
+            <ContentEditor
               value={call.request.body ?? ""}
-              onChange={(e) => updateRequest({ body: e.target.value })}
+              onChange={(v) => updateRequest({ body: v })}
               readOnly={readOnly}
-              rows={4}
+              language="json"
+              label={t("httpcallsEditor.body", "Request Body")}
               placeholder={t(
                 "httpcallsEditor.bodyPlaceholder",
                 "JSON body template..."
               )}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              testId="request-body-editor"
             />
           </Section>
 

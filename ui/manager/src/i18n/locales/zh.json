@@ -16,7 +16,7 @@
     "bots": "机器人",
     "packages": "包",
     "conversations": "会话",
-    "coordinator": "Coordinator",
+    "coordinator": "Coordinator", "orphans": "Orphans",
     "chat": "聊天",
     "resources": "资源",
     "sectionManagement": "Management",
@@ -480,5 +480,15 @@
     "discardError": "Failed to discard",
     "purgeSuccess": "Purged all dead-letter entries",
     "purgeError": "Failed to purge"
+  },
+  "contentEditor": {
+    "expand": "展开",
+    "expandHint": "全屏 (Ctrl+Shift+F)",
+    "close": "完成",
+    "lines": "行",
+    "chars": "字符",
+    "fullscreenTitle": "内容编辑器",
+    "fullscreenDescription": "全屏编辑器。按 Escape 关闭。"
   }
 }
+

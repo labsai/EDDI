@@ -19,23 +19,20 @@ export interface ConversationDescriptor {
   lastModifiedBy?: string;
 }
 
-export interface ConversationOutput {
-  key: string;
-  value: unknown;
-}
+/** Java backend serializes ConversationOutput as a LinkedHashMap<String, Object> */
+export type ConversationOutput = Record<string, unknown>;
 
 export interface ConversationStepData {
   key: string;
   value: unknown;
+  timestamp?: string;
+  originPackageId?: string | null;
   isPublic?: boolean;
 }
 
 export interface SimpleConversationStep {
-  input?: string;
-  output?: string;
-  actions?: string[];
-  conversationOutputs?: ConversationOutput[];
-  data?: ConversationStepData[];
+  conversationStep: ConversationStepData[];
+  timestamp?: string;
 }
 
 export interface SimpleConversationMemorySnapshot {
@@ -45,8 +42,86 @@ export interface SimpleConversationMemorySnapshot {
   conversationState: ConversationState;
   environment: string;
   conversationSteps: SimpleConversationStep[];
+  conversationOutputs?: ConversationOutput[];
   conversationProperties?: Record<string, unknown>;
-  redoCache?: SimpleConversationStep[];
+  undoAvailable?: boolean;
+  redoAvailable?: boolean;
+}
+
+/** Extract user input from a conversation step's key/value pairs */
+export function extractInput(step: SimpleConversationStep): string | undefined {
+  const entry = step.conversationStep?.find(
+    (d) => d.key === "input:initial"
+  );
+  return entry?.value as string | undefined;
+}
+
+/** Extract bot output from a conversationOutput map (one per step).
+ * Handles two formats:
+ * 1. Nested (from conversationOutputs): { output: [{ type, text, delay }], quickReplies: [...] }
+ * 2. Flat (from conversationSteps): { "output:text:action_name": { text: "..." }, ... }
+ */
+export function extractOutput(conversationOutput?: ConversationOutput): string | undefined {
+  if (!conversationOutput) return undefined;
+
+  const texts: string[] = [];
+
+  // Format 1: Nested "output" array (from conversationOutputs)
+  const outputArray = conversationOutput.output;
+  if (Array.isArray(outputArray)) {
+    for (const item of outputArray) {
+      if (typeof item === "string") texts.push(item);
+      else if (item?.text) texts.push(item.text as string);
+    }
+    if (texts.length > 0) return texts.join("\n");
+  }
+
+  // Format 2: Flat keys like "output:text:*" (from conversationSteps)
+  for (const [key, val] of Object.entries(conversationOutput)) {
+    if (!key.startsWith("output:text:")) continue;
+
+    if (typeof val === "string") {
+      texts.push(val);
+    } else if (Array.isArray(val)) {
+      for (const item of val) {
+        if (typeof item === "string") texts.push(item);
+        else if (item?.text) texts.push(item.text);
+      }
+    } else if (val && typeof val === "object" && (val as Record<string, unknown>).text) {
+      texts.push((val as Record<string, unknown>).text as string);
+    }
+  }
+  return texts.length > 0 ? texts.join("\n") : undefined;
+}
+
+/** Extract quick reply values from a conversationOutput */
+export function extractQuickReplies(conversationOutput?: ConversationOutput): string[] {
+  if (!conversationOutput) return [];
+
+  // Nested format: { quickReplies: [{ value: "...", expressions: "..." }] }
+  const qrArray = conversationOutput.quickReplies;
+  if (Array.isArray(qrArray)) {
+    return qrArray
+      .map((qr: unknown) => {
+        if (typeof qr === "string") return qr;
+        if (qr && typeof qr === "object" && "value" in qr) return (qr as { value: string }).value;
+        return null;
+      })
+      .filter((v): v is string => v !== null);
+  }
+
+  return [];
+}
+
+/** Extract actions from a conversation step's key/value pairs */
+export function extractActions(step: SimpleConversationStep): string[] {
+  const entry = step.conversationStep?.find(
+    (d) => d.key === "actions"
+  );
+  if (!entry?.value) return [];
+  if (Array.isArray(entry.value)) return entry.value as string[];
+  if (typeof entry.value === "string") return [entry.value];
+  return [];
 }
 
 export interface ConversationMemorySnapshot {

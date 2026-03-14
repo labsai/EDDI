@@ -21,7 +21,7 @@ describe("parseResourceUri", () => {
 });
 
 describe("groupBotsByName", () => {
-  it("groups bots by name keeping latest version", () => {
+  it("groups bots by resource ID keeping latest version", () => {
     const bots: BotDescriptor[] = [
       {
         resource: "eddi://ai.labs.bot/botstore/bots/a?version=1",
@@ -49,9 +49,39 @@ describe("groupBotsByName", () => {
     const result = groupBotsByName(bots);
     expect(result).toHaveLength(2);
 
-    const supportBot = result.find((b) => b.name === "Support Bot");
+    const supportBot = result.find((b) => b.id === "a");
     expect(supportBot?.version).toBe(3);
     expect(supportBot?.description).toBe("v3");
+  });
+
+  it("does NOT merge bots with same name but different IDs", () => {
+    const bots: BotDescriptor[] = [
+      {
+        resource: "eddi://ai.labs.bot/botstore/bots/id1?version=1",
+        name: "",
+        description: "",
+        createdOn: 1000,
+        lastModifiedOn: 1000,
+      },
+      {
+        resource: "eddi://ai.labs.bot/botstore/bots/id2?version=1",
+        name: "",
+        description: "",
+        createdOn: 2000,
+        lastModifiedOn: 2000,
+      },
+      {
+        resource: "eddi://ai.labs.bot/botstore/bots/id3?version=1",
+        name: "",
+        description: "",
+        createdOn: 3000,
+        lastModifiedOn: 3000,
+      },
+    ];
+
+    const result = groupBotsByName(bots);
+    // Previously this would return 1 (all grouped under ""), now returns 3
+    expect(result).toHaveLength(3);
   });
 
   it("sorts by lastModifiedOn descending", () => {

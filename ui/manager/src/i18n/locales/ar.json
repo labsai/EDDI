@@ -16,7 +16,7 @@
     "bots": "الروبوتات",
     "packages": "الحزم",
     "conversations": "المحادثات",
-    "coordinator": "Coordinator",
+    "coordinator": "Coordinator", "orphans": "Orphans",
     "chat": "الدردشة",
     "resources": "الموارد",
     "sectionManagement": "Management",
@@ -480,5 +480,15 @@
     "discardError": "Failed to discard",
     "purgeSuccess": "Purged all dead-letter entries",
     "purgeError": "Failed to purge"
+  },
+  "contentEditor": {
+    "expand": "توسيع",
+    "expandHint": "ملء الشاشة (Ctrl+Shift+F)",
+    "close": "تم",
+    "lines": "سطور",
+    "chars": "أحرف",
+    "fullscreenTitle": "محرر المحتوى",
+    "fullscreenDescription": "محرر ملء الشاشة. اضغط Escape للإغلاق."
   }
 }
+

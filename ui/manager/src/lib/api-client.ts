@@ -49,8 +49,8 @@ class ApiClient {
       throw error;
     }
 
-    // Handle 204 No Content
-    if (response.status === 204) {
+    // Handle 202 Accepted and 204 No Content (empty body responses)
+    if (response.status === 202 || response.status === 204) {
       return undefined as T;
     }
 

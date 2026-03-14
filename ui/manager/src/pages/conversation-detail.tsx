@@ -16,6 +16,8 @@ import {
   CheckCircle2,
   Clock,
   AlertTriangle,
+  Zap,
+  Code,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -24,8 +26,10 @@ import {
 } from "@/hooks/use-conversations";
 import type {
   ConversationState,
+  ConversationOutput,
   SimpleConversationStep,
 } from "@/lib/api/conversations";
+import { extractInput, extractOutput, extractActions } from "@/lib/api/conversations";
 import { useNavigate } from "react-router-dom";
 
 const stateConfig: Record<
@@ -112,6 +116,7 @@ export function ConversationDetailPage() {
   const state = conversation.conversationState || "READY";
   const config = stateConfig[state];
   const StateIcon = config.icon;
+  const stepCount = conversation.conversationSteps?.length ?? 0;
 
   return (
     <div className="space-y-6">
@@ -147,6 +152,11 @@ export function ConversationDetailPage() {
             {conversation.botId} v{conversation.botVersion}
           </span>
 
+          {/* Step count */}
+          <span className="rounded-full bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary">
+            {stepCount} {t("conversationDetail.steps", "steps")}
+          </span>
+
           {/* Delete */}
           <button
             onClick={handleDelete}
@@ -165,21 +175,20 @@ export function ConversationDetailPage() {
           />
         )}
 
-      {/* Conversation Steps */}
-      <section className="rounded-xl border bg-card shadow-sm">
+      {/* Chat-style conversation */}
+      <section className="rounded-xl border bg-card shadow-sm" data-testid="conversation-chat">
         <div className="flex items-center gap-2 border-b border-border p-5">
           <MessageSquare className="h-5 w-5 text-primary" />
           <h2 className="text-lg font-semibold text-foreground">
-            {t("conversationDetail.steps", "Conversation Steps")}
+            {t("conversationDetail.chatLog", "Chat Log")}
           </h2>
           <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-            {conversation.conversationSteps?.length ?? 0}
+            {stepCount}
           </span>
         </div>
 
-        <div className="divide-y divide-border">
-          {(!conversation.conversationSteps ||
-            conversation.conversationSteps.length === 0) && (
+        <div className="p-4 sm:p-6 space-y-1">
+          {stepCount === 0 && (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
               <MessageSquare className="h-10 w-10 opacity-50" />
               <p className="mt-3 text-sm">
@@ -192,10 +201,12 @@ export function ConversationDetailPage() {
           )}
 
           {conversation.conversationSteps?.map((step, index) => (
-            <ConversationStepRow
+            <ChatBubbleStep
               key={index}
               step={step}
+              conversationOutput={conversation.conversationOutputs?.[index]}
               stepNumber={index + 1}
+              isLast={index === stepCount - 1}
             />
           ))}
         </div>
@@ -217,83 +228,120 @@ function BackLink() {
   );
 }
 
-function ConversationStepRow({
+function ChatBubbleStep({
   step,
+  conversationOutput,
   stepNumber,
+  isLast,
 }: {
   step: SimpleConversationStep;
+  conversationOutput?: ConversationOutput;
   stepNumber: number;
+  isLast: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const { t } = useTranslation();
+  const [showRaw, setShowRaw] = useState(false);
 
-  // Extract common fields
-  const input = step.input;
-  const output = step.output;
-  const actions = step.actions;
+  // Parse input/output/actions from the conversationStep key/value pairs
+  const input = extractInput(step);
+  const output = extractOutput(conversationOutput);
+  const actions = extractActions(step);
+
+  // Calculate processing time from timestamps of conversationStep data entries
+  const processingTime = (() => {
+    const timestamps = step.conversationStep
+      ?.map((d) => d.timestamp ? new Date(d.timestamp).getTime() : 0)
+      .filter((t) => t > 0);
+    if (!timestamps || timestamps.length < 2) return null;
+    const min = Math.min(...timestamps);
+    const max = Math.max(...timestamps);
+    const diffMs = max - min;
+    if (diffMs < 1000) return `${diffMs}ms`;
+    return `${(diffMs / 1000).toFixed(1)}s`;
+  })();
 
   return (
-    <div className="px-5 py-4">
-      <div className="flex items-start gap-3">
-        {/* Step number */}
-        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-          {stepNumber}
-        </span>
-
-        <div className="flex-1 min-w-0 space-y-2">
-          {/* User input */}
-          {input && (
-            <div className="flex items-start gap-2">
-              <User className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
-              <p className="text-sm text-foreground">{input}</p>
+    <div className={cn("space-y-3", !isLast && "pb-3")}>
+      {/* User message — right aligned */}
+      {input && (
+        <div className="flex justify-end">
+          <div className="flex items-end gap-2 max-w-[80%] sm:max-w-[70%]">
+            <div className="rounded-2xl rounded-be-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm">
+              <p className="text-sm whitespace-pre-wrap">{input}</p>
             </div>
-          )}
-
-          {/* Actions */}
-          {actions && actions.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {actions.map((action, i) => (
-                <span
-                  key={i}
-                  className="rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400"
-                >
-                  {action}
-                </span>
-              ))}
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20">
+              <User className="h-3.5 w-3.5 text-primary" />
             </div>
-          )}
-
-          {/* Bot output */}
-          {output && (
-            <div className="flex items-start gap-2">
-              <Bot className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <p className="text-sm text-foreground whitespace-pre-wrap">
-                {output}
-              </p>
-            </div>
-          )}
+          </div>
         </div>
+      )}
 
-        {/* Expand/collapse raw data */}
+      {/* Actions — centered */}
+      {actions.length > 0 && (
+        <div className="flex justify-center">
+          <div className="flex flex-wrap items-center justify-center gap-1">
+            <Zap className="h-3 w-3 text-amber-500" />
+            {actions.map((action, i) => (
+              <span
+                key={i}
+                className="rounded-md bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+              >
+                {action}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Bot message — left aligned */}
+      {output && (
+        <div className="flex justify-start">
+          <div className="flex items-end gap-2 max-w-[80%] sm:max-w-[70%]">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary">
+              <Bot className="h-3.5 w-3.5 text-primary" />
+            </div>
+            <div className="rounded-2xl rounded-bs-md bg-secondary px-4 py-2.5 shadow-sm">
+              <p className="text-sm text-foreground whitespace-pre-wrap">{output}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Raw data toggle + processing time */}
+      <div className="flex justify-center">
         <button
-          onClick={() => setExpanded(!expanded)}
-          className="rounded-md p-1 text-muted-foreground hover:bg-secondary transition-colors"
-          title="View raw data"
+          onClick={() => setShowRaw(!showRaw)}
+          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] text-muted-foreground hover:bg-secondary transition-colors"
+          title={t("conversationDetail.rawData", "View raw data")}
         >
-          {expanded ? (
-            <ChevronUp className="h-4 w-4" />
+          <Code className="h-3 w-3" />
+          {t("conversationDetail.step", "Step")} {stepNumber}
+          {processingTime && (
+            <span className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+              <Clock className="h-2.5 w-2.5" />
+              {processingTime}
+            </span>
+          )}
+          {showRaw ? (
+            <ChevronUp className="h-3 w-3" />
           ) : (
-            <ChevronDown className="h-4 w-4" />
+            <ChevronDown className="h-3 w-3" />
           )}
         </button>
       </div>
 
-      {/* Raw data view */}
-      {expanded && (
-        <div className="mt-3 ms-9 rounded-lg bg-secondary p-3">
-          <pre className="overflow-x-auto text-xs text-foreground">
-            {JSON.stringify(step, null, 2)}
-          </pre>
+      {showRaw && (
+        <div className="mx-4 sm:mx-8 rounded-lg bg-secondary/50 p-3 border border-border overflow-x-auto">
+          <pre
+            className="text-xs leading-relaxed"
+            dangerouslySetInnerHTML={{ __html: syntaxHighlightJson(JSON.stringify(step, null, 2)) }}
+          />
         </div>
+      )}
+
+      {/* Divider between steps */}
+      {!isLast && (
+        <div className="border-b border-border/50" />
       )}
     </div>
   );
@@ -331,5 +379,27 @@ function PropertiesSection({
         </div>
       )}
     </section>
+  );
+}
+
+/** Simple JSON syntax highlighter using regex — returns HTML string */
+function syntaxHighlightJson(json: string): string {
+  return json.replace(
+    /("(\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g,
+    (match) => {
+      let cls = "color: var(--color-amber-400)"; // number
+      if (/^"/.test(match)) {
+        if (/:$/.test(match)) {
+          cls = "color: var(--color-primary)"; // key
+        } else {
+          cls = "color: var(--color-emerald-400)"; // string
+        }
+      } else if (/true|false/.test(match)) {
+        cls = "color: var(--color-sky-400)"; // boolean
+      } else if (/null/.test(match)) {
+        cls = "color: var(--color-rose-400)"; // null
+      }
+      return `<span style="${cls}">${match}</span>`;
+    }
   );
 }

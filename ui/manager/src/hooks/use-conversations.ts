@@ -69,3 +69,19 @@ export function useDeleteConversation() {
     },
   });
 }
+
+/**
+ * Lazily fetch step count for a single conversation.
+ * Uses returnDetailed=false to minimize data transfer.
+ */
+export function useConversationStepCount(id: string) {
+  return useQuery({
+    queryKey: [...CONVERSATIONS_KEY, "stepCount", id],
+    queryFn: async () => {
+      const data = await getSimpleConversationLog(id, false, false);
+      return data.conversationSteps?.length ?? 0;
+    },
+    enabled: !!id,
+    staleTime: 60_000,
+  });
+}

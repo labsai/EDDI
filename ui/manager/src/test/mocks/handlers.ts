@@ -483,17 +483,29 @@ export const handlers = [
       conversationId: "conv1",
       conversationState: "READY",
       environment: "unrestricted",
+      undoAvailable: true,
+      redoAvailable: false,
       conversationSteps: [
         {
-          input: "Hello",
-          output: "Hi there! How can I help you?",
-          actions: ["greet"],
+          conversationStep: [
+            { key: "input:initial", value: "Hello", timestamp: new Date().toISOString(), originPackageId: null },
+            { key: "actions", value: ["greet"], timestamp: new Date().toISOString(), originPackageId: "pkg1" },
+            { key: "output:text:greet", value: "Hi there! How can I help you?", timestamp: new Date().toISOString(), originPackageId: "pkg1" },
+          ],
+          timestamp: new Date().toISOString(),
         },
         {
-          input: "What's the weather?",
-          output: "The weather in NYC is sunny at 72°F.",
-          actions: ["get_weather"],
+          conversationStep: [
+            { key: "input:initial", value: "What's the weather?", timestamp: new Date().toISOString(), originPackageId: null },
+            { key: "actions", value: ["get_weather"], timestamp: new Date().toISOString(), originPackageId: "pkg1" },
+            { key: "output:text:get_weather", value: "The weather in NYC is sunny at 72°F.", timestamp: new Date().toISOString(), originPackageId: "pkg1" },
+          ],
+          timestamp: new Date().toISOString(),
         },
+      ],
+      conversationOutputs: [
+        { "output:text:greet": "Hi there! How can I help you?" },
+        { "output:text:get_weather": "The weather in NYC is sunny at 72°F." },
       ],
       conversationProperties: {
         botName: "Support Bot",
@@ -1037,3 +1049,36 @@ export const coordinatorHandlers = [
   }),
 ];
 
+// ─── Orphan Admin Handlers ───────────────────────────────────────────────────
+
+const ORPHAN_REPORT_MOCK = {
+  totalOrphans: 2,
+  deletedCount: 0,
+  orphans: [
+    {
+      resourceUri: "eddi://ai.labs.package/packagestore/packages/orphan1?version=1",
+      type: "ai.labs.package",
+      name: "Unused Package",
+      deleted: false,
+    },
+    {
+      resourceUri: "eddi://ai.labs.behavior/behaviorstore/behaviorsets/orphan2?version=1",
+      type: "ai.labs.behavior",
+      name: "Old Behavior Set",
+      deleted: true,
+    },
+  ],
+};
+
+export const orphanHandlers = [
+  http.get("*/administration/orphans", () => {
+    return HttpResponse.json(ORPHAN_REPORT_MOCK);
+  }),
+
+  http.delete("*/administration/orphans", () => {
+    return HttpResponse.json({
+      ...ORPHAN_REPORT_MOCK,
+      deletedCount: ORPHAN_REPORT_MOCK.totalOrphans,
+    });
+  }),
+];

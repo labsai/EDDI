@@ -16,7 +16,7 @@
     "bots": "봇",
     "packages": "패키지",
     "conversations": "대화",
-    "coordinator": "Coordinator",
+    "coordinator": "Coordinator", "orphans": "Orphans",
     "chat": "채팅",
     "resources": "리소스",
     "sectionManagement": "Management",
@@ -480,5 +480,15 @@
     "discardError": "Failed to discard",
     "purgeSuccess": "Purged all dead-letter entries",
     "purgeError": "Failed to purge"
+  },
+  "contentEditor": {
+    "expand": "확장",
+    "expandHint": "전체 화면 (Ctrl+Shift+F)",
+    "close": "완료",
+    "lines": "줄",
+    "chars": "문자",
+    "fullscreenTitle": "콘텐츠 편집기",
+    "fullscreenDescription": "전체 화면 편집기. Escape로 닫습니다."
   }
 }
+

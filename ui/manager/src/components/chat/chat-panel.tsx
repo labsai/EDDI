@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   useChatStore,
@@ -28,10 +29,12 @@ import {
 
 export function ChatPanel() {
   const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [botSelectorOpen, setBotSelectorOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const botSelectorRef = useRef<HTMLDivElement>(null);
+  const autoStartedRef = useRef(false);
 
   // Store state
   const messages = useChatStore((s) => s.messages);
@@ -52,6 +55,26 @@ export function ChatPanel() {
   const endConversation = useEndConversation();
   const undoConversation = useUndoConversation();
   const redoConversation = useRedoConversation();
+
+  // Auto-start conversation from ?botId= query param
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    const botIdParam = searchParams.get("botId");
+    if (!botIdParam || !deployedBots) return;
+
+    autoStartedRef.current = true;
+
+    // Find bot name from deployed bots list
+    const bot = deployedBots.find((b) => b.id === botIdParam);
+    const botName = bot?.name ?? "Bot";
+
+    // Auto-select and start conversation
+    setSelectedBot(botIdParam, botName);
+    startConversation.mutate({ botId: botIdParam });
+
+    // Remove query param so refresh doesn't re-create
+    setSearchParams({}, { replace: true });
+  }, [searchParams, deployedBots, setSelectedBot, startConversation, setSearchParams]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {

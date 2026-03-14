@@ -9,6 +9,7 @@ import {
   MoreVertical,
   ExternalLink,
   Download,
+  MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDeploymentStatus, useDeployBot, useUndeployBot } from "@/hooks/use-bots";
@@ -16,6 +17,7 @@ import { useExportBot } from "@/hooks/use-backup";
 import type { BotDescriptor } from "@/lib/api/bots";
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 
 interface BotCardProps {
   bot: BotDescriptor & { id: string; version: number };
@@ -58,7 +60,7 @@ const statusConfig = {
 export function BotCard({ bot, onDuplicate, onDelete }: BotCardProps) {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
-  const { data: deployment } = useDeploymentStatus(bot.id);
+  const { data: deployment } = useDeploymentStatus(bot.id, bot.version);
   const deployMutation = useDeployBot();
   const undeployMutation = useUndeployBot();
   const exportMutation = useExportBot();
@@ -74,14 +76,23 @@ export function BotCard({ bot, onDuplicate, onDelete }: BotCardProps) {
     status === "IN_PROGRESS";
 
   function handleDeploy() {
-    deployMutation.mutate({
-      botId: bot.id,
-      version: bot.version,
-    });
+    deployMutation.mutate(
+      { botId: bot.id, version: bot.version },
+      {
+        onSuccess: () => toast.success(t("bots.deploySuccess", "Bot deployed successfully")),
+        onError: () => toast.error(t("bots.deployError", "Deploy failed")),
+      }
+    );
   }
 
   function handleUndeploy() {
-    undeployMutation.mutate({ botId: bot.id });
+    undeployMutation.mutate(
+      { botId: bot.id, version: bot.version },
+      {
+        onSuccess: () => toast.success(t("bots.undeploySuccess", "Bot undeployed")),
+        onError: () => toast.error(t("bots.undeployError", "Undeploy failed")),
+      }
+    );
   }
 
   const timeAgo = formatTimeAgo(bot.lastModifiedOn);
@@ -170,9 +181,12 @@ export function BotCard({ bot, onDuplicate, onDelete }: BotCardProps) {
           to={`/manage/botview/${bot.id}`}
           className="text-lg font-semibold text-foreground hover:text-primary transition-colors"
         >
-          {bot.name || "Unnamed Bot"}
+          {bot.name || t("bots.unnamed", "Unnamed Bot")}
           <ExternalLink className="ms-1 inline h-3.5 w-3.5 opacity-0 group-hover:opacity-50" />
         </Link>
+        <p className="mt-0.5 font-mono text-xs text-muted-foreground/70 truncate" title={bot.id}>
+          {bot.id}
+        </p>
         <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
           {bot.description || "No description"}
         </p>
@@ -184,23 +198,37 @@ export function BotCard({ bot, onDuplicate, onDelete }: BotCardProps) {
           {timeAgo}
         </span>
 
-        <button
-          onClick={isDeployed ? handleUndeploy : handleDeploy}
-          disabled={isBusy}
-          className={cn(
-            "rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
-            isDeployed
-              ? "bg-destructive/10 text-destructive hover:bg-destructive/20"
-              : "bg-primary/10 text-primary hover:bg-primary/20",
-            isBusy && "cursor-not-allowed opacity-50"
+        <div className="flex items-center gap-2">
+          {/* Chat button — only when deployed */}
+          {isDeployed && (
+            <Link
+              to={`/manage/chat?botId=${bot.id}`}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400"
+              data-testid={`bot-chat-${bot.id}`}
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              {t("bots.chat", "Chat")}
+            </Link>
           )}
-        >
-          {isBusy
-            ? t("common.loading")
-            : isDeployed
-              ? t("bots.undeploy", "Undeploy")
-              : t("bots.deploy", "Deploy")}
-        </button>
+
+          <button
+            onClick={isDeployed ? handleUndeploy : handleDeploy}
+            disabled={isBusy}
+            className={cn(
+              "rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+              isDeployed
+                ? "bg-destructive/10 text-destructive hover:bg-destructive/20"
+                : "bg-primary/10 text-primary hover:bg-primary/20",
+              isBusy && "cursor-not-allowed opacity-50"
+            )}
+          >
+            {isBusy
+              ? t("common.loading")
+              : isDeployed
+                ? t("bots.undeploy", "Undeploy")
+                : t("bots.deploy", "Deploy")}
+          </button>
+        </div>
       </div>
     </div>
   );
