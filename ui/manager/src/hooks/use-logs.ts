@@ -56,6 +56,7 @@ export function useLogStream(filters: LogFilters = {}) {
   const [paused, setPaused] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const pausedRef = useRef(false);
+  const filterKey = JSON.stringify(filters);
 
   // Keep ref in sync
   useEffect(() => {
@@ -94,14 +95,16 @@ export function useLogStream(filters: LogFilters = {}) {
     } catch {
       setSseConnected(false);
     }
-  }, [filters]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterKey]);
 
   useEffect(() => {
     connect();
     return () => {
       eventSourceRef.current?.close();
     };
-  }, [connect]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterKey]);
 
   const clearEntries = useCallback(() => {
     setEntries([]);

@@ -105,6 +105,6 @@ export function createLogEventSource(filters: LogFilters = {}): EventSource {
 
   const qs = params.toString();
   return new EventSource(
-    `${window.location.origin}${BASE}/stream${qs ? `?${qs}` : ""}`
+    `${BASE}/stream${qs ? `?${qs}` : ""}`
   );
 }
