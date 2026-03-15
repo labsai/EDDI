@@ -43,10 +43,69 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-15 — Phase 6C: Infinispan → Caffeine
+
+**Repo:** EDDI
+**Branch:** `feature/version-6.0.0`
+
+**What changed:**
+- Rewrote `CacheFactory.java` — Caffeine builder replaces Infinispan `EmbeddedCacheManager`
+- Rewrote `CacheImpl.java` — wraps Caffeine `Cache<K,V>` instead of Infinispan `Cache`
+- Removed 4 Infinispan dependencies + `infinispan.version` property from POM
+- Caffeine provided transitively by `quarkus-cache` (no new dependency needed)
+- Deleted `infinispan-embedded.xml`, cleaned `application.properties`
+- Updated `ToolCacheService` Javadoc + log message
+
+**Key finding:** Infinispan was NOT used for multi-instance bot deployment coordination. Bot deployment uses DB-backed `IDeploymentStore` with `@Scheduled` 10s polling. `BotFactory` uses plain `ConcurrentHashMap`. Cross-instance routing uses NATS JetStream.
+
+**Decision:** Plan to replace 10s DB polling with NATS-based deployment events in a future phase.
+
+**Quarkus upgrade:** Attempted 3.30.8→3.32.3 but blocked by Java 25 `Unsupported value type: [ALL-UNNAMED]` error in `generate-code-tests`. Will wait for Quarkus 3.33 LTS (GA ~March 25, 2026).
+
+**729 unit tests pass.**
+
+---
+
+### 2026-03-15 — Roadmap Restructuring + Research Analysis
+
+**Repos:** EDDI, EDDI-Manager
+**Branch:** `feature/version-6.0.0`
+
+**What changed:**
+- Analyzed 4 research documents and their interpretations, mapped gaps to new roadmap phases
+- Created `docs/project-philosophy.md` — 7 architectural pillars governing all EDDI development
+- Restructured roadmap from 8 phases to 14 phases (7–14b) based on research findings
+- Split all phases >10 SP into ≤10 SP chunks for single-session implementability
+- Added Phase 6C (Infinispan→Caffeine, 2 SP) and Phase 6D (Lombok removal, 5 SP) as quick wins
+- Updated `AGENTS.md` in both EDDI and EDDI-Manager with new phase structure
+
+**Key decisions:**
+- Secrets Vault + Audit Ledger promoted to Phase 7 (critical for enterprise/EU AI Act)
+- MCP split into 8a (servers) + 8b (client + operator)
+- Heartbeat/Scheduled Triggers: cluster-safe exactly-once via NATS
+- Time-Traveling Debugger + Visual Taint Tracking added to Manager UI phases
+- Website Astro migration is the final phase before v6.0 GA
+
+---
+
+### 2026-03-15 — Lombok Removal Analysis
+
+**Repo:** EDDI
+**Branch:** `feature/version-6.0.0`
+
+**Analysis only (no code changes):**
+- 114 files use Lombok, 371 total annotation usages
+- Breakdown: `@Getter`(118), `@Setter`(110), `@NoArgsConstructor`(47), `@AllArgsConstructor`(42), `@EqualsAndHashCode`(22), `@Value`(10), `@Slf4j`(9), `@ToString`(8), `@Data`(5)
+- Lombok uses `sun.misc.Unsafe::objectFieldOffset` — terminally deprecated in Java 25, will be removed
+- Recommendation: Phase 6D (5 SP) — IntelliJ Delombok + `@Value`→records + `@Slf4j`→JBoss Logger
+
+---
+
 ### 2026-03-14 — Orphan Detection & Cleanup Endpoint
 
 **Repo:** EDDI
 **Branch:** `feature/version-6.0.0`
+
 
 **New endpoint:** `GET/DELETE /administration/orphans`
 

@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-13
+> **Last updated:** 2026-03-15
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -376,24 +376,46 @@
 - `IResourceClientLibrary.java`, `ResourceClientLibrary.java` — `deleteResource` method
 - `docs/deployment-management-of-chatbots.md` — deletion + orphan docs
 
+### Phase 6C: Infinispan → Caffeine ✅
+
+- [x] Rewrote `CacheFactory.java` — Caffeine builder with inline size configs (replaced `EmbeddedCacheManager`)
+- [x] Rewrote `CacheImpl.java` — wraps Caffeine `Cache<K,V>` (replaced Infinispan `Cache`)
+- [x] Removed 4 Infinispan dependencies + `infinispan.version` property from POM
+- [x] Caffeine provided transitively by `quarkus-cache` (already in POM)
+- [x] Deleted `infinispan-embedded.xml` config
+- [x] Cleaned `application.properties` (removed 2 Infinispan config lines)
+- [x] Updated `ToolCacheService` Javadoc + log message
+- [x] Verified: multi-instance bot deployment does NOT use Infinispan (uses DB-backed `IDeploymentStore` + `@Scheduled` polling)
+- [x] 729 unit tests pass (0 failures, 0 errors, 4 skipped)
+
+**Key files:**
+
+- `src/main/java/ai/labs/eddi/engine/caching/CacheFactory.java` — rewritten
+- `src/main/java/ai/labs/eddi/engine/caching/CacheImpl.java` — rewritten
+- `pom.xml` — 4 deps removed, caffeine via quarkus-cache
+- `src/main/resources/infinispan-embedded.xml` — deleted
+- `src/main/resources/application.properties` — cleaned
+
 ## Next Up
 
-### Bot Lifecycle API — Remaining Phases
+### Quick Wins (before Phase 7)
 
-- [ ] **Phase 3: Bulk Delete** — `POST /botstore/bots/bulkDelete` with cascade+permanent options (2 SP)
-- [ ] **Phase 4: Manager UI Multi-Select** — checkboxes on bot cards, bulk action bar (3 SP)
+- [ ] **Phase 6D: Lombok Removal** — Delombok 114 files (371 annotations), convert `@Value`→records, `@Slf4j`→JBoss Logger (5 SP)
+- [ ] **Quarkus 3.33 LTS Upgrade** — waiting for GA (March 25, 2026). 3.32.3 has Java 25 `ALL-UNNAMED` module issue.
+- [ ] **NATS Deployment Events** — replace 10s DB polling with pub/sub (future phase)
 
-### Phase 7: MCP Server + Client
+### Phase 7: Secrets Management + Audit Infrastructure (10 SP)
 
-- [ ] Item 33: MCP Server — expose EDDI tools via MCP (5 SP)
-- [ ] Item 34: MCP Client — consume external MCP tools (5 SP)
+- [ ] Item 33: Secrets Vault — `${vault:key}` references, export sanitization (5 SP)
+- [ ] Item 34: Immutable Audit Ledger — write-once trail, EU AI Act (5 SP)
 
-See `AGENTS.md` for the full roadmap.
+See `AGENTS.md` for the full roadmap (Phases 7–14b) and `docs/project-philosophy.md` for the 7 architectural pillars.
 
 ## Important Rules
 
 - All work on **`feature/version-6.0.0`** branch (never `main`)
 - Read `AGENTS.md` for development order and guidelines
+- Read `docs/project-philosophy.md` for architectural pillars
 - Read `docs/v6-planning/` for architecture analysis, changelog, and business logic analysis
 - Commit often with conventional commits
 - Run `.\mvnw test` before committing

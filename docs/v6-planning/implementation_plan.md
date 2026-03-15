@@ -488,58 +488,141 @@ Step-by-step wizard for new users:
 
 ## Part 8: Updated Phased Roadmap
 
-### Phase 1: Architecture Foundation (v6.0-alpha)
+> **Last updated:** 2026-03-15. Phases 0–6C complete. Roadmap restructured with research gap analysis, phases split to ≤10 SP.
 
-> Unblock everything else. Focus on the plumbing.
+### Completed Phases (v6.0-alpha through v6.0-beta)
 
-| #   | Item                                                                      | Priority    |
-| --- | ------------------------------------------------------------------------- | ----------- |
-| 1   | **Extract `ConversationService` from `RestBotEngine`**                    | 🔴 Critical |
-| 2   | **Streaming API** (SSE endpoint, `StreamingChatModel`)                    | 🔴 Critical |
-| 3   | **Decompose `LangchainTask`** into focused classes                        | 🟡 High     |
-| 4   | **Add Quarkus Reactive Messaging** (RabbitMQ) for conversation processing | 🟡 High     |
-| 5   | **Chat UI rewrite** (Vite + streaming + embeddable widget)                | 🟡 High     |
-| 6   | **MCP Server** (expose bots as MCP tools)                                 | 🟡 High     |
+| Phase | Description | SP | Status |
+|-------|------------|-----|--------|
+| 0 | **Security Quick Wins** — CORS, PathNavigator | 6 | ✅ |
+| 1 | **Backend Foundation** — ConversationService, LangchainTask decomp, typed memory, config consolidation | 20 | ✅ |
+| 2 | **Testing Infrastructure** — 48 ITs, unit test gaps, API contracts | 14 | ✅ |
+| 3 | **Manager UI Rewrite** — React 19/Vite/Tailwind, all editors, MSW, i18n, Keycloak | 36 | ✅ |
+| 4 | **Hardening** — E2E Playwright, integration tests, JSON Schema, production build | 18 | ✅ |
+| 5 | **NATS JetStream** — event bus abstraction, adapter, coordinator dashboard | 16 | ✅ |
+| 6 | **PostgreSQL / DB-Agnostic** — repository abstraction, PG adapter, sync driver, 48 PG ITs | 26 | ✅ |
+| 6C | **Infinispan → Caffeine** — 2 files rewritten, 4 POM deps removed, Caffeine via quarkus-cache | 2 | ✅ |
 
-### Phase 2: Intelligence Layer (v6.0-beta)
+### Quick Wins (before Phase 7)
 
-> New capabilities that differentiate EDDI.
+| Item | Description | SP | Status |
+|------|------------|-----|--------|
+| 6D | **Lombok Removal** — Delombok 114 files (371 annotations), `@Value`→records, `@Slf4j`→JBoss Logger | 5 | ⬜ |
+| — | **Quarkus 3.33 LTS Upgrade** — waiting for GA (~March 25, 2026). 3.32.3 blocked by Java 25 `ALL-UNNAMED` issue | 2 | ⏳ |
 
-| #   | Item                                                            | Priority  |
-| --- | --------------------------------------------------------------- | --------- |
-| 7   | **Multi-bot parallel execution**                                | 🟡 High   |
-| 8   | **Cascading model routing** (small → better)                    | 🟡 High   |
-| 9   | **MCP Client** (bots consuming external MCP tools)              | 🟡 High   |
-| 10  | **RAG pipeline** (vector store integration, document ingestion) | 🟡 High   |
-| 11  | **Persistent user memory** (cross-conversation, cross-bot)      | 🟠 Medium |
-| 12  | **Webhook/event system**                                        | 🟠 Medium |
+### Phase 7: Secrets Management + Audit Infrastructure (v6.0-beta2)
 
-### Phase 3: Manager UI Rewrite (v6.0-beta2)
+> Remove production blockers. Low complexity, no dependencies, maximum enterprise unlock.
 
-> Complete frontend overhaul.
+| # | Item | Priority |
+|---|------|----------|
+| 33 | **Secrets Vault** — `${vault:key}` references resolved at runtime, export sanitization scrubs plaintext keys | 🔴 Critical |
+| 34 | **Immutable Audit Ledger** — write-once append-only trail of compiled prompts, tool calls, responses, costs (EU AI Act) | 🔴 Critical |
 
-| #   | Item                                       | Priority    |
-| --- | ------------------------------------------ | ----------- |
-| 13  | **New Manager: Vite + MUI v6 + RTK Query** | 🔴 Critical |
-| 14  | **Dashboard with analytics**               | 🟡 High     |
-| 15  | **Visual pipeline builder**                | 🟡 High     |
-| 16  | **Conversation debugger**                  | 🟡 High     |
-| 17  | **Guided bot creation wizard**             | 🟠 Medium   |
-| 18  | **Inline config editor with validation**   | 🟠 Medium   |
+### Phase 8a: MCP Servers (v6.0-beta3, 8 SP)
 
-### Phase 4: Advanced & Polish (v6.0-rc)
+> EDDI's integration story. The broadest MCP scope of any JVM platform.
 
-> Expert features and production hardening.
+| # | Item | Priority |
+|---|------|----------|
+| 35 | **MCP Server: Bot Conversations** — `talk_to_bot`, `create_conversation`, `list_bots` tools | 🔴 Critical |
+| 36 | **MCP Server: EDDI Admin API** — manage bots/packages/deploy/config via MCP | 🟡 High |
 
-| #   | Item                                                               | Priority        |
-| --- | ------------------------------------------------------------------ | --------------- |
-| 19  | **Group-of-experts / debate orchestration**                        | 🟠 Medium       |
-| 20  | **Heartbeat / proactive bot actions**                              | 🟠 Medium       |
-| 21  | **PostgreSQL for configs** (alongside MongoDB for conversations)   | 🟠 Medium       |
-| 22  | **Redis distributed cache** (replace Infinispan embedded)          | 🟡 High         |
-| 23  | **DAG pipeline execution** (parallel tasks, conditional branching) | 🟠 Medium       |
-| 24  | **Multi-channel adapters** (Slack, Telegram, Discord)              | 🟢 Nice-to-have |
-| 25  | **Helm chart + OpenTelemetry**                                     | 🟡 High         |
+### Phase 8b: MCP Client + Operator (7 SP)
+
+| # | Item | Priority |
+|---|------|----------|
+| 37 | **MCP Server: EDDI Documentation** — docs.labs.ai content as MCP resources | 🟡 High |
+| 38 | **MCP Client** — bots consume external MCP tools (filesystem, database, code execution) | 🟡 High |
+| — | Phase 8b includes design doc for Workspace AI Operator | 🟠 Medium |
+
+### Phase 9: DAG Pipeline + Governance (v6.0-rc1, 10 SP)
+
+> Enable parallel execution. Foundation for multi-bot.
+
+| # | Item | Priority |
+|---|------|----------|
+| 39 | **3-Tier State Architecture (CQRS)** — partition memory into Execution Token / Transient Context / Telemetry Ledger | 🟡 High |
+| 40 | **DAG Pipeline Execution** — parallel tasks, per-task circuit breakers, execution hash dedup, budget-aware branches | 🟡 High |
+
+### Phase 9b: HITL Framework (5 SP)
+
+| # | Item | Priority |
+|---|------|----------|
+| 41 | **HITL Framework** — pause/resume/approve for STATE_CHANGING MCP tools, budget thresholds, human escalation | 🟡 High |
+| 42 | **Workspace AI Operator** — system bot with admin API access | 🟠 Medium |
+
+### Phase 10a: Multi-Bot Orchestration (8 SP)
+
+> The differentiating features. Depend on DAG (Phase 9).
+
+| # | Item | Priority |
+|---|------|----------|
+| 43 | **Bot-to-bot routing** — orchestrator bot pattern, cascading conversation context | 🟡 High |
+| 44 | **Cascading model routing** — small→better fallback, consensus modes | 🟡 High |
+
+### Phase 10b: RAG Pipeline + Debate (8 SP)
+
+| # | Item | Priority |
+|---|------|----------|
+| 45 | **RAG Pipeline** — vector store integration, document ingestion, chunk provenance, tenant-level RLS | 🟡 High |
+| 46 | **Group-of-Experts / Debate Pattern** — multi-round specialist bots with moderator synthesis | 🟠 Medium |
+
+### Phase 11a: Persistent Memory + Heartbeat (8 SP)
+
+> User-facing intelligence features.
+
+| # | Item | Priority |
+|---|------|----------|
+| 47 | **Persistent User Memory** — cross-conversation, cross-bot user knowledge store | 🟡 High |
+| 48 | **Heartbeat / Scheduled Triggers** — cluster-safe via NATS exactly-once, bot self-scheduling via tool | 🟡 High |
+
+### Phase 11b: Multi-Channel Adapters (5 SP)
+
+| # | Item | Priority |
+|---|------|----------|
+| 49 | **Multi-Channel Adapters** — WhatsApp/Telegram/Slack (separate services) | 🟠 Medium |
+
+### Phase 12: CI/CD (8 SP, can run in parallel)
+
+> Can be executed alongside any other phase.
+
+| # | Item | Priority |
+|---|------|----------|
+| 50 | **GitHub Actions: EDDI** — compile, test, Docker build, integration tests, push | 🟡 High |
+| 51 | **GitHub Actions: Manager + Chat-UI + Website** — build, test, deploy | 🟡 High |
+
+### Phase 13a: Time-Traveling Debugger (5 SP)
+
+| # | Item | Priority |
+|---|------|----------|
+| 52 | **Time-Traveling Debugger** — step-through replay from audit ledger, compiled prompt viewer, memory diffs | 🟡 High |
+
+### Phase 13b: Visual Pipeline Builder + Taint Tracking (8 SP)
+
+| # | Item | Priority |
+|---|------|----------|
+| 53 | **Visual Pipeline Builder** — Linear/Block Hybrid editor, side-sheet inspectors | 🟠 Medium |
+| 54 | **Visual Taint Tracking** — green/yellow/red data provenance indicators | 🟠 Medium |
+
+### Phase 14a: Website — Astro Setup (5 SP)
+
+| # | Item | Priority |
+|---|------|----------|
+| 55 | Scaffold Astro + Tailwind + i18n | 🟠 Medium |
+| 56 | Dark/light + RTL | 🟠 Medium |
+
+### Phase 14b: Website — Content + Deployment (9 SP) [LAST]
+
+| # | Item | Priority |
+|---|------|----------|
+| 57 | Migrate content into components | 🟠 Medium |
+| 58 | Documentation pages (Content Collections) | 🟠 Medium |
+| 59 | GitHub Actions deployment | 🟠 Medium |
+
+### Future: Deployment Coordination Enhancement
+
+> Replace the current 10-second `@Scheduled` DB polling for bot deployments with NATS pub/sub deployment events for instant cross-instance coordination.
 
 ---
 

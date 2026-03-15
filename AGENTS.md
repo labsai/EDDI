@@ -33,6 +33,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Bot behavior l
 ### Before Starting Any Work
 
 1. **Read the planning docs**:
+   - [`docs/project-philosophy.md`](docs/project-philosophy.md) — **Supreme directive.** 7 architectural pillars governing all EDDI development
    - [`docs/changelog.md`](docs/changelog.md) — **READ FIRST.** Running log of all changes, decisions, and reasoning across ALL repos and sessions
    - [`docs/v6-planning/implementation_plan.md`](docs/v6-planning/implementation_plan.md) — Full architecture audit (14 appendices, A-N) and phased roadmap
    - [`docs/v6-planning/business-logic-analysis.md`](docs/v6-planning/business-logic-analysis.md) — Configuration model, Bot Father, parser/expression deep dive
@@ -112,34 +113,73 @@ Phase 6: PostgreSQL / DB-Agnostic Architecture ✅
   6B. PostgreSQL integration test parity               3 SP
       (run all 48 ITs against both MongoDB and PostgreSQL)
 
-Phase 7: MCP Server + Client
-  33. MCP Server — expose EDDI tools via MCP           5 SP
-  34. MCP Client — consume external MCP tools          5 SP
+Phase 6C: Infinispan → Caffeine (2 SP)   [QUICK WIN]  ✅
+  6C. Replace Infinispan with Caffeine (2 files, POM cleanup)   2 SP
 
-Phase 8: Multi-Bot Orchestration + Cascading Routing
-  35. Bot-to-bot routing rules                         5 SP
-  36. Cascading conversation context                   3 SP
-  37. Orchestrator bot pattern                          3 SP
+Phase 6D: Lombok Removal (5 SP)   [QUICK WIN]
+  6D. Delombok 114 files, @Value→records, @Slf4j→Logger    5 SP
 
-Phase 9: Persistent User Memory + Multi-Channel Adapters
-  38. Cross-conversation user memory store             5 SP
-  39. Channel adapter abstraction                      3 SP
-  40. WhatsApp/Telegram/Slack adapters                  5 SP
+Phase 7: Secrets Management + Audit Infrastructure (10 SP)
+  33. Secrets Vault — ${vault:key} references, export sanitization  5 SP
+  34. Immutable Audit Ledger — write-once trail, EU AI Act          5 SP
 
-Phase 10: CI/CD (8 SP)
-  41. GitHub Actions for EDDI (replace CircleCI)      3 SP
-  42. GitHub Actions for Manager + Chat-UI + Website  5 SP
+Phase 8a: MCP Servers (8 SP)
+  35. MCP Server: Bot Conversations (talk_to_bot, list_bots)       5 SP
+  36. MCP Server: EDDI Admin API (manage bots/packages/deploy)     3 SP
 
-Phase 11: Website — Astro Migration (14 SP) [LAST]
-  43. Scaffold Astro + Tailwind + i18n                2 SP
-  44. Migrate content into components                 3 SP
-  45. Dark/light + RTL                                3 SP
-  46. Documentation pages (Content Collections)       5 SP
-  47. GitHub Actions deployment                       1 SP
+Phase 8b: MCP Client + Operator (7 SP)
+  37. MCP Server: EDDI Documentation (docs as MCP resources)       3 SP
+  38. MCP Client — bots consume external MCP tools                 5 SP
+      (Phase 8b includes design doc for Workspace AI Operator)
+
+Phase 9: DAG Pipeline + Governance (10 SP)
+  39. 3-Tier State Architecture (CQRS memory partitioning)         5 SP
+  40. DAG Pipeline (parallel tasks, circuit breakers, budget)       5 SP
+
+Phase 9b: HITL Framework (5 SP)
+  41. HITL Framework (pause/resume/approve for MCP + budget)       3 SP
+  42. Workspace AI Operator — system bot with admin API access     2 SP
+
+Phase 10a: Multi-Bot Orchestration (8 SP)
+  43. Bot-to-bot routing + orchestrator pattern                    5 SP
+  44. Cascading model routing (small→better, consensus)            3 SP
+
+Phase 10b: RAG Pipeline + Debate (8 SP)
+  45. RAG Pipeline (vector store, provenance, tenant RLS)          5 SP
+  46. Group-of-Experts / Debate Pattern                             3 SP
+
+Phase 11a: Persistent Memory + Heartbeat (8 SP)
+  47. Cross-conversation persistent user memory                    5 SP
+  48. Heartbeat / Scheduled Triggers (cluster-safe via NATS,       3 SP
+      exactly-once, bot self-scheduling via tool)
+
+Phase 11b: Multi-Channel Adapters (5 SP)
+  49. Multi-channel adapters (WhatsApp/Telegram/Slack)             5 SP
+
+Phase 12: CI/CD (8 SP)
+  50. GitHub Actions for EDDI (replace CircleCI)                   3 SP
+  51. GitHub Actions for Manager + Chat-UI + Website               5 SP
+
+Phase 13a: Time-Traveling Debugger (5 SP)
+  52. Time-Traveling Debugger (audit ledger replay)                5 SP
+
+Phase 13b: Visual Pipeline Builder + Taint Tracking (8 SP)
+  53. Visual Pipeline Builder (Linear/Block Hybrid)                5 SP
+  54. Visual Taint Tracking (data provenance indicators)           3 SP
+
+Phase 14a: Website — Astro Setup (5 SP)
+  55. Scaffold Astro + Tailwind + i18n                             2 SP
+  56. Dark/light + RTL                                             3 SP
+
+Phase 14b: Website — Content + Deployment (9 SP)
+  57. Migrate content into components                              3 SP
+  58. Documentation pages (Content Collections)                    5 SP
+  59. GitHub Actions deployment                                    1 SP
 
 Deferred (post v6.0):
   - Redis distributed cache
   - Helm chart + OpenTelemetry
+  - Self-improving skills (bots that learn from interactions)
 ```
 
 ---
