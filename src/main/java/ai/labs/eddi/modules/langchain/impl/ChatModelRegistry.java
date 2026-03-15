@@ -26,6 +26,9 @@ class ChatModelRegistry {
     private static final String KEY_LOG_SIZE_LIMIT = "logSizeLimit";
     private static final String KEY_ADD_TO_OUTPUT = "addToOutput";
     private static final String KEY_CONVERT_TO_OBJECT = "convertToObject";
+    private static final String KEY_TIMEOUT = "timeout";
+    private static final String KEY_LOG_REQUESTS = "logRequests";
+    private static final String KEY_LOG_RESPONSES = "logResponses";
 
     private static final Logger LOGGER = Logger.getLogger(ChatModelRegistry.class);
 
@@ -44,6 +47,11 @@ class ChatModelRegistry {
     ChatModel getOrCreate(String type, Map<String, String> processedParams)
             throws UnsupportedLangchainTaskException {
 
+        // Extract observability params BEFORE filtering (they're removed from cache key)
+        var timeoutMs = processedParams.get(KEY_TIMEOUT);
+        var logReq = processedParams.get(KEY_LOG_REQUESTS);
+        var logResp = processedParams.get(KEY_LOG_RESPONSES);
+
         var filteredParams = filterParams(processedParams);
         var cacheKey = new ModelCacheKey(type, filteredParams);
 
@@ -55,7 +63,8 @@ class ChatModelRegistry {
             throw new UnsupportedLangchainTaskException(String.format("Type \"%s\" is not supported", type));
         }
 
-        var model = languageModelApiConnectorBuilders.get(type).get().build(filteredParams);
+        var rawModel = languageModelApiConnectorBuilders.get(type).get().build(filteredParams);
+        var model = ObservableChatModel.wrapIfNeeded(rawModel, type, timeoutMs, logReq, logResp);
         modelCache.put(cacheKey, model);
 
         return model;
@@ -101,6 +110,10 @@ class ChatModelRegistry {
         returnMap.remove(KEY_LOG_SIZE_LIMIT);
         returnMap.remove(KEY_ADD_TO_OUTPUT);
         returnMap.remove(KEY_CONVERT_TO_OBJECT);
+        // Observability params don't affect model identity — remove from cache key
+        returnMap.remove(KEY_TIMEOUT);
+        returnMap.remove(KEY_LOG_REQUESTS);
+        returnMap.remove(KEY_LOG_RESPONSES);
         return returnMap;
     }
 
