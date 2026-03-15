@@ -15,6 +15,7 @@ import jakarta.ws.rs.sse.SseEventSink;
 import org.jboss.logging.Logger;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * REST implementation for log administration — provides real-time SSE streaming
@@ -76,18 +77,22 @@ public class RestLogAdmin implements IRestLogAdmin {
             sendEvent(eventSink, sse, entry);
         });
 
-        // Clean up when client disconnects
-        // We schedule a periodic check since SseEventSink doesn't have an onClose callback
+        // Clean up when client disconnects or after max lifetime
         Thread.ofVirtual().name("sse-log-cleanup-" + listenerId).start(() -> {
+            long maxLifetimeMs = TimeUnit.HOURS.toMillis(24);
+            long start = System.currentTimeMillis();
             try {
-                while (!eventSink.isClosed()) {
+                while (!eventSink.isClosed() && (System.currentTimeMillis() - start) < maxLifetimeMs) {
                     Thread.sleep(2000);
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } finally {
                 boundedLogStore.removeListener(listenerId);
-                log.debugv("SSE log listener {0} removed (client disconnected)", listenerId);
+                if (!eventSink.isClosed()) {
+                    eventSink.close();
+                }
+                log.debugv("SSE log listener {0} removed (client disconnected or max lifetime reached)", listenerId);
             }
         });
 

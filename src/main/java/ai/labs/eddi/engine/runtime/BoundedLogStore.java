@@ -302,7 +302,7 @@ public class BoundedLogStore {
                     record.getMillis(),
                     record.getLevel().getName(),
                     loggerName,
-                    record.getMessage(),
+                    formatMessage(record),
                     environment,
                     botId,
                     botVersion,
@@ -312,6 +312,24 @@ public class BoundedLogStore {
             );
 
             store.publish(entry);
+        }
+
+        /**
+         * Format a JUL LogRecord message, resolving {0},{1}... placeholders
+         * from the record's parameters array.
+         */
+        private String formatMessage(LogRecord record) {
+            String msg = record.getMessage();
+            if (msg == null) return "";
+            Object[] params = record.getParameters();
+            if (params != null && params.length > 0) {
+                try {
+                    return java.text.MessageFormat.format(msg, params);
+                } catch (Exception e) {
+                    return msg; // fallback to raw pattern
+                }
+            }
+            return msg;
         }
 
         @Override
