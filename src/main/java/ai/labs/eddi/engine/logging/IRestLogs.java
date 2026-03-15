@@ -26,8 +26,7 @@ public interface IRestLogs {
                               @QueryParam("botVersion") Integer botVersion,
                               @QueryParam("conversationId") String conversationId,
                               @QueryParam("userId") String userId,
+                              @QueryParam("instanceId") String instanceId,
                               @QueryParam("skip") @DefaultValue("0") Integer skip,
                               @QueryParam("limit") @DefaultValue("200") Integer limit);
-
 }
-

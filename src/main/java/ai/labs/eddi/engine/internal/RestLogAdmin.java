@@ -1,0 +1,117 @@
+package ai.labs.eddi.engine.internal;
+
+import ai.labs.eddi.engine.IRestLogAdmin;
+import ai.labs.eddi.engine.model.DatabaseLog;
+import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.LogEntry;
+import ai.labs.eddi.engine.runtime.BoundedLogStore;
+import ai.labs.eddi.engine.runtime.IDatabaseLogs;
+import ai.labs.eddi.engine.runtime.InstanceIdProducer;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.sse.OutboundSseEvent;
+import jakarta.ws.rs.sse.Sse;
+import jakarta.ws.rs.sse.SseEventSink;
+import org.jboss.logging.Logger;
+
+import java.util.List;
+
+/**
+ * REST implementation for log administration — provides real-time SSE streaming
+ * from the in-memory ring buffer and historical queries from the database.
+ *
+ * @author ginccc
+ * @since 6.0.0
+ */
+@ApplicationScoped
+public class RestLogAdmin implements IRestLogAdmin {
+
+    private static final Logger log = Logger.getLogger(RestLogAdmin.class);
+
+    private final BoundedLogStore boundedLogStore;
+    private final IDatabaseLogs databaseLogs;
+    private final InstanceIdProducer instanceIdProducer;
+
+    @Inject
+    public RestLogAdmin(BoundedLogStore boundedLogStore,
+                        IDatabaseLogs databaseLogs,
+                        InstanceIdProducer instanceIdProducer) {
+        this.boundedLogStore = boundedLogStore;
+        this.databaseLogs = databaseLogs;
+        this.instanceIdProducer = instanceIdProducer;
+    }
+
+    @Override
+    public List<LogEntry> getRecentLogs(String botId, String conversationId, String level, int limit) {
+        return boundedLogStore.getEntries(botId, conversationId, level, limit);
+    }
+
+    @Override
+    public List<DatabaseLog> getHistoryLogs(Deployment.Environment environment, String botId,
+                                             Integer botVersion, String conversationId,
+                                             String userId, String instanceId,
+                                             Integer skip, Integer limit) {
+        return databaseLogs.getLogs(environment, botId, botVersion, conversationId, userId, instanceId, skip, limit);
+    }
+
+    @Override
+    public void streamLogs(String botId, String conversationId, String level,
+                           SseEventSink eventSink, Sse sse) {
+
+        // Send initial batch from ring buffer
+        List<LogEntry> initial = boundedLogStore.getEntries(botId, conversationId, level, 50);
+        for (int i = initial.size() - 1; i >= 0; i--) {
+            sendEvent(eventSink, sse, initial.get(i));
+        }
+
+        // Register listener for live push
+        String listenerId = boundedLogStore.addListener(entry -> {
+            if (eventSink.isClosed()) return;
+
+            // Apply filters
+            if (botId != null && !botId.equals(entry.botId())) return;
+            if (conversationId != null && !conversationId.equals(entry.conversationId())) return;
+            if (level != null && !level.equalsIgnoreCase(entry.level())) return;
+
+            sendEvent(eventSink, sse, entry);
+        });
+
+        // Clean up when client disconnects
+        // We schedule a periodic check since SseEventSink doesn't have an onClose callback
+        Thread.ofVirtual().name("sse-log-cleanup-" + listenerId).start(() -> {
+            try {
+                while (!eventSink.isClosed()) {
+                    Thread.sleep(2000);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                boundedLogStore.removeListener(listenerId);
+                log.debugv("SSE log listener {0} removed (client disconnected)", listenerId);
+            }
+        });
+
+        log.debugv("SSE log stream started (listenerId={0}, botId={1}, level={2})",
+                listenerId, botId, level);
+    }
+
+    @Override
+    public InstanceInfo getInstanceId() {
+        return new InstanceInfo(instanceIdProducer.getInstanceId());
+    }
+
+    private void sendEvent(SseEventSink eventSink, Sse sse, LogEntry entry) {
+        try {
+            OutboundSseEvent event = sse.newEventBuilder()
+                    .name("log")
+                    .data(entry)
+                    .build();
+            eventSink.send(event).exceptionally(t -> {
+                log.debugv("Failed to send SSE log event: {0}", t.getMessage());
+                return null;
+            });
+        } catch (Exception e) {
+            log.debugv("Error sending SSE log event: {0}", e.getMessage());
+        }
+    }
+}

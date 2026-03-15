@@ -3,12 +3,12 @@ package ai.labs.eddi.engine.logging;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.model.DatabaseLog;
 import ai.labs.eddi.engine.model.Deployment;
+import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
 
-@Slf4j
+@ApplicationScoped
 public class RestLogs implements IRestLogs {
     private final IDatabaseLogs databaseLogs;
 
@@ -22,16 +22,16 @@ public class RestLogs implements IRestLogs {
         return databaseLogs.getLogs(skip, limit);
     }
 
-
     @Override
     public List<DatabaseLog> getLogs(Deployment.Environment environment,
                                      String botId,
                                      Integer botVersion,
                                      String conversationId,
                                      String userId,
+                                     String instanceId,
                                      Integer skip,
                                      Integer limit) {
 
-        return databaseLogs.getLogs(environment, botId, botVersion, conversationId, userId, skip, limit);
+        return databaseLogs.getLogs(environment, botId, botVersion, conversationId, userId, instanceId, skip, limit);
     }
 }
