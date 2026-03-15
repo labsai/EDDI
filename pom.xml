@@ -17,10 +17,9 @@
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
         <quarkus.platform.version>3.30.8</quarkus.platform.version>
-        <langchain4j-beta.version>1.11.0-beta19</langchain4j-beta.version>
-
-        <langchain4j.version>1.11.0</langchain4j.version>
-        <langchain4j-libs.version>1.11.0</langchain4j-libs.version>
+        <langchain4j-beta.version>1.12.2-beta22</langchain4j-beta.version>
+        <langchain4j.version>1.12.2</langchain4j.version>
+        <langchain4j-libs.version>1.12.2</langchain4j-libs.version>
         <jandex-maven-plugin.version>3.5.3</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.5.4</surefire-plugin.version>
