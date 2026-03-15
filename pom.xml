@@ -20,7 +20,6 @@
         <quarkus.langchain4j.version>1.7.4</quarkus.langchain4j.version>
         <langchain4j.version>1.11.0</langchain4j.version>
         <langchain4j-libs.version>1.11.0</langchain4j-libs.version>
-        <infinispan.version>15.1.7.Final</infinispan.version>
         <jandex-maven-plugin.version>3.5.3</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.5.4</surefire-plugin.version>
@@ -217,28 +216,7 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-mongodb-client</artifactId>
         </dependency>
-        <dependency>
-            <groupId>org.infinispan</groupId>
-            <artifactId>infinispan-quarkus-embedded</artifactId>
-            <version>${infinispan.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.infinispan</groupId>
-            <artifactId>infinispan-core</artifactId>
-            <version>${infinispan.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.infinispan</groupId>
-            <artifactId>infinispan-commons</artifactId>
-            <version>${infinispan.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.infinispan</groupId>
-            <artifactId>infinispan-component-annotations</artifactId>
-            <version>${infinispan.version}</version>
-            <scope>compile</scope>
-        </dependency>
+        <!-- Caffeine cache provided transitively by quarkus-cache (Phase 6C: Infinispan removed) -->
         <!-- RxJava3 removed in Phase 6A — sync MongoDB driver replaces reactive+blocking pattern -->
         <dependency>
             <groupId>org.apache.commons</groupId>

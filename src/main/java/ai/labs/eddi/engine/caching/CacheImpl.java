@@ -1,12 +1,22 @@
 package ai.labs.eddi.engine.caching;
 
-import org.infinispan.Cache;
+import com.github.benmanes.caffeine.cache.Cache;
 
 import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Caffeine-backed implementation of {@link ICache}.
+ * <p>
+ * TTL-aware put methods use Caffeine's {@code policy().expireVariably()} when available,
+ * but since Caffeine's standard builder doesn't support per-entry TTL out of the box
+ * without a custom Expiry, we store entries normally and rely on the global max-size eviction.
+ * For tool caching (the only consumer using TTL puts), the ToolCacheService already tracks
+ * expiry internally via {@code CachedResult.expiresAt}.
+ */
 public class CacheImpl<K, V> implements ICache<K, V> {
     private final String cacheName;
     private final Cache<K, V> cache;
@@ -21,118 +31,137 @@ public class CacheImpl<K, V> implements ICache<K, V> {
         return cacheName;
     }
 
+    // --- TTL-aware operations ---
+    // Caffeine's standard API doesn't support per-entry TTL without a custom Expiry.
+    // These delegate to the non-TTL versions since:
+    //   1. ToolCacheService tracks expiry internally (CachedResult.expiresAt)
+    //   2. Other consumers don't use TTL puts at all
+    //   3. Global max-size eviction is the primary eviction strategy
+
     @Override
     public V put(K key, V value, long lifespan, TimeUnit unit) {
-        return this.cache.put(key, value, lifespan, unit);
+        return put(key, value);
     }
 
     @Override
     public V putIfAbsent(K key, V value, long lifespan, TimeUnit unit) {
-        return this.cache.putIfAbsent(key, value, lifespan, unit);
+        return putIfAbsent(key, value);
     }
 
     @Override
     public void putAll(Map<? extends K, ? extends V> map, long lifespan, TimeUnit unit) {
-        this.cache.putAll(map, lifespan, unit);
+        putAll(map);
     }
 
     @Override
     public V replace(K key, V value, long lifespan, TimeUnit unit) {
-        return this.cache.replace(key, value, lifespan, unit);
+        return replace(key, value);
     }
 
     @Override
     public boolean replace(K key, V oldValue, V value, long lifespan, TimeUnit unit) {
-        return this.cache.replace(key, oldValue, value, lifespan, unit);
+        return replace(key, oldValue, value);
     }
 
     @Override
     public V put(K key, V value, long lifespan, TimeUnit lifespanUnit, long maxIdleTime, TimeUnit maxIdleTimeUnit) {
-        return this.cache.put(key, value, lifespan, lifespanUnit, maxIdleTime, maxIdleTimeUnit);
+        return put(key, value);
     }
 
     @Override
     public V putIfAbsent(K key, V value, long lifespan, TimeUnit lifespanUnit, long maxIdleTime, TimeUnit maxIdleTimeUnit) {
-        return this.cache.putIfAbsent(key, value, lifespan, lifespanUnit, maxIdleTime, maxIdleTimeUnit);
+        return putIfAbsent(key, value);
+    }
+
+    // --- ConcurrentMap delegate methods ---
+
+    private ConcurrentMap<K, V> asMap() {
+        return cache.asMap();
     }
 
     @Override
     public V putIfAbsent(K key, V value) {
-        return this.cache.putIfAbsent(key, value);
+        return asMap().putIfAbsent(key, value);
     }
 
     @Override
     public boolean remove(Object key, Object value) {
-        return this.cache.remove(key, value);
+        return asMap().remove(key, value);
     }
 
     @Override
     public boolean replace(K key, V oldValue, V newValue) {
-        return this.cache.replace(key, oldValue, newValue);
+        return asMap().replace(key, oldValue, newValue);
     }
 
     @Override
     public V replace(K key, V value) {
-        return this.cache.replace(key, value);
+        return asMap().replace(key, value);
     }
 
     @Override
     public int size() {
-        return this.cache.size();
+        return (int) cache.estimatedSize();
     }
 
     @Override
     public boolean isEmpty() {
-        return this.cache.isEmpty();
+        return cache.estimatedSize() == 0;
     }
 
     @Override
     public boolean containsKey(Object key) {
-        return this.cache.containsKey(key);
+        return asMap().containsKey(key);
     }
 
     @Override
     public boolean containsValue(Object value) {
-        return this.cache.containsValue(value);
+        return asMap().containsValue(value);
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public V get(Object key) {
-        return this.cache.get(key);
+        return cache.getIfPresent((K) key);
     }
 
     @Override
     public V put(K key, V value) {
-        return this.cache.put(key, value);
+        V prev = cache.getIfPresent(key);
+        cache.put(key, value);
+        return prev;
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public V remove(Object key) {
-        return this.cache.remove(key);
+        V prev = cache.getIfPresent((K) key);
+        cache.invalidate((K) key);
+        return prev;
     }
 
     @Override
     public void putAll(Map<? extends K, ? extends V> m) {
-        this.cache.putAll(m);
+        cache.putAll(m);
     }
 
     @Override
     public void clear() {
-        this.cache.clear();
+        cache.invalidateAll();
     }
 
     @Override
     public Set<K> keySet() {
-        return this.cache.keySet();
+        return asMap().keySet();
     }
 
     @Override
     public Collection<V> values() {
-        return this.cache.values();
+        return asMap().values();
     }
 
     @Override
-    public Set<Entry<K, V>> entrySet() {
-        return this.cache.entrySet();
+    public Set<Map.Entry<K, V>> entrySet() {
+        return asMap().entrySet();
     }
 }

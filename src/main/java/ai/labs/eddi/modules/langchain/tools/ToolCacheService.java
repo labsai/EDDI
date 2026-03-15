@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Infinispan-based cache service for tool results with smart TTL management.
+ * Caffeine-backed cache service for tool results with smart TTL management.
  * Phase 4: Intelligent caching with tool-specific time-to-live values and metrics.
  */
 @ApplicationScoped
@@ -106,7 +106,7 @@ public class ToolCacheService {
         // Register gauge for cache size
         meterRegistry.gauge("eddi.tool.cache.size", cache, ICache::size);
 
-        LOGGER.info("Tool cache service initialized with Infinispan cache: " + CACHE_NAME);
+        LOGGER.info("Tool cache service initialized with Caffeine cache: " + CACHE_NAME);
     }
 
     /**
