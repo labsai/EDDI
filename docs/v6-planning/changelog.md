@@ -43,6 +43,27 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-15 — Strategic Roadmap Reorder
+
+**Repos:** EDDI, EDDI-Manager
+**Branch:** `feature/version-6.0.0`
+
+**What changed:**
+- RAG basics pulled from Phase 10b into Phase 8b as "RAG Lifecycle Task" (#38b, 3 SP)
+- Phase 7 expanded to 12 SP: added Tenant Quota Stub (#34b, 2 SP) for SaaS foundation
+- OpenTelemetry Tracing (#40b) moved from "deferred" into Phase 9 (DAG)
+- Phase 10b renamed to "Advanced RAG + Debate" (builds on 8b basics)
+- CI/CD (Phase 12) deprioritized from 🟡High to 🟠Medium (CircleCI exists)
+- langchain4j/quarkus-langchain4j leverage notes added to all future phases
+
+**Key decisions:**
+- Use langchain4j `EmbeddingStore`/`EmbeddingModel` for RAG (not custom implementations)
+- Use `quarkus-langchain4j` MCP support where it fits EDDI's config-driven model
+- Keep `ILifecycleTask` as the orchestration layer wrapping langchain4j components
+- OTel bundled with DAG because tracing across parallel tasks is when it becomes essential
+
+---
+
 ### 2026-03-15 — Phase 6C: Infinispan → Caffeine
 
 **Repo:** EDDI

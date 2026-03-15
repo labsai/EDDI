@@ -404,10 +404,16 @@
 - [ ] **Quarkus 3.33 LTS Upgrade** — waiting for GA (March 25, 2026). 3.32.3 has Java 25 `ALL-UNNAMED` module issue.
 - [ ] **NATS Deployment Events** — replace 10s DB polling with pub/sub (future phase)
 
-### Phase 7: Secrets Management + Audit Infrastructure (10 SP)
+### Phase 7: Secrets, Audit + Tenant Foundation (12 SP)
 
 - [ ] Item 33: Secrets Vault — `${vault:key}` references, export sanitization (5 SP)
 - [ ] Item 34: Immutable Audit Ledger — write-once trail, EU AI Act (5 SP)
+- [ ] Item 34b: Tenant Quota Stub — per-tenant rate limits, usage metering (2 SP)
+
+### Phase 8: MCP + RAG Foundation
+
+- [ ] Phase 8a: MCP Servers — bot conversations, admin API (8 SP)
+- [ ] Phase 8b: MCP Client + RAG Lifecycle Task + docs MCP (10 SP)
 
 See `AGENTS.md` for the full roadmap (Phases 7–14b) and `docs/project-philosophy.md` for the 7 architectural pillars.
 

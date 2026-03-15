@@ -510,119 +510,147 @@ Step-by-step wizard for new users:
 | 6D | **Lombok Removal** — Delombok 114 files (371 annotations), `@Value`→records, `@Slf4j`→JBoss Logger | 5 | ⬜ |
 | — | **Quarkus 3.33 LTS Upgrade** — waiting for GA (~March 25, 2026). 3.32.3 blocked by Java 25 `ALL-UNNAMED` issue | 2 | ⏳ |
 
-### Phase 7: Secrets Management + Audit Infrastructure (v6.0-beta2)
+### Phase 7: Secrets, Audit + Tenant Foundation (v6.0-beta2, 12 SP)
 
 > Remove production blockers. Low complexity, no dependencies, maximum enterprise unlock.
 
-| # | Item | Priority |
-|---|------|----------|
-| 33 | **Secrets Vault** — `${vault:key}` references resolved at runtime, export sanitization scrubs plaintext keys | 🔴 Critical |
-| 34 | **Immutable Audit Ledger** — write-once append-only trail of compiled prompts, tool calls, responses, costs (EU AI Act) | 🔴 Critical |
+| # | Item | SP | Priority |
+|---|------|----|----------|
+| 33 | **Secrets Vault** — `${vault:key}` references resolved at runtime, export sanitization scrubs plaintext keys | 5 | 🔴 Critical |
+| 34 | **Immutable Audit Ledger** — write-once append-only trail of compiled prompts, tool calls, responses, costs (EU AI Act) | 5 | 🔴 Critical |
+| 34b | **Tenant Quota Stub** — per-tenant API rate limits, usage metering counters, configurable resource caps (SaaS foundation) | 2 | 🟡 High |
 
 ### Phase 8a: MCP Servers (v6.0-beta3, 8 SP)
 
 > EDDI's integration story. The broadest MCP scope of any JVM platform.
+> **Leverage:** `quarkus-langchain4j` MCP server support where available. Use langchain4j `@Tool` annotations for MCP tool definitions.
 
-| # | Item | Priority |
-|---|------|----------|
-| 35 | **MCP Server: Bot Conversations** — `talk_to_bot`, `create_conversation`, `list_bots` tools | 🔴 Critical |
-| 36 | **MCP Server: EDDI Admin API** — manage bots/packages/deploy/config via MCP | 🟡 High |
+| # | Item | SP | Priority |
+|---|------|----|----------|
+| 35 | **MCP Server: Bot Conversations** — `talk_to_bot`, `create_conversation`, `list_bots` tools | 5 | 🔴 Critical |
+| 36 | **MCP Server: EDDI Admin API** — manage bots/packages/deploy/config via MCP | 3 | 🟡 High |
 
-### Phase 8b: MCP Client + Operator (7 SP)
+### Phase 8b: MCP Client + RAG Foundation (10 SP)
 
-| # | Item | Priority |
-|---|------|----------|
-| 37 | **MCP Server: EDDI Documentation** — docs.labs.ai content as MCP resources | 🟡 High |
-| 38 | **MCP Client** — bots consume external MCP tools (filesystem, database, code execution) | 🟡 High |
-| — | Phase 8b includes design doc for Workspace AI Operator | 🟠 Medium |
+> MCP Client + basic RAG together tell the story: "EDDI bots can access any tool AND any knowledge base."
+> **Leverage:** `langchain4j` `EmbeddingStore` + `EmbeddingModel` interfaces for vector store abstraction. `quarkus-langchain4j` provides `@RegisterAiService` and built-in RAG support (`RetrievalAugmentor`, `EmbeddingStoreContentRetriever`). Use these instead of custom implementations where they fit EDDI's config-driven model.
+
+| # | Item | SP | Priority |
+|---|------|----|----------|
+| 37 | **MCP Server: EDDI Documentation** — docs.labs.ai content as MCP resources | 2 | 🟡 High |
+| 38 | **MCP Client** — bots consume external MCP tools (filesystem, database, code execution). Leverage `quarkus-langchain4j` MCP client support | 5 | 🟡 High |
+| 38b | **RAG Lifecycle Task** — new `ILifecycleTask` for vector store retrieval. Config-driven: embedding model, store type, chunk strategy, top-K. Uses langchain4j `EmbeddingStore`/`EmbeddingModel` abstractions for provider-agnostic vector search | 3 | 🟡 High |
+| — | Phase 8b includes design doc for Workspace AI Operator | — | 🟠 Medium |
 
 ### Phase 9: DAG Pipeline + Governance (v6.0-rc1, 10 SP)
 
 > Enable parallel execution. Foundation for multi-bot.
+> **Leverage:** langchain4j's `AiServices` for structured output parsing in DAG node results.
 
-| # | Item | Priority |
-|---|------|----------|
-| 39 | **3-Tier State Architecture (CQRS)** — partition memory into Execution Token / Transient Context / Telemetry Ledger | 🟡 High |
-| 40 | **DAG Pipeline Execution** — parallel tasks, per-task circuit breakers, execution hash dedup, budget-aware branches | 🟡 High |
+| # | Item | SP | Priority |
+|---|------|----|----------|
+| 39 | **3-Tier State Architecture (CQRS)** — partition memory into Execution Token / Transient Context / Telemetry Ledger | 5 | 🟡 High |
+| 40 | **DAG Pipeline Execution** — parallel tasks, per-task circuit breakers, execution hash dedup, budget-aware branches | 5 | 🟡 High |
+| 40b | **OpenTelemetry Tracing** — distributed trace context through pipeline steps, MCP calls, and LLM invocations. Essential for debugging multi-step agent flows | — | 🟡 High |
+
+> [!NOTE]
+> **OpenTelemetry** is bundled with DAG because that's when request tracing across parallel tasks becomes essential. Quarkus has built-in OTel support (`quarkus-opentelemetry`). The 30+ existing Micrometer metrics continue to work alongside OTel traces.
 
 ### Phase 9b: HITL Framework (5 SP)
 
-| # | Item | Priority |
-|---|------|----------|
-| 41 | **HITL Framework** — pause/resume/approve for STATE_CHANGING MCP tools, budget thresholds, human escalation | 🟡 High |
-| 42 | **Workspace AI Operator** — system bot with admin API access | 🟠 Medium |
+| # | Item | SP | Priority |
+|---|------|----|----------|
+| 41 | **HITL Framework** — pause/resume/approve for STATE_CHANGING MCP tools, budget thresholds, human escalation | 3 | 🟡 High |
+| 42 | **Workspace AI Operator** — system bot with admin API access | 2 | 🟠 Medium |
 
 ### Phase 10a: Multi-Bot Orchestration (8 SP)
 
 > The differentiating features. Depend on DAG (Phase 9).
+> **Leverage:** langchain4j's `ChatMemory` and `TokenWindowChatMemory` for cross-bot conversation context passing.
 
-| # | Item | Priority |
-|---|------|----------|
-| 43 | **Bot-to-bot routing** — orchestrator bot pattern, cascading conversation context | 🟡 High |
-| 44 | **Cascading model routing** — small→better fallback, consensus modes | 🟡 High |
+| # | Item | SP | Priority |
+|---|------|----|----------|
+| 43 | **Bot-to-bot routing** — orchestrator bot pattern, cascading conversation context | 5 | 🟡 High |
+| 44 | **Cascading model routing** — small→better fallback, consensus modes | 3 | 🟡 High |
 
-### Phase 10b: RAG Pipeline + Debate (8 SP)
+### Phase 10b: Advanced RAG + Debate (8 SP)
 
-| # | Item | Priority |
-|---|------|----------|
-| 45 | **RAG Pipeline** — vector store integration, document ingestion, chunk provenance, tenant-level RLS | 🟡 High |
-| 46 | **Group-of-Experts / Debate Pattern** — multi-round specialist bots with moderator synthesis | 🟠 Medium |
+> Builds on the basic RAG task from Phase 8b. Adds provenance, multi-tenant isolation, and debate patterns.
+> **Leverage:** langchain4j `ContentRetriever`, `QueryTransformer`, `QueryRouter` for advanced retrieval strategies.
+
+| # | Item | SP | Priority |
+|---|------|----|----------|
+| 45 | **Advanced RAG** — document ingestion pipeline, chunk provenance tracking, tenant-level RLS on vector store, re-ranking | 5 | 🟡 High |
+| 46 | **Group-of-Experts / Debate Pattern** — multi-round specialist bots with moderator synthesis | 3 | 🟠 Medium |
 
 ### Phase 11a: Persistent Memory + Heartbeat (8 SP)
 
 > User-facing intelligence features.
+> **Leverage:** langchain4j `ChatMemoryStore` interface for persistent memory backend abstraction.
 
-| # | Item | Priority |
-|---|------|----------|
-| 47 | **Persistent User Memory** — cross-conversation, cross-bot user knowledge store | 🟡 High |
-| 48 | **Heartbeat / Scheduled Triggers** — cluster-safe via NATS exactly-once, bot self-scheduling via tool | 🟡 High |
+| # | Item | SP | Priority |
+|---|------|----|----------|
+| 47 | **Persistent User Memory** — cross-conversation, cross-bot user knowledge store | 5 | 🟡 High |
+| 48 | **Heartbeat / Scheduled Triggers** — cluster-safe via NATS exactly-once, bot self-scheduling via tool | 3 | 🟡 High |
 
 ### Phase 11b: Multi-Channel Adapters (5 SP)
 
-| # | Item | Priority |
-|---|------|----------|
-| 49 | **Multi-Channel Adapters** — WhatsApp/Telegram/Slack (separate services) | 🟠 Medium |
+| # | Item | SP | Priority |
+|---|------|----|----------|
+| 49 | **Multi-Channel Adapters** — WhatsApp/Telegram/Slack (separate services) | 5 | 🟠 Medium |
 
-### Phase 12: CI/CD (8 SP, can run in parallel)
+### Phase 12: CI/CD — GitHub Actions Migration (8 SP)
 
-> Can be executed alongside any other phase.
+> CircleCI currently handles builds. This migrates to GitHub Actions for unified ecosystem.
 
-| # | Item | Priority |
-|---|------|----------|
-| 50 | **GitHub Actions: EDDI** — compile, test, Docker build, integration tests, push | 🟡 High |
-| 51 | **GitHub Actions: Manager + Chat-UI + Website** — build, test, deploy | 🟡 High |
+| # | Item | SP | Priority |
+|---|------|----|----------|
+| 50 | **GitHub Actions: EDDI** — compile, test, Docker build, integration tests, push | 3 | 🟠 Medium |
+| 51 | **GitHub Actions: Manager + Chat-UI + Website** — build, test, deploy | 5 | 🟠 Medium |
 
 ### Phase 13a: Time-Traveling Debugger (5 SP)
 
-| # | Item | Priority |
-|---|------|----------|
-| 52 | **Time-Traveling Debugger** — step-through replay from audit ledger, compiled prompt viewer, memory diffs | 🟡 High |
+> Depends on Audit Ledger (Phase 7).
+
+| # | Item | SP | Priority |
+|---|------|----|----------|
+| 52 | **Time-Traveling Debugger** — step-through replay from audit ledger, compiled prompt viewer, memory diffs | 5 | 🟡 High |
 
 ### Phase 13b: Visual Pipeline Builder + Taint Tracking (8 SP)
 
-| # | Item | Priority |
-|---|------|----------|
-| 53 | **Visual Pipeline Builder** — Linear/Block Hybrid editor, side-sheet inspectors | 🟠 Medium |
-| 54 | **Visual Taint Tracking** — green/yellow/red data provenance indicators | 🟠 Medium |
+| # | Item | SP | Priority |
+|---|------|----|----------|
+| 53 | **Visual Pipeline Builder** — Linear/Block Hybrid editor, side-sheet inspectors | 5 | 🟠 Medium |
+| 54 | **Visual Taint Tracking** — green/yellow/red data provenance indicators | 3 | 🟠 Medium |
 
 ### Phase 14a: Website — Astro Setup (5 SP)
 
-| # | Item | Priority |
-|---|------|----------|
-| 55 | Scaffold Astro + Tailwind + i18n | 🟠 Medium |
-| 56 | Dark/light + RTL | 🟠 Medium |
+| # | Item | SP | Priority |
+|---|------|----|----------|
+| 55 | Scaffold Astro + Tailwind + i18n | 2 | 🟠 Medium |
+| 56 | Dark/light + RTL | 3 | 🟠 Medium |
 
 ### Phase 14b: Website — Content + Deployment (9 SP) [LAST]
 
-| # | Item | Priority |
-|---|------|----------|
-| 57 | Migrate content into components | 🟠 Medium |
-| 58 | Documentation pages (Content Collections) | 🟠 Medium |
-| 59 | GitHub Actions deployment | 🟠 Medium |
+| # | Item | SP | Priority |
+|---|------|----|----------|
+| 57 | Migrate content into components | 3 | 🟠 Medium |
+| 58 | Documentation pages (Content Collections) | 5 | 🟠 Medium |
+| 59 | GitHub Actions deployment | 1 | 🟠 Medium |
 
 ### Future: Deployment Coordination Enhancement
 
 > Replace the current 10-second `@Scheduled` DB polling for bot deployments with NATS pub/sub deployment events for instant cross-instance coordination.
+
+### Implementation Note: langchain4j / quarkus-langchain4j Leverage
+
+> [!IMPORTANT]
+> **Maximize reuse of langchain4j and quarkus-langchain4j** across all phases. EDDI already uses langchain4j for model building, tool execution, and streaming. Future phases should:
+> - Use `EmbeddingStore`/`EmbeddingModel` interfaces for RAG (not custom vector clients)
+> - Use `quarkus-langchain4j` MCP support for MCP server/client where it fits EDDI's config-driven model
+> - Use `ChatMemoryStore` for persistent memory
+> - Use `ContentRetriever`/`QueryTransformer` for advanced RAG strategies
+> - Keep EDDI's `ILifecycleTask` as the orchestration layer that *wraps* langchain4j components — don't bypass the pipeline
 
 ---
 
