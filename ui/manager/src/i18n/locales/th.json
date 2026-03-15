@@ -16,7 +16,8 @@
     "bots": "บอท",
     "packages": "แพ็กเกจ",
     "conversations": "การสนทนา",
-    "coordinator": "Coordinator", "orphans": "Orphans",
+    "coordinator": "Coordinator",
+    "logs": "บันทึก", "orphans": "Orphans",
     "chat": "แชท",
     "resources": "ทรัพยากร",
     "sectionManagement": "Management",
@@ -490,5 +491,27 @@
     "fullscreenTitle": "ตัวแก้ไขเนื้อหา",
     "fullscreenDescription": "แก้ไขเต็มหน้าจอ กด Escape เพื่อปิด"
   }
+,
+  "logs": {
+    "title": "Logs",
+    "description": "Monitor real-time log stream or search historical logs.",
+    "tabLive": "Live",
+    "tabHistory": "History",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "filterBot": "Bot ID...",
+    "filterConversation": "Conversation ID...",
+    "filterInstance": "Instance ID...",
+    "allLevels": "All Levels",
+    "pause": "Pause",
+    "resume": "Resume",
+    "clear": "Clear",
+    "search": "Search",
+    "waitingForLogs": "Waiting for logs...",
+    "connectingStream": "Connecting to stream...",
+    "noHistoryLogs": "No historical logs found.",
+    "entryCount": "{{count}} entries",
+    "showStacktrace": "Show stacktrace ({{count}} frames)",
+    "hideStacktrace": "Hide stacktrace"
+  }
 }
-

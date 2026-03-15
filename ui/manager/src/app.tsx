@@ -14,6 +14,7 @@ import { ResourceDetailPage } from "@/pages/resource-detail";
 import { BotWizardPage } from "@/pages/bot-wizard";
 import { CoordinatorPage } from "@/pages/coordinator";
 import { OrphansPage } from "@/pages/orphans";
+import { LogsPage } from "@/pages/logs";
 
 export function App() {
   return (
@@ -27,6 +28,7 @@ export function App() {
         <Route path="/manage/packageview/:id" element={<PackageDetailPage />} />
         <Route path="/manage/conversations" element={<ConversationsPage />} />
         <Route path="/manage/coordinator" element={<CoordinatorPage />} />
+        <Route path="/manage/logs" element={<LogsPage />} />
         <Route path="/manage/orphans" element={<OrphansPage />} />
         <Route
           path="/manage/conversationview/:id"

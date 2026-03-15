@@ -16,7 +16,8 @@
     "bots": "机器人",
     "packages": "包",
     "conversations": "会话",
-    "coordinator": "Coordinator", "orphans": "Orphans",
+    "coordinator": "Coordinator",
+    "logs": "日志", "orphans": "Orphans",
     "chat": "聊天",
     "resources": "资源",
     "sectionManagement": "Management",
@@ -490,5 +491,27 @@
     "fullscreenTitle": "内容编辑器",
     "fullscreenDescription": "全屏编辑器。按 Escape 关闭。"
   }
+,
+  "logs": {
+    "title": "Logs",
+    "description": "Monitor real-time log stream or search historical logs.",
+    "tabLive": "Live",
+    "tabHistory": "History",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "filterBot": "Bot ID...",
+    "filterConversation": "Conversation ID...",
+    "filterInstance": "Instance ID...",
+    "allLevels": "All Levels",
+    "pause": "Pause",
+    "resume": "Resume",
+    "clear": "Clear",
+    "search": "Search",
+    "waitingForLogs": "Waiting for logs...",
+    "connectingStream": "Connecting to stream...",
+    "noHistoryLogs": "No historical logs found.",
+    "entryCount": "{{count}} entries",
+    "showStacktrace": "Show stacktrace ({{count}} frames)",
+    "hideStacktrace": "Hide stacktrace"
+  }
 }
-

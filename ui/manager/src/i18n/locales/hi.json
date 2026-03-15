@@ -16,7 +16,8 @@
     "bots": "बॉट",
     "packages": "पैकेज",
     "conversations": "वार्तालाप",
-    "coordinator": "Coordinator", "orphans": "Orphans",
+    "coordinator": "Coordinator",
+    "logs": "लॉग्स", "orphans": "Orphans",
     "chat": "चैट",
     "resources": "संसाधन",
     "sectionManagement": "Management",
@@ -490,5 +491,27 @@
     "fullscreenTitle": "सामग्री संपादक",
     "fullscreenDescription": "पूर्ण स्क्रीन संपादक। बंद करने के लिए Escape दबाएँ।"
   }
+,
+  "logs": {
+    "title": "Logs",
+    "description": "Monitor real-time log stream or search historical logs.",
+    "tabLive": "Live",
+    "tabHistory": "History",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "filterBot": "Bot ID...",
+    "filterConversation": "Conversation ID...",
+    "filterInstance": "Instance ID...",
+    "allLevels": "All Levels",
+    "pause": "Pause",
+    "resume": "Resume",
+    "clear": "Clear",
+    "search": "Search",
+    "waitingForLogs": "Waiting for logs...",
+    "connectingStream": "Connecting to stream...",
+    "noHistoryLogs": "No historical logs found.",
+    "entryCount": "{{count}} entries",
+    "showStacktrace": "Show stacktrace ({{count}} frames)",
+    "hideStacktrace": "Hide stacktrace"
+  }
 }
-

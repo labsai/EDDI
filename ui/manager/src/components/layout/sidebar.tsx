@@ -15,6 +15,7 @@ import {
   FileJson,
   Activity,
   Trash2,
+  ScrollText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -47,6 +48,11 @@ const navSections = [
         path: "/manage/coordinator",
         icon: Activity,
         labelKey: "nav.coordinator",
+      },
+      {
+        path: "/manage/logs",
+        icon: ScrollText,
+        labelKey: "nav.logs",
       },
       {
         path: "/manage/orphans",

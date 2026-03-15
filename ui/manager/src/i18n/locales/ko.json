@@ -16,7 +16,8 @@
     "bots": "봇",
     "packages": "패키지",
     "conversations": "대화",
-    "coordinator": "Coordinator", "orphans": "Orphans",
+    "coordinator": "Coordinator",
+    "logs": "로그", "orphans": "Orphans",
     "chat": "채팅",
     "resources": "리소스",
     "sectionManagement": "Management",
@@ -490,5 +491,27 @@
     "fullscreenTitle": "콘텐츠 편집기",
     "fullscreenDescription": "전체 화면 편집기. Escape로 닫습니다."
   }
+,
+  "logs": {
+    "title": "Logs",
+    "description": "Monitor real-time log stream or search historical logs.",
+    "tabLive": "Live",
+    "tabHistory": "History",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "filterBot": "Bot ID...",
+    "filterConversation": "Conversation ID...",
+    "filterInstance": "Instance ID...",
+    "allLevels": "All Levels",
+    "pause": "Pause",
+    "resume": "Resume",
+    "clear": "Clear",
+    "search": "Search",
+    "waitingForLogs": "Waiting for logs...",
+    "connectingStream": "Connecting to stream...",
+    "noHistoryLogs": "No historical logs found.",
+    "entryCount": "{{count}} entries",
+    "showStacktrace": "Show stacktrace ({{count}} frames)",
+    "hideStacktrace": "Hide stacktrace"
+  }
 }
-

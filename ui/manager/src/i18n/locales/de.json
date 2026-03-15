@@ -16,7 +16,8 @@
     "bots": "Bots",
     "packages": "Pakete",
     "conversations": "Gespräche",
-    "coordinator": "Coordinator", "orphans": "Orphans",
+    "coordinator": "Coordinator",
+    "logs": "Protokolle", "orphans": "Orphans",
     "chat": "Chat",
     "resources": "Ressourcen",
     "sectionManagement": "Management",
@@ -490,5 +491,27 @@
     "fullscreenTitle": "Inhaltseditor",
     "fullscreenDescription": "Vollbild-Inhaltseditor. Escape zum Schließen."
   }
+,
+  "logs": {
+    "title": "Logs",
+    "description": "Monitor real-time log stream or search historical logs.",
+    "tabLive": "Live",
+    "tabHistory": "History",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "filterBot": "Bot ID...",
+    "filterConversation": "Conversation ID...",
+    "filterInstance": "Instance ID...",
+    "allLevels": "All Levels",
+    "pause": "Pause",
+    "resume": "Resume",
+    "clear": "Clear",
+    "search": "Search",
+    "waitingForLogs": "Waiting for logs...",
+    "connectingStream": "Connecting to stream...",
+    "noHistoryLogs": "No historical logs found.",
+    "entryCount": "{{count}} entries",
+    "showStacktrace": "Show stacktrace ({{count}} frames)",
+    "hideStacktrace": "Hide stacktrace"
+  }
 }
-

@@ -1082,3 +1082,64 @@ export const orphanHandlers = [
     });
   }),
 ];
+
+// ─── Log Admin Handlers ──────────────────────────────────────────────────────
+
+const MOCK_LOG_ENTRIES = [
+  {
+    timestamp: Date.now() - 5000,
+    level: "INFO",
+    loggerName: "ai.labs.eddi.engine.runtime.BotEngine",
+    message: "Processing conversation conv-1 for bot bot-1",
+    environment: "unrestricted",
+    botId: "bot-1",
+    botVersion: 1,
+    conversationId: "conv-1",
+    userId: "user-1",
+    instanceId: "eddi-host-a1b2",
+  },
+  {
+    timestamp: Date.now() - 3000,
+    level: "WARNING",
+    loggerName: "ai.labs.eddi.modules.langchain.impl.LangchainTask",
+    message: "LLM response took 8200ms, exceeding timeout threshold of 5000ms",
+    environment: "unrestricted",
+    botId: "bot-1",
+    botVersion: 1,
+    conversationId: "conv-1",
+    userId: "user-1",
+    instanceId: "eddi-host-a1b2",
+  },
+  {
+    timestamp: Date.now() - 1000,
+    level: "SEVERE",
+    loggerName: "ai.labs.eddi.modules.httpcalls.impl.HttpCallsTask",
+    message:
+      "Failed to execute HTTP call 'get_weather'\n\tat ai.labs.eddi.modules.httpcalls.impl.HttpCallsTask.executeTask(HttpCallsTask.java:85)\n\tat ai.labs.eddi.modules.httpcalls.impl.HttpCallsTask.execute(HttpCallsTask.java:42)\n\tat ai.labs.eddi.engine.lifecycle.LifecycleManager.executeComponent(LifecycleManager.java:120)\nCaused by: java.net.ConnectException: Connection refused\n\tat java.net.http/jdk.internal.net.http.HttpClientImpl.send(HttpClientImpl.java:565)\n\tat java.net.http/jdk.internal.net.http.HttpClientImpl.send(HttpClientImpl.java:510)",
+    environment: "unrestricted",
+    botId: "bot-1",
+    botVersion: 1,
+    conversationId: "conv-1",
+    userId: "user-1",
+    instanceId: "eddi-host-a1b2",
+  },
+];
+
+export const logAdminHandlers = [
+  http.get("*/administration/logs", () => {
+    return HttpResponse.json(MOCK_LOG_ENTRIES);
+  }),
+
+  http.get("*/administration/logs/history", () => {
+    return HttpResponse.json(
+      MOCK_LOG_ENTRIES.map((e) => ({
+        ...e,
+        timestamp: new Date(e.timestamp).toISOString(),
+      }))
+    );
+  }),
+
+  http.get("*/administration/logs/instance", () => {
+    return HttpResponse.json({ instanceId: "eddi-host-a1b2" });
+  }),
+];
