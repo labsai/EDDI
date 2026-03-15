@@ -7,17 +7,14 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import org.jboss.logging.MDC;
 
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
-import java.util.logging.Handler;
-import java.util.logging.LogRecord;
 
 /**
- * In-memory ring buffer that captures JUL log records with MDC context.
+ * In-memory ring buffer that captures log records with MDC context.
  * Provides:
  * <ul>
  *   <li>Instant in-memory access for the SSE live-tail endpoint</li>
@@ -25,8 +22,9 @@ import java.util.logging.LogRecord;
  *   <li>Async batched DB persistence via {@link IDatabaseLogs}</li>
  * </ul>
  *
- * <p>Replaces the direct JUL Handler role previously held by DatabaseLogs/PostgresDatabaseLogs.
- * Those classes now only provide the persistence API; this class is the single registered handler.</p>
+ * <p>Log records are captured via {@link LogCaptureFilter}, a Quarkus
+ * {@code @LoggingFilter} that intercepts every log record in the
+ * JBoss LogManager pipeline and pushes it to this store.</p>
  *
  * @author ginccc
  * @since 6.0.0
@@ -55,9 +53,6 @@ public class BoundedLogStore {
     private final ConcurrentLinkedQueue<LogEntry> dbQueue = new ConcurrentLinkedQueue<>();
     private ScheduledExecutorService dbWriter;
 
-    // JUL handler instance
-    private LogCaptureHandler julHandler;
-
     @Inject
     public BoundedLogStore(
             InstanceIdProducer instanceIdProducer,
@@ -78,7 +73,7 @@ public class BoundedLogStore {
 
     /**
      * Factory method for testing — creates a store without CDI.
-     * Call {@link #init()} after construction to register the JUL handler.
+     * Call {@link #init()} after construction to start the DB writer.
      */
     static BoundedLogStore createForTesting(InstanceIdProducer instanceIdProducer, IDatabaseLogs databaseLogs,
                                              int bufferSize, boolean dbEnabled, int dbFlushIntervalSeconds,
@@ -89,11 +84,6 @@ public class BoundedLogStore {
 
     @PostConstruct
     void init() {
-        // Register as JUL handler on root logger
-        julHandler = new LogCaptureHandler(this);
-        java.util.logging.Logger rootLogger = java.util.logging.Logger.getLogger("");
-        rootLogger.addHandler(julHandler);
-
         // Start async DB writer if enabled
         if (dbEnabled) {
             dbWriter = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -114,11 +104,6 @@ public class BoundedLogStore {
 
     @PreDestroy
     void shutdown() {
-        // Remove JUL handler
-        if (julHandler != null) {
-            java.util.logging.Logger.getLogger("").removeHandler(julHandler);
-        }
-
         // Final flush
         if (dbEnabled && dbWriter != null) {
             flushToDb();
@@ -135,8 +120,76 @@ public class BoundedLogStore {
     }
 
     /**
+     * Called by {@link LogCaptureFilter} for every log record passing through
+     * the Quarkus logging pipeline.
+     *
+     * @param record the JUL LogRecord (actually a JBoss ExtLogRecord at runtime)
+     */
+    public void capture(java.util.logging.LogRecord record) {
+        if (record == null) return;
+
+        // Format the message using a Formatter (avoids deprecated getFormattedMessage())
+        String message = formatRecord(record);
+        if (message == null || message.isEmpty()) return;
+
+        // Don't capture our own log messages to avoid infinite recursion
+        String loggerName = record.getLoggerName();
+        if (loggerName != null && loggerName.startsWith("ai.labs.eddi.engine.runtime.BoundedLogStore")) {
+            return;
+        }
+
+        // Read MDC context from ExtLogRecord if available, otherwise from SLF4J MDC
+        String environment = null;
+        String botId = null;
+        String conversationId = null;
+        String userId = null;
+        Integer botVersion = null;
+
+        if (record instanceof org.jboss.logmanager.ExtLogRecord extRecord) {
+            environment = extRecord.getMdc("environment");
+            botId = extRecord.getMdc("botId");
+            conversationId = extRecord.getMdc("conversationId");
+            userId = extRecord.getMdc("userId");
+            String bv = extRecord.getMdc("botVersion");
+            if (bv != null) {
+                try {
+                    botVersion = Integer.parseInt(bv);
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        } else {
+            // Fallback: read from SLF4J MDC
+            environment = org.slf4j.MDC.get("environment");
+            botId = org.slf4j.MDC.get("botId");
+            conversationId = org.slf4j.MDC.get("conversationId");
+            userId = org.slf4j.MDC.get("userId");
+            String bv = org.slf4j.MDC.get("botVersion");
+            if (bv != null) {
+                try {
+                    botVersion = Integer.parseInt(bv);
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+
+        LogEntry entry = new LogEntry(
+                record.getMillis(),
+                record.getLevel().getName(),
+                loggerName,
+                message,
+                environment,
+                botId,
+                botVersion,
+                conversationId,
+                userId,
+                instanceIdProducer.getInstanceId()
+        );
+
+        publish(entry);
+    }
+
+    /**
      * Publish a log entry to the ring buffer and notify listeners.
-     * Called from the JUL handler on the logging thread.
      */
     public void publish(LogEntry entry) {
         // Add to ring buffer
@@ -223,7 +276,8 @@ public class BoundedLogStore {
         }
     }
 
-    // Visible for testing
+    // ==================== Visible for Testing ====================
+
     int getBufferSize() {
         lock.readLock().lock();
         try {
@@ -239,6 +293,29 @@ public class BoundedLogStore {
 
     int getDbQueueSize() {
         return dbQueue.size();
+    }
+
+    // ==================== Private Helpers ====================
+
+    /**
+     * Format a LogRecord's message, resolving {0},{1}... placeholders
+     * from the record's parameters array using a standard Formatter.
+     * Avoids deprecated ExtLogRecord.getFormattedMessage().
+     */
+    private static String formatRecord(java.util.logging.LogRecord record) {
+        String msg = record.getMessage();
+        if (msg == null) return "";
+
+        // Resolve {0}, {1}, ... placeholders using MessageFormat
+        Object[] params = record.getParameters();
+        if (params != null && params.length > 0) {
+            try {
+                return java.text.MessageFormat.format(msg, params);
+            } catch (Exception e) {
+                return msg; // fallback to raw pattern
+            }
+        }
+        return msg;
     }
 
     private boolean matchesFilter(LogEntry entry, String botId, String conversationId, String level) {
@@ -263,81 +340,5 @@ public class BoundedLogStore {
             case "FINER", "FINEST", "TRACE" -> 0;
             default -> 3; // default to INFO
         };
-    }
-
-    /**
-     * Inner JUL Handler that captures log records and delegates to BoundedLogStore.
-     */
-    private static class LogCaptureHandler extends Handler {
-
-        private final BoundedLogStore store;
-
-        LogCaptureHandler(BoundedLogStore store) {
-            this.store = store;
-        }
-
-        @Override
-        public void publish(LogRecord record) {
-            if (record == null || record.getMessage() == null) return;
-
-            // Don't capture our own log messages to avoid infinite recursion
-            String loggerName = record.getLoggerName();
-            if (loggerName != null && loggerName.startsWith("ai.labs.eddi.engine.runtime.BoundedLogStore")) {
-                return;
-            }
-
-            // Read MDC context (set by ContextLogger in ConversationService)
-            String environment = (String) MDC.get("environment");
-            String botId = (String) MDC.get("botId");
-            String conversationId = (String) MDC.get("conversationId");
-            String userId = (String) MDC.get("userId");
-            Integer botVersion = null;
-            try {
-                String bv = (String) MDC.get("botVersion");
-                if (bv != null) botVersion = Integer.parseInt(bv);
-            } catch (NumberFormatException ignored) {
-            }
-
-            LogEntry entry = new LogEntry(
-                    record.getMillis(),
-                    record.getLevel().getName(),
-                    loggerName,
-                    formatMessage(record),
-                    environment,
-                    botId,
-                    botVersion,
-                    conversationId,
-                    userId,
-                    store.instanceIdProducer.getInstanceId()
-            );
-
-            store.publish(entry);
-        }
-
-        /**
-         * Format a JUL LogRecord message, resolving {0},{1}... placeholders
-         * from the record's parameters array.
-         */
-        private String formatMessage(LogRecord record) {
-            String msg = record.getMessage();
-            if (msg == null) return "";
-            Object[] params = record.getParameters();
-            if (params != null && params.length > 0) {
-                try {
-                    return java.text.MessageFormat.format(msg, params);
-                } catch (Exception e) {
-                    return msg; // fallback to raw pattern
-                }
-            }
-            return msg;
-        }
-
-        @Override
-        public void flush() {
-        }
-
-        @Override
-        public void close() throws SecurityException {
-        }
     }
 }
