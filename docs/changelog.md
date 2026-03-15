@@ -15,6 +15,43 @@ Each entry follows this format:
 
 ---
 
+## Phase 6F: Contextual Logging — MDC + Manager Log Panel (2026-03-15)
+
+### Backend — BoundedLogStore + REST/SSE Log Admin
+
+**Repo:** EDDI (`feature/version-6.0.0`)  
+**Commit:** `c866a34e`
+
+- **`BoundedLogStore`** — Core ring buffer (configurable size) that captures all JUL log records, tags them with MDC context (botId, conversationId, environment, userId) and instanceId, then pushes to SSE listeners and optionally batches to DB
+- **`InstanceIdProducer`** — Generates stable `hostname-xxxx` identifier per EDDI instance for multi-instance log disambiguation
+- **Async batched DB writer** — Drains ring buffer to MongoDB/PostgreSQL every N seconds (configurable). Toggle off with `eddi.logs.db-enabled=false`. Min persist level configurable
+- **`IRestLogAdmin` + `RestLogAdmin`** — 4 REST endpoints: GET recent (ring buffer), GET history (DB), GET /stream (SSE), GET /instance
+- **Database layer** — `IDatabaseLogs`, `DatabaseLogs`, `PostgresDatabaseLogs` updated with batch insert, instanceId column, nullable filters
+- **Config** — `eddi.logs.buffer-size=1000`, `eddi.logs.db-enabled=true`, `eddi.logs.db-flush-interval-seconds=5`, `eddi.logs.db-persist-min-level=WARNING`
+- **Tests** — `BoundedLogStoreTest` (16 tests), `RestLogAdminTest` (5 tests). Total: 775 tests pass, 0 failures
+
+### Frontend — Logs Page with Live + History Tabs
+
+**Repo:** EDDI-Manager (`feature/version-6.0.0`)  
+**Commit:** `80f4688`
+
+- **API module** (`logs.ts`) — recent, history, instance ID, SSE EventSource factory
+- **Hooks** (`use-logs.ts`) — `useLogStream` (SSE with pause/resume, max 500 entries), `useHistoryLogs`, `useInstanceId`
+- **Logs page** (`logs.tsx`) — Two-tab interface:
+  - **Live tab** — SSE streaming with connection badge, instance ID, bot/level filters, pause/resume, clear, auto-scroll
+  - **History tab** — DB query with bot/conversation/instance filters, pagination
+- **Collapsible stacktrace** — Java stacktrace patterns (`at `, `Caused by:`) are auto-detected; frames hidden behind expandable toggle with frame count
+- **Sidebar** — `ScrollText` icon under Operations section
+- **Routing** — `/manage/logs` route
+- **MSW** — Mock handlers with realistic data including a stacktrace example
+- **i18n** — 23 keys in `logs.*` namespace across all 11 locales
+
+**Design decisions:**
+- Hybrid architecture: ring buffer for real-time, DB for durability
+- SSE push (event-driven) not polling, for minimal latency
+- DB persistence is opt-out via config, so users who rely on console can disable it
+- Stacktrace collapsing is frontend-only parsing — no backend changes needed
+
 ## Planning Phase (2026-03-05)
 
 ### Audit Completed — Implementation Plan Finalized
