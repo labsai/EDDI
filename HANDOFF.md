@@ -400,9 +400,9 @@
 
 ### Quick Wins (before Phase 7)
 
+- [ ] **Phase 6E: quarkus-langchain4j → langchain4j Core** — Remove all `io.quarkiverse.langchain4j` deps. Migrate 3 builders (Vertex Gemini, HuggingFace, Jlama) to core `dev.langchain4j` equivalents. Remove 3 deps (OpenAI, Anthropic, Ollama — already using core classes). Keep Jlama for edge/offline scenarios. See `implementation_plan.md` Part 8 Phase 6E detail for exact class mappings and POM changes. (2 SP)
 - [ ] **Phase 6D: Lombok Removal** — Delombok 114 files (371 annotations), convert `@Value`→records, `@Slf4j`→JBoss Logger (5 SP)
 - [ ] **Quarkus 3.33 LTS Upgrade** — waiting for GA (March 25, 2026). 3.32.3 has Java 25 `ALL-UNNAMED` module issue.
-- [ ] **NATS Deployment Events** — replace 10s DB polling with pub/sub (future phase)
 
 ### Phase 7: Secrets, Audit + Tenant Foundation (12 SP)
 

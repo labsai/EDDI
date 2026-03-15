@@ -507,8 +507,41 @@ Step-by-step wizard for new users:
 
 | Item | Description | SP | Status |
 |------|------------|-----|--------|
+| 6E | **quarkus-langchain4j → langchain4j Core** — Remove `io.quarkiverse.langchain4j` dependency, use `dev.langchain4j` core modules only (3 files, POM cleanup) | 2 | ⬜ |
 | 6D | **Lombok Removal** — Delombok 114 files (371 annotations), `@Value`→records, `@Slf4j`→JBoss Logger | 5 | ⬜ |
 | — | **Quarkus 3.33 LTS Upgrade** — waiting for GA (~March 25, 2026). 3.32.3 blocked by Java 25 `ALL-UNNAMED` issue | 2 | ⏳ |
+
+#### Phase 6E Detail: quarkus-langchain4j → langchain4j Core
+
+**Why**: EDDI uses `quarkus-langchain4j` 1.7.4 alongside core `langchain4j` 1.11.0 — two different versions of the same ecosystem creating version conflicts. EDDI builds models at runtime from JSON config, which is the opposite of quarkus-langchain4j's compile-time `@RegisterAiService` approach. EDDI uses none of quarkiverse's CDI magic, Dev Services, or auto-config.
+
+**Impact**: 6 POM deps removed/replaced, 3 Java files modified, 0 config changes.
+
+**Current usage** — only 3 of 7 builders use quarkiverse classes:
+
+| Builder | Current (quarkiverse) | Target (core) |
+|---------|----------------------|---------------|
+| `VertexGeminiLanguageModelBuilder` | `io.quarkiverse.langchain4j.vertexai.runtime.gemini.VertexAiGeminiChatLanguageModel` | `dev.langchain4j.model.vertexai.VertexAiGeminiChatModel` |
+| `HuggingFaceLanguageModelBuilder` | `io.quarkiverse.langchain4j.huggingface.QuarkusHuggingFaceChatModel` | `dev.langchain4j.model.huggingface.HuggingFaceChatModel` |
+| `JlamaLanguageModelBuilder` | `io.quarkiverse.langchain4j.jlama.JlamaChatModel` | `dev.langchain4j.model.jlama.JlamaChatModel` |
+
+**POM changes:**
+
+| POM Dependency | Action |
+|---|---|
+| `quarkus-langchain4j-openai` | **Remove** — `OpenAILanguageModelBuilder` already uses `dev.langchain4j.model.openai.OpenAiChatModel` |
+| `quarkus-langchain4j-anthropic` | **Remove** — `AnthropicLanguageModelBuilder` already uses `dev.langchain4j.model.anthropic.AnthropicChatModel` |
+| `quarkus-langchain4j-ollama` | **Remove** — `OllamaLanguageModelBuilder` already uses `dev.langchain4j.model.ollama.OllamaChatModel` |
+| `quarkus-langchain4j-vertex-ai-gemini` | **Replace** → `dev.langchain4j:langchain4j-vertex-ai-gemini:${langchain4j-libs.version}` |
+| `quarkus-langchain4j-hugging-face` | **Replace** → `dev.langchain4j:langchain4j-hugging-face:${langchain4j-libs.version}` |
+| `quarkus-langchain4j-jlama` | **Replace** → `dev.langchain4j:langchain4j-jlama:${langchain4j-libs.version}` |
+| `<quarkus.langchain4j.version>` property | **Remove** entirely |
+
+**Note on HuggingFace**: `QuarkusHuggingFaceChatModel.builder()` uses `Optional`/`OptionalInt`/`OptionalDouble` wrappers for `topK`, `topP`, `doSample`, `repetitionPenalty`. Core `HuggingFaceChatModel` likely uses plain primitives — verify API.
+
+**Jlama decision**: Keep. Runs in-process JVM inference (niche/edge use). Ollama in a separate Docker container is far more practical for production, but Jlama costs nothing to maintain.
+
+**Verification**: `./mvnw compile && ./mvnw test && ./mvnw dependency:tree | grep -i quarkiverse` (should return nothing)
 
 ### Phase 7: Secrets, Audit + Tenant Foundation (v6.0-beta2, 12 SP)
 
@@ -523,7 +556,7 @@ Step-by-step wizard for new users:
 ### Phase 8a: MCP Servers (v6.0-beta3, 8 SP)
 
 > EDDI's integration story. The broadest MCP scope of any JVM platform.
-> **Leverage:** `quarkus-langchain4j` MCP server support where available. Use langchain4j `@Tool` annotations for MCP tool definitions.
+> **Leverage:** Core langchain4j `@Tool` annotations for MCP tool definitions. MCP server/client support available in core langchain4j.
 
 | # | Item | SP | Priority |
 |---|------|----|----------|
@@ -533,12 +566,12 @@ Step-by-step wizard for new users:
 ### Phase 8b: MCP Client + RAG Foundation (10 SP)
 
 > MCP Client + basic RAG together tell the story: "EDDI bots can access any tool AND any knowledge base."
-> **Leverage:** `langchain4j` `EmbeddingStore` + `EmbeddingModel` interfaces for vector store abstraction. `quarkus-langchain4j` provides `@RegisterAiService` and built-in RAG support (`RetrievalAugmentor`, `EmbeddingStoreContentRetriever`). Use these instead of custom implementations where they fit EDDI's config-driven model.
+> **Leverage:** Core `langchain4j` `EmbeddingStore` + `EmbeddingModel` + `ContentRetriever` interfaces for vector store abstraction. Use `RetrievalAugmentor` and `EmbeddingStoreContentRetriever` from core langchain4j. Wrap in `ILifecycleTask` for config-driven orchestration.
 
 | # | Item | SP | Priority |
 |---|------|----|----------|
 | 37 | **MCP Server: EDDI Documentation** — docs.labs.ai content as MCP resources | 2 | 🟡 High |
-| 38 | **MCP Client** — bots consume external MCP tools (filesystem, database, code execution). Leverage `quarkus-langchain4j` MCP client support | 5 | 🟡 High |
+| 38 | **MCP Client** — bots consume external MCP tools (filesystem, database, code execution). Leverage core langchain4j MCP client support | 5 | 🟡 High |
 | 38b | **RAG Lifecycle Task** — new `ILifecycleTask` for vector store retrieval. Config-driven: embedding model, store type, chunk strategy, top-K. Uses langchain4j `EmbeddingStore`/`EmbeddingModel` abstractions for provider-agnostic vector search | 3 | 🟡 High |
 | — | Phase 8b includes design doc for Workspace AI Operator | — | 🟠 Medium |
 

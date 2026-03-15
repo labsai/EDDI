@@ -43,6 +43,23 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-15 — Phase 6E Planned: quarkus-langchain4j → langchain4j Core
+
+**Repo:** EDDI
+**Branch:** `feature/version-6.0.0`
+
+**Decision:** Drop `quarkus-langchain4j` entirely, use core `langchain4j` only.
+
+**Analysis:**
+- EDDI has 7 model builders: 4 already use core `dev.langchain4j` (OpenAI, Anthropic, Ollama, Gemini). Only 3 use `io.quarkiverse` classes (Vertex Gemini, HuggingFace, Jlama) — and only for the model provider class, not for any quarkiverse CDI features
+- quarkus-langchain4j's value proposition (`@RegisterAiService`, Dev Services, centralized config) is architecturally incompatible with EDDI: EDDI builds models at runtime from JSON config per-bot, not at compile-time from annotations
+- Version conflict: quarkiverse 1.7.4 bundles older langchain4j internally alongside EDDI's explicit 1.11.0
+- All 3 quarkiverse-only providers have core equivalents in `langchain4j` 1.11.0-beta19
+
+**Jlama decision:** Keep (migrated to core). Runs in-process JVM inference — niche for edge/offline. For Docker production, Ollama in a separate container is more practical, but Jlama costs nothing to maintain.
+
+---
+
 ### 2026-03-15 — Strategic Roadmap Reorder
 
 **Repos:** EDDI, EDDI-Manager

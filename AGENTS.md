@@ -116,6 +116,9 @@ Phase 6: PostgreSQL / DB-Agnostic Architecture ✅
 Phase 6C: Infinispan → Caffeine (2 SP)   [QUICK WIN]  ✅
   6C. Replace Infinispan with Caffeine (2 files, POM cleanup)   2 SP
 
+Phase 6E: quarkus-langchain4j → langchain4j Core (2 SP)   [QUICK WIN]
+  6E. Remove io.quarkiverse.langchain4j, migrate 3 builders to core   2 SP
+
 Phase 6D: Lombok Removal (5 SP)   [QUICK WIN]
   6D. Delombok 114 files, @Value→records, @Slf4j→Logger    5 SP
 
