@@ -407,7 +407,7 @@
 - [x] Created `ObservableChatModel` — provider-agnostic ChatModel decorator with configurable timeout + request/response logging
 - [x] Wired into `ChatModelRegistry.getOrCreate()` — all providers get timeout+logging automatically via `timeout`, `logRequests`, `logResponses` config params
 - [x] Zero `quarkiverse` references in dependency tree
-- [x] 737 unit tests pass (0 failures, 0 errors, 4 skipped) — 8 new `ObservableChatModelTest`
+- [x] 753 unit tests pass (0 failures, 0 errors, 4 skipped) — 19 `ObservableChatModelTest` + 5 `ChatModelRegistryTest` observability tests
 
 **Key files:**
 
@@ -417,13 +417,15 @@
 - `src/main/java/.../builder/VertexGeminiLanguageModelBuilder.java` — rewritten
 - `src/main/java/.../builder/HuggingFaceLanguageModelBuilder.java` — rewritten
 - `src/main/java/.../builder/JlamaLanguageModelBuilder.java` — updated
-- `src/test/java/.../impl/ObservableChatModelTest.java` — **NEW** 8 tests
+- `src/test/java/.../impl/ObservableChatModelTest.java` — **NEW** 19 tests
+- `src/test/java/.../impl/ChatModelRegistryTest.java` — 5 new observability tests
 
 ## Next Up
 
 ### Quick Wins (before Phase 7)
 
 - [x] ~~**Phase 6E: quarkus-langchain4j → langchain4j Core**~~ ✅
+- [ ] **Phase 6F: Contextual Logging** — MDC context (botId, conversationId), BoundedLogStore ring buffer, REST+SSE log streaming, Manager UI log panel (5 SP)
 - [ ] **Phase 6D: Lombok Removal** — Delombok 114 files (371 annotations), convert `@Value`→records, `@Slf4j`→JBoss Logger (5 SP)
 - [ ] **Quarkus 3.33 LTS Upgrade** — waiting for GA (March 25, 2026). 3.32.3 has Java 25 `ALL-UNNAMED` module issue.
 

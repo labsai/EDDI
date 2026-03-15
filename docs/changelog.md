@@ -41,34 +41,43 @@ Each entry follows this format:
 
 ## Implementation Log
 
-### 2026-03-15 — Phase 6E: quarkus-langchain4j → langchain4j Core
+### 2026-03-15 — Phase 6E: quarkus-langchain4j → langchain4j Core + ObservableChatModel
 
 **Repo:** EDDI
 **Branch:** `feature/version-6.0.0`
 **Phase:** 6E — Quick Win (2 SP)
+**Commits:** `da69c7d0`, `d353c1d6`, `5c17a50f`, plus test enhancement commit
 
 **What changed:**
 
-Migrated from `io.quarkiverse.langchain4j` (Quarkus extension wrappers) to core `dev.langchain4j` libraries directly.
+Migrated from `io.quarkiverse.langchain4j` (Quarkus extension wrappers) to core `dev.langchain4j` libraries directly. Then added provider-agnostic observability layer.
 
 | Component | Change |
 |---|---|
-| `pom.xml` | Removed 6 quarkiverse deps, added 7 core `dev.langchain4j` deps. Removed `quarkus.langchain4j.version` property, added `langchain4j-beta.version` (1.11.0-beta19) |
-| `VertexGeminiLanguageModelBuilder` | New package (`vertexai.gemini`), API renames: `projectId→project`, `publisher→location`, `modelId→modelName`. Removed `timeout()` (unsupported in core) |
-| `HuggingFaceLanguageModelBuilder` | `QuarkusHuggingFaceChatModel` → `HuggingFaceChatModel`. Removed `Optional` wrappers, `url(URL)→baseUrl(String)`. Added deprecation Javadoc (core class deprecated since v1.7.0 in favor of OpenAI-compatible HF Router) |
-| `JlamaLanguageModelBuilder` | Package change only. Removed `logRequests`/`logResponses` (unsupported in core) |
+| `pom.xml` | Removed 6 quarkiverse deps, added 7 core `dev.langchain4j` deps. Version split: GA (`1.11.0`) vs beta (`1.11.0-beta19`) |
+| `VertexGeminiLanguageModelBuilder` | New package, API renames, removed `timeout()` (now EDDI-level) |
+| `HuggingFaceLanguageModelBuilder` | Removed quarkiverse-only methods (`topK`, `topP`, `doSample`, `repetitionPenalty`). Kept core-only methods |
+| `JlamaLanguageModelBuilder` | Package change, removed `logRequests`/`logResponses` |
+| `ObservableChatModel` | **NEW** — provider-agnostic decorator with timeout (Future+cancel) and request/response logging |
+| `ChatModelRegistry` | Wires ObservableChatModel into `getOrCreate()`, filters observability params from cache key |
+| `ObservableChatModelTest` | **NEW** — 19 tests across 4 nested classes |
+| `ChatModelRegistryTest` | 5 new observability integration tests |
 
 **Key decisions:**
 
 | # | Decision | Reasoning |
 |---|---|---|
-| 1 | Keep deprecated `HuggingFaceChatModel` for now | Still functional; EDDI's OpenAI builder can use HF Router as alternative. Full migration to OpenAI-compatible endpoint deferred |
-| 2 | Separate `langchain4j-beta.version` property | vertex-ai-gemini, hugging-face, jlama use beta versioning (`1.11.0-beta19`); open-ai, anthropic, ollama use GA (`1.11.0`) |
-| 3 | Added explicit `langchain4j:langchain4j` dep | Was transitive via quarkiverse-openai. Provides `ToolExecutor`, `DefaultToolExecutor`, other `dev.langchain4j.service.*` classes |
+| 1 | Provider-agnostic observability layer | Timeout/logging at EDDI level (not per-provider) ensures uniform behavior |
+| 2 | Keep deprecated `HuggingFaceChatModel` | Still functional; EDDI's OpenAI builder can use HF Router as alternative |
+| 3 | Separate `langchain4j-beta.version` | vertex-ai-gemini, hugging-face, jlama use beta versioning |
+| 4 | Zero-overhead wrapping | `wrapIfNeeded()` returns original model when no observability params set |
 
-**Testing:** ✅ 729 tests pass (0 failures, 0 errors, 4 skipped). Zero `quarkiverse` references in dependency tree.
+**Testing:** ✅ 753 tests pass (0 failures, 0 errors, 4 skipped). Zero `quarkiverse` references in dependency tree.
+
+**Next:** Phase 6F (Contextual Logging — MDC + Manager Log Panel, 5 SP)
 
 ---
+
 
 
 ### 2026-03-11 — Session Wrap-Up: Next Steps Documented
