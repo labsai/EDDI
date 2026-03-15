@@ -17,7 +17,8 @@
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
         <quarkus.platform.version>3.30.8</quarkus.platform.version>
-        <quarkus.langchain4j.version>1.7.4</quarkus.langchain4j.version>
+        <langchain4j-beta.version>1.11.0-beta19</langchain4j-beta.version>
+
         <langchain4j.version>1.11.0</langchain4j.version>
         <langchain4j-libs.version>1.11.0</langchain4j-libs.version>
         <jandex-maven-plugin.version>3.5.3</jandex-maven-plugin.version>
@@ -110,25 +111,36 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-cache</artifactId>
         </dependency>
+        <!-- Phase 6E: quarkiverse deps removed — all core langchain4j deps now explicit -->
         <dependency>
-            <groupId>io.quarkiverse.langchain4j</groupId>
-            <artifactId>quarkus-langchain4j-openai</artifactId>
-            <version>${quarkus.langchain4j.version}</version>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
-            <groupId>io.quarkiverse.langchain4j</groupId>
-            <artifactId>quarkus-langchain4j-hugging-face</artifactId>
-            <version>${quarkus.langchain4j.version}</version>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-open-ai</artifactId>
+            <version>${langchain4j-libs.version}</version>
         </dependency>
         <dependency>
-            <groupId>io.quarkiverse.langchain4j</groupId>
-            <artifactId>quarkus-langchain4j-anthropic</artifactId>
-            <version>${quarkus.langchain4j.version}</version>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-anthropic</artifactId>
+            <version>${langchain4j-libs.version}</version>
         </dependency>
         <dependency>
-            <groupId>io.quarkiverse.langchain4j</groupId>
-            <artifactId>quarkus-langchain4j-vertex-ai-gemini</artifactId>
-            <version>${quarkus.langchain4j.version}</version>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-ollama</artifactId>
+            <version>${langchain4j-libs.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-vertex-ai-gemini</artifactId>
+            <version>${langchain4j-beta.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-hugging-face</artifactId>
+            <version>${langchain4j-beta.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
@@ -141,14 +153,9 @@
             <version>${langchain4j-libs.version}</version>
         </dependency>
         <dependency>
-            <groupId>io.quarkiverse.langchain4j</groupId>
-            <artifactId>quarkus-langchain4j-ollama</artifactId>
-            <version>${quarkus.langchain4j.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>io.quarkiverse.langchain4j</groupId>
-            <artifactId>quarkus-langchain4j-jlama</artifactId>
-            <version>${quarkus.langchain4j.version}</version>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-jlama</artifactId>
+            <version>${langchain4j-beta.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.pdfbox</groupId>

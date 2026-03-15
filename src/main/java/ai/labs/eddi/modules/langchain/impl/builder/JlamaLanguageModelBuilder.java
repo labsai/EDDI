@@ -1,7 +1,7 @@
 package ai.labs.eddi.modules.langchain.impl.builder;
 
 import dev.langchain4j.model.chat.ChatModel;
-import io.quarkiverse.langchain4j.jlama.JlamaChatModel;
+import dev.langchain4j.model.jlama.JlamaChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.Map;
@@ -14,8 +14,6 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_AUTH_TOKEN = "authToken";
     private static final String KEY_TEMPERATURE = "temperature";
     private static final String KEY_MAX_TOKENS = "maxTokens";
-    private static final String KEY_LOG_REQUESTS = "logRequests";
-    private static final String KEY_LOG_RESPONSES = "logResponses";
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
@@ -35,14 +33,6 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
 
         if (!isNullOrEmpty(parameters.get(KEY_MAX_TOKENS))) {
             builder.maxTokens(Integer.parseInt(parameters.get(KEY_MAX_TOKENS)));
-        }
-
-        if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
-            builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
-        }
-
-        if (!isNullOrEmpty(parameters.get(KEY_LOG_RESPONSES))) {
-            builder.logResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_RESPONSES)));
         }
 
         return builder.build();

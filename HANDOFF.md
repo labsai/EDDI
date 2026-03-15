@@ -396,11 +396,29 @@
 - `src/main/resources/infinispan-embedded.xml` — deleted
 - `src/main/resources/application.properties` — cleaned
 
+### Phase 6E: quarkus-langchain4j → langchain4j Core ✅
+
+- [x] Removed 6 `io.quarkiverse.langchain4j` dependencies from POM
+- [x] Added 7 core `dev.langchain4j` deps (langchain4j, open-ai, anthropic, ollama, vertex-ai-gemini, hugging-face, jlama)
+- [x] Removed `quarkus.langchain4j.version` property, added `langchain4j-beta.version` (1.11.0-beta19) for beta-versioned modules
+- [x] Migrated `VertexGeminiLanguageModelBuilder`: new package (`vertexai.gemini`), API renames (`projectId→project`, `publisher→location`, `modelId→modelName`), removed `timeout()` (unsupported in core)
+- [x] Migrated `HuggingFaceLanguageModelBuilder`: removed `Optional` wrappers, `url(URL)→baseUrl(String)`, added `@SuppressWarnings("deprecation")` + Javadoc
+- [x] Migrated `JlamaLanguageModelBuilder`: package change only, removed unsupported `logRequests`/`logResponses`
+- [x] Zero `quarkiverse` references in dependency tree
+- [x] 729 unit tests pass (0 failures, 0 errors, 4 skipped)
+
+**Key files:**
+
+- `pom.xml` — 6 deps removed, 7 added, version properties updated
+- `src/main/java/.../builder/VertexGeminiLanguageModelBuilder.java` — rewritten
+- `src/main/java/.../builder/HuggingFaceLanguageModelBuilder.java` — rewritten
+- `src/main/java/.../builder/JlamaLanguageModelBuilder.java` — updated
+
 ## Next Up
 
 ### Quick Wins (before Phase 7)
 
-- [ ] **Phase 6E: quarkus-langchain4j → langchain4j Core** — Remove all `io.quarkiverse.langchain4j` deps. Migrate 3 builders (Vertex Gemini, HuggingFace, Jlama) to core `dev.langchain4j` equivalents. Remove 3 deps (OpenAI, Anthropic, Ollama — already using core classes). Keep Jlama for edge/offline scenarios. See `implementation_plan.md` Part 8 Phase 6E detail for exact class mappings and POM changes. (2 SP)
+- [x] ~~**Phase 6E: quarkus-langchain4j → langchain4j Core**~~ ✅
 - [ ] **Phase 6D: Lombok Removal** — Delombok 114 files (371 annotations), convert `@Value`→records, `@Slf4j`→JBoss Logger (5 SP)
 - [ ] **Quarkus 3.33 LTS Upgrade** — waiting for GA (March 25, 2026). 3.32.3 has Java 25 `ALL-UNNAMED` module issue.
 
