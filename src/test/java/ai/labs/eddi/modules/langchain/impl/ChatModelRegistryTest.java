@@ -159,4 +159,73 @@ class ChatModelRegistryTest {
             assertNotSame(syncModel, streamingModel);
         }
     }
+
+    @Nested
+    @DisplayName("Observability wrapping tests")
+    class ObservabilityTests {
+
+        @Test
+        @DisplayName("getOrCreate wraps model when timeout param is present")
+        void getOrCreate_withTimeout_wrapsWithObservable() throws Exception {
+            var params = new HashMap<String, String>();
+            params.put("apiKey", "test");
+            params.put("timeout", "5000");
+
+            ChatModel model = registry.getOrCreate("openai", params);
+            assertNotNull(model);
+            assertInstanceOf(ObservableChatModel.class, model,
+                    "Model should be wrapped with ObservableChatModel when timeout is set");
+        }
+
+        @Test
+        @DisplayName("getOrCreate wraps model when logRequests param is present")
+        void getOrCreate_withLogRequests_wrapsWithObservable() throws Exception {
+            var params = new HashMap<String, String>();
+            params.put("apiKey", "test");
+            params.put("logRequests", "true");
+
+            ChatModel model = registry.getOrCreate("openai", params);
+            assertInstanceOf(ObservableChatModel.class, model);
+        }
+
+        @Test
+        @DisplayName("getOrCreate wraps model when logResponses param is present")
+        void getOrCreate_withLogResponses_wrapsWithObservable() throws Exception {
+            var params = new HashMap<String, String>();
+            params.put("apiKey", "test");
+            params.put("logResponses", "true");
+
+            ChatModel model = registry.getOrCreate("openai", params);
+            assertInstanceOf(ObservableChatModel.class, model);
+        }
+
+        @Test
+        @DisplayName("getOrCreate does NOT wrap when no observability params")
+        void getOrCreate_noObservabilityParams_returnsRawModel() throws Exception {
+            ChatModel model = registry.getOrCreate("openai", Map.of("apiKey", "test"));
+            assertNotNull(model);
+            assertSame(mockSyncModel, model, "Without observability params, raw model should be returned");
+        }
+
+        @Test
+        @DisplayName("Observability params are excluded from cache key")
+        void getOrCreate_observabilityParamsDontAffectCacheKey() throws Exception {
+            // First call without observability
+            var params1 = new HashMap<String, String>();
+            params1.put("apiKey", "test");
+            ChatModel first = registry.getOrCreate("openai", params1);
+
+            // Second call with observability — same model params, different observability
+            var params2 = new HashMap<String, String>();
+            params2.put("apiKey", "test");
+            params2.put("timeout", "5000");
+            params2.put("logRequests", "true");
+            ChatModel second = registry.getOrCreate("openai", params2);
+
+            // Both should be cached under the same key (observability params filtered out)
+            // The first cached model (unwrapped) is returned since it was cached first
+            assertSame(first, second,
+                    "Observability params should be excluded from cache key");
+        }
+    }
 }

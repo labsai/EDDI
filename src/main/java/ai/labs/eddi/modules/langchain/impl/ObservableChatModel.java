@@ -96,7 +96,10 @@ public class ObservableChatModel implements ChatModel {
         Duration timeout = null;
         if (timeoutMs != null && !timeoutMs.isBlank()) {
             try {
-                timeout = Duration.ofMillis(Long.parseLong(timeoutMs));
+                var parsed = Duration.ofMillis(Long.parseLong(timeoutMs));
+                if (!parsed.isZero() && !parsed.isNegative()) {
+                    timeout = parsed;
+                }
             } catch (NumberFormatException ignored) {
                 // invalid timeout value, skip
             }
