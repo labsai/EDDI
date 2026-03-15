@@ -20,7 +20,7 @@ Each entry follows this format:
 ### Backend — BoundedLogStore + REST/SSE Log Admin
 
 **Repo:** EDDI (`feature/version-6.0.0`)  
-**Commit:** `c866a34e`
+**Commits:** `c866a34e` (initial), `2431f858` (bugs, IT, legacy removal), `b6b6bf30` (Quarkus @LoggingFilter)
 
 - **`BoundedLogStore`** — Core ring buffer (configurable size) that captures all JUL log records, tags them with MDC context (botId, conversationId, environment, userId) and instanceId, then pushes to SSE listeners and optionally batches to DB
 - **`InstanceIdProducer`** — Generates stable `hostname-xxxx` identifier per EDDI instance for multi-instance log disambiguation
