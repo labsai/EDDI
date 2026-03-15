@@ -189,7 +189,7 @@ All phases tracked in [`HANDOFF.md`](HANDOFF.md):
 | **4.4**  | **JSON Schema Enrichment** — victools migration + mock schema enrichment              | ✅     |
 | **4.5**  | **Production Build + Dashboard** — single bundle, loading indicator, old dashboard → Manager redirect | ✅     |
 
-**Phase 5+**: Phases 5–6 (NATS JetStream, PostgreSQL/DB-agnostic) ✅ complete. Remaining: Secrets+Audit (7), MCP full suite (8), DAG+HITL (9), Multi-Bot+RAG (10), Persistent Memory+Heartbeat (11), CI/CD (12), **Advanced Manager UI — Debugger, Visual Pipeline, Taint Tracking (13)**, Website Astro (14). See EDDI [`AGENTS.md`](../EDDI/AGENTS.md) and [`project-philosophy.md`](../EDDI/docs/project-philosophy.md) for full roadmap and principles.
+**Phase 5+**: Phases 5–6 (NATS JetStream, PostgreSQL/DB-agnostic) ✅ complete. Remaining: Secrets+Audit+Tenancy (7), MCP Servers (8a), MCP Client+RAG (8b), DAG+OTel (9), HITL (9b), Multi-Bot (10a), Advanced RAG+Debate (10b), Persistent Memory+Heartbeat (11), CI/CD (12), **Advanced Manager UI — Debugger, Visual Pipeline, Taint Tracking (13)**, Website Astro (14). See EDDI [`AGENTS.md`](../EDDI/AGENTS.md) and [`project-philosophy.md`](../EDDI/docs/project-philosophy.md) for full roadmap and principles.
 
 ---
 
