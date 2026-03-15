@@ -41,7 +41,6 @@ public class HuggingFaceLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_WAIT_FOR_MODEL = "waitForModel";
     private static final String BASE_URL_HUGGING_FACE = "https://api-inference.huggingface.co/models/";
 
-    @SuppressWarnings("deprecation") // HuggingFaceChatModel deprecated since langchain4j 1.7.0; retained for backward compat
     @Override
     public ChatModel build(Map<String, String> parameters) {
         var builder = HuggingFaceChatModel.builder();

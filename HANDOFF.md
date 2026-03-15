@@ -401,18 +401,23 @@
 - [x] Removed 6 `io.quarkiverse.langchain4j` dependencies from POM
 - [x] Added 7 core `dev.langchain4j` deps (langchain4j, open-ai, anthropic, ollama, vertex-ai-gemini, hugging-face, jlama)
 - [x] Removed `quarkus.langchain4j.version` property, added `langchain4j-beta.version` (1.11.0-beta19) for beta-versioned modules
-- [x] Migrated `VertexGeminiLanguageModelBuilder`: new package (`vertexai.gemini`), API renames (`projectId→project`, `publisher→location`, `modelId→modelName`), removed `timeout()` (unsupported in core)
-- [x] Migrated `HuggingFaceLanguageModelBuilder`: removed `Optional` wrappers, `url(URL)→baseUrl(String)`, added `@SuppressWarnings("deprecation")` + Javadoc
+- [x] Migrated `VertexGeminiLanguageModelBuilder`: new package (`vertexai.gemini`), API renames, removed `timeout()` (now EDDI-level)
+- [x] Migrated `HuggingFaceLanguageModelBuilder`: removed quarkiverse-only methods (`topK`, `topP`, `doSample`, `repetitionPenalty`), kept core methods only
 - [x] Migrated `JlamaLanguageModelBuilder`: package change only, removed unsupported `logRequests`/`logResponses`
+- [x] Created `ObservableChatModel` — provider-agnostic ChatModel decorator with configurable timeout + request/response logging
+- [x] Wired into `ChatModelRegistry.getOrCreate()` — all providers get timeout+logging automatically via `timeout`, `logRequests`, `logResponses` config params
 - [x] Zero `quarkiverse` references in dependency tree
-- [x] 729 unit tests pass (0 failures, 0 errors, 4 skipped)
+- [x] 737 unit tests pass (0 failures, 0 errors, 4 skipped) — 8 new `ObservableChatModelTest`
 
 **Key files:**
 
 - `pom.xml` — 6 deps removed, 7 added, version properties updated
+- `src/main/java/.../impl/ObservableChatModel.java` — **NEW** provider-agnostic timeout + logging decorator
+- `src/main/java/.../impl/ChatModelRegistry.java` — wires ObservableChatModel
 - `src/main/java/.../builder/VertexGeminiLanguageModelBuilder.java` — rewritten
 - `src/main/java/.../builder/HuggingFaceLanguageModelBuilder.java` — rewritten
 - `src/main/java/.../builder/JlamaLanguageModelBuilder.java` — updated
+- `src/test/java/.../impl/ObservableChatModelTest.java` — **NEW** 8 tests
 
 ## Next Up
 
