@@ -92,16 +92,27 @@ eddi.secrets.master-key=your-strong-master-key
 
 ## Secret Input (Bot Conversations)
 
-Bots can request secret input from users (e.g., API keys during setup). When a property has `scope: secret`:
+Bots can request secret input from users (e.g., API keys during setup). The flow works end-to-end across backend, chat UI, and Manager.
+
+### Backend: PropertySetterTask + Conversation Scrubbing
+
+When a property has `scope: secret`:
 
 1. **PropertySetterTask** detects `scope == secret` on the property instruction
 2. The raw value is immediately stored in the vault via `ISecretProvider.storeSecret()`
 3. A vault reference (`${eddivault:...}`) replaces the plaintext in memory
 4. The raw `input:initial` entry is scrubbed from the conversation step
 
+When the **client flags input as secret** (via the `secretInput` context key):
+
+1. `Conversation.isSecretInputFlagged()` checks for `{"secretInput": {"type": "string", "value": "true"}}` in the context map
+2. `storeUserInputInMemory()` replaces the display value with `<secret input>` in conversation output
+3. The actual plaintext still flows through lifecycle data so `PropertySetterTask` can vault it
+4. The conversation log and API responses show `<secret input>` — **plaintext is never persisted**
+
 ### Output InputField Directive
 
-To signal the chat UI to show a password field, use the `inputField` output type:
+To signal the chat UI to show a password field, use the `inputField` output type in your output configuration:
 
 ```json
 {
@@ -111,21 +122,120 @@ To signal the chat UI to show a password field, use the `inputField` output type
 }
 ```
 
-> **Note:** Chat UI password field support is a separate implementation (see remaining work).
+### Chat UI: Password Fields + Secret Mode
+
+Both **eddi-chat-ui** and the **EDDI-Manager chat panel** support secret input:
+
+**Backend-driven password fields:**
+- When the backend response contains an `inputField` output item with `subType: "password"`, the chat UI replaces the normal text input with a masked `<input type="password">` field
+- An **eye toggle** button allows the user to reveal/hide the value
+- After submission, the input reverts to the normal text field
+
+**Proactive secret mode (client-initiated):**
+- A 🔒/🔓 toggle button on the chat input lets users mark any input as secret
+- When toggled ON, the input becomes a password field with eye toggle
+- The `secretInput` context flag is sent to the backend, triggering output scrubbing in `Conversation.java`
+
+**Security measures:**
+- Chat UI state for secret values is **ephemeral** — cleared on submit or dialog close
+- No secret values are stored in browser `localStorage` or `sessionStorage`
+- `autoComplete="new-password"` prevents browser caching
+
+### Bot Father Example
+
+The default Bot Father bot demonstrates vault integration during API key setup:
+
+```json
+// Output configuration — prompts with a password field
+{
+  "type": "inputField",
+  "subType": "password",
+  "text": "Please enter your API key:"
+}
+
+// Property setter — auto-vaults the input
+{
+  "name": "apiKey",
+  "valueString": "[[${memory.current.input}]]",
+  "scope": "secret"
+}
+```
+
+The `scope: secret` instruction causes `PropertySetterTask` to store the API key in the vault and replace the memory value with a `${eddivault:...}` reference.
 
 ## REST API
 
 ### Endpoints
 
+All endpoints are under the base path `/secretstore/secrets`.
+
 | Method | Path | Description |
 |---|---|---|
-| `PUT` | `/secretstore/secrets/{id}` | Create or update a secret |
-| `GET` | `/secretstore/secrets/{id}` | Read a secret (returns decrypted value) |
-| `DELETE` | `/secretstore/secrets/{id}` | Delete a secret |
+| `PUT` | `/{tenantId}/{botId}/{keyName}` | Store a secret (body = plaintext value) |
+| `DELETE` | `/{tenantId}/{botId}/{keyName}` | Delete a secret |
+| `GET` | `/{tenantId}/{botId}/{keyName}` | Get secret **metadata only** (never returns plaintext) |
+| `GET` | `/{tenantId}/{botId}` | List all secrets for a tenant+bot (metadata only) |
+| `GET` | `/health` | Vault health check (provider status) |
+
+> **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`, `checksum`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API.
+
+### Response Examples
+
+**`PUT /{tenantId}/{botId}/{keyName}`** — returns the vault reference:
+```json
+{
+  "reference": "${eddivault:default.bot1.apiKey}",
+  "tenantId": "default",
+  "botId": "bot1",
+  "keyName": "apiKey"
+}
+```
+
+**`GET /{tenantId}/{botId}`** — returns metadata list:
+```json
+[
+  {
+    "tenantId": "default",
+    "botId": "bot1",
+    "keyName": "apiKey",
+    "createdAt": "2026-03-15T10:30:00Z",
+    "lastAccessedAt": "2026-03-16T14:00:00Z",
+    "checksum": "a1b2c3d4..."
+  }
+]
+```
+
+**`GET /health`** — returns vault provider status:
+```json
+{
+  "status": "UP",
+  "provider": "DatabaseSecretProvider",
+  "available": true
+}
+```
 
 ### Input Validation
 
-All path parameters are validated against `[a-zA-Z0-9._-]{1,128}` to prevent path traversal attacks.
+All path parameters (`tenantId`, `botId`, `keyName`) are validated against `[a-zA-Z0-9._-]{1,128}` to prevent path traversal attacks.
+
+## Manager — Secrets Admin Page
+
+The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets` for managing vault entries through the UI.
+
+### Features
+
+- **Namespace filtering** — select tenant ID and bot ID to scope the view
+- **Secrets table** — displays `keyName`, `createdAt`, `lastAccessedAt`, and `checksum` (truncated)
+- **Add Secret** — dialog with masked password input (eye toggle, `autoComplete="new-password"`)
+- **Delete Secret** — confirmation dialog before permanent deletion
+- **Vault Health** — live status badge showing vault online/offline state
+
+### Security
+
+- `autoComplete="off"` on key name input prevents browser caching
+- `autoComplete="new-password"` on value input prevents browser caching
+- React state is cleared immediately on dialog close or submission
+- Secret values are **never displayed** — the API only returns metadata
 
 ## Security Measures
 
@@ -153,7 +263,9 @@ All path parameters are validated against `[a-zA-Z0-9._-]{1,128}` to prevent pat
 
 ## Testing
 
-32 unit tests across 5 test classes:
+54 tests across 8 test classes:
+
+### Backend (37 tests)
 
 | Test Class | Tests | Coverage |
 |---|---|---|
@@ -162,3 +274,11 @@ All path parameters are validated against `[a-zA-Z0-9._-]{1,128}` to prevent pat
 | `SecretRedactionFilterTest` | 6 | All 5 regex patterns, null/empty, safe messages |
 | `SecretScrubberTest` | 4 | Nested object scrubbing, preservation of non-secret fields |
 | `SecretReferenceTest` | 6 | Parsing, equality, hash, invalid references |
+| `ConversationSecretInputTest` | 5 | Secret context scrubbing, normal passthrough, false flag, empty context, output vs. lifecycle data |
+
+### Frontend (17 tests)
+
+| Test File | Tests | Coverage |
+|---|---|---|
+| `secrets.test.tsx` (Manager) | 12 | Page render, tenant/bot inputs, vault health, create dialog (password, autocomplete, eye toggle), delete confirmation |
+| `chat-store.test.tsx` (Chat UI) | 5 | `SET_INPUT_FIELD`, `CLEAR_INPUT_FIELD`, `TOGGLE_SECRET_MODE`, `CLEAR_MESSAGES` reset, initial defaults |
