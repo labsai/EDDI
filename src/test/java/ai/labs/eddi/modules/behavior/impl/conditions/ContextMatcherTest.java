@@ -7,7 +7,6 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
-import lombok.EqualsAndHashCode;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -308,7 +307,6 @@ public class ContextMatcherTest {
         Assertions.assertEquals(IBehaviorCondition.ExecutionState.FAIL, actualExecutionState);
     }
 
-    @EqualsAndHashCode
     private static class MockData<T> implements IData<T> {
         private final String key;
         private T result;
@@ -365,6 +363,19 @@ public class ContextMatcherTest {
         @Override
         public void setPublic(boolean isPublic) {
 
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            MockData that = (MockData) o;
+            return java.util.Objects.equals(key, that.key) && java.util.Objects.equals(result, that.result);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(key, result);
         }
     }
 }

@@ -3,8 +3,6 @@ package ai.labs.eddi.modules.behavior.impl.conditions;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.modules.behavior.impl.BehaviorRule;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -15,7 +13,6 @@ import java.util.Map;
  * @author ginccc
  */
 
-@NoArgsConstructor
 public class Occurrence implements IBehaviorCondition {
     public static final String ID = "occurrence";
     private static final String BEHAVIOR_RULES_SUCCESS = "behavior_rules:success";
@@ -25,9 +22,7 @@ public class Occurrence implements IBehaviorCondition {
 
     private final String maxTimesOccurredQualifier = "maxTimesOccurred";
     private final String minTimesOccurredQualifier = "minTimesOccurred";
-    @Setter
     private int maxTimesOccurred = -1;
-    @Setter
     private int minTimesOccurred = -1;
 
     private int countTimesOccurred(List<List<String>> allBehaviorRulesHistorical) {
@@ -120,4 +115,15 @@ public class Occurrence implements IBehaviorCondition {
 
         return occurrence;
     }
+
+    public Occurrence() {
+    }
+    }
+        this.minTimesOccurred = minTimesOccurred;
+    public void setMinTimesOccurred(int minTimesOccurred) {
+
+    }
+        this.maxTimesOccurred = maxTimesOccurred;
+    public void setMaxTimesOccurred(int maxTimesOccurred) {
+
 }

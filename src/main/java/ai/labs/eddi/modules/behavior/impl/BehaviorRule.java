@@ -3,10 +3,6 @@ package ai.labs.eddi.modules.behavior.impl;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.behavior.impl.conditions.IBehaviorCondition;
 import ai.labs.eddi.modules.behavior.impl.conditions.IBehaviorCondition.ExecutionState;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
-import lombok.extern.slf4j.Slf4j;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -14,10 +10,6 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Slf4j
-@NoArgsConstructor
-@Getter
-@Setter
 public class BehaviorRule implements Cloneable {
     private String name;
     private List<String> actions = new LinkedList<>();
@@ -106,5 +98,34 @@ public class BehaviorRule implements Cloneable {
         InfiniteLoopException(String message) {
             super(message);
         }
+    }
+
+    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(BehaviorRule.class);
+
+    public BehaviorRule() {
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public List<String> getActions() {
+        return actions;
+    }
+
+    public void setActions(List<String> actions) {
+        this.actions = actions;
+    }
+
+    public List<IBehaviorCondition> getConditions() {
+        return conditions;
+    }
+
+    public void setConditions(List<IBehaviorCondition> conditions) {
+        this.conditions = conditions;
     }
 }

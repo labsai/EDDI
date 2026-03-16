@@ -1,7 +1,6 @@
 package ai.labs.eddi.modules.nlp.expressions;
 
 import ai.labs.eddi.utils.CharacterUtilities;
-import lombok.extern.slf4j.Slf4j;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -9,7 +8,6 @@ import java.util.Collections;
 /**
  * @author ginccc
  */
-@Slf4j
 public class Expression implements Cloneable {
     protected String domain;
     protected String expressionName;
@@ -228,4 +226,6 @@ public class Expression implements Cloneable {
         }
         return ret.toString();
     }
+
+    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(Expression.class);
 }

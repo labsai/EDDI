@@ -1,13 +1,9 @@
 package ai.labs.eddi.modules.output.model.types;
 
 import ai.labs.eddi.modules.output.model.OutputItem;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.Objects;
 
-@Getter
-@Setter
 public class TextOutputItem extends OutputItem {
     private String text;
     private int delay;
@@ -48,5 +44,29 @@ public class TextOutputItem extends OutputItem {
     @Override
     public String toString() {
         return text;
+    }
+
+    public String getText() {
+        return text;
+    }
+
+    public void setText(String text) {
+        this.text = text;
+    }
+
+    public int getDelay() {
+        return delay;
+    }
+
+    public void setDelay(int delay) {
+        this.delay = delay;
+    }
+
+    public TextOutputItem getThat() {
+        return that;
+    }
+
+    public void setThat(TextOutputItem that) {
+        this.that = that;
     }
 }

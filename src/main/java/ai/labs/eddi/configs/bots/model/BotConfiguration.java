@@ -1,8 +1,6 @@
 package ai.labs.eddi.configs.bots.model;
 
 
-import lombok.Getter;
-import lombok.Setter;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -14,17 +12,45 @@ import java.util.Map;
  * @author ginccc
  */
 
-@Getter
-@Setter
 public class BotConfiguration {
     private List<URI> packages = new ArrayList<>();
     private List<ChannelConnector> channels = new ArrayList<>();
 
-    @Getter
-    @Setter
     public static class ChannelConnector {
         private URI type;
         private Map<String, String> config = new HashMap<>();
+
+        public URI getType() {
+            return type;
+        }
+
+        public void setType(URI type) {
+            this.type = type;
+        }
+
+        public Map<String, String> getConfig() {
+            return config;
+        }
+
+        public void setConfig(Map<String, String> config) {
+            this.config = config;
+        }
     }
 
+
+    public List<URI> getPackages() {
+        return packages;
+    }
+
+    public void setPackages(List<URI> packages) {
+        this.packages = packages;
+    }
+
+    public List<ChannelConnector> getChannels() {
+        return channels;
+    }
+
+    public void setChannels(List<ChannelConnector> channels) {
+        this.channels = channels;
+    }
 }

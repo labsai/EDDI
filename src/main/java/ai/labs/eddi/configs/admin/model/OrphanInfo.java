@@ -1,22 +1,56 @@
 package ai.labs.eddi.configs.admin.model;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.net.URI;
 
 /**
  * Represents an orphaned resource that is not referenced by any bot or package.
  */
-@Getter
-@Setter
-@NoArgsConstructor
-@AllArgsConstructor
 public class OrphanInfo {
     private URI resourceUri;
     private String type;        // e.g., "ai.labs.package", "ai.labs.behavior"
     private String name;        // human-readable name from descriptor
     private boolean deleted;    // soft-deleted?
+
+    public OrphanInfo() {
+    }
+
+    public OrphanInfo(URI resourceUri, String type, String name, boolean deleted) {
+        this.resourceUri = resourceUri;
+        this.type = type;
+        this.name = name;
+        this.deleted = deleted;
+    }
+
+    public URI getResourceUri() {
+        return resourceUri;
+    }
+
+    public void setResourceUri(URI resourceUri) {
+        this.resourceUri = resourceUri;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public boolean isDeleted() {
+        return deleted;
+    }
+
+    public void setDeleted(boolean deleted) {
+        this.deleted = deleted;
+    }
 }

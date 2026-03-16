@@ -1,13 +1,9 @@
 package ai.labs.eddi.modules.output.model.types;
 
 import ai.labs.eddi.modules.output.model.OutputItem;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.Objects;
 
-@Getter
-@Setter
 public class ApplicationLinkOutputItem extends OutputItem {
     private String path;
     private String label;
@@ -43,5 +39,37 @@ public class ApplicationLinkOutputItem extends OutputItem {
     @Override
     public String toString() {
         return path + ";" + label + ";" + delay;
+    }
+
+    public String getPath() {
+        return path;
+    }
+
+    public void setPath(String path) {
+        this.path = path;
+    }
+
+    public String getLabel() {
+        return label;
+    }
+
+    public void setLabel(String label) {
+        this.label = label;
+    }
+
+    public int getDelay() {
+        return delay;
+    }
+
+    public void setDelay(int delay) {
+        this.delay = delay;
+    }
+
+    public ApplicationLinkOutputItem getThat() {
+        return that;
+    }
+
+    public void setThat(ApplicationLinkOutputItem that) {
+        this.that = that;
     }
 }

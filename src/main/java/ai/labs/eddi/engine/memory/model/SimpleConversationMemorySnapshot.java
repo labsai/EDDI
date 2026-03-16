@@ -3,9 +3,6 @@ package ai.labs.eddi.engine.memory.model;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.Date;
 import java.util.LinkedList;
@@ -15,8 +12,6 @@ import java.util.List;
  * @author ginccc
  */
 
-@Getter
-@Setter
 public class SimpleConversationMemorySnapshot {
     private String conversationId;
     private String botId;
@@ -30,20 +25,158 @@ public class SimpleConversationMemorySnapshot {
     private IConversationMemory.IConversationProperties conversationProperties = new ConversationProperties(null);
     private List<SimpleConversationStep> conversationSteps = new LinkedList<>();
 
-    @Getter
-    @Setter
     public static class SimpleConversationStep {
         private List<ConversationStepData> conversationStep = new LinkedList<>();
         private Date timestamp;
+
+        public List<ConversationStepData> getConversationStep() {
+            return conversationStep;
+        }
+
+        public void setConversationStep(List<ConversationStepData> conversationStep) {
+            this.conversationStep = conversationStep;
+        }
+
+        public Date getTimestamp() {
+            return timestamp;
+        }
+
+        public void setTimestamp(Date timestamp) {
+            this.timestamp = timestamp;
+        }
     }
 
-    @AllArgsConstructor
-    @Getter
-    @Setter
     public static class ConversationStepData {
         private String key;
         private Object value;
         private Date timestamp;
         private String originPackageId;
+
+        public ConversationStepData(String key, Object value, Date timestamp, String originPackageId) {
+            this.key = key;
+            this.value = value;
+            this.timestamp = timestamp;
+            this.originPackageId = originPackageId;
+        }
+
+        public String getKey() {
+            return key;
+        }
+
+        public void setKey(String key) {
+            this.key = key;
+        }
+
+        public Object getValue() {
+            return value;
+        }
+
+        public void setValue(Object value) {
+            this.value = value;
+        }
+
+        public Date getTimestamp() {
+            return timestamp;
+        }
+
+        public void setTimestamp(Date timestamp) {
+            this.timestamp = timestamp;
+        }
+
+        public String getOriginPackageId() {
+            return originPackageId;
+        }
+
+        public void setOriginPackageId(String originPackageId) {
+            this.originPackageId = originPackageId;
+        }
+    }
+
+    public String getConversationId() {
+        return conversationId;
+    }
+
+    public void setConversationId(String conversationId) {
+        this.conversationId = conversationId;
+    }
+
+    public String getBotId() {
+        return botId;
+    }
+
+    public void setBotId(String botId) {
+        this.botId = botId;
+    }
+
+    public Integer getBotVersion() {
+        return botVersion;
+    }
+
+    public void setBotVersion(Integer botVersion) {
+        this.botVersion = botVersion;
+    }
+
+    public String getUserId() {
+        return userId;
+    }
+
+    public void setUserId(String userId) {
+        this.userId = userId;
+    }
+
+    public Deployment.Environment getEnvironment() {
+        return environment;
+    }
+
+    public void setEnvironment(Deployment.Environment environment) {
+        this.environment = environment;
+    }
+
+    public ConversationState getConversationState() {
+        return conversationState;
+    }
+
+    public void setConversationState(ConversationState conversationState) {
+        this.conversationState = conversationState;
+    }
+
+    public boolean isUndoAvailable() {
+        return undoAvailable;
+    }
+
+    public void setUndoAvailable(boolean undoAvailable) {
+        this.undoAvailable = undoAvailable;
+    }
+
+    public boolean isRedoAvailable() {
+        return redoAvailable;
+    }
+
+    public void setRedoAvailable(boolean redoAvailable) {
+        this.redoAvailable = redoAvailable;
+    }
+
+    public List<ConversationOutput> getConversationOutputs() {
+        return conversationOutputs;
+    }
+
+    public void setConversationOutputs(List<ConversationOutput> conversationOutputs) {
+        this.conversationOutputs = conversationOutputs;
+    }
+
+    public IConversationMemory.IConversationProperties getConversationProperties() {
+        return conversationProperties;
+    }
+
+    public void setConversationProperties(IConversationMemory.IConversationProperties conversationProperties) {
+        this.conversationProperties = conversationProperties;
+    }
+
+    public List<SimpleConversationStep> getConversationSteps() {
+        return conversationSteps;
+    }
+
+    public void setConversationSteps(List<SimpleConversationStep> conversationSteps) {
+        this.conversationSteps = conversationSteps;
     }
 }

@@ -1,13 +1,10 @@
 package ai.labs.eddi.utils;
 
-import lombok.AccessLevel;
-import lombok.NoArgsConstructor;
 
 import java.sql.Time;
 import java.util.Date;
 import java.util.regex.Pattern;
 
-@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class LanguageUtilities {
     private interface TimeRecognition {
         Pattern p1 = Pattern.compile("^(([0-1]?[0-9]|[2]?2[0-3])(h)([0-5][0-9]))$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL); //e.g. 12h10
@@ -61,5 +58,8 @@ public class LanguageUtilities {
         }
 
         return null;
+    }
+
+    public LanguageUtilities() {
     }
 }

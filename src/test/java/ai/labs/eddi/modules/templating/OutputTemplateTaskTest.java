@@ -9,10 +9,6 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.output.model.QuickReply;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.AllArgsConstructor;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.Setter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -160,7 +156,6 @@ public class OutputTemplateTaskTest {
     }
 
 
-    @EqualsAndHashCode
     private static class MockData<T> implements IData<T> {
         private final String key;
         private T result;
@@ -219,14 +214,45 @@ public class OutputTemplateTaskTest {
         public void setPublic(boolean isPublic) {
 
         }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            MockData that = (MockData) o;
+            return java.util.Objects.equals(key, that.key) && java.util.Objects.equals(result, that.result);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(key, result);
+        }
     }
 
-    @Getter
-    @Setter
-    @AllArgsConstructor
     private static class TestContextObject {
         private String key;
         private String value;
+
+        public TestContextObject(String key, String value) {
+            this.key = key;
+            this.value = value;
+        }
+
+        public String getKey() {
+            return key;
+        }
+
+        public void setKey(String key) {
+            this.key = key;
+        }
+
+        public String getValue() {
+            return value;
+        }
+
+        public void setValue(String value) {
+            this.value = value;
+        }
     }
 }
 

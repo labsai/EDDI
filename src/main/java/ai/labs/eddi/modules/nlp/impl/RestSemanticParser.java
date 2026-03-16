@@ -12,9 +12,6 @@ import ai.labs.eddi.modules.nlp.IRestSemanticParser;
 import ai.labs.eddi.modules.nlp.Solution;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -108,14 +105,22 @@ public class RestSemanticParser implements IRestSemanticParser {
         return resourceClientLibrary.getResource(resourceUri, ParserConfiguration.class);
     }
 
-    @Getter
-    @Setter
-    @NoArgsConstructor
     public static class ResponseSolution {
         private String expressions;
 
         public ResponseSolution(Expressions exps) {
             expressions = exps.toString();
+        }
+
+        public ResponseSolution() {
+        }
+
+        public String getExpressions() {
+            return expressions;
+        }
+
+        public void setExpressions(String expressions) {
+            this.expressions = expressions;
         }
     }
 }

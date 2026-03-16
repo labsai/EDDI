@@ -1,8 +1,5 @@
 package ai.labs.eddi.modules.langchain.model;
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -13,9 +10,6 @@ import java.util.Map;
  * Tracks tool calls made during agent execution for debugging, logging, and analytics.
  * Phase 4: Enhanced with metrics, caching, and cost tracking.
  */
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
 public class ToolExecutionTrace {
 
     /**
@@ -56,9 +50,6 @@ public class ToolExecutionTrace {
     /**
      * Individual tool call record
      */
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
     public static class ToolCall {
         /**
          * Name of the tool that was called
@@ -104,14 +95,116 @@ public class ToolExecutionTrace {
          * Timestamp when tool was called
          */
         private long timestamp;
+
+        public ToolCall() {
+        }
+
+        public ToolCall(String toolName, String arguments, String result, long executionTimeMs, String error, boolean success, double cost, boolean fromCache, long timestamp) {
+            this.toolName = toolName;
+            this.arguments = arguments;
+            this.result = result;
+            this.executionTimeMs = executionTimeMs;
+            this.error = error;
+            this.success = success;
+            this.cost = cost;
+            this.fromCache = fromCache;
+            this.timestamp = timestamp;
+        }
+
+        public String getToolName() {
+            return toolName;
+        }
+
+        public void setToolName(String toolName) {
+            this.toolName = toolName;
+        }
+
+        public String getArguments() {
+            return arguments;
+        }
+
+        public void setArguments(String arguments) {
+            this.arguments = arguments;
+        }
+
+        public String getResult() {
+            return result;
+        }
+
+        public void setResult(String result) {
+            this.result = result;
+        }
+
+        public long getExecutionTimeMs() {
+            return executionTimeMs;
+        }
+
+        public void setExecutionTimeMs(long executionTimeMs) {
+            this.executionTimeMs = executionTimeMs;
+        }
+
+        public String getError() {
+            return error;
+        }
+
+        public void setError(String error) {
+            this.error = error;
+        }
+
+        public boolean isSuccess() {
+            return success;
+        }
+
+        public void setSuccess(boolean success) {
+            this.success = success;
+        }
+
+        public double getCost() {
+            return cost;
+        }
+
+        public void setCost(double cost) {
+            this.cost = cost;
+        }
+
+        public boolean isFromCache() {
+            return fromCache;
+        }
+
+        public void setFromCache(boolean fromCache) {
+            this.fromCache = fromCache;
+        }
+
+        public long getTimestamp() {
+            return timestamp;
+        }
+
+        public void setTimestamp(long timestamp) {
+            this.timestamp = timestamp;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            ToolCall that = (ToolCall) o;
+            return java.util.Objects.equals(toolName, that.toolName) && java.util.Objects.equals(arguments, that.arguments) && java.util.Objects.equals(result, that.result) && executionTimeMs == that.executionTimeMs && java.util.Objects.equals(error, that.error) && success == that.success && Double.compare(that.cost, cost) == 0 && fromCache == that.fromCache && timestamp == that.timestamp;
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(toolName, arguments, result, executionTimeMs, error, success, cost, fromCache, timestamp);
+        }
+
+        @Override
+        public String toString() {
+            return "ToolCall(" + "toolName=" + toolName + ", arguments=" + arguments + ", result=" + result + ", executionTimeMs=" + executionTimeMs + ", error=" + error + ", success=" + success + ", cost=" + cost + ", fromCache=" + fromCache + ", timestamp=" + timestamp" + ")";
+        }
     }
 
     /**
      * Metrics for a specific tool
      */
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
     public static class ToolMetrics {
         private String toolName;
         private int totalCalls;
@@ -133,6 +226,111 @@ public class ToolExecutionTrace {
 
         public double getCacheHitRate() {
             return totalCalls > 0 ? (double) cacheHits / totalCalls * 100 : 0;
+        }
+
+        public ToolMetrics() {
+        }
+
+        public ToolMetrics(String toolName, int totalCalls, int successfulCalls, int failedCalls, long totalExecutionTimeMs, long minExecutionTimeMs, long maxExecutionTimeMs, double totalCost, int cacheHits) {
+            this.toolName = toolName;
+            this.totalCalls = totalCalls;
+            this.successfulCalls = successfulCalls;
+            this.failedCalls = failedCalls;
+            this.totalExecutionTimeMs = totalExecutionTimeMs;
+            this.minExecutionTimeMs = minExecutionTimeMs;
+            this.maxExecutionTimeMs = maxExecutionTimeMs;
+            this.totalCost = totalCost;
+            this.cacheHits = cacheHits;
+        }
+
+        public String getToolName() {
+            return toolName;
+        }
+
+        public void setToolName(String toolName) {
+            this.toolName = toolName;
+        }
+
+        public int getTotalCalls() {
+            return totalCalls;
+        }
+
+        public void setTotalCalls(int totalCalls) {
+            this.totalCalls = totalCalls;
+        }
+
+        public int getSuccessfulCalls() {
+            return successfulCalls;
+        }
+
+        public void setSuccessfulCalls(int successfulCalls) {
+            this.successfulCalls = successfulCalls;
+        }
+
+        public int getFailedCalls() {
+            return failedCalls;
+        }
+
+        public void setFailedCalls(int failedCalls) {
+            this.failedCalls = failedCalls;
+        }
+
+        public long getTotalExecutionTimeMs() {
+            return totalExecutionTimeMs;
+        }
+
+        public void setTotalExecutionTimeMs(long totalExecutionTimeMs) {
+            this.totalExecutionTimeMs = totalExecutionTimeMs;
+        }
+
+        public long getMinExecutionTimeMs() {
+            return minExecutionTimeMs;
+        }
+
+        public void setMinExecutionTimeMs(long minExecutionTimeMs) {
+            this.minExecutionTimeMs = minExecutionTimeMs;
+        }
+
+        public long getMaxExecutionTimeMs() {
+            return maxExecutionTimeMs;
+        }
+
+        public void setMaxExecutionTimeMs(long maxExecutionTimeMs) {
+            this.maxExecutionTimeMs = maxExecutionTimeMs;
+        }
+
+        public double getTotalCost() {
+            return totalCost;
+        }
+
+        public void setTotalCost(double totalCost) {
+            this.totalCost = totalCost;
+        }
+
+        public int getCacheHits() {
+            return cacheHits;
+        }
+
+        public void setCacheHits(int cacheHits) {
+            this.cacheHits = cacheHits;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            ToolMetrics that = (ToolMetrics) o;
+            return java.util.Objects.equals(toolName, that.toolName) && totalCalls == that.totalCalls && successfulCalls == that.successfulCalls && failedCalls == that.failedCalls && totalExecutionTimeMs == that.totalExecutionTimeMs && minExecutionTimeMs == that.minExecutionTimeMs && maxExecutionTimeMs == that.maxExecutionTimeMs && Double.compare(that.totalCost, totalCost) == 0 && cacheHits == that.cacheHits;
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(toolName, totalCalls, successfulCalls, failedCalls, totalExecutionTimeMs, minExecutionTimeMs, maxExecutionTimeMs, totalCost, cacheHits);
+        }
+
+        @Override
+        public String toString() {
+            return "ToolMetrics(" + "toolName=" + toolName + ", totalCalls=" + totalCalls + ", successfulCalls=" + successfulCalls + ", failedCalls=" + failedCalls + ", totalExecutionTimeMs=" + totalExecutionTimeMs + ", minExecutionTimeMs=" + minExecutionTimeMs + ", maxExecutionTimeMs=" + maxExecutionTimeMs + ", totalCost=" + totalCost + ", cacheHits=" + cacheHits" + ")";
         }
     }
 
@@ -241,6 +439,108 @@ public class ToolExecutionTrace {
         }
 
         return sb.toString();
+    }
+
+    public ToolExecutionTrace() {
+    }
+
+    public ToolExecutionTrace(List<ToolCall> toolCalls, long totalExecutionTimeMs, boolean hasErrors, double totalCost, int cacheHits, int cacheMisses, Map<String, ToolMetrics> toolMetrics, ToolCall call, ToolCall call, StringBuilder sb) {
+        this.toolCalls = toolCalls;
+        this.totalExecutionTimeMs = totalExecutionTimeMs;
+        this.hasErrors = hasErrors;
+        this.totalCost = totalCost;
+        this.cacheHits = cacheHits;
+        this.cacheMisses = cacheMisses;
+        this.toolMetrics = toolMetrics;
+        this.call = call;
+        this.call = call;
+        this.sb = sb;
+    }
+
+    public List<ToolCall> getToolCalls() {
+        return toolCalls;
+    }
+
+    public void setToolCalls(List<ToolCall> toolCalls) {
+        this.toolCalls = toolCalls;
+    }
+
+    public void setTotalExecutionTimeMs(long totalExecutionTimeMs) {
+        this.totalExecutionTimeMs = totalExecutionTimeMs;
+    }
+
+    public boolean isHasErrors() {
+        return hasErrors;
+    }
+
+    public void setHasErrors(boolean hasErrors) {
+        this.hasErrors = hasErrors;
+    }
+
+    public void setTotalCost(double totalCost) {
+        this.totalCost = totalCost;
+    }
+
+    public void setCacheHits(int cacheHits) {
+        this.cacheHits = cacheHits;
+    }
+
+    public int getCacheMisses() {
+        return cacheMisses;
+    }
+
+    public void setCacheMisses(int cacheMisses) {
+        this.cacheMisses = cacheMisses;
+    }
+
+    public Map<String, ToolMetrics> getToolMetrics() {
+        return toolMetrics;
+    }
+
+    public void setToolMetrics(Map<String, ToolMetrics> toolMetrics) {
+        this.toolMetrics = toolMetrics;
+    }
+
+    public ToolCall getCall() {
+        return call;
+    }
+
+    public void setCall(ToolCall call) {
+        this.call = call;
+    }
+
+    public ToolCall getCall() {
+        return call;
+    }
+
+    public void setCall(ToolCall call) {
+        this.call = call;
+    }
+
+    public StringBuilder getSb() {
+        return sb;
+    }
+
+    public void setSb(StringBuilder sb) {
+        this.sb = sb;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        ToolExecutionTrace that = (ToolExecutionTrace) o;
+        return java.util.Objects.equals(toolCalls, that.toolCalls) && totalExecutionTimeMs == that.totalExecutionTimeMs && hasErrors == that.hasErrors && Double.compare(that.totalCost, totalCost) == 0 && cacheHits == that.cacheHits && cacheMisses == that.cacheMisses && java.util.Objects.equals(toolMetrics, that.toolMetrics) && java.util.Objects.equals(call, that.call) && java.util.Objects.equals(call, that.call) && java.util.Objects.equals(sb, that.sb);
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(toolCalls, totalExecutionTimeMs, hasErrors, totalCost, cacheHits, cacheMisses, toolMetrics, call, call, sb);
+    }
+
+    @Override
+    public String toString() {
+        return "ToolExecutionTrace(" + "toolCalls=" + toolCalls + ", totalExecutionTimeMs=" + totalExecutionTimeMs + ", hasErrors=" + hasErrors + ", totalCost=" + totalCost + ", cacheHits=" + cacheHits + ", cacheMisses=" + cacheMisses + ", toolMetrics=" + toolMetrics + ", call=" + call + ", call=" + call + ", sb=" + sb" + ")";
     }
 }
 

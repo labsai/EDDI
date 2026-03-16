@@ -12,7 +12,6 @@ import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.RegularDictionary;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import io.quarkus.runtime.Startup;
-import lombok.extern.slf4j.Slf4j;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -23,7 +22,6 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Slf4j
 @Startup(1000)
 @ApplicationScoped
 public class RegularDictionaryProvider implements IDictionaryProvider {
@@ -127,4 +125,6 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
             throws ServiceException {
         return resourceClientLibrary.getResource(resourceURI, RegularDictionaryConfiguration.class);
     }
+
+    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(RegularDictionaryProvider.class);
 }

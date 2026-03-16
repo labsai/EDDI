@@ -4,9 +4,6 @@ import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.modules.templating.bootstrap.TemplateEngineModule;
 import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.Setter;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -59,10 +56,19 @@ public class TemplatingEngineTest {
         Assertions.assertEquals("Some kind of string having a testValue", result);
     }
 
-    @Getter
-    @Setter
-    @AllArgsConstructor
     private static class TestObject {
         private String value;
+
+        public TestObject(String value) {
+            this.value = value;
+        }
+
+        public String getValue() {
+            return value;
+        }
+
+        public void setValue(String value) {
+            this.value = value;
+        }
     }
 }

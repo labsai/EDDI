@@ -3,7 +3,6 @@ package ai.labs.eddi.modules.output.impl;
 import ai.labs.eddi.modules.output.IOutputFilter;
 import ai.labs.eddi.modules.output.IOutputGeneration;
 import ai.labs.eddi.modules.output.model.OutputEntry;
-import lombok.Getter;
 
 import java.util.*;
 
@@ -12,9 +11,7 @@ import java.util.*;
  */
 
 public class OutputGeneration implements IOutputGeneration {
-    @Getter
     private final Map<String, List<OutputEntry>> outputMapper = new LinkedHashMap<>();
-    @Getter
     private final String language;
 
     public OutputGeneration(String language) {
@@ -83,5 +80,13 @@ public class OutputGeneration implements IOutputGeneration {
         }
 
         return outputEntries;
+    }
+
+    public Map<String, List<OutputEntry>> getOutputMapper() {
+        return outputMapper;
+    }
+
+    public String getLanguage() {
+        return language;
     }
 }

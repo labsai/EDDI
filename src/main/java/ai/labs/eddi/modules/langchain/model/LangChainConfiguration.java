@@ -2,8 +2,6 @@ package ai.labs.eddi.modules.langchain.model;
 
 import ai.labs.eddi.configs.http.model.PostResponse;
 import ai.labs.eddi.configs.http.model.PreRequest;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.List;
 import java.util.Map;
@@ -51,8 +49,6 @@ public record LangChainConfiguration(List<Task> tasks) {
      * Task configuration supporting both simple chat and advanced agent features.
      * The task automatically switches to agent mode when tools are configured.
      */
-    @Getter
-    @Setter
     public static class Task {
         // === Core Configuration (Required) ===
 
@@ -166,30 +162,282 @@ public record LangChainConfiguration(List<Task> tasks) {
         public String getSystemMessage() {
             return parameters != null ? parameters.get("systemMessage") : null;
         }
+
+        public List<String> getActions() {
+            return actions;
+        }
+
+        public void setActions(List<String> actions) {
+            this.actions = actions;
+        }
+
+        public String getId() {
+            return id;
+        }
+
+        public void setId(String id) {
+            this.id = id;
+        }
+
+        public String getType() {
+            return type;
+        }
+
+        public void setType(String type) {
+            this.type = type;
+        }
+
+        public String getDescription() {
+            return description;
+        }
+
+        public void setDescription(String description) {
+            this.description = description;
+        }
+
+        public PreRequest getPreRequest() {
+            return preRequest;
+        }
+
+        public void setPreRequest(PreRequest preRequest) {
+            this.preRequest = preRequest;
+        }
+
+        public Map<String, String> getParameters() {
+            return parameters;
+        }
+
+        public void setParameters(Map<String, String> parameters) {
+            this.parameters = parameters;
+        }
+
+        public String getResponseObjectName() {
+            return responseObjectName;
+        }
+
+        public void setResponseObjectName(String responseObjectName) {
+            this.responseObjectName = responseObjectName;
+        }
+
+        public String getResponseMetadataObjectName() {
+            return responseMetadataObjectName;
+        }
+
+        public void setResponseMetadataObjectName(String responseMetadataObjectName) {
+            this.responseMetadataObjectName = responseMetadataObjectName;
+        }
+
+        public PostResponse getPostResponse() {
+            return postResponse;
+        }
+
+        public void setPostResponse(PostResponse postResponse) {
+            this.postResponse = postResponse;
+        }
+
+        public List<String> getTools() {
+            return tools;
+        }
+
+        public void setTools(List<String> tools) {
+            this.tools = tools;
+        }
+
+        public Boolean getEnableBuiltInTools() {
+            return enableBuiltInTools;
+        }
+
+        public void setEnableBuiltInTools(Boolean enableBuiltInTools) {
+            this.enableBuiltInTools = enableBuiltInTools;
+        }
+
+        public List<String> getBuiltInToolsWhitelist() {
+            return builtInToolsWhitelist;
+        }
+
+        public void setBuiltInToolsWhitelist(List<String> builtInToolsWhitelist) {
+            this.builtInToolsWhitelist = builtInToolsWhitelist;
+        }
+
+        public Integer getConversationHistoryLimit() {
+            return conversationHistoryLimit;
+        }
+
+        public void setConversationHistoryLimit(Integer conversationHistoryLimit) {
+            this.conversationHistoryLimit = conversationHistoryLimit;
+        }
+
+        public RetrievalAugmentorConfiguration getRetrievalAugmentor() {
+            return retrievalAugmentor;
+        }
+
+        public void setRetrievalAugmentor(RetrievalAugmentorConfiguration retrievalAugmentor) {
+            this.retrievalAugmentor = retrievalAugmentor;
+        }
+
+        public RetryConfiguration getRetry() {
+            return retry;
+        }
+
+        public void setRetry(RetryConfiguration retry) {
+            this.retry = retry;
+        }
+
+        public Double getMaxBudgetPerConversation() {
+            return maxBudgetPerConversation;
+        }
+
+        public void setMaxBudgetPerConversation(Double maxBudgetPerConversation) {
+            this.maxBudgetPerConversation = maxBudgetPerConversation;
+        }
+
+        public Boolean getEnableCostTracking() {
+            return enableCostTracking;
+        }
+
+        public void setEnableCostTracking(Boolean enableCostTracking) {
+            this.enableCostTracking = enableCostTracking;
+        }
+
+        public Boolean getEnableToolCaching() {
+            return enableToolCaching;
+        }
+
+        public void setEnableToolCaching(Boolean enableToolCaching) {
+            this.enableToolCaching = enableToolCaching;
+        }
+
+        public Boolean getEnableRateLimiting() {
+            return enableRateLimiting;
+        }
+
+        public void setEnableRateLimiting(Boolean enableRateLimiting) {
+            this.enableRateLimiting = enableRateLimiting;
+        }
+
+        public Integer getDefaultRateLimit() {
+            return defaultRateLimit;
+        }
+
+        public void setDefaultRateLimit(Integer defaultRateLimit) {
+            this.defaultRateLimit = defaultRateLimit;
+        }
+
+        public Map<String, Integer> getToolRateLimits() {
+            return toolRateLimits;
+        }
+
+        public void setToolRateLimits(Map<String, Integer> toolRateLimits) {
+            this.toolRateLimits = toolRateLimits;
+        }
+
+        public Boolean getEnableParallelExecution() {
+            return enableParallelExecution;
+        }
+
+        public void setEnableParallelExecution(Boolean enableParallelExecution) {
+            this.enableParallelExecution = enableParallelExecution;
+        }
+
+        public Long getParallelExecutionTimeoutMs() {
+            return parallelExecutionTimeoutMs;
+        }
+
+        public void setParallelExecutionTimeoutMs(Long parallelExecutionTimeoutMs) {
+            this.parallelExecutionTimeoutMs = parallelExecutionTimeoutMs;
+        }
     }
 
     /**
      * Configuration for API call retries
      */
-    @Getter
-    @Setter
     public static class RetryConfiguration {
         private Integer maxAttempts = 3;
         private Long backoffDelayMs = 1000L;
         private Double backoffMultiplier = 2.0;
         private Long maxBackoffDelayMs = 10000L;
+
+        public Integer getMaxAttempts() {
+            return maxAttempts;
+        }
+
+        public void setMaxAttempts(Integer maxAttempts) {
+            this.maxAttempts = maxAttempts;
+        }
+
+        public Long getBackoffDelayMs() {
+            return backoffDelayMs;
+        }
+
+        public void setBackoffDelayMs(Long backoffDelayMs) {
+            this.backoffDelayMs = backoffDelayMs;
+        }
+
+        public Double getBackoffMultiplier() {
+            return backoffMultiplier;
+        }
+
+        public void setBackoffMultiplier(Double backoffMultiplier) {
+            this.backoffMultiplier = backoffMultiplier;
+        }
+
+        public Long getMaxBackoffDelayMs() {
+            return maxBackoffDelayMs;
+        }
+
+        public void setMaxBackoffDelayMs(Long maxBackoffDelayMs) {
+            this.maxBackoffDelayMs = maxBackoffDelayMs;
+        }
     }
 
     /**
      * Configuration for RAG (Retrieval-Augmented Generation)
      */
-    @Getter
-    @Setter
     public static class RetrievalAugmentorConfiguration {
         private String httpCall;
         private String embeddingModel;
         private String embeddingStore;
         private Integer maxResults;
         private Double minScore;
+
+        public String getHttpCall() {
+            return httpCall;
+        }
+
+        public void setHttpCall(String httpCall) {
+            this.httpCall = httpCall;
+        }
+
+        public String getEmbeddingModel() {
+            return embeddingModel;
+        }
+
+        public void setEmbeddingModel(String embeddingModel) {
+            this.embeddingModel = embeddingModel;
+        }
+
+        public String getEmbeddingStore() {
+            return embeddingStore;
+        }
+
+        public void setEmbeddingStore(String embeddingStore) {
+            this.embeddingStore = embeddingStore;
+        }
+
+        public Integer getMaxResults() {
+            return maxResults;
+        }
+
+        public void setMaxResults(Integer maxResults) {
+            this.maxResults = maxResults;
+        }
+
+        public Double getMinScore() {
+            return minScore;
+        }
+
+        public void setMinScore(Double minScore) {
+            this.minScore = minScore;
+        }
     }
 }

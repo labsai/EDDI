@@ -6,7 +6,6 @@ import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.value.Value;
 import ai.labs.eddi.modules.properties.IPropertySetter;
-import lombok.Getter;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -21,7 +20,6 @@ import static ai.labs.eddi.configs.properties.model.Property.Scope.*;
 public class PropertySetter implements IPropertySetter {
     private static final String PROPERTY_EXPRESSION = "property";
 
-    @Getter
     private final List<SetOnActions> setOnActionsList;
 
     public PropertySetter(List<SetOnActions> setOnActionsList) {
@@ -76,5 +74,9 @@ public class PropertySetter implements IPropertySetter {
             }
         }
         return propertyScope;
+    }
+
+    public List<SetOnActions> getSetOnActionsList() {
+        return setOnActionsList;
     }
 }

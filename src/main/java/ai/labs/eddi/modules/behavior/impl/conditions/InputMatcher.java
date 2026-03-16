@@ -6,8 +6,6 @@ import ai.labs.eddi.modules.behavior.impl.BehaviorRule;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.utils.StringUtilities;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -26,8 +24,6 @@ public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
     public static final String ID = "inputmatcher";
     private static final String KEY_EXPRESSIONS = "expressions";
 
-    @Getter
-    @Setter
     private Expressions expressions = new Expressions();
     private final String expressionsQualifier = KEY_EXPRESSIONS;
 
@@ -116,5 +112,13 @@ public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
         IBehaviorCondition clone = new InputMatcher(expressionProvider);
         clone.setConfigs(getConfigs());
         return clone;
+    }
+
+    public Expressions getExpressions() {
+        return expressions;
+    }
+
+    public void setExpressions(Expressions expressions) {
+        this.expressions = expressions;
     }
 }

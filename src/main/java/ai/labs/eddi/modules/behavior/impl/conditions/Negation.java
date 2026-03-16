@@ -2,8 +2,6 @@ package ai.labs.eddi.modules.behavior.impl.conditions;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.behavior.impl.BehaviorRule;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.util.Collections;
 import java.util.List;
@@ -16,10 +14,8 @@ import static ai.labs.eddi.modules.behavior.impl.conditions.IBehaviorCondition.E
  */
 
 
-@NoArgsConstructor
 public class Negation implements IBehaviorCondition {
     public static final String ID = "negation";
-    @Setter
     private IBehaviorCondition condition;
 
     @Override
@@ -61,4 +57,11 @@ public class Negation implements IBehaviorCondition {
             this.condition = conditions.get(0);
         }
     }
+
+    public Negation() {
+    }
+    }
+        this.condition = condition;
+    public void setCondition(IBehaviorCondition condition) {
+
 }

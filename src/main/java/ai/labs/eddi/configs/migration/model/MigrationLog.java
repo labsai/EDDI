@@ -1,14 +1,8 @@
 package ai.labs.eddi.configs.migration.model;
 
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.util.Date;
 
-@Getter
-@Setter
-@NoArgsConstructor
 public class MigrationLog {
     private String name;
     private boolean finished;
@@ -18,5 +12,32 @@ public class MigrationLog {
         this.name = name;
         finished = true;
         timestamp = new Date(System.currentTimeMillis());
+    }
+
+    public MigrationLog() {
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public boolean isFinished() {
+        return finished;
+    }
+
+    public void setFinished(boolean finished) {
+        this.finished = finished;
+    }
+
+    public Date getTimestamp() {
+        return timestamp;
+    }
+
+    public void setTimestamp(Date timestamp) {
+        this.timestamp = timestamp;
     }
 }

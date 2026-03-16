@@ -19,10 +19,6 @@ import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -348,12 +344,32 @@ public class RestBotManagement implements IRestBotManagement {
         }
     }
 
-    @Getter
-    @Setter
-    @NoArgsConstructor
-    @AllArgsConstructor
     public static class UserConversationResult {
         private boolean newlyCreatedConversation;
         private UserConversation userConversation;
+
+        public UserConversationResult() {
+        }
+
+        public UserConversationResult(boolean newlyCreatedConversation, UserConversation userConversation) {
+            this.newlyCreatedConversation = newlyCreatedConversation;
+            this.userConversation = userConversation;
+        }
+
+        public boolean isNewlyCreatedConversation() {
+            return newlyCreatedConversation;
+        }
+
+        public void setNewlyCreatedConversation(boolean newlyCreatedConversation) {
+            this.newlyCreatedConversation = newlyCreatedConversation;
+        }
+
+        public UserConversation getUserConversation() {
+            return userConversation;
+        }
+
+        public void setUserConversation(UserConversation userConversation) {
+            this.userConversation = userConversation;
+        }
     }
 }

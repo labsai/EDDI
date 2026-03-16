@@ -2,8 +2,6 @@ package ai.labs.eddi.modules.behavior.impl.conditions;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.HashMap;
 import java.util.List;
@@ -18,8 +16,6 @@ public abstract class BaseMatcher implements IBehaviorCondition {
     private static final String KEY_OCCURRENCE = "occurrence";
     static final String KEY_EMPTY = "empty";
 
-    @Getter
-    @Setter
     protected ConversationStepOccurrence occurrence = ConversationStepOccurrence.currentStep;
 
     private final String conversationOccurrenceQualifier = KEY_OCCURRENCE;
@@ -68,6 +64,14 @@ public abstract class BaseMatcher implements IBehaviorCondition {
     boolean occurredInAnyStep(IConversationMemory memory, String dataKey, ValueEvaluation valueEvaluation) {
         List<IData<String>> allLatestData = memory.getAllSteps().getAllLatestData(dataKey);
         return allLatestData.stream().anyMatch(latestData -> valueEvaluation.evaluate(latestData) == SUCCESS);
+    }
+
+    public ConversationStepOccurrence getOccurrence() {
+        return occurrence;
+    }
+
+    public void setOccurrence(ConversationStepOccurrence occurrence) {
+        this.occurrence = occurrence;
     }
 
     interface ValueEvaluation {

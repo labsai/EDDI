@@ -1,13 +1,9 @@
 package ai.labs.eddi.modules.output.model.types;
 
 import ai.labs.eddi.modules.output.model.OutputItem;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.Objects;
 
-@Getter
-@Setter
 public class BotFaceOutputItem extends OutputItem {
     private String uri;
     private String alt;
@@ -40,5 +36,37 @@ public class BotFaceOutputItem extends OutputItem {
     @Override
     public int hashCode() {
         return Objects.hash(uri, alt, delay);
+    }
+
+    public String getUri() {
+        return uri;
+    }
+
+    public void setUri(String uri) {
+        this.uri = uri;
+    }
+
+    public String getAlt() {
+        return alt;
+    }
+
+    public void setAlt(String alt) {
+        this.alt = alt;
+    }
+
+    public int getDelay() {
+        return delay;
+    }
+
+    public void setDelay(int delay) {
+        this.delay = delay;
+    }
+
+    public BotFaceOutputItem getThat() {
+        return that;
+    }
+
+    public void setThat(BotFaceOutputItem that) {
+        this.that = that;
     }
 }

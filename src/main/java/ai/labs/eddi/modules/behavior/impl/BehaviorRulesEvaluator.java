@@ -3,10 +3,6 @@ package ai.labs.eddi.modules.behavior.impl;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.behavior.impl.conditions.IBehaviorCondition;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.util.LinkedList;
 
@@ -14,10 +10,6 @@ import java.util.LinkedList;
  * @author ginccc
  */
 
-@NoArgsConstructor
-@AllArgsConstructor
-@Getter
-@Setter
 class BehaviorRulesEvaluator {
     private BehaviorSet behaviorSet;
 
@@ -86,5 +78,38 @@ class BehaviorRulesEvaluator {
         BehaviorRuleExecutionException(String message, Exception e) {
             super(message, e);
         }
+    }
+
+    public BehaviorRulesEvaluator() {
+    }
+
+    public BehaviorRulesEvaluator(BehaviorSet behaviorSet, boolean appendActions, boolean expressionsAsActions) {
+        this.behaviorSet = behaviorSet;
+        this.appendActions = appendActions;
+        this.expressionsAsActions = expressionsAsActions;
+    }
+
+    public BehaviorSet getBehaviorSet() {
+        return behaviorSet;
+    }
+
+    public void setBehaviorSet(BehaviorSet behaviorSet) {
+        this.behaviorSet = behaviorSet;
+    }
+
+    public boolean isAppendActions() {
+        return appendActions;
+    }
+
+    public void setAppendActions(boolean appendActions) {
+        this.appendActions = appendActions;
+    }
+
+    public boolean isExpressionsAsActions() {
+        return expressionsAsActions;
+    }
+
+    public void setExpressionsAsActions(boolean expressionsAsActions) {
+        this.expressionsAsActions = expressionsAsActions;
     }
 }

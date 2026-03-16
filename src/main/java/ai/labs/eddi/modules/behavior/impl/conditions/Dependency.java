@@ -4,7 +4,6 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.behavior.impl.BehaviorGroup;
 import ai.labs.eddi.modules.behavior.impl.BehaviorRule;
 import ai.labs.eddi.modules.behavior.impl.BehaviorSet;
-import lombok.NoArgsConstructor;
 
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -16,7 +15,6 @@ import java.util.Map;
  * @author ginccc
  */
 
-@NoArgsConstructor
 public class Dependency implements IBehaviorCondition {
     public static final String ID = "dependency";
 
@@ -102,5 +100,8 @@ public class Dependency implements IBehaviorCondition {
     @Override
     public void setContainingBehaviorRuleSet(BehaviorSet behaviorSet) {
         this.behaviorSet = behaviorSet;
+    }
+
+    public Dependency() {
     }
 }

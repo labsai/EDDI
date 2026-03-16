@@ -10,7 +10,6 @@ import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
 import ai.labs.eddi.modules.nlp.model.Phrase;
 import ai.labs.eddi.modules.nlp.model.Word;
 import ai.labs.eddi.utils.StringUtilities;
-import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +22,6 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 /**
  * @author ginccc
  */
-@Slf4j
 public class InputParserTest {
     private static IExpressionProvider expressionProvider;
 
@@ -205,4 +203,6 @@ public class InputParserTest {
     private static String toString(List<Expression> expressions) {
         return StringUtilities.joinStrings(", ", expressions);
     }
+
+    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(InputParserTest.class);
 }

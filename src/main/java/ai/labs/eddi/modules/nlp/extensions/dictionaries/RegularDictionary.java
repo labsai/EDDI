@@ -2,8 +2,6 @@ package ai.labs.eddi.modules.nlp.extensions.dictionaries;
 
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.model.*;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -11,8 +9,6 @@ import java.util.stream.Collectors;
 /**
  * @author ginccc
  */
-@Getter
-@Setter
 public class RegularDictionary implements IDictionary {
     private static final String ID = "regular";
     private String languageCode;
@@ -79,5 +75,49 @@ public class RegularDictionary implements IDictionary {
 
     public void addPhrase(String value, Expressions expressions) {
         phrases.add(new Phrase(value, expressions, ID));
+    }
+
+    public void setLanguageCode(String languageCode) {
+        this.languageCode = languageCode;
+    }
+
+    public void setPhrases(List<IPhrase> phrases) {
+        this.phrases = phrases;
+    }
+
+    public void setWords(Map<String, IWord> words) {
+        this.words = words;
+    }
+
+    public List<IRegEx> getRegExs() {
+        return regExs;
+    }
+
+    public void setRegExs(List<IRegEx> regExs) {
+        this.regExs = regExs;
+    }
+
+    public boolean isLookupIfKnown() {
+        return lookupIfKnown;
+    }
+
+    public void setLookupIfKnown(boolean lookupIfKnown) {
+        this.lookupIfKnown = lookupIfKnown;
+    }
+
+    public List<IWord> getAllWords() {
+        return allWords;
+    }
+
+    public void setAllWords(List<IWord> allWords) {
+        this.allWords = allWords;
+    }
+
+    public IWord getWord() {
+        return word;
+    }
+
+    public void setWord(IWord word) {
+        this.word = word;
     }
 }

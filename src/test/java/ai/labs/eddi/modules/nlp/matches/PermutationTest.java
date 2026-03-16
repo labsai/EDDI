@@ -1,7 +1,6 @@
 package ai.labs.eddi.modules.nlp.matches;
 
 import ai.labs.eddi.modules.nlp.internal.matches.Permutation;
-import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -10,7 +9,6 @@ import java.util.Iterator;
 /**
  * @author ginccc
  */
-@Slf4j
 public class PermutationTest {
 
     @Test
@@ -66,4 +64,6 @@ public class PermutationTest {
         Assertions.assertArrayEquals(new Integer[]{1, 0, 0}, permutationIterator.next());
         Assertions.assertFalse(permutationIterator.hasNext());
     }
+
+    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(PermutationTest.class);
 }

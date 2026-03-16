@@ -9,8 +9,6 @@ import ai.labs.eddi.engine.runtime.IBot;
 import ai.labs.eddi.engine.runtime.IExecutablePackage;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -20,14 +18,10 @@ import java.util.Map;
  * @author ginccc
  */
 public class Bot implements IBot {
-    @Getter
     private final String botId;
-    @Getter
     private final Integer botVersion;
     private final List<IExecutablePackage> executablePackages;
 
-    @Getter
-    @Setter
     private Deployment.Status deploymentStatus;
 
     public Bot(String botId, Integer botVersion) {
@@ -58,5 +52,21 @@ public class Bot implements IBot {
                                               final IPropertiesHandler propertiesHandler,
                                               final IConversation.IConversationOutputRenderer outputProvider) throws IllegalAccessException {
         return new Conversation(executablePackages, conversationMemory, propertiesHandler, outputProvider);
+    }
+
+    public String getBotId() {
+        return botId;
+    }
+
+    public Integer getBotVersion() {
+        return botVersion;
+    }
+
+    public Deployment.Status getDeploymentStatus() {
+        return deploymentStatus;
+    }
+
+    public void setDeploymentStatus(Deployment.Status deploymentStatus) {
+        this.deploymentStatus = deploymentStatus;
     }
 }

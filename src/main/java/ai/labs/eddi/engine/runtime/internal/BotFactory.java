@@ -15,10 +15,6 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import lombok.AllArgsConstructor;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.Setter;
 import org.jboss.logging.Logger;
 
 import java.util.*;
@@ -269,10 +265,6 @@ public class BotFactory implements IBotFactory {
         }
     }
 
-    @AllArgsConstructor
-    @Getter
-    @Setter
-    @EqualsAndHashCode
     private static class BotId {
         private String id;
         private Integer version;
@@ -280,6 +272,40 @@ public class BotFactory implements IBotFactory {
         @Override
         public String toString() {
             return id + ":" + version;
+        }
+
+        public BotId(String id, Integer version) {
+            this.id = id;
+            this.version = version;
+        }
+
+        public String getId() {
+            return id;
+        }
+
+        public void setId(String id) {
+            this.id = id;
+        }
+
+        public Integer getVersion() {
+            return version;
+        }
+
+        public void setVersion(Integer version) {
+            this.version = version;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            BotId that = (BotId) o;
+            return java.util.Objects.equals(id, that.id) && java.util.Objects.equals(version, that.version);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(id, version);
         }
     }
 }

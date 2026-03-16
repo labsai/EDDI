@@ -3,7 +3,6 @@ package ai.labs.eddi.modules.nlp.expressions;
 import ai.labs.eddi.modules.nlp.expressions.value.AllValue;
 import ai.labs.eddi.modules.nlp.expressions.value.AnyValue;
 import ai.labs.eddi.modules.nlp.expressions.value.Value;
-import lombok.extern.slf4j.Slf4j;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import java.util.Hashtable;
@@ -13,7 +12,6 @@ import static ai.labs.eddi.utils.CharacterUtilities.isNumber;
 /**
  * @author ginccc
  */
-@Slf4j
 @ApplicationScoped
 public class ExpressionFactory implements IExpressionFactory {
     private final Hashtable<String, Expression> expressions = new Hashtable<>();
@@ -62,4 +60,6 @@ public class ExpressionFactory implements IExpressionFactory {
 
         return exp;
     }
+
+    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(ExpressionFactory.class);
 }

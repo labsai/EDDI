@@ -6,15 +6,12 @@ import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.configs.properties.model.Property;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import lombok.*;
 
 import java.util.*;
 
 /**
  * @author ginccc
  */
-@Getter
-@Setter
 public class ConversationMemorySnapshot {
     private String conversationId;
     private String botId;
@@ -64,8 +61,6 @@ public class ConversationMemorySnapshot {
         this.conversationId = conversationId;
     }
 
-    @Getter
-    @Setter
     public static class ConversationStepSnapshot {
         private List<PackageRunSnapshot> packages = new LinkedList<>();
 
@@ -83,10 +78,24 @@ public class ConversationMemorySnapshot {
         public int hashCode() {
             return packages != null ? packages.hashCode() : 0;
         }
+
+        public List<PackageRunSnapshot> getPackages() {
+            return packages;
+        }
+
+        public void setPackages(List<PackageRunSnapshot> packages) {
+            this.packages = packages;
+        }
+
+        public ConversationStepSnapshot getThat() {
+            return that;
+        }
+
+        public void setThat(ConversationStepSnapshot that) {
+            this.that = that;
+        }
     }
 
-    @Getter
-    @Setter
     public static class PackageRunSnapshot {
         private List<ResultSnapshot> lifecycleTasks = new LinkedList<>();
 
@@ -104,13 +113,24 @@ public class ConversationMemorySnapshot {
         public int hashCode() {
             return 31 * (lifecycleTasks != null ? lifecycleTasks.hashCode() : 0);
         }
+
+        public List<ResultSnapshot> getLifecycleTasks() {
+            return lifecycleTasks;
+        }
+
+        public void setLifecycleTasks(List<ResultSnapshot> lifecycleTasks) {
+            this.lifecycleTasks = lifecycleTasks;
+        }
+
+        public PackageRunSnapshot getThat() {
+            return that;
+        }
+
+        public void setThat(PackageRunSnapshot that) {
+            this.that = that;
+        }
     }
 
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @Getter
-    @Setter
-    @ToString
     public static class ResultSnapshot {
         private String key;
         private Object result;
@@ -138,5 +158,170 @@ public class ConversationMemorySnapshot {
             result = 31 * result + (possibleResults != null ? possibleResults.hashCode() : 0);
             return result;
         }
+
+        public ResultSnapshot() {
+        }
+
+        public ResultSnapshot(String key, Object result, List possibleResults, Date timestamp, String originPackageId, boolean isPublic) {
+            this.key = key;
+            this.result = result;
+            this.possibleResults = possibleResults;
+            this.timestamp = timestamp;
+            this.originPackageId = originPackageId;
+            this.isPublic = isPublic;
+        }
+
+        public String getKey() {
+            return key;
+        }
+
+        public void setKey(String key) {
+            this.key = key;
+        }
+
+        public Object getResult() {
+            return result;
+        }
+
+        public void setResult(Object result) {
+            this.result = result;
+        }
+
+        public List getPossibleResults() {
+            return possibleResults;
+        }
+
+        public void setPossibleResults(List possibleResults) {
+            this.possibleResults = possibleResults;
+        }
+
+        public Date getTimestamp() {
+            return timestamp;
+        }
+
+        public void setTimestamp(Date timestamp) {
+            this.timestamp = timestamp;
+        }
+
+        public String getOriginPackageId() {
+            return originPackageId;
+        }
+
+        public void setOriginPackageId(String originPackageId) {
+            this.originPackageId = originPackageId;
+        }
+
+        public boolean isPublic() {
+            return isPublic;
+        }
+
+        public void setPublic(boolean isPublic) {
+            this.isPublic = isPublic;
+        }
+
+        public ResultSnapshot getThat() {
+            return that;
+        }
+
+        public void setThat(ResultSnapshot that) {
+            this.that = that;
+        }
+
+        public int getResult() {
+            return result;
+        }
+
+        public void setResult(int result) {
+            this.result = result;
+        }
+
+        @Override
+        public String toString() {
+            return "ResultSnapshot(" + "key=" + key + ", result=" + result + ", possibleResults=" + possibleResults + ", timestamp=" + timestamp + ", originPackageId=" + originPackageId + ", isPublic=" + isPublic + ", that=" + that + ", result=" + result" + ")";
+        }
+    }
+
+    public void setConversationId(String conversationId) {
+        this.conversationId = conversationId;
+    }
+
+    public String getBotId() {
+        return botId;
+    }
+
+    public void setBotId(String botId) {
+        this.botId = botId;
+    }
+
+    public Integer getBotVersion() {
+        return botVersion;
+    }
+
+    public void setBotVersion(Integer botVersion) {
+        this.botVersion = botVersion;
+    }
+
+    public String getUserId() {
+        return userId;
+    }
+
+    public void setUserId(String userId) {
+        this.userId = userId;
+    }
+
+    public Deployment.Environment getEnvironment() {
+        return environment;
+    }
+
+    public void setEnvironment(Deployment.Environment environment) {
+        this.environment = environment;
+    }
+
+    public ConversationState getConversationState() {
+        return conversationState;
+    }
+
+    public void setConversationState(ConversationState conversationState) {
+        this.conversationState = conversationState;
+    }
+
+    public List<ConversationOutput> getConversationOutputs() {
+        return conversationOutputs;
+    }
+
+    public void setConversationOutputs(List<ConversationOutput> conversationOutputs) {
+        this.conversationOutputs = conversationOutputs;
+    }
+
+    public Map<String, Property> getConversationProperties() {
+        return conversationProperties;
+    }
+
+    public void setConversationProperties(Map<String, Property> conversationProperties) {
+        this.conversationProperties = conversationProperties;
+    }
+
+    public List<ConversationStepSnapshot> getConversationSteps() {
+        return conversationSteps;
+    }
+
+    public void setConversationSteps(List<ConversationStepSnapshot> conversationSteps) {
+        this.conversationSteps = conversationSteps;
+    }
+
+    public Stack<ConversationStepSnapshot> getRedoCache() {
+        return redoCache;
+    }
+
+    public void setRedoCache(Stack<ConversationStepSnapshot> redoCache) {
+        this.redoCache = redoCache;
+    }
+
+    public ConversationMemorySnapshot getThat() {
+        return that;
+    }
+
+    public void setThat(ConversationMemorySnapshot that) {
+        this.that = that;
     }
 }

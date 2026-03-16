@@ -1,13 +1,9 @@
 package ai.labs.eddi.modules.output.model.types;
 
 import ai.labs.eddi.modules.output.model.OutputItem;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.Objects;
 
-@Getter
-@Setter
 public class InputFieldOutputItem extends OutputItem {
     private String subType;
     private String placeholder;
@@ -48,11 +44,81 @@ public class InputFieldOutputItem extends OutputItem {
         return Objects.hash(subType, placeholder, label, defaultValue, validation);
     }
 
-    @Getter
-    @Setter
     private static class Validation {
         private Integer minLength;
         private Integer maxLength;
         private String validationErrorMessage;
+
+        public Integer getMinLength() {
+            return minLength;
+        }
+
+        public void setMinLength(Integer minLength) {
+            this.minLength = minLength;
+        }
+
+        public Integer getMaxLength() {
+            return maxLength;
+        }
+
+        public void setMaxLength(Integer maxLength) {
+            this.maxLength = maxLength;
+        }
+
+        public String getValidationErrorMessage() {
+            return validationErrorMessage;
+        }
+
+        public void setValidationErrorMessage(String validationErrorMessage) {
+            this.validationErrorMessage = validationErrorMessage;
+        }
+    }
+
+    public String getSubType() {
+        return subType;
+    }
+
+    public void setSubType(String subType) {
+        this.subType = subType;
+    }
+
+    public String getPlaceholder() {
+        return placeholder;
+    }
+
+    public void setPlaceholder(String placeholder) {
+        this.placeholder = placeholder;
+    }
+
+    public String getLabel() {
+        return label;
+    }
+
+    public void setLabel(String label) {
+        this.label = label;
+    }
+
+    public String getDefaultValue() {
+        return defaultValue;
+    }
+
+    public void setDefaultValue(String defaultValue) {
+        this.defaultValue = defaultValue;
+    }
+
+    public Validation getValidation() {
+        return validation;
+    }
+
+    public void setValidation(Validation validation) {
+        this.validation = validation;
+    }
+
+    public InputFieldOutputItem getThat() {
+        return that;
+    }
+
+    public void setThat(InputFieldOutputItem that) {
+        this.that = that;
     }
 }

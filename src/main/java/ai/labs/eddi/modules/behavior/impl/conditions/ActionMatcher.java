@@ -4,8 +4,6 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.modules.behavior.impl.BehaviorRule;
 import ai.labs.eddi.utils.StringUtilities;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -24,8 +22,6 @@ public class ActionMatcher extends BaseMatcher implements IBehaviorCondition {
     public static final String ID = "actionmatcher";
     private static final String KEY_ACTIONS = "actions";
 
-    @Getter
-    @Setter
     private List<String> actions = Collections.emptyList();
     private final String actionsQualifier = KEY_ACTIONS;
 
@@ -108,5 +104,13 @@ public class ActionMatcher extends BaseMatcher implements IBehaviorCondition {
         IBehaviorCondition clone = new ActionMatcher();
         clone.setConfigs(this.getConfigs());
         return clone;
+    }
+
+    public List<String> getActions() {
+        return actions;
+    }
+
+    public void setActions(List<String> actions) {
+        this.actions = actions;
     }
 }

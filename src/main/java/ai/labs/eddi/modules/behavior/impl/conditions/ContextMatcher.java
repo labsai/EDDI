@@ -10,10 +10,6 @@ import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.utils.StringUtilities;
 import com.jayway.jsonpath.JsonPath;
 import com.jayway.jsonpath.PathNotFoundException;
-import lombok.AllArgsConstructor;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.Setter;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
@@ -163,12 +159,42 @@ public class ContextMatcher implements IBehaviorCondition {
         return clone;
     }
 
-    @AllArgsConstructor
-    @Getter
-    @Setter
-    @EqualsAndHashCode
     static class ObjectValue {
         private String objectKeyPath;
         private String objectValue;
+
+        public ObjectValue(String objectKeyPath, String objectValue) {
+            this.objectKeyPath = objectKeyPath;
+            this.objectValue = objectValue;
+        }
+
+        public String getObjectKeyPath() {
+            return objectKeyPath;
+        }
+
+        public void setObjectKeyPath(String objectKeyPath) {
+            this.objectKeyPath = objectKeyPath;
+        }
+
+        public String getObjectValue() {
+            return objectValue;
+        }
+
+        public void setObjectValue(String objectValue) {
+            this.objectValue = objectValue;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            ObjectValue that = (ObjectValue) o;
+            return java.util.Objects.equals(objectKeyPath, that.objectKeyPath) && java.util.Objects.equals(objectValue, that.objectValue);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(objectKeyPath, objectValue);
+        }
     }
 }

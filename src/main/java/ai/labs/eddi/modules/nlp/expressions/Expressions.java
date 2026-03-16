@@ -1,13 +1,11 @@
 package ai.labs.eddi.modules.nlp.expressions;
 
-import lombok.NoArgsConstructor;
 
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 
-@NoArgsConstructor
 public class Expressions extends LinkedList<Expression> {
 
     public Expressions(Expressions expressions) {
@@ -43,5 +41,8 @@ public class Expressions extends LinkedList<Expression> {
         }
 
         return sb.toString();
+    }
+
+    public Expressions() {
     }
 }

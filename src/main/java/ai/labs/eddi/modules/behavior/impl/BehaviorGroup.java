@@ -1,8 +1,5 @@
 package ai.labs.eddi.modules.behavior.impl;
 
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -10,9 +7,6 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@NoArgsConstructor
-@Getter
-@Setter
 public class BehaviorGroup {
     private String name;
     private ExecutionStrategy executionStrategy = ExecutionStrategy.executeUntilFirstSuccess;
@@ -21,5 +15,32 @@ public class BehaviorGroup {
     public enum ExecutionStrategy {
         executeAll,
         executeUntilFirstSuccess
+    }
+
+    public BehaviorGroup() {
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public ExecutionStrategy getExecutionStrategy() {
+        return executionStrategy;
+    }
+
+    public void setExecutionStrategy(ExecutionStrategy executionStrategy) {
+        this.executionStrategy = executionStrategy;
+    }
+
+    public List<BehaviorRule> getBehaviorRules() {
+        return behaviorRules;
+    }
+
+    public void setBehaviorRules(List<BehaviorRule> behaviorRules) {
+        this.behaviorRules = behaviorRules;
     }
 }

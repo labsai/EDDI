@@ -3,8 +3,6 @@ package ai.labs.eddi.modules.output.model;
 import ai.labs.eddi.modules.output.model.types.*;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import lombok.Getter;
-import lombok.Setter;
 
 @JsonTypeInfo(
         visible = true,
@@ -22,11 +20,17 @@ import lombok.Setter;
         @JsonSubTypes.Type(value = ButtonOutputItem.class, name = "button"),
         @JsonSubTypes.Type(value = OtherOutputItem.class, name = "other")
 })
-@Getter
-@Setter
 public abstract class OutputItem {
     protected String type;
 
     protected abstract void initType();
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
+    }
 }
 

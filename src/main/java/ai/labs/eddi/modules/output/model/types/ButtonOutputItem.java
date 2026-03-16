@@ -1,14 +1,10 @@
 package ai.labs.eddi.modules.output.model.types;
 
 import ai.labs.eddi.modules.output.model.OutputItem;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.Map;
 import java.util.Objects;
 
-@Getter
-@Setter
 public class ButtonOutputItem extends OutputItem {
     private String buttonType;
     private String label;
@@ -42,5 +38,37 @@ public class ButtonOutputItem extends OutputItem {
     @Override
     public int hashCode() {
         return Objects.hash(buttonType, label, onPress);
+    }
+
+    public String getButtonType() {
+        return buttonType;
+    }
+
+    public void setButtonType(String buttonType) {
+        this.buttonType = buttonType;
+    }
+
+    public String getLabel() {
+        return label;
+    }
+
+    public void setLabel(String label) {
+        this.label = label;
+    }
+
+    public Map<String, Object> getOnPress() {
+        return onPress;
+    }
+
+    public void setOnPress(Map<String, Object> onPress) {
+        this.onPress = onPress;
+    }
+
+    public ButtonOutputItem getThat() {
+        return that;
+    }
+
+    public void setThat(ButtonOutputItem that) {
+        this.that = that;
     }
 }

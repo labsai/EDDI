@@ -2,8 +2,6 @@ package ai.labs.eddi.modules.behavior.impl.conditions;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.behavior.impl.BehaviorRule;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
 
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -14,7 +12,6 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@NoArgsConstructor
 public class Connector implements IBehaviorCondition {
     public static final String ID = "connector";
     private final String operatorQualifier = "operator";
@@ -25,7 +22,6 @@ public class Connector implements IBehaviorCondition {
 
     private Operator operator;
 
-    @Getter
     private final List<IBehaviorCondition> conditions = new LinkedList<>();
 
     private Connector(Operator operator) {
@@ -111,4 +107,11 @@ public class Connector implements IBehaviorCondition {
     public void setConditions(List<IBehaviorCondition> conditions) {
         this.conditions.addAll(conditions);
     }
+
+    public Connector() {
+    }
+    }
+        return conditions;
+    public List<IBehaviorCondition> getConditions() {
+
 }

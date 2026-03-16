@@ -2,7 +2,6 @@ package ai.labs.eddi.modules.nlp;
 
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
 import ai.labs.eddi.modules.nlp.model.FoundWord;
-import lombok.NoArgsConstructor;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -10,7 +9,6 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@NoArgsConstructor
 public class TestDictionary implements IDictionary {
     private List<IWord> words = new LinkedList<>();
     private List<IPhrase> phrases = new LinkedList<>();
@@ -56,5 +54,8 @@ public class TestDictionary implements IDictionary {
 
     void addPhrase(IPhrase phrase) {
         this.phrases.add(phrase);
+    }
+
+    public TestDictionary() {
     }
 }

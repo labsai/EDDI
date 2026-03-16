@@ -1,13 +1,9 @@
 package ai.labs.eddi.modules.output.model.types;
 
 import ai.labs.eddi.modules.output.model.OutputItem;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.Objects;
 
-@Getter
-@Setter
 public class QuickReplyOutputItem extends OutputItem {
     private String value;
     private String expressions;
@@ -42,5 +38,37 @@ public class QuickReplyOutputItem extends OutputItem {
     @Override
     public int hashCode() {
         return Objects.hash(value, expressions, isDefault);
+    }
+
+    public String getValue() {
+        return value;
+    }
+
+    public void setValue(String value) {
+        this.value = value;
+    }
+
+    public String getExpressions() {
+        return expressions;
+    }
+
+    public void setExpressions(String expressions) {
+        this.expressions = expressions;
+    }
+
+    public Boolean getIsDefault() {
+        return isDefault;
+    }
+
+    public void setIsDefault(Boolean isDefault) {
+        this.isDefault = isDefault;
+    }
+
+    public QuickReplyOutputItem getThat() {
+        return that;
+    }
+
+    public void setThat(QuickReplyOutputItem that) {
+        this.that = that;
     }
 }
