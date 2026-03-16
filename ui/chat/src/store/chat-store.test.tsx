@@ -128,4 +128,47 @@ describe("chatReducer", () => {
     // Original defaults preserved
     expect(result.config.enableMarkdown).toBe(true);
   });
+
+  // --- Secret input tests ---
+
+  it("SET_INPUT_FIELD sets activeInputField", () => {
+    const field = { subType: "password", label: "Enter API key" };
+    const result = chatReducer(initialState, { type: "SET_INPUT_FIELD", field });
+    expect(result.activeInputField).toEqual(field);
+  });
+
+  it("CLEAR_INPUT_FIELD resets activeInputField to null", () => {
+    const state: ChatState = {
+      ...initialState,
+      activeInputField: { subType: "password", label: "Key" },
+    };
+    const result = chatReducer(state, { type: "CLEAR_INPUT_FIELD" });
+    expect(result.activeInputField).toBeNull();
+  });
+
+  it("TOGGLE_SECRET_MODE toggles isSecretMode", () => {
+    expect(initialState.isSecretMode).toBe(false);
+    const toggled = chatReducer(initialState, { type: "TOGGLE_SECRET_MODE" });
+    expect(toggled.isSecretMode).toBe(true);
+    const toggledBack = chatReducer(toggled, { type: "TOGGLE_SECRET_MODE" });
+    expect(toggledBack.isSecretMode).toBe(false);
+  });
+
+  it("CLEAR_MESSAGES also resets activeInputField and isSecretMode", () => {
+    const state: ChatState = {
+      ...initialState,
+      messages: [makeMsg()],
+      activeInputField: { subType: "password", label: "Key" },
+      isSecretMode: true,
+    };
+    const result = chatReducer(state, { type: "CLEAR_MESSAGES" });
+    expect(result.activeInputField).toBeNull();
+    expect(result.isSecretMode).toBe(false);
+    expect(result.messages).toHaveLength(0);
+  });
+
+  it("initialState has secret fields properly defaulted", () => {
+    expect(initialState.activeInputField).toBeNull();
+    expect(initialState.isSecretMode).toBe(false);
+  });
 });
