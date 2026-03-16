@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.secrets.SecretResolver;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -47,16 +48,19 @@ public class HttpCallExecutor implements IHttpCallExecutor {
     private final IJsonSerialization jsonSerialization;
     private final IRuntime runtime;
     private final PrePostUtils prePostUtils;
+    private final SecretResolver secretResolver;
 
     @Inject
     public HttpCallExecutor(IHttpClient httpClient,
                             IJsonSerialization jsonSerialization,
                             IRuntime runtime,
-                            PrePostUtils prePostUtils) {
+                            PrePostUtils prePostUtils,
+                            SecretResolver secretResolver) {
         this.httpClient = httpClient;
         this.jsonSerialization = jsonSerialization;
         this.runtime = runtime;
         this.prePostUtils = prePostUtils;
+        this.secretResolver = secretResolver;
     }
 
     @Override
@@ -100,7 +104,11 @@ public class HttpCallExecutor implements IHttpCallExecutor {
                     do {
                         request = buildRequest(targetServerUrl, call.getRequest(), templateDataObjects);
                         var objectName = call.getName() + "Request";
-                        prePostUtils.createMemoryEntry(currentStep, request.toMap(), objectName, KEY_HTTP_CALLS);
+                        var requestMap = request.toMap();
+                        // Scrub resolved secrets from request map before persisting to conversation memory.
+                        // The actual request (with secrets) was already built — this only affects the debug record.
+                        scrubSensitiveHeaders(requestMap);
+                        prePostUtils.createMemoryEntry(currentStep, requestMap, objectName, KEY_HTTP_CALLS);
                         response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
 
                         var isResponseSuccessful = response.getHttpCode() >= 200 && response.getHttpCode() < 300;
@@ -323,8 +331,13 @@ public class HttpCallExecutor implements IHttpCallExecutor {
             path = SLASH_CHAR + path;
         }
         var targetDestination = !path.startsWith("http") ? targetServerUrl + path : path;
-        var targetUri = URI.create(prePostUtils.templateValues(targetDestination, templateDataObjects));
+        var targetUriStr = prePostUtils.templateValues(targetDestination, templateDataObjects);
+        // Resolve vault references in URL (e.g., target server with embedded credentials)
+        targetUriStr = secretResolver.resolveValue(targetUriStr);
+        var targetUri = URI.create(targetUriStr);
         var requestBody = prePostUtils.templateValues(requestConfig.getBody(), templateDataObjects);
+        // Resolve vault references in request body
+        requestBody = secretResolver.resolveValue(requestBody);
 
         var method = IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase());
         IRequest request = httpClient.newRequest(targetUri, method);
@@ -335,14 +348,49 @@ public class HttpCallExecutor implements IHttpCallExecutor {
 
         Map<String, String> headers = requestConfig.getHeaders();
         for (String headerName : headers.keySet()) {
-            request.setHttpHeader(headerName, prePostUtils.templateValues(headers.get(headerName), templateDataObjects));
+            String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
+            // Resolve vault references in headers (e.g., Authorization: Bearer ${eddivault:...})
+            headerValue = secretResolver.resolveValue(headerValue);
+            request.setHttpHeader(headerName, headerValue);
         }
 
         Map<String, String> queryParams = requestConfig.getQueryParams();
         for (String queryParam : queryParams.keySet()) {
-            request.setQueryParam(queryParam, prePostUtils.templateValues(queryParams.get(queryParam), templateDataObjects));
+            var qpValue = prePostUtils.templateValues(queryParams.get(queryParam), templateDataObjects);
+            // Resolve vault references in query params
+            qpValue = secretResolver.resolveValue(qpValue);
+            request.setQueryParam(queryParam, qpValue);
         }
         return request;
+    }
+
+    /**
+     * Scrub sensitive header values from the request map before it is stored in conversation memory.
+     * This prevents resolved secrets (API keys, bearer tokens) from being persisted to the database.
+     */
+    @SuppressWarnings("unchecked")
+    private static void scrubSensitiveHeaders(Map<String, Object> requestMap) {
+        Object headersObj = requestMap.get("headers");
+        if (headersObj instanceof Map) {
+            var headers = (Map<String, Object>) headersObj;
+            var scrubbed = new HashMap<>(headers);
+            for (var entry : scrubbed.entrySet()) {
+                String headerName = entry.getKey().toLowerCase();
+                if (headerName.contains("authorization") ||
+                        headerName.contains("api-key") ||
+                        headerName.contains("api_key") ||
+                        headerName.contains("apikey") ||
+                        headerName.contains("x-api-key") ||
+                        headerName.contains("token") ||
+                        headerName.contains("secret") ||
+                        headerName.contains("credential")) {
+                    entry.setValue("<REDACTED>");
+                } else if (entry.getValue() instanceof String val && val.contains("${eddivault:")) {
+                    entry.setValue("<REDACTED>");
+                }
+            }
+            requestMap.put("headers", scrubbed);
+        }
     }
 
     private static class HttpCallsValidationException extends Exception {

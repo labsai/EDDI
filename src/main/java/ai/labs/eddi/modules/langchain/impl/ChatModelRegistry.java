@@ -1,6 +1,7 @@
 package ai.labs.eddi.modules.langchain.impl;
 
 import ai.labs.eddi.modules.langchain.impl.builder.ILanguageModelBuilder;
+import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import jakarta.inject.Provider;
@@ -33,11 +34,14 @@ class ChatModelRegistry {
     private static final Logger LOGGER = Logger.getLogger(ChatModelRegistry.class);
 
     private final Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders;
+    private final SecretResolver secretResolver;
     private final Map<ModelCacheKey, ChatModel> modelCache = new ConcurrentHashMap<>(1);
     private final Map<ModelCacheKey, StreamingChatModel> streamingModelCache = new ConcurrentHashMap<>(1);
 
-    ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders) {
+    ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders,
+                      SecretResolver secretResolver) {
         this.languageModelApiConnectorBuilders = languageModelApiConnectorBuilders;
+        this.secretResolver = secretResolver;
     }
 
     /**
@@ -63,7 +67,9 @@ class ChatModelRegistry {
             throw new UnsupportedLangchainTaskException(String.format("Type \"%s\" is not supported", type));
         }
 
-        var rawModel = languageModelApiConnectorBuilders.get(type).get().build(filteredParams);
+        // Resolve vault references (late-binding: after Thymeleaf, before builder.build())
+        var resolvedParams = secretResolver.resolveSecrets(filteredParams);
+        var rawModel = languageModelApiConnectorBuilders.get(type).get().build(resolvedParams);
         var model = ObservableChatModel.wrapIfNeeded(rawModel, type, timeoutMs, logReq, logResp);
         modelCache.put(cacheKey, model);
 
@@ -89,7 +95,9 @@ class ChatModelRegistry {
         }
 
         try {
-            var model = languageModelApiConnectorBuilders.get(type).get().buildStreaming(filteredParams);
+            // Resolve vault references (late-binding: after Thymeleaf, before builder.build())
+            var resolvedParams = secretResolver.resolveSecrets(filteredParams);
+            var model = languageModelApiConnectorBuilders.get(type).get().buildStreaming(resolvedParams);
             streamingModelCache.put(cacheKey, model);
             return model;
         } catch (UnsupportedOperationException e) {

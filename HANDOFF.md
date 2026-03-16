@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-16
+> **Last updated:** 2026-03-16 (Secrets Vault complete)
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -428,17 +428,45 @@
 - [x] Removed Lombok dependency, version property, and annotation processor from POM
 - [x] All 775 tests pass, 0 Lombok annotations/imports remain
 
+### Phase 7, Item 33: Secrets Vault — Security Remediation ✅
+
+- [x] R1: Fixed CRITICAL memory leakage — PropertySetterTask no longer resolves vault refs to plaintext, HttpCallExecutor scrubs sensitive headers
+- [x] R2: Complete URL/body/query resolution in HttpCallExecutor
+- [x] R3: Secret input mechanism — `Property.Scope.secret` + auto-vault + `InputFieldOutputItem` with `subType: password`
+- [x] R4: PBKDF2 key derivation — upgraded EnvelopeCrypto from SHA-256 to PBKDF2 (600K iterations)
+- [x] R5: REST input validation — path param regex in RestSecretStore
+- [x] R6: 32 unit tests across 5 test classes (9+7+6+4+6)
+- [x] Fixed SecretRedactionFilter regex replacement bug ($ interpreted as group reference)
+- [x] Fixed 8 pre-existing Lombok ghost-method bugs in OutputItem subclasses + OutputConfiguration
+- [x] Cleanup: removed dead secretResolver, unused imports
+- [x] Documentation: `docs/secrets-vault.md`
+- [x] All 810 tests pass (0 failures, 0 errors, 4 skipped)
+
+**Key files (new):**
+
+- `src/main/java/ai/labs/eddi/secrets/` — model, crypto, sanitize, rest packages
+- `src/test/java/ai/labs/eddi/secrets/` — EnvelopeCryptoTest, SecretResolverTest, SecretRedactionFilterTest, SecretScrubberTest, SecretReferenceTest
+- `docs/secrets-vault.md` — full feature documentation
+
+**Key files (modified):**
+
+- `PropertySetterTask.java` — secret scope auto-vault, removed dead secretResolver
+- `HttpCallExecutor.java` — header scrubbing, vault ref resolution
+- `RestExportService.java` — export sanitization
+- `OutputConfiguration.java` + 6 OutputItem subclasses — Lombok bug fixes
+
 ## Next Up
 
-### Quick Wins (before Phase 7)
+### Quick Wins
 
 - [x] ~~**Phase 6E: quarkus-langchain4j → langchain4j Core**~~ ✅
 - [x] ~~**Phase 6D: Lombok Removal**~~ ✅
 - [ ] **Quarkus 3.33 LTS Upgrade** — waiting for GA (March 25, 2026). 3.32.3 has Java 25 `ALL-UNNAMED` module issue.
 
-### Phase 7: Secrets, Audit + Tenant Foundation (12 SP)
+### Phase 7 (continued)
 
-- [ ] Item 33: Secrets Vault — `${vault:key}` references, export sanitization (5 SP)
+- [x] ~~Item 33: Secrets Vault~~ ✅
+- [ ] Item 33b: Chat UI password field + Manager integration (remaining vault work)
 - [ ] Item 34: Immutable Audit Ledger — write-once trail, EU AI Act (5 SP)
 - [ ] Item 34b: Tenant Quota Stub — per-tenant rate limits, usage metering (2 SP)
 

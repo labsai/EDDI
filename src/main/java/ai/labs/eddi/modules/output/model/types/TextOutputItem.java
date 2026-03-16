@@ -61,12 +61,4 @@ public class TextOutputItem extends OutputItem {
     public void setDelay(int delay) {
         this.delay = delay;
     }
-
-    public TextOutputItem getThat() {
-        return that;
-    }
-
-    public void setThat(TextOutputItem that) {
-        this.that = that;
-    }
 }

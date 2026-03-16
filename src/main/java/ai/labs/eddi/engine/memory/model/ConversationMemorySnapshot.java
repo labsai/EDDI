@@ -237,7 +237,7 @@ public class ConversationMemorySnapshot {
 
         @Override
         public String toString() {
-            return "ResultSnapshot(" + "key=" + key + ", result=" + result + ", possibleResults=" + possibleResults + ", timestamp=" + timestamp + ", originPackageId=" + originPackageId + ", isPublic=" + isPublic + ", that=" + that + ", result=" + result" + ")";
+            return "ResultSnapshot(" + "key=" + key + ", result=" + result + ", possibleResults=" + possibleResults + ", timestamp=" + timestamp + ", originPackageId=" + originPackageId + ", isPublic=" + isPublic + ")";
         }
     }
 

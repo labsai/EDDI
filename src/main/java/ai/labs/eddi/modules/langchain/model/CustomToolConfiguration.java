@@ -131,7 +131,7 @@ public class CustomToolConfiguration {
 
         @Override
         public String toString() {
-            return "ToolParameter(" + "name=" + name + ", description=" + description + ", type=" + type + ", required=" + required + ", defaultValue=" + defaultValue" + ")";
+            return "ToolParameter(" + "name=" + name + ", description=" + description + ", type=" + type + ", required=" + required + ", defaultValue=" + defaultValue + ")";
         }
     }
 
@@ -267,7 +267,7 @@ public class CustomToolConfiguration {
 
     @Override
     public String toString() {
-        return "CustomToolConfiguration(" + "name=" + name + ", description=" + description + ", type=" + type + ", parameters=" + parameters + ", config=" + config + ", requiresAuth=" + requiresAuth + ", costPerExecution=" + costPerExecution + ", cacheTtlMs=" + cacheTtlMs + ", rateLimit=" + rateLimit" + ")";
+        return "CustomToolConfiguration(" + "name=" + name + ", description=" + description + ", type=" + type + ", parameters=" + parameters + ", config=" + config + ", requiresAuth=" + requiresAuth + ", costPerExecution=" + costPerExecution + ", cacheTtlMs=" + cacheTtlMs + ", rateLimit=" + rateLimit + ")";
     }
 }
 

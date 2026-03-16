@@ -72,6 +72,6 @@ public class OutputEntry implements Comparable<OutputEntry> {
 
     @Override
     public String toString() {
-        return "OutputEntry(" + "action=" + action + ", occurred=" + occurred + ", outputs=" + outputs + ", quickReplies=" + quickReplies" + ")";
+        return "OutputEntry(" + "action=" + action + ", occurred=" + occurred + ", outputs=" + outputs + ", quickReplies=" + quickReplies + ")";
     }
 }

@@ -51,12 +51,4 @@ public class ImageOutputItem extends OutputItem {
     public void setAlt(String alt) {
         this.alt = alt;
     }
-
-    public ImageOutputItem getThat() {
-        return that;
-    }
-
-    public void setThat(ImageOutputItem that) {
-        this.that = that;
-    }
 }

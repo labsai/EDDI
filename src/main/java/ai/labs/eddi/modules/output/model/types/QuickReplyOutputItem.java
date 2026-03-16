@@ -63,12 +63,4 @@ public class QuickReplyOutputItem extends OutputItem {
     public void setIsDefault(Boolean isDefault) {
         this.isDefault = isDefault;
     }
-
-    public QuickReplyOutputItem getThat() {
-        return that;
-    }
-
-    public void setThat(QuickReplyOutputItem that) {
-        this.that = that;
-    }
 }

@@ -198,7 +198,7 @@ public class ToolExecutionTrace {
 
         @Override
         public String toString() {
-            return "ToolCall(" + "toolName=" + toolName + ", arguments=" + arguments + ", result=" + result + ", executionTimeMs=" + executionTimeMs + ", error=" + error + ", success=" + success + ", cost=" + cost + ", fromCache=" + fromCache + ", timestamp=" + timestamp" + ")";
+            return "ToolCall(" + "toolName=" + toolName + ", arguments=" + arguments + ", result=" + result + ", executionTimeMs=" + executionTimeMs + ", error=" + error + ", success=" + success + ", cost=" + cost + ", fromCache=" + fromCache + ", timestamp=" + timestamp + ")";
         }
     }
 
@@ -330,7 +330,7 @@ public class ToolExecutionTrace {
 
         @Override
         public String toString() {
-            return "ToolMetrics(" + "toolName=" + toolName + ", totalCalls=" + totalCalls + ", successfulCalls=" + successfulCalls + ", failedCalls=" + failedCalls + ", totalExecutionTimeMs=" + totalExecutionTimeMs + ", minExecutionTimeMs=" + minExecutionTimeMs + ", maxExecutionTimeMs=" + maxExecutionTimeMs + ", totalCost=" + totalCost + ", cacheHits=" + cacheHits" + ")";
+            return "ToolMetrics(" + "toolName=" + toolName + ", totalCalls=" + totalCalls + ", successfulCalls=" + successfulCalls + ", failedCalls=" + failedCalls + ", totalExecutionTimeMs=" + totalExecutionTimeMs + ", minExecutionTimeMs=" + minExecutionTimeMs + ", maxExecutionTimeMs=" + maxExecutionTimeMs + ", totalCost=" + totalCost + ", cacheHits=" + cacheHits + ")";
         }
     }
 
@@ -444,19 +444,6 @@ public class ToolExecutionTrace {
     public ToolExecutionTrace() {
     }
 
-    public ToolExecutionTrace(List<ToolCall> toolCalls, long totalExecutionTimeMs, boolean hasErrors, double totalCost, int cacheHits, int cacheMisses, Map<String, ToolMetrics> toolMetrics, ToolCall call, ToolCall call, StringBuilder sb) {
-        this.toolCalls = toolCalls;
-        this.totalExecutionTimeMs = totalExecutionTimeMs;
-        this.hasErrors = hasErrors;
-        this.totalCost = totalCost;
-        this.cacheHits = cacheHits;
-        this.cacheMisses = cacheMisses;
-        this.toolMetrics = toolMetrics;
-        this.call = call;
-        this.call = call;
-        this.sb = sb;
-    }
-
     public List<ToolCall> getToolCalls() {
         return toolCalls;
     }
@@ -501,46 +488,23 @@ public class ToolExecutionTrace {
         this.toolMetrics = toolMetrics;
     }
 
-    public ToolCall getCall() {
-        return call;
-    }
-
-    public void setCall(ToolCall call) {
-        this.call = call;
-    }
-
-    public ToolCall getCall() {
-        return call;
-    }
-
-    public void setCall(ToolCall call) {
-        this.call = call;
-    }
-
-    public StringBuilder getSb() {
-        return sb;
-    }
-
-    public void setSb(StringBuilder sb) {
-        this.sb = sb;
-    }
-
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         ToolExecutionTrace that = (ToolExecutionTrace) o;
-        return java.util.Objects.equals(toolCalls, that.toolCalls) && totalExecutionTimeMs == that.totalExecutionTimeMs && hasErrors == that.hasErrors && Double.compare(that.totalCost, totalCost) == 0 && cacheHits == that.cacheHits && cacheMisses == that.cacheMisses && java.util.Objects.equals(toolMetrics, that.toolMetrics) && java.util.Objects.equals(call, that.call) && java.util.Objects.equals(call, that.call) && java.util.Objects.equals(sb, that.sb);
+        return java.util.Objects.equals(toolCalls, that.toolCalls) && totalExecutionTimeMs == that.totalExecutionTimeMs && hasErrors == that.hasErrors && Double.compare(that.totalCost, totalCost) == 0 && cacheHits == that.cacheHits && cacheMisses == that.cacheMisses && java.util.Objects.equals(toolMetrics, that.toolMetrics);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(toolCalls, totalExecutionTimeMs, hasErrors, totalCost, cacheHits, cacheMisses, toolMetrics, call, call, sb);
+        return java.util.Objects.hash(toolCalls, totalExecutionTimeMs, hasErrors, totalCost, cacheHits, cacheMisses, toolMetrics);
     }
 
     @Override
     public String toString() {
-        return "ToolExecutionTrace(" + "toolCalls=" + toolCalls + ", totalExecutionTimeMs=" + totalExecutionTimeMs + ", hasErrors=" + hasErrors + ", totalCost=" + totalCost + ", cacheHits=" + cacheHits + ", cacheMisses=" + cacheMisses + ", toolMetrics=" + toolMetrics + ", call=" + call + ", call=" + call + ", sb=" + sb" + ")";
+        return "ToolExecutionTrace(" + "toolCalls=" + toolCalls + ", totalExecutionTimeMs=" + totalExecutionTimeMs + ", hasErrors=" + hasErrors + ", totalCost=" + totalCost + ", cacheHits=" + cacheHits + ", cacheMisses=" + cacheMisses + ", toolMetrics=" + toolMetrics + ")";
     }
 }
+
 

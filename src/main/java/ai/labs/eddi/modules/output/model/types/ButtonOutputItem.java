@@ -63,12 +63,4 @@ public class ButtonOutputItem extends OutputItem {
     public void setOnPress(Map<String, Object> onPress) {
         this.onPress = onPress;
     }
-
-    public ButtonOutputItem getThat() {
-        return that;
-    }
-
-    public void setThat(ButtonOutputItem that) {
-        this.that = that;
-    }
 }

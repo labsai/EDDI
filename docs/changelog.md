@@ -15,6 +15,58 @@ Each entry follows this format:
 
 ---
 
+## Phase 7, Item 33: Secrets Vault — Security Remediation (2026-03-16)
+
+### Backend — Secrets Vault Hardening + Secret Input
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Security audit identified 5 critical/high issues in the vault implementation. All fixed plus new secret input mechanism and 32 unit tests.
+
+| Fix | Severity | Change |
+|---|---|---|
+| R1: Memory leakage | CRITICAL | `PropertySetterTask` no longer resolves vault refs to plaintext; `HttpCallExecutor` scrubs sensitive headers before memory storage |
+| R2: URL/body/query resolution | HIGH | `HttpCallExecutor` now resolves vault refs in URL, body, and query params |
+| R3: Secret input | NEW | `Property.Scope.secret` + auto-vault in `PropertySetterTask` + `InputFieldOutputItem` with `subType: password` |
+| R4: PBKDF2 key derivation | MEDIUM | `EnvelopeCrypto` upgraded from SHA-256 to PBKDF2WithHmacSHA256 (600,000 iterations) |
+| R5: REST input validation | LOW | `RestSecretStore` validates path params against `[a-zA-Z0-9._-]{1,128}` |
+
+**Additional fixes:**
+- Fixed `SecretRedactionFilter` — `$` in replacement string `${eddivault:<REDACTED>}` was interpreted as regex group reference
+- Removed dead `secretResolver` field from `PropertySetterTask` (left over from R1 fix)
+- Fixed 8 pre-existing Lombok ghost-method bugs in OutputItem subclasses + `OutputConfiguration`
+- Cleaned unused imports in `HttpCallExecutorTest` and `PropertySetterTaskTest`
+
+**Key files (new):**
+- `src/main/java/ai/labs/eddi/secrets/` — full secrets package (model, crypto, sanitize, rest)
+- `src/test/java/ai/labs/eddi/secrets/` — 5 test classes, 32 tests
+- `docs/secrets-vault.md` — architecture, encryption, API, security docs
+- `docs/research/security-vault.md` — research notes (unversioned)
+- `docs/research/security-vault-java.md` — Java implementation research
+
+**Key files (modified):**
+- `PropertySetterTask.java` — secret scope handling, removed dead secretResolver
+- `HttpCallExecutor.java` — header scrubbing, vault ref resolution in URL/body/query
+- `RestExportService.java` — export sanitization via SecretScrubber
+- `OutputConfiguration.java` — fixed broken constructor + ghost getters
+- 6 OutputItem subclasses — removed bogus getThat()/setThat()
+
+**Design decisions:**
+
+| # | Decision | Reasoning |
+|---|---|---|
+| 1 | Envelope encryption (per-secret DEK) | Standard security pattern; allows key rotation without re-encrypting all secrets |
+| 2 | PBKDF2 over plain SHA-256 | 600K iteration cost makes brute-force infeasible |
+| 3 | Scrub-before-store (not scrub-on-read) | Defense-in-depth: plaintext never hits DB |
+| 4 | `Property.Scope.secret` | Reuses existing property mechanism; no new pipeline concepts |
+| 5 | `InputFieldOutputItem` for password UI | Output directives already flow to chat UI; subType=password is a clean extension |
+
+**Testing:** ✅ 810 tests (0 failures, 0 errors, 4 skipped). 32 new vault tests across 5 classes.
+
+---
+
 ## Phase 6D: Lombok Removal (2026-03-16)
 
 ### Backend — Complete Delombok

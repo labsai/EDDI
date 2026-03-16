@@ -113,12 +113,4 @@ public class InputFieldOutputItem extends OutputItem {
     public void setValidation(Validation validation) {
         this.validation = validation;
     }
-
-    public InputFieldOutputItem getThat() {
-        return that;
-    }
-
-    public void setThat(InputFieldOutputItem that) {
-        this.that = that;
-    }
 }

@@ -66,7 +66,7 @@ public class ConversationLog {
 
             @Override
             public String toString() {
-                return "Content(" + "type=" + type + ", value=" + value" + ")";
+                return "Content(" + "type=" + type + ", value=" + value + ")";
             }
         }
 
@@ -117,7 +117,7 @@ public class ConversationLog {
 
         @Override
         public String toString() {
-            return "ConversationPart(" + "role=" + role + ", content=" + content" + ")";
+            return "ConversationPart(" + "role=" + role + ", content=" + content + ")";
         }
     }
 

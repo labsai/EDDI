@@ -51,7 +51,7 @@ public class Property {
     }
 
     public enum Scope {
-        step, conversation, longTerm
+        step, conversation, longTerm, secret
     }
 
     public Property() {

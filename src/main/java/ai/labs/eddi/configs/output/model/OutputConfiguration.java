@@ -48,13 +48,11 @@ public class OutputConfiguration {
     public OutputConfiguration() {
     }
 
-    public OutputConfiguration(String action, int timesOccurred, List<Output> outputs, List<QuickReply> quickReplies, OutputConfiguration that, int result) {
+    public OutputConfiguration(String action, int timesOccurred, List<Output> outputs, List<QuickReply> quickReplies) {
         this.action = action;
         this.timesOccurred = timesOccurred;
         this.outputs = outputs;
         this.quickReplies = quickReplies;
-        this.that = that;
-        this.result = result;
     }
 
     public String getAction() {
@@ -87,21 +85,5 @@ public class OutputConfiguration {
 
     public void setQuickReplies(List<QuickReply> quickReplies) {
         this.quickReplies = quickReplies;
-    }
-
-    public OutputConfiguration getThat() {
-        return that;
-    }
-
-    public void setThat(OutputConfiguration that) {
-        this.that = that;
-    }
-
-    public int getResult() {
-        return result;
-    }
-
-    public void setResult(int result) {
-        this.result = result;
     }
 }

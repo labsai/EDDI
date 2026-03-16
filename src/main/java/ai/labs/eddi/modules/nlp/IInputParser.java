@@ -70,7 +70,7 @@ public interface IInputParser {
 
         @Override
         public String toString() {
-            return "Config(" + "appendExpressions=" + appendExpressions + ", includeUnused=" + includeUnused + ", includeUnknown=" + includeUnknown" + ")";
+            return "Config(" + "appendExpressions=" + appendExpressions + ", includeUnused=" + includeUnused + ", includeUnknown=" + includeUnknown + ")";
         }
     }
 }

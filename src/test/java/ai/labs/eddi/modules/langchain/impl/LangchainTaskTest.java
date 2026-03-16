@@ -17,6 +17,7 @@ import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.modules.langchain.tools.EddiToolBridge;
 import ai.labs.eddi.modules.langchain.tools.ToolExecutionService;
 import ai.labs.eddi.modules.langchain.tools.impl.*;
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.ChatMessage;
@@ -87,6 +88,8 @@ class LangchainTaskTest {
                 var weatherTool = mock(WeatherTool.class);
                 var eddiToolBridge = mock(EddiToolBridge.class);
                 var toolExecutionService = mock(ToolExecutionService.class);
+                var secretResolver = mock(SecretResolver.class);
+                when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
 
                 langChainTask = new LangchainTask(
                                 resourceClientLibrary,
@@ -96,6 +99,7 @@ class LangchainTaskTest {
                                 jsonSerialization,
                                 prePostUtils,
                                 languageModelApiConnectorBuilders,
+                                secretResolver,
                                 calculatorTool,
                                 dateTimeTool,
                                 webSearchTool,

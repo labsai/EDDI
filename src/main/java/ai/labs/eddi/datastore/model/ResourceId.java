@@ -42,6 +42,6 @@ public class ResourceId implements IResourceStore.IResourceId {
 
     @Override
     public String toString() {
-        return "ResourceId(" + "id=" + id + ", version=" + version" + ")";
+        return "ResourceId(" + "id=" + id + ", version=" + version + ")";
     }
 }

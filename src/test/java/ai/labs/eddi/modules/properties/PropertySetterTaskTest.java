@@ -72,8 +72,9 @@ public class PropertySetterTaskTest {
         IMemoryItemConverter memoryItemConverter = mock(IMemoryItemConverter.class);
         ITemplatingEngine templateEngine = mock(ITemplatingEngine.class);
         IResourceClientLibrary resourceClientLibrary = mock(IResourceClientLibrary.class);
+        ai.labs.eddi.secrets.ISecretProvider secretProvider = mock(ai.labs.eddi.secrets.ISecretProvider.class);
         propertySetterTask = new PropertySetterTask(expressionProvider, memoryItemConverter, templateEngine,
-                dataFactory, resourceClientLibrary, new ObjectMapper());
+                dataFactory, resourceClientLibrary, new ObjectMapper(), secretProvider);
     }
 
     @Test

@@ -16,6 +16,7 @@ import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration.Task;
 import ai.labs.eddi.modules.langchain.tools.EddiToolBridge;
 import ai.labs.eddi.modules.langchain.tools.ToolExecutionService;
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.modules.langchain.tools.impl.*;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -87,6 +88,7 @@ public class LangchainTask implements ILifecycleTask {
             IJsonSerialization jsonSerialization,
             PrePostUtils prePostUtils,
             Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders,
+            SecretResolver secretResolver,
             CalculatorTool calculatorTool,
             DateTimeTool dateTimeTool,
             WebSearchTool webSearchTool,
@@ -104,7 +106,7 @@ public class LangchainTask implements ILifecycleTask {
         this.jsonSerialization = jsonSerialization;
         this.prePostUtils = prePostUtils;
 
-        this.chatModelRegistry = new ChatModelRegistry(languageModelApiConnectorBuilders);
+        this.chatModelRegistry = new ChatModelRegistry(languageModelApiConnectorBuilders, secretResolver);
         this.conversationHistoryBuilder = new ConversationHistoryBuilder();
         this.legacyChatExecutor = new LegacyChatExecutor();
         this.streamingLegacyChatExecutor = new StreamingLegacyChatExecutor();

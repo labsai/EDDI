@@ -8,16 +8,17 @@ import ai.labs.eddi.engine.httpclient.IResponse;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
+
 
 import java.net.URI;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+
 import static org.mockito.Mockito.*;
 
 /**
@@ -44,8 +45,10 @@ class HttpCallExecutorTest {
         jsonSerialization = mock(IJsonSerialization.class);
         runtime = mock(IRuntime.class);
         prePostUtils = mock(PrePostUtils.class);
+        SecretResolver secretResolver = mock(SecretResolver.class);
+        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
-        executor = new HttpCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils);
+        executor = new HttpCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, secretResolver);
 
         memory = mock(IConversationMemory.class);
         currentStep = mock(IWritableConversationStep.class);

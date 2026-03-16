@@ -21,9 +21,13 @@ import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.properties.IPropertySetter;
 import ai.labs.eddi.modules.properties.model.SetOnActions;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.model.SecretReference;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import ai.labs.eddi.utils.PathNavigator;
+
+import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -43,6 +47,7 @@ import static java.lang.Boolean.parseBoolean;
 @ApplicationScoped
 public class PropertySetterTask implements ILifecycleTask {
     public static final String ID = "ai.labs.property";
+    private static final Logger LOGGER = Logger.getLogger(PropertySetterTask.class);
     private static final String EXPRESSIONS_PARSED_IDENTIFIER = "expressions:parsed";
     private static final String ACTIONS_IDENTIFIER = "actions";
     private static final String CATCH_ANY_INPUT_AS_PROPERTY_ACTION = "CATCH_ANY_INPUT_AS_PROPERTY";
@@ -63,12 +68,14 @@ public class PropertySetterTask implements ILifecycleTask {
     private static final String SCOPE = "scope";
     private static final String OVERRIDE = "override";
     private static final String KEY_URI = "uri";
+    private static final String SECRET_INPUT_PLACEHOLDER = "<secret input>";
     private final IExpressionProvider expressionProvider;
     private final IMemoryItemConverter memoryItemConverter;
     private final ITemplatingEngine templatingEngine;
     private final IDataFactory dataFactory;
     private final IResourceClientLibrary resourceClientLibrary;
     private final ObjectMapper objectMapper;
+    private final ISecretProvider secretProvider;
 
     @Inject
     public PropertySetterTask(IExpressionProvider expressionProvider,
@@ -76,13 +83,15 @@ public class PropertySetterTask implements ILifecycleTask {
             ITemplatingEngine templatingEngine,
             IDataFactory dataFactory,
             IResourceClientLibrary resourceClientLibrary,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            ISecretProvider secretProvider) {
         this.expressionProvider = expressionProvider;
         this.memoryItemConverter = memoryItemConverter;
         this.templatingEngine = templatingEngine;
         this.dataFactory = dataFactory;
         this.resourceClientLibrary = resourceClientLibrary;
         this.objectMapper = objectMapper;
+        this.secretProvider = secretProvider;
     }
 
     @Override
@@ -179,7 +188,20 @@ public class PropertySetterTask implements ILifecycleTask {
                                     if (!isNullOrEmpty(valueString)) {
                                         templateString = templatingEngine.processTemplate(valueString,
                                                 templateDataObjects);
-                                        conversationProperties.put(name, new Property(name, templateString, scope));
+                                        if (scope == Scope.secret) {
+                                            // Auto-vault: store the plaintext in the vault and
+                                            // replace it with a vault reference in conversation properties.
+                                            templateString = autoVaultSecret(memory, name, templateString);
+                                            // Store as conversation-scoped (the vault ref, not the plaintext)
+                                            conversationProperties.put(name,
+                                                    new Property(name, templateString, conversation));
+                                        } else {
+                                            // NOTE: Do NOT resolve vault references here — they must stay as-is
+                                            // in conversation properties (which are persisted to DB).
+                                            // Vault refs are resolved at point-of-use by downstream consumers
+                                            // (ChatModelRegistry, HttpCallExecutor) to prevent secret leakage.
+                                            conversationProperties.put(name, new Property(name, templateString, scope));
+                                        }
                                     }
 
                                     var valueMap = property.getValueObject();
@@ -365,5 +387,52 @@ public class PropertySetterTask implements ILifecycleTask {
 
             return propertyInstruction;
         }).collect(Collectors.toList());
+    }
+
+    /**
+     * Store a plaintext secret in the vault and return the vault reference string.
+     * Also scrubs the raw user input from conversation memory to prevent leakage.
+     *
+     * @param memory    the conversation memory (used for botId and input scrubbing)
+     * @param keyName   the property name used as the vault key
+     * @param plaintext the secret value to store
+     * @return the vault reference string, e.g. {@code ${eddivault:default/botId/keyName}}
+     */
+    private String autoVaultSecret(IConversationMemory memory, String keyName, String plaintext) {
+        // Determine tenantId — use conversation property if set, else "default"
+        var conversationProperties = memory.getConversationProperties();
+        String tenantId = "default";
+        if (conversationProperties.containsKey("tenantId")) {
+            Property tenantProp = conversationProperties.get("tenantId");
+            if (tenantProp.getValueString() != null) {
+                tenantId = tenantProp.getValueString();
+            }
+        }
+
+        String botId = memory.getBotId();
+        var ref = new SecretReference(tenantId, botId, keyName);
+
+        // Store the plaintext in the vault (encrypted at rest)
+        try {
+            secretProvider.store(ref, plaintext);
+        } catch (ISecretProvider.SecretProviderException e) {
+            // If vault storage fails, log and return the plaintext as-is (degraded mode).
+            // This prevents the PropertySetter from breaking the pipeline.
+            LOGGER.error("Failed to store secret in vault for key '" + keyName + "': " + e.getMessage());
+            return plaintext;
+        }
+
+        // Scrub the raw user input from conversation memory so the plaintext
+        // doesn't persist in the DB as part of the conversation history.
+        var currentStep = memory.getCurrentStep();
+        IData<String> inputData = currentStep.getLatestData(INPUT_INITIAL_IDENTIFIER);
+        if (inputData != null && plaintext.equals(inputData.getResult())) {
+            currentStep.storeData(dataFactory.createData(INPUT_INITIAL_IDENTIFIER, SECRET_INPUT_PLACEHOLDER));
+            currentStep.resetConversationOutput("input");
+            currentStep.addConversationOutputString("input", SECRET_INPUT_PLACEHOLDER);
+        }
+
+        // Return the vault reference to be stored in properties instead of plaintext
+        return ref.toReferenceString();
     }
 }

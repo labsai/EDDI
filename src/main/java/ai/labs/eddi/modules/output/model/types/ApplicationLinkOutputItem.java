@@ -64,12 +64,4 @@ public class ApplicationLinkOutputItem extends OutputItem {
     public void setDelay(int delay) {
         this.delay = delay;
     }
-
-    public ApplicationLinkOutputItem getThat() {
-        return that;
-    }
-
-    public void setThat(ApplicationLinkOutputItem that) {
-        this.that = that;
-    }
 }

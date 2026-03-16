@@ -61,12 +61,4 @@ public class BotFaceOutputItem extends OutputItem {
     public void setDelay(int delay) {
         this.delay = delay;
     }
-
-    public BotFaceOutputItem getThat() {
-        return that;
-    }
-
-    public void setThat(BotFaceOutputItem that) {
-        this.that = that;
-    }
 }

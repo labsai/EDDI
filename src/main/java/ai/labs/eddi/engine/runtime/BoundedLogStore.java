@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.runtime;
 
 import ai.labs.eddi.engine.model.LogEntry;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -131,6 +132,9 @@ public class BoundedLogStore {
         // Format the message using a Formatter (avoids deprecated getFormattedMessage())
         String message = formatRecord(record);
         if (message == null || message.isEmpty()) return;
+
+        // Redact potential secrets from log messages (defense-in-depth)
+        message = SecretRedactionFilter.redact(message);
 
         // Don't capture our own log messages to avoid infinite recursion
         String loggerName = record.getLoggerName();

@@ -1,6 +1,7 @@
 package ai.labs.eddi.modules.langchain.impl;
 
 import ai.labs.eddi.modules.langchain.impl.builder.ILanguageModelBuilder;
+import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -19,6 +20,9 @@ import java.util.Map;
 
 import static dev.langchain4j.data.message.AiMessage.aiMessage;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Tests for {@link ChatModelRegistry} — both sync and streaming model caching.
@@ -64,7 +68,11 @@ class ChatModelRegistryTest {
             // Uses default buildStreaming — throws UnsupportedOperationException
         });
 
-        registry = new ChatModelRegistry(builders);
+        // Create a pass-through SecretResolver mock (vault not configured)
+        SecretResolver secretResolver = mock(SecretResolver.class);
+        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        registry = new ChatModelRegistry(builders, secretResolver);
     }
 
     @Nested

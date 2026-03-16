@@ -36,6 +36,6 @@ public class Solution {
 
     @Override
     public String toString() {
-        return "Solution(" + "expressions=" + expressions" + ")";
+        return "Solution(" + "expressions=" + expressions + ")";
     }
 }

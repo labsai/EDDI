@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.regulardictionary.IRegularDictionaryStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.secrets.sanitize.SecretScrubber;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -60,6 +61,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private final IOutputStore outputStore;
     private final IJsonSerialization jsonSerialization;
     private final IZipArchive zipArchive;
+    private final SecretScrubber secretScrubber;
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp"));
 
     private static final Logger log = Logger.getLogger(RestExportService.class);
@@ -75,7 +77,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                              IPropertySetterStore propertySetterStore,
                              IOutputStore outputStore,
                              IJsonSerialization jsonSerialization,
-                             IZipArchive zipArchive) {
+                             IZipArchive zipArchive,
+                             SecretScrubber secretScrubber) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.botStore = botStore;
         this.packageStore = packageStore;
@@ -87,6 +90,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         this.outputStore = outputStore;
         this.jsonSerialization = jsonSerialization;
         this.zipArchive = zipArchive;
+        this.secretScrubber = secretScrubber;
     }
 
     @Override
@@ -218,7 +222,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 Map.Entry::getKey,
                 e -> {
                     try {
-                        return jsonSerialization.serialize(e.getValue());
+                        String json = jsonSerialization.serialize(e.getValue());
+                        // Scrub secrets before export (defense-in-depth)
+                        return secretScrubber.scrubJson(json);
                     } catch (IOException ex) {
                         log.error(ex.getLocalizedMessage(), ex);
                         return "";
