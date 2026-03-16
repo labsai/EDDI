@@ -14,6 +14,31 @@ Each entry follows this format:
 - **Files** — Links to modified files
 
 ---
+## IDE Warning Cleanup — Phase C (2026-03-16)
+
+### Backend — Unused Imports, Logger Fields, Copy-Paste Bug, Deprecated API, Resource Leak
+
+**Repo:** EDDI (`feature/version-6.0.0`)  
+**Commits:** `38f8fa89`, `next`
+
+**What changed:**
+
+Systematic cleanup of ~50 IDE warnings across 23 files, building on the Lombok removal phase.
+
+| Category | Count | Fix |
+|---|---|---|
+| Unused `InternalServerErrorException` import | 8 | Removed — classes use `sneakyThrow` not explicit exceptions |
+| Unused `NotFoundException` import | 2 | Removed |
+| Unused `Logger` import + `log` field | 11 | Removed from Rest*Store classes that had no log calls |
+| Unused `sneakyThrow` import | 2 | Removed — classes use explicit exceptions |
+| Unused `ApplicationScoped` import | 1 | `URIMessageBodyProvider` uses `@Provider` not `@ApplicationScoped` |
+| Logger copy-paste bug | 1 | `RestPackageStore` logged as `RestOutputStore.class` → fixed |
+| Deprecated `getSize()` | 1 | Removed from `URIMessageBodyProvider` (JAX-RS deprecated since 2.0) |
+| `Scanner` resource leak | 1 | Replaced with `InputStream.readAllBytes()` in `URIMessageBodyProvider` |
+
+**Testing:** ✅ 811 tests, 0 failures, 0 errors, 0 skipped.
+
+---
 
 ## Phase 7, Item 33: Secrets Vault — Security Remediation (2026-03-16)
 
