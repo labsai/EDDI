@@ -1,7 +1,6 @@
 package ai.labs.eddi.modules.behavior.impl.conditions;
 
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
@@ -10,8 +9,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-@Disabled
-class BaseMatcherTest {
+abstract class BaseMatcherTest {
     static final String KEY_OCCURRENCE = "occurrence";
     BaseMatcher matcher;
 

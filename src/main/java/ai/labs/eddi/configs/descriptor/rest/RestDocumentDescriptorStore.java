@@ -8,7 +8,7 @@ import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptor.model.SimpleDocumentDescriptor;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.jboss.logging.Logger;
-import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
+
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;

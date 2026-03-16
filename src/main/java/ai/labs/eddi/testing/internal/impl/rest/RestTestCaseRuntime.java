@@ -4,12 +4,10 @@ import ai.labs.eddi.testing.ITestCaseStore;
 import ai.labs.eddi.testing.internal.impl.TestCaseRuntime;
 import ai.labs.eddi.testing.model.TestCaseState;
 import ai.labs.eddi.testing.rest.IRestTestCaseRuntime;
-import org.jboss.logging.Logger;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 
 /**
@@ -20,7 +18,7 @@ public class RestTestCaseRuntime implements IRestTestCaseRuntime {
     private final ITestCaseStore testCaseStore;
     private final TestCaseRuntime testCaseRuntime;
 
-    private static final Logger log = Logger.getLogger(RestTestCaseRuntime.class);
+
 
     @Inject
     public RestTestCaseRuntime(ITestCaseStore testCaseStore,

@@ -118,12 +118,13 @@ public class Occurrence implements IBehaviorCondition {
 
     public Occurrence() {
     }
-    }
-        this.minTimesOccurred = minTimesOccurred;
+
     public void setMinTimesOccurred(int minTimesOccurred) {
-
+        this.minTimesOccurred = minTimesOccurred;
     }
-        this.maxTimesOccurred = maxTimesOccurred;
-    public void setMaxTimesOccurred(int maxTimesOccurred) {
 
+    public void setMaxTimesOccurred(int maxTimesOccurred) {
+        this.maxTimesOccurred = maxTimesOccurred;
+    }
 }
+

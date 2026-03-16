@@ -4,12 +4,11 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.IRestDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.datastore.IResourceStore;
-import org.jboss.logging.Logger;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
+
 import java.util.List;
 
 /**
@@ -20,7 +19,7 @@ import java.util.List;
 public class RestDeploymentStore implements IRestDeploymentStore {
     private final IDeploymentStore deploymentStore;
 
-    private static final Logger log = Logger.getLogger(RestDeploymentStore.class);
+
 
     @Inject
     public RestDeploymentStore(IDeploymentStore deploymentStore) {

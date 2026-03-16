@@ -5,7 +5,6 @@ import ai.labs.eddi.configs.properties.IRestPropertiesStore;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.datastore.IResourceStore;
 import org.jboss.logging.Logger;
-import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;

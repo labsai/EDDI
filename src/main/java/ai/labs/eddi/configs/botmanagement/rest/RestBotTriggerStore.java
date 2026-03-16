@@ -9,7 +9,7 @@ import ai.labs.eddi.engine.model.BotTriggerConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
-import org.jboss.logging.Logger;
+
 
 import java.util.List;
 
@@ -25,7 +25,7 @@ public class RestBotTriggerStore implements IRestBotTriggerStore {
     private final IBotTriggerStore botTriggerStore;
     private final ICache<String, BotTriggerConfiguration> botTriggersCache;
 
-    private static final Logger log = Logger.getLogger(RestBotTriggerStore.class);
+
 
     @Inject
     public RestBotTriggerStore(IBotTriggerStore botTriggerStore,

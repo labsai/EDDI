@@ -1,6 +1,5 @@
 package ai.labs.eddi.engine.runtime.rest.providers;
 
-import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.MultivaluedMap;

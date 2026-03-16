@@ -11,7 +11,7 @@ import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
-import org.jboss.logging.Logger;
+
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.util.List;
@@ -25,7 +25,7 @@ public class RestLangChainStore implements IRestLangChainStore {
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<LangChainConfiguration> restVersionInfo;
 
-    private static final Logger log = Logger.getLogger(RestLangChainStore.class);
+
 
     @Inject
     public RestLangChainStore(ILangChainStore httpCallsStore,

@@ -268,7 +268,6 @@ class ConversationServiceTest {
 
     // --- say tests ---
 
-    @SuppressWarnings("unchecked")
     @Test
     void say_botMismatch_throwsBotMismatchException() throws Exception {
         var snapshot = new ConversationMemorySnapshot();
@@ -288,7 +287,6 @@ class ConversationServiceTest {
                         new InputData("hello", Map.of()), false, handler));
     }
 
-    @SuppressWarnings("unchecked")
     @Test
     void say_conversationEnded_throwsConversationEndedException() throws Exception {
         var snapshot = new ConversationMemorySnapshot();
@@ -314,7 +312,6 @@ class ConversationServiceTest {
                         new InputData("hello", Map.of()), false, handler));
     }
 
-    @SuppressWarnings("unchecked")
     @Test
     void say_validInput_submitsToCoordinator() throws Exception {
         var snapshot = new ConversationMemorySnapshot();
@@ -358,7 +355,6 @@ class ConversationServiceTest {
 
     // --- sayStreaming tests ---
 
-    @SuppressWarnings("unchecked")
     @Test
     void sayStreaming_botMismatch_throwsBotMismatchException() throws Exception {
         var snapshot = new ConversationMemorySnapshot();

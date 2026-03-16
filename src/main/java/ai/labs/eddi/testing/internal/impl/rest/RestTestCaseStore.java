@@ -16,7 +16,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
-import org.jboss.logging.Logger;
+
 
 import java.net.URI;
 import java.util.LinkedList;
@@ -33,7 +33,7 @@ public class RestTestCaseStore implements IRestTestCaseStore {
     private final ITestCaseDescriptorStore testCaseDescriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
 
-    private static final Logger log = Logger.getLogger(RestTestCaseStore.class);
+
 
     @Inject
     public RestTestCaseStore(ITestCaseStore testCaseStore,

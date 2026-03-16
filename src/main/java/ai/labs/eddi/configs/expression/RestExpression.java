@@ -9,9 +9,7 @@ import ai.labs.eddi.utils.CollectionUtilities;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.NotFoundException;
-import org.jboss.logging.Logger;
+
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.net.URI;
@@ -28,7 +26,7 @@ public class RestExpression implements IRestExpression {
     private final IPackageStore packageStore;
     private final IRegularDictionaryStore regularDictionaryStore;
 
-    private static final Logger log = Logger.getLogger(RestExpression.class);
+
 
     @Inject
     public RestExpression(IPackageStore packageStore,

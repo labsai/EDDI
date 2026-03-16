@@ -87,13 +87,7 @@ public class ConversationMemorySnapshot {
             this.packages = packages;
         }
 
-        public ConversationStepSnapshot getThat() {
-            return that;
-        }
 
-        public void setThat(ConversationStepSnapshot that) {
-            this.that = that;
-        }
     }
 
     public static class PackageRunSnapshot {
@@ -122,13 +116,7 @@ public class ConversationMemorySnapshot {
             this.lifecycleTasks = lifecycleTasks;
         }
 
-        public PackageRunSnapshot getThat() {
-            return that;
-        }
 
-        public void setThat(PackageRunSnapshot that) {
-            this.that = that;
-        }
     }
 
     public static class ResultSnapshot {
@@ -219,30 +207,12 @@ public class ConversationMemorySnapshot {
             this.isPublic = isPublic;
         }
 
-        public ResultSnapshot getThat() {
-            return that;
-        }
 
-        public void setThat(ResultSnapshot that) {
-            this.that = that;
-        }
-
-        public int getResult() {
-            return result;
-        }
-
-        public void setResult(int result) {
-            this.result = result;
-        }
 
         @Override
         public String toString() {
             return "ResultSnapshot(" + "key=" + key + ", result=" + result + ", possibleResults=" + possibleResults + ", timestamp=" + timestamp + ", originPackageId=" + originPackageId + ", isPublic=" + isPublic + ")";
         }
-    }
-
-    public void setConversationId(String conversationId) {
-        this.conversationId = conversationId;
     }
 
     public String getBotId() {
@@ -315,13 +285,5 @@ public class ConversationMemorySnapshot {
 
     public void setRedoCache(Stack<ConversationStepSnapshot> redoCache) {
         this.redoCache = redoCache;
-    }
-
-    public ConversationMemorySnapshot getThat() {
-        return that;
-    }
-
-    public void setThat(ConversationMemorySnapshot that) {
-        this.that = that;
     }
 }

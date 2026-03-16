@@ -53,3 +53,12 @@ fabric.properties
 # === Project-specific ===
 docker/data/
 /tmp/
+
+build-clean-compile.txt
+build-full.txt
+build-package-clean.txt
+build-package-output.txt
+build-test-output.txt
+build-xlint-output.txt
+build-xlint.txt
+build-warnings.txt

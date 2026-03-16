@@ -60,8 +60,9 @@ public class Negation implements IBehaviorCondition {
 
     public Negation() {
     }
-    }
-        this.condition = condition;
-    public void setCondition(IBehaviorCondition condition) {
 
+    public void setCondition(IBehaviorCondition condition) {
+        this.condition = condition;
+    }
 }
+

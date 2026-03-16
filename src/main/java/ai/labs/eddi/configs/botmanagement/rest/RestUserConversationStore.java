@@ -6,7 +6,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.UserConversation;
-import org.jboss.logging.Logger;
+
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -24,7 +24,7 @@ public class RestUserConversationStore implements IRestUserConversationStore {
     private final IUserConversationStore userConversationStore;
     private final ICache<String, UserConversation> userConversationCache;
 
-    private static final Logger log = Logger.getLogger(RestUserConversationStore.class);
+
 
     @Inject
     public RestUserConversationStore(IUserConversationStore userConversationStore,

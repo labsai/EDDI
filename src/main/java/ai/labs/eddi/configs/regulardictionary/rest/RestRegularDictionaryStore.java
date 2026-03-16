@@ -9,11 +9,11 @@ import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
-import org.jboss.logging.Logger;
+
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
+
 import jakarta.ws.rs.core.Response;
 import java.util.List;
 
@@ -29,7 +29,7 @@ public class RestRegularDictionaryStore implements IRestRegularDictionaryStore {
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<RegularDictionaryConfiguration> restVersionInfo;
 
-    private static final Logger log = Logger.getLogger(RestRegularDictionaryStore.class);
+
 
     @Inject
     public RestRegularDictionaryStore(IRegularDictionaryStore regularDictionaryStore,

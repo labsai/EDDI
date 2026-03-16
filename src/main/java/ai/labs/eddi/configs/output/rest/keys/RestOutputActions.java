@@ -13,9 +13,7 @@ import ai.labs.eddi.utils.CollectionUtilities;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.NotFoundException;
-import org.jboss.logging.Logger;
+
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.net.URI;
@@ -34,7 +32,7 @@ public class RestOutputActions implements IRestOutputActions {
     private final IBehaviorStore behaviorStore;
     private final IOutputStore outputStore;
 
-    private static final Logger log = Logger.getLogger(RestOutputActions.class);
+
 
     @Inject
     public RestOutputActions(IPackageStore packageStore,

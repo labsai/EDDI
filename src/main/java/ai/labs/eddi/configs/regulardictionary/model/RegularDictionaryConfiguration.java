@@ -59,6 +59,10 @@ public class RegularDictionaryConfiguration {
             return word.compareTo(o.getWord());
         }
 
+        public String getWord() {
+            return word;
+        }
+
         public void setWord(String word) {
             this.word = word;
         }
@@ -77,14 +81,6 @@ public class RegularDictionaryConfiguration {
 
         public void setFrequency(int frequency) {
             this.frequency = frequency;
-        }
-
-        public WordConfiguration getThat() {
-            return that;
-        }
-
-        public void setThat(WordConfiguration that) {
-            this.that = that;
         }
     }
 
@@ -121,6 +117,10 @@ public class RegularDictionaryConfiguration {
             return regEx.compareTo(o.getRegEx());
         }
 
+        public String getRegEx() {
+            return regEx;
+        }
+
         public void setRegEx(String regEx) {
             this.regEx = regEx;
         }
@@ -131,14 +131,6 @@ public class RegularDictionaryConfiguration {
 
         public void setExpressions(String expressions) {
             this.expressions = expressions;
-        }
-
-        public RegExConfiguration getThat() {
-            return that;
-        }
-
-        public void setThat(RegExConfiguration that) {
-            this.that = that;
         }
     }
 
@@ -187,13 +179,7 @@ public class RegularDictionaryConfiguration {
             this.expressions = expressions;
         }
 
-        public PhraseConfiguration getThat() {
-            return that;
-        }
 
-        public void setThat(PhraseConfiguration that) {
-            this.that = that;
-        }
     }
 
     public String getLang() {

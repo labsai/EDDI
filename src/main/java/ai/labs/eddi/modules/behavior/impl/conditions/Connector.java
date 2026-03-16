@@ -110,8 +110,8 @@ public class Connector implements IBehaviorCondition {
 
     public Connector() {
     }
-    }
-        return conditions;
-    public List<IBehaviorCondition> getConditions() {
 
+    public List<IBehaviorCondition> getConditions() {
+        return conditions;
+    }
 }

@@ -104,20 +104,5 @@ public class RegularDictionary implements IDictionary {
     public void setLookupIfKnown(boolean lookupIfKnown) {
         this.lookupIfKnown = lookupIfKnown;
     }
-
-    public List<IWord> getAllWords() {
-        return allWords;
-    }
-
-    public void setAllWords(List<IWord> allWords) {
-        this.allWords = allWords;
-    }
-
-    public IWord getWord() {
-        return word;
-    }
-
-    public void setWord(IWord word) {
-        this.word = word;
-    }
 }
+
