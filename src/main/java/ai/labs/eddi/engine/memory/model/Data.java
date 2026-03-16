@@ -70,10 +70,6 @@ public class Data<T> implements IData<T> {
         return key;
     }
 
-    public void setKey(final String key) {
-        this.key = key;
-    }
-
     public List<T> getPossibleResults() {
         return possibleResults;
     }
@@ -92,10 +88,6 @@ public class Data<T> implements IData<T> {
 
     public final Date getTimestamp() {
         return timestamp;
-    }
-
-    public void setTimestamp(final Date timestamp) {
-        this.timestamp = timestamp;
     }
 
     public String getOriginPackageId() {

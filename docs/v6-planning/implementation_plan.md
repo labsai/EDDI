@@ -507,8 +507,8 @@ Step-by-step wizard for new users:
 
 | Item | Description | SP | Status |
 |------|------------|-----|--------|
-| 6E | **quarkus-langchain4j → langchain4j Core** — Remove `io.quarkiverse.langchain4j` dependency, use `dev.langchain4j` core modules only (3 files, POM cleanup) | 2 | ⬜ |
-| 6D | **Lombok Removal** — Delombok 114 files (371 annotations), `@Value`→records, `@Slf4j`→JBoss Logger | 5 | ⬜ |
+| 6E | **quarkus-langchain4j → langchain4j Core** — Remove `io.quarkiverse.langchain4j` dependency, use `dev.langchain4j` core modules only (3 files, POM cleanup) | 2 | ✅ |
+| 6D | **Lombok Removal** — Delombok 114 files, explicit getters/setters, JBoss Logger, POM cleanup | 5 | ✅ |
 | — | **Quarkus 3.33 LTS Upgrade** — waiting for GA (~March 25, 2026). 3.32.3 blocked by Java 25 `ALL-UNNAMED` issue | 2 | ⏳ |
 
 #### Phase 6E Detail: quarkus-langchain4j → langchain4j Core
@@ -1072,7 +1072,7 @@ setupBot(dictionaryPath, behaviorPath, outputPath)
 | TestNG         | **6.14.3** (2018) | 7.10+                                  | ❌ **Replace with JUnit 5** (Quarkus native)  |
 | RestAssured    | **3.3.0** (2018)  | 5.4+                                   | ⬆️ Upgrade (already a Quarkus dependency)     |
 | Jackson        | **2.9.9** (2019)  | 2.17+                                  | ⬆️ Use Quarkus-managed version                |
-| Lombok         | **1.18.8** (2019) | 1.18.32+                               | ⬆️ or remove (Quarkus prefers records)        |
+| Lombok         | **removed** (Phase 6D) | —                                      | ✅ Removed — explicit getters/setters         |
 | Log4j          | **2.12.0** (2019) | ⚠️ **SECURITY RISK** (CVE-2021-44228!) | ❌ **Remove** — use JBoss Logging via Quarkus |
 | Maven Compiler | Java **11**       | Java **21**                            | ⬆️ Match EDDI main project                    |
 

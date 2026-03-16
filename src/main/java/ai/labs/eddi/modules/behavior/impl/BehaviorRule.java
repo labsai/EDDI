@@ -100,8 +100,6 @@ public class BehaviorRule implements Cloneable {
         }
     }
 
-    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(BehaviorRule.class);
-
     public BehaviorRule() {
     }
 

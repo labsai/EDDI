@@ -159,9 +159,7 @@ Technical specifications:
 
 3. Go to Browser --&gt; [http://localhost:7070](http://localhost:7070)
 
-Note: If running locally inside an IDE you need _lombok_ to be enabled \(otherwise you will get compile errors
-complaining about missing constructors\). Either download as plugin \(e.g. inside Intellij\) or follow instructions
-here [https://projectlombok.org/](https://projectlombok.org/)
+
 
 ## Build App & Docker image
 
