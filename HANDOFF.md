@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-15
+> **Last updated:** 2026-03-16
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -420,13 +420,20 @@
 - `src/test/java/.../impl/ObservableChatModelTest.java` — **NEW** 19 tests
 - `src/test/java/.../impl/ChatModelRegistryTest.java` — 5 new observability tests
 
+### Phase 6D: Lombok Removal ✅ (commit `ca3e45da`)
+
+- [x] IntelliJ delombok expanded all 114 files (107 main + 7 test)
+- [x] Fixed 11 structurally corrupted files from field-level annotation script
+- [x] `isIsPublic` → `isPublic` naming fix in `Data.java` and `ResultSnapshot`
+- [x] Removed Lombok dependency, version property, and annotation processor from POM
+- [x] All 775 tests pass, 0 Lombok annotations/imports remain
+
 ## Next Up
 
 ### Quick Wins (before Phase 7)
 
 - [x] ~~**Phase 6E: quarkus-langchain4j → langchain4j Core**~~ ✅
-- [ ] **Phase 6F: Contextual Logging** — MDC context (botId, conversationId), BoundedLogStore ring buffer, REST+SSE log streaming, Manager UI log panel (5 SP)
-- [ ] **Phase 6D: Lombok Removal** — Delombok 114 files (371 annotations), convert `@Value`→records, `@Slf4j`→JBoss Logger (5 SP)
+- [x] ~~**Phase 6D: Lombok Removal**~~ ✅
 - [ ] **Quarkus 3.33 LTS Upgrade** — waiting for GA (March 25, 2026). 3.32.3 has Java 25 `ALL-UNNAMED` module issue.
 
 ### Phase 7: Secrets, Audit + Tenant Foundation (12 SP)

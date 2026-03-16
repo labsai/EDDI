@@ -15,6 +15,20 @@ Each entry follows this format:
 
 ---
 
+## Phase 6D: Lombok Removal (2026-03-16)
+
+### Backend — Complete Delombok
+
+**Repo:** EDDI (`feature/version-6.0.0`)  
+**Commit:** `ca3e45da`
+
+- **IntelliJ Delombok** — Used IntelliJ's built-in delombok to expand all Lombok annotations across 114 files (107 main + 7 test)
+- **Field-level fix script** — Python script to handle field-level `@Getter`/`@Setter` that delombok missed; script had a bug inserting methods in reverse order with mismatched braces
+- **Manual fixes** — 11 files required manual repair: `Bot.java`, `Data.java`, `ConversationMemorySnapshot.ResultSnapshot`, `ActionMatcher`, `InputMatcher`, `RawSolution`, `OutputGeneration`, `BehaviorRule` (added `getName()`, removed bogus getters for local vars), `BehaviorRulesEvaluator` (fixed constructor), `BehaviorSetResult` (toString syntax), `PropertySetter` (reversed getter)
+- **`isIsPublic` → `isPublic`** — Fixed naming for boolean getters (`Data.java`, `ResultSnapshot`)
+- **POM cleanup** — Removed `dependency.version.lombok` property, `org.projectlombok:lombok` dependency, and Lombok annotation processor from `maven-compiler-plugin`
+- **Result**: 114 files changed, 4174 insertions, 634 deletions. All 775 tests pass, 0 `import lombok` statements, 0 `@Getter/@Setter/@Slf4j` annotations remain
+
 ## Phase 6F: Contextual Logging — MDC + Manager Log Panel (2026-03-15)
 
 ### Backend — BoundedLogStore + REST/SSE Log Admin
