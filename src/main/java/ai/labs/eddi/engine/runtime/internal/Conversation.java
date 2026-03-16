@@ -31,6 +31,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 public class Conversation implements IConversation {
     private static final String KEY_USER_INFO = "userInfo";
     private static final String KEY_CONTEXT = "context";
+    private static final String KEY_SECRET_INPUT = "secretInput";
+    private static final String SECRET_INPUT_PLACEHOLDER = "<secret input>";
     private final List<IExecutablePackage> executablePackages;
     private final IConversationMemory conversationMemory;
     private final IPropertiesHandler propertiesHandler;
@@ -185,7 +187,8 @@ public class Conversation implements IConversation {
         addContextToConversationOutput(currentStep, contextData);
         removedTaskTypeResultsFromPreviousRuns(currentStep, taskTypeResultsToBeRemoved);
 
-        storeUserInputInMemory(message, lifecycleData);
+        boolean isSecretInput = isSecretInputFlagged(contexts);
+        storeUserInputInMemory(message, lifecycleData, isSecretInput);
         return lifecycleData;
     }
 
@@ -209,14 +212,31 @@ public class Conversation implements IConversation {
         }
     }
 
-    private void storeUserInputInMemory(String message, List<IData> lifecycleData) {
+    /**
+     * Check if the client flagged this input as a secret via the context map.
+     * The client sends: {@code { "secretInput": { "type": "string", "value": "true" } }}
+     */
+    private static boolean isSecretInputFlagged(Map<String, Context> contexts) {
+        if (contexts == null || !contexts.containsKey(KEY_SECRET_INPUT)) {
+            return false;
+        }
+        Context secretCtx = contexts.get(KEY_SECRET_INPUT);
+        return secretCtx != null && "true".equals(String.valueOf(secretCtx.getValue()));
+    }
+
+    private void storeUserInputInMemory(String message, List<IData> lifecycleData, boolean isSecretInput) {
         IData initialData;
         IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
         if (!"".equals(message.trim())) {
+            // The actual plaintext flows through lifecycle data so PropertySetterTask
+            // can vault it. But the conversation output (persisted + returned to client)
+            // is scrubbed when the client marks the input as secret.
             initialData = new Data<>(INPUT_INITIAL.key(), message);
             initialData.setPublic(true);
             lifecycleData.add(initialData);
-            currentStep.addConversationOutputString(INPUT.key(), message);
+
+            String displayValue = isSecretInput ? SECRET_INPUT_PLACEHOLDER : message;
+            currentStep.addConversationOutputString(INPUT.key(), displayValue);
         }
     }
 

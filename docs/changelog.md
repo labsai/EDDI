@@ -17,6 +17,37 @@ Each entry follows this format:
 
 ## Phase 7, Item 33: Secrets Vault — Security Remediation (2026-03-16)
 
+### Chat UI + Manager — Secret Input Handling (2026-03-17)
+
+**Repos:** eddi-chat-ui, EDDI-Manager, EDDI (Bot Father)
+
+**What changed:**
+
+Frontend implementation of the secret input system, enabling both backend-driven password fields (`InputFieldOutputItem`) and client-initiated secret marking via context flags.
+
+| Component | Change |
+|---|---|
+| **eddi-chat-ui** | `SecretInput.tsx` (new) — password field with eye toggle for backend-driven prompts |
+| **eddi-chat-ui** | `ChatInput.tsx` — 🔒/🔓 secret mode toggle, conditional password input with eye toggle |
+| **eddi-chat-ui** | `ChatWidget.tsx` — `processSnapshot` detects `InputFieldOutputItem`, `handleSend` sends `secretInput` context |
+| **eddi-chat-ui** | `chat-api.ts` — `sendMessage` + `sendMessageStreaming` accept optional context |
+| **eddi-chat-ui** | `chat-store.tsx` — `activeInputField`, `isSecretMode` state + actions |
+| **EDDI-Manager** | `use-chat.ts` — Zustand store with `activeInputField`, `isSecretMode`, secret context send |
+| **EDDI-Manager** | `conversations.ts` — `extractInputField()` parser for backend output |
+| **EDDI-Manager** | `chat-panel.tsx` — `SecretInputField` + `ChatInputWithSecretToggle` inline components |
+| **EDDI (backend)** | `Conversation.java` — `isSecretInputFlagged()` + scrub plaintext from conversation output |
+| **Bot Father** | 3 property setters: `apiKey` scope `conversation` → `secret` (auto-vault) |
+| **Bot Father** | 4 output configs: added `InputFieldOutputItem` {subType: password} for API key prompts |
+
+**Code review fixes:**
+- Removed unused `inputRef` in `ChatInput.tsx`
+- Added `secretContext` to streaming path (`sendMessageStreaming` + `ChatWidget.tsx`)
+- Fixed Tailwind `end-3` → `inset-e-3` (logical property) in Manager `chat-panel.tsx`
+
+**Testing:** ✅ EDDI backend compiles clean, eddi-chat-ui 6/6 tests pass, Manager tsc clean.
+
+---
+
 ### Backend — Secrets Vault Hardening + Secret Input
 
 **Repo:** EDDI (`feature/version-6.0.0`)
