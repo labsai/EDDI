@@ -10,7 +10,7 @@ import {
   type Dispatch,
   type ReactNode,
 } from "react";
-import type { ChatMessage, QuickReply, ConversationState, ChatConfig } from "@/types";
+import type { ChatMessage, QuickReply, ConversationState, ChatConfig, InputField } from "@/types";
 
 /* ─── State ───────────────────────────────────── */
 
@@ -25,6 +25,10 @@ export interface ChatState {
   redoAvailable: boolean;
   botName: string | null;
   config: ChatConfig;
+  /** Set when the backend requests a specific input field (e.g. password). */
+  activeInputField: InputField | null;
+  /** Set when the user toggles the 🔒 secret mode on the chat input. */
+  isSecretMode: boolean;
 }
 
 const defaultConfig: ChatConfig = {
@@ -56,6 +60,8 @@ export const initialState: ChatState = {
   redoAvailable: false,
   botName: null,
   config: defaultConfig,
+  activeInputField: null,
+  isSecretMode: false,
 };
 
 /* ─── Actions ─────────────────────────────────── */
@@ -73,7 +79,10 @@ export type ChatAction =
   | { type: "REPLACE_MESSAGES"; messages: ChatMessage[] }
   | { type: "SET_BOT_NAME"; name: string | null }
   | { type: "CLEAR_MESSAGES" }
-  | { type: "SET_CONFIG"; config: Partial<ChatConfig> };
+  | { type: "SET_CONFIG"; config: Partial<ChatConfig> }
+  | { type: "SET_INPUT_FIELD"; field: InputField }
+  | { type: "CLEAR_INPUT_FIELD" }
+  | { type: "TOGGLE_SECRET_MODE" };
 
 /* ─── Reducer ─────────────────────────────────── */
 
@@ -125,6 +134,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         isThinking: false,
         undoAvailable: false,
         redoAvailable: false,
+        activeInputField: null,
+        isSecretMode: false,
       };
 
     case "SET_UNDO_REDO":
@@ -138,6 +149,15 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case "SET_CONFIG":
       return { ...state, config: { ...state.config, ...action.config } };
+
+    case "SET_INPUT_FIELD":
+      return { ...state, activeInputField: action.field };
+
+    case "CLEAR_INPUT_FIELD":
+      return { ...state, activeInputField: null };
+
+    case "TOGGLE_SECRET_MODE":
+      return { ...state, isSecretMode: !state.isSecretMode };
 
     default:
       return state;

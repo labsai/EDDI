@@ -10,6 +10,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { useChatState, useChatDispatch } from "@/store/chat-store";
 import { MessageBubble } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
+import { SecretInput } from "./SecretInput";
 import { QuickReplies } from "./QuickReplies";
 import { TypingIndicator, ThinkingIndicator } from "./Indicators";
 import { ScrollToBottom } from "./ScrollToBottom";
@@ -32,7 +33,7 @@ import {
   demoSendMessageStreaming,
   demoGetQuickReplies,
 } from "@/api/demo-api";
-import type { ChatMessage, SSEEvent, ChatConfig } from "@/types";
+import type { ChatMessage, SSEEvent, ChatConfig, OutputItem } from "@/types";
 
 /**
  * Color query params → CSS variable mappings.
@@ -179,18 +180,31 @@ export function ChatWidget() {
       if (snapshot.conversationOutputs?.length) {
         const output = snapshot.conversationOutputs[0];
 
-        // Extract bot replies
-        const botReplies: { text: string }[] = output.output ?? [];
+        // Extract bot replies and detect input field requests
+        const botReplies: OutputItem[] = output.output ?? [];
         for (const reply of botReplies) {
-          dispatch({
-            type: "ADD_MESSAGE",
-            message: {
-              id: `bot-${Date.now()}-${Math.random()}`,
-              role: "bot",
-              content: reply.text,
-              timestamp: Date.now(),
-            },
-          });
+          if (reply.type === "inputField") {
+            // Backend is requesting a specific input field (e.g. password)
+            dispatch({
+              type: "SET_INPUT_FIELD",
+              field: {
+                subType: reply.subType || "password",
+                placeholder: reply.placeholder,
+                label: reply.label,
+                defaultValue: reply.defaultValue,
+              },
+            });
+          } else if (reply.text) {
+            dispatch({
+              type: "ADD_MESSAGE",
+              message: {
+                id: `bot-${Date.now()}-${Math.random()}`,
+                role: "bot",
+                content: reply.text,
+                timestamp: Date.now(),
+              },
+            });
+          }
         }
 
         // Quick replies
@@ -288,12 +302,17 @@ export function ChatWidget() {
 
   /* ─── Send message ──────────────────────────── */
   const handleSend = useCallback(
-    async (text: string) => {
-      // Add user message
+    async (text: string, isSecret?: boolean) => {
+      // Build context for secret input
+      const secretContext = isSecret
+        ? { secretInput: { type: "string" as const, value: "true" } }
+        : undefined;
+
+      // Add user message (display masked if secret)
       const userMsg: ChatMessage = {
         id: `user-${Date.now()}`,
         role: "user",
-        content: text,
+        content: isSecret ? "●●●●●●●●" : text,
         timestamp: Date.now(),
       };
       dispatch({ type: "ADD_MESSAGE", message: userMsg });
@@ -353,6 +372,7 @@ export function ChatWidget() {
             botId,
             state.conversationId,
             text,
+            secretContext,
           );
 
           for await (const event of events) {
@@ -360,13 +380,14 @@ export function ChatWidget() {
           }
           dispatch({ type: "FINISH_STREAMING" });
         } else if (environment && botId && state.conversationId) {
-          // Non-streaming path
+          // Non-streaming path — pass context for secret input
           const snapshot = await sendMessage(
             environment,
             botId,
             state.conversationId,
             text,
             userId,
+            secretContext,
           );
           dispatch({ type: "SET_THINKING", value: false });
           processSnapshot(snapshot);
@@ -632,10 +653,21 @@ export function ChatWidget() {
               </div>
             )}
 
-            <ChatInput
-              onSend={handleSend}
-              disabled={!state.conversationId && !isManagedBot}
-            />
+            {state.activeInputField ? (
+              <SecretInput
+                label={state.activeInputField.label}
+                placeholder={state.activeInputField.placeholder}
+                defaultValue={state.activeInputField.defaultValue}
+                subType={state.activeInputField.subType}
+                onSend={handleSend}
+                disabled={state.isProcessing}
+              />
+            ) : (
+              <ChatInput
+                onSend={handleSend}
+                disabled={!state.conversationId && !isManagedBot}
+              />
+            )}
           </div>
         )
       )}

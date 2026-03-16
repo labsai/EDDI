@@ -494,6 +494,158 @@ a:hover { opacity: 0.85; }
   to { transform: rotate(360deg); }
 }
 
+/* ─── Secret toggle in ChatInput ──────────────── */
+
+.chat-input__secret-toggle {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--chat-radius-sm);
+  background: transparent;
+  color: var(--chat-text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  font-size: 1.1rem;
+}
+
+.chat-input__secret-toggle:hover {
+  background: var(--chat-accent-soft);
+  color: var(--chat-text);
+}
+
+.chat-input__secret-toggle--active {
+  background: var(--chat-accent-soft);
+  color: var(--chat-accent);
+}
+
+.chat-input__secret-wrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.chat-input__secret-field {
+  flex: 1;
+  padding: 10px 40px 10px 14px;
+  font-size: 0.925rem;
+  font-family: var(--chat-font);
+  line-height: 1.5;
+  color: var(--chat-input-text);
+  background: var(--chat-input-bg);
+  border: 1px solid var(--chat-accent);
+  border-radius: 14px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  height: 44px;
+}
+
+.chat-input__secret-field::placeholder {
+  color: var(--chat-input-placeholder);
+}
+
+.chat-input__secret-field:focus {
+  border-color: var(--chat-accent);
+  box-shadow: 0 0 0 2px var(--chat-accent-soft);
+}
+
+.chat-input__eye-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  color: var(--chat-text-muted);
+  padding: 4px;
+  line-height: 1;
+  transition: opacity 0.15s;
+}
+
+.chat-input__eye-toggle:hover {
+  opacity: 0.7;
+}
+
+/* ─── SecretInput (backend-driven) ────────────── */
+
+.secret-input {
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--chat-border);
+  background: var(--chat-surface);
+  animation: msgIn 0.25s ease-out;
+}
+
+.secret-input__label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--chat-accent);
+  margin-bottom: 8px;
+  letter-spacing: 0.02em;
+}
+
+.secret-input__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.secret-input__field-wrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.secret-input__field {
+  flex: 1;
+  padding: 10px 40px 10px 14px;
+  font-size: 0.925rem;
+  font-family: var(--chat-font);
+  line-height: 1.5;
+  color: var(--chat-input-text);
+  background: var(--chat-input-bg);
+  border: 1px solid var(--chat-accent);
+  border-radius: 14px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  height: 44px;
+}
+
+.secret-input__field::placeholder {
+  color: var(--chat-input-placeholder);
+}
+
+.secret-input__field:focus {
+  border-color: var(--chat-accent);
+  box-shadow: 0 0 0 2px var(--chat-accent-soft);
+}
+
+.secret-input__eye-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  color: var(--chat-text-muted);
+  padding: 4px;
+  line-height: 1;
+  transition: opacity 0.15s;
+}
+
+.secret-input__eye-toggle:hover {
+  opacity: 0.7;
+}
+
 /* ─── Scroll-to-bottom ────────────────────────── */
 
 .scroll-to-bottom {

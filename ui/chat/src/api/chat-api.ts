@@ -67,6 +67,7 @@ export async function readConversation(
 /**
  * Send a message (non-streaming) to a direct bot.
  * Returns the conversation snapshot with the bot's reply in `conversationOutputs`.
+ * When `context` is provided, sends as JSON `InputData` instead of plain text.
  */
 export async function sendMessage(
   environment: string,
@@ -74,6 +75,7 @@ export async function sendMessage(
   conversationId: string,
   message: string,
   userId?: string,
+  context?: Record<string, { type: string; value: string }>,
 ): Promise<ConversationSnapshot> {
   const params = new URLSearchParams({
     returnDetailed: "false",
@@ -81,12 +83,18 @@ export async function sendMessage(
   });
   if (userId) params.set("userId", userId);
 
+  const hasContext = context && Object.keys(context).length > 0;
+
   const res = await fetch(
     buildUrl(`/bots/${environment}/${botId}/${conversationId}?${params}`),
     {
       method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: message,
+      headers: {
+        "Content-Type": hasContext ? "application/json" : "text/plain",
+      },
+      body: hasContext
+        ? JSON.stringify({ input: message, context })
+        : message,
     },
   );
   if (!res.ok) throw new Error(`Failed to send message: ${res.statusText}`);
@@ -102,13 +110,19 @@ export async function* sendMessageStreaming(
   botId: string,
   conversationId: string,
   message: string,
+  context?: Record<string, { type: string; value: string }>,
 ): AsyncGenerator<SSEEvent> {
+  const body: Record<string, unknown> = { input: message };
+  if (context && Object.keys(context).length > 0) {
+    body.context = context;
+  }
+
   const res = await fetch(
     buildUrl(`/bots/${environment}/${botId}/${conversationId}/stream`),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ input: message }),
+      body: JSON.stringify(body),
     },
   );
 

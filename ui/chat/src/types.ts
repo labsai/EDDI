@@ -18,6 +18,17 @@ export interface QuickReply {
   expressions?: string;
 }
 
+/**
+ * An input field requested by the backend (from InputFieldOutputItem).
+ * When `subType` is `"password"`, the chat UI renders a masked input.
+ */
+export interface InputField {
+  subType: string;       // "password" | "text" | "email" etc.
+  placeholder?: string;
+  label?: string;
+  defaultValue?: string;
+}
+
 /** Backend conversation states. */
 export type ConversationState =
   | "READY"
@@ -61,10 +72,20 @@ export interface ConversationSnapshot {
   redoAvailable?: boolean;
 }
 
+/** A single output item from the backend output array. */
+export interface OutputItem {
+  type?: string;       // "text" | "inputField" | "image" etc.
+  text?: string;
+  subType?: string;    // for inputField: "password" | "text" etc.
+  placeholder?: string;
+  label?: string;
+  defaultValue?: string;
+}
+
 /** Per-step output block from POST /bots responses. */
 export interface ConversationOutput {
   actions?: string[];
-  output?: { text: string }[];
+  output?: OutputItem[];
   quickReplies?: QuickReply[];
 }
 
