@@ -13,7 +13,7 @@ import java.io.OutputStream;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Type;
 import java.net.URI;
-import java.util.Scanner;
+
 
 @Provider
 public class URIMessageBodyProvider implements MessageBodyReader<URI>, MessageBodyWriter<URI> {
@@ -23,19 +23,14 @@ public class URIMessageBodyProvider implements MessageBodyReader<URI>, MessageBo
     }
 
     @Override
-    public URI readFrom(Class<URI> type, Type genericType, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, String> httpHeaders, InputStream entityStream) throws WebApplicationException {
-        String stringUri = new Scanner(entityStream).useDelimiter("\\A").next();
-        return URI.create(stringUri);
+    public URI readFrom(Class<URI> type, Type genericType, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, String> httpHeaders, InputStream entityStream) throws IOException, WebApplicationException {
+        String stringUri = new String(entityStream.readAllBytes());
+        return URI.create(stringUri.trim());
     }
 
     @Override
     public boolean isWriteable(Class<?> type, Type genericType, Annotation[] annotations, MediaType mediaType) {
         return type == URI.class;
-    }
-
-    @Override
-    public long getSize(URI uri, Class<?> type, Type genericType, Annotation[] annotations, MediaType mediaType) {
-        return 0;
     }
 
     @Override

@@ -1,7 +1,7 @@
 package ai.labs.eddi.configs.packages.rest;
 
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.eddi.configs.output.rest.RestOutputStore;
+
 import ai.labs.eddi.configs.packages.IPackageStore;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
@@ -38,7 +38,7 @@ public class RestPackageStore implements IRestPackageStore {
     private final RestVersionInfo<PackageConfiguration> restVersionInfo;
     private final IDocumentDescriptorStore documentDescriptorStore;
 
-    private static final Logger log = Logger.getLogger(RestOutputStore.class);
+    private static final Logger log = Logger.getLogger(RestPackageStore.class);
 
     @Inject
     public RestPackageStore(IPackageStore packageStore,
