@@ -105,10 +105,14 @@ public class PrePostUtils {
                         if (propertyValue instanceof String s) {
                             memory.getConversationProperties().put(propertyName,
                                     new Property(propertyName, s, scope));
-                        } else if (propertyValue instanceof Map m) {
+                        } else if (propertyValue instanceof Map<?, ?>) {
+                            @SuppressWarnings("unchecked")
+                            var m = (Map<String, Object>) propertyValue;
                             memory.getConversationProperties().put(propertyName,
                                     new Property(propertyName, m, scope));
-                        } else if (propertyValue instanceof List l) {
+                        } else if (propertyValue instanceof List<?>) {
+                            @SuppressWarnings("unchecked")
+                            var l = (List<Object>) propertyValue;
                             memory.getConversationProperties().put(propertyName,
                                     new Property(propertyName, l, scope));
                         } else if (propertyValue instanceof Integer i) {
@@ -307,6 +311,8 @@ public class PrePostUtils {
             jsonList = new StringBuilder(jsonList).deleteCharAt(jsonList.lastIndexOf(",")).toString();
         }
 
-        return jsonSerialization.deserialize(jsonList, List.class);
+        @SuppressWarnings("unchecked")
+        List<Object> result = jsonSerialization.deserialize(jsonList, List.class);
+        return result;
     }
 }

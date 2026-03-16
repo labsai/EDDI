@@ -37,6 +37,7 @@ public class IdDeserializer extends JsonDeserializer<String> {
         return deserialize((BsonParser) jsonParser, ctxt);
     }
 
+    @SuppressWarnings("deprecation")
     public String deserialize(BsonParser bsonParser, DeserializationContext ctxt) throws IOException {
         if (bsonParser.getCurrentToken() != JsonToken.VALUE_EMBEDDED_OBJECT ||
                 bsonParser.getCurrentBsonType() != BsonConstants.TYPE_OBJECTID) {

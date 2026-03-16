@@ -20,7 +20,7 @@ import static ai.labs.eddi.modules.behavior.impl.conditions.IBehaviorCondition.E
  * @author ginccc
  */
 
-public class InputMatcher extends BaseMatcher implements IBehaviorCondition {
+public class InputMatcher extends BaseMatcher {
     public static final String ID = "inputmatcher";
     private static final String KEY_EXPRESSIONS = "expressions";
 

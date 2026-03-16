@@ -24,7 +24,7 @@ public class RuntimeUtilities {
         }
     }
 
-    public static void checkCollectionNoNullElements(Collection collection, String name) {
+    public static void checkCollectionNoNullElements(Collection<?> collection, String name) {
         checkNotNull(collection, name);
 
         for (Object obj : collection) {
@@ -55,11 +55,11 @@ public class RuntimeUtilities {
             return ((String) obj).isEmpty();
         }
 
-        if (obj instanceof Collection) {
-            return ((Collection) obj).isEmpty();
+        if (obj instanceof Collection<?> c) {
+            return c.isEmpty();
         }
 
-        return obj instanceof Map && ((Map) obj).isEmpty();
+        return obj instanceof Map<?, ?> m && m.isEmpty();
     }
 
     public static InputStream getResourceAsStream(String path) {

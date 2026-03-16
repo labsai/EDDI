@@ -203,6 +203,4 @@ public class InputParserTest {
     private static String toString(List<Expression> expressions) {
         return StringUtilities.joinStrings(", ", expressions);
     }
-
-    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(InputParserTest.class);
 }

@@ -111,10 +111,12 @@ public class RestPackageStore implements IRestPackageStore {
 
             Map<String, Object> extensions = packageExtension.getExtensions();
             for (String extensionKey : extensions.keySet()) {
-                List<Map<String, Object>> extensionElements = (List<Map<String, Object>>) extensions.get(extensionKey);
+                @SuppressWarnings("unchecked")
+                var extensionElements = (List<Map<String, Object>>) extensions.get(extensionKey);
                 for (Map<String, Object> extensionElement : extensionElements) {
                     if (extensionElement.containsKey(KEY_CONFIG)) {
-                        Map<String, Object> config = (Map<String, Object>) extensionElement.get(KEY_CONFIG);
+                        @SuppressWarnings("unchecked")
+                        var config = (Map<String, Object>) extensionElement.get(KEY_CONFIG);
                         if (updateResourceURI(resourceURI, resourceURIWithoutVersion, config)) {
                             updated = true;
                         }
@@ -252,11 +254,13 @@ public class RestPackageStore implements IRestPackageStore {
 
     private void duplicateDictionaryInParser(PackageExtension packageExtension) throws ServiceException {
         URI type;
+        @SuppressWarnings("unchecked")
         var dictionaries = (List<Map<String, Object>>) packageExtension.getExtensions().get("dictionaries");
         if (!isNullOrEmpty(dictionaries)) {
             for (var dictionary : dictionaries) {
                 type = URI.create(dictionary.get("type").toString());
                 if ("ai.labs.parser.dictionaries.regular".equals(type.getHost())) {
+                    @SuppressWarnings("unchecked")
                     var config = (Map<String, URI>) dictionary.get("config");
                     if (!isNullOrEmpty(config)) {
                         Object dictionaryUriObj = config.get(KEY_URI);

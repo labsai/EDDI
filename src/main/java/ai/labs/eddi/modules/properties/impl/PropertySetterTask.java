@@ -167,10 +167,14 @@ public class PropertySetterTask implements ILifecycleTask {
                                                 templateDataObjects);
                                         conversationProperties.put(name,
                                                 new Property(name, templateString, scope));
-                                    } else if (templatedObj instanceof Map valueMap) {
+                                    } else if (templatedObj instanceof Map<?, ?>) {
+                                        @SuppressWarnings("unchecked")
+                                        var valueMap = (Map<String, Object>) templatedObj;
                                         conversationProperties.put(name,
                                                 new Property(name, new LinkedHashMap<>(valueMap), scope));
-                                    } else if (templatedObj instanceof List valueList) {
+                                    } else if (templatedObj instanceof List<?>) {
+                                        @SuppressWarnings("unchecked")
+                                        var valueList = (List<Object>) templatedObj;
                                         conversationProperties.put(name,
                                                 new Property(name, new ArrayList<>(valueList), scope));
                                     } else if (templatedObj instanceof Integer valueInt) {
@@ -364,9 +368,13 @@ public class PropertySetterTask implements ILifecycleTask {
             if (property.containsKey(VALUE_STRING)) {
                 var o = property.get(VALUE_STRING);
                 propertyInstruction.setValueString(o.toString());
-            } else if (property.containsKey(VALUE_OBJECT) && property.get(VALUE_OBJECT) instanceof Map m) {
+            } else if (property.containsKey(VALUE_OBJECT) && property.get(VALUE_OBJECT) instanceof Map<?, ?>) {
+                @SuppressWarnings("unchecked")
+                var m = (Map<String, Object>) property.get(VALUE_OBJECT);
                 propertyInstruction.setValueObject(m);
-            } else if (property.containsKey(VALUE_LIST) && property.get(VALUE_LIST) instanceof List l) {
+            } else if (property.containsKey(VALUE_LIST) && property.get(VALUE_LIST) instanceof List<?>) {
+                @SuppressWarnings("unchecked")
+                var l = (List<Object>) property.get(VALUE_LIST);
                 propertyInstruction.setValueList(l);
             } else if (property.containsKey(VALUE_INT) && property.get(VALUE_INT) instanceof Integer i) {
                 propertyInstruction.setValueInt(i);

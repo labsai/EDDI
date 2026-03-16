@@ -50,6 +50,7 @@ public class IdSerializer extends JsonSerializer<String> {
         bsonGenerator.writeObjectId(createObjectIdFromString(s));
     }
 
+    @SuppressWarnings("deprecation")
     private static ObjectId createObjectIdFromString(String s) {
         int[] parsed = parse(s);
 

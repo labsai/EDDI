@@ -13,7 +13,7 @@ import java.io.IOException;
  *
  * @param <T> the resource document type
  */
-public class ModifiableHistorizedResourceStore<T> extends HistorizedResourceStore<T> implements IResourceStore<T> {
+public class ModifiableHistorizedResourceStore<T> extends HistorizedResourceStore<T> {
     public ModifiableHistorizedResourceStore(IResourceStorage<T> resourceStore) {
         super(resourceStore);
         this.resourceStorage = resourceStore;

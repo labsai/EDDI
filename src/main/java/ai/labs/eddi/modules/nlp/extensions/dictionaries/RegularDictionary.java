@@ -11,7 +11,6 @@ import java.util.stream.Collectors;
  */
 public class RegularDictionary implements IDictionary {
     private static final String ID = "regular";
-    private String languageCode;
     private List<IPhrase> phrases = new LinkedList<>();
     private Map<String, IWord> words = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     private List<IRegEx> regExs = new LinkedList<>();
@@ -77,9 +76,6 @@ public class RegularDictionary implements IDictionary {
         phrases.add(new Phrase(value, expressions, ID));
     }
 
-    public void setLanguageCode(String languageCode) {
-        this.languageCode = languageCode;
-    }
 
     public void setPhrases(List<IPhrase> phrases) {
         this.phrases = phrases;

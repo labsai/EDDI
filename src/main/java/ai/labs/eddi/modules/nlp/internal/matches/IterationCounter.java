@@ -166,7 +166,7 @@ public class IterationCounter implements Iterator<IterationCounter.IterationPlan
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(indexes);
+            return java.util.Objects.hash((Object[]) indexes);
         }
     }
 }

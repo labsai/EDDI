@@ -57,7 +57,6 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     private final String streamName;
     private final String deadLetterStreamName;
     private final int maxRetries;
-    private final long ackWaitSeconds;
 
     private Connection natsConnection;
     private JetStream jetStream;
@@ -85,7 +84,6 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
         this.streamName = streamName;
         this.deadLetterStreamName = deadLetterStreamName;
         this.maxRetries = maxRetries;
-        this.ackWaitSeconds = ackWaitSeconds;
     }
 
     @PostConstruct

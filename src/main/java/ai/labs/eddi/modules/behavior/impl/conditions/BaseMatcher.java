@@ -74,6 +74,7 @@ public abstract class BaseMatcher implements IBehaviorCondition {
         this.occurrence = occurrence;
     }
 
+    @SuppressWarnings("rawtypes")
     interface ValueEvaluation {
         ExecutionState evaluate(IData data);
     }

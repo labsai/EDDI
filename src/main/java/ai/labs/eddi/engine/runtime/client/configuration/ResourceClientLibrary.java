@@ -179,6 +179,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         });
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public <T> T getResource(URI uri, Class<T> clazz) throws ServiceException {
         String type = uri.getHost();

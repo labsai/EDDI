@@ -52,6 +52,7 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public void filter(ContainerRequestContext contextRequest, ContainerResponseContext contextResponse) {
         try {
             int httpStatus = contextResponse.getStatus();
@@ -128,6 +129,7 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
         }
     }
 
+    @SuppressWarnings("rawtypes")
     private IDescriptorStore getDescriptorStore(String createdResourceURIString) {
         IDescriptorStore descriptorStore;
         if (createdResourceURIString.contains("testcases")) {

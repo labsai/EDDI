@@ -77,7 +77,6 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
 
     private RegularDictionary addConfigsToDictionary(RegularDictionaryConfiguration regularDictionaryConfiguration) {
         var regularDictionary = new RegularDictionary();
-        regularDictionary.setLanguageCode(regularDictionaryConfiguration.getLang());
         regularDictionary.setLookupIfKnown(true);
 
         regularDictionaryConfiguration.getWords().forEach(wordConfig -> {

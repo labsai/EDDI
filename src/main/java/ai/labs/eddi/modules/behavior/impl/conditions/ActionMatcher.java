@@ -18,7 +18,7 @@ import static ai.labs.eddi.modules.behavior.impl.conditions.IBehaviorCondition.E
 /**
  * @author ginccc
  */
-public class ActionMatcher extends BaseMatcher implements IBehaviorCondition {
+public class ActionMatcher extends BaseMatcher {
     public static final String ID = "actionmatcher";
     private static final String KEY_ACTIONS = "actions";
 

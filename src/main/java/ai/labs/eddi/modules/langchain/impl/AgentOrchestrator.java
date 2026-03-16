@@ -275,30 +275,26 @@ class AgentOrchestrator {
         }
 
         List<String> whitelist = task.getBuiltInToolsWhitelist();
-        boolean hasWhitelist = whitelist != null && !whitelist.isEmpty();
 
-        if (!hasWhitelist || whitelist.contains("calculator")) {
+        if (whitelist != null && !whitelist.isEmpty()) {
+            // Only add tools that are explicitly listed in the whitelist
+            if (whitelist.contains("calculator")) tools.add(calculatorTool);
+            if (whitelist.contains("datetime")) tools.add(dateTimeTool);
+            if (whitelist.contains("websearch")) tools.add(webSearchTool);
+            if (whitelist.contains("dataformatter")) tools.add(dataFormatterTool);
+            if (whitelist.contains("webscraper")) tools.add(webScraperTool);
+            if (whitelist.contains("textsummarizer")) tools.add(textSummarizerTool);
+            if (whitelist.contains("pdfreader")) tools.add(pdfReaderTool);
+            if (whitelist.contains("weather")) tools.add(weatherTool);
+        } else {
+            // No whitelist — add all built-in tools
             tools.add(calculatorTool);
-        }
-        if (!hasWhitelist || whitelist.contains("datetime")) {
             tools.add(dateTimeTool);
-        }
-        if (!hasWhitelist || whitelist.contains("websearch")) {
             tools.add(webSearchTool);
-        }
-        if (!hasWhitelist || whitelist.contains("dataformatter")) {
             tools.add(dataFormatterTool);
-        }
-        if (!hasWhitelist || whitelist.contains("webscraper")) {
             tools.add(webScraperTool);
-        }
-        if (!hasWhitelist || whitelist.contains("textsummarizer")) {
             tools.add(textSummarizerTool);
-        }
-        if (!hasWhitelist || whitelist.contains("pdfreader")) {
             tools.add(pdfReaderTool);
-        }
-        if (!hasWhitelist || whitelist.contains("weather")) {
             tools.add(weatherTool);
         }
 

@@ -2,7 +2,6 @@ package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.HistorizedResourceStore;
-import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.client.MongoDatabase;
@@ -21,12 +20,13 @@ import com.mongodb.client.MongoDatabase;
  * @deprecated Use {@link AbstractResourceStore} with {@link ai.labs.eddi.datastore.IResourceStorageFactory} instead
  */
 @Deprecated
-public abstract class AbstractMongoResourceStore<T> extends AbstractResourceStore<T> implements IResourceStore<T> {
+public abstract class AbstractMongoResourceStore<T> extends AbstractResourceStore<T> {
 
     /**
      * No-args constructor required by CDI for proxy creation of
      * {@code @ApplicationScoped} subclasses.
      */
+    @Deprecated
     protected AbstractMongoResourceStore() {
         super();
     }
@@ -51,6 +51,7 @@ public abstract class AbstractMongoResourceStore<T> extends AbstractResourceStor
      * Used by BotStore and PackageStore which have inner classes extending
      * MongoResourceStorage.
      */
+    @Deprecated
     protected AbstractMongoResourceStore(HistorizedResourceStore<T> resourceStore) {
         super(resourceStore);
     }

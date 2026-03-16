@@ -82,7 +82,8 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                 for (var lifecycleTask : aPackage.getLifecycleTasks()) {
                     if (lifecycleTask.getKey().startsWith(KEY_CONTEXT)) {
                         var result = lifecycleTask.getResult();
-                        if (result instanceof LinkedHashMap) {
+                        if (result instanceof LinkedHashMap<?, ?>) {
+                            @SuppressWarnings("unchecked")
                             var map = (LinkedHashMap<String, Object>) result;
                             var context = new Context(valueOf(map.get(KEY_TYPE).toString()), map.get(KEY_VALUE));
                             lifecycleTask.setResult(context);

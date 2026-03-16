@@ -64,6 +64,4 @@ public class PermutationTest {
         Assertions.assertArrayEquals(new Integer[]{1, 0, 0}, permutationIterator.next());
         Assertions.assertFalse(permutationIterator.hasNext());
     }
-
-    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(PermutationTest.class);
 }

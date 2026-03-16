@@ -266,8 +266,8 @@ public class BotFactory implements IBotFactory {
     }
 
     private static class BotId {
-        private String id;
-        private Integer version;
+        private final String id;
+        private final Integer version;
 
         @Override
         public String toString() {
@@ -283,16 +283,8 @@ public class BotFactory implements IBotFactory {
             return id;
         }
 
-        public void setId(String id) {
-            this.id = id;
-        }
-
         public Integer getVersion() {
             return version;
-        }
-
-        public void setVersion(Integer version) {
-            this.version = version;
         }
 
         @Override

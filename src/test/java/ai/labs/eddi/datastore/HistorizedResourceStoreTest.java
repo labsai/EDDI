@@ -3,8 +3,6 @@ package ai.labs.eddi.datastore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -12,12 +10,12 @@ import static org.mockito.Mockito.*;
  * Tests that HistorizedResourceStore correctly manages versioning lifecycle
  * (create, read, update, delete) against a mocked IResourceStorage.
  */
+@SuppressWarnings("unchecked")
 class HistorizedResourceStoreTest {
 
     private IResourceStorage<String> storage;
     private HistorizedResourceStore<String> store;
 
-    @SuppressWarnings("unchecked")
     @BeforeEach
     void setUp() {
         storage = mock(IResourceStorage.class);

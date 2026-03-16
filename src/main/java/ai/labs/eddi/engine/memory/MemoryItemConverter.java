@@ -62,11 +62,13 @@ public class MemoryItemConverter implements IMemoryItemConverter {
         if (!isNullOrEmpty(id)) {
             if (ret.containsKey(keyInfo)) {
                 Object o = ret.get(keyInfo);
-                if (o instanceof Map map) {
+                if (o instanceof Map<?, ?>) {
+                    @SuppressWarnings("unchecked")
+                    var map = (Map<String, Object>) o;
                     map.put(keyId, id);
                 }
             } else {
-                var objectMap = new HashMap<>();
+                var objectMap = new HashMap<String, Object>();
                 objectMap.put(keyId, id);
                 ret.put(keyInfo, objectMap);
             }

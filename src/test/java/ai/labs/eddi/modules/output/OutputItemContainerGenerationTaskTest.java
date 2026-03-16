@@ -34,7 +34,6 @@ import static org.mockito.Mockito.*;
 public class OutputItemContainerGenerationTaskTest {
         private static final String ACTION_1 = "action1";
         private static final String ACTION_2 = "action2";
-        private static final String ACTION = "actions";
         private static final String SOME_ACTION_1 = "someAction1";
         private static final String SOME_ACTION_2 = "someAction2";
         private static final String SOME_OTHER_ACTION_1 = "someOtherAction1";
@@ -50,8 +49,8 @@ public class OutputItemContainerGenerationTaskTest {
         public static final String OUTPUT_TYPE_TEXT = "text";
         private static OutputGenerationTask outputGenerationTask;
         private static IResourceClientLibrary resourceClientLibrary;
-        private static IOutputGeneration outputGeneration;
         private static IDataFactory dataFactory;
+        private static IOutputGeneration outputGeneration;
 
         @BeforeEach
         public void setUp() {

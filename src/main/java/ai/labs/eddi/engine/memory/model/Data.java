@@ -50,7 +50,7 @@ public class Data<T> implements IData<T> {
 
     @Override
     public boolean equals(Object o) {
-        return this == o || o instanceof IData && key.equals(((Data) o).key);
+        return this == o || o instanceof Data<?> data && key.equals(data.key);
     }
 
     @Override

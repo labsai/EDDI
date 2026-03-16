@@ -67,13 +67,15 @@ public class RestExpression implements IRestExpression {
                     continue;
                 }
 
-                List<Map<String, Object>> extensions = (List<Map<String, Object>>) extensionTypes.get(extensionKey);
+                @SuppressWarnings("unchecked")
+                var extensions = (List<Map<String, Object>>) extensionTypes.get(extensionKey);
                 for (Map<String, Object> extension : extensions) {
                     if (!extension.containsKey("type") || !extension.get("type").toString().startsWith("eddi://ai.labs.parser.dictionaries.regular")) {
                         continue;
                     }
 
-                    Map<String, Object> config = (Map<String, Object>) extension.get("config");
+                    @SuppressWarnings("unchecked")
+                    var config = (Map<String, Object>) extension.get("config");
                     String uri = (String) config.get("uri");
                     resourceIds.add(RestUtilities.extractResourceId(URI.create(uri)));
                 }

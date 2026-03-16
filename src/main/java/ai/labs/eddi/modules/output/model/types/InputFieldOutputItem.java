@@ -44,34 +44,7 @@ public class InputFieldOutputItem extends OutputItem {
         return Objects.hash(subType, placeholder, label, defaultValue, validation);
     }
 
-    private static class Validation {
-        private Integer minLength;
-        private Integer maxLength;
-        private String validationErrorMessage;
-
-        public Integer getMinLength() {
-            return minLength;
-        }
-
-        public void setMinLength(Integer minLength) {
-            this.minLength = minLength;
-        }
-
-        public Integer getMaxLength() {
-            return maxLength;
-        }
-
-        public void setMaxLength(Integer maxLength) {
-            this.maxLength = maxLength;
-        }
-
-        public String getValidationErrorMessage() {
-            return validationErrorMessage;
-        }
-
-        public void setValidationErrorMessage(String validationErrorMessage) {
-            this.validationErrorMessage = validationErrorMessage;
-        }
+    private record Validation(Integer minLength, Integer maxLength, String validationErrorMessage) {
     }
 
     public String getSubType() {

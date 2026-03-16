@@ -60,7 +60,8 @@ public class PostgresPropertiesStore implements IPropertiesStore {
                     // Parse the JSON into Properties (which extends LinkedHashMap)
                     Properties props = new Properties();
                     if (json != null && !json.isEmpty() && !json.equals("{}")) {
-                        var map = new com.fasterxml.jackson.databind.ObjectMapper()
+                        @SuppressWarnings("unchecked")
+                        var map = (java.util.Map<String, Object>) new com.fasterxml.jackson.databind.ObjectMapper()
                                 .readValue(json, java.util.Map.class);
                         if (map != null) {
                             props.putAll(map);
@@ -81,8 +82,8 @@ public class PostgresPropertiesStore implements IPropertiesStore {
         if (properties == null || properties.isEmpty()) return;
 
         Properties existing = readProperties(userId);
+        Properties current = (existing != null) ? existing : new Properties();
         boolean create = (existing == null);
-        Properties current = create ? new Properties() : existing;
         current.putAll(properties);
 
         try {

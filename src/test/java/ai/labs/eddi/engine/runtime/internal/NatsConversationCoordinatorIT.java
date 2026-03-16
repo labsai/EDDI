@@ -136,11 +136,10 @@ class NatsConversationCoordinatorIT {
     @Test
     @DisplayName("should route to dead-letter after max retries exhausted")
     void deadLetterAfterMaxRetries() throws Exception {
-        CountDownLatch deadLettered = new CountDownLatch(1);
         String convId = "conv-dead-letter-test";
 
         // Subscribe to dead-letter subject to verify routing
-        JetStream js = directConnection.jetStream();
+        directConnection.jetStream();
         JetStreamManagement jsm = directConnection.jetStreamManagement();
 
         // Create a consumer on the dead-letter stream

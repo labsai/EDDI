@@ -99,7 +99,7 @@ public interface IConversationMemory extends Serializable {
 
         Set<String> getAllKeys();
 
-        List<IData> getAllElements();
+        List<IData<?>> getAllElements();
 
         int size();
 
@@ -114,7 +114,7 @@ public interface IConversationMemory extends Serializable {
     }
 
     interface IWritableConversationStep extends IConversationStep {
-        void storeData(IData element);
+        void storeData(IData<?> element);
 
         /**
          * Type-safe store: creates a {@link IData} wrapper, sets the public flag
@@ -134,7 +134,7 @@ public interface IConversationMemory extends Serializable {
 
         void addConversationOutputString(String key, String value);
 
-        void addConversationOutputList(String key, List list);
+        void addConversationOutputList(String key, List<?> list);
 
         void addConversationOutputMap(String key, Map<String, Object> map);
     }

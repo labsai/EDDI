@@ -122,7 +122,7 @@ public class ConversationMemorySnapshot {
     public static class ResultSnapshot {
         private String key;
         private Object result;
-        private List possibleResults;
+        private List<?> possibleResults;
         private Date timestamp;
         private String originPackageId;
         private boolean isPublic;
@@ -150,7 +150,7 @@ public class ConversationMemorySnapshot {
         public ResultSnapshot() {
         }
 
-        public ResultSnapshot(String key, Object result, List possibleResults, Date timestamp, String originPackageId, boolean isPublic) {
+        public ResultSnapshot(String key, Object result, List<?> possibleResults, Date timestamp, String originPackageId, boolean isPublic) {
             this.key = key;
             this.result = result;
             this.possibleResults = possibleResults;
@@ -175,11 +175,11 @@ public class ConversationMemorySnapshot {
             this.result = result;
         }
 
-        public List getPossibleResults() {
+        public List<?> getPossibleResults() {
             return possibleResults;
         }
 
-        public void setPossibleResults(List possibleResults) {
+        public void setPossibleResults(List<?> possibleResults) {
             this.possibleResults = possibleResults;
         }
 

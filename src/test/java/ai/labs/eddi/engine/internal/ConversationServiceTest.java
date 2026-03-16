@@ -336,7 +336,7 @@ class ConversationServiceTest {
                 new InputData("hello", Map.of()), false, handler);
 
         // Verify conversation was submitted to the coordinator
-        verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any(Callable.class));
+        verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
     }
 
     // --- createPropertiesHandler tests ---
@@ -374,7 +374,6 @@ class ConversationServiceTest {
                         new InputData("hello", Map.of()), handler));
     }
 
-    @SuppressWarnings("unchecked")
     @Test
     void sayStreaming_conversationEnded_throwsConversationEndedException() throws Exception {
         var snapshot = new ConversationMemorySnapshot();

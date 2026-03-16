@@ -311,37 +311,13 @@ public class HttpClientWrapper implements IHttpClient {
                     uri, method, requestBodyTruncated, maxLength, queryParamsMap);
         }
 
-        public final URI getUri() {
-            return uri;
-        }
 
-        public final HttpRequest<Buffer> getRequest() {
-            return request;
-        }
 
-        public final io.vertx.core.http.HttpMethod getMethod() {
-            return method;
-        }
 
-        public int getMaxLength() {
-            return maxLength;
-        }
 
-        public String getRequestBody() {
-            return requestBody;
-        }
 
-        public String getRequestEncoding() {
-            return requestEncoding;
-        }
 
-        public long getCurrentTimeout() {
-            return currentTimeout;
-        }
 
-        public final Map<String, List<String>> getQueryParamsMap() {
-            return queryParamsMap;
-        }
 
         @Override
         public boolean equals(Object o) {

@@ -90,19 +90,18 @@ public class ToolCostTracker {
      * Cost metrics for a conversation
      */
     public static class ConversationCostMetrics {
-        private final String conversationId;
         private final AtomicInteger toolCallCount = new AtomicInteger(0);
         private final DoubleAdder totalCost = new DoubleAdder();
         private final Map<String, Integer> toolUsage = new ConcurrentHashMap<>();
 
         public ConversationCostMetrics(String conversationId) {
-            this.conversationId = conversationId;
+            // conversationId is the map key in the parent; no need to store it here
         }
 
         public void addToolCost(String toolName, double cost) {
             toolCallCount.incrementAndGet();
             totalCost.add(cost);
-            toolUsage.merge(toolName, 1, Integer::sum);
+            toolUsage.merge(toolName, 1, (a, b) -> a + b);
         }
 
         public int getToolCallCount() {

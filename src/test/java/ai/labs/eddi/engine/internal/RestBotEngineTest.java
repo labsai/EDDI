@@ -1,6 +1,5 @@
 package ai.labs.eddi.engine.internal;
 
-import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.IConversationService;
 import ai.labs.eddi.engine.IConversationService.*;
@@ -18,7 +17,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
 import java.net.URI;
-import java.util.Collections;
 
 import static ai.labs.eddi.engine.model.Deployment.Environment.unrestricted;
 import static org.junit.jupiter.api.Assertions.*;

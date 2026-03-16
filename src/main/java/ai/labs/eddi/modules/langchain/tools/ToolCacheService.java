@@ -71,12 +71,10 @@ public class ToolCacheService {
     private static class CachedResult {
         final String result;
         final long cachedAt;
-        final String toolName;
 
         CachedResult(String result, String toolName) {
             this.result = result;
             this.cachedAt = System.currentTimeMillis();
-            this.toolName = toolName;
         }
     }
 

@@ -201,7 +201,7 @@ public class TestCaseRuntime {
         }
 
         @Override
-        public Map<Class<?>, Collection<Class<?>>> register(Class<?> callback, Class<?>[] callbacks) {
+        public Map<Class<?>, Collection<Class<?>>> register(Class<?> callback, Class<?>... callbacks) {
             return null;
         }
 

@@ -224,6 +224,7 @@ public class MigrationManager implements IMigrationManager {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public IDocumentMigration migratePropertySetter() {
         return document -> {
             try {
@@ -252,6 +253,7 @@ public class MigrationManager implements IMigrationManager {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public IDocumentMigration migrateHttpCalls() {
         return document -> {
             try {
@@ -311,7 +313,7 @@ public class MigrationManager implements IMigrationManager {
                     value = "[# th:with=\"uuid=${@java.util.UUID@randomUUID()}\"][[${uuid}]][/]";
                 }
                 propertyInstruction.put(FIELD_NAME_VALUE_STRING, value);
-            } else if (value instanceof Map) {
+            } else if (value instanceof Map<?, ?>) {
                 propertyInstruction.put(FIELD_NAME_VALUE_OBJECT, value);
             } else if (value instanceof Integer) {
                 propertyInstruction.put(FIELD_NAME_VALUE_INT, value);
@@ -331,6 +333,7 @@ public class MigrationManager implements IMigrationManager {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public IDocumentMigration migrateOutput() {
         return document -> {
             try {
@@ -350,16 +353,17 @@ public class MigrationManager implements IMigrationManager {
                                             var textOutput = new TextOutputItem(valueAlternative.toString());
                                             valueAlternatives.set(i, textOutput);
                                             convertedOutput = true;
-                                        } else if (valueAlternative instanceof Map outputValue) {
+                                        } else if (valueAlternative instanceof Map<?, ?>) {
+                                            var outputValue = (Map<String, Object>) valueAlternative;
                                             var type = outputValue.get(FIELD_NAME_TYPE);
                                             if (isNullOrEmpty(type) || type.equals(FIELD_NAME_OTHER)) {
                                                 if (!isNullOrEmpty(outputValue.get(FIELD_NAME_TEXT))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_TEXT);
-                                                } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_URI))) {
+                                                } else if (!isNullOrEmpty(outputValue.get(FIELD_NAME_URI))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_IMAGE);
-                                                } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_EXPRESSIONS))) {
+                                                } else if (!isNullOrEmpty(outputValue.get(FIELD_NAME_EXPRESSIONS))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_QUICK_REPLY);
-                                                } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_PLACEHOLDER))) {
+                                                } else if (!isNullOrEmpty(outputValue.get(FIELD_NAME_PLACEHOLDER))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_INPUT_FIELD);
                                                     if (outputValue.containsKey(OLD_FIELD_NAME_IS_PASSWORD)) {
                                                         var isPassword =
@@ -368,7 +372,7 @@ public class MigrationManager implements IMigrationManager {
                                                             outputValue.put(FIELD_NAME_SUB_TYPE, "password");
                                                         }
                                                     }
-                                                } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_ON_PRESS))) {
+                                                } else if (!isNullOrEmpty(outputValue.get(FIELD_NAME_ON_PRESS))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_BUTTON);
                                                 } else {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_OTHER);
@@ -443,6 +447,7 @@ public class MigrationManager implements IMigrationManager {
         toBeRemoved.forEach(outputValue::remove);
     }
 
+    @SuppressWarnings("unchecked")
     private IDocumentMigration migrateConversationMemory() {
         return document -> {
             try {
@@ -478,6 +483,7 @@ public class MigrationManager implements IMigrationManager {
         }
 
         if (isHistory) {
+            @SuppressWarnings("unchecked")
             var idObj = (Map<String, Object>) document.get(ID_FIELD);
             id = idObj.get(ID_FIELD).toString();
 

@@ -27,7 +27,7 @@ public interface IResourceStorage<T> {
 
     IHistoryResource<T> readHistoryLatest(String id);
 
-    IHistoryResource<T> newHistoryResourceFor(IResource resource, boolean deleted);
+    IHistoryResource<T> newHistoryResourceFor(IResource<T> resource, boolean deleted);
 
     void store(IHistoryResource<T> history);
 

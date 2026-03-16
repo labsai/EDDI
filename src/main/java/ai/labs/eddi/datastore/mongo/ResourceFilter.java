@@ -56,8 +56,6 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
     }
 
     private BsonDocument createQuery(QueryFilters[] allQueryFilters) {
-        BsonDocument filter = new BsonDocument();
-
         List<Bson> connectedFilters = new ArrayList<>();
         for (QueryFilters queryFilters : allQueryFilters) {
             List<Bson> filters = new ArrayList<>();

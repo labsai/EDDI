@@ -102,7 +102,7 @@ class HttpCallExecutorTest {
         when(jsonSerialization.deserialize("{\"key\":\"value\"}", Object.class)).thenReturn(parsed);
 
         // When
-        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
         // Then: should still deserialize as JSON after charset stripping
         verify(jsonSerialization).deserialize("{\"key\":\"value\"}", Object.class);
@@ -149,7 +149,7 @@ class HttpCallExecutorTest {
         when(mockResponse.getHttpHeader()).thenReturn(headers);
 
         // When
-        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
         // Then: should treat as non-JSON (actualContentType = "<not-present>")
         verify(jsonSerialization, never()).deserialize(any(), any());

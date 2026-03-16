@@ -93,8 +93,9 @@ public class ConversationMemoryUtilities {
             conversationSteps.add(conversationStep);
             for (var packageRunSnapshot : redoStep.getPackages()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
-                    var data = new Data(resultSnapshot.getKey(), resultSnapshot.getResult(),
-                            resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(),
+                    @SuppressWarnings("unchecked")
+                    var data = new Data<Object>(resultSnapshot.getKey(), resultSnapshot.getResult(),
+                            (List<Object>) resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(),
                             resultSnapshot.isPublic());
                     conversationStep.storeData(data);
                 }
@@ -129,8 +130,9 @@ public class ConversationMemoryUtilities {
             var conversationStepSnapshot = conversationSteps.get(i);
             for (var packageRunSnapshot : conversationStepSnapshot.getPackages()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
-                    var data = new Data(resultSnapshot.getKey(), resultSnapshot.getResult(),
-                            resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(),
+                    @SuppressWarnings("unchecked")
+                    var data = new Data<Object>(resultSnapshot.getKey(), resultSnapshot.getResult(),
+                            (List<Object>) resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(),
                             resultSnapshot.isPublic());
                     conversationMemory.getCurrentStep().storeData(data);
                 }
@@ -278,7 +280,7 @@ public class ConversationMemoryUtilities {
             if (context != null) {
                 var contextType = context.getType();
                 switch (contextType) {
-                    case object, array, string -> dynamicAttributesMap.put(key, context.getValue());
+                    case object, array, string, expressions -> dynamicAttributesMap.put(key, context.getValue());
                 }
             } else {
                 dynamicAttributesMap.put(key, null);

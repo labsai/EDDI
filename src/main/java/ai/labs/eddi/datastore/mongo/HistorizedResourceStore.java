@@ -10,6 +10,7 @@ import ai.labs.eddi.datastore.IResourceStorage;
  */
 @Deprecated
 public class HistorizedResourceStore<T> extends ai.labs.eddi.datastore.HistorizedResourceStore<T> {
+    @Deprecated
     public HistorizedResourceStore(IResourceStorage<T> resourceStore) {
         super(resourceStore);
     }

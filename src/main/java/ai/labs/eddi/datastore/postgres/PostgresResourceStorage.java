@@ -243,7 +243,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
-    public IHistoryResource<T> newHistoryResourceFor(IResource resource, boolean deleted) {
+    public IHistoryResource<T> newHistoryResourceFor(IResource<T> resource, boolean deleted) {
         Resource pgResource = checkInternalResource(resource);
         return new HistoryResource(
                 pgResource.getId(), pgResource.getVersion(),

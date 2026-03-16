@@ -37,27 +37,11 @@ public class PackageFactory implements IPackageFactory {
     }
 
     private class PackageId {
-        private String id;
-        private Integer version;
+        private final String id;
+        private final Integer version;
 
         private PackageId(String id, Integer version) {
             this.id = id;
-            this.version = version;
-        }
-
-        public String getId() {
-            return id;
-        }
-
-        public void setId(String id) {
-            this.id = id;
-        }
-
-        public Integer getVersion() {
-            return version;
-        }
-
-        public void setVersion(Integer version) {
             this.version = version;
         }
 

@@ -36,14 +36,14 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     protected IDocumentBuilder documentBuilder;
 
     public MongoResourceStorage(MongoDatabase database, String collectionName,
-                                IDocumentBuilder documentBuilder,
-                                Class<T> documentType) {
+            IDocumentBuilder documentBuilder,
+            Class<T> documentType) {
         this(database, collectionName, documentBuilder, documentType, new String[0]);
     }
 
     public MongoResourceStorage(MongoDatabase database, String collectionName,
-                                IDocumentBuilder documentBuilder,
-                                Class<T> documentType, String... indexes) {
+            IDocumentBuilder documentBuilder,
+            Class<T> documentType, String... indexes) {
         checkNotNull(database, "database");
 
         this.documentType = documentType;
@@ -82,7 +82,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
-    public void store(IResource currentResource) {
+    public void store(IResource<T> currentResource) {
         Resource resource = checkInternalResource(currentResource);
         if (resource.getId() == null) {
             currentCollection.insertOne(resource.getMongoDocument());
@@ -95,11 +95,10 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
-    public void createNew(IResource currentResource) {
+    public void createNew(IResource<T> currentResource) {
         Resource resource = checkInternalResource(currentResource);
         currentCollection.insertOne(resource.getMongoDocument());
     }
-
 
     @Override
     public IResource<T> read(String id, Integer version) {
@@ -178,7 +177,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
-    public IHistoryResource<T> newHistoryResourceFor(IResource resource, boolean deleted) {
+    public IHistoryResource<T> newHistoryResourceFor(IResource<T> resource, boolean deleted) {
         Resource mongoResource = checkInternalResource(resource);
         Document historyObject = new Document(mongoResource.getMongoDocument());
 
@@ -204,7 +203,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
-    public void store(IHistoryResource resource) {
+    public void store(IHistoryResource<T> resource) {
         HistoryResource historyResource = checkInternalHistoryResource(resource);
         historyCollection.insertOne(historyResource.getMongoDocument());
     }
@@ -282,21 +281,26 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     private static IResourceStore.IResourceId createResourceId(String id, Integer version) {
         return new IResourceStore.IResourceId() {
             @Override
-            public String getId() { return id; }
+            public String getId() {
+                return id;
+            }
+
             @Override
-            public Integer getVersion() { return version; }
+            public Integer getVersion() {
+                return version;
+            }
         };
     }
 
-    private Resource checkInternalResource(IResource currentResource) {
-        if (!(currentResource instanceof MongoResourceStorage.Resource)) {
+    private Resource checkInternalResource(IResource<T> currentResource) {
+        if (!(currentResource instanceof MongoResourceStorage<?>.Resource)) {
             throw new IllegalArgumentException("Resource must not be implemented externally.");
         }
         return (Resource) currentResource;
     }
 
-    private HistoryResource checkInternalHistoryResource(IHistoryResource resource) {
-        if (!(resource instanceof MongoResourceStorage.HistoryResource)) {
+    private HistoryResource checkInternalHistoryResource(IHistoryResource<T> resource) {
+        if (!(resource instanceof MongoResourceStorage<?>.HistoryResource)) {
             throw new IllegalArgumentException("HistoryResource must not be implemented externally.");
         }
         return (HistoryResource) resource;

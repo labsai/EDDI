@@ -3,14 +3,11 @@ package ai.labs.eddi.modules.langchain.tools.impl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.time.format.DateTimeFormatter;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 class DateTimeToolTest {
 
     private DateTimeTool dateTimeTool;
-    private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_DATE_TIME;
 
     @BeforeEach
     void setUp() {

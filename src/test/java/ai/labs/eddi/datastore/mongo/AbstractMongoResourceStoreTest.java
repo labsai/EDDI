@@ -12,6 +12,7 @@ import static org.mockito.Mockito.*;
  * Tests that AbstractMongoResourceStore correctly delegates all CRUD operations
  * to the underlying HistorizedResourceStore.
  */
+@SuppressWarnings("deprecation")
 class AbstractMongoResourceStoreTest {
 
     private HistorizedResourceStore<String> historizedStore;
