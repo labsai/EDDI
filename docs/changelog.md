@@ -48,6 +48,36 @@ Frontend implementation of the secret input system, enabling both backend-driven
 
 ---
 
+### Manager — Secrets Admin Page (2026-03-17)
+
+**Repo:** EDDI-Manager (`feature/version-6.0.0`)  
+**Commit:** `2e4ec47`
+
+**What changed:**
+
+Added a dedicated Secrets Admin page at `/manage/secrets` for managing vault entries through the Manager UI.
+
+| Component | Change |
+|---|---|
+| `secrets.ts` (new) | API module: `listSecrets`, `storeSecret`, `deleteSecret`, `getVaultHealth` |
+| `use-secrets.ts` (new) | TanStack Query hooks: `useSecrets`, `useStoreSecret`, `useDeleteSecret`, `useVaultHealth` |
+| `secrets.tsx` (new) | Full page: namespace selectors (tenantId/botId), secrets table with metadata, create dialog (password input + eye toggle), delete confirmation, vault health badge |
+| `sidebar.tsx` | Added Secrets nav item (KeyRound icon) in Operations section |
+| `app.tsx` | Added `/manage/secrets` route |
+| `handlers.ts` | Added `secretsHandlers` with mock data (2 secrets, store/delete/health) |
+| `server.ts` | Registered `secretsHandlers` in MSW server |
+| 11 locale files | Added `nav.secrets` + 35 `secrets.*` i18n keys |
+
+**Security measures:**
+- Secret values are **write-only** — backend API never returns plaintext
+- `autoComplete="off"` on key name input, `autoComplete="new-password"` on value input
+- React state cleared immediately on dialog close/submit
+- Password field masked by default with optional eye toggle
+
+**Testing:** ✅ 19/19 tests pass, TypeScript zero errors.
+
+---
+
 ### Backend — Secrets Vault Hardening + Secret Input
 
 **Repo:** EDDI (`feature/version-6.0.0`)
