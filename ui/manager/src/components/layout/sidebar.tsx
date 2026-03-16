@@ -16,6 +16,7 @@ import {
   Activity,
   Trash2,
   ScrollText,
+  KeyRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -58,6 +59,11 @@ const navSections = [
         path: "/manage/orphans",
         icon: Trash2,
         labelKey: "nav.orphans",
+      },
+      {
+        path: "/manage/secrets",
+        icon: KeyRound,
+        labelKey: "nav.secrets",
       },
     ],
   },

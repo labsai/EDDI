@@ -1143,3 +1143,57 @@ export const logAdminHandlers = [
     return HttpResponse.json({ instanceId: "eddi-host-a1b2" });
   }),
 ];
+
+// --- Secrets Vault Mock ---
+const MOCK_SECRETS = [
+  {
+    tenantId: "default",
+    botId: "bot1",
+    keyName: "apiKey",
+    createdAt: new Date(Date.now() - 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 3600000).toISOString(),
+    checksum: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+  },
+  {
+    tenantId: "default",
+    botId: "bot1",
+    keyName: "dbPassword",
+    createdAt: new Date(Date.now() - 172800000).toISOString(),
+    lastAccessedAt: null,
+    checksum: "f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5",
+  },
+];
+
+export const secretsHandlers = [
+  // List secrets
+  http.get("*/secretstore/secrets/:tenantId/:botId", ({ params }) => {
+    const filtered = MOCK_SECRETS.filter(
+      (s) => s.tenantId === params.tenantId && s.botId === params.botId,
+    );
+    return HttpResponse.json(filtered);
+  }),
+
+  // Store secret
+  http.put("*/secretstore/secrets/:tenantId/:botId/:keyName", ({ params }) => {
+    return HttpResponse.json(
+      {
+        reference: `\${eddivault:${params.tenantId}.${params.botId}.${params.keyName}}`,
+        tenantId: params.tenantId,
+        botId: params.botId,
+        keyName: params.keyName,
+      },
+      { status: 201 },
+    );
+  }),
+
+  // Delete secret
+  http.delete(
+    "*/secretstore/secrets/:tenantId/:botId/:keyName",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+
+  // Health check
+  http.get("*/secretstore/secrets/health", () =>
+    HttpResponse.json({ status: "UP", provider: "DatabaseSecretProvider", available: true }),
+  ),
+];
