@@ -1,8 +1,8 @@
 # EDDI Manager — Handoff Document
 
-> **Last updated**: 2026-03-14  
+> **Last updated**: 2026-03-16  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: ContentEditor component — Monaco-based content editing with fullscreen expand
+> **Last commit**: Secrets Admin page, chat UI secret input, comprehensive test coverage
 
 ---
 
@@ -10,7 +10,8 @@
 
 **Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.21 complete.  
 **Phase 4 (Hardening)**: Phase 4.1 + 4.2 + 4.3 + 4.4 + 4.5 complete.  
-**Phase 5 (Backend features with Manager integration)**: Item 5.30 complete (Coordinator Dashboard).
+**Phase 5 (Backend features with Manager integration)**: Item 5.30 complete (Coordinator Dashboard).  
+**Phase 7 (Secrets Vault)**: Chat UI secret input + Manager Secrets Admin page complete.
 
 ### What's Done
 
@@ -45,7 +46,7 @@
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 208/208 pass (`npm run test`) — 26 files
+- **Unit/Component**: 220+ pass (`npm run test`) — 28 files (incl. `secrets.test.tsx` 12 tests)
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds
@@ -78,6 +79,8 @@
 - **Keycloak**: `docker-compose.keycloak.yml` (local dev), `keycloak/eddi-realm.json` (auto-import realm)
 - **Docker**: `docker-compose.integration.yml` (EDDI + MongoDB for integration tests)
 - **Coordinator**: `coordinator.tsx` (dashboard page), `api/coordinator.ts` (API module), `use-coordinator.ts` (SSE + TanStack hooks), `coordinator.test.tsx` (12 tests)
+- **Secrets Admin**: `secrets.tsx` (admin page at `/manage/secrets`), `api/secrets.ts` (API module), `use-secrets.ts` (TanStack hooks), `secrets.test.tsx` (12 tests)
+- **Chat Panel Secrets**: `SecretInputField` + `ChatInputWithSecretToggle` inline components in `chat-panel.tsx`, `extractInputField()` in `conversations.ts`
 
 ---
 
