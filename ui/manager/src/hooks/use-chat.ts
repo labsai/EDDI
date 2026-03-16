@@ -4,6 +4,7 @@ import {
   startConversation,
   readConversation,
   sendMessage,
+  sendMessageWithContext,
   sendMessageStreaming,
   endConversation as endConversationApi,
   undoConversation as undoConversationApi,
@@ -14,8 +15,10 @@ import {
 import {
   getConversationDescriptors,
   type SimpleConversationMemorySnapshot,
+  type InputField,
   extractInput,
   extractOutput,
+  extractInputField,
   extractQuickReplies,
 } from "@/lib/api/conversations";
 import {
@@ -38,6 +41,10 @@ interface ChatState {
   undoAvailable: boolean;
   redoAvailable: boolean;
   quickReplies: string[];
+  /** Set when the backend requests a specific input field (e.g. password). */
+  activeInputField: InputField | null;
+  /** Set when the user toggles the 🔒 secret mode on the chat input. */
+  isSecretMode: boolean;
 
   // Actions
   setSelectedBot: (botId: string | null, botName: string | null) => void;
@@ -52,6 +59,9 @@ interface ChatState {
   setUndoRedo: (undo: boolean, redo: boolean) => void;
   setQuickReplies: (replies: string[]) => void;
   replaceMessages: (messages: ChatMessage[]) => void;
+  setInputField: (field: InputField) => void;
+  clearInputField: () => void;
+  toggleSecretMode: () => void;
   reset: () => void;
 }
 
@@ -74,6 +84,8 @@ export const useChatStore = create<ChatState>((set) => ({
   undoAvailable: false,
   redoAvailable: false,
   quickReplies: [],
+  activeInputField: null,
+  isSecretMode: false,
 
   setSelectedBot: (botId, botName) =>
     set({
@@ -123,13 +135,19 @@ export const useChatStore = create<ChatState>((set) => ({
       return { streamingEnabled: next };
     }),
 
-  clearMessages: () => set({ messages: [], conversationId: null, undoAvailable: false, redoAvailable: false, quickReplies: [] }),
+  clearMessages: () => set({ messages: [], conversationId: null, undoAvailable: false, redoAvailable: false, quickReplies: [], activeInputField: null, isSecretMode: false }),
 
   setUndoRedo: (undo, redo) => set({ undoAvailable: undo, redoAvailable: redo }),
 
   setQuickReplies: (replies) => set({ quickReplies: replies }),
 
   replaceMessages: (messages) => set({ messages }),
+
+  setInputField: (field) => set({ activeInputField: field }),
+
+  clearInputField: () => set({ activeInputField: null }),
+
+  toggleSecretMode: () => set((s) => ({ isSecretMode: !s.isSecretMode })),
 
   reset: () =>
     set({
@@ -142,6 +160,8 @@ export const useChatStore = create<ChatState>((set) => ({
       undoAvailable: false,
       redoAvailable: false,
       quickReplies: [],
+      activeInputField: null,
+      isSecretMode: false,
     }),
 }));
 
@@ -227,25 +247,31 @@ export function useStartConversation() {
   });
 }
 
-/** Send a message — auto-branches between streaming and non-streaming. */
+/** Send a message — auto-branches between streaming and non-streaming.
+ *  Supports secret mode: masks user message and sends secretInput context. */
 export function useSendMessage() {
   const store = useChatStore;
   return useMutation({
-    mutationFn: async ({ message }: { message: string }) => {
+    mutationFn: async ({ message, isSecret }: { message: string; isSecret?: boolean }) => {
       const state = store.getState();
       const { selectedBotId, conversationId, streamingEnabled } = state;
       if (!selectedBotId || !conversationId) {
         throw new Error("No active conversation");
       }
 
-      // Add user message
+      // Add user message (masked if secret)
       state.addMessage({
         id: `user-${Date.now()}`,
         role: "user",
-        content: message,
+        content: isSecret ? "●●●●●●●●" : message,
         timestamp: Date.now(),
       });
       state.setProcessing(true);
+
+      // Clear input field state after send
+      if (isSecret) {
+        state.clearInputField();
+      }
 
       if (streamingEnabled) {
         // --- Streaming path ---
@@ -269,13 +295,26 @@ export function useSendMessage() {
         }
         state.finishStreaming();
       } else {
-        // --- Non-streaming path ---
-        const snapshot = await sendMessage(
-          "unrestricted",
-          selectedBotId,
-          conversationId,
-          message
-        );
+        // --- Non-streaming path — pass context for secret input ---
+        let snapshot;
+        if (isSecret) {
+          snapshot = await sendMessageWithContext(
+            "unrestricted",
+            selectedBotId,
+            conversationId,
+            {
+              input: message,
+              context: { secretInput: { type: "string", value: "true" } },
+            }
+          );
+        } else {
+          snapshot = await sendMessage(
+            "unrestricted",
+            selectedBotId,
+            conversationId,
+            message
+          );
+        }
 
         // Extract bot output from the last conversationOutput
         const lastOutput = snapshot.conversationOutputs?.[
@@ -290,6 +329,12 @@ export function useSendMessage() {
             content: output,
             timestamp: Date.now(),
           });
+        }
+
+        // Check for input field requests (e.g. password)
+        const inputField = extractInputField(lastOutput);
+        if (inputField) {
+          state.setInputField(inputField);
         }
 
         // Extract quick replies

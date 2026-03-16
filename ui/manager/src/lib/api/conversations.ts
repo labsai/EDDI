@@ -94,6 +94,36 @@ export function extractOutput(conversationOutput?: ConversationOutput): string |
   return texts.length > 0 ? texts.join("\n") : undefined;
 }
 
+/** An input field requested by the backend (from InputFieldOutputItem). */
+export interface InputField {
+  subType: string;       // "password" | "text" | "email" etc.
+  placeholder?: string;
+  label?: string;
+  defaultValue?: string;
+}
+
+/** Extract an input field request from a conversationOutput, if present.
+ *  The backend sends InputFieldOutputItem with type "inputField" in the output array. */
+export function extractInputField(conversationOutput?: ConversationOutput): InputField | undefined {
+  if (!conversationOutput) return undefined;
+
+  const outputArray = conversationOutput.output;
+  if (!Array.isArray(outputArray)) return undefined;
+
+  for (const item of outputArray) {
+    if (item && typeof item === "object" && (item as Record<string, unknown>).type === "inputField") {
+      const obj = item as Record<string, unknown>;
+      return {
+        subType: (obj.subType as string) || "password",
+        placeholder: obj.placeholder as string | undefined,
+        label: obj.label as string | undefined,
+        defaultValue: obj.defaultValue as string | undefined,
+      };
+    }
+  }
+  return undefined;
+}
+
 /** Extract quick reply values from a conversationOutput */
 export function extractQuickReplies(conversationOutput?: ConversationOutput): string[] {
   if (!conversationOutput) return [];

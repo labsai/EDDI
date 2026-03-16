@@ -11,7 +11,6 @@ import {
   useRedoConversation,
 } from "@/hooks/use-chat";
 import { ChatMessage } from "./chat-message";
-import { ChatInput } from "./chat-input";
 import { ChatHistory } from "./chat-history";
 import { StreamingToggle } from "./streaming-toggle";
 import { cn } from "@/lib/utils";
@@ -25,6 +24,11 @@ import {
   Undo2,
   Redo2,
   Brain,
+  Lock,
+  Unlock,
+  Eye,
+  EyeOff,
+  Send,
 } from "lucide-react";
 
 export function ChatPanel() {
@@ -47,6 +51,10 @@ export function ChatPanel() {
   const redoAvailable = useChatStore((s) => s.redoAvailable);
   const quickReplies = useChatStore((s) => s.quickReplies);
   const setSelectedBot = useChatStore((s) => s.setSelectedBot);
+  const activeInputField = useChatStore((s) => s.activeInputField);
+  const isSecretMode = useChatStore((s) => s.isSecretMode);
+  const toggleSecretMode = useChatStore((s) => s.toggleSecretMode);
+  const clearInputField = useChatStore((s) => s.clearInputField);
 
   // Queries & mutations
   const { data: deployedBots, isLoading: botsLoading } = useDeployedBots();
@@ -111,8 +119,8 @@ export function ChatPanel() {
   }, [selectedBotId, startConversation]);
 
   const handleSend = useCallback(
-    (message: string) => {
-      sendMessage.mutate({ message });
+    (message: string, isSecret?: boolean) => {
+      sendMessage.mutate({ message, isSecret });
     },
     [sendMessage]
   );
@@ -323,12 +331,266 @@ export function ChatPanel() {
           </div>
         )}
 
-        {/* Input */}
-        <ChatInput
-          onSend={handleSend}
-          disabled={!conversationId}
-          isProcessing={isProcessing}
-        />
+        {/* Input — show SecretInput when backend requests it or user toggles 🔒 */}
+        {activeInputField ? (
+          <SecretInputField
+            label={activeInputField.label}
+            placeholder={activeInputField.placeholder}
+            defaultValue={activeInputField.defaultValue}
+            subType={activeInputField.subType}
+            onSend={(val) => {
+              handleSend(val, true);
+              clearInputField();
+            }}
+            disabled={isProcessing}
+          />
+        ) : (
+          <ChatInputWithSecretToggle
+            onSend={handleSend}
+            disabled={!conversationId}
+            isProcessing={isProcessing}
+            isSecretMode={isSecretMode}
+            onToggleSecret={toggleSecretMode}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Inline sub-components ──────────────────── */
+
+/** Password input field rendered when backend requests InputFieldOutputItem */
+function SecretInputField({
+  label,
+  placeholder,
+  defaultValue = "",
+  subType = "password",
+  onSend,
+  disabled = false,
+}: {
+  label?: string;
+  placeholder?: string;
+  defaultValue?: string;
+  subType?: string;
+  onSend: (value: string) => void;
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  const [value, setValue] = useState(defaultValue);
+  const [visible, setVisible] = useState(false);
+
+  const handleSubmit = () => {
+    const trimmed = value.trim();
+    if (!trimmed || disabled) return;
+    onSend(trimmed);
+    setValue("");
+  };
+
+  const inputType = visible ? "text" : (subType || "password");
+
+  return (
+    <div className="border-t border-border bg-background p-4">
+      {label && (
+        <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-primary" data-testid="secret-input-label">
+          <Lock className="h-3.5 w-3.5" />
+          {label}
+        </div>
+      )}
+      <div className="flex items-end gap-2">
+        <div className="relative flex-1">
+          <input
+            type={inputType}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit();
+              }
+            }}
+            placeholder={placeholder || t("chat.secretPlaceholder", "Enter secret value...")}
+            disabled={disabled}
+            autoFocus
+            autoComplete="off"
+            className={cn(
+              "w-full rounded-xl border border-primary/60 bg-card px-4 py-3 pe-10 text-sm",
+              "placeholder:text-muted-foreground",
+              "focus:outline-none focus:ring-2 focus:ring-primary/30",
+              "disabled:cursor-not-allowed disabled:opacity-50"
+            )}
+            data-testid="secret-input-field"
+          />
+          <button
+            type="button"
+            onClick={() => setVisible(!visible)}
+            className="absolute inset-e-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            title={visible ? t("chat.hide", "Hide") : t("chat.show", "Show")}
+            data-testid="secret-input-eye"
+          >
+            {visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+          </button>
+        </div>
+        <button
+          onClick={handleSubmit}
+          disabled={!value.trim() || disabled}
+          className={cn(
+            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-colors",
+            value.trim() && !disabled
+              ? "bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+              : "bg-muted text-muted-foreground cursor-not-allowed"
+          )}
+          data-testid="secret-input-send"
+        >
+          <Send className="h-5 w-5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** ChatInput enhanced with 🔒/🔓 secret mode toggle */
+function ChatInputWithSecretToggle({
+  onSend,
+  disabled = false,
+  isProcessing = false,
+  isSecretMode,
+  onToggleSecret,
+}: {
+  onSend: (message: string, isSecret?: boolean) => void;
+  disabled?: boolean;
+  isProcessing?: boolean;
+  isSecretMode: boolean;
+  onToggleSecret: () => void;
+}) {
+  const { t } = useTranslation();
+  const [value, setValue] = useState("");
+  const [secretVisible, setSecretVisible] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleSend = useCallback(() => {
+    const trimmed = value.trim();
+    if (!trimmed || disabled || isProcessing) return;
+    onSend(trimmed, isSecretMode);
+    setValue("");
+    if (isSecretMode) {
+      onToggleSecret();
+      setSecretVisible(false);
+    }
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
+  }, [value, disabled, isProcessing, isSecretMode, onSend, onToggleSecret]);
+
+  const handleInput = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, []);
+
+  const canSend = value.trim().length > 0 && !disabled && !isProcessing;
+
+  return (
+    <div className="border-t border-border bg-background p-4">
+      <div className="flex items-end gap-2">
+        {/* 🔒 Secret mode toggle */}
+        <button
+          type="button"
+          onClick={onToggleSecret}
+          className={cn(
+            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-colors",
+            isSecretMode
+              ? "bg-primary/10 text-primary"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          )}
+          title={isSecretMode ? t("chat.secretModeOn", "Secret mode ON") : t("chat.secretModeOff", "Toggle secret mode")}
+          data-testid="chat-secret-toggle"
+        >
+          {isSecretMode ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+        </button>
+
+        {isSecretMode ? (
+          /* Secret mode: password input with eye toggle */
+          <div className="relative flex-1">
+            <input
+              type={secretVisible ? "text" : "password"}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              placeholder={t("chat.secretPlaceholder", "Enter secret value...")}
+              disabled={disabled}
+              autoComplete="off"
+              className={cn(
+                "w-full rounded-xl border border-primary/60 bg-card px-4 py-3 pe-10 text-sm",
+                "placeholder:text-muted-foreground",
+                "focus:outline-none focus:ring-2 focus:ring-primary/30",
+                "disabled:cursor-not-allowed disabled:opacity-50",
+                "min-h-[44px]"
+              )}
+              data-testid="chat-input"
+            />
+            <button
+              type="button"
+              onClick={() => setSecretVisible(!secretVisible)}
+              className="absolute inset-e-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              data-testid="chat-eye-toggle"
+            >
+              {secretVisible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+            </button>
+          </div>
+        ) : (
+          /* Normal mode: auto-growing textarea */
+          <textarea
+            ref={textareaRef}
+            data-testid="chat-input"
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              handleInput();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            placeholder={t("chat.placeholder")}
+            disabled={disabled}
+            rows={1}
+            className={cn(
+              "flex-1 resize-none rounded-xl border border-input bg-card px-4 py-3 text-sm",
+              "placeholder:text-muted-foreground",
+              "focus:outline-none focus:ring-2 focus:ring-ring",
+              "disabled:cursor-not-allowed disabled:opacity-50",
+              "max-h-40 min-h-[44px]"
+            )}
+          />
+        )}
+
+        <button
+          onClick={handleSend}
+          disabled={!canSend}
+          className={cn(
+            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-colors",
+            canSend
+              ? "bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+              : "bg-muted text-muted-foreground cursor-not-allowed"
+          )}
+          aria-label={t("chat.send")}
+          data-testid="chat-send"
+        >
+          {isProcessing ? (
+            <Loader2 className="h-5 w-5 animate-spin" />
+          ) : (
+            <Send className="h-5 w-5" />
+          )}
+        </button>
       </div>
     </div>
   );
