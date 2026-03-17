@@ -15,6 +15,34 @@ Each entry follows this format:
 
 ---
 
+## Phase 8a: MCP Server — EDDI as MCP Tool Provider (2026-03-17)
+
+### Backend — quarkus-mcp-server-http Integration
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+EDDI now exposes its bot conversation and administration capabilities via the Model Context Protocol (MCP), enabling AI assistants (Claude Desktop, IDE plugins, custom MCP clients) to interact with deployed bots.
+
+| Component | Files | Purpose |
+|---|---|---|
+| Dependency | `pom.xml` | `quarkus-mcp-server-http` v1.10.2 (Quarkiverse) |
+| Conversation Tools | `McpConversationTools.java` | 6 MCP tools: listBots, listBotConfigs, createConversation, talkToBot, readConversation, readConversationLog |
+| Admin Tools | `McpAdminTools.java` | 6 MCP tools: deployBot, undeployBot, getDeploymentStatus, listPackages, createBot, deleteBot |
+| Config | `application.properties` | Streamable HTTP transport at `/mcp` |
+| Tests | `McpConversationToolsTest.java`, `McpAdminToolsTest.java` | 24 unit tests |
+| Docs | `docs/mcp-server.md` | Feature documentation with Claude Desktop config |
+
+**Design decisions:**
+- **`quarkus-mcp-server`** over raw MCP Java SDK — native CDI `@Tool`/`@ToolArg` annotations, auto JSON schema, Dev UI, live reload. Dramatically less boilerplate.
+- **langchain4j-mcp is client-only** — not suitable for building MCP servers. Reserved for Phase 8b.
+- **Delegates to existing services** — `IConversationService` and `IRestBotAdministration` (extracted in Phase 1), avoiding code duplication.
+- **Manual `errorJson()` construction** — avoids serialization dependency in error paths.
+- **Per-bot MCP config planned** — currently global, will be per-bot configurable in future iteration.
+
+---
+
 ## Manager: Audit Trail UI (2026-03-17)
 
 ### Frontend — Timeline-Based Audit Ledger Viewer

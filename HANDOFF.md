@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-17 (Audit Ledger complete)
+> **Last updated:** 2026-03-17 (Phase 8a MCP Server complete)
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -511,11 +511,28 @@
 - [x] ~~Item 33: Secrets Vault~~ ✅
 - [ ] Item 33b: Chat UI password field + Manager integration (remaining vault work)
 - [x] ~~Item 34: Immutable Audit Ledger~~ ✅
-- [ ] Item 34b: Tenant Quota Stub — per-tenant rate limits, usage metering (2 SP)
+- [x] ~~Item 34b: Tenant Quota Stub~~ ✅
+
+### Phase 8a: MCP Servers ✅ (commit `1553b40e`)
+
+- [x] `quarkus-mcp-server-http` v1.10.2 dependency
+- [x] `McpConversationTools` — 6 tools (listBots, listBotConfigs, createConversation, talkToBot, readConversation, readConversationLog)
+- [x] `McpAdminTools` — 6 tools (deployBot, undeployBot, getDeploymentStatus, listPackages, createBot, deleteBot)
+- [x] 24 unit tests (McpConversationToolsTest + McpAdminToolsTest)
+- [x] Streamable HTTP transport at `/mcp`
+- [x] `docs/mcp-server.md` with Claude Desktop config
+
+**Key files:**
+
+- `src/main/java/ai/labs/eddi/engine/mcp/McpConversationTools.java`
+- `src/main/java/ai/labs/eddi/engine/mcp/McpAdminTools.java`
+- `src/test/java/ai/labs/eddi/engine/mcp/McpConversationToolsTest.java`
+- `src/test/java/ai/labs/eddi/engine/mcp/McpAdminToolsTest.java`
+- `docs/mcp-server.md`
 
 ### Phase 8: MCP + RAG Foundation
 
-- [ ] Phase 8a: MCP Servers — bot conversations, admin API (8 SP)
+- [x] ~~Phase 8a: MCP Servers~~ ✅
 - [ ] Phase 8b: MCP Client + RAG Lifecycle Task + docs MCP (10 SP)
 
 See `AGENTS.md` for the full roadmap (Phases 7–14b) and `docs/project-philosophy.md` for the 7 architectural pillars.
