@@ -513,21 +513,25 @@
 - [x] ~~Item 34: Immutable Audit Ledger~~ ✅
 - [x] ~~Item 34b: Tenant Quota Stub~~ ✅
 
-### Phase 8a: MCP Servers ✅ (commit `1553b40e`)
+### Phase 8a: MCP Servers ✅ (commits `1553b40e`, `b9a9c5e1`)
 
 - [x] `quarkus-mcp-server-http` v1.10.2 dependency
-- [x] `McpConversationTools` — 6 tools (listBots, listBotConfigs, createConversation, talkToBot, readConversation, readConversationLog)
-- [x] `McpAdminTools` — 6 tools (deployBot, undeployBot, getDeploymentStatus, listPackages, createBot, deleteBot)
-- [x] 24 unit tests (McpConversationToolsTest + McpAdminToolsTest)
+- [x] `McpConversationTools` — 7 tools (list_bots, list_bot_configs, create_conversation, talk_to_bot, **chat_with_bot**, read_conversation, read_conversation_log)
+- [x] `McpAdminTools` — 6 tools (deploy_bot, undeploy_bot, get_deployment_status, list_packages, create_bot, delete_bot)
+- [x] `McpToolUtils` — shared helpers, RFC 8259 JSON escaping
+- [x] 50 unit tests (18 McpToolUtils + 16 Conversation + 16 Admin)
 - [x] Streamable HTTP transport at `/mcp`
 - [x] `docs/mcp-server.md` with Claude Desktop config
+- [x] Code review fixes: `@Blocking`, error callback, typed params (`Integer`/`Boolean`), createBot descriptor patch, snake_case `@Tool` names
 
 **Key files:**
 
 - `src/main/java/ai/labs/eddi/engine/mcp/McpConversationTools.java`
 - `src/main/java/ai/labs/eddi/engine/mcp/McpAdminTools.java`
+- `src/main/java/ai/labs/eddi/engine/mcp/McpToolUtils.java`
 - `src/test/java/ai/labs/eddi/engine/mcp/McpConversationToolsTest.java`
 - `src/test/java/ai/labs/eddi/engine/mcp/McpAdminToolsTest.java`
+- `src/test/java/ai/labs/eddi/engine/mcp/McpToolUtilsTest.java`
 - `docs/mcp-server.md`
 
 ### Phase 8: MCP + RAG Foundation
