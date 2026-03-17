@@ -13,11 +13,9 @@ public interface IRuntime {
 
     ExecutorService getExecutorService();
 
-    void logVersion();
+    ScheduledExecutorService getScheduledExecutorService();
 
-    <T> Future<T> submitScheduledCallable(Callable<T> callable,
-                                                   long delay, TimeUnit timeUnit,
-                                                   Map<Object, Object> threadBindings);
+    void logVersion();
 
     <T> Future<T> submitCallable(Callable<T> callable, Map<Object, Object> threadBindings);
 

@@ -211,6 +211,7 @@ class NatsConversationCoordinatorIT {
      */
     private static class TestRuntime implements IRuntime {
         private final ExecutorService executor = Executors.newFixedThreadPool(4);
+        private final ScheduledExecutorService scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
 
         @Override
         public void init() {}
@@ -222,13 +223,10 @@ class NatsConversationCoordinatorIT {
         public ExecutorService getExecutorService() { return executor; }
 
         @Override
-        public void logVersion() {}
+        public ScheduledExecutorService getScheduledExecutorService() { return scheduledExecutor; }
 
         @Override
-        public <T> Future<T> submitScheduledCallable(Callable<T> callable, long delay,
-                                                      TimeUnit timeUnit, java.util.Map<Object, Object> threadBindings) {
-            return executor.submit(callable);
-        }
+        public void logVersion() {}
 
         @Override
         public <T> Future<T> submitCallable(Callable<T> callable, java.util.Map<Object, Object> threadBindings) {

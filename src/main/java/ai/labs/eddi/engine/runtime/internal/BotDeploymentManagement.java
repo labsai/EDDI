@@ -29,7 +29,6 @@ import java.time.LocalDate;
 import java.time.Period;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
-import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -85,11 +84,11 @@ public class BotDeploymentManagement implements IBotDeploymentManagement {
     }
 
     void onStart(@Observes StartupEvent ev) {
-        runtime.submitScheduledCallable(() -> {
+        runtime.getScheduledExecutorService().schedule(() -> {
             autoDeployBots();
 
             return null;
-        }, 1000, TimeUnit.MILLISECONDS, Collections.emptyMap());
+        }, 1000, TimeUnit.MILLISECONDS);
     }
 
     @Override

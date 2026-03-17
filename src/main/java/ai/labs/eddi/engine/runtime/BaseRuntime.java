@@ -4,6 +4,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.context.ManagedExecutor;
 import org.jboss.logging.Logger;
 
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.Map;
@@ -19,6 +20,7 @@ public class BaseRuntime implements IRuntime {
     @Inject
     ManagedExecutor executorService;
     private final String projectName;
+    private final ScheduledExecutorService scheduledExecutorService;
 
     private boolean isInit = false;
 
@@ -28,11 +30,21 @@ public class BaseRuntime implements IRuntime {
     public BaseRuntime(@ConfigProperty(name = "systemRuntime.projectName") String projectName,
                        @ConfigProperty(name = "systemRuntime.projectVersion") String projectVersion) {
 
-
         this.projectName = projectName;
         this.projectVersion = projectVersion;
+        this.scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(
+                r -> {
+                    Thread t = new Thread(r, "eddi-scheduler");
+                    t.setDaemon(true);
+                    return t;
+                });
 
         init();
+    }
+
+    @PreDestroy
+    void shutdown() {
+        scheduledExecutorService.shutdownNow();
     }
 
     public void init() {
@@ -74,52 +86,9 @@ public class BaseRuntime implements IRuntime {
         return executorService;
     }
 
-    // TODO: find another way to schedule
     @Override
-    public <T> Future<T> submitScheduledCallable(final Callable<T> callable,
-                                                          long delay, TimeUnit timeUnit,
-                                                          final Map<Object, Object> threadBindings) {
-
-        long multipliedDelay = delay;
-        switch (timeUnit) {
-            case NANOSECONDS:
-                multipliedDelay = delay/1000000;
-                break;
-            case MICROSECONDS:
-                multipliedDelay = delay/1000;
-                break;
-            case MILLISECONDS:
-                break;
-            case SECONDS:
-                multipliedDelay = delay * 1000;
-                break;
-            case MINUTES:
-                multipliedDelay = delay * 60 * 1000;
-                break;
-            case HOURS:
-                multipliedDelay = delay * 60 * 60 * 1000;
-                break;
-            case DAYS:
-                multipliedDelay = delay * 24 * 60 * 60 * 1000;
-                break;
-        }
-        final long finalMultipliedDelay = multipliedDelay;
-
-        return executorService.submit(() -> {
-            try {
-                Thread.sleep(finalMultipliedDelay);
-                if (threadBindings != null) {
-                    ThreadContext.setResources(threadBindings);
-                }
-                return callable.call();
-            } catch (Throwable t) {
-                log.error(t.getLocalizedMessage(), t);
-                return null;
-            } finally {
-                ThreadContext.remove();
-            }
-        });
-
+    public ScheduledExecutorService getScheduledExecutorService() {
+        return scheduledExecutorService;
     }
 
     @Override

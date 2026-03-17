@@ -20,6 +20,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
@@ -272,10 +273,9 @@ public class HttpCallExecutor implements IHttpCallExecutor {
             throws IRequest.HttpRequestException, ExecutionException, InterruptedException {
 
         if (delay > 0) {
-            return runtime.submitScheduledCallable(
-                    request::send,
-                    delay, TimeUnit.MILLISECONDS,
-                    Collections.emptyMap()).get();
+            return runtime.getScheduledExecutorService().schedule(
+                    (Callable<IResponse>) request::send,
+                    delay, TimeUnit.MILLISECONDS).get();
         } else {
             return request.send();
         }
