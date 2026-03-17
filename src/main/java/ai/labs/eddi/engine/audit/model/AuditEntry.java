@@ -75,4 +75,16 @@ public record AuditEntry(
                 input, output, llmDetail, toolCalls, actions,
                 cost, timestamp, hmac);
     }
+
+    /**
+     * Return a copy of this entry with the HMAC integrity hash set.
+     * Used by AuditLedgerService after computing the HMAC.
+     */
+    public AuditEntry withHmac(String hmacValue) {
+        return new AuditEntry(
+                id, conversationId, botId, botVersion, userId, environment,
+                stepIndex, taskId, taskType, taskIndex, durationMs,
+                input, output, llmDetail, toolCalls, actions,
+                cost, timestamp, hmacValue);
+    }
 }

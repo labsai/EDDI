@@ -128,7 +128,7 @@ public class AuditLedgerService {
         AuditEntry signed;
         if (hmacKey != null) {
             String hmac = AuditHmac.computeHmac(scrubbed, hmacKey);
-            signed = withHmac(scrubbed, hmac);
+            signed = scrubbed.withHmac(hmac);
         } else {
             signed = scrubbed;
         }
@@ -240,29 +240,5 @@ public class AuditLedgerService {
                     .toList();
         }
         return value;
-    }
-
-    private static AuditEntry withHmac(AuditEntry entry, String hmac) {
-        return new AuditEntry(
-                entry.id(),
-                entry.conversationId(),
-                entry.botId(),
-                entry.botVersion(),
-                entry.userId(),
-                entry.environment(),
-                entry.stepIndex(),
-                entry.taskId(),
-                entry.taskType(),
-                entry.taskIndex(),
-                entry.durationMs(),
-                entry.input(),
-                entry.output(),
-                entry.llmDetail(),
-                entry.toolCalls(),
-                entry.actions(),
-                entry.cost(),
-                entry.timestamp(),
-                hmac
-        );
     }
 }

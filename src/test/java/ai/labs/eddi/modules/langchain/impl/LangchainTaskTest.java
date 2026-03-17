@@ -123,7 +123,7 @@ class LangchainTaskTest {
                                                                 "addToOutput", "true"),
                                                 List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0)),
                                                 4, // times for templatingEngine.processTemplate
-                                                5, // times for currentStep.storeData (langchain + output + 3 audit keys)
+                                                2, // times for currentStep.storeData (audit writes guarded by collector)
                                                 1 // times for currentStep.addConversationOutputList
                                 ),
                                 Arguments.of(
@@ -133,7 +133,7 @@ class LangchainTaskTest {
                                                                 "apiKey", "<apiKey1>"),
                                                 List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0)),
                                                 3, // times for templatingEngine.processTemplate
-                                                4, // times for currentStep.storeData (langchain + 3 audit keys)
+                                                1, // times for currentStep.storeData (audit writes guarded by collector)
                                                 0 // times for currentStep.addConversationOutputList
                                 )
                 // Add more test cases as needed
@@ -705,6 +705,98 @@ class LangchainTaskTest {
                         // Assert: event sink received the response as a single token
                         verify(eventSink, atLeastOnce()).onToken(anyString());
                         verify(currentStep, atLeastOnce()).storeData(any(IData.class));
+                }
+        }
+        @Nested
+        @DisplayName("Audit Memory Key Tests")
+        class AuditMemoryKeyTests {
+
+                @Test
+                @DisplayName("Should write audit:* keys when audit collector is set")
+                void testAuditKeysWrittenWhenCollectorSet() throws Exception {
+                        IConversationMemory memory = mock(IConversationMemory.class);
+                        IConversationMemory.IWritableConversationStep currentStep = mock(
+                                        IConversationMemory.IWritableConversationStep.class);
+                        when(memory.getCurrentStep()).thenReturn(currentStep);
+
+                        // Set audit collector — this enables audit writes
+                        when(memory.getAuditCollector()).thenReturn(entry -> {});
+
+                        var conversationOutput = new ConversationOutput();
+                        conversationOutput.put("input", "hi");
+                        when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+                        var actionData = mock(IData.class);
+                        when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+                        when(actionData.getResult()).thenReturn(List.of("action1"));
+
+                        var task = new LangChainConfiguration.Task();
+                        task.setActions(List.of("action1"));
+                        task.setId("taskId");
+                        task.setType("openai");
+                        task.setParameters(Map.of(
+                                        "systemMessage", "be helpful",
+                                        "apiKey", "<key>"));
+
+                        var langChainConfig = new LangChainConfiguration(List.of(task));
+
+                        IData outputData = mock(IData.class);
+                        when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+                        when(templatingEngine.processTemplate(anyString(), anyMap()))
+                                        .thenAnswer(i -> i.getArgument(0));
+
+                        langChainTask.execute(memory, langChainConfig);
+
+                        // Verify audit keys are written: langchain data (1) + compiled_prompt + model_response + model_name (3) = 4
+                        verify(currentStep, times(4)).storeData(any(IData.class));
+
+                        // Verify the data factory was called with audit key names
+                        verify(dataFactory).createData(eq("audit:compiled_prompt"), any());
+                        verify(dataFactory).createData(eq("audit:model_response"), any());
+                        verify(dataFactory).createData(eq("audit:model_name"), any());
+                }
+
+                @Test
+                @DisplayName("Should NOT write audit:* keys when audit collector is null")
+                void testNoAuditKeysWhenCollectorNull() throws Exception {
+                        IConversationMemory memory = mock(IConversationMemory.class);
+                        IConversationMemory.IWritableConversationStep currentStep = mock(
+                                        IConversationMemory.IWritableConversationStep.class);
+                        when(memory.getCurrentStep()).thenReturn(currentStep);
+
+                        // No audit collector set
+                        when(memory.getAuditCollector()).thenReturn(null);
+
+                        var conversationOutput = new ConversationOutput();
+                        conversationOutput.put("input", "hi");
+                        when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+                        var actionData = mock(IData.class);
+                        when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+                        when(actionData.getResult()).thenReturn(List.of("action1"));
+
+                        var task = new LangChainConfiguration.Task();
+                        task.setActions(List.of("action1"));
+                        task.setId("taskId");
+                        task.setType("openai");
+                        task.setParameters(Map.of(
+                                        "systemMessage", "be helpful",
+                                        "apiKey", "<key>"));
+
+                        var langChainConfig = new LangChainConfiguration(List.of(task));
+
+                        IData outputData = mock(IData.class);
+                        when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+                        when(templatingEngine.processTemplate(anyString(), anyMap()))
+                                        .thenAnswer(i -> i.getArgument(0));
+
+                        langChainTask.execute(memory, langChainConfig);
+
+                        // Only langchain data stored, no audit keys
+                        verify(currentStep, times(1)).storeData(any(IData.class));
+                        verify(dataFactory, never()).createData(eq("audit:compiled_prompt"), any());
+                        verify(dataFactory, never()).createData(eq("audit:model_response"), any());
+                        verify(dataFactory, never()).createData(eq("audit:model_name"), any());
                 }
         }
 }

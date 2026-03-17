@@ -390,6 +390,20 @@ class AuditLedgerServiceTest {
             assertEquals(entry.conversationId(), enriched.conversationId());
             assertEquals(entry.taskId(), enriched.taskId());
         }
+
+        @Test
+        void withHmac_shouldSetHmacField() {
+            AuditEntry entry = createEntry("task-1", "conv-1");
+            assertNull(entry.hmac());
+
+            AuditEntry signed = entry.withHmac("abc123");
+            assertEquals("abc123", signed.hmac());
+            // Other fields unchanged
+            assertEquals(entry.id(), signed.id());
+            assertEquals(entry.conversationId(), signed.conversationId());
+            assertEquals(entry.environment(), signed.environment());
+            assertEquals(entry.taskId(), signed.taskId());
+        }
     }
 
     // ==================== HMAC Determinism ====================
@@ -432,12 +446,6 @@ class AuditLedgerServiceTest {
     // ==================== Helper ====================
 
     private static AuditEntry withHmac(AuditEntry entry, String hmac) {
-        return new AuditEntry(
-                entry.id(), entry.conversationId(), entry.botId(), entry.botVersion(),
-                entry.userId(), entry.environment(), entry.stepIndex(),
-                entry.taskId(), entry.taskType(), entry.taskIndex(),
-                entry.durationMs(), entry.input(), entry.output(),
-                entry.llmDetail(), entry.toolCalls(), entry.actions(),
-                entry.cost(), entry.timestamp(), hmac);
+        return entry.withHmac(hmac);
     }
 }

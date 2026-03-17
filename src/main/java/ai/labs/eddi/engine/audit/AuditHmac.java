@@ -28,6 +28,8 @@ public final class AuditHmac {
 
     private static final String HMAC_ALGORITHM = "HmacSHA256";
     private static final String PBKDF2_SALT = "eddi-audit-hmac-v1";
+    /** OWASP recommendation for PBKDF2-SHA256 (2023): minimum 600,000 iterations */
+    private static final int PBKDF2_ITERATIONS = 600_000;
 
     private AuditHmac() {
         // Utility class
@@ -48,7 +50,7 @@ public final class AuditHmac {
                     new javax.crypto.spec.PBEKeySpec(
                             masterKey.toCharArray(),
                             PBKDF2_SALT.getBytes(StandardCharsets.UTF_8),
-                            600_000,
+                            PBKDF2_ITERATIONS,
                             256);
             return factory.generateSecret(spec).getEncoded();
         } catch (Exception e) {
@@ -102,7 +104,7 @@ public final class AuditHmac {
         sb.append("|out=").append(sortedMapString(entry.output()));
         sb.append("|llm=").append(sortedMapString(entry.llmDetail()));
         sb.append("|tools=").append(sortedMapString(entry.toolCalls()));
-        sb.append("|actions=").append(Objects.toString(entry.actions(), ""));
+        sb.append("|actions=").append(entry.actions() != null ? String.join(",", entry.actions()) : "");
         sb.append("|cost=").append(entry.cost());
         sb.append("|ts=").append(Objects.toString(entry.timestamp(), ""));
         return sb.toString();
