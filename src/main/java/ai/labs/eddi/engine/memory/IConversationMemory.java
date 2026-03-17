@@ -1,5 +1,6 @@
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.model.ConversationState;
@@ -62,6 +63,22 @@ public interface IConversationMemory extends Serializable {
      * {@code ConversationService.sayStreaming()} before lifecycle execution.
      */
     default void setEventSink(ConversationEventSink eventSink) {
+        // no-op by default
+    }
+
+    /**
+     * Get the audit entry collector for this conversation turn.
+     * Returns {@code null} when auditing is disabled.
+     */
+    default IAuditEntryCollector getAuditCollector() {
+        return null;
+    }
+
+    /**
+     * Set the audit entry collector for this conversation turn.
+     * Called from {@code ConversationService} before lifecycle execution.
+     */
+    default void setAuditCollector(IAuditEntryCollector auditCollector) {
         // no-op by default
     }
 

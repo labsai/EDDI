@@ -14,6 +14,42 @@ Each entry follows this format:
 - **Files** — Links to modified files
 
 ---
+
+## Phase 7, Item 34: Immutable Audit Ledger (2026-03-17)
+
+### Backend — Write-Once Audit Trail, HMAC Integrity, EU AI Act Compliance
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Added an immutable audit ledger that captures every lifecycle task execution as a write-once, append-only trail. This implements Tier 3 ("Telemetry Ledger") of the EDDI 3-Tier CQRS architecture for EU AI Act Articles 17/19 compliance.
+
+| Component | Files | Purpose |
+|---|---|---|
+| Data Model | `AuditEntry.java` | Record with 18 fields + `withEnvironment()` helper |
+| Store Interface | `IAuditStore.java` | Write-once contract — no update/delete |
+| MongoDB Store | `AuditStore.java` | `audit_ledger` collection, insert-only, 3 indexes |
+| HMAC Signing | `AuditHmac.java` | HMAC-SHA256 with PBKDF2-derived key, sorted-key determinism |
+| Batch Writer | `AuditLedgerService.java` | Async queue + flush, secret scrubbing, retry on failure |
+| Collector | `IAuditEntryCollector.java` | Functional interface decoupling pipeline from storage |
+| REST API | `IRestAuditStore` / `RestAuditStore` | Read-only endpoints: `/auditstore/{conversationId}` |
+| Pipeline Hook | `LifecycleManager.java` | `buildAuditEntry()` emits per-task audit entries |
+| Service Wiring | `ConversationService.java` | Audit collector on both `say` and `sayStreaming` paths |
+| Memory API | `IConversationMemory` / `ConversationMemory` | `getAuditCollector()` / `setAuditCollector()` |
+| Documentation | `docs/audit-ledger.md` | Full feature docs: config, API, HMAC, secret redaction |
+
+**Key decisions:**
+
+- **Vault master key reuse**: HMAC signing key derived from `EDDI_VAULT_MASTER_KEY` with a distinct PBKDF2 salt (`eddi-audit-hmac-v1`), so the audit key is cryptographically independent from the vault KEK. No new secret needed.
+- **Retry on failure**: On flush failure, entries are re-queued for the next cycle (up to 3 attempts). Prevents data loss from transient DB issues.
+- **HMAC determinism**: Map keys sorted via `TreeMap` in canonical string builder — HMAC is stable regardless of `HashMap` vs `LinkedHashMap`.
+- **Secret scrubbing**: `SecretRedactionFilter.redact()` applied recursively to strings, nested maps, and lists before HMAC and storage.
+- **Environment enrichment**: `ConversationService` wraps the audit collector lambda to add environment — avoids modifying the memory interface further.
+
+**Testing:** 20 new unit tests in `AuditLedgerServiceTest` (queue/flush, HMAC, retry, list scrubbing, determinism, entry helpers). All tests pass.
+
+---
 ## IDE Warning Cleanup — Phase C (2026-03-16)
 
 ### Backend — Unused Imports, Logger Fields, Copy-Paste Bug, Deprecated API, Resource Leak

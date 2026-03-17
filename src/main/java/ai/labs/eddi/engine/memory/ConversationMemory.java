@@ -1,5 +1,6 @@
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
@@ -28,6 +29,9 @@ public class ConversationMemory implements IConversationMemory {
 
     /** Transient — never serialized to MongoDB. Set per-turn for SSE streaming. */
     private transient ConversationEventSink eventSink;
+
+    /** Transient — never serialized to MongoDB. Set per-turn for audit capture. */
+    private transient IAuditEntryCollector auditCollector;
 
     public ConversationMemory(String conversationId, String botId, Integer botVersion, String userId) {
         this(botId, botVersion, userId);
@@ -169,6 +173,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setEventSink(ConversationEventSink eventSink) {
         this.eventSink = eventSink;
+    }
+
+    @Override
+    public IAuditEntryCollector getAuditCollector() {
+        return auditCollector;
+    }
+
+    @Override
+    public void setAuditCollector(IAuditEntryCollector auditCollector) {
+        this.auditCollector = auditCollector;
     }
 
     public final static class ConversationStepStack implements IConversationStepStack {

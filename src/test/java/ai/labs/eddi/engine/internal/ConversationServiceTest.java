@@ -2,6 +2,7 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.properties.IPropertiesStore;
 import ai.labs.eddi.engine.IConversationService.*;
+import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.lifecycle.IConversation;
@@ -47,6 +48,7 @@ class ConversationServiceTest {
     private IContextLogger contextLogger;
     private ICacheFactory cacheFactory;
     private ICache<String, ConversationState> conversationStateCache;
+    private AuditLedgerService auditLedgerService;
 
     private static final Environment ENV = Environment.unrestricted;
     private static final String BOT_ID = "test-bot-id";
@@ -67,6 +69,8 @@ class ConversationServiceTest {
         contextLogger = mock(IContextLogger.class);
         cacheFactory = mock(ICacheFactory.class);
         conversationStateCache = mock(ICache.class);
+        auditLedgerService = mock(AuditLedgerService.class);
+        when(auditLedgerService.isEnabled()).thenReturn(false);
         MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
         doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
@@ -76,7 +80,7 @@ class ConversationServiceTest {
         conversationService = new ConversationService(
                 botFactory, conversationMemoryStore, conversationDescriptorStore,
                 propertiesStore, conversationCoordinator, conversationSetup,
-                cacheFactory, runtime, contextLogger, meterRegistry, BOT_TIMEOUT);
+                cacheFactory, runtime, contextLogger, auditLedgerService, meterRegistry, BOT_TIMEOUT);
     }
 
     // --- startConversation tests ---

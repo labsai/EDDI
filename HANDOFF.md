@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-16 (Secrets Vault complete)
+> **Last updated:** 2026-03-17 (Audit Ledger complete)
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -455,6 +455,44 @@
 - `RestExportService.java` — export sanitization
 - `OutputConfiguration.java` + 6 OutputItem subclasses — Lombok bug fixes
 
+### Phase 7, Item 34: Immutable Audit Ledger — EU AI Act Compliance ✅
+
+- [x] Created `AuditEntry` record — per-task audit data with 18 fields (input, output, LLM detail, actions, cost, timing, HMAC)
+- [x] Created `IAuditStore` interface — write-once contract (NO update/delete methods)
+- [x] Created `AuditStore` (MongoDB) — `audit_ledger` collection, `insertOne`/`insertMany` only, 3 indexes
+- [x] Created `AuditHmac` — HMAC-SHA256 integrity signing, PBKDF2 key derivation from vault master key (independent salt)
+- [x] Created `AuditLedgerService` — async batch writer with re-queue retry (3 attempts), secret scrubbing, HMAC signing
+- [x] Created `IAuditEntryCollector` — functional interface decoupling `LifecycleManager` from storage
+- [x] Integrated into `LifecycleManager` — `buildAuditEntry()` emits audit entry per task completion
+- [x] Integrated into `ConversationService` — both `say` and `sayStreaming` paths set audit collector with environment enrichment
+- [x] Created `IRestAuditStore` / `RestAuditStore` — read-only REST API (`/auditstore/{conversationId}`, `/auditstore/bot/{botId}`)
+- [x] Added `AuditEntry.withEnvironment()` — environment enrichment at the ConversationService layer
+- [x] Secret redaction via `SecretRedactionFilter.redact()` — recurses into nested maps and lists
+- [x] HMAC determinism — `buildCanonicalString()` sorts map keys via `TreeMap`
+- [x] Flush retry — entries re-queued on DB failure, capped at 3 retries before dropping
+- [x] Documentation: `docs/audit-ledger.md`
+- [x] 20 unit tests in `AuditLedgerServiceTest`: queue/flush (4), HMAC (5), scrubbing (3), retry (3), entry helpers (2), determinism (1), canonical (2)
+
+**Key files (new):**
+
+- `src/main/java/ai/labs/eddi/engine/audit/model/AuditEntry.java`
+- `src/main/java/ai/labs/eddi/engine/audit/IAuditStore.java`
+- `src/main/java/ai/labs/eddi/engine/audit/IAuditEntryCollector.java`
+- `src/main/java/ai/labs/eddi/engine/audit/AuditHmac.java`
+- `src/main/java/ai/labs/eddi/engine/audit/AuditLedgerService.java`
+- `src/main/java/ai/labs/eddi/engine/audit/AuditStore.java`
+- `src/main/java/ai/labs/eddi/engine/audit/rest/IRestAuditStore.java`
+- `src/main/java/ai/labs/eddi/engine/audit/rest/RestAuditStore.java`
+- `src/test/java/ai/labs/eddi/engine/audit/AuditLedgerServiceTest.java`
+- `docs/audit-ledger.md`
+
+**Key files (modified):**
+
+- `IConversationMemory.java` / `ConversationMemory.java` — `getAuditCollector` / `setAuditCollector`
+- `LifecycleManager.java` — `buildAuditEntry()` + audit hook
+- `ConversationService.java` — injected `AuditLedgerService`, environment-enriched audit collector
+- `ConversationServiceTest.java` — updated constructor
+
 ## Next Up
 
 ### Quick Wins
@@ -467,7 +505,7 @@
 
 - [x] ~~Item 33: Secrets Vault~~ ✅
 - [ ] Item 33b: Chat UI password field + Manager integration (remaining vault work)
-- [ ] Item 34: Immutable Audit Ledger — write-once trail, EU AI Act (5 SP)
+- [x] ~~Item 34: Immutable Audit Ledger~~ ✅
 - [ ] Item 34b: Tenant Quota Stub — per-tenant rate limits, usage metering (2 SP)
 
 ### Phase 8: MCP + RAG Foundation

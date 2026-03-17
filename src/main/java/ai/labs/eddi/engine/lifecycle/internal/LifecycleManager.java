@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.lifecycle.internal;
 
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
@@ -10,8 +11,8 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 
-import java.util.LinkedList;
-import java.util.List;
+import java.time.Instant;
+import java.util.*;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.utils.LifecycleUtilities.createComponentKey;
@@ -207,10 +208,19 @@ public class LifecycleManager implements ILifecycleManager {
                 task.execute(conversationMemory, component);
 
                 // Emit task_complete event if streaming
+                long durationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
+                Map<String, Object> summary = buildTaskSummary(conversationMemory, task);
+
                 if (eventSink != null) {
-                    long durationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
-                    var summary = buildTaskSummary(conversationMemory, task);
                     eventSink.onTaskComplete(task.getId(), task.getType(), durationMs, summary);
+                }
+
+                // Emit audit entry if audit collector is set
+                var auditCollector = conversationMemory.getAuditCollector();
+                if (auditCollector != null) {
+                    AuditEntry auditEntry = buildAuditEntry(
+                            conversationMemory, task, index, durationMs, summary);
+                    auditCollector.collect(auditEntry);
                 }
 
                 // Check if task triggered a STOP_CONVERSATION action
@@ -226,15 +236,81 @@ public class LifecycleManager implements ILifecycleManager {
      * Includes emitted actions for behavior tasks so the Manager UI can display
      * them.
      */
-    private java.util.Map<String, Object> buildTaskSummary(IConversationMemory conversationMemory,
+    private Map<String, Object> buildTaskSummary(IConversationMemory conversationMemory,
             ILifecycleTask task) {
-        var summary = new java.util.HashMap<String, Object>();
+        var summary = new HashMap<String, Object>();
         // If the task produced actions, include them in the summary
-        IData<java.util.List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(ACTIONS);
+        IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(ACTIONS);
         if (actionData != null && actionData.getResult() != null) {
             summary.put("actions", actionData.getResult());
         }
         return summary;
+    }
+
+    /**
+     * Build an audit entry capturing a task's execution data.
+     * Maps memory data into input/output/llmDetail/toolCalls fields.
+     */
+    private AuditEntry buildAuditEntry(IConversationMemory memory, ILifecycleTask task,
+                                       int taskIndex, long durationMs,
+                                       Map<String, Object> summary) {
+        var currentStep = memory.getCurrentStep();
+        int stepIndex = memory.size() - 1; // 0-based
+
+        // Collect input data (what the task read)
+        Map<String, Object> input = new LinkedHashMap<>();
+        IData<String> inputData = currentStep.getLatestData("input");
+        if (inputData != null && inputData.getResult() != null) {
+            input.put("userInput", inputData.getResult());
+        }
+
+        // Collect output data (what the task wrote)
+        Map<String, Object> output = new LinkedHashMap<>();
+        IData<List<String>> outputData = currentStep.getLatestData("output");
+        if (outputData != null && outputData.getResult() != null) {
+            output.put("output", outputData.getResult());
+        }
+
+        // Collect LLM details (if present)
+        Map<String, Object> llmDetail = null;
+        IData<String> promptData = currentStep.getLatestData("audit:compiled_prompt");
+        if (promptData != null && promptData.getResult() != null) {
+            llmDetail = new LinkedHashMap<>();
+            llmDetail.put("compiledPrompt", promptData.getResult());
+            IData<String> responseData = currentStep.getLatestData("audit:model_response");
+            if (responseData != null) llmDetail.put("modelResponse", responseData.getResult());
+            IData<String> modelData = currentStep.getLatestData("audit:model_name");
+            if (modelData != null) llmDetail.put("modelName", modelData.getResult());
+            IData<Map<String, Object>> tokenData = currentStep.getLatestData("audit:token_usage");
+            if (tokenData != null) llmDetail.put("tokenUsage", tokenData.getResult());
+        }
+
+        // Actions
+        @SuppressWarnings("unchecked")
+        List<String> actions = summary.containsKey("actions")
+                ? (List<String>) summary.get("actions") : null;
+
+        return new AuditEntry(
+                UUID.randomUUID().toString(),
+                memory.getConversationId(),
+                memory.getBotId(),
+                memory.getBotVersion(),
+                memory.getUserId(),
+                null, // environment is set by ConversationService
+                stepIndex,
+                task.getId(),
+                task.getType(),
+                taskIndex,
+                durationMs,
+                input.isEmpty() ? null : input,
+                output.isEmpty() ? null : output,
+                llmDetail,
+                null, // toolCalls — set by LangchainTask in memory
+                actions,
+                0.0, // cost — set by ToolCostTracker integration
+                Instant.now(),
+                null  // HMAC computed by AuditLedgerService
+        );
     }
 
     /**

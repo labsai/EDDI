@@ -20,6 +20,8 @@
 * [HttpCalls](httpcalls.md)
 * [Langchain](langchain.md)
 * [Security](security.md)
+* [Secrets Vault](secrets-vault.md)
+* [Audit Ledger](audit-ledger.md)
 * [Output Configuration](output-configuration.md)
 * [Conversations](conversations.md)
 * [Passing context information](passing-context-information.md)

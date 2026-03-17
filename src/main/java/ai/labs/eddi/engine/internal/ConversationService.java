@@ -5,6 +5,7 @@ import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.IConversationService;
+import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
@@ -68,6 +69,7 @@ public class ConversationService implements IConversationService {
     private final IConversationCoordinator conversationCoordinator;
     private final IRuntime runtime;
     private final IContextLogger contextLogger;
+    private final AuditLedgerService auditLedgerService;
     private final int botTimeout;
     private final IConversationSetup conversationSetup;
     private final ICache<String, ConversationState> conversationStateCache;
@@ -100,6 +102,7 @@ public class ConversationService implements IConversationService {
             ICacheFactory cacheFactory,
             IRuntime runtime,
             IContextLogger contextLogger,
+            AuditLedgerService auditLedgerService,
             MeterRegistry meterRegistry,
             @ConfigProperty(name = "systemRuntime.botTimeoutInSeconds") int botTimeout) {
         this.botFactory = botFactory;
@@ -111,6 +114,7 @@ public class ConversationService implements IConversationService {
         this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
         this.runtime = runtime;
         this.contextLogger = contextLogger;
+        this.auditLedgerService = auditLedgerService;
         this.botTimeout = botTimeout;
         this.processingConversationReferences = new ArrayList<>();
 
@@ -284,6 +288,13 @@ public class ConversationService implements IConversationService {
                 throw new BotNotReadyException(msg);
             }
 
+            // Set the audit collector on memory (if auditing is enabled)
+            if (auditLedgerService.isEnabled()) {
+                String envName = environment.toString();
+                conversationMemory.setAuditCollector(entry ->
+                        auditLedgerService.submit(entry.withEnvironment(envName)));
+            }
+
             final IConversation conversation = bot.continueConversation(conversationMemory,
                     createPropertiesHandler(conversationMemory.getUserId()),
                     returnConversationMemory -> {
@@ -404,6 +415,13 @@ public class ConversationService implements IConversationService {
 
             // Set the event sink on memory so LifecycleManager and tasks can use it
             conversationMemory.setEventSink(eventSink);
+
+            // Set the audit collector on memory (if auditing is enabled)
+            if (auditLedgerService.isEnabled()) {
+                String envName = environment.toString();
+                conversationMemory.setAuditCollector(entry ->
+                        auditLedgerService.submit(entry.withEnvironment(envName)));
+            }
 
             final IConversation conversation = bot.continueConversation(conversationMemory,
                     createPropertiesHandler(conversationMemory.getUserId()),
