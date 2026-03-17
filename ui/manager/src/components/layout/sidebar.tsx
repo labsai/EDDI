@@ -18,6 +18,7 @@ import {
   ScrollText,
   KeyRound,
   ShieldCheck,
+  Gauge,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -70,6 +71,11 @@ const navSections = [
         path: "/manage/audit",
         icon: ShieldCheck,
         labelKey: "nav.audit",
+      },
+      {
+        path: "/manage/quotas",
+        icon: Gauge,
+        labelKey: "nav.quotas",
       },
     ],
   },

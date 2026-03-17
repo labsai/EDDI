@@ -25,7 +25,8 @@
     "sectionDevelopment": "Development",
     "sectionOperations": "Operations",
     "secrets": "Secrets",
-    "audit": "Audit Trail"
+    "audit": "Audit Trail",
+    "quotas": "Quotas"
   },
   "theme": {
     "light": "Hell",

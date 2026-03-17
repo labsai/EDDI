@@ -1308,3 +1308,46 @@ export const auditHandlers = [
     return HttpResponse.json(MOCK_AUDIT_ENTRIES);
   }),
 ];
+
+// --- Tenant Quota Mock Data ---
+
+const MOCK_QUOTA = {
+  tenantId: "default",
+  maxConversationsPerDay: -1,
+  maxBotsPerTenant: -1,
+  maxApiCallsPerMinute: -1,
+  maxMonthlyCostUsd: -1,
+  enabled: false,
+};
+
+const MOCK_USAGE = {
+  tenantId: "default",
+  conversationsToday: 42,
+  apiCallsThisMinute: 7,
+  monthlyCostUsd: 12.50,
+  minuteWindowStart: new Date().toISOString(),
+  dayStart: new Date(new Date().setHours(0, 0, 0, 0)).toISOString(),
+};
+
+export const quotaHandlers = [
+  http.get("*/administration/quotas", () => {
+    return HttpResponse.json([MOCK_QUOTA]);
+  }),
+
+  http.get("*/administration/quotas/:tenantId/usage", () => {
+    return HttpResponse.json(MOCK_USAGE);
+  }),
+
+  http.get("*/administration/quotas/:tenantId", () => {
+    return HttpResponse.json(MOCK_QUOTA);
+  }),
+
+  http.put("*/administration/quotas/:tenantId", async ({ request }) => {
+    const body = await request.json();
+    return HttpResponse.json(body);
+  }),
+
+  http.post("*/administration/quotas/:tenantId/usage/reset", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+];

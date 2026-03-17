@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-03-17  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Audit Trail UI — page, API, hooks, tests
+> **Last commit**: Phase 7.34b — Tenant Quota Stub (Manager UI)
 
 ---
 
@@ -13,6 +13,7 @@
 **Phase 5 (Backend features with Manager integration)**: Item 5.30 complete (Coordinator Dashboard).  
 **Phase 7 (Secrets Vault)**: Chat UI secret input + Manager Secrets Admin page complete.
 **Phase 7.34 (Audit Ledger)**: Manager Audit Trail UI complete.
+**Phase 7.34b (Tenant Quotas)**: Backend engine + REST API + Manager Quotas admin page complete.
 
 ### What's Done
 
@@ -47,7 +48,7 @@
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 246 pass (`npm run test`) — 29 files (incl. `audit.test.tsx` 13 tests)
+- **Unit/Component**: 254 pass (`npm run test`) — 30 files (incl. `quotas.test.tsx` 8 tests)
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds
@@ -83,6 +84,7 @@
 - **Secrets Admin**: `secrets.tsx` (admin page at `/manage/secrets`), `api/secrets.ts` (API module), `use-secrets.ts` (TanStack hooks), `secrets.test.tsx` (12 tests)
 - **Audit Trail**: `audit.tsx` (timeline-based page at `/manage/audit`), `api/audit.ts` (API module), `use-audit.ts` (TanStack hooks), `audit.test.tsx` (13 tests)
 - **Chat Panel Secrets**: `SecretInputField` + `ChatInputWithSecretToggle` inline components in `chat-panel.tsx`, `extractInputField()` in `conversations.ts`
+- **Tenant Quotas**: `quotas.tsx` (admin page at `/manage/quotas`), `api/quotas.ts` (API module), `use-quotas.ts` (TanStack hooks with 10s usage polling), `quotas.test.tsx` (8 tests)
 
 ---
 
