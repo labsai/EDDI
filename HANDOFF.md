@@ -513,13 +513,14 @@
 - [x] ~~Item 34: Immutable Audit Ledger~~ ✅
 - [x] ~~Item 34b: Tenant Quota Stub~~ ✅
 
-### Phase 8a: MCP Servers ✅ (commits `1553b40e`, `b9a9c5e1`)
+### Phase 8a: MCP Servers ✅ (commits `1553b40e`, `b9a9c5e1`, latest)
 
 - [x] `quarkus-mcp-server-http` v1.10.2 dependency
 - [x] `McpConversationTools` — 7 tools (list_bots, list_bot_configs, create_conversation, talk_to_bot, **chat_with_bot**, read_conversation, read_conversation_log)
 - [x] `McpAdminTools` — 6 tools (deploy_bot, undeploy_bot, get_deployment_status, list_packages, create_bot, delete_bot)
-- [x] `McpToolUtils` — shared helpers, RFC 8259 JSON escaping
-- [x] 50 unit tests (18 McpToolUtils + 16 Conversation + 16 Admin)
+- [x] `McpSetupTools` — **setup_bot** composite tool: creates full bot (behavior → langchain → output → package → bot → deploy) in a single MCP call
+- [x] `McpToolUtils` — shared helpers, RFC 8259 JSON escaping, `extractIdFromLocation`/`extractVersionFromLocation`
+- [x] 62 unit tests (18 McpToolUtils + 16 Conversation + 16 Admin + 12 Setup)
 - [x] Streamable HTTP transport at `/mcp`
 - [x] `docs/mcp-server.md` with Claude Desktop config
 - [x] Code review fixes: `@Blocking`, error callback, typed params (`Integer`/`Boolean`), createBot descriptor patch, snake_case `@Tool` names
@@ -528,11 +529,18 @@
 
 - `src/main/java/ai/labs/eddi/engine/mcp/McpConversationTools.java`
 - `src/main/java/ai/labs/eddi/engine/mcp/McpAdminTools.java`
+- `src/main/java/ai/labs/eddi/engine/mcp/McpSetupTools.java`
 - `src/main/java/ai/labs/eddi/engine/mcp/McpToolUtils.java`
-- `src/test/java/ai/labs/eddi/engine/mcp/McpConversationToolsTest.java`
-- `src/test/java/ai/labs/eddi/engine/mcp/McpAdminToolsTest.java`
-- `src/test/java/ai/labs/eddi/engine/mcp/McpToolUtilsTest.java`
+- `src/test/java/ai/labs/eddi/engine/mcp/McpSetupToolsTest.java` (+ 3 other test files)
 - `docs/mcp-server.md`
+
+**Next: `create_api_bot` MCP tool (Phase 8a+)**
+
+> Takes an OpenAPI spec → generates httpcalls configs for each endpoint → wires them as
+> LangChain tools → creates a bot that can call any API securely through EDDI's controlled pipeline.
+>
+> Needs `swagger-parser` (`io.swagger.parser.v3:swagger-parser:2.1.x`) dependency.
+> See implementation plan in antigravity brain artifact `implementation_plan.md` Part B.
 
 ### Phase 8: MCP + RAG Foundation
 

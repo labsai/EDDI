@@ -30,9 +30,10 @@ EDDI now exposes its bot conversation and administration capabilities via the Mo
 | Dependency | `pom.xml` | `quarkus-mcp-server-http` v1.10.2 (Quarkiverse) |
 | Conversation Tools | `McpConversationTools.java` | 7 MCP tools: list_bots, list_bot_configs, create_conversation, talk_to_bot, **chat_with_bot**, read_conversation, read_conversation_log |
 | Admin Tools | `McpAdminTools.java` | 6 MCP tools: deploy_bot, undeploy_bot, get_deployment_status, list_packages, create_bot, delete_bot |
-| Shared Utils | `McpToolUtils.java` | parseEnvironment, JSON escaping (RFC 8259), parseBooleanOrDefault |
+| **Setup Tools** | `McpSetupTools.java` | **setup_bot** composite: creates full bot pipeline in one MCP call (behavior → langchain → output → package → bot → deploy) |
+| Shared Utils | `McpToolUtils.java` | parseEnvironment, JSON escaping (RFC 8259), extractIdFromLocation, extractVersionFromLocation |
 | Config | `application.properties` | Streamable HTTP transport at `/mcp` |
-| Tests | `McpConversationToolsTest.java`, `McpAdminToolsTest.java`, `McpToolUtilsTest.java` | 50 unit tests |
+| Tests | `McpSetupToolsTest.java` + 3 others | 62 unit tests |
 | Docs | `docs/mcp-server.md` | Feature documentation with Claude Desktop config |
 
 **Design decisions:**
@@ -41,15 +42,14 @@ EDDI now exposes its bot conversation and administration capabilities via the Mo
 - **Delegates to existing services** — `IConversationService` and `IRestBotAdministration` (extracted in Phase 1), avoiding code duplication.
 - **Typed params** — `Integer`/`Boolean` for `@ToolArg` so MCP JSON Schema uses correct types.
 - **`chat_with_bot` composite** — combines create_conversation + talk_to_bot in one call (most common AI workflow).
-- **`create_bot` descriptor patch** — name/description persisted via `IRestDocumentDescriptorStore.patchDescriptor()`.
+- **`setup_bot` composite** — codifies the Bot Father's 12-step httpcalls pipeline as server-side Java. Atomic, validated, with proper error handling and rollback.
 - **`@Blocking` on `talk_to_bot`/`chat_with_bot`** — explicit annotation since `CompletableFuture.get()` blocks the thread.
 - **Per-bot MCP config planned** — currently global, will be per-bot configurable in future iteration.
 
-**Future (Phase 8a+):**
-- `setup_bot` composite tool (create from template: bot + packages + resources in one call)
-- `read_bot_configuration` (resolved config tree: bot → packages → extensions)
-- `update_bot_config` (currently no way to modify existing bot config via MCP)
-- Per-bot MCP enablement flag in `BotConfiguration`
+**Planned (Phase 8a+): `create_api_bot`**
+- Takes an OpenAPI spec → generates httpcalls configs → wires as LangChain tools → creates a bot that can call any API securely
+- Needs `swagger-parser` (`io.swagger.parser.v3:swagger-parser:2.1.x`)
+- Positions EDDI as an AI API gateway
 
 ---
 
