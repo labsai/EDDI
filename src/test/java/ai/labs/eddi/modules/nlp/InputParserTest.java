@@ -170,7 +170,7 @@ public class InputParserTest {
         List<RawSolution> suggestions = inputParser.parse(lookupString);
 
         //assert
-        assertEquals(7, suggestions.size());
+        assertEquals(8, suggestions.size());
         List<IDictionary.IFoundWord> foundWords = suggestions.get(0).getDictionaryEntries();
         assertEquals(3, foundWords.size());
         assertEquals("day", foundWords.get(0).getValue());

@@ -28,7 +28,7 @@ public class Permutation implements Iterable<Integer[]> {
         private Integer[] next = null;
 
         PermutationIterator(Integer[] values) {
-            this.values = values;
+            this.values = Arrays.copyOf(values, values.length);
 
             Arrays.sort(this.values);
 
