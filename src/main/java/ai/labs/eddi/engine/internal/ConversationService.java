@@ -6,6 +6,9 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
@@ -70,6 +73,7 @@ public class ConversationService implements IConversationService {
     private final IRuntime runtime;
     private final IContextLogger contextLogger;
     private final AuditLedgerService auditLedgerService;
+    private final TenantQuotaService tenantQuotaService;
     private final int botTimeout;
     private final IConversationSetup conversationSetup;
     private final ICache<String, ConversationState> conversationStateCache;
@@ -103,6 +107,7 @@ public class ConversationService implements IConversationService {
             IRuntime runtime,
             IContextLogger contextLogger,
             AuditLedgerService auditLedgerService,
+            TenantQuotaService tenantQuotaService,
             MeterRegistry meterRegistry,
             @ConfigProperty(name = "systemRuntime.botTimeoutInSeconds") int botTimeout) {
         this.botFactory = botFactory;
@@ -115,6 +120,7 @@ public class ConversationService implements IConversationService {
         this.runtime = runtime;
         this.contextLogger = contextLogger;
         this.auditLedgerService = auditLedgerService;
+        this.tenantQuotaService = tenantQuotaService;
         this.botTimeout = botTimeout;
         this.processingConversationReferences = new ArrayList<>();
 
@@ -149,6 +155,12 @@ public class ConversationService implements IConversationService {
         }
 
         try {
+            // Tenant quota check — conversation start
+            QuotaCheckResult quotaCheck = tenantQuotaService.checkConversationQuota();
+            if (!quotaCheck.allowed()) {
+                throw new QuotaExceededException(quotaCheck.reason());
+            }
+
             IBot latestBot = botFactory.getLatestReadyBot(environment, botId);
             if (latestBot == null) {
                 String message = "No version of bot (botId=%s) ready for interaction (environment=%s)!";
@@ -163,6 +175,7 @@ public class ConversationService implements IConversationService {
             var conversationMemory = conversation.getConversationMemory();
             var conversationId = storeConversationMemory(conversationMemory, environment);
             cacheConversationState(conversationId, conversationMemory.getConversationState());
+            tenantQuotaService.recordConversationStart();
             var conversationUri = createURI(RESOURCE_URI, conversationId);
 
             conversationSetup.createConversationDescriptor(botId, latestBot, userId, conversationId, conversationUri);
@@ -266,6 +279,13 @@ public class ConversationService implements IConversationService {
 
         long startTime = System.nanoTime();
         try {
+            // Tenant quota check — API call
+            QuotaCheckResult quotaCheck = tenantQuotaService.checkApiCallQuota();
+            if (!quotaCheck.allowed()) {
+                throw new QuotaExceededException(quotaCheck.reason());
+            }
+            tenantQuotaService.recordApiCall();
+
             processingConversationReferences.add(createReferenceForMetrics(botId, conversationId));
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
@@ -362,6 +382,13 @@ public class ConversationService implements IConversationService {
 
         long startTime = System.nanoTime();
         try {
+            // Tenant quota check — API call (streaming)
+            QuotaCheckResult quotaCheck = tenantQuotaService.checkApiCallQuota();
+            if (!quotaCheck.allowed()) {
+                throw new QuotaExceededException(quotaCheck.reason());
+            }
+            tenantQuotaService.recordApiCall();
+
             processingConversationReferences.add(createReferenceForMetrics(botId, conversationId));
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);

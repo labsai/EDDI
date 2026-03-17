@@ -43,6 +43,60 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-17 — Phase 7 Item 34b: Tenant Quota Stub
+
+**Repos:** EDDI, EDDI-Manager
+**Branch:** `feature/version-6.0.0`
+
+**What changed:**
+
+**EDDI (backend):**
+- `TenantQuota.java` [NEW]: Quota config record (limits, enabled flag), `unlimited()` factory
+- `TenantUsage.java` [NEW]: Thread-safe atomic counters (`AtomicInteger`, `DoubleAdder`) with `UsageSnapshot` for REST
+- `QuotaCheckResult.java` [NEW]: Allowed/denied result record with `OK` constant
+- `ITenantQuotaStore.java` [NEW]: Store interface for CRUD
+- `InMemoryTenantQuotaStore.java` [NEW]: `ConcurrentHashMap` impl with `@ConfigProperty` defaults
+- `TenantQuotaService.java` [NEW]: Enforcement engine — conversation/API call/cost budget checks, sliding window resets, Micrometer metrics (`eddi.tenant.quota.allowed/denied`, `eddi.tenant.usage.*`)
+- `QuotaExceededException.java` [NEW]: Runtime exception
+- `QuotaExceededExceptionMapper.java` [NEW]: HTTP 429 + `Retry-After: 60`
+- `IRestTenantQuota.java` [NEW]: JAX-RS interface at `/administration/quotas`
+- `RestTenantQuota.java` [NEW]: REST implementation
+- `ConversationService.java` [MODIFIED]: Quota hooks in `startConversation()`, `say()`, `sayStreaming()`
+- `application.properties` [MODIFIED]: 8 new `eddi.tenant.*` config properties (disabled by default)
+- `TenantQuotaServiceTest.java` [NEW]: 15 unit tests
+- `RestTenantQuotaTest.java` [NEW]: 7 REST + exception mapper tests
+- `ConversationServiceTest.java` [MODIFIED]: Updated constructor + mock stubs
+
+**EDDI-Manager:**
+- `quotas.ts` [NEW]: API module (list, get, update, usage, reset)
+- `use-quotas.ts` [NEW]: 5 TanStack Query hooks with 10s usage polling
+- `quotas.tsx` [NEW]: Admin page — config form (4 limits + enabled toggle) + live usage dashboard (progress bars, color thresholds)
+- `quotas.test.tsx` [NEW]: 8 page-level tests
+- `sidebar.tsx` [MODIFIED]: `Gauge` icon + nav entry in Operations section
+- `app.tsx` [MODIFIED]: `/manage/quotas` route
+- `handlers.ts` [MODIFIED]: `quotaHandlers` with mock data
+- `server.ts` + `browser.ts` [MODIFIED]: Registered `quotaHandlers`
+- 11 locale files [MODIFIED]: `nav.quotas` key
+
+**Code review fixes applied:**
+1. Deleted dead `TenantQuota.merge()` (broken `!= 0` sentinel, never called)
+2. Added TOCTOU TODO comments for future check+record atomicity
+3. Moved `quotaAllowedCounter` from `record*()` → `check*()` methods (semantically correct)
+4. Documented thread-safety limitation in `TenantUsage` Javadoc
+5. Switched form init in `quotas.tsx` from setState-during-render → `useEffect`
+
+**Design decisions:**
+- Disabled by default (`eddi.tenant.quota.enabled=false`) — zero impact on existing deployments
+- `-1` = unlimited for all limits
+- Single-tenant `"default"` ID — multi-tenant JWT extraction deferred to Phase 7.1
+- In-memory store — DB-backed store planned for future
+
+**Testing:**
+- [x] Backend: 861 tests pass (22 new), 0 failures
+- [x] Manager: `npx tsc -b` clean, 30 test files pass (8 new), build succeeds
+
+---
+
 ### 2026-03-15 — Phase 6E Planned: quarkus-langchain4j → langchain4j Core
 
 **Repo:** EDDI

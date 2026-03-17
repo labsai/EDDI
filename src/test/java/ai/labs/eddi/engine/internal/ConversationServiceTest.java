@@ -17,6 +17,8 @@ import ai.labs.eddi.engine.runtime.IBot;
 import ai.labs.eddi.engine.runtime.IBotFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.utilities.IConversationSetup;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -49,6 +51,7 @@ class ConversationServiceTest {
     private ICacheFactory cacheFactory;
     private ICache<String, ConversationState> conversationStateCache;
     private AuditLedgerService auditLedgerService;
+    private TenantQuotaService tenantQuotaService;
 
     private static final Environment ENV = Environment.unrestricted;
     private static final String BOT_ID = "test-bot-id";
@@ -70,6 +73,9 @@ class ConversationServiceTest {
         cacheFactory = mock(ICacheFactory.class);
         conversationStateCache = mock(ICache.class);
         auditLedgerService = mock(AuditLedgerService.class);
+        tenantQuotaService = mock(TenantQuotaService.class);
+        when(tenantQuotaService.checkConversationQuota()).thenReturn(QuotaCheckResult.OK);
+        when(tenantQuotaService.checkApiCallQuota()).thenReturn(QuotaCheckResult.OK);
         when(auditLedgerService.isEnabled()).thenReturn(false);
         MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
@@ -80,7 +86,8 @@ class ConversationServiceTest {
         conversationService = new ConversationService(
                 botFactory, conversationMemoryStore, conversationDescriptorStore,
                 propertiesStore, conversationCoordinator, conversationSetup,
-                cacheFactory, runtime, contextLogger, auditLedgerService, meterRegistry, BOT_TIMEOUT);
+                cacheFactory, runtime, contextLogger, auditLedgerService,
+                tenantQuotaService, meterRegistry, BOT_TIMEOUT);
     }
 
     // --- startConversation tests ---
