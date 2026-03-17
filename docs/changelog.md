@@ -15,6 +15,38 @@ Each entry follows this format:
 
 ---
 
+## Manager: Audit Trail UI (2026-03-17)
+
+### Frontend — Timeline-Based Audit Ledger Viewer
+
+**Repo:** EDDI-Manager (`feature/version-6.0.0`)
+
+**What changed:**
+
+Added an Audit Trail page to the Manager UI that consumes the backend audit ledger REST API. Provides a timeline-based visualization of task execution for compliance review and debugging.
+
+| Component | Files | Purpose |
+|---|---|---|
+| API Module | `src/lib/api/audit.ts` | `AuditEntry` type + 3 fetch functions (by conversation, by bot, count) |
+| Hooks | `src/hooks/use-audit.ts` | 3 TanStack Query hooks with conditional enabling |
+| Page | `src/pages/audit.tsx` | Timeline UX: step-grouped entries, color-coded task badges, expandable JSON, summary strip |
+| Sidebar | `sidebar.tsx` | ShieldCheck icon under Operations |
+| Routing | `App.tsx` | `/manage/audit` route |
+| i18n | 11 locale files | `nav.audit` + `audit.*` namespace |
+| MSW Mocks | `handlers.ts` | 4 realistic entries (parser → behavior → langchain → output) |
+| Tests | `audit.test.tsx` | 13 tests covering all UI states and interactions |
+
+**Design decisions:**
+- **Timeline layout** groups entries by `stepIndex` — mirrors the conversation lifecycle pipeline
+- **Color-coded badges**: langchain=purple, behavior=blue, output=emerald, expressions=amber, httpcalls=orange, propertysetter=teal
+- **Expandable detail sections** (Input/Output/LLM Detail/Tool Calls) keep the default view clean
+- **Two search modes**: by Conversation ID or by Bot ID (with optional version filter)
+- **Summary strip** with total entries, duration, and cost at a glance
+
+**Verification:** 0 TS errors, 246/246 tests pass (29 files), production build succeeds.
+
+---
+
 ## Phase 7, Item 34: Immutable Audit Ledger (2026-03-17)
 
 ### Backend — Write-Once Audit Trail, HMAC Integrity, EU AI Act Compliance
