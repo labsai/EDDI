@@ -54,6 +54,12 @@ public class TenantQuotaService {
     }
 
     /**
+     * CDI constructor.
+     */
+    public TenantQuotaService() {
+    }
+
+    /**
      * Test-only constructor — skips CDI.
      */
     public TenantQuotaService(ITenantQuotaStore quotaStore, MeterRegistry meterRegistry, String defaultTenantId) {

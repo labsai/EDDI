@@ -8,7 +8,6 @@ import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IRestBotAdministration;
-import ai.labs.eddi.engine.model.Deployment.Environment;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import jakarta.enterprise.context.ApplicationScoped;

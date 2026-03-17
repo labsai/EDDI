@@ -9,7 +9,6 @@ import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
