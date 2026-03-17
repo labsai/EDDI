@@ -37,6 +37,8 @@ Added an immutable audit ledger that captures every lifecycle task execution as 
 | Pipeline Hook | `LifecycleManager.java` | `buildAuditEntry()` emits per-task audit entries |
 | Service Wiring | `ConversationService.java` | Audit collector on both `say` and `sayStreaming` paths |
 | Memory API | `IConversationMemory` / `ConversationMemory` | `getAuditCollector()` / `setAuditCollector()` |
+| PostgreSQL Store | `PostgresAuditStore.java` | JDBC+JSONB hybrid, `@IfBuildProfile("postgres")` |
+| LLM Audit | `LangchainTask.java` | Writes `audit:compiled_prompt`, `audit:model_response`, `audit:model_name` |
 | Documentation | `docs/audit-ledger.md` | Full feature docs: config, API, HMAC, secret redaction |
 
 **Key decisions:**

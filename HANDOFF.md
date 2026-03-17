@@ -470,6 +470,8 @@
 - [x] Secret redaction via `SecretRedactionFilter.redact()` — recurses into nested maps and lists
 - [x] HMAC determinism — `buildCanonicalString()` sorts map keys via `TreeMap`
 - [x] Flush retry — entries re-queued on DB failure, capped at 3 retries before dropping
+- [x] Created `PostgresAuditStore` — JDBC+JSONB hybrid storage, `@IfBuildProfile("postgres")`, same insert-only contract
+- [x] LangchainTask audit integration — writes `audit:compiled_prompt`, `audit:model_response`, `audit:model_name` memory keys
 - [x] Documentation: `docs/audit-ledger.md`
 - [x] 20 unit tests in `AuditLedgerServiceTest`: queue/flush (4), HMAC (5), scrubbing (3), retry (3), entry helpers (2), determinism (1), canonical (2)
 
@@ -480,7 +482,8 @@
 - `src/main/java/ai/labs/eddi/engine/audit/IAuditEntryCollector.java`
 - `src/main/java/ai/labs/eddi/engine/audit/AuditHmac.java`
 - `src/main/java/ai/labs/eddi/engine/audit/AuditLedgerService.java`
-- `src/main/java/ai/labs/eddi/engine/audit/AuditStore.java`
+- `src/main/java/ai/labs/eddi/engine/audit/AuditStore.java` (MongoDB)
+- `src/main/java/ai/labs/eddi/datastore/postgres/PostgresAuditStore.java` (PostgreSQL)
 - `src/main/java/ai/labs/eddi/engine/audit/rest/IRestAuditStore.java`
 - `src/main/java/ai/labs/eddi/engine/audit/rest/RestAuditStore.java`
 - `src/test/java/ai/labs/eddi/engine/audit/AuditLedgerServiceTest.java`
@@ -491,6 +494,8 @@
 - `IConversationMemory.java` / `ConversationMemory.java` — `getAuditCollector` / `setAuditCollector`
 - `LifecycleManager.java` — `buildAuditEntry()` + audit hook
 - `ConversationService.java` — injected `AuditLedgerService`, environment-enriched audit collector
+- `LangchainTask.java` — writes `audit:*` memory keys after each LLM call
+- `LangchainTaskTest.java` — updated storeData expected counts
 - `ConversationServiceTest.java` — updated constructor
 
 ## Next Up

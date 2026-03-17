@@ -257,6 +257,21 @@ public class LangchainTask implements ILifecycleTask {
                 responseContent);
         currentStep.storeData(langchainData);
 
+        // Write audit:* memory keys for the audit ledger
+        var compiledPrompt = dataFactory.createData("audit:compiled_prompt",
+                systemMessage + "\n---\n" + (processedParams.get(KEY_PROMPT) != null
+                        ? processedParams.get(KEY_PROMPT) : ""));
+        currentStep.storeData(compiledPrompt);
+
+        if (responseContent != null) {
+            var modelResponse = dataFactory.createData("audit:model_response", responseContent);
+            currentStep.storeData(modelResponse);
+        }
+
+        String modelName = processedParams.getOrDefault("model", task.getType());
+        var modelNameData = dataFactory.createData("audit:model_name", modelName);
+        currentStep.storeData(modelNameData);
+
         // Store tool trace if available
         if (!toolTrace.isEmpty()) {
             var traceData = dataFactory.createData(KEY_LANGCHAIN + ":trace:" + task.getType() + ":" + task.getId(),

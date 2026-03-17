@@ -114,7 +114,10 @@ If a database write fails, entries are **re-queued** for the next flush cycle. A
 
 ### PostgreSQL
 
-A PostgreSQL implementation will be provided in a future release.
+- Table: `audit_ledger` (auto-created on first use)
+- Hybrid storage: indexed columns (conversation_id, bot_id, bot_version, timestamp) + JSONB for variable data
+- Activated with `@IfBuildProfile("postgres")`
+- Same insert-only contract as MongoDB
 
 ## Architecture
 

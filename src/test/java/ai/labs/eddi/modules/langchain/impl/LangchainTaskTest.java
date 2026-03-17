@@ -123,7 +123,7 @@ class LangchainTaskTest {
                                                                 "addToOutput", "true"),
                                                 List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0)),
                                                 4, // times for templatingEngine.processTemplate
-                                                2, // times for currentStep.storeData
+                                                5, // times for currentStep.storeData (langchain + output + 3 audit keys)
                                                 1 // times for currentStep.addConversationOutputList
                                 ),
                                 Arguments.of(
@@ -133,7 +133,7 @@ class LangchainTaskTest {
                                                                 "apiKey", "<apiKey1>"),
                                                 List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0)),
                                                 3, // times for templatingEngine.processTemplate
-                                                1, // times for currentStep.storeData
+                                                4, // times for currentStep.storeData (langchain + 3 audit keys)
                                                 0 // times for currentStep.addConversationOutputList
                                 )
                 // Add more test cases as needed
