@@ -26,6 +26,7 @@
         <failsafe-plugin.version>3.5.4</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <war-plugin.version>3.4.0</war-plugin.version>
+        <quarkus-mcp-server.version>1.10.2</quarkus-mcp-server.version>
         <skipITs>true</skipITs>
     </properties>
     <dependencyManagement>
@@ -290,6 +291,12 @@
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-agroal</artifactId>
+        </dependency>
+        <!-- Phase 8a: Quarkus MCP Server — expose EDDI as MCP tool provider -->
+        <dependency>
+            <groupId>io.quarkiverse.mcp</groupId>
+            <artifactId>quarkus-mcp-server-http</artifactId>
+            <version>${quarkus-mcp-server.version}</version>
         </dependency>
         <!-- Testcontainers for NATS integration tests (Phase 5.29) -->
         <dependency>
