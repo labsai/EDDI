@@ -53,6 +53,55 @@ EDDI now exposes its bot conversation and administration capabilities via the Mo
 
 ---
 
+## Phase 8a+: `create_api_bot` MCP Tool (2026-03-17)
+
+### Backend — OpenAPI-to-Bot Pipeline
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+EDDI's MCP server now includes a `create_api_bot` composite tool that takes an OpenAPI 3.0/3.1 spec and generates a fully deployed bot with LLM-powered API interaction. The LLM receives context about available endpoints and can orchestrate API calls through EDDI's controlled pipeline.
+
+| Component | Files | Purpose |
+|---|---|---|
+| OpenAPI Parser | `McpApiToolBuilder.java` (new) | Parses OpenAPI spec → grouped `HttpCallsConfiguration` resources |
+| Composite Tool | `McpSetupTools.java` (modified) | `create_api_bot` @Tool method: parse → create httpcalls → behavior → langchain → package → bot → deploy |
+| Dependency | `pom.xml` | `io.swagger.parser.v3:swagger-parser:2.1.39` |
+| Unit Tests | `McpApiToolBuilderTest.java` (new) | 19 tests: parsing, grouping, filtering, body templates, path conversion |
+| Unit Tests | `McpSetupToolsTest.java` (modified) | 4 new tests (17 total): full pipeline, validation, package structure, prompt enrichment |
+| Integration Test | `CreateApiBotIT.java` (new) | 10 ordered tests against running EDDI instance (standalone, not @QuarkusTest) |
+
+**Key features:**
+- **Tag-based grouping**: OpenAPI tags → separate `HttpCallsConfiguration` resources (e.g. "MyAPI - Users", "MyAPI - Orders"), keeping configs logically organized
+- **Prompt enrichment**: System prompt automatically includes an API summary with all available endpoints for LLM context
+- **Endpoint filtering**: Optional comma-separated filter (e.g. `"GET /users,POST /orders"`) to include only specific endpoints
+- **Path/query param conversion**: OpenAPI `{petId}` → Thymeleaf `[[${petId}]]` templates for LLM-provided values
+- **Request body templates**: Flat JSON schemas become typed Thymeleaf templates (strings quoted, numbers unquoted)
+- **Auth propagation**: Optional `apiAuth` parameter flows as `Authorization` header on all generated HttpCalls
+- **Deprecated operation skipping**: Operations marked `deprecated: true` are automatically excluded
+- **Truncated summaries**: API summary capped at 30 endpoints to avoid overwhelming the LLM context
+
+**Design decisions:**
+
+| # | Decision | Reasoning |
+|---|---|---|
+| 1 | `McpApiToolBuilder` as package-private utility | Stateless, testable in isolation; `McpSetupTools` handles the CDI-injected pipeline |
+| 2 | Tag-based grouping (not one giant config) | Keeps HttpCallsConfiguration files manageable; mirrors API domain boundaries |
+| 3 | Flat body template fallback to `[[${requestBody}]]` | Nested objects/arrays are too complex for Thymeleaf; documented as known limitation |
+| 4 | Default to `anthropic`/`claude-sonnet-4-6` | Best balance of quality + tool-calling reliability for API bots |
+| 5 | Standalone REST integration test | `quarkus-mcp-server-http` extension's build-time `@ToolArg` processing causes `UnsatisfiedResolutionException` during `@QuarkusTest` — an MCP extension limitation |
+| 6 | `resolveParams()` extraction | Eliminates parameter resolution duplication between `setupBot` and `createApiBot` |
+
+**Model names updated:**
+- Default model: `gpt-4o` → **`claude-sonnet-4-6`**
+- Default provider: `openai` → **`anthropic`**
+- Examples: `gpt-5.4`, `gemini-3.1-pro-preview`, `deepseek-chat`
+
+**Testing:** ✅ 36 MCP unit tests pass (19 `McpApiToolBuilderTest` + 17 `McpSetupToolsTest`). `CreateApiBotIT` requires a running EDDI instance.
+
+---
+
 ## Manager: Audit Trail UI (2026-03-17)
 
 ### Frontend — Timeline-Based Audit Ledger Viewer

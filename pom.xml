@@ -298,6 +298,12 @@
             <artifactId>quarkus-mcp-server-http</artifactId>
             <version>${quarkus-mcp-server.version}</version>
         </dependency>
+        <!-- Phase 8a+: OpenAPI spec parser for create_api_bot MCP tool -->
+        <dependency>
+            <groupId>io.swagger.parser.v3</groupId>
+            <artifactId>swagger-parser</artifactId>
+            <version>2.1.39</version>
+        </dependency>
         <!-- Testcontainers for NATS integration tests (Phase 5.29) -->
         <dependency>
             <groupId>org.testcontainers</groupId>

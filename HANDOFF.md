@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-17 (Phase 8a MCP Server complete)
+> **Last updated:** 2026-03-17 (Phase 8a+ `create_api_bot` complete)
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -519,28 +519,27 @@
 - [x] `McpConversationTools` — 7 tools (list_bots, list_bot_configs, create_conversation, talk_to_bot, **chat_with_bot**, read_conversation, read_conversation_log)
 - [x] `McpAdminTools` — 6 tools (deploy_bot, undeploy_bot, get_deployment_status, list_packages, create_bot, delete_bot)
 - [x] `McpSetupTools` — **setup_bot** composite tool: creates full bot (behavior → langchain → output → package → bot → deploy) in a single MCP call
+- [x] `McpSetupTools` — **create_api_bot** composite tool: OpenAPI spec → grouped HttpCalls → behavior → langchain → package → bot → deploy
+- [x] `McpApiToolBuilder` — OpenAPI 3.0/3.1 parser: tag-based grouping, endpoint filtering, path/query param → Thymeleaf conversion, body templates, deprecated op skipping
 - [x] `McpToolUtils` — shared helpers, RFC 8259 JSON escaping, `extractIdFromLocation`/`extractVersionFromLocation`
-- [x] 62 unit tests (18 McpToolUtils + 16 Conversation + 16 Admin + 12 Setup)
+- [x] `swagger-parser` v2.1.39 dependency
+- [x] Default model: `anthropic`/`claude-sonnet-4-6` (was `openai`/`gpt-4o`)
+- [x] 75 unit tests (18 McpToolUtils + 16 Conversation + 16 Admin + 17 Setup + 19 ApiToolBuilder) — Code review: 5 fixes applied
+- [x] `CreateApiBotIT` — 10 ordered REST API tests (standalone, not @QuarkusTest due to MCP extension limitation)
 - [x] Streamable HTTP transport at `/mcp`
-- [x] `docs/mcp-server.md` with Claude Desktop config
-- [x] Code review fixes: `@Blocking`, error callback, typed params (`Integer`/`Boolean`), createBot descriptor patch, snake_case `@Tool` names
+- [x] `docs/mcp-server.md` with Claude Desktop config + setup tools reference
+- [x] Code review fixes: `@Blocking`, error callback, typed params, `resolveParams()` extraction, static Pattern, prompt enrichment ArgumentCaptor test
 
 **Key files:**
 
 - `src/main/java/ai/labs/eddi/engine/mcp/McpConversationTools.java`
 - `src/main/java/ai/labs/eddi/engine/mcp/McpAdminTools.java`
 - `src/main/java/ai/labs/eddi/engine/mcp/McpSetupTools.java`
+- `src/main/java/ai/labs/eddi/engine/mcp/McpApiToolBuilder.java`
 - `src/main/java/ai/labs/eddi/engine/mcp/McpToolUtils.java`
 - `src/test/java/ai/labs/eddi/engine/mcp/McpSetupToolsTest.java` (+ 3 other test files)
+- `src/test/java/ai/labs/eddi/integration/CreateApiBotIT.java`
 - `docs/mcp-server.md`
-
-**Next: `create_api_bot` MCP tool (Phase 8a+)**
-
-> Takes an OpenAPI spec → generates httpcalls configs for each endpoint → wires them as
-> LangChain tools → creates a bot that can call any API securely through EDDI's controlled pipeline.
->
-> Needs `swagger-parser` (`io.swagger.parser.v3:swagger-parser:2.1.x`) dependency.
-> See implementation plan in antigravity brain artifact `implementation_plan.md` Part B.
 
 ### Phase 8: MCP + RAG Foundation
 

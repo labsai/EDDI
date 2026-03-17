@@ -3,6 +3,7 @@ package ai.labs.eddi.engine.mcp;
 import ai.labs.eddi.configs.behavior.IRestBehaviorStore;
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
+import ai.labs.eddi.configs.http.IRestHttpCallsStore;
 import ai.labs.eddi.configs.langchain.IRestLangChainStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
@@ -27,6 +28,7 @@ class McpSetupToolsTest {
     private IRestBehaviorStore behaviorStore;
     private IRestLangChainStore langchainStore;
     private IRestOutputStore outputStore;
+    private IRestHttpCallsStore httpCallsStore;
     private IRestPackageStore packageStore;
     private IRestBotStore botStore;
     private IRestDocumentDescriptorStore descriptorStore;
@@ -39,6 +41,7 @@ class McpSetupToolsTest {
         behaviorStore = mock(IRestBehaviorStore.class);
         langchainStore = mock(IRestLangChainStore.class);
         outputStore = mock(IRestOutputStore.class);
+        httpCallsStore = mock(IRestHttpCallsStore.class);
         packageStore = mock(IRestPackageStore.class);
         botStore = mock(IRestBotStore.class);
         descriptorStore = mock(IRestDocumentDescriptorStore.class);
@@ -49,7 +52,7 @@ class McpSetupToolsTest {
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
 
         tools = new McpSetupTools(behaviorStore, langchainStore, outputStore,
-                packageStore, botStore, descriptorStore, botAdmin, jsonSerialization);
+                httpCallsStore, packageStore, botStore, descriptorStore, botAdmin, jsonSerialization);
     }
 
     @Test
@@ -69,7 +72,7 @@ class McpSetupToolsTest {
                 .thenReturn(Response.ok().build());
 
         String result = tools.setupBot(
-                "Test Bot", "You are helpful", "openai", "gpt-4o",
+                "Test Bot", "You are helpful", "anthropic", "claude-sonnet-4-6",
                 "sk-test", "Hello!", true, "calculator,datetime",
                 true, "unrestricted");
 
@@ -265,7 +268,7 @@ class McpSetupToolsTest {
     @Test
     void createLangchainConfig_withTooling_setsToolFields() {
         var config = tools.createLangchainConfig(
-                "openai", "gpt-4o", "key", "You are helpful",
+                "anthropic", "claude-sonnet-4-6", "key", "You are helpful",
                 true, "calculator,websearch");
 
         var task = config.tasks().get(0);
@@ -282,5 +285,119 @@ class McpSetupToolsTest {
         assertEquals("CONVERSATION_START", output.getAction());
         assertEquals(0, output.getTimesOccurred());
         assertEquals(1, output.getOutputs().size());
+    }
+
+    // --- create_api_bot tests ---
+
+    private static final String SIMPLE_SPEC = """
+            {
+              "openapi": "3.0.3",
+              "info": { "title": "Test API", "version": "1.0.0" },
+              "servers": [{ "url": "https://api.example.com" }],
+              "paths": {
+                "/users": {
+                  "get": {
+                    "operationId": "listUsers",
+                    "summary": "List users",
+                    "tags": ["users"]
+                  }
+                },
+                "/orders": {
+                  "post": {
+                    "operationId": "createOrder",
+                    "summary": "Create order",
+                    "tags": ["orders"]
+                  }
+                }
+              }
+            }
+            """;
+
+    @Test
+    void createApiBot_fullPipeline_createsAllResources() throws Exception {
+        // Mock all store responses
+        when(httpCallsStore.createHttpCalls(any()))
+                .thenReturn(Response.created(URI.create("/httpcallsstore/httpcalls/hc-1?version=1")).build())
+                .thenReturn(Response.created(URI.create("/httpcallsstore/httpcalls/hc-2?version=1")).build());
+        when(behaviorStore.createBehaviorRuleSet(any()))
+                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
+        when(langchainStore.createLangChain(any()))
+                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
+        when(packageStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
+        when(botStore.createBot(any()))
+                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+        when(botAdmin.deployBot(any(), any(), anyInt(), anyBoolean()))
+                .thenReturn(Response.ok().build());
+
+        String result = tools.createApiBot(
+                "API Bot", "You are an API assistant", SIMPLE_SPEC,
+                "anthropic", "claude-sonnet-4-6", "sk-test",
+                null, "Bearer api-key", null, true, null);
+
+        assertNotNull(result);
+
+        // Verify httpcalls created (2 groups: users, orders)
+        verify(httpCallsStore, times(2)).createHttpCalls(any());
+        verify(behaviorStore).createBehaviorRuleSet(any());
+        verify(langchainStore).createLangChain(any());
+        verify(packageStore).createPackage(any());
+        verify(botStore).createBot(any());
+        verify(botAdmin).deployBot(Environment.unrestricted, "bot-1", 1, true);
+
+        // Verify the system prompt was enriched with API summary
+        var lcCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
+        verify(langchainStore).createLangChain(lcCaptor.capture());
+        String systemMessage = lcCaptor.getValue().tasks().get(0).getParameters().get("systemMessage");
+        assertTrue(systemMessage.startsWith("You are an API assistant"),
+                "System prompt should keep the original text");
+        assertTrue(systemMessage.contains("Available API endpoints"),
+                "System prompt should include the API summary");
+    }
+
+    @Test
+    void createApiBot_missingSpec_returnsError() {
+        String result = tools.createApiBot("Bot", "prompt", null,
+                null, null, "key", null, null, null, null, null);
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("OpenAPI spec is required"));
+    }
+
+    @Test
+    void createApiBot_missingApiKey_returnsError() {
+        String result = tools.createApiBot("Bot", "prompt", SIMPLE_SPEC,
+                null, null, null, null, null, null, null, null);
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("API key is required"));
+    }
+
+    @Test
+    void createApiBot_packageContainsHttpCallsExtensions() throws Exception {
+        when(httpCallsStore.createHttpCalls(any()))
+                .thenReturn(Response.created(URI.create("/httpcallsstore/httpcalls/hc-1?version=1")).build())
+                .thenReturn(Response.created(URI.create("/httpcallsstore/httpcalls/hc-2?version=1")).build());
+        when(behaviorStore.createBehaviorRuleSet(any()))
+                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
+        when(langchainStore.createLangChain(any()))
+                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
+        when(packageStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
+        when(botStore.createBot(any()))
+                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+
+        tools.createApiBot("Bot", "prompt", SIMPLE_SPEC,
+                null, null, "key", null, null, null, false, null);
+
+        var packageCaptor = ArgumentCaptor.forClass(PackageConfiguration.class);
+        verify(packageStore).createPackage(packageCaptor.capture());
+
+        var pkgConfig = packageCaptor.getValue();
+        // Should have 5 extensions: parser + behavior + 2 httpcalls groups + langchain
+        assertEquals(5, pkgConfig.getPackageExtensions().size());
+        assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getPackageExtensions().get(0).getType());
+        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getPackageExtensions().get(1).getType());
+        assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getPackageExtensions().get(2).getType());
+        assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getPackageExtensions().get(3).getType());
+        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getPackageExtensions().get(4).getType());
     }
 }

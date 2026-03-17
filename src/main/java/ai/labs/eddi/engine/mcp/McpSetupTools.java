@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.configs.http.IRestHttpCallsStore;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.langchain.IRestLangChainStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
@@ -17,6 +18,7 @@ import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.engine.IRestBotAdministration;
+import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -46,6 +48,7 @@ public class McpSetupTools {
     private final IRestBehaviorStore behaviorStore;
     private final IRestLangChainStore langchainStore;
     private final IRestOutputStore outputStore;
+    private final IRestHttpCallsStore httpCallsStore;
     private final IRestPackageStore packageStore;
     private final IRestBotStore botStore;
     private final IRestDocumentDescriptorStore descriptorStore;
@@ -56,6 +59,7 @@ public class McpSetupTools {
     public McpSetupTools(IRestBehaviorStore behaviorStore,
                          IRestLangChainStore langchainStore,
                          IRestOutputStore outputStore,
+                         IRestHttpCallsStore httpCallsStore,
                          IRestPackageStore packageStore,
                          IRestBotStore botStore,
                          IRestDocumentDescriptorStore descriptorStore,
@@ -64,6 +68,7 @@ public class McpSetupTools {
         this.behaviorStore = behaviorStore;
         this.langchainStore = langchainStore;
         this.outputStore = outputStore;
+        this.httpCallsStore = httpCallsStore;
         this.packageStore = packageStore;
         this.botStore = botStore;
         this.descriptorStore = descriptorStore;
@@ -80,9 +85,9 @@ public class McpSetupTools {
             @ToolArg(description = "Bot name (required)") String name,
             @ToolArg(description = "System prompt / role for the LLM (required). " +
                     "Describes the bot's personality and purpose.") String systemPrompt,
-            @ToolArg(description = "LLM provider type: 'openai' (default), 'anthropic', or 'gemini'")
+            @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', or 'gemini'")
             String model,
-            @ToolArg(description = "Model name, e.g. 'gpt-4o' (default), 'claude-3-5-sonnet', 'gemini-1.5-pro'")
+            @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default), 'gpt-5.4', 'gemini-3.1-pro-preview', 'deepseek-chat'")
             String modelName,
             @ToolArg(description = "API key for the LLM provider (required). " +
                     "Can be a vault reference like '${vault:openai-key}'") String apiKey,
@@ -109,11 +114,8 @@ public class McpSetupTools {
                 return errorJson("API key is required");
             }
 
-            String modelType = model != null && !model.isBlank() ? model.trim().toLowerCase() : "openai";
-            String modelId = modelName != null && !modelName.isBlank() ? modelName.trim() : "gpt-4o";
-            boolean shouldDeploy = deploy == null || deploy;
+            var params = resolveParams(model, modelName, deploy, environment);
             boolean toolsEnabled = enableBuiltInTools != null && enableBuiltInTools;
-            var env = parseEnvironment(environment);
 
             var createdResources = new LinkedHashMap<String, String>(); // track for result
 
@@ -128,7 +130,7 @@ public class McpSetupTools {
 
             // --- Step 2: Create LangChain Configuration ---
             var langchainConfig = createLangchainConfig(
-                    modelType, modelId, apiKey, systemPrompt, toolsEnabled, builtInToolsWhitelist);
+                    params.modelType, params.modelId, apiKey, systemPrompt, toolsEnabled, builtInToolsWhitelist);
             Response langchainResponse = langchainStore.createLangChain(langchainConfig);
             String langchainLocation = langchainResponse.getHeaderString("Location");
             String langchainId = extractIdFromLocation(langchainLocation);
@@ -149,7 +151,7 @@ public class McpSetupTools {
             }
 
             // --- Step 4: Create Package ---
-            var packageConfig = createPackageConfig(behaviorLocation, langchainLocation, outputLocation);
+            var packageConfig = createPackageConfig(behaviorLocation, null, langchainLocation, outputLocation);
             Response packageResponse = packageStore.createPackage(packageConfig);
             String packageLocation = packageResponse.getHeaderString("Location");
             String packageId = extractIdFromLocation(packageLocation);
@@ -168,11 +170,11 @@ public class McpSetupTools {
             patchDescriptor(botId, botVersion, name);
 
             // --- Step 6: Deploy ---
-            if (shouldDeploy && botId != null) {
+            if (params.shouldDeploy && botId != null) {
                 try {
-                    botAdmin.deployBot(env, botId, botVersion, true);
+                    botAdmin.deployBot(params.env, botId, botVersion, true);
                     createdResources.put("deployed", "true");
-                    createdResources.put("environment", env.name());
+                    createdResources.put("environment", params.env.name());
                 } catch (Exception deployError) {
                     LOGGER.warn("MCP setup_bot: bot created but deploy failed for " + botId, deployError);
                     createdResources.put("deployed", "false");
@@ -184,7 +186,7 @@ public class McpSetupTools {
             result.put("action", "setup_complete");
             result.put("botId", botId != null ? botId : "unknown");
             result.put("botName", name);
-            result.put("model", modelType + "/" + modelId);
+            result.put("model", params.modelType + "/" + params.modelId);
             result.put("resources", createdResources);
             return jsonSerialization.serialize(result);
 
@@ -277,9 +279,10 @@ public class McpSetupTools {
     }
 
     /**
-     * Create package with parser + behavior + langchain [+ output] pipeline.
+     * Create package with parser + behavior + [httpcalls...] + langchain [+ output] pipeline.
      */
     PackageConfiguration createPackageConfig(String behaviorLocation,
+                                              List<String> httpCallsLocations,
                                               String langchainLocation,
                                               String outputLocation) {
         var extensions = new ArrayList<PackageConfiguration.PackageExtension>();
@@ -294,6 +297,16 @@ public class McpSetupTools {
         behavior.setType(URI.create("eddi://ai.labs.behavior"));
         behavior.setConfig(Map.of("uri", behaviorLocation));
         extensions.add(behavior);
+
+        // HttpCalls (zero or more groups)
+        if (httpCallsLocations != null) {
+            for (String httpCallsLocation : httpCallsLocations) {
+                var httpCalls = new PackageConfiguration.PackageExtension();
+                httpCalls.setType(URI.create("eddi://ai.labs.httpcalls"));
+                httpCalls.setConfig(Map.of("uri", httpCallsLocation));
+                extensions.add(httpCalls);
+            }
+        }
 
         // LangChain
         var langchain = new PackageConfiguration.PackageExtension();
@@ -312,6 +325,161 @@ public class McpSetupTools {
         var config = new PackageConfiguration();
         config.setPackageExtensions(extensions);
         return config;
+    }
+
+    @Tool(name = "create_api_bot",
+            description = "Create a bot that can call any REST API described by an OpenAPI specification. " +
+                    "Parses the OpenAPI spec, generates HttpCalls configurations (grouped by API tag), " +
+                    "and creates a fully deployed bot with LLM-powered API interaction. " +
+                    "The LLM can then call the API endpoints as tools through EDDI's controlled pipeline.")
+    public String createApiBot(
+            @ToolArg(description = "Bot name (required)") String name,
+            @ToolArg(description = "System prompt / role for the LLM (required). " +
+                    "Should describe the API and how the bot should use it.") String systemPrompt,
+            @ToolArg(description = "OpenAPI 3.0/3.1 specification as JSON/YAML string or URL (required)")
+            String openApiSpec,
+            @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', or 'gemini'")
+            String model,
+            @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default), 'gpt-5.4', 'gemini-3.1-pro-preview', 'deepseek-chat'")
+            String modelName,
+            @ToolArg(description = "API key for the LLM provider (required). " +
+                    "Can be a vault reference like '${vault:openai-key}'") String apiKey,
+            @ToolArg(description = "Override the API base URL from the spec (optional)")
+            String apiBaseUrl,
+            @ToolArg(description = "API authorization header value or vault reference (optional). " +
+                    "E.g. 'Bearer sk-...' or '${vault:api-key}'") String apiAuth,
+            @ToolArg(description = "Comma-separated endpoint filter, e.g. 'GET /users,POST /orders' (optional, default: all)")
+            String endpoints,
+            @ToolArg(description = "Automatically deploy the bot after creation? (default: true)")
+            Boolean deploy,
+            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'")
+            String environment) {
+        try {
+            // Validate required params
+            if (name == null || name.isBlank()) {
+                return errorJson("Bot name is required");
+            }
+            if (systemPrompt == null || systemPrompt.isBlank()) {
+                return errorJson("System prompt is required");
+            }
+            if (openApiSpec == null || openApiSpec.isBlank()) {
+                return errorJson("OpenAPI spec is required");
+            }
+            if (apiKey == null || apiKey.isBlank()) {
+                return errorJson("API key is required");
+            }
+
+            var params = resolveParams(model, modelName, deploy, environment);
+
+            var createdResources = new LinkedHashMap<String, Object>();
+
+            // --- Step 1: Parse OpenAPI and build grouped httpcalls configs ---
+            McpApiToolBuilder.ApiBuildResult buildResult;
+            try {
+                buildResult = McpApiToolBuilder.parseAndBuild(openApiSpec, endpoints, apiBaseUrl, apiAuth);
+            } catch (IllegalArgumentException e) {
+                return errorJson("OpenAPI parsing failed: " + e.getMessage());
+            }
+
+            // --- Step 2: Create HttpCalls resources (one per group) ---
+            var httpCallsLocations = new ArrayList<String>();
+            var groupNames = new ArrayList<String>();
+            for (var entry : buildResult.configsByGroup().entrySet()) {
+                String groupName = entry.getKey();
+                var config = entry.getValue();
+                Response httpCallsResponse = httpCallsStore.createHttpCalls(config);
+                String httpCallsLocation = httpCallsResponse.getHeaderString("Location");
+                httpCallsLocations.add(httpCallsLocation);
+                groupNames.add(groupName);
+
+                // Patch descriptor with "{botName} - {groupName}"
+                String httpCallsId = extractIdFromLocation(httpCallsLocation);
+                int httpCallsVersion = extractVersionFromLocation(httpCallsLocation);
+                patchDescriptor(httpCallsId, httpCallsVersion, name + " - " + groupName);
+            }
+            createdResources.put("httpCallsGroups", groupNames);
+            createdResources.put("httpCallsLocations", httpCallsLocations);
+
+            // --- Step 3: Create Behavior Rules ---
+            var behaviorConfig = createBehaviorConfig();
+            Response behaviorResponse = behaviorStore.createBehaviorRuleSet(behaviorConfig);
+            String behaviorLocation = behaviorResponse.getHeaderString("Location");
+            createdResources.put("behaviorLocation", behaviorLocation);
+            patchDescriptor(extractIdFromLocation(behaviorLocation),
+                    extractVersionFromLocation(behaviorLocation), name);
+
+            // --- Step 4: Create LangChain Configuration ---
+            // Enrich system prompt with API summary
+            String enrichedPrompt = systemPrompt + "\n\n" + buildResult.apiSummary();
+            var langchainConfig = createLangchainConfig(
+                    params.modelType, params.modelId, apiKey, enrichedPrompt, false, null);
+            Response langchainResponse = langchainStore.createLangChain(langchainConfig);
+            String langchainLocation = langchainResponse.getHeaderString("Location");
+            createdResources.put("langchainLocation", langchainLocation);
+            patchDescriptor(extractIdFromLocation(langchainLocation),
+                    extractVersionFromLocation(langchainLocation), name);
+
+            // --- Step 5: Create Package (with httpcalls in pipeline) ---
+            var packageConfig = createPackageConfig(
+                    behaviorLocation, httpCallsLocations, langchainLocation, null);
+            Response packageResponse = packageStore.createPackage(packageConfig);
+            String packageLocation = packageResponse.getHeaderString("Location");
+            createdResources.put("packageLocation", packageLocation);
+            patchDescriptor(extractIdFromLocation(packageLocation),
+                    extractVersionFromLocation(packageLocation), name);
+
+            // --- Step 6: Create Bot ---
+            var botConfig = new BotConfiguration();
+            botConfig.setPackages(List.of(URI.create(packageLocation)));
+            Response botResponse = botStore.createBot(botConfig);
+            String botLocation = botResponse.getHeaderString("Location");
+            String botId = extractIdFromLocation(botLocation);
+            int botVersion = extractVersionFromLocation(botLocation);
+            createdResources.put("botLocation", botLocation);
+            patchDescriptor(botId, botVersion, name);
+
+            // --- Step 7: Deploy ---
+            if (params.shouldDeploy && botId != null) {
+                try {
+                    botAdmin.deployBot(params.env, botId, botVersion, true);
+                    createdResources.put("deployed", "true");
+                    createdResources.put("environment", params.env.name());
+                } catch (Exception deployError) {
+                    LOGGER.warn("MCP create_api_bot: bot created but deploy failed for " + botId, deployError);
+                    createdResources.put("deployed", "false");
+                    createdResources.put("deployError", deployError.getMessage());
+                }
+            }
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("action", "api_bot_created");
+            result.put("botId", botId != null ? botId : "unknown");
+            result.put("botName", name);
+            result.put("model", params.modelType + "/" + params.modelId);
+            result.put("endpointCount", buildResult.endpointCount());
+            result.put("groups", groupNames);
+            result.put("resources", createdResources);
+            return jsonSerialization.serialize(result);
+
+        } catch (Exception e) {
+            LOGGER.error("MCP create_api_bot failed", e);
+            return errorJson("Failed to create API bot: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Resolve common parameters with defaults.
+     */
+    private record ResolvedParams(String modelType, String modelId,
+                                   boolean shouldDeploy, Deployment.Environment env) {}
+
+    private ResolvedParams resolveParams(String model, String modelName,
+                                          Boolean deploy, String environment) {
+        return new ResolvedParams(
+                model != null && !model.isBlank() ? model.trim().toLowerCase() : "anthropic",
+                modelName != null && !modelName.isBlank() ? modelName.trim() : "claude-sonnet-4-6",
+                deploy == null || deploy,
+                parseEnvironment(environment));
     }
 
     /**

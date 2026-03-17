@@ -34,6 +34,14 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `createBot` | Create a new bot |
 | `deleteBot` | Delete a bot (with optional cascade) |
 
+### Setup Tools
+
+| Tool | Description |
+|------|-------------|
+| `setup_bot` | Create a fully working bot in one call: creates behavior rules, LangChain config, optional output/greeting, package, bot, and deploys. Supports built-in tools (calculator, datetime, websearch). Default: `anthropic`/`claude-sonnet-4-6` |
+| `create_api_bot` | Create a bot from an OpenAPI 3.0/3.1 spec. Parses the spec, generates HttpCalls configs (grouped by API tag), creates behavior/langchain/package/bot, and deploys. The LLM gets API endpoint context injected into its system prompt. Supports endpoint filtering, base URL override, and auth header propagation |
+
+
 ## Quick Start
 
 ### Claude Desktop Configuration
@@ -86,12 +94,13 @@ quarkus.mcp-server.http.root-path=/mcp
                   ┌─────────────┼─────────────┐
                   ▼             ▼              ▼
          ┌────────────┐ ┌────────────┐ ┌────────────┐
-         │ McpConv.   │ │ McpAdmin   │ │   Quarkus  │
-         │   Tools    │ │   Tools    │ │  Security  │
-         └─────┬──────┘ └─────┬──────┘ └────────────┘
-               │              │
-         ┌─────▼──────┐ ┌─────▼──────┐
-         │ IConv.     │ │ IRestBot   │
-         │ Service    │ │ Admin/Store│
-         └────────────┘ └────────────┘
+         │ McpConv.   │ │ McpAdmin   │ │ McpSetup   │
+         │   Tools    │ │   Tools    │ │   Tools    │
+         └─────┬──────┘ └─────┬──────┘ └─────┬──────┘
+               │              │               │
+         ┌─────▼──────┐ ┌─────▼──────┐ ┌─────▼──────┐
+         │ IConv.     │ │ IRestBot   │ │ OpenAPI    │
+         │ Service    │ │ Admin/Store│ │ Parser     │
+         └────────────┘ └────────────┘ └────────────┘
 ```
+
