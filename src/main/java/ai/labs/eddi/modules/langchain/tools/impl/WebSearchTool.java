@@ -42,8 +42,8 @@ public class WebSearchTool {
 
     @Tool("Searches the web for current information on any topic. Returns relevant search results with titles and snippets.")
     public String searchWeb(
-            @P("Search query - what to search for") String query,
-            @P("Number of results to return (1-10)") Integer maxResults) {
+            @P("query") String query,
+            @P("maxResults") Integer maxResults) {
 
         if (maxResults == null || maxResults < 1) {
             maxResults = 5;
@@ -238,8 +238,8 @@ public class WebSearchTool {
 
     @Tool("Searches for news articles on a specific topic")
     public String searchNews(
-            @P("News query - what news to search for") String query,
-            @P("Number of results (1-10)") Integer maxResults) {
+            @P("query") String query,
+            @P("maxResults") Integer maxResults) {
 
         // Add "news" keyword to regular search for better results
         return searchWeb(query + " news", maxResults);
@@ -247,7 +247,7 @@ public class WebSearchTool {
 
     @Tool("Searches Wikipedia for information on a topic")
     public String searchWikipedia(
-            @P("Topic to search on Wikipedia") String query) {
+            @P("query") String query) {
 
         try {
             String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);

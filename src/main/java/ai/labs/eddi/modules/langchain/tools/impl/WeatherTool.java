@@ -43,8 +43,8 @@ public class WeatherTool {
 
     @Tool("Gets current weather information for a city. Returns temperature, conditions, humidity, and wind speed.")
     public String getCurrentWeather(
-            @P("City name (e.g., 'London', 'New York', 'Tokyo')") String city,
-            @P("Temperature units: 'metric' (Celsius) or 'imperial' (Fahrenheit)") String units) {
+            @P("city") String city,
+            @P("units") String units) {
 
         if (openWeatherMapApiKey.isEmpty()) {
             return "Error: Weather API key not configured. Please set eddi.tools.weather.openweathermap.api-key in application.properties";
@@ -89,9 +89,9 @@ public class WeatherTool {
 
     @Tool("Gets weather forecast for the next few days")
     public String getWeatherForecast(
-            @P("City name") String city,
-            @P("Number of days (1-5)") Integer days,
-            @P("Temperature units: 'metric' or 'imperial'") String units) {
+            @P("city") String city,
+            @P("days") Integer days,
+            @P("units") String units) {
 
         if (openWeatherMapApiKey.isEmpty()) {
             return "Error: Weather API key not configured.";

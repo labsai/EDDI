@@ -18,8 +18,8 @@ public class TextSummarizerTool {
 
     @Tool("Summarizes long text by extracting the most important sentences. Good for quick overviews of articles or documents.")
     public String summarizeText(
-            @P("Text to summarize") String text,
-            @P("Number of sentences in summary (1-10)") Integer numSentences) {
+            @P("text") String text,
+            @P("numSentences") Integer numSentences) {
 
         try {
             if (numSentences == null || numSentences < 1) {
@@ -72,7 +72,7 @@ public class TextSummarizerTool {
 
     @Tool("Counts words, sentences, and characters in text")
     public String analyzeText(
-            @P("Text to analyze") String text) {
+            @P("text") String text) {
 
         try {
             int charCount = text.length();
@@ -108,8 +108,8 @@ public class TextSummarizerTool {
 
     @Tool("Extracts keywords from text based on frequency and importance")
     public String extractKeywords(
-            @P("Text to extract keywords from") String text,
-            @P("Number of keywords to extract (1-20)") Integer numKeywords) {
+            @P("text") String text,
+            @P("numKeywords") Integer numKeywords) {
 
         try {
             if (numKeywords == null || numKeywords < 1) {
@@ -157,7 +157,7 @@ public class TextSummarizerTool {
 
     @Tool("Removes extra whitespace and normalizes text formatting")
     public String normalizeText(
-            @P("Text to normalize") String text) {
+            @P("text") String text) {
 
         try {
             // Remove extra whitespace

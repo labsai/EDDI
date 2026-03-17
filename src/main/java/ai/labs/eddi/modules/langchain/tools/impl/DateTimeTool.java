@@ -21,8 +21,7 @@ public class DateTimeTool {
 
     @Tool("Gets the current date and time in a specified timezone. Returns formatted date/time string.")
     public String getCurrentDateTime(
-            @P("Timezone (e.g., 'America/New_York', 'Europe/London', 'Asia/Tokyo', 'UTC')")
-            String timezone) {
+            @P("timezone") String timezone) {
 
         try {
             ZoneId zoneId = ZoneId.of(timezone);
@@ -40,9 +39,9 @@ public class DateTimeTool {
 
     @Tool("Converts a date/time from one timezone to another")
     public String convertTimezone(
-            @P("Date/time string in ISO format (e.g., '2025-11-03T10:30:00')") String dateTime,
-            @P("Source timezone") String fromTimezone,
-            @P("Target timezone") String toTimezone) {
+            @P("dateTime") String dateTime,
+            @P("fromTimezone") String fromTimezone,
+            @P("toTimezone") String toTimezone) {
 
         try {
             ZoneId fromZone = ZoneId.of(fromTimezone);
@@ -64,9 +63,9 @@ public class DateTimeTool {
 
     @Tool("Calculates the difference between two dates/times")
     public String calculateDateDifference(
-            @P("Start date/time in ISO format") String startDateTime,
-            @P("End date/time in ISO format") String endDateTime,
-            @P("Unit: 'days', 'hours', 'minutes', 'seconds'") String unit) {
+            @P("startDateTime") String startDateTime,
+            @P("endDateTime") String endDateTime,
+            @P("unit") String unit) {
 
         try {
             LocalDateTime start = LocalDateTime.parse(startDateTime, ISO_FORMATTER);
@@ -108,10 +107,10 @@ public class DateTimeTool {
 
     @Tool("Adds or subtracts time from a date")
     public String addTime(
-            @P("Date/time in ISO format") String dateTime,
-            @P("Amount to add (negative to subtract)") long amount,
-            @P("Unit: 'days', 'hours', 'minutes', 'seconds', 'weeks', 'months', 'years'") String unit,
-            @P("Timezone for the result") String timezone) {
+            @P("dateTime") String dateTime,
+            @P("amount") long amount,
+            @P("unit") String unit,
+            @P("timezone") String timezone) {
 
         try {
             LocalDateTime localDateTime = LocalDateTime.parse(dateTime, ISO_FORMATTER);
@@ -157,9 +156,9 @@ public class DateTimeTool {
 
     @Tool("Formats a date/time string into a different format")
     public String formatDateTime(
-            @P("Date/time in ISO format") String dateTime,
-            @P("Desired format pattern (e.g., 'yyyy-MM-dd', 'MMM dd, yyyy HH:mm')") String pattern,
-            @P("Timezone") String timezone) {
+            @P("dateTime") String dateTime,
+            @P("pattern") String pattern,
+            @P("timezone") String timezone) {
 
         try {
             LocalDateTime localDateTime = LocalDateTime.parse(dateTime, ISO_FORMATTER);

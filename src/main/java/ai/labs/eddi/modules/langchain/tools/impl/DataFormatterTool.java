@@ -25,7 +25,7 @@ public class DataFormatterTool {
 
     @Tool("Validates and formats JSON data. Returns formatted JSON or error message.")
     public String formatJson(
-            @P("JSON string to validate and format") String jsonString) {
+            @P("jsonString") String jsonString) {
 
         try {
             JsonNode jsonNode = jsonMapper.readTree(jsonString);
@@ -41,7 +41,7 @@ public class DataFormatterTool {
 
     @Tool("Converts JSON to XML format")
     public String jsonToXml(
-            @P("JSON string to convert") String jsonString) {
+            @P("jsonString") String jsonString) {
 
         try {
             JsonNode jsonNode = jsonMapper.readTree(jsonString);
@@ -57,7 +57,7 @@ public class DataFormatterTool {
 
     @Tool("Converts XML to JSON format")
     public String xmlToJson(
-            @P("XML string to convert") String xmlString) {
+            @P("xmlString") String xmlString) {
 
         try {
             JsonNode jsonNode = xmlMapper.readTree(xmlString);
@@ -73,7 +73,7 @@ public class DataFormatterTool {
 
     @Tool("Parses CSV data and converts it to JSON format")
     public String csvToJson(
-            @P("CSV string with headers in first row") String csvString) {
+            @P("csvString") String csvString) {
 
         try {
             CsvSchema schema = CsvSchema.emptySchema().withHeader();
@@ -97,8 +97,8 @@ public class DataFormatterTool {
 
     @Tool("Extracts a value from JSON using a JSONPath-like expression")
     public String extractJsonValue(
-            @P("JSON string") String jsonString,
-            @P("Path to value (e.g., 'user.name', 'items[0].price')") String path) {
+            @P("jsonString") String jsonString,
+            @P("path") String path) {
 
         try {
             JsonNode valueNode = jsonMapper.readTree(jsonString);
@@ -132,7 +132,7 @@ public class DataFormatterTool {
 
     @Tool("Validates XML against basic well-formedness rules")
     public String validateXml(
-            @P("XML string to validate") String xmlString) {
+            @P("xmlString") String xmlString) {
 
         try {
             xmlMapper.readTree(xmlString);
@@ -147,7 +147,7 @@ public class DataFormatterTool {
 
     @Tool("Minifies JSON by removing whitespace and formatting")
     public String minifyJson(
-            @P("JSON string to minify") String jsonString) {
+            @P("jsonString") String jsonString) {
 
         try {
             JsonNode jsonNode = jsonMapper.readTree(jsonString);

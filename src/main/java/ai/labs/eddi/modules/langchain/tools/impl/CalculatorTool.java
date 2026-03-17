@@ -23,8 +23,7 @@ public class CalculatorTool {
           "functions (sqrt, pow, abs, ceil, floor, round, min, max, sin, cos, tan, atan, log, exp), " +
           "and constants (PI, E). Returns the numeric result.")
     public String calculate(
-            @P("Mathematical expression to evaluate (e.g., '2 + 2', 'sqrt(16)', '(10 * 5) / 2')")
-            String expression) {
+            @P("expression") String expression) {
 
         try {
             LOGGER.debug("Calculating expression: " + expression);
@@ -63,9 +62,9 @@ public class CalculatorTool {
 
     @Tool("Converts between different units of measurement")
     public String convertUnits(
-            @P("Value to convert") double value,
-            @P("Source unit (e.g., 'celsius', 'km', 'lb')") String fromUnit,
-            @P("Target unit (e.g., 'fahrenheit', 'miles', 'kg')") String toUnit) {
+            @P("value") double value,
+            @P("fromUnit") String fromUnit,
+            @P("toUnit") String toUnit) {
 
         try {
             double result = performConversion(value, fromUnit.toLowerCase(), toUnit.toLowerCase());

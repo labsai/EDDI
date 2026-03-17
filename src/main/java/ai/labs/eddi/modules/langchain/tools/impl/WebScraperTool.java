@@ -35,7 +35,7 @@ public class WebScraperTool {
 
     @Tool("Extracts text content from a web page URL. Returns the main text content without HTML tags.")
     public String extractWebPageText(
-            @P("URL of the web page to extract text from") String url) {
+            @P("url") String url) {
 
         try {
             LOGGER.info("Extracting text from URL: " + url);
@@ -79,8 +79,8 @@ public class WebScraperTool {
 
     @Tool("Extracts all links (URLs) from a web page")
     public String extractLinks(
-            @P("URL of the web page") String url,
-            @P("Maximum number of links to extract (1-50)") Integer maxLinks) {
+            @P("url") String url,
+            @P("maxLinks") Integer maxLinks) {
 
         try {
             if (maxLinks == null || maxLinks < 1) {
@@ -131,8 +131,8 @@ public class WebScraperTool {
 
     @Tool("Extracts structured data from a web page using CSS selectors")
     public String extractWithSelector(
-            @P("URL of the web page") String url,
-            @P("CSS selector (e.g., 'h1', '.classname', '#id')") String cssSelector) {
+            @P("url") String url,
+            @P("cssSelector") String cssSelector) {
 
         try {
             LOGGER.info("Extracting elements matching '" + cssSelector + "' from " + url);
@@ -171,7 +171,7 @@ public class WebScraperTool {
 
     @Tool("Gets metadata from a web page (title, description, keywords)")
     public String extractMetadata(
-            @P("URL of the web page") String url) {
+            @P("url") String url) {
 
         try {
             LOGGER.info("Extracting metadata from URL: " + url);

@@ -36,7 +36,7 @@ public class PdfReaderTool {
 
     @Tool("Extracts all text content from a PDF file. Provide the URL to the PDF document.")
     public String extractTextFromPdf(
-            @P("URL to the PDF file (http or https)") String pdfLocation) {
+            @P("pdfLocation") String pdfLocation) {
 
         try {
             LOGGER.info("Extracting text from PDF: " + pdfLocation);
@@ -64,9 +64,9 @@ public class PdfReaderTool {
 
     @Tool("Extracts text from specific pages of a PDF file")
     public String extractTextFromPdfPages(
-            @P("URL to the PDF file (http or https)") String pdfLocation,
-            @P("Start page number (1-based)") int startPage,
-            @P("End page number (1-based)") int endPage) {
+            @P("pdfLocation") String pdfLocation,
+            @P("startPage") int startPage,
+            @P("endPage") int endPage) {
 
         try {
             LOGGER.info("Extracting text from PDF pages " + startPage + "-" + endPage + ": " + pdfLocation);
@@ -94,7 +94,7 @@ public class PdfReaderTool {
 
     @Tool("Gets metadata and information about a PDF file (number of pages, title, author, etc.)")
     public String getPdfInfo(
-            @P("URL to the PDF file (http or https)") String pdfLocation) {
+            @P("pdfLocation") String pdfLocation) {
 
         PDDocument document = null;
         Path tempFile = null;
