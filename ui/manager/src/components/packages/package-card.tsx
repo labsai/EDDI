@@ -52,7 +52,7 @@ export function PackageCard({ pkg, onDuplicate, onDelete }: PackageCardProps) {
                 className="fixed inset-0 z-40"
                 onClick={() => setMenuOpen(false)}
               />
-              <div className="absolute end-0 z-50 mt-1 w-44 rounded-lg border bg-popover py-1 shadow-lg">
+              <div className="absolute inset-e-0 z-50 mt-1 w-44 rounded-lg border bg-popover py-1 shadow-lg">
                 <button
                   onClick={() => {
                     onDuplicate(pkg.id, pkg.version);
