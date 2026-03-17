@@ -13,19 +13,23 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
+import io.smallrye.common.annotation.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
+
 /**
  * MCP tools for conversing with EDDI bots.
- * Exposes list_bots, create_conversation, talk_to_bot, and read_conversation
+ * Exposes bot listing, conversation management, and messaging
  * as MCP-compliant tools via the Quarkus MCP Server extension.
  *
  * <p>Phase 8a — Item 35: Bot Conversations MCP Server (5 SP)
@@ -36,7 +40,6 @@ import java.util.concurrent.TimeUnit;
 public class McpConversationTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpConversationTools.class);
-    private static final String DEFAULT_ENV = "unrestricted";
     private static final int CONVERSATION_TIMEOUT_SECONDS = 60;
 
     private final IConversationService conversationService;
@@ -55,8 +58,9 @@ public class McpConversationTools {
         this.jsonSerialization = jsonSerialization;
     }
 
-    @Tool(description = "List all deployed bots with their status, version, and name. " +
-            "Returns a JSON array of bot deployment statuses.")
+    @Tool(name = "list_bots",
+            description = "List all deployed bots with their status, version, and name. " +
+                    "Returns a JSON array of bot deployment statuses.")
     public String listBots(
             @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'")
             String environment) {
@@ -65,29 +69,32 @@ public class McpConversationTools {
             List<BotDeploymentStatus> statuses = botAdmin.getDeploymentStatuses(env);
             return jsonSerialization.serialize(statuses);
         } catch (Exception e) {
-            LOGGER.error("MCP listBots failed", e);
+            LOGGER.error("MCP list_bots failed", e);
             return errorJson("Failed to list bots: " + e.getMessage());
         }
     }
 
-    @Tool(description = "List all bot configurations (including those not yet deployed). " +
-            "Returns a JSON array of bot descriptors with name, description, and IDs.")
+    @Tool(name = "list_bot_configs",
+            description = "List all bot configurations (including those not yet deployed). " +
+                    "Returns a JSON array of bot descriptors with name, description, and IDs.")
     public String listBotConfigs(
             @ToolArg(description = "Optional filter string to search bot names") String filter,
-            @ToolArg(description = "Maximum number of results (default 20)") String limit) {
+            @ToolArg(description = "Maximum number of results (default 20)") Integer limit) {
         try {
-            int limitInt = parseIntOrDefault(limit, 20);
+            int limitInt = limit != null ? limit : 20;
             String filterStr = filter != null ? filter : "";
             List<DocumentDescriptor> descriptors = botStore.readBotDescriptors(filterStr, 0, limitInt);
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
-            LOGGER.error("MCP listBotConfigs failed", e);
+            LOGGER.error("MCP list_bot_configs failed", e);
             return errorJson("Failed to list bot configs: " + e.getMessage());
         }
     }
 
-    @Tool(description = "Start a new conversation with a deployed bot. " +
-            "Returns the conversationId which you need for subsequent talk_to_bot calls.")
+    @Tool(name = "create_conversation",
+            description = "Start a new conversation with a deployed bot. " +
+                    "Returns the conversationId which you need for subsequent talk_to_bot calls. " +
+                    "Tip: Use chat_with_bot instead if you want to send a message immediately.")
     public String createConversation(
             @ToolArg(description = "Bot ID (required)") String botId,
             @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'")
@@ -103,13 +110,16 @@ public class McpConversationTools {
                     "environment", env.name()
             ));
         } catch (Exception e) {
-            LOGGER.error("MCP createConversation failed for bot " + botId, e);
+            LOGGER.error("MCP create_conversation failed for bot " + botId, e);
             return errorJson("Failed to create conversation: " + e.getMessage());
         }
     }
 
-    @Tool(description = "Send a message to a bot in an existing conversation and get the bot's response. " +
-            "You must first call create_conversation to get a conversationId.")
+    @Blocking
+    @Tool(name = "talk_to_bot",
+            description = "Send a message to a bot in an existing conversation and get the bot's response. " +
+                    "You must first call create_conversation to get a conversationId, " +
+                    "or use chat_with_bot for a single-call alternative.")
     public String talkToBot(
             @ToolArg(description = "Bot ID (required)") String botId,
             @ToolArg(description = "Conversation ID from create_conversation (required)") String conversationId,
@@ -129,77 +139,132 @@ public class McpConversationTools {
             conversationService.say(env, botId, conversationId,
                     false, true, Collections.emptyList(),
                     inputData, false,
-                    responseFuture::complete);
+                    snapshot -> {
+                        if (snapshot != null) {
+                            responseFuture.complete(snapshot);
+                        } else {
+                            responseFuture.completeExceptionally(
+                                    new RuntimeException("Bot returned null response"));
+                        }
+                    });
 
             var snapshot = responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
-            // Extract the output from the conversation
             return jsonSerialization.serialize(snapshot);
         } catch (Exception e) {
-            LOGGER.error("MCP talkToBot failed for bot " + botId + " conversation " + conversationId, e);
+            LOGGER.error("MCP talk_to_bot failed for bot " + botId + " conversation " + conversationId, e);
             return errorJson("Failed to talk to bot: " + e.getMessage());
         }
     }
 
-    @Tool(description = "Read conversation history and memory. " +
-            "Returns the conversation memory snapshot including all steps and outputs.")
-    public String readConversation(
+    @Blocking
+    @Tool(name = "chat_with_bot",
+            description = "Send a message to a bot, automatically creating a new conversation if needed. " +
+                    "This is the simplest way to interact with a bot — combines create_conversation + " +
+                    "talk_to_bot into a single call. Returns the bot response and conversationId " +
+                    "for follow-up messages.")
+    public String chatWithBot(
             @ToolArg(description = "Bot ID (required)") String botId,
-            @ToolArg(description = "Conversation ID (required)") String conversationId,
+            @ToolArg(description = "The user message to send to the bot (required)") String message,
+            @ToolArg(description = "Conversation ID to continue (optional — creates new if omitted)")
+            String conversationId,
             @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'")
             String environment) {
         try {
             var env = parseEnvironment(environment);
+
+            // Step 1: Create conversation if not provided
+            String convId = conversationId;
+            if (convId == null || convId.isBlank()) {
+                ConversationResult convResult = conversationService.startConversation(
+                        env, botId, null, Collections.emptyMap());
+                convId = convResult.conversationId();
+            }
+
+            // Step 2: Send the message
+            var inputData = new InputData();
+            inputData.setInput(message);
+            inputData.setContext(Map.of("mcp", new Context(Context.ContextType.string, "true")));
+
+            var responseFuture = new CompletableFuture<SimpleConversationMemorySnapshot>();
+
+            final String finalConvId = convId;
+            conversationService.say(env, botId, finalConvId,
+                    false, true, Collections.emptyList(),
+                    inputData, false,
+                    snapshot -> {
+                        if (snapshot != null) {
+                            responseFuture.complete(snapshot);
+                        } else {
+                            responseFuture.completeExceptionally(
+                                    new RuntimeException("Bot returned null response"));
+                        }
+                    });
+
+            var snapshot = responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            // Step 3: Return response with conversationId for follow-up
+            var result = new LinkedHashMap<String, Object>();
+            result.put("conversationId", finalConvId);
+            result.put("botId", botId);
+            result.put("environment", env.name());
+            result.put("response", snapshot);
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.error("MCP chat_with_bot failed for bot " + botId, e);
+            return errorJson("Failed to chat with bot: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "read_conversation",
+            description = "Read conversation history and memory. " +
+                    "Returns the conversation memory snapshot. Use returningFields to limit " +
+                    "output size, or use read_conversation_log for a human-readable summary.")
+    public String readConversation(
+            @ToolArg(description = "Bot ID (required)") String botId,
+            @ToolArg(description = "Conversation ID (required)") String conversationId,
+            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'")
+            String environment,
+            @ToolArg(description = "Return only the current (latest) step? (default: true)")
+            Boolean currentStepOnly,
+            @ToolArg(description = "Return detailed internal data? (default: false)")
+            Boolean returnDetailed,
+            @ToolArg(description = "Comma-separated list of fields to return (e.g. 'input,output,actions'). " +
+                    "Empty = all fields.")
+            String returningFields) {
+        try {
+            var env = parseEnvironment(environment);
+            boolean stepOnly = currentStepOnly != null ? currentStepOnly : true;
+            boolean detailed = returnDetailed != null ? returnDetailed : false;
+
+            List<String> fields = Collections.emptyList();
+            if (returningFields != null && !returningFields.isBlank()) {
+                fields = List.of(returningFields.split(","));
+            }
+
             var snapshot = conversationService.readConversation(
-                    env, botId, conversationId, false, false, Collections.emptyList());
+                    env, botId, conversationId, detailed, stepOnly, fields);
             return jsonSerialization.serialize(snapshot);
         } catch (Exception e) {
-            LOGGER.error("MCP readConversation failed for conversation " + conversationId, e);
+            LOGGER.error("MCP read_conversation failed for conversation " + conversationId, e);
             return errorJson("Failed to read conversation: " + e.getMessage());
         }
     }
 
-    @Tool(description = "Read conversation log as formatted text. " +
-            "Returns the conversation history in a human-readable format.")
+    @Tool(name = "read_conversation_log",
+            description = "Read conversation log as formatted text. " +
+                    "Returns the conversation history in a human-readable format. " +
+                    "This is the preferred tool for reviewing what was said in a conversation.")
     public String readConversationLog(
             @ToolArg(description = "Conversation ID (required)") String conversationId,
-            @ToolArg(description = "Number of recent steps to include (default: all)") String logSize) {
+            @ToolArg(description = "Number of recent steps to include (default: all)") Integer logSize) {
         try {
-            int size = parseIntOrDefault(logSize, -1);
             var result = conversationService.readConversationLog(
-                    conversationId, "text", size > 0 ? size : null);
+                    conversationId, "text", logSize != null && logSize > 0 ? logSize : null);
             return result.content().toString();
         } catch (Exception e) {
-            LOGGER.error("MCP readConversationLog failed for conversation " + conversationId, e);
+            LOGGER.error("MCP read_conversation_log failed for conversation " + conversationId, e);
             return errorJson("Failed to read conversation log: " + e.getMessage());
         }
-    }
-
-    // --- helpers ---
-
-    private Environment parseEnvironment(String environment) {
-        if (environment == null || environment.isBlank()) {
-            return Environment.unrestricted;
-        }
-        try {
-            return Environment.valueOf(environment.trim().toLowerCase());
-        } catch (IllegalArgumentException e) {
-            return Environment.unrestricted;
-        }
-    }
-
-    private int parseIntOrDefault(String value, int defaultValue) {
-        if (value == null || value.isBlank()) {
-            return defaultValue;
-        }
-        try {
-            return Integer.parseInt(value.trim());
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    private String errorJson(String message) {
-        return "{\"error\":\"" + message.replace("\"", "'").replace("\n", " ") + "\"}";
     }
 }
