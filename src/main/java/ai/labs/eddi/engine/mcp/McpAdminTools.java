@@ -234,23 +234,6 @@ public class McpAdminTools {
         }
     }
 
-    // --- helpers ---
-
-    /**
-     * Extract the resource ID from a Location header like "/botstore/bots/{id}?version=1".
-     */
-    private String extractIdFromLocation(String location) {
-        if (location == null || location.isBlank()) {
-            return null;
-        }
-        // Remove query string
-        String path = location.contains("?") ? location.substring(0, location.indexOf('?')) : location;
-        // Get last path segment
-        int lastSlash = path.lastIndexOf('/');
-        return lastSlash >= 0 && lastSlash < path.length() - 1
-                ? path.substring(lastSlash + 1)
-                : null;
-    }
 
     private String resultJson(String action, Map<String, Object> data) {
         try {

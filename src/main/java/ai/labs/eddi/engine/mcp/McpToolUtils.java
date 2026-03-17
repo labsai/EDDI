@@ -90,4 +90,36 @@ final class McpToolUtils {
         }
         return sb.toString();
     }
+
+    /**
+     * Extract the resource ID from a Location header like "/store/resources/{id}?version=1".
+     */
+    static String extractIdFromLocation(String location) {
+        if (location == null || location.isBlank()) {
+            return null;
+        }
+        String path = location.contains("?") ? location.substring(0, location.indexOf('?')) : location;
+        int lastSlash = path.lastIndexOf('/');
+        return lastSlash >= 0 && lastSlash < path.length() - 1
+                ? path.substring(lastSlash + 1)
+                : null;
+    }
+
+    /**
+     * Extract the version from a Location header like "/store/resources/{id}?version=1".
+     * Returns 1 if not found.
+     */
+    static int extractVersionFromLocation(String location) {
+        if (location == null || !location.contains("version=")) {
+            return 1;
+        }
+        try {
+            int idx = location.indexOf("version=") + "version=".length();
+            int end = location.indexOf('&', idx);
+            String ver = end > 0 ? location.substring(idx, end) : location.substring(idx);
+            return Integer.parseInt(ver.trim());
+        } catch (NumberFormatException e) {
+            return 1;
+        }
+    }
 }
