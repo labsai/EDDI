@@ -24,7 +24,8 @@
     "sectionManagement": "Management",
     "sectionDevelopment": "Development",
     "sectionOperations": "Operations",
-    "secrets": "Secrets"
+    "secrets": "Secrets",
+    "audit": "Audit Trail"
   },
   "theme": {
     "light": "فاتح",
@@ -545,5 +546,30 @@
     "enterBotIdHint": "Specify a bot ID above to view and manage its secrets.",
     "vaultUp": "Vault Online",
     "vaultDown": "Vault Offline"
+  },
+  "audit": {
+    "title": "Audit Trail",
+    "description": "Browse the immutable audit ledger.",
+    "byConversation": "By Conversation",
+    "byBot": "By Bot",
+    "conversationIdPlaceholder": "Enter conversation ID...",
+    "botIdPlaceholder": "Enter bot ID...",
+    "versionPlaceholder": "Version (optional)",
+    "search": "Search",
+    "entries": "entries",
+    "totalDuration": "total",
+    "totalCost": "total cost",
+    "step": "Step",
+    "tasks": "tasks",
+    "input": "Input",
+    "output": "Output",
+    "llmDetail": "LLM Detail",
+    "toolCalls": "Tool Calls",
+    "hmacIntegrity": "HMAC integrity verified",
+    "empty": "Search for audit entries",
+    "emptyHint": "Enter a conversation or bot ID above to browse the audit trail.",
+    "noResults": "No audit entries found",
+    "noResultsHint": "Try a different ID.",
+    "loadMore": "Load more"
   }
 }

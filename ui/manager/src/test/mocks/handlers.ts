@@ -1197,3 +1197,114 @@ export const secretsHandlers = [
     HttpResponse.json({ status: "UP", provider: "DatabaseSecretProvider", available: true }),
   ),
 ];
+
+// ─── Audit Trail Handlers ────────────────────────────────────────────────────
+
+const MOCK_AUDIT_ENTRIES = [
+  {
+    id: "audit-1",
+    conversationId: "conv1",
+    botId: "bot1",
+    botVersion: 1,
+    userId: "user-1",
+    environment: "unrestricted",
+    stepIndex: 0,
+    taskId: "ai.labs.parser",
+    taskType: "expressions",
+    taskIndex: 0,
+    durationMs: 12,
+    input: { "input:initial": "Hello there" },
+    output: { "expressions:parsed": ["greeting(hello)"] },
+    llmDetail: null,
+    toolCalls: null,
+    actions: null,
+    cost: 0,
+    timestamp: new Date(Date.now() - 60000).toISOString(),
+    hmac: "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef12345678",
+  },
+  {
+    id: "audit-2",
+    conversationId: "conv1",
+    botId: "bot1",
+    botVersion: 1,
+    userId: "user-1",
+    environment: "unrestricted",
+    stepIndex: 0,
+    taskId: "ai.labs.behavior",
+    taskType: "behavior",
+    taskIndex: 1,
+    durationMs: 3,
+    input: { "expressions:parsed": ["greeting(hello)"] },
+    output: { "actions:triggered": ["greet", "chat"] },
+    llmDetail: null,
+    toolCalls: null,
+    actions: ["greet", "chat"],
+    cost: 0,
+    timestamp: new Date(Date.now() - 59000).toISOString(),
+    hmac: "b2c3d4e5f6a1789012345678901234567890abcdef1234567890abcdef12345678",
+  },
+  {
+    id: "audit-3",
+    conversationId: "conv1",
+    botId: "bot1",
+    botVersion: 1,
+    userId: "user-1",
+    environment: "unrestricted",
+    stepIndex: 0,
+    taskId: "ai.labs.langchain",
+    taskType: "langchain",
+    taskIndex: 2,
+    durationMs: 1850,
+    input: { "user:message": "Hello there", "conversation:history": 3 },
+    output: { "llm:response": "Hi there! How can I help you today?" },
+    llmDetail: {
+      "compiled_prompt": "You are a helpful assistant.\n\nUser: Hello there",
+      "model_response": "Hi there! How can I help you today?",
+      "model_name": "gpt-4o-mini",
+      "input_tokens": 42,
+      "output_tokens": 12,
+    },
+    toolCalls: null,
+    actions: ["greet", "chat"],
+    cost: 0.003,
+    timestamp: new Date(Date.now() - 57000).toISOString(),
+    hmac: "c3d4e5f6a1b2789012345678901234567890abcdef1234567890abcdef12345678",
+  },
+  {
+    id: "audit-4",
+    conversationId: "conv1",
+    botId: "bot1",
+    botVersion: 1,
+    userId: "user-1",
+    environment: "unrestricted",
+    stepIndex: 0,
+    taskId: "ai.labs.output",
+    taskType: "output",
+    taskIndex: 3,
+    durationMs: 2,
+    input: { "actions": ["greet", "chat"] },
+    output: { "output:text": "Hi there! How can I help you today?" },
+    llmDetail: null,
+    toolCalls: null,
+    actions: ["greet", "chat"],
+    cost: 0,
+    timestamp: new Date(Date.now() - 55000).toISOString(),
+    hmac: "d4e5f6a1b2c3789012345678901234567890abcdef1234567890abcdef12345678",
+  },
+];
+
+export const auditHandlers = [
+  // Get audit trail by conversation
+  http.get("*/auditstore/:conversationId/count", () => {
+    return HttpResponse.json(MOCK_AUDIT_ENTRIES.length);
+  }),
+
+  http.get("*/auditstore/bot/:botId", () => {
+    return HttpResponse.json(MOCK_AUDIT_ENTRIES);
+  }),
+
+  http.get("*/auditstore/:conversationId", ({ params }) => {
+    if (params.conversationId === "count") return;
+    return HttpResponse.json(MOCK_AUDIT_ENTRIES);
+  }),
+];

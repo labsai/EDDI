@@ -16,6 +16,7 @@ import { CoordinatorPage } from "@/pages/coordinator";
 import { OrphansPage } from "@/pages/orphans";
 import { LogsPage } from "@/pages/logs";
 import { SecretsPage } from "@/pages/secrets";
+import { AuditPage } from "@/pages/audit";
 
 export function App() {
   return (
@@ -32,6 +33,7 @@ export function App() {
         <Route path="/manage/logs" element={<LogsPage />} />
         <Route path="/manage/orphans" element={<OrphansPage />} />
         <Route path="/manage/secrets" element={<SecretsPage />} />
+        <Route path="/manage/audit" element={<AuditPage />} />
         <Route
           path="/manage/conversationview/:id"
           element={<ConversationDetailPage />}
