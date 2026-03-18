@@ -15,6 +15,27 @@ Each entry follows this format:
 
 ---
 
+## Phase 8a: MCP Code Review Fixes (2026-03-18)
+
+### Backend — CDI Injection Fix, Code Quality, Test Coverage
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Full code review of all 15 MCP tools identified and fixed several issues:
+
+| Fix | Files | Change |
+|---|---|---|
+| **P0: CDI → REST proxy** | `McpAdminTools.java` | Same bug as McpSetupTools — `create_bot` bypassed `DocumentDescriptorFilter`. Refactored to `IRestInterfaceFactory` |
+| **P1: Deduplication** | `McpConversationTools.java` | Extracted `sendMessageAndWait()` — eliminated 30 duplicated lines between `talkToBot` and `chatWithBot` |
+| **P1: Input validation** | `McpConversationTools.java` | Added null/blank checks to `createConversation`, `talkToBot`, `chatWithBot` — returns clear errors instead of NPE |
+| **Tests: +31 new** | `McpConversationToolsTest`, `McpAdminToolsTest` | 8 new tests: input validation (6), `readConversationLog` error path (1), `chatWithBot` creation failure (1). Factory mock wiring for admin tools |
+
+**Testing:** ✅ 103 MCP tests pass (up from 72), all green.
+
+---
+
 ## Phase 8a: MCP Server — EDDI as MCP Tool Provider (2026-03-17)
 
 ### Backend — quarkus-mcp-server-http Integration
