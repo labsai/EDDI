@@ -28,7 +28,7 @@ import org.jboss.logging.Logger;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.util.*;
-import java.util.concurrent.Callable;
+import java.util.concurrent.*;
 
 import static ai.labs.eddi.engine.model.Deployment.Status.*;
 
@@ -66,14 +66,48 @@ public class RestBotAdministration implements IRestBotAdministration {
 
     @Override
     public Response deployBot(final Deployment.Environment environment,
-            final String botId, final Integer version, final Boolean autoDeploy) {
+            final String botId, final Integer version, final Boolean autoDeploy,
+            final Boolean waitForCompletion) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(botId, "botId");
         RuntimeUtilities.checkNotNull(version, "version");
         RuntimeUtilities.checkNotNull(autoDeploy, "autoDeploy");
 
         try {
-            deploy(environment, botId, version, autoDeploy);
+            Future<Void> deployFuture = deploy(environment, botId, version, autoDeploy);
+
+            boolean shouldWait = waitForCompletion != null && waitForCompletion;
+            if (shouldWait) {
+                String deployError = null;
+                try {
+                    deployFuture.get(30, TimeUnit.SECONDS);
+                } catch (TimeoutException e) {
+                    log.warn("Deployment wait timed out for bot " + botId + " v" + version);
+                    deployError = "Deployment timed out";
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause();
+                    // Log full details server-side, expose only safe message to client
+                    log.warn("Deployment failed for bot " + botId + " v" + version +
+                            ": " + (cause != null ? cause.getMessage() : e.getMessage()), cause != null ? cause : e);
+                    deployError = "Deployment failed. Check server logs for details.";
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    deployError = "Deployment was interrupted";
+                }
+
+                // Return the actual status after waiting
+                Status status = checkDeploymentStatus(environment, botId, version);
+                var responseBody = new java.util.LinkedHashMap<String, Object>();
+                responseBody.put("status", status.toString());
+                responseBody.put("botId", botId);
+                responseBody.put("version", version);
+                responseBody.put("environment", environment.name());
+                if (deployError != null) {
+                    responseBody.put("error", deployError);
+                }
+                return Response.ok(responseBody, MediaType.APPLICATION_JSON).build();
+            }
+
             return Response.accepted().build();
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
@@ -81,7 +115,7 @@ public class RestBotAdministration implements IRestBotAdministration {
         }
     }
 
-    private void deploy(final Deployment.Environment environment,
+    private Future<Void> deploy(final Deployment.Environment environment,
             final String botId, final Integer version, final Boolean autoDeploy) {
         Callable<Void> deployBot = () -> {
             try {
@@ -105,7 +139,7 @@ public class RestBotAdministration implements IRestBotAdministration {
             return null;
         };
 
-        runtime.submitCallable(deployBot, ThreadContext.getResources());
+        return runtime.submitCallable(deployBot, ThreadContext.getResources());
     }
 
     private void handleDeploymentException(Exception e, String botId, Integer version,

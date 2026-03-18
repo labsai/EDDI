@@ -67,16 +67,38 @@ public class McpAdminTools {
         try {
             var env = parseEnvironment(environment);
             int ver = version != null ? version : 1;
-            Response response = botAdmin.deployBot(env, botId, ver, true);
-            return resultJson("deployed", Map.of(
-                    "botId", botId,
-                    "version", ver,
-                    "environment", env.name(),
-                    "status", response.getStatus()
-            ));
+            Response response = botAdmin.deployBot(env, botId, ver, true, true);
+            int httpStatus = response.getStatus();
+
+            var result = new java.util.LinkedHashMap<String, Object>();
+            result.put("botId", botId);
+            result.put("version", ver);
+            result.put("environment", env.name());
+            result.put("httpStatus", httpStatus);
+
+            if (httpStatus == 200) {
+                // Read actual deployment status from response body
+                try {
+                    @SuppressWarnings("unchecked")
+                    var body = (java.util.Map<String, Object>) response.getEntity();
+                    if (body != null && body.containsKey("status")) {
+                        String deployStatus = body.get("status").toString();
+                        result.put("deploymentStatus", deployStatus);
+                        result.put("deployed", "READY".equals(deployStatus));
+                    }
+                } catch (Exception parseError) {
+                    result.put("deployed", false);
+                    result.put("parseWarning", "Could not read deployment status from response");
+                }
+            } else if (httpStatus == 202) {
+                result.put("deployed", "pending");
+                result.put("deploymentStatus", "IN_PROGRESS");
+            }
+
+            return resultJson("deployed", result);
         } catch (Exception e) {
             LOGGER.error("MCP deploy_bot failed for bot " + botId, e);
-            return errorJson("Failed to deploy bot: " + e.getMessage());
+            return errorJson("Failed to deploy bot. Check server logs for details.");
         }
     }
 

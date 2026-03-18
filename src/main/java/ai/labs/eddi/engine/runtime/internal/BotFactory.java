@@ -192,6 +192,7 @@ public class BotFactory implements IBotFactory {
 
                 return bot; // Replace the dummy bot with the actual bot
             } catch (ServiceException e) {
+                log.error("Bot deployment failed for " + botId + " v" + version + ": " + e.getMessage(), e);
                 progressDummyBot.setDeploymentStatus(Deployment.Status.ERROR);
                 finalDeploymentProcess.completed(Deployment.Status.ERROR);
                 logBotDeployment(environment.toString(), botId, version, Deployment.Status.ERROR);

@@ -53,36 +53,36 @@ class McpAdminToolsTest {
 
     @Test
     void deployBot_success() throws IOException {
-        when(botAdmin.deployBot(Environment.unrestricted, BOT_ID, 1, true))
+        when(botAdmin.deployBot(Environment.unrestricted, BOT_ID, 1, true, true))
                 .thenReturn(Response.ok().build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deployed\"}");
 
         String result = tools.deployBot(BOT_ID, 1, "unrestricted");
 
         assertNotNull(result);
-        verify(botAdmin).deployBot(Environment.unrestricted, BOT_ID, 1, true);
+        verify(botAdmin).deployBot(Environment.unrestricted, BOT_ID, 1, true, true);
     }
 
     @Test
     void deployBot_defaultsToUnrestricted() throws IOException {
-        when(botAdmin.deployBot(Environment.unrestricted, BOT_ID, 2, true))
+        when(botAdmin.deployBot(Environment.unrestricted, BOT_ID, 2, true, true))
                 .thenReturn(Response.ok().build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deployed\"}");
 
         tools.deployBot(BOT_ID, 2, null);
 
-        verify(botAdmin).deployBot(Environment.unrestricted, BOT_ID, 2, true);
+        verify(botAdmin).deployBot(Environment.unrestricted, BOT_ID, 2, true, true);
     }
 
     @Test
     void deployBot_handlesException() {
-        when(botAdmin.deployBot(any(), any(), anyInt(), anyBoolean()))
+        when(botAdmin.deployBot(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
                 .thenThrow(new RuntimeException("Deploy failed"));
 
         String result = tools.deployBot(BOT_ID, 1, null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Deploy failed"));
+        assertTrue(result.contains("Failed to deploy bot"));
     }
 
     // --- undeployBot ---

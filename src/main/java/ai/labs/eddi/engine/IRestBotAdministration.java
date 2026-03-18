@@ -27,7 +27,10 @@ public interface IRestBotAdministration {
     Response deployBot(@PathParam("environment") Environment environment,
             @PathParam("botId") String botId,
             @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("autoDeploy") @DefaultValue("true") Boolean autoDeploy);
+            @QueryParam("autoDeploy") @DefaultValue("true") Boolean autoDeploy,
+            @Parameter(description = "If true, wait for deployment to complete (up to 30s) and return the final status. " +
+                    "If false (default), return 202 Accepted immediately.")
+            @QueryParam("waitForCompletion") @DefaultValue("false") Boolean waitForCompletion);
 
     @POST
     @Path("/{environment}/undeploy/{botId}")

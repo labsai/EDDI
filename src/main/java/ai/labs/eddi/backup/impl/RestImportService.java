@@ -120,7 +120,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                         deploymentFutures.add(deploymentFuture);
 
                                         restBotAdministration.deployBot(
-                                                unrestricted, botId.getId(), botId.getVersion(), true);
+                                                unrestricted, botId.getId(), botId.getVersion(), true, false);
 
                                         return true;
                                     }

@@ -7,6 +7,7 @@ import ai.labs.eddi.configs.behavior.model.BehaviorRuleConditionConfiguration;
 import ai.labs.eddi.configs.behavior.model.BehaviorRuleConfiguration;
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
+import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.configs.http.IRestHttpCallsStore;
@@ -52,6 +53,7 @@ public class McpSetupTools {
     private final IRestPackageStore packageStore;
     private final IRestBotStore botStore;
     private final IRestDocumentDescriptorStore descriptorStore;
+    private final IDocumentDescriptorStore documentDescriptorStore;
     private final IRestBotAdministration botAdmin;
     private final IJsonSerialization jsonSerialization;
 
@@ -63,6 +65,7 @@ public class McpSetupTools {
             IRestPackageStore packageStore,
             IRestBotStore botStore,
             IRestDocumentDescriptorStore descriptorStore,
+            IDocumentDescriptorStore documentDescriptorStore,
             IRestBotAdministration botAdmin,
             IJsonSerialization jsonSerialization) {
         this.behaviorStore = behaviorStore;
@@ -72,6 +75,7 @@ public class McpSetupTools {
         this.packageStore = packageStore;
         this.botStore = botStore;
         this.descriptorStore = descriptorStore;
+        this.documentDescriptorStore = documentDescriptorStore;
         this.botAdmin = botAdmin;
         this.jsonSerialization = jsonSerialization;
     }
@@ -303,8 +307,8 @@ public class McpSetupTools {
     }
 
     /**
-     * Create package with parser + behavior + [httpcalls...] + langchain [+ output]
-     * pipeline.
+     * Create package with behavior + [httpcalls...] + langchain [+ output]
+     * pipeline. Parser is NOT included — LLM-powered bots don't need NLU parsing.
      */
     PackageConfiguration createPackageConfig(String behaviorLocation,
             List<String> httpCallsLocations,
@@ -312,10 +316,9 @@ public class McpSetupTools {
             String outputLocation) {
         var extensions = new ArrayList<PackageConfiguration.PackageExtension>();
 
-        // Parser (always first in pipeline)
-        var parser = new PackageConfiguration.PackageExtension();
-        parser.setType(URI.create("eddi://ai.labs.parser"));
-        extensions.add(parser);
+        // Note: Parser extension is NOT added here. LLM-powered bots (created by setup_bot)
+        // don't need the NLU parser — the LangChain task processes user input directly.
+        // Adding a parser without dictionary config causes deployment failures.
 
         // Behavior rules
         var behavior = new PackageConfiguration.PackageExtension();
@@ -495,51 +498,55 @@ public class McpSetupTools {
     }
 
     /**
-     * Deploy a bot and synchronously wait for it to reach READY status.
-     * Polls up to 5 seconds, reporting the actual deployment status.
+     * Deploy a bot using the REST endpoint with waitForCompletion=true.
+     * The endpoint waits up to 30s for deployment to complete and returns the actual status.
      */
     private Map<String, String> deployAndWait(Deployment.Environment env, String botId, int botVersion) {
         var result = new LinkedHashMap<String, String>();
         result.put("environment", env.name());
         try {
-            botAdmin.deployBot(env, botId, botVersion, true);
+            Response response = botAdmin.deployBot(env, botId, botVersion, true, true);
+            int httpStatus = response.getStatus();
 
-            // Poll for deployment completion (max 5 seconds)
-            String finalStatus = "UNKNOWN";
-            for (int attempt = 0; attempt < 10; attempt++) {
+            if (httpStatus == 200) {
+                // Synchronous response with actual deployment status
                 try {
-                    Thread.sleep(500);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-                try {
-                    var statuses = botAdmin.getDeploymentStatuses(env);
-                    var matchingStatus = statuses.stream()
-                            .filter(s -> botId.equals(s.getBotId()))
-                            .findFirst();
-                    if (matchingStatus.isPresent()) {
-                        finalStatus = matchingStatus.get().getStatus().name();
-                        if ("READY".equals(finalStatus) || "ERROR".equals(finalStatus)) {
-                            break;
-                        }
+                    @SuppressWarnings("unchecked")
+                    var body = (java.util.Map<String, Object>) response.getEntity();
+                    String deployStatus = body != null && body.containsKey("status")
+                            ? body.get("status").toString() : "UNKNOWN";
+                    result.put("deployed", "READY".equals(deployStatus) ? "true" : "false");
+                    result.put("deploymentStatus", deployStatus);
+                    if (body != null && body.containsKey("error")) {
+                        result.put("deployError", body.get("error").toString());
                     }
-                } catch (Exception pollError) {
-                    LOGGER.debug("MCP deploy poll attempt " + attempt + " failed", pollError);
+                    if (!"READY".equals(deployStatus)) {
+                        String warning = "Bot created but deployment status is " + deployStatus +
+                                ". Check bot configuration and credentials.";
+                        if (body != null && body.containsKey("error")) {
+                            warning += " Error: " + body.get("error");
+                        }
+                        result.put("deployWarning", warning);
+                    }
+                } catch (Exception parseError) {
+                    LOGGER.debug("Could not parse deploy response", parseError);
+                    result.put("deployed", "false");
+                    result.put("deploymentStatus", "UNKNOWN");
+                    result.put("deployWarning", "Deploy returned 200 but could not parse status.");
                 }
-            }
-
-            result.put("deployed", "READY".equals(finalStatus) ? "true" : "false");
-            result.put("deploymentStatus", finalStatus);
-            if (!"READY".equals(finalStatus)) {
-                result.put("deployWarning",
-                        "Bot created but deployment status is " + finalStatus +
-                                ". Check bot configuration and credentials.");
+            } else if (httpStatus == 202) {
+                // Async response (shouldn't happen with waitForCompletion=true, but handle it)
+                result.put("deployed", "false");
+                result.put("deploymentStatus", "IN_PROGRESS");
+                result.put("deployWarning", "Deployment accepted but not yet complete.");
+            } else {
+                result.put("deployed", "false");
+                result.put("deployError", "Unexpected deploy response: HTTP " + httpStatus);
             }
         } catch (Exception deployError) {
             LOGGER.warn("MCP deploy failed for bot " + botId, deployError);
             result.put("deployed", "false");
-            result.put("deployError", deployError.getMessage());
+            result.put("deployError", "Deployment failed. Check server logs for details.");
         }
         return result;
     }
@@ -561,15 +568,29 @@ public class McpSetupTools {
         if (id == null)
             return;
         try {
-            var descriptor = new DocumentDescriptor();
-            descriptor.setName(name);
+            try {
+                // Try to patch the existing descriptor
+                var patchDoc = new DocumentDescriptor();
+                patchDoc.setName(name);
 
-            var patch = new PatchInstruction<DocumentDescriptor>();
-            patch.setOperation(PatchInstruction.PatchOperation.SET);
-            patch.setDocument(descriptor);
-            descriptorStore.patchDescriptor(id, version, patch);
+                var patch = new PatchInstruction<DocumentDescriptor>();
+                patch.setOperation(PatchInstruction.PatchOperation.SET);
+                patch.setDocument(patchDoc);
+                descriptorStore.patchDescriptor(id, version, patch);
+            } catch (Exception patchEx) {
+                // Descriptor doesn't exist yet (MCP bypasses REST layer which auto-creates them)
+                // Create the descriptor directly, mirroring DocumentDescriptorFilter behavior
+                var descriptor = new DocumentDescriptor();
+                descriptor.setName(name);
+                descriptor.setDescription("");
+                var now = new java.util.Date(System.currentTimeMillis());
+                descriptor.setCreatedOn(now);
+                descriptor.setLastModifiedOn(now);
+                documentDescriptorStore.createDescriptor(id, version, descriptor);
+                LOGGER.debug("MCP setup_bot: created descriptor for " + id + " v" + version);
+            }
         } catch (Exception e) {
-            LOGGER.warn("MCP setup_bot: failed to patch descriptor for " + id, e);
+            LOGGER.warn("MCP setup_bot: failed to create/patch descriptor for " + id, e);
         }
     }
 }

@@ -2,6 +2,7 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.behavior.IRestBehaviorStore;
 import ai.labs.eddi.configs.bots.IRestBotStore;
+import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.http.IRestHttpCallsStore;
 import ai.labs.eddi.configs.langchain.IRestLangChainStore;
@@ -32,6 +33,7 @@ class McpSetupToolsTest {
     private IRestPackageStore packageStore;
     private IRestBotStore botStore;
     private IRestDocumentDescriptorStore descriptorStore;
+    private IDocumentDescriptorStore documentDescriptorStore;
     private IRestBotAdministration botAdmin;
     private IJsonSerialization jsonSerialization;
     private McpSetupTools tools;
@@ -45,6 +47,7 @@ class McpSetupToolsTest {
         packageStore = mock(IRestPackageStore.class);
         botStore = mock(IRestBotStore.class);
         descriptorStore = mock(IRestDocumentDescriptorStore.class);
+        documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         botAdmin = mock(IRestBotAdministration.class);
         jsonSerialization = mock(IJsonSerialization.class);
 
@@ -52,7 +55,7 @@ class McpSetupToolsTest {
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
 
         tools = new McpSetupTools(behaviorStore, langchainStore, outputStore,
-                httpCallsStore, packageStore, botStore, descriptorStore, botAdmin, jsonSerialization);
+                httpCallsStore, packageStore, botStore, descriptorStore, documentDescriptorStore, botAdmin, jsonSerialization);
     }
 
     @Test
@@ -68,7 +71,7 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
         when(botStore.createBot(any()))
                 .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
-        when(botAdmin.deployBot(any(), any(), anyInt(), anyBoolean()))
+        when(botAdmin.deployBot(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
                 .thenReturn(Response.ok().build());
 
         String result = tools.setupBot(
@@ -84,7 +87,7 @@ class McpSetupToolsTest {
         verify(outputStore).createOutputSet(any());
         verify(packageStore).createPackage(any());
         verify(botStore).createBot(any());
-        verify(botAdmin).deployBot(Environment.unrestricted, "bot-1", 1, true);
+        verify(botAdmin).deployBot(Environment.unrestricted, "bot-1", 1, true, true);
 
         // Verify 5 descriptors patched (behavior, langchain, output, package, bot)
         verify(descriptorStore, times(5)).patchDescriptor(any(), anyInt(), any());
@@ -100,7 +103,7 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
         when(botStore.createBot(any()))
                 .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
-        when(botAdmin.deployBot(any(), any(), anyInt(), anyBoolean()))
+        when(botAdmin.deployBot(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
                 .thenReturn(Response.ok().build());
 
         tools.setupBot("Test Bot", "You are helpful", null, null,
@@ -127,7 +130,7 @@ class McpSetupToolsTest {
                 "sk-test", null, null, null, null, false, null);
 
         // Deploy should NOT be called
-        verify(botAdmin, never()).deployBot(any(), any(), anyInt(), anyBoolean());
+        verify(botAdmin, never()).deployBot(any(), any(), anyInt(), anyBoolean(), anyBoolean());
     }
 
     @Test
@@ -140,7 +143,7 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
         when(botStore.createBot(any()))
                 .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
-        when(botAdmin.deployBot(any(), any(), anyInt(), anyBoolean()))
+        when(botAdmin.deployBot(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
                 .thenThrow(new RuntimeException("Deploy failed"));
 
         String result = tools.setupBot("Test Bot", "You are helpful", null, null,
@@ -258,12 +261,11 @@ class McpSetupToolsTest {
         verify(packageStore).createPackage(packageCaptor.capture());
 
         var pkgConfig = packageCaptor.getValue();
-        // Should have 4 extensions: parser, behavior, langchain, output
-        assertEquals(4, pkgConfig.getPackageExtensions().size());
-        assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getPackageExtensions().get(0).getType());
-        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getPackageExtensions().get(1).getType());
-        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getPackageExtensions().get(2).getType());
-        assertEquals(URI.create("eddi://ai.labs.output"), pkgConfig.getPackageExtensions().get(3).getType());
+        // Should have 3 extensions: behavior, langchain, output (no parser for LLM-powered bots)
+        assertEquals(3, pkgConfig.getPackageExtensions().size());
+        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getPackageExtensions().get(0).getType());
+        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getPackageExtensions().get(1).getType());
+        assertEquals(URI.create("eddi://ai.labs.output"), pkgConfig.getPackageExtensions().get(2).getType());
     }
 
     @Test
@@ -283,8 +285,8 @@ class McpSetupToolsTest {
         var packageCaptor = ArgumentCaptor.forClass(PackageConfiguration.class);
         verify(packageStore).createPackage(packageCaptor.capture());
 
-        // Without intro message, should have 3 extensions (no output)
-        assertEquals(3, packageCaptor.getValue().getPackageExtensions().size());
+        // Without intro message, should have 2 extensions (no output, no parser)
+        assertEquals(2, packageCaptor.getValue().getPackageExtensions().size());
     }
 
     @Test
@@ -404,7 +406,7 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
         when(botStore.createBot(any()))
                 .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
-        when(botAdmin.deployBot(any(), any(), anyInt(), anyBoolean()))
+        when(botAdmin.deployBot(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
                 .thenReturn(Response.ok().build());
 
         String result = tools.createApiBot(
@@ -420,7 +422,7 @@ class McpSetupToolsTest {
         verify(langchainStore).createLangChain(any());
         verify(packageStore).createPackage(any());
         verify(botStore).createBot(any());
-        verify(botAdmin).deployBot(Environment.unrestricted, "bot-1", 1, true);
+        verify(botAdmin).deployBot(Environment.unrestricted, "bot-1", 1, true, true);
 
         // Verify the system prompt was enriched with API summary
         var lcCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
@@ -469,12 +471,11 @@ class McpSetupToolsTest {
         verify(packageStore).createPackage(packageCaptor.capture());
 
         var pkgConfig = packageCaptor.getValue();
-        // Should have 5 extensions: parser + behavior + 2 httpcalls groups + langchain
-        assertEquals(5, pkgConfig.getPackageExtensions().size());
-        assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getPackageExtensions().get(0).getType());
-        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getPackageExtensions().get(1).getType());
+        // Should have 4 extensions: behavior + 2 httpcalls groups + langchain (no parser for LLM-powered bots)
+        assertEquals(4, pkgConfig.getPackageExtensions().size());
+        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getPackageExtensions().get(0).getType());
+        assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getPackageExtensions().get(1).getType());
         assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getPackageExtensions().get(2).getType());
-        assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getPackageExtensions().get(3).getType());
-        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getPackageExtensions().get(4).getType());
+        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getPackageExtensions().get(3).getType());
     }
 }
