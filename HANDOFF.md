@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-17 (Phase 8a+ `create_api_bot` complete)
+> **Last updated:** 2026-03-18 (Phase 8a MCP improvements — cleaner responses, ollama/jlama, deploy verification)
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -529,6 +529,13 @@
 - [x] Streamable HTTP transport at `/mcp`
 - [x] `docs/mcp-server.md` with Claude Desktop config + setup tools reference
 - [x] Code review fixes: `@Blocking`, error callback, typed params, `resolveParams()` extraction, static Pattern, prompt enrichment ArgumentCaptor test
+- [x] **MCP Improvements** (2026-03-18):
+  - AI-agent-friendly responses: `buildConversationResponse()` extracts `botResponse`, `quickReplies`, `actions`, `conversationState` as top-level fields
+  - Ollama/jlama support: all 7 providers in `setup_bot`, `baseUrl` param, `isLocalLlmProvider()` skips apiKey validation, provider-specific param mapping
+  - Deploy verification: `deployAndWait()` polls deployment status for 5s, reports actual status + warning on failure
+  - `OllamaLanguageModelBuilder` — added `baseUrl` support to both `build()` and `buildStreaming()`
+  - `docker-compose.yml` — added `host.docker.internal:host-gateway` for Docker-hosted Ollama
+  - 38 MCP tests pass (16 McpConversationToolsTest + 22 McpSetupToolsTest)
 
 **Key files:**
 
