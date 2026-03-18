@@ -31,7 +31,8 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
  * Exposes bot listing, conversation management, and messaging
  * as MCP-compliant tools via the Quarkus MCP Server extension.
  *
- * <p>Phase 8a — Item 35: Bot Conversations MCP Server (5 SP)
+ * <p>
+ * Phase 8a — Item 35: Bot Conversations MCP Server (5 SP)
  *
  * @author ginccc
  */
@@ -48,21 +49,19 @@ public class McpConversationTools {
 
     @Inject
     public McpConversationTools(IConversationService conversationService,
-                                IRestBotAdministration botAdmin,
-                                IRestBotStore botStore,
-                                IJsonSerialization jsonSerialization) {
+            IRestBotAdministration botAdmin,
+            IRestBotStore botStore,
+            IJsonSerialization jsonSerialization) {
         this.conversationService = conversationService;
         this.botAdmin = botAdmin;
         this.botStore = botStore;
         this.jsonSerialization = jsonSerialization;
     }
 
-    @Tool(name = "list_bots",
-            description = "List all deployed bots with their status, version, and name. " +
-                    "Returns a JSON array of bot deployment statuses.")
+    @Tool(name = "list_bots", description = "List all deployed bots with their status, version, and name. " +
+            "Returns a JSON array of bot deployment statuses.")
     public String listBots(
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'")
-            String environment) {
+            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
         try {
             var env = parseEnvironment(environment);
             List<BotDeploymentStatus> statuses = botAdmin.getDeploymentStatuses(env);
@@ -73,9 +72,8 @@ public class McpConversationTools {
         }
     }
 
-    @Tool(name = "list_bot_configs",
-            description = "List all bot configurations (including those not yet deployed). " +
-                    "Returns a JSON array of bot descriptors with name, description, and IDs.")
+    @Tool(name = "list_bot_configs", description = "List all bot configurations (including those not yet deployed). " +
+            "Returns a JSON array of bot descriptors with name, description, and IDs.")
     public String listBotConfigs(
             @ToolArg(description = "Optional filter string to search bot names") String filter,
             @ToolArg(description = "Maximum number of results (default 20)") Integer limit) {
@@ -90,14 +88,12 @@ public class McpConversationTools {
         }
     }
 
-    @Tool(name = "create_conversation",
-            description = "Start a new conversation with a deployed bot. " +
-                    "Returns the conversationId which you need for subsequent talk_to_bot calls. " +
-                    "Tip: Use chat_with_bot instead if you want to send a message immediately.")
+    @Tool(name = "create_conversation", description = "Start a new conversation with a deployed bot. " +
+            "Returns the conversationId which you need for subsequent talk_to_bot calls. " +
+            "Tip: Use chat_with_bot instead if you want to send a message immediately.")
     public String createConversation(
             @ToolArg(description = "Bot ID (required)") String botId,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'")
-            String environment) {
+            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
         try {
             var env = parseEnvironment(environment);
             ConversationResult result = conversationService.startConversation(
@@ -106,8 +102,7 @@ public class McpConversationTools {
                     "conversationId", result.conversationId(),
                     "conversationUri", result.conversationUri().toString(),
                     "botId", botId,
-                    "environment", env.name()
-            ));
+                    "environment", env.name()));
         } catch (Exception e) {
             LOGGER.error("MCP create_conversation failed for bot " + botId, e);
             return errorJson("Failed to create conversation: " + e.getMessage());
@@ -115,16 +110,15 @@ public class McpConversationTools {
     }
 
     @Blocking
-    @Tool(name = "talk_to_bot",
-            description = "Send a message to a bot in an existing conversation and get the bot's response. " +
-                    "You must first call create_conversation to get a conversationId, " +
-                    "or use chat_with_bot for a single-call alternative.")
+    @Tool(name = "talk_to_bot", description = "Send a message to a bot in an existing conversation and get the bot's response. "
+            +
+            "You must first call create_conversation to get a conversationId, " +
+            "or use chat_with_bot for a single-call alternative.")
     public String talkToBot(
             @ToolArg(description = "Bot ID (required)") String botId,
             @ToolArg(description = "Conversation ID from create_conversation (required)") String conversationId,
             @ToolArg(description = "The user message to send to the bot (required)") String message,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'")
-            String environment) {
+            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
         try {
             var env = parseEnvironment(environment);
 
@@ -159,18 +153,16 @@ public class McpConversationTools {
     }
 
     @Blocking
-    @Tool(name = "chat_with_bot",
-            description = "Send a message to a bot, automatically creating a new conversation if needed. " +
-                    "This is the simplest way to interact with a bot — combines create_conversation + " +
-                    "talk_to_bot into a single call. Returns the bot response and conversationId " +
-                    "for follow-up messages.")
+    @Tool(name = "chat_with_bot", description = "Send a message to a bot, automatically creating a new conversation if needed. "
+            +
+            "This is the simplest way to interact with a bot — combines create_conversation + " +
+            "talk_to_bot into a single call. Returns the bot response and conversationId " +
+            "for follow-up messages.")
     public String chatWithBot(
             @ToolArg(description = "Bot ID (required)") String botId,
             @ToolArg(description = "The user message to send to the bot (required)") String message,
-            @ToolArg(description = "Conversation ID to continue (optional — creates new if omitted)")
-            String conversationId,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'")
-            String environment) {
+            @ToolArg(description = "Conversation ID to continue (optional — creates new if omitted)") String conversationId,
+            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
         try {
             var env = parseEnvironment(environment);
 
@@ -216,22 +208,17 @@ public class McpConversationTools {
         }
     }
 
-    @Tool(name = "read_conversation",
-            description = "Read conversation history and memory. " +
-                    "Returns the conversation memory snapshot. Use returningFields to limit " +
-                    "output size, or use read_conversation_log for a human-readable summary.")
+    @Tool(name = "read_conversation", description = "Read conversation history and memory. " +
+            "Returns the conversation memory snapshot. Use returningFields to limit " +
+            "output size, or use read_conversation_log for a human-readable summary.")
     public String readConversation(
             @ToolArg(description = "Bot ID (required)") String botId,
             @ToolArg(description = "Conversation ID (required)") String conversationId,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'")
-            String environment,
-            @ToolArg(description = "Return only the current (latest) step? (default: true)")
-            Boolean currentStepOnly,
-            @ToolArg(description = "Return detailed internal data? (default: false)")
-            Boolean returnDetailed,
+            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment,
+            @ToolArg(description = "Return only the current (latest) step? (default: true)") Boolean currentStepOnly,
+            @ToolArg(description = "Return detailed internal data? (default: false)") Boolean returnDetailed,
             @ToolArg(description = "Comma-separated list of fields to return (e.g. 'input,output,actions'). " +
-                    "Empty = all fields.")
-            String returningFields) {
+                    "Empty = all fields.") String returningFields) {
         try {
             var env = parseEnvironment(environment);
             boolean stepOnly = currentStepOnly != null ? currentStepOnly : true;
@@ -251,10 +238,9 @@ public class McpConversationTools {
         }
     }
 
-    @Tool(name = "read_conversation_log",
-            description = "Read conversation log as formatted text. " +
-                    "Returns the conversation history in a human-readable format. " +
-                    "This is the preferred tool for reviewing what was said in a conversation.")
+    @Tool(name = "read_conversation_log", description = "Read conversation log as formatted text. " +
+            "Returns the conversation history in a human-readable format. " +
+            "This is the preferred tool for reviewing what was said in a conversation.")
     public String readConversationLog(
             @ToolArg(description = "Conversation ID (required)") String conversationId,
             @ToolArg(description = "Number of recent steps to include (default: all)") Integer logSize) {
@@ -273,7 +259,6 @@ public class McpConversationTools {
      * Extracts top-level fields: botResponse (text), quickReplies, actions,
      * conversationState — so AI agents don't need to dig into the raw snapshot.
      */
-    @SuppressWarnings("unchecked")
     private LinkedHashMap<String, Object> buildConversationResponse(
             SimpleConversationMemorySnapshot snapshot, String conversationId) {
 

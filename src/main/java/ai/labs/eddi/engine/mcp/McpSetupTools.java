@@ -18,7 +18,6 @@ import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.engine.IRestBotAdministration;
-import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
@@ -58,14 +57,14 @@ public class McpSetupTools {
 
     @Inject
     public McpSetupTools(IRestBehaviorStore behaviorStore,
-                         IRestLangChainStore langchainStore,
-                         IRestOutputStore outputStore,
-                         IRestHttpCallsStore httpCallsStore,
-                         IRestPackageStore packageStore,
-                         IRestBotStore botStore,
-                         IRestDocumentDescriptorStore descriptorStore,
-                         IRestBotAdministration botAdmin,
-                         IJsonSerialization jsonSerialization) {
+            IRestLangChainStore langchainStore,
+            IRestOutputStore outputStore,
+            IRestHttpCallsStore httpCallsStore,
+            IRestPackageStore packageStore,
+            IRestBotStore botStore,
+            IRestDocumentDescriptorStore descriptorStore,
+            IRestBotAdministration botAdmin,
+            IJsonSerialization jsonSerialization) {
         this.behaviorStore = behaviorStore;
         this.langchainStore = langchainStore;
         this.outputStore = outputStore;
@@ -77,37 +76,29 @@ public class McpSetupTools {
         this.jsonSerialization = jsonSerialization;
     }
 
-    @Tool(name = "setup_bot",
-            description = "Create a fully working, deployed bot in a single call. " +
-                    "This creates all necessary resources (behavior rules, LLM connection, " +
-                    "output set, package, bot), names them, and optionally deploys the bot. " +
-                    "This is the fastest way to get a new bot running — equivalent to the Bot Father workflow.")
+    @Tool(name = "setup_bot", description = "Create a fully working, deployed bot in a single call. " +
+            "This creates all necessary resources (behavior rules, LLM connection, " +
+            "output set, package, bot), names them, and optionally deploys the bot. " +
+            "This is the fastest way to get a new bot running — equivalent to the Bot Father workflow.")
     public String setupBot(
             @ToolArg(description = "Bot name (required)") String name,
             @ToolArg(description = "System prompt / role for the LLM (required). " +
                     "Describes the bot's personality and purpose.") String systemPrompt,
             @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', 'gemini', " +
-                    "'gemini-vertex', 'huggingface', 'ollama', or 'jlama'")
-            String model,
+                    "'gemini-vertex', 'huggingface', 'ollama', or 'jlama'") String model,
             @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default), 'gpt-5.4', " +
-                    "'gemini-3.1-pro-preview', 'deepseek-chat', 'llama3.2:1b' (ollama)")
-            String modelName,
+                    "'gemini-3.1-pro-preview', 'deepseek-chat', 'llama3.2:1b' (ollama)") String modelName,
             @ToolArg(description = "API key for the LLM provider. Required for cloud providers " +
                     "(anthropic, openai, gemini). Optional/unused for local LLMs (ollama, jlama). " +
                     "Can be a vault reference like '${vault:openai-key}'.") String apiKey,
             @ToolArg(description = "Base URL for the LLM provider (optional). " +
                     "Useful for ollama when running in Docker (e.g. 'http://host.docker.internal:11434')") String baseUrl,
-            @ToolArg(description = "Greeting message shown when a conversation starts (optional)")
-            String introMessage,
-            @ToolArg(description = "Enable built-in tools like calculator, datetime, websearch? (default: false)")
-            Boolean enableBuiltInTools,
+            @ToolArg(description = "Greeting message shown when a conversation starts (optional)") String introMessage,
+            @ToolArg(description = "Enable built-in tools like calculator, datetime, websearch? (default: false)") Boolean enableBuiltInTools,
             @ToolArg(description = "Comma-separated list of specific built-in tools to enable " +
-                    "(e.g. 'calculator,datetime,websearch'). Only used if enableBuiltInTools is true.")
-            String builtInToolsWhitelist,
-            @ToolArg(description = "Automatically deploy the bot after creation? (default: true)")
-            Boolean deploy,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'")
-            String environment) {
+                    "(e.g. 'calculator,datetime,websearch'). Only used if enableBuiltInTools is true.") String builtInToolsWhitelist,
+            @ToolArg(description = "Automatically deploy the bot after creation? (default: true)") Boolean deploy,
+            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
         try {
             // Validate required params
             if (name == null || name.isBlank()) {
@@ -224,13 +215,15 @@ public class McpSetupTools {
     }
 
     /**
-     * Create LangChain config with the specified model, system prompt, and tool settings.
-     * Uses provider-specific parameter key names (e.g., Ollama uses 'model' not 'modelName').
+     * Create LangChain config with the specified model, system prompt, and tool
+     * settings.
+     * Uses provider-specific parameter key names (e.g., Ollama uses 'model' not
+     * 'modelName').
      */
     LangChainConfiguration createLangchainConfig(String modelType, String modelId,
-                                                   String apiKey, String systemPrompt,
-                                                   boolean enableTooling, String toolsWhitelist,
-                                                   String baseUrl) {
+            String apiKey, String systemPrompt,
+            boolean enableTooling, String toolsWhitelist,
+            String baseUrl) {
         var task = new LangChainConfiguration.Task();
         task.setActions(List.of("send_message"));
         task.setId(modelType);
@@ -310,12 +303,13 @@ public class McpSetupTools {
     }
 
     /**
-     * Create package with parser + behavior + [httpcalls...] + langchain [+ output] pipeline.
+     * Create package with parser + behavior + [httpcalls...] + langchain [+ output]
+     * pipeline.
      */
     PackageConfiguration createPackageConfig(String behaviorLocation,
-                                              List<String> httpCallsLocations,
-                                              String langchainLocation,
-                                              String outputLocation) {
+            List<String> httpCallsLocations,
+            String langchainLocation,
+            String outputLocation) {
         var extensions = new ArrayList<PackageConfiguration.PackageExtension>();
 
         // Parser (always first in pipeline)
@@ -358,33 +352,26 @@ public class McpSetupTools {
         return config;
     }
 
-    @Tool(name = "create_api_bot",
-            description = "Create a bot that can call any REST API described by an OpenAPI specification. " +
-                    "Parses the OpenAPI spec, generates HttpCalls configurations (grouped by API tag), " +
-                    "and creates a fully deployed bot with LLM-powered API interaction. " +
-                    "The LLM can then call the API endpoints as tools through EDDI's controlled pipeline.")
+    @Tool(name = "create_api_bot", description = "Create a bot that can call any REST API described by an OpenAPI specification. "
+            +
+            "Parses the OpenAPI spec, generates HttpCalls configurations (grouped by API tag), " +
+            "and creates a fully deployed bot with LLM-powered API interaction. " +
+            "The LLM can then call the API endpoints as tools through EDDI's controlled pipeline.")
     public String createApiBot(
             @ToolArg(description = "Bot name (required)") String name,
             @ToolArg(description = "System prompt / role for the LLM (required). " +
                     "Should describe the API and how the bot should use it.") String systemPrompt,
-            @ToolArg(description = "OpenAPI 3.0/3.1 specification as JSON/YAML string or URL (required)")
-            String openApiSpec,
-            @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', or 'gemini'")
-            String model,
-            @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default), 'gpt-5.4', 'gemini-3.1-pro-preview', 'deepseek-chat'")
-            String modelName,
+            @ToolArg(description = "OpenAPI 3.0/3.1 specification as JSON/YAML string or URL (required)") String openApiSpec,
+            @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', or 'gemini'") String model,
+            @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default), 'gpt-5.4', 'gemini-3.1-pro-preview', 'deepseek-chat'") String modelName,
             @ToolArg(description = "API key for the LLM provider (required). " +
                     "Can be a vault reference like '${vault:openai-key}'") String apiKey,
-            @ToolArg(description = "Override the API base URL from the spec (optional)")
-            String apiBaseUrl,
+            @ToolArg(description = "Override the API base URL from the spec (optional)") String apiBaseUrl,
             @ToolArg(description = "API authorization header value or vault reference (optional). " +
                     "E.g. 'Bearer sk-...' or '${vault:api-key}'") String apiAuth,
-            @ToolArg(description = "Comma-separated endpoint filter, e.g. 'GET /users,POST /orders' (optional, default: all)")
-            String endpoints,
-            @ToolArg(description = "Automatically deploy the bot after creation? (default: true)")
-            Boolean deploy,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'")
-            String environment) {
+            @ToolArg(description = "Comma-separated endpoint filter, e.g. 'GET /users,POST /orders' (optional, default: all)") String endpoints,
+            @ToolArg(description = "Automatically deploy the bot after creation? (default: true)") Boolean deploy,
+            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
         try {
             // Validate required params
             if (name == null || name.isBlank()) {
@@ -495,10 +482,11 @@ public class McpSetupTools {
      * Resolve common parameters with defaults.
      */
     private record ResolvedParams(String modelType, String modelId,
-                                   boolean shouldDeploy, Deployment.Environment env) {}
+            boolean shouldDeploy, Deployment.Environment env) {
+    }
 
     private ResolvedParams resolveParams(String model, String modelName,
-                                          Boolean deploy, String environment) {
+            Boolean deploy, String environment) {
         return new ResolvedParams(
                 model != null && !model.isBlank() ? model.trim().toLowerCase() : "anthropic",
                 modelName != null && !modelName.isBlank() ? modelName.trim() : "claude-sonnet-4-6",
@@ -546,7 +534,7 @@ public class McpSetupTools {
             if (!"READY".equals(finalStatus)) {
                 result.put("deployWarning",
                         "Bot created but deployment status is " + finalStatus +
-                        ". Check bot configuration and credentials.");
+                                ". Check bot configuration and credentials.");
             }
         } catch (Exception deployError) {
             LOGGER.warn("MCP deploy failed for bot " + botId, deployError);
@@ -560,7 +548,8 @@ public class McpSetupTools {
      * Check if the given model type is a local LLM provider (no API key needed).
      */
     static boolean isLocalLlmProvider(String model) {
-        if (model == null || model.isBlank()) return false;
+        if (model == null || model.isBlank())
+            return false;
         String normalized = model.trim().toLowerCase();
         return "ollama".equals(normalized) || "jlama".equals(normalized);
     }
@@ -569,7 +558,8 @@ public class McpSetupTools {
      * Patch a resource descriptor with the bot name.
      */
     private void patchDescriptor(String id, int version, String name) {
-        if (id == null) return;
+        if (id == null)
+            return;
         try {
             var descriptor = new DocumentDescriptor();
             descriptor.setName(name);
