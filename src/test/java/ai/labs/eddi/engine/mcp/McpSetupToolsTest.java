@@ -2,7 +2,6 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.behavior.IRestBehaviorStore;
 import ai.labs.eddi.configs.bots.IRestBotStore;
-import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.http.IRestHttpCallsStore;
 import ai.labs.eddi.configs.langchain.IRestLangChainStore;
@@ -12,6 +11,7 @@ import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,7 +33,6 @@ class McpSetupToolsTest {
     private IRestPackageStore packageStore;
     private IRestBotStore botStore;
     private IRestDocumentDescriptorStore descriptorStore;
-    private IDocumentDescriptorStore documentDescriptorStore;
     private IRestBotAdministration botAdmin;
     private IJsonSerialization jsonSerialization;
     private McpSetupTools tools;
@@ -47,15 +46,23 @@ class McpSetupToolsTest {
         packageStore = mock(IRestPackageStore.class);
         botStore = mock(IRestBotStore.class);
         descriptorStore = mock(IRestDocumentDescriptorStore.class);
-        documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         botAdmin = mock(IRestBotAdministration.class);
         jsonSerialization = mock(IJsonSerialization.class);
+
+        // Wire store mocks through IRestInterfaceFactory
+        var restInterfaceFactory = mock(IRestInterfaceFactory.class);
+        when(restInterfaceFactory.get(IRestBehaviorStore.class)).thenReturn(behaviorStore);
+        when(restInterfaceFactory.get(IRestLangChainStore.class)).thenReturn(langchainStore);
+        when(restInterfaceFactory.get(IRestOutputStore.class)).thenReturn(outputStore);
+        when(restInterfaceFactory.get(IRestHttpCallsStore.class)).thenReturn(httpCallsStore);
+        when(restInterfaceFactory.get(IRestPackageStore.class)).thenReturn(packageStore);
+        when(restInterfaceFactory.get(IRestBotStore.class)).thenReturn(botStore);
+        when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
 
         // Default serialization
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
 
-        tools = new McpSetupTools(behaviorStore, langchainStore, outputStore,
-                httpCallsStore, packageStore, botStore, descriptorStore, documentDescriptorStore, botAdmin, jsonSerialization);
+        tools = new McpSetupTools(restInterfaceFactory, botAdmin, jsonSerialization);
     }
 
     @Test

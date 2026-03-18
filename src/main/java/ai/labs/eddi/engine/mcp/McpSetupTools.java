@@ -7,7 +7,6 @@ import ai.labs.eddi.configs.behavior.model.BehaviorRuleConditionConfiguration;
 import ai.labs.eddi.configs.behavior.model.BehaviorRuleConfiguration;
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
-import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.configs.http.IRestHttpCallsStore;
@@ -20,6 +19,8 @@ import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -46,36 +47,15 @@ public class McpSetupTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpSetupTools.class);
 
-    private final IRestBehaviorStore behaviorStore;
-    private final IRestLangChainStore langchainStore;
-    private final IRestOutputStore outputStore;
-    private final IRestHttpCallsStore httpCallsStore;
-    private final IRestPackageStore packageStore;
-    private final IRestBotStore botStore;
-    private final IRestDocumentDescriptorStore descriptorStore;
-    private final IDocumentDescriptorStore documentDescriptorStore;
+    private final IRestInterfaceFactory restInterfaceFactory;
     private final IRestBotAdministration botAdmin;
     private final IJsonSerialization jsonSerialization;
 
     @Inject
-    public McpSetupTools(IRestBehaviorStore behaviorStore,
-            IRestLangChainStore langchainStore,
-            IRestOutputStore outputStore,
-            IRestHttpCallsStore httpCallsStore,
-            IRestPackageStore packageStore,
-            IRestBotStore botStore,
-            IRestDocumentDescriptorStore descriptorStore,
-            IDocumentDescriptorStore documentDescriptorStore,
+    public McpSetupTools(IRestInterfaceFactory restInterfaceFactory,
             IRestBotAdministration botAdmin,
             IJsonSerialization jsonSerialization) {
-        this.behaviorStore = behaviorStore;
-        this.langchainStore = langchainStore;
-        this.outputStore = outputStore;
-        this.httpCallsStore = httpCallsStore;
-        this.packageStore = packageStore;
-        this.botStore = botStore;
-        this.descriptorStore = descriptorStore;
-        this.documentDescriptorStore = documentDescriptorStore;
+        this.restInterfaceFactory = restInterfaceFactory;
         this.botAdmin = botAdmin;
         this.jsonSerialization = jsonSerialization;
     }
@@ -124,7 +104,7 @@ public class McpSetupTools {
 
             // --- Step 1: Create Behavior Rules ---
             var behaviorConfig = createBehaviorConfig();
-            Response behaviorResponse = behaviorStore.createBehaviorRuleSet(behaviorConfig);
+            Response behaviorResponse = getRestStore(IRestBehaviorStore.class).createBehaviorRuleSet(behaviorConfig);
             String behaviorLocation = behaviorResponse.getHeaderString("Location");
             String behaviorId = extractIdFromLocation(behaviorLocation);
             int behaviorVersion = extractVersionFromLocation(behaviorLocation);
@@ -135,7 +115,7 @@ public class McpSetupTools {
             var langchainConfig = createLangchainConfig(
                     params.modelType, params.modelId, apiKey, systemPrompt,
                     toolsEnabled, builtInToolsWhitelist, baseUrl);
-            Response langchainResponse = langchainStore.createLangChain(langchainConfig);
+            Response langchainResponse = getRestStore(IRestLangChainStore.class).createLangChain(langchainConfig);
             String langchainLocation = langchainResponse.getHeaderString("Location");
             String langchainId = extractIdFromLocation(langchainLocation);
             int langchainVersion = extractVersionFromLocation(langchainLocation);
@@ -146,7 +126,7 @@ public class McpSetupTools {
             String outputLocation = null;
             if (introMessage != null && !introMessage.isBlank()) {
                 var outputConfig = createOutputConfig(introMessage);
-                Response outputResponse = outputStore.createOutputSet(outputConfig);
+                Response outputResponse = getRestStore(IRestOutputStore.class).createOutputSet(outputConfig);
                 outputLocation = outputResponse.getHeaderString("Location");
                 String outputId = extractIdFromLocation(outputLocation);
                 int outputVersion = extractVersionFromLocation(outputLocation);
@@ -156,7 +136,7 @@ public class McpSetupTools {
 
             // --- Step 4: Create Package ---
             var packageConfig = createPackageConfig(behaviorLocation, null, langchainLocation, outputLocation);
-            Response packageResponse = packageStore.createPackage(packageConfig);
+            Response packageResponse = getRestStore(IRestPackageStore.class).createPackage(packageConfig);
             String packageLocation = packageResponse.getHeaderString("Location");
             String packageId = extractIdFromLocation(packageLocation);
             int packageVersion = extractVersionFromLocation(packageLocation);
@@ -166,7 +146,7 @@ public class McpSetupTools {
             // --- Step 5: Create Bot ---
             var botConfig = new BotConfiguration();
             botConfig.setPackages(List.of(URI.create(packageLocation)));
-            Response botResponse = botStore.createBot(botConfig);
+            Response botResponse = getRestStore(IRestBotStore.class).createBot(botConfig);
             String botLocation = botResponse.getHeaderString("Location");
             String botId = extractIdFromLocation(botLocation);
             int botVersion = extractVersionFromLocation(botLocation);
@@ -408,7 +388,7 @@ public class McpSetupTools {
             for (var entry : buildResult.configsByGroup().entrySet()) {
                 String groupName = entry.getKey();
                 var config = entry.getValue();
-                Response httpCallsResponse = httpCallsStore.createHttpCalls(config);
+                Response httpCallsResponse = getRestStore(IRestHttpCallsStore.class).createHttpCalls(config);
                 String httpCallsLocation = httpCallsResponse.getHeaderString("Location");
                 httpCallsLocations.add(httpCallsLocation);
                 groupNames.add(groupName);
@@ -423,7 +403,7 @@ public class McpSetupTools {
 
             // --- Step 3: Create Behavior Rules ---
             var behaviorConfig = createBehaviorConfig();
-            Response behaviorResponse = behaviorStore.createBehaviorRuleSet(behaviorConfig);
+            Response behaviorResponse = getRestStore(IRestBehaviorStore.class).createBehaviorRuleSet(behaviorConfig);
             String behaviorLocation = behaviorResponse.getHeaderString("Location");
             createdResources.put("behaviorLocation", behaviorLocation);
             patchDescriptor(extractIdFromLocation(behaviorLocation),
@@ -434,7 +414,7 @@ public class McpSetupTools {
             String enrichedPrompt = systemPrompt + "\n\n" + buildResult.apiSummary();
             var langchainConfig = createLangchainConfig(
                     params.modelType, params.modelId, apiKey, enrichedPrompt, false, null, null);
-            Response langchainResponse = langchainStore.createLangChain(langchainConfig);
+            Response langchainResponse = getRestStore(IRestLangChainStore.class).createLangChain(langchainConfig);
             String langchainLocation = langchainResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);
             patchDescriptor(extractIdFromLocation(langchainLocation),
@@ -443,7 +423,7 @@ public class McpSetupTools {
             // --- Step 5: Create Package (with httpcalls in pipeline) ---
             var packageConfig = createPackageConfig(
                     behaviorLocation, httpCallsLocations, langchainLocation, null);
-            Response packageResponse = packageStore.createPackage(packageConfig);
+            Response packageResponse = getRestStore(IRestPackageStore.class).createPackage(packageConfig);
             String packageLocation = packageResponse.getHeaderString("Location");
             createdResources.put("packageLocation", packageLocation);
             patchDescriptor(extractIdFromLocation(packageLocation),
@@ -452,7 +432,7 @@ public class McpSetupTools {
             // --- Step 6: Create Bot ---
             var botConfig = new BotConfiguration();
             botConfig.setPackages(List.of(URI.create(packageLocation)));
-            Response botResponse = botStore.createBot(botConfig);
+            Response botResponse = getRestStore(IRestBotStore.class).createBot(botConfig);
             String botLocation = botResponse.getHeaderString("Location");
             String botId = extractIdFromLocation(botLocation);
             int botVersion = extractVersionFromLocation(botLocation);
@@ -563,34 +543,34 @@ public class McpSetupTools {
 
     /**
      * Patch a resource descriptor with the bot name.
+     * Descriptors are auto-created by DocumentDescriptorFilter when using REST HTTP proxies.
      */
     private void patchDescriptor(String id, int version, String name) {
         if (id == null)
             return;
         try {
-            try {
-                // Try to patch the existing descriptor
-                var patchDoc = new DocumentDescriptor();
-                patchDoc.setName(name);
+            var patchDoc = new DocumentDescriptor();
+            patchDoc.setName(name);
 
-                var patch = new PatchInstruction<DocumentDescriptor>();
-                patch.setOperation(PatchInstruction.PatchOperation.SET);
-                patch.setDocument(patchDoc);
-                descriptorStore.patchDescriptor(id, version, patch);
-            } catch (Exception patchEx) {
-                // Descriptor doesn't exist yet (MCP bypasses REST layer which auto-creates them)
-                // Create the descriptor directly, mirroring DocumentDescriptorFilter behavior
-                var descriptor = new DocumentDescriptor();
-                descriptor.setName(name);
-                descriptor.setDescription("");
-                var now = new java.util.Date(System.currentTimeMillis());
-                descriptor.setCreatedOn(now);
-                descriptor.setLastModifiedOn(now);
-                documentDescriptorStore.createDescriptor(id, version, descriptor);
-                LOGGER.debug("MCP setup_bot: created descriptor for " + id + " v" + version);
-            }
+            var patch = new PatchInstruction<DocumentDescriptor>();
+            patch.setOperation(PatchInstruction.PatchOperation.SET);
+            patch.setDocument(patchDoc);
+            getRestStore(IRestDocumentDescriptorStore.class).patchDescriptor(id, version, patch);
         } catch (Exception e) {
-            LOGGER.warn("MCP setup_bot: failed to create/patch descriptor for " + id, e);
+            LOGGER.warn("MCP patchDescriptor failed for " + id, e);
+        }
+    }
+
+    /**
+     * Get a REST interface proxy via IRestInterfaceFactory.
+     * These proxies make HTTP calls that go through the full JAX-RS pipeline,
+     * including DocumentDescriptorFilter which auto-creates descriptors.
+     */
+    private <T> T getRestStore(Class<T> clazz) {
+        try {
+            return restInterfaceFactory.get(clazz);
+        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+            throw new RuntimeException("Failed to get REST proxy for " + clazz.getSimpleName(), e);
         }
     }
 }
