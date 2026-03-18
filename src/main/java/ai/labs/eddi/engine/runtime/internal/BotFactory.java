@@ -196,7 +196,9 @@ public class BotFactory implements IBotFactory {
                 progressDummyBot.setDeploymentStatus(Deployment.Status.ERROR);
                 finalDeploymentProcess.completed(Deployment.Status.ERROR);
                 logBotDeployment(environment.toString(), botId, version, Deployment.Status.ERROR);
-                throw new IllegalStateException(String.format("Failed to deploy bot: %s (environment=%s, version=%d)", botId, environment, version), e);
+                // Return the dummy bot with ERROR status so checkDeploymentStatus() can report it
+                // (ConcurrentHashMap.compute() discards the result if the function throws)
+                return progressDummyBot;
             } catch (IllegalAccessException e) {
                 throw new RuntimeException(e);
             }
