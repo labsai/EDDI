@@ -611,12 +611,16 @@ public class McpSetupTools {
         }
 
         if (sentiment) {
-            schema.put("sentimentScore", "Float - range from -1.0 (very negative) to +1.0 (very positive)");
-            schema.put("userSentimentTrend", "String - e.g., 'improved', 'worsened', or 'unchanged'");
-            schema.put("identifiedEmotions", List.of("String - e.g., 'anger', 'joy', 'frustration', etc."));
-            schema.put("detectedIntent", "String - e.g., 'complaint', 'question', 'feedback', 'feature_request'");
-            schema.put("urgencyRating", "String - e.g., 'low', 'medium', or 'high'");
-            schema.put("extractedUserFeedback", "String - direct user feedback if present; otherwise empty");
+            var sentimentObj = new LinkedHashMap<String, Object>();
+            sentimentObj.put("score", "Float - range from -1.0 (very negative) to +1.0 (very positive)");
+            sentimentObj.put("trend", "String - e.g., 'improved', 'worsened', or 'unchanged'");
+            sentimentObj.put("emotions", List.of("String - e.g., 'anger', 'joy', 'frustration', etc."));
+            sentimentObj.put("intent", "String - e.g., 'complaint', 'question', 'feedback', 'feature_request'");
+            sentimentObj.put("urgency", "String - 'low', 'medium', or 'high'");
+            sentimentObj.put("confidence", "Float - 0.0 to 1.0, how confident you are in the sentiment assessment");
+            sentimentObj.put("topicTags", List.of("String - e.g., 'billing', 'shipping', 'product_quality', 'account'"));
+            sentimentObj.put("userFeedback", "String - direct user feedback if present; otherwise empty");
+            schema.put("sentiment", sentimentObj);
         }
 
         try {

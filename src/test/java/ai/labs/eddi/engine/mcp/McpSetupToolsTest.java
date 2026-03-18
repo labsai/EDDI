@@ -400,10 +400,16 @@ class McpSetupToolsTest {
         verify(langchainStore).createLangChain(lcCaptor.capture());
         var params = lcCaptor.getValue().tasks().get(0).getParameters();
 
-        assertTrue(params.get("systemMessage").contains("sentimentScore"),
-                "System message should contain sentimentScore");
-        assertTrue(params.get("systemMessage").contains("identifiedEmotions"),
-                "System message should contain identifiedEmotions");
+        assertTrue(params.get("systemMessage").contains("\"sentiment\":"),
+                "System message should contain nested sentiment object");
+        assertTrue(params.get("systemMessage").contains("\"score\":"),
+                "System message should contain score field");
+        assertTrue(params.get("systemMessage").contains("\"emotions\":"),
+                "System message should contain emotions field");
+        assertTrue(params.get("systemMessage").contains("\"confidence\":"),
+                "System message should contain confidence field");
+        assertTrue(params.get("systemMessage").contains("\"topicTags\":"),
+                "System message should contain topicTags field");
         assertTrue(params.get("systemMessage").contains("htmlResponseText"),
                 "System message should contain htmlResponseText");
         assertFalse(params.get("systemMessage").contains("quickReplies"),
@@ -431,7 +437,10 @@ class McpSetupToolsTest {
         var params = lcCaptor.getValue().tasks().get(0).getParameters();
 
         assertTrue(params.get("systemMessage").contains("quickReplies"));
-        assertTrue(params.get("systemMessage").contains("sentimentScore"));
+        assertTrue(params.get("systemMessage").contains("\"sentiment\":"));
+        assertTrue(params.get("systemMessage").contains("\"score\":"));
+        assertTrue(params.get("systemMessage").contains("\"confidence\":"));
+        assertTrue(params.get("systemMessage").contains("\"topicTags\":"));
         assertTrue(params.get("systemMessage").contains("htmlResponseText"));
         assertEquals("true", params.get("convertToObject"));
         assertEquals("json", params.get("responseFormat"));
@@ -475,9 +484,12 @@ class McpSetupToolsTest {
     void buildPromptResponseJson_sentimentOnly() {
         String result = McpSetupTools.buildPromptResponseJson(false, true);
         assertNotNull(result);
-        assertTrue(result.contains("sentimentScore"));
-        assertTrue(result.contains("identifiedEmotions"));
-        assertTrue(result.contains("urgencyRating"));
+        assertTrue(result.contains("\"sentiment\":"));
+        assertTrue(result.contains("\"score\":"));
+        assertTrue(result.contains("\"emotions\":"));
+        assertTrue(result.contains("\"urgency\":"));
+        assertTrue(result.contains("\"confidence\":"));
+        assertTrue(result.contains("\"topicTags\":"));
         assertFalse(result.contains("quickReplies"));
     }
 
@@ -486,7 +498,10 @@ class McpSetupToolsTest {
         String result = McpSetupTools.buildPromptResponseJson(true, true);
         assertNotNull(result);
         assertTrue(result.contains("quickReplies"));
-        assertTrue(result.contains("sentimentScore"));
+        assertTrue(result.contains("\"sentiment\":"));
+        assertTrue(result.contains("\"score\":"));
+        assertTrue(result.contains("\"confidence\":"));
+        assertTrue(result.contains("\"topicTags\":"));
         assertTrue(result.contains("htmlResponseText"));
     }
 
