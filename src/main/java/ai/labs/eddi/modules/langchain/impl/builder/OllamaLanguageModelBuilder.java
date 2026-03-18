@@ -18,12 +18,16 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_TIMEOUT = "timeout";
     private static final String KEY_LOG_REQUESTS = "logRequests";
     private static final String KEY_LOG_RESPONSES = "logResponses";
+    private static final String KEY_BASE_URL = "baseUrl";
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
         var builder = OllamaChatModel.builder()
                 .httpClientBuilder(JdkHttpClient.builder());
 
+        if (!isNullOrEmpty(parameters.get(KEY_BASE_URL))) {
+            builder.baseUrl(parameters.get(KEY_BASE_URL));
+        }
         if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {
             builder.modelName(parameters.get(KEY_MODEL));
         }
@@ -45,6 +49,9 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
         var builder = OllamaStreamingChatModel.builder()
                 .httpClientBuilder(JdkHttpClient.builder());
 
+        if (!isNullOrEmpty(parameters.get(KEY_BASE_URL))) {
+            builder.baseUrl(parameters.get(KEY_BASE_URL));
+        }
         if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {
             builder.modelName(parameters.get(KEY_MODEL));
         }

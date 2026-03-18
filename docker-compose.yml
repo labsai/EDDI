@@ -4,6 +4,8 @@ services:
     environment:
       - "EDDI_VAULT_MASTER_KEY=local-dev-key-change-in-production"
 #      - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "7070:7070"
       - "7443:7443"
