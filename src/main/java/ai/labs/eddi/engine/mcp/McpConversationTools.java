@@ -149,7 +149,9 @@ public class McpConversationTools {
 
             var snapshot = responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
-            return jsonSerialization.serialize(snapshot);
+            // Return AI-agent-friendly summary + full snapshot
+            var result = buildConversationResponse(snapshot, null);
+            return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP talk_to_bot failed for bot " + botId + " conversation " + conversationId, e);
             return errorJson("Failed to talk to bot: " + e.getMessage());
@@ -202,12 +204,11 @@ public class McpConversationTools {
 
             var snapshot = responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
-            // Step 3: Return response with conversationId for follow-up
-            var result = new LinkedHashMap<String, Object>();
-            result.put("conversationId", finalConvId);
-            result.put("botId", botId);
-            result.put("environment", env.name());
-            result.put("response", snapshot);
+            // Step 3: Return AI-agent-friendly summary + full snapshot
+            var result = buildConversationResponse(snapshot, finalConvId);
+            result.putFirst("environment", env.name());
+            result.putFirst("botId", botId);
+            result.putFirst("conversationId", finalConvId);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP chat_with_bot failed for bot " + botId, e);
@@ -265,5 +266,67 @@ public class McpConversationTools {
             LOGGER.error("MCP read_conversation_log failed for conversation " + conversationId, e);
             return errorJson("Failed to read conversation log: " + e.getMessage());
         }
+    }
+
+    /**
+     * Build an AI-agent-friendly response from a conversation snapshot.
+     * Extracts top-level fields: botResponse (text), quickReplies, actions,
+     * conversationState — so AI agents don't need to dig into the raw snapshot.
+     */
+    @SuppressWarnings("unchecked")
+    private LinkedHashMap<String, Object> buildConversationResponse(
+            SimpleConversationMemorySnapshot snapshot, String conversationId) {
+
+        var result = new LinkedHashMap<String, Object>();
+
+        // Extract from the LAST conversationOutput (the current step's output)
+        var outputs = snapshot.getConversationOutputs();
+        if (outputs != null && !outputs.isEmpty()) {
+            var lastOutput = outputs.get(outputs.size() - 1);
+
+            // Bot response text — extract text strings from output items
+            var outputItems = lastOutput.get("output");
+            if (outputItems instanceof List<?> items) {
+                var texts = new java.util.ArrayList<String>();
+                for (var item : items) {
+                    if (item instanceof Map<?, ?> map && map.containsKey("text")) {
+                        texts.add(String.valueOf(map.get("text")));
+                    }
+                }
+                if (!texts.isEmpty()) {
+                    result.put("botResponse", texts);
+                }
+            }
+
+            // QuickReplies — extract value strings for easy AI consumption
+            var quickReplies = lastOutput.get("quickReplies");
+            if (quickReplies instanceof List<?> qrList && !qrList.isEmpty()) {
+                var qrValues = new java.util.ArrayList<String>();
+                for (var qr : qrList) {
+                    if (qr instanceof Map<?, ?> map && map.containsKey("value")) {
+                        qrValues.add(String.valueOf(map.get("value")));
+                    }
+                }
+                if (!qrValues.isEmpty()) {
+                    result.put("quickReplies", qrValues);
+                }
+            }
+
+            // Actions
+            var actions = lastOutput.get("actions");
+            if (actions != null) {
+                result.put("actions", actions);
+            }
+        }
+
+        // Conversation state
+        if (snapshot.getConversationState() != null) {
+            result.put("conversationState", snapshot.getConversationState().name());
+        }
+
+        // Full snapshot for detailed access
+        result.put("response", snapshot);
+
+        return result;
     }
 }

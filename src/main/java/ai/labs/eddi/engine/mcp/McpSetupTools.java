@@ -18,6 +18,7 @@ import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.engine.IRestBotAdministration;
+import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
@@ -85,12 +86,17 @@ public class McpSetupTools {
             @ToolArg(description = "Bot name (required)") String name,
             @ToolArg(description = "System prompt / role for the LLM (required). " +
                     "Describes the bot's personality and purpose.") String systemPrompt,
-            @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', or 'gemini'")
+            @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', 'gemini', " +
+                    "'gemini-vertex', 'huggingface', 'ollama', or 'jlama'")
             String model,
-            @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default), 'gpt-5.4', 'gemini-3.1-pro-preview', 'deepseek-chat'")
+            @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default), 'gpt-5.4', " +
+                    "'gemini-3.1-pro-preview', 'deepseek-chat', 'llama3.2:1b' (ollama)")
             String modelName,
-            @ToolArg(description = "API key for the LLM provider (required). " +
-                    "Can be a vault reference like '${vault:openai-key}'") String apiKey,
+            @ToolArg(description = "API key for the LLM provider. Required for cloud providers " +
+                    "(anthropic, openai, gemini). Optional/unused for local LLMs (ollama, jlama). " +
+                    "Can be a vault reference like '${vault:openai-key}'.") String apiKey,
+            @ToolArg(description = "Base URL for the LLM provider (optional). " +
+                    "Useful for ollama when running in Docker (e.g. 'http://host.docker.internal:11434')") String baseUrl,
             @ToolArg(description = "Greeting message shown when a conversation starts (optional)")
             String introMessage,
             @ToolArg(description = "Enable built-in tools like calculator, datetime, websearch? (default: false)")
@@ -110,8 +116,10 @@ public class McpSetupTools {
             if (systemPrompt == null || systemPrompt.isBlank()) {
                 return errorJson("System prompt is required");
             }
-            if (apiKey == null || apiKey.isBlank()) {
-                return errorJson("API key is required");
+            // API key required for cloud LLM providers, optional for local ones
+            boolean isLocalLLM = isLocalLlmProvider(model);
+            if (!isLocalLLM && (apiKey == null || apiKey.isBlank())) {
+                return errorJson("API key is required for cloud LLM providers (anthropic, openai, gemini)");
             }
 
             var params = resolveParams(model, modelName, deploy, environment);
@@ -130,7 +138,8 @@ public class McpSetupTools {
 
             // --- Step 2: Create LangChain Configuration ---
             var langchainConfig = createLangchainConfig(
-                    params.modelType, params.modelId, apiKey, systemPrompt, toolsEnabled, builtInToolsWhitelist);
+                    params.modelType, params.modelId, apiKey, systemPrompt,
+                    toolsEnabled, builtInToolsWhitelist, baseUrl);
             Response langchainResponse = langchainStore.createLangChain(langchainConfig);
             String langchainLocation = langchainResponse.getHeaderString("Location");
             String langchainId = extractIdFromLocation(langchainLocation);
@@ -169,17 +178,10 @@ public class McpSetupTools {
             createdResources.put("botLocation", botLocation);
             patchDescriptor(botId, botVersion, name);
 
-            // --- Step 6: Deploy ---
+            // --- Step 6: Deploy (synchronous wait for completion) ---
             if (params.shouldDeploy && botId != null) {
-                try {
-                    botAdmin.deployBot(params.env, botId, botVersion, true);
-                    createdResources.put("deployed", "true");
-                    createdResources.put("environment", params.env.name());
-                } catch (Exception deployError) {
-                    LOGGER.warn("MCP setup_bot: bot created but deploy failed for " + botId, deployError);
-                    createdResources.put("deployed", "false");
-                    createdResources.put("deployError", deployError.getMessage());
-                }
+                var deployResult = deployAndWait(params.env, botId, botVersion);
+                createdResources.putAll(deployResult);
             }
 
             var result = new LinkedHashMap<String, Object>();
@@ -223,10 +225,12 @@ public class McpSetupTools {
 
     /**
      * Create LangChain config with the specified model, system prompt, and tool settings.
+     * Uses provider-specific parameter key names (e.g., Ollama uses 'model' not 'modelName').
      */
     LangChainConfiguration createLangchainConfig(String modelType, String modelId,
                                                    String apiKey, String systemPrompt,
-                                                   boolean enableTooling, String toolsWhitelist) {
+                                                   boolean enableTooling, String toolsWhitelist,
+                                                   String baseUrl) {
         var task = new LangChainConfiguration.Task();
         task.setActions(List.of("send_message"));
         task.setId(modelType);
@@ -236,12 +240,39 @@ public class McpSetupTools {
         var params = new LinkedHashMap<String, String>();
         params.put("systemMessage", systemPrompt);
         params.put("addToOutput", "true");
-        params.put("apiKey", apiKey);
-        params.put("modelName", modelId);
         params.put("timeout", "60");
         params.put("temperature", "0.3");
         params.put("logRequests", "true");
         params.put("logResponses", "true");
+
+        // Provider-specific parameter mapping
+        switch (modelType) {
+            case "ollama" -> {
+                // Ollama uses 'model' not 'modelName', no apiKey needed
+                params.put("model", modelId);
+                if (baseUrl != null && !baseUrl.isBlank()) {
+                    params.put("baseUrl", baseUrl);
+                }
+            }
+            case "jlama" -> {
+                // jlama uses 'modelName', optional 'authToken' instead of 'apiKey'
+                params.put("modelName", modelId);
+                if (apiKey != null && !apiKey.isBlank()) {
+                    params.put("authToken", apiKey);
+                }
+            }
+            default -> {
+                // Cloud providers (anthropic, openai, gemini, etc.): 'modelName' + 'apiKey'
+                params.put("modelName", modelId);
+                if (apiKey != null && !apiKey.isBlank()) {
+                    params.put("apiKey", apiKey);
+                }
+                if (baseUrl != null && !baseUrl.isBlank()) {
+                    params.put("baseUrl", baseUrl);
+                }
+            }
+        }
+
         task.setParameters(params);
 
         if (enableTooling) {
@@ -412,7 +443,7 @@ public class McpSetupTools {
             // Enrich system prompt with API summary
             String enrichedPrompt = systemPrompt + "\n\n" + buildResult.apiSummary();
             var langchainConfig = createLangchainConfig(
-                    params.modelType, params.modelId, apiKey, enrichedPrompt, false, null);
+                    params.modelType, params.modelId, apiKey, enrichedPrompt, false, null, null);
             Response langchainResponse = langchainStore.createLangChain(langchainConfig);
             String langchainLocation = langchainResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);
@@ -438,17 +469,10 @@ public class McpSetupTools {
             createdResources.put("botLocation", botLocation);
             patchDescriptor(botId, botVersion, name);
 
-            // --- Step 7: Deploy ---
+            // --- Step 7: Deploy (synchronous wait for completion) ---
             if (params.shouldDeploy && botId != null) {
-                try {
-                    botAdmin.deployBot(params.env, botId, botVersion, true);
-                    createdResources.put("deployed", "true");
-                    createdResources.put("environment", params.env.name());
-                } catch (Exception deployError) {
-                    LOGGER.warn("MCP create_api_bot: bot created but deploy failed for " + botId, deployError);
-                    createdResources.put("deployed", "false");
-                    createdResources.put("deployError", deployError.getMessage());
-                }
+                var deployResult = deployAndWait(params.env, botId, botVersion);
+                createdResources.putAll(deployResult);
             }
 
             var result = new LinkedHashMap<String, Object>();
@@ -480,6 +504,65 @@ public class McpSetupTools {
                 modelName != null && !modelName.isBlank() ? modelName.trim() : "claude-sonnet-4-6",
                 deploy == null || deploy,
                 parseEnvironment(environment));
+    }
+
+    /**
+     * Deploy a bot and synchronously wait for it to reach READY status.
+     * Polls up to 5 seconds, reporting the actual deployment status.
+     */
+    private Map<String, String> deployAndWait(Deployment.Environment env, String botId, int botVersion) {
+        var result = new LinkedHashMap<String, String>();
+        result.put("environment", env.name());
+        try {
+            botAdmin.deployBot(env, botId, botVersion, true);
+
+            // Poll for deployment completion (max 5 seconds)
+            String finalStatus = "UNKNOWN";
+            for (int attempt = 0; attempt < 10; attempt++) {
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                try {
+                    var statuses = botAdmin.getDeploymentStatuses(env);
+                    var matchingStatus = statuses.stream()
+                            .filter(s -> botId.equals(s.getBotId()))
+                            .findFirst();
+                    if (matchingStatus.isPresent()) {
+                        finalStatus = matchingStatus.get().getStatus().name();
+                        if ("READY".equals(finalStatus) || "ERROR".equals(finalStatus)) {
+                            break;
+                        }
+                    }
+                } catch (Exception pollError) {
+                    LOGGER.debug("MCP deploy poll attempt " + attempt + " failed", pollError);
+                }
+            }
+
+            result.put("deployed", "READY".equals(finalStatus) ? "true" : "false");
+            result.put("deploymentStatus", finalStatus);
+            if (!"READY".equals(finalStatus)) {
+                result.put("deployWarning",
+                        "Bot created but deployment status is " + finalStatus +
+                        ". Check bot configuration and credentials.");
+            }
+        } catch (Exception deployError) {
+            LOGGER.warn("MCP deploy failed for bot " + botId, deployError);
+            result.put("deployed", "false");
+            result.put("deployError", deployError.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * Check if the given model type is a local LLM provider (no API key needed).
+     */
+    static boolean isLocalLlmProvider(String model) {
+        if (model == null || model.isBlank()) return false;
+        String normalized = model.trim().toLowerCase();
+        return "ollama".equals(normalized) || "jlama".equals(normalized);
     }
 
     /**

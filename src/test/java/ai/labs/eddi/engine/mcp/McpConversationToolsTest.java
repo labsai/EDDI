@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import java.util.LinkedHashMap;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -157,13 +158,13 @@ class McpConversationToolsTest {
                 anyBoolean(), anyBoolean(), anyList(),
                 any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
 
-        when(jsonSerialization.serialize(any(SimpleConversationMemorySnapshot.class)))
-                .thenReturn("{\"conversationSteps\":[]}");
+        when(jsonSerialization.serialize(any(LinkedHashMap.class)))
+                .thenReturn("{\"conversationState\":\"READY\",\"response\":{\"conversationSteps\":[]}}");
 
         String result = tools.talkToBot(BOT_ID, CONV_ID, "Hello bot!", "unrestricted");
 
         assertNotNull(result);
-        assertTrue(result.contains("conversationSteps"));
+        assertTrue(result.contains("conversationState"));
 
         // Verify the message was sent correctly
         ArgumentCaptor<InputData> inputCaptor = ArgumentCaptor.forClass(InputData.class);
