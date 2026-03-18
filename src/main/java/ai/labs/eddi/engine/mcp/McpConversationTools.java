@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
@@ -94,6 +95,7 @@ public class McpConversationTools {
     public String createConversation(
             @ToolArg(description = "Bot ID (required)") String botId,
             @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
+        if (botId == null || botId.isBlank()) return errorJson("botId is required");
         try {
             var env = parseEnvironment(environment);
             ConversationResult result = conversationService.startConversation(
@@ -119,31 +121,12 @@ public class McpConversationTools {
             @ToolArg(description = "Conversation ID from create_conversation (required)") String conversationId,
             @ToolArg(description = "The user message to send to the bot (required)") String message,
             @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
+        if (botId == null || botId.isBlank()) return errorJson("botId is required");
+        if (conversationId == null || conversationId.isBlank()) return errorJson("conversationId is required");
+        if (message == null || message.isBlank()) return errorJson("message is required");
         try {
             var env = parseEnvironment(environment);
-
-            var inputData = new InputData();
-            inputData.setInput(message);
-            inputData.setContext(Map.of("mcp", new Context(Context.ContextType.string, "true")));
-
-            // Use CompletableFuture to bridge the async callback
-            var responseFuture = new CompletableFuture<SimpleConversationMemorySnapshot>();
-
-            conversationService.say(env, botId, conversationId,
-                    false, true, Collections.emptyList(),
-                    inputData, false,
-                    snapshot -> {
-                        if (snapshot != null) {
-                            responseFuture.complete(snapshot);
-                        } else {
-                            responseFuture.completeExceptionally(
-                                    new RuntimeException("Bot returned null response"));
-                        }
-                    });
-
-            var snapshot = responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-
-            // Return AI-agent-friendly summary + full snapshot
+            var snapshot = sendMessageAndWait(env, botId, conversationId, message);
             var result = buildConversationResponse(snapshot, null);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
@@ -163,6 +146,8 @@ public class McpConversationTools {
             @ToolArg(description = "The user message to send to the bot (required)") String message,
             @ToolArg(description = "Conversation ID to continue (optional — creates new if omitted)") String conversationId,
             @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
+        if (botId == null || botId.isBlank()) return errorJson("botId is required");
+        if (message == null || message.isBlank()) return errorJson("message is required");
         try {
             var env = parseEnvironment(environment);
 
@@ -175,32 +160,13 @@ public class McpConversationTools {
             }
 
             // Step 2: Send the message
-            var inputData = new InputData();
-            inputData.setInput(message);
-            inputData.setContext(Map.of("mcp", new Context(Context.ContextType.string, "true")));
-
-            var responseFuture = new CompletableFuture<SimpleConversationMemorySnapshot>();
-
-            final String finalConvId = convId;
-            conversationService.say(env, botId, finalConvId,
-                    false, true, Collections.emptyList(),
-                    inputData, false,
-                    snapshot -> {
-                        if (snapshot != null) {
-                            responseFuture.complete(snapshot);
-                        } else {
-                            responseFuture.completeExceptionally(
-                                    new RuntimeException("Bot returned null response"));
-                        }
-                    });
-
-            var snapshot = responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            var snapshot = sendMessageAndWait(env, botId, convId, message);
 
             // Step 3: Return AI-agent-friendly summary + full snapshot
-            var result = buildConversationResponse(snapshot, finalConvId);
+            var result = buildConversationResponse(snapshot, convId);
             result.putFirst("environment", env.name());
             result.putFirst("botId", botId);
-            result.putFirst("conversationId", finalConvId);
+            result.putFirst("conversationId", convId);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP chat_with_bot failed for bot " + botId, e);
@@ -252,6 +218,35 @@ public class McpConversationTools {
             LOGGER.error("MCP read_conversation_log failed for conversation " + conversationId, e);
             return errorJson("Failed to read conversation log: " + e.getMessage());
         }
+    }
+
+    /**
+     * Send a message to a bot synchronously and wait for the response.
+     * Bridges the async callback pattern to a blocking call.
+     */
+    private SimpleConversationMemorySnapshot sendMessageAndWait(
+            Deployment.Environment env, String botId, String conversationId, String message)
+            throws Exception {
+
+        var inputData = new InputData();
+        inputData.setInput(message);
+        inputData.setContext(Map.of("mcp", new Context(Context.ContextType.string, "true")));
+
+        var responseFuture = new CompletableFuture<SimpleConversationMemorySnapshot>();
+
+        conversationService.say(env, botId, conversationId,
+                false, true, Collections.emptyList(),
+                inputData, false,
+                snapshot -> {
+                    if (snapshot != null) {
+                        responseFuture.complete(snapshot);
+                    } else {
+                        responseFuture.completeExceptionally(
+                                new RuntimeException("Bot returned null response"));
+                    }
+                });
+
+        return responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }
 
     /**

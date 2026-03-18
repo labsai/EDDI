@@ -321,4 +321,70 @@ class McpConversationToolsTest {
 
         assertEquals("User: Hi\nBot: Hello!", result);
     }
+
+    @Test
+    void readConversationLog_handlesException() throws Exception {
+        when(conversationService.readConversationLog(eq(CONV_ID), eq("text"), isNull()))
+                .thenThrow(new RuntimeException("Conversation not found"));
+
+        String result = tools.readConversationLog(CONV_ID, null);
+
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("Conversation not found"));
+    }
+
+    // --- input validation ---
+
+    @Test
+    void talkToBot_nullBotId_returnsError() {
+        String result = tools.talkToBot(null, CONV_ID, "Hello!", null);
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("botId is required"));
+    }
+
+    @Test
+    void talkToBot_nullConversationId_returnsError() {
+        String result = tools.talkToBot(BOT_ID, null, "Hello!", null);
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("conversationId is required"));
+    }
+
+    @Test
+    void talkToBot_nullMessage_returnsError() {
+        String result = tools.talkToBot(BOT_ID, CONV_ID, null, null);
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("message is required"));
+    }
+
+    @Test
+    void chatWithBot_nullBotId_returnsError() {
+        String result = tools.chatWithBot(null, "Hello!", null, null);
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("botId is required"));
+    }
+
+    @Test
+    void chatWithBot_nullMessage_returnsError() {
+        String result = tools.chatWithBot(BOT_ID, null, null, null);
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("message is required"));
+    }
+
+    @Test
+    void chatWithBot_conversationCreationFails_returnsError() throws Exception {
+        when(conversationService.startConversation(any(), eq(BOT_ID), isNull(), anyMap()))
+                .thenThrow(new IConversationService.BotNotReadyException("Bot not deployed"));
+
+        String result = tools.chatWithBot(BOT_ID, "Hello!", null, null);
+
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("Bot not deployed"));
+    }
+
+    @Test
+    void createConversation_nullBotId_returnsError() {
+        String result = tools.createConversation(null, null);
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("botId is required"));
+    }
 }

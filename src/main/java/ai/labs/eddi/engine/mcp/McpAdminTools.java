@@ -8,6 +8,8 @@ import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IRestBotAdministration;
+import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -37,22 +39,16 @@ public class McpAdminTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpAdminTools.class);
 
+    private final IRestInterfaceFactory restInterfaceFactory;
     private final IRestBotAdministration botAdmin;
-    private final IRestBotStore botStore;
-    private final IRestPackageStore packageStore;
-    private final IRestDocumentDescriptorStore descriptorStore;
     private final IJsonSerialization jsonSerialization;
 
     @Inject
-    public McpAdminTools(IRestBotAdministration botAdmin,
-                         IRestBotStore botStore,
-                         IRestPackageStore packageStore,
-                         IRestDocumentDescriptorStore descriptorStore,
+    public McpAdminTools(IRestInterfaceFactory restInterfaceFactory,
+                         IRestBotAdministration botAdmin,
                          IJsonSerialization jsonSerialization) {
+        this.restInterfaceFactory = restInterfaceFactory;
         this.botAdmin = botAdmin;
-        this.botStore = botStore;
-        this.packageStore = packageStore;
-        this.descriptorStore = descriptorStore;
         this.jsonSerialization = jsonSerialization;
     }
 
@@ -164,7 +160,8 @@ public class McpAdminTools {
         try {
             int limitInt = limit != null ? limit : 20;
             String filterStr = filter != null ? filter : "";
-            List<DocumentDescriptor> descriptors = packageStore.readPackageDescriptors(filterStr, 0, limitInt);
+            List<DocumentDescriptor> descriptors = getRestStore(IRestPackageStore.class)
+                    .readPackageDescriptors(filterStr, 0, limitInt);
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
             LOGGER.error("MCP list_packages failed", e);
@@ -192,7 +189,7 @@ public class McpAdminTools {
                 botConfig.setPackages(uris);
             }
 
-            Response response = botStore.createBot(botConfig);
+            Response response = getRestStore(IRestBotStore.class).createBot(botConfig);
             String location = response.getHeaderString("Location");
 
             // Extract bot ID from location header (format: /botstore/bots/{id}?version=1)
@@ -208,7 +205,7 @@ public class McpAdminTools {
                     var patch = new PatchInstruction<DocumentDescriptor>();
                     patch.setOperation(PatchInstruction.PatchOperation.SET);
                     patch.setDocument(descriptor);
-                    descriptorStore.patchDescriptor(botId, 1, patch);
+                    getRestStore(IRestDocumentDescriptorStore.class).patchDescriptor(botId, 1, patch);
                 } catch (Exception patchError) {
                     LOGGER.warn("MCP create_bot: bot created but descriptor update failed for " + botId, patchError);
                     // Bot was still created — return success with warning
@@ -241,7 +238,7 @@ public class McpAdminTools {
             int ver = version != null ? version : 1;
             boolean isPermanent = permanent != null ? permanent : false;
             boolean isCascade = cascade != null ? cascade : false;
-            Response response = botStore.deleteBot(botId, ver, isPermanent, isCascade);
+            Response response = getRestStore(IRestBotStore.class).deleteBot(botId, ver, isPermanent, isCascade);
             return resultJson("deleted", Map.of(
                     "botId", botId,
                     "version", ver,
@@ -263,6 +260,14 @@ public class McpAdminTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             return "{\"action\":\"" + escapeJsonString(action) + "\",\"status\":\"completed\"}";
+        }
+    }
+
+    private <T> T getRestStore(Class<T> clazz) {
+        try {
+            return restInterfaceFactory.get(clazz);
+        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+            throw new RuntimeException("Failed to get REST proxy for " + clazz.getSimpleName(), e);
         }
     }
 }

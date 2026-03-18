@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.Deployment.Status;
+import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,14 +40,20 @@ class McpAdminToolsTest {
     private McpAdminTools tools;
 
     @BeforeEach
-    void setUp() throws IOException {
+    void setUp() throws Exception {
         botAdmin = mock(IRestBotAdministration.class);
         botStore = mock(IRestBotStore.class);
         packageStore = mock(IRestPackageStore.class);
         descriptorStore = mock(IRestDocumentDescriptorStore.class);
         jsonSerialization = mock(IJsonSerialization.class);
+
+        var restInterfaceFactory = mock(IRestInterfaceFactory.class);
+        when(restInterfaceFactory.get(IRestBotStore.class)).thenReturn(botStore);
+        when(restInterfaceFactory.get(IRestPackageStore.class)).thenReturn(packageStore);
+        when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
+
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        tools = new McpAdminTools(botAdmin, botStore, packageStore, descriptorStore, jsonSerialization);
+        tools = new McpAdminTools(restInterfaceFactory, botAdmin, jsonSerialization);
     }
 
     // --- deployBot ---
