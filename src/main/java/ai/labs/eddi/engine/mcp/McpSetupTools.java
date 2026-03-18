@@ -81,6 +81,13 @@ public class McpSetupTools {
             @ToolArg(description = "Enable built-in tools like calculator, datetime, websearch? (default: false)") Boolean enableBuiltInTools,
             @ToolArg(description = "Comma-separated list of specific built-in tools to enable " +
                     "(e.g. 'calculator,datetime,websearch'). Only used if enableBuiltInTools is true.") String builtInToolsWhitelist,
+            @ToolArg(description = "Enable quick reply buttons in bot responses? (default: false). " +
+                    "When enabled, the LLM returns structured JSON with quick reply suggestions. " +
+                    "Note: streaming is not supported when this is enabled.") Boolean enableQuickReplies,
+            @ToolArg(description = "Enable ad-hoc sentiment analysis in bot responses? (default: false). " +
+                    "When enabled, the LLM returns structured JSON with sentiment scores, " +
+                    "emotion detection, intent classification, and urgency rating. " +
+                    "Note: streaming is not supported when this is enabled.") Boolean enableSentimentAnalysis,
             @ToolArg(description = "Automatically deploy the bot after creation? (default: true)") Boolean deploy,
             @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
         try {
@@ -99,6 +106,9 @@ public class McpSetupTools {
 
             var params = resolveParams(model, modelName, deploy, environment);
             boolean toolsEnabled = enableBuiltInTools != null && enableBuiltInTools;
+            boolean quickReplies = enableQuickReplies != null && enableQuickReplies;
+            boolean sentiment = enableSentimentAnalysis != null && enableSentimentAnalysis;
+            String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
 
             var createdResources = new LinkedHashMap<String, String>(); // track for result
 
@@ -114,7 +124,7 @@ public class McpSetupTools {
             // --- Step 2: Create LangChain Configuration ---
             var langchainConfig = createLangchainConfig(
                     params.modelType, params.modelId, apiKey, systemPrompt,
-                    toolsEnabled, builtInToolsWhitelist, baseUrl);
+                    toolsEnabled, builtInToolsWhitelist, baseUrl, promptResponseJson);
             Response langchainResponse = getRestStore(IRestLangChainStore.class).createLangChain(langchainConfig);
             String langchainLocation = langchainResponse.getHeaderString("Location");
             String langchainId = extractIdFromLocation(langchainLocation);
@@ -164,6 +174,11 @@ public class McpSetupTools {
             result.put("botId", botId != null ? botId : "unknown");
             result.put("botName", name);
             result.put("model", params.modelType + "/" + params.modelId);
+            if (quickReplies || sentiment) {
+                result.put("responseFormat", "json");
+                if (quickReplies) result.put("quickRepliesEnabled", true);
+                if (sentiment) result.put("sentimentAnalysisEnabled", true);
+            }
             result.put("resources", createdResources);
             return jsonSerialization.serialize(result);
 
@@ -207,20 +222,31 @@ public class McpSetupTools {
     LangChainConfiguration createLangchainConfig(String modelType, String modelId,
             String apiKey, String systemPrompt,
             boolean enableTooling, String toolsWhitelist,
-            String baseUrl) {
+            String baseUrl, String promptResponseJson) {
         var task = new LangChainConfiguration.Task();
         task.setActions(List.of("send_message"));
         task.setId(modelType);
         task.setType(modelType);
         task.setDescription("LLM integration via " + modelType);
 
+        // Build effective system message: user prompt + optional JSON format instruction
+        String effectiveSystemPrompt = systemPrompt;
+        if (promptResponseJson != null) {
+            effectiveSystemPrompt = systemPrompt + "\n\n" + promptResponseJson;
+        }
+
         var params = new LinkedHashMap<String, String>();
-        params.put("systemMessage", systemPrompt);
+        params.put("systemMessage", effectiveSystemPrompt);
         params.put("addToOutput", "true");
         params.put("timeout", "60");
         params.put("temperature", "0.3");
         params.put("logRequests", "true");
         params.put("logResponses", "true");
+
+        // When JSON response format is active, parse the response as a JSON object
+        if (promptResponseJson != null) {
+            params.put("convertToObject", "true");
+        }
 
         // Provider-specific parameter mapping
         switch (modelType) {
@@ -246,6 +272,10 @@ public class McpSetupTools {
                 }
                 if (baseUrl != null && !baseUrl.isBlank()) {
                     params.put("baseUrl", baseUrl);
+                }
+                // Set responseFormat=json for providers that support it (OpenAI, Gemini)
+                if (promptResponseJson != null && supportsResponseFormat(modelType)) {
+                    params.put("responseFormat", "json");
                 }
             }
         }
@@ -413,7 +443,7 @@ public class McpSetupTools {
             // Enrich system prompt with API summary
             String enrichedPrompt = systemPrompt + "\n\n" + buildResult.apiSummary();
             var langchainConfig = createLangchainConfig(
-                    params.modelType, params.modelId, apiKey, enrichedPrompt, false, null, null);
+                    params.modelType, params.modelId, apiKey, enrichedPrompt, false, null, null, null);
             Response langchainResponse = getRestStore(IRestLangChainStore.class).createLangChain(langchainConfig);
             String langchainLocation = langchainResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);
@@ -539,6 +569,65 @@ public class McpSetupTools {
             return false;
         String normalized = model.trim().toLowerCase();
         return "ollama".equals(normalized) || "jlama".equals(normalized);
+    }
+
+    /**
+     * Check if the provider supports the builder-level responseFormat=json parameter.
+     * Providers that support this will enforce JSON output at the API level,
+     * making structured responses more reliable (especially with smaller models).
+     */
+    static boolean supportsResponseFormat(String modelType) {
+        return "openai".equals(modelType) || "gemini".equals(modelType) || "gemini-vertex".equals(modelType);
+    }
+
+    /**
+     * Build the promptResponseJson format instruction for the LLM.
+     * Returns null if neither feature is enabled.
+     *
+     * <p>This follows the same pattern as the Gnowbe learner bot:
+     * the instruction tells the LLM to respond with a single valid JSON object
+     * containing the main text reply and optional structured data.</p>
+     *
+     * @param quickReplies include quick reply button suggestions
+     * @param sentiment    include sentiment analysis fields
+     * @return the format instruction string, or null if no features enabled
+     */
+    static String buildPromptResponseJson(boolean quickReplies, boolean sentiment) {
+        if (!quickReplies && !sentiment) {
+            return null;
+        }
+
+        // Build the JSON schema as a map — cleaner than manual string escaping
+        var schema = new LinkedHashMap<String, Object>();
+        schema.put("htmlResponseText",
+                "String - your main reply to the user, optionally formatted with basic inline HTML tags for readability.");
+
+        if (quickReplies) {
+            schema.put("quickReplies", List.of(
+                    "short, button-like suggestions for how the user might want to respond next: " +
+                    "Provide 2-4 concise quick reply buttons that are relevant to your latest answer " +
+                    "and any recent user input. They should prompt fast responses or encourage deeper " +
+                    "exploration (e.g., 'Yes, I agree', 'Tell me more')"));
+        }
+
+        if (sentiment) {
+            schema.put("sentimentScore", "Float - range from -1.0 (very negative) to +1.0 (very positive)");
+            schema.put("userSentimentTrend", "String - e.g., 'improved', 'worsened', or 'unchanged'");
+            schema.put("identifiedEmotions", List.of("String - e.g., 'anger', 'joy', 'frustration', etc."));
+            schema.put("detectedIntent", "String - e.g., 'complaint', 'question', 'feedback', 'feature_request'");
+            schema.put("urgencyRating", "String - e.g., 'low', 'medium', or 'high'");
+            schema.put("extractedUserFeedback", "String - direct user feedback if present; otherwise empty");
+        }
+
+        try {
+            String jsonSchema = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(schema);
+            return "Response with one single valid JSON Object (without wrapping it in " +
+                    "any formatting or markdown). Always use the following json structure as response:" +
+                    jsonSchema;
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            // Should never happen with simple maps/strings
+            throw new RuntimeException("Failed to serialize JSON schema", e);
+        }
     }
 
     /**

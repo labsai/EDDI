@@ -84,7 +84,7 @@ class McpSetupToolsTest {
         String result = tools.setupBot(
                 "Test Bot", "You are helpful", "anthropic", "claude-sonnet-4-6",
                 "sk-test", null, "Hello!", true, "calculator,datetime",
-                true, "unrestricted");
+                null, null, true, "unrestricted");
 
         assertNotNull(result);
 
@@ -114,7 +114,7 @@ class McpSetupToolsTest {
                 .thenReturn(Response.ok().build());
 
         tools.setupBot("Test Bot", "You are helpful", null, null,
-                "sk-test", null, null, null, null, true, null);
+                "sk-test", null, null, null, null, null, null, true, null);
 
         // Output store should NOT be called
         verify(outputStore, never()).createOutputSet(any());
@@ -134,7 +134,7 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
 
         tools.setupBot("Test Bot", "You are helpful", null, null,
-                "sk-test", null, null, null, null, false, null);
+                "sk-test", null, null, null, null, null, null, false, null);
 
         // Deploy should NOT be called
         verify(botAdmin, never()).deployBot(any(), any(), anyInt(), anyBoolean(), anyBoolean());
@@ -154,7 +154,7 @@ class McpSetupToolsTest {
                 .thenThrow(new RuntimeException("Deploy failed"));
 
         String result = tools.setupBot("Test Bot", "You are helpful", null, null,
-                "sk-test", null, null, null, null, true, null);
+                "sk-test", null, null, null, null, null, null, true, null);
 
         // Should still return a result (bot was created), not an error
         assertNotNull(result);
@@ -163,21 +163,21 @@ class McpSetupToolsTest {
 
     @Test
     void setupBot_missingName_returnsError() {
-        String result = tools.setupBot(null, "prompt", null, null, "key", null, null, null, null, null, null);
+        String result = tools.setupBot(null, "prompt", null, null, "key", null, null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("name is required"));
     }
 
     @Test
     void setupBot_missingPrompt_returnsError() {
-        String result = tools.setupBot("Bot", null, null, null, "key", null, null, null, null, null, null);
+        String result = tools.setupBot("Bot", null, null, null, "key", null, null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("System prompt is required"));
     }
 
     @Test
     void setupBot_missingApiKey_returnsError() {
-        String result = tools.setupBot("Bot", "prompt", null, null, null, null, null, null, null, null, null);
+        String result = tools.setupBot("Bot", "prompt", null, null, null, null, null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("API key is required"));
     }
@@ -195,7 +195,7 @@ class McpSetupToolsTest {
 
         // Ollama should NOT require an apiKey
         String result = tools.setupBot("Ollama Bot", "You are helpful", "ollama", "llama3.2:1b",
-                null, null, null, null, null, false, null);
+                null, null, null, null, null, null, null, false, null);
 
         assertNotNull(result);
         assertFalse(result.contains("\"error\""), "Ollama setup should succeed without API key");
@@ -214,7 +214,7 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
 
         String result = tools.setupBot("Jlama Bot", "You are helpful", "jlama", "tinyllama",
-                null, null, null, null, null, false, null);
+                null, null, null, null, null, null, null, false, null);
 
         assertNotNull(result);
         assertFalse(result.contains("\"error\""), "Jlama setup should succeed without API key");
@@ -232,7 +232,7 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
 
         tools.setupBot("My Bot", "You are a pirate", "anthropic", "claude-3-5-sonnet",
-                "sk-ant-key", null, null, null, null, false, null);
+                "sk-ant-key", null, null, null, null, null, null, false, null);
 
         // Capture the langchain config
         var langchainCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
@@ -261,7 +261,7 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
 
         tools.setupBot("Bot", "prompt", null, null, "key", null, "Hello!",
-                null, null, false, null);
+                null, null, null, null, false, null);
 
         // Capture package config
         var packageCaptor = ArgumentCaptor.forClass(PackageConfiguration.class);
@@ -287,7 +287,7 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
 
         tools.setupBot("Bot", "prompt", null, null, "key", null, null,
-                null, null, false, null);
+                null, null, null, null, false, null);
 
         var packageCaptor = ArgumentCaptor.forClass(PackageConfiguration.class);
         verify(packageStore).createPackage(packageCaptor.capture());
@@ -316,7 +316,7 @@ class McpSetupToolsTest {
     void createLangchainConfig_withTooling_setsToolFields() {
         var config = tools.createLangchainConfig(
                 "anthropic", "claude-sonnet-4-6", "key", "You are helpful",
-                true, "calculator,websearch", null);
+                true, "calculator,websearch", null, null);
 
         var task = config.tasks().get(0);
         assertTrue(task.getEnableBuiltInTools());
@@ -327,7 +327,7 @@ class McpSetupToolsTest {
     void createLangchainConfig_ollama_usesModelParam() {
         var config = tools.createLangchainConfig(
                 "ollama", "llama3.2:1b", null, "prompt",
-                false, null, "http://host.docker.internal:11434");
+                false, null, "http://host.docker.internal:11434", null);
 
         var task = config.tasks().get(0);
         var params = task.getParameters();
@@ -341,13 +341,168 @@ class McpSetupToolsTest {
     void createLangchainConfig_jlama_usesAuthToken() {
         var config = tools.createLangchainConfig(
                 "jlama", "tinyllama", "my-token", "prompt",
-                false, null, null);
+                false, null, null, null);
 
         var task = config.tasks().get(0);
         var params = task.getParameters();
         assertEquals("tinyllama", params.get("modelName"));
         assertEquals("my-token", params.get("authToken"));
         assertNull(params.get("apiKey"), "Jlama should use 'authToken' not 'apiKey'");
+    }
+
+    // --- Quick Replies & Sentiment Analysis tests ---
+
+    @Test
+    void setupBot_withQuickReplies_appendsJsonFormat() throws Exception {
+        when(behaviorStore.createBehaviorRuleSet(any()))
+                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
+        when(langchainStore.createLangChain(any()))
+                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
+        when(packageStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
+        when(botStore.createBot(any()))
+                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+
+        tools.setupBot("QR Bot", "You are helpful", "openai", "gpt-4o",
+                "sk-test", null, null, null, null, true, null, false, null);
+
+        var lcCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
+        verify(langchainStore).createLangChain(lcCaptor.capture());
+        var params = lcCaptor.getValue().tasks().get(0).getParameters();
+
+        assertTrue(params.get("systemMessage").contains("quickReplies"),
+                "System message should contain quickReplies format");
+        assertTrue(params.get("systemMessage").contains("htmlResponseText"),
+                "System message should contain htmlResponseText");
+        assertFalse(params.get("systemMessage").contains("sentimentScore"),
+                "System message should NOT contain sentiment fields");
+        assertEquals("true", params.get("convertToObject"),
+                "convertToObject should be true for JSON format");
+        assertEquals("json", params.get("responseFormat"),
+                "OpenAI should have responseFormat=json");
+    }
+
+    @Test
+    void setupBot_withSentiment_appendsJsonFormat() throws Exception {
+        when(behaviorStore.createBehaviorRuleSet(any()))
+                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
+        when(langchainStore.createLangChain(any()))
+                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
+        when(packageStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
+        when(botStore.createBot(any()))
+                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+
+        tools.setupBot("Sentiment Bot", "You are helpful", "gemini", "gemini-2.0-flash",
+                "key", null, null, null, null, null, true, false, null);
+
+        var lcCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
+        verify(langchainStore).createLangChain(lcCaptor.capture());
+        var params = lcCaptor.getValue().tasks().get(0).getParameters();
+
+        assertTrue(params.get("systemMessage").contains("sentimentScore"),
+                "System message should contain sentimentScore");
+        assertTrue(params.get("systemMessage").contains("identifiedEmotions"),
+                "System message should contain identifiedEmotions");
+        assertTrue(params.get("systemMessage").contains("htmlResponseText"),
+                "System message should contain htmlResponseText");
+        assertFalse(params.get("systemMessage").contains("quickReplies"),
+                "System message should NOT contain quickReplies");
+        assertEquals("json", params.get("responseFormat"),
+                "Gemini should have responseFormat=json");
+    }
+
+    @Test
+    void setupBot_withBothFeatures_appendsFullJsonFormat() throws Exception {
+        when(behaviorStore.createBehaviorRuleSet(any()))
+                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
+        when(langchainStore.createLangChain(any()))
+                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
+        when(packageStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
+        when(botStore.createBot(any()))
+                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+
+        tools.setupBot("Full Bot", "You are helpful", "openai", "gpt-4o",
+                "sk-test", null, null, null, null, true, true, false, null);
+
+        var lcCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
+        verify(langchainStore).createLangChain(lcCaptor.capture());
+        var params = lcCaptor.getValue().tasks().get(0).getParameters();
+
+        assertTrue(params.get("systemMessage").contains("quickReplies"));
+        assertTrue(params.get("systemMessage").contains("sentimentScore"));
+        assertTrue(params.get("systemMessage").contains("htmlResponseText"));
+        assertEquals("true", params.get("convertToObject"));
+        assertEquals("json", params.get("responseFormat"));
+    }
+
+    @Test
+    void setupBot_anthropic_noResponseFormat() throws Exception {
+        when(behaviorStore.createBehaviorRuleSet(any()))
+                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
+        when(langchainStore.createLangChain(any()))
+                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
+        when(packageStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
+        when(botStore.createBot(any()))
+                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+
+        tools.setupBot("Anthropic Bot", "You are helpful", "anthropic", "claude-sonnet-4-6",
+                "sk-test", null, null, null, null, true, null, false, null);
+
+        var lcCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
+        verify(langchainStore).createLangChain(lcCaptor.capture());
+        var params = lcCaptor.getValue().tasks().get(0).getParameters();
+
+        // Anthropic doesn't support responseFormat but should still have the prompt instruction
+        assertTrue(params.get("systemMessage").contains("quickReplies"));
+        assertEquals("true", params.get("convertToObject"));
+        assertNull(params.get("responseFormat"),
+                "Anthropic should NOT have responseFormat param");
+    }
+
+    @Test
+    void buildPromptResponseJson_quickRepliesOnly() {
+        String result = McpSetupTools.buildPromptResponseJson(true, false);
+        assertNotNull(result);
+        assertTrue(result.contains("quickReplies"));
+        assertTrue(result.contains("htmlResponseText"));
+        assertFalse(result.contains("sentimentScore"));
+    }
+
+    @Test
+    void buildPromptResponseJson_sentimentOnly() {
+        String result = McpSetupTools.buildPromptResponseJson(false, true);
+        assertNotNull(result);
+        assertTrue(result.contains("sentimentScore"));
+        assertTrue(result.contains("identifiedEmotions"));
+        assertTrue(result.contains("urgencyRating"));
+        assertFalse(result.contains("quickReplies"));
+    }
+
+    @Test
+    void buildPromptResponseJson_both() {
+        String result = McpSetupTools.buildPromptResponseJson(true, true);
+        assertNotNull(result);
+        assertTrue(result.contains("quickReplies"));
+        assertTrue(result.contains("sentimentScore"));
+        assertTrue(result.contains("htmlResponseText"));
+    }
+
+    @Test
+    void buildPromptResponseJson_neither_returnsNull() {
+        assertNull(McpSetupTools.buildPromptResponseJson(false, false));
+    }
+
+    @Test
+    void supportsResponseFormat_openaiAndGemini() {
+        assertTrue(McpSetupTools.supportsResponseFormat("openai"));
+        assertTrue(McpSetupTools.supportsResponseFormat("gemini"));
+        assertTrue(McpSetupTools.supportsResponseFormat("gemini-vertex"));
+        assertFalse(McpSetupTools.supportsResponseFormat("anthropic"));
+        assertFalse(McpSetupTools.supportsResponseFormat("ollama"));
+        assertFalse(McpSetupTools.supportsResponseFormat("jlama"));
     }
 
     @Test

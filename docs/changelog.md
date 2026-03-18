@@ -15,6 +15,47 @@ Each entry follows this format:
 
 ---
 
+## Phase 8a: MCP `setup_bot` — Quick Replies, Sentiment Analysis & JSON Mode (2026-03-18)
+
+### Backend — Structured JSON LLM Output
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Two new optional params for `setup_bot` that enable structured JSON output from the LLM:
+
+| Feature | Param | Effect |
+|---|---|---|
+| **Quick Replies** | `enableQuickReplies` | LLM returns `htmlResponseText` + `quickReplies[]` buttons |
+| **Sentiment Analysis** | `enableSentimentAnalysis` | LLM returns `sentimentScore`, `identifiedEmotions[]`, `detectedIntent`, `urgencyRating`, etc. |
+
+**Two-layer JSON reliability approach:**
+
+1. **Prompt instruction** — `promptResponseJson` format string appended to system prompt (works with all providers)
+2. **Provider-level `responseFormat=json`** — set on langchain params for providers that support builder-level JSON mode
+
+| Provider | `responseFormat=json` | Method |
+|---|---|---|
+| **OpenAI** | ✅ Wired in this commit | `.responseFormat("json_object")` |
+| **Gemini** | ✅ Already existed | `.responseFormat(JSON)` |
+| **Anthropic** | ❌ No native JSON mode | Prompt-only (works well) |
+| **Ollama/jlama** | ❌ No builder-level API | Prompt-only |
+
+When JSON format is active, `convertToObject=true` is set on the langchain params so EDDI parses the JSON response into an object. Streaming is not recommended with JSON mode as it would show raw JSON building up in the UI.
+
+**Files changed:**
+
+| File | Change |
+|---|---|
+| `McpSetupTools.java` | 2 new params, `buildPromptResponseJson()`, `supportsResponseFormat()`, `createLangchainConfig()` with JSON/convertToObject support |
+| `OpenAILanguageModelBuilder.java` | Added `responseFormat=json` → `json_object` support |
+| `McpSetupToolsTest.java` | 10 new tests (31 total): quick replies, sentiment, both, anthropic no-responseFormat, helper methods |
+
+**Testing:** ✅ 31 MCP setup tests pass (up from 21), all green.
+
+---
+
 ## Phase 8a: MCP Code Review Fixes (2026-03-18)
 
 ### Backend — CDI Injection Fix, Code Quality, Test Coverage

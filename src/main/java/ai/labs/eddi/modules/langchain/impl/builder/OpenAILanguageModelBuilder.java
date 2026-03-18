@@ -20,6 +20,8 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_TIMEOUT = "timeout";
     private static final String KEY_LOG_REQUESTS = "logRequests";
     private static final String KEY_LOG_RESPONSES = "logResponses";
+    private static final String KEY_RESPONSE_FORMAT = "responseFormat";
+    private static final String TYPE_JSON = "json";
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
@@ -36,6 +38,9 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
         }
         if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
             builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
+        }
+        if (TYPE_JSON.equalsIgnoreCase(parameters.get(KEY_RESPONSE_FORMAT))) {
+            builder.responseFormat("json_object");
         }
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
@@ -61,6 +66,9 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
         }
         if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
             builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
+        }
+        if (TYPE_JSON.equalsIgnoreCase(parameters.get(KEY_RESPONSE_FORMAT))) {
+            builder.responseFormat("json_object");
         }
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
