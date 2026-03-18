@@ -102,6 +102,28 @@ EDDI's MCP server now includes a `create_api_bot` composite tool that takes an O
 
 ---
 
+## Phase 8a: MCP Improvements — AI-Agent Friendliness (2026-03-18)
+
+### Backend — Cleaner Responses, Ollama/jlama Support, Deploy Verification
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Three improvements to make the MCP server more useful for AI agents:
+
+| Improvement | Files | Change |
+|---|---|---|
+| **1. Cleaner responses** | `McpConversationTools.java` | `buildConversationResponse()` extracts `botResponse`, `quickReplies`, `actions`, `conversationState` as top-level fields — eliminates deep JSON navigation |
+| **2. Ollama/jlama support** | `McpSetupTools.java`, `McpToolUtils.java` | All 7 providers listed; `baseUrl` param; `isLocalLlmProvider()` skips apiKey validation; provider-specific param mapping (ollama→`model`, jlama→`authToken`) |
+| **3. Deploy verification** | `McpSetupTools.java` | `deployAndWait()` polls status for 5s; reports actual `deploymentStatus` + `deployWarning` on failure |
+| **4. Ollama baseUrl backend** | `OllamaLanguageModelBuilder.java` | Added `baseUrl` parameter to both `build()` and `buildStreaming()` |
+| **5. Docker compose** | `docker-compose.yml` | Added `host.docker.internal:host-gateway` extra_hosts for Ollama running in Docker |
+
+**Testing:** ✅ 38 MCP tests pass (16 `McpConversationToolsTest` + 22 `McpSetupToolsTest`)
+
+---
+
 ## Manager: Audit Trail UI (2026-03-17)
 
 ### Frontend — Timeline-Based Audit Ledger Viewer
