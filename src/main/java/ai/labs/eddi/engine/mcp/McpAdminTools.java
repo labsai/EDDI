@@ -1,21 +1,27 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.behavior.IRestBehaviorStore;
+import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.configs.http.IRestHttpCallsStore;
+import ai.labs.eddi.configs.http.model.HttpCallsConfiguration;
 import ai.labs.eddi.configs.langchain.IRestLangChainStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
+import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
+import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.regulardictionary.IRestRegularDictionaryStore;
+import ai.labs.eddi.configs.regulardictionary.model.RegularDictionaryConfiguration;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -23,6 +29,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -32,11 +39,12 @@ import java.util.Map;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
 
 /**
- * MCP tools for administering EDDI bots and packages.
- * Exposes deploy, undeploy, list packages, create/delete bot
+ * MCP tools for administering EDDI bots, packages, and resources.
+ * Exposes deploy, undeploy, CRUD, batch cascade, and introspection
  * as MCP-compliant tools via the Quarkus MCP Server extension.
  *
- * <p>Phase 8a — Item 36: Admin API MCP Server (3 SP)
+ * <p>Phase 8a — Admin API MCP Server
+ * <p>Phase 8a.2 — Resource CRUD + Batch Cascade + Introspection
  *
  * @author ginccc
  */
@@ -390,6 +398,394 @@ public class McpAdminTools {
         };
     }
 
+    // ==================== Phase 8a.2: Resource CRUD + Batch Cascade ====================
+
+    @Tool(name = "update_resource", description = "Update any EDDI resource configuration by type and ID. " +
+            "Returns the new version URI after update. " +
+            "Supported types: 'behavior', 'langchain', 'httpcalls', 'output', 'propertysetter', 'dictionaries'.")
+    public String updateResource(
+            @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'output', " +
+                    "'propertysetter', or 'dictionaries' (required)") String resourceType,
+            @ToolArg(description = "Resource ID (required)") String resourceId,
+            @ToolArg(description = "Current version number (required)") Integer version,
+            @ToolArg(description = "Full JSON configuration body (required)") String config) {
+        if (resourceType == null || resourceType.isBlank()) return errorJson("resourceType is required");
+        if (resourceId == null || resourceId.isBlank()) return errorJson("resourceId is required");
+        if (config == null || config.isBlank()) return errorJson("config is required");
+        try {
+            int ver = version != null ? version : 1;
+            String type = resourceType.trim().toLowerCase();
+            Response response = updateResourceByType(type, resourceId, ver, config);
+            String location = response.getHeaderString("Location");
+            int newVersion = extractVersionFromLocation(location);
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("resourceType", type);
+            result.put("resourceId", resourceId);
+            result.put("previousVersion", ver);
+            result.put("newVersion", newVersion);
+            if (location != null) {
+                result.put("resourceUri", location);
+            }
+            result.put("status", response.getStatus());
+            return resultJson("updated", result);
+        } catch (Exception e) {
+            LOGGER.error("MCP update_resource failed for " + resourceType + "/" + resourceId, e);
+            return errorJson("Failed to update resource: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "create_resource", description = "Create a new EDDI resource configuration. " +
+            "Returns the new resource ID and URI. " +
+            "Supported types: 'behavior', 'langchain', 'httpcalls', 'output', 'propertysetter', 'dictionaries'.")
+    public String createResource(
+            @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'output', " +
+                    "'propertysetter', or 'dictionaries' (required)") String resourceType,
+            @ToolArg(description = "Full JSON configuration body (required)") String config) {
+        if (resourceType == null || resourceType.isBlank()) return errorJson("resourceType is required");
+        if (config == null || config.isBlank()) return errorJson("config is required");
+        try {
+            String type = resourceType.trim().toLowerCase();
+            Response response = createResourceByType(type, config);
+            String location = response.getHeaderString("Location");
+            String newId = extractIdFromLocation(location);
+            int newVersion = extractVersionFromLocation(location);
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("resourceType", type);
+            result.put("resourceId", newId != null ? newId : "unknown");
+            result.put("version", newVersion);
+            if (location != null) {
+                result.put("resourceUri", location);
+            }
+            result.put("status", response.getStatus());
+            return resultJson("created", result);
+        } catch (Exception e) {
+            LOGGER.error("MCP create_resource failed for " + resourceType, e);
+            return errorJson("Failed to create resource: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "delete_resource", description = "Delete an EDDI resource configuration. " +
+            "Soft-deletes by default; set permanent=true for permanent removal. " +
+            "Supported types: 'behavior', 'langchain', 'httpcalls', 'output', 'propertysetter', 'dictionaries'.")
+    public String deleteResource(
+            @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'output', " +
+                    "'propertysetter', or 'dictionaries' (required)") String resourceType,
+            @ToolArg(description = "Resource ID (required)") String resourceId,
+            @ToolArg(description = "Current version number (required)") Integer version,
+            @ToolArg(description = "Permanently delete? (default: false)") Boolean permanent) {
+        if (resourceType == null || resourceType.isBlank()) return errorJson("resourceType is required");
+        if (resourceId == null || resourceId.isBlank()) return errorJson("resourceId is required");
+        try {
+            int ver = version != null ? version : 1;
+            boolean isPermanent = permanent != null ? permanent : false;
+            String type = resourceType.trim().toLowerCase();
+            Response response = deleteResourceByType(type, resourceId, ver, isPermanent);
+
+            return resultJson("deleted", Map.of(
+                    "resourceType", type,
+                    "resourceId", resourceId,
+                    "version", ver,
+                    "permanent", isPermanent,
+                    "status", response.getStatus()
+            ));
+        } catch (Exception e) {
+            LOGGER.error("MCP delete_resource failed for " + resourceType + "/" + resourceId, e);
+            return errorJson("Failed to delete resource: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "apply_bot_changes", description = "Batch-cascade multiple resource URI changes through " +
+            "package → bot in ONE pass. After updating resources with update_resource, use this to wire " +
+            "the new versions into the bot's packages and optionally redeploy. " +
+            "This replaces ALL URIs in-memory and saves each package/bot ONCE — no wasteful intermediate versions.")
+    public String applyBotChanges(
+            @ToolArg(description = "Bot ID (required)") String botId,
+            @ToolArg(description = "Current bot version (required)") Integer botVersion,
+            @ToolArg(description = "JSON array of URI mappings: " +
+                    "[{\"oldUri\":\"eddi://...?version=1\",\"newUri\":\"eddi://...?version=2\"}, ...]") String resourceMappings,
+            @ToolArg(description = "Redeploy the bot after cascading changes? (default: false)") Boolean redeploy,
+            @ToolArg(description = "Environment for redeployment: 'unrestricted' (default), 'restricted', or 'test'")
+            String environment) {
+        if (botId == null || botId.isBlank()) return errorJson("botId is required");
+        if (resourceMappings == null || resourceMappings.isBlank()) return errorJson("resourceMappings is required");
+        try {
+            int ver = botVersion != null ? botVersion : 1;
+
+            // 1. Parse resource mappings
+            @SuppressWarnings("unchecked")
+            List<Map<String, String>> mappings = jsonSerialization.deserialize(resourceMappings, List.class);
+            if (mappings == null || mappings.isEmpty()) {
+                return resultJson("no_changes", Map.of("botId", botId, "reason", "Empty resource mappings"));
+            }
+
+            // 2. Read bot config
+            var botStore = getRestStore(IRestBotStore.class);
+            BotConfiguration botConfig = botStore.readBot(botId, ver);
+            if (botConfig == null) {
+                return errorJson("Bot not found: " + botId + " version " + ver);
+            }
+
+            // 3. Process each package
+            var pkgStore = getRestStore(IRestPackageStore.class);
+            List<URI> originalPackageUris = new ArrayList<>(botConfig.getPackages());
+            List<URI> updatedPackageUris = new ArrayList<>();
+            int updatedPackageCount = 0;
+
+            for (URI pkgUri : originalPackageUris) {
+                String pkgId = extractIdFromLocation(pkgUri.toString());
+                int pkgVersion = extractVersionFromLocation(pkgUri.toString());
+                if (pkgId == null) {
+                    updatedPackageUris.add(pkgUri); // keep as-is
+                    continue;
+                }
+
+                PackageConfiguration pkgConfig = pkgStore.readPackage(pkgId, pkgVersion);
+                if (pkgConfig == null) {
+                    updatedPackageUris.add(pkgUri);
+                    continue;
+                }
+
+                // Replace URIs in package extensions
+                boolean packageModified = false;
+                for (var ext : pkgConfig.getPackageExtensions()) {
+                    Object uriObj = ext.getConfig().get("uri");
+                    if (uriObj != null) {
+                        String currentUri = uriObj.toString();
+                        for (var mapping : mappings) {
+                            String oldUri = mapping.get("oldUri");
+                            String newUri = mapping.get("newUri");
+                            if (oldUri != null && newUri != null && currentUri.equals(oldUri)) {
+                                ext.getConfig().put("uri", newUri);
+                                packageModified = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (packageModified) {
+                    // Save package ONCE with all replacements
+                    Response pkgResponse = pkgStore.updatePackage(pkgId, pkgVersion, pkgConfig);
+                    String pkgLocation = pkgResponse.getHeaderString("Location");
+                    if (pkgLocation != null) {
+                        updatedPackageUris.add(URI.create(pkgLocation));
+                    } else {
+                        // Construct new URI with incremented version
+                        int newPkgVersion = pkgVersion + 1;
+                        String newPkgUri = pkgUri.toString().replaceAll(
+                                "version=\\d+", "version=" + newPkgVersion);
+                        updatedPackageUris.add(URI.create(newPkgUri));
+                    }
+                    updatedPackageCount++;
+                } else {
+                    updatedPackageUris.add(pkgUri); // unchanged
+                }
+            }
+
+            // 4. Update bot if any packages changed
+            int newBotVersion = ver;
+            if (updatedPackageCount > 0) {
+                botConfig.setPackages(updatedPackageUris);
+                Response botResponse = botStore.updateBot(botId, ver, botConfig);
+                String botLocation = botResponse.getHeaderString("Location");
+                newBotVersion = botLocation != null
+                        ? extractVersionFromLocation(botLocation)
+                        : ver + 1;
+            }
+
+            // 5. Redeploy if requested
+            var result = new LinkedHashMap<String, Object>();
+            result.put("botId", botId);
+            result.put("previousBotVersion", ver);
+            result.put("newBotVersion", newBotVersion);
+            result.put("updatedPackages", updatedPackageCount);
+            result.put("totalPackages", originalPackageUris.size());
+            result.put("mappingsApplied", mappings.size());
+
+            if (Boolean.TRUE.equals(redeploy) && updatedPackageCount > 0) {
+                var env = parseEnvironment(environment);
+                try {
+                    Response deployResponse = botAdmin.deployBot(env, botId, newBotVersion, true, true);
+                    result.put("redeployed", deployResponse.getStatus() == 200);
+                    result.put("environment", env.name());
+                } catch (Exception deployErr) {
+                    result.put("redeployed", false);
+                    result.put("deployError", "Redeployment failed: " + deployErr.getMessage());
+                }
+            }
+
+            return resultJson("cascaded", result);
+        } catch (Exception e) {
+            LOGGER.error("MCP apply_bot_changes failed for bot " + botId, e);
+            return errorJson("Failed to apply bot changes: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "list_bot_resources", description = "Get a complete inventory of all resources in a bot's pipeline. " +
+            "Walks bot → packages → extensions and returns a flat summary with all resource IDs, types, and URIs. " +
+            "This is the fastest way to understand a bot's full configuration before making changes.")
+    public String listBotResources(
+            @ToolArg(description = "Bot ID (required)") String botId,
+            @ToolArg(description = "Bot version (default: 1)") Integer version) {
+        if (botId == null || botId.isBlank()) return errorJson("botId is required");
+        try {
+            int ver = version != null ? version : 1;
+
+            // Read bot config
+            var botStore = getRestStore(IRestBotStore.class);
+            BotConfiguration botConfig = botStore.readBot(botId, ver);
+            if (botConfig == null) {
+                return errorJson("Bot not found: " + botId + " version " + ver);
+            }
+
+            // Read bot name from descriptor
+            String botName = null;
+            try {
+                DocumentDescriptor descriptor = getRestStore(IRestDocumentDescriptorStore.class)
+                        .readDescriptor(botId, ver);
+                if (descriptor != null) {
+                    botName = descriptor.getName();
+                }
+            } catch (Exception e) {
+                LOGGER.debug("Could not read bot descriptor for " + botId, e);
+            }
+
+            // Walk packages → extensions
+            var pkgStore = getRestStore(IRestPackageStore.class);
+            var packages = new ArrayList<Map<String, Object>>();
+
+            for (URI pkgUri : botConfig.getPackages()) {
+                String pkgId = extractIdFromLocation(pkgUri.toString());
+                int pkgVersion = extractVersionFromLocation(pkgUri.toString());
+                if (pkgId == null) continue;
+
+                var pkgInfo = new LinkedHashMap<String, Object>();
+                pkgInfo.put("packageId", pkgId);
+                pkgInfo.put("packageVersion", pkgVersion);
+                pkgInfo.put("packageUri", pkgUri.toString());
+
+                try {
+                    PackageConfiguration pkgConfig = pkgStore.readPackage(pkgId, pkgVersion);
+                    if (pkgConfig != null) {
+                        var extensions = new ArrayList<Map<String, Object>>();
+                        for (var ext : pkgConfig.getPackageExtensions()) {
+                            var extInfo = new LinkedHashMap<String, Object>();
+                            if (ext.getType() != null) {
+                                extInfo.put("type", ext.getType().toString());
+                                extInfo.put("resourceType", uriToResourceType(ext.getType().toString()));
+                            }
+                            Object uriObj = ext.getConfig().get("uri");
+                            if (uriObj != null) {
+                                String uri = uriObj.toString();
+                                extInfo.put("resourceUri", uri);
+                                extInfo.put("resourceId", extractIdFromLocation(uri));
+                                extInfo.put("resourceVersion", extractVersionFromLocation(uri));
+                            }
+                            extensions.add(extInfo);
+                        }
+                        pkgInfo.put("extensions", extensions);
+                        pkgInfo.put("extensionCount", extensions.size());
+                    }
+                } catch (Exception pkgErr) {
+                    pkgInfo.put("error", "Failed to read package: " + pkgErr.getMessage());
+                }
+
+                packages.add(pkgInfo);
+            }
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("botId", botId);
+            result.put("botVersion", ver);
+            if (botName != null) result.put("botName", botName);
+            result.put("packageCount", packages.size());
+            result.put("packages", packages);
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.error("MCP list_bot_resources failed for bot " + botId, e);
+            return errorJson("Failed to list bot resources: " + e.getMessage());
+        }
+    }
+
+    // ==================== Type Dispatch Helpers ====================
+
+    /**
+     * Dispatch resource update to the correct REST store based on type.
+     */
+    private Response updateResourceByType(String type, String id, int version, String configJson)
+            throws IOException {
+        return switch (type) {
+            case "behavior" -> getRestStore(IRestBehaviorStore.class)
+                    .updateBehaviorRuleSet(id, version, jsonSerialization.deserialize(configJson, BehaviorConfiguration.class));
+            case "langchain" -> getRestStore(IRestLangChainStore.class)
+                    .updateLangChain(id, version, jsonSerialization.deserialize(configJson, LangChainConfiguration.class));
+            case "httpcalls" -> getRestStore(IRestHttpCallsStore.class)
+                    .updateHttpCalls(id, version, jsonSerialization.deserialize(configJson, HttpCallsConfiguration.class));
+            case "output" -> getRestStore(IRestOutputStore.class)
+                    .updateOutputSet(id, version, jsonSerialization.deserialize(configJson, OutputConfigurationSet.class));
+            case "propertysetter" -> getRestStore(IRestPropertySetterStore.class)
+                    .updatePropertySetter(id, version, jsonSerialization.deserialize(configJson, PropertySetterConfiguration.class));
+            case "dictionaries" -> getRestStore(IRestRegularDictionaryStore.class)
+                    .updateRegularDictionary(id, version, jsonSerialization.deserialize(configJson, RegularDictionaryConfiguration.class));
+            default -> throw new IllegalArgumentException("Unknown resource type: " + type +
+                    ". Supported: behavior, langchain, httpcalls, output, propertysetter, dictionaries");
+        };
+    }
+
+    /**
+     * Dispatch resource create to the correct REST store based on type.
+     */
+    private Response createResourceByType(String type, String configJson) throws IOException {
+        return switch (type) {
+            case "behavior" -> getRestStore(IRestBehaviorStore.class)
+                    .createBehaviorRuleSet(jsonSerialization.deserialize(configJson, BehaviorConfiguration.class));
+            case "langchain" -> getRestStore(IRestLangChainStore.class)
+                    .createLangChain(jsonSerialization.deserialize(configJson, LangChainConfiguration.class));
+            case "httpcalls" -> getRestStore(IRestHttpCallsStore.class)
+                    .createHttpCalls(jsonSerialization.deserialize(configJson, HttpCallsConfiguration.class));
+            case "output" -> getRestStore(IRestOutputStore.class)
+                    .createOutputSet(jsonSerialization.deserialize(configJson, OutputConfigurationSet.class));
+            case "propertysetter" -> getRestStore(IRestPropertySetterStore.class)
+                    .createPropertySetter(jsonSerialization.deserialize(configJson, PropertySetterConfiguration.class));
+            case "dictionaries" -> getRestStore(IRestRegularDictionaryStore.class)
+                    .createRegularDictionary(jsonSerialization.deserialize(configJson, RegularDictionaryConfiguration.class));
+            default -> throw new IllegalArgumentException("Unknown resource type: " + type +
+                    ". Supported: behavior, langchain, httpcalls, output, propertysetter, dictionaries");
+        };
+    }
+
+    /**
+     * Dispatch resource delete to the correct REST store based on type.
+     */
+    private Response deleteResourceByType(String type, String id, int version, boolean permanent) {
+        return switch (type) {
+            case "behavior" -> getRestStore(IRestBehaviorStore.class).deleteBehaviorRuleSet(id, version, permanent);
+            case "langchain" -> getRestStore(IRestLangChainStore.class).deleteLangChain(id, version, permanent);
+            case "httpcalls" -> getRestStore(IRestHttpCallsStore.class).deleteHttpCalls(id, version, permanent);
+            case "output" -> getRestStore(IRestOutputStore.class).deleteOutputSet(id, version, permanent);
+            case "propertysetter" -> getRestStore(IRestPropertySetterStore.class).deletePropertySetter(id, version, permanent);
+            case "dictionaries" -> getRestStore(IRestRegularDictionaryStore.class).deleteRegularDictionary(id, version, permanent);
+            default -> throw new IllegalArgumentException("Unknown resource type: " + type +
+                    ". Supported: behavior, langchain, httpcalls, output, propertysetter, dictionaries");
+        };
+    }
+
+    /**
+     * Map a package extension type URI to the MCP resource type slug.
+     * E.g., "eddi://ai.labs.behavior" → "behavior"
+     */
+    private static String uriToResourceType(String typeUri) {
+        if (typeUri == null) return "unknown";
+        if (typeUri.contains("behavior")) return "behavior";
+        if (typeUri.contains("langchain")) return "langchain";
+        if (typeUri.contains("httpcalls")) return "httpcalls";
+        if (typeUri.contains("output")) return "output";
+        if (typeUri.contains("property")) return "propertysetter";
+        if (typeUri.contains("dictionary") || typeUri.contains("parser")) return "dictionaries";
+        return "unknown";
+    }
+
     private String resultJson(String action, Map<String, Object> data) {
         try {
             var result = new LinkedHashMap<>(data);
@@ -407,3 +803,4 @@ public class McpAdminTools {
         return McpToolUtils.getRestStore(restInterfaceFactory, clazz);
     }
 }
+

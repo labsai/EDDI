@@ -8,14 +8,18 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IConversationService;
 import ai.labs.eddi.engine.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.IRestBotAdministration;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import io.quarkiverse.mcp.server.Tool;
@@ -55,18 +59,24 @@ public class McpConversationTools {
     private final IRestBotStore botStore;
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IJsonSerialization jsonSerialization;
+    private final BoundedLogStore boundedLogStore;
+    private final IRestAuditStore auditStore;
 
     @Inject
     public McpConversationTools(IConversationService conversationService,
             IRestBotAdministration botAdmin,
             IRestBotStore botStore,
             IRestInterfaceFactory restInterfaceFactory,
-            IJsonSerialization jsonSerialization) {
+            IJsonSerialization jsonSerialization,
+            BoundedLogStore boundedLogStore,
+            IRestAuditStore auditStore) {
         this.conversationService = conversationService;
         this.botAdmin = botAdmin;
         this.botStore = botStore;
         this.restInterfaceFactory = restInterfaceFactory;
         this.jsonSerialization = jsonSerialization;
+        this.boundedLogStore = boundedLogStore;
+        this.auditStore = auditStore;
     }
 
     @Tool(name = "list_bots", description = "List all deployed bots with their status, version, and name. " +
@@ -308,6 +318,62 @@ public class McpConversationTools {
         } catch (Exception e) {
             LOGGER.error("MCP get_bot failed for bot " + botId, e);
             return errorJson("Failed to get bot: " + e.getMessage());
+        }
+    }
+
+    // ==================== Phase 8a.2: Diagnostic Tools ====================
+
+    @Tool(name = "read_bot_logs", description = "Read recent server-side logs for a bot or conversation. " +
+            "Returns pipeline execution logs, LLM provider errors, timeouts, and internal diagnostics " +
+            "that are NOT visible in conversation memory. Essential for debugging 'why did the bot fail?' " +
+            "Filter by botId, conversationId, and/or log level.")
+    public String readBotLogs(
+            @ToolArg(description = "Filter by bot ID (optional)") String botId,
+            @ToolArg(description = "Filter by conversation ID (optional)") String conversationId,
+            @ToolArg(description = "Filter by log level: 'ERROR', 'WARN', 'INFO', 'DEBUG' (optional)") String level,
+            @ToolArg(description = "Maximum number of log entries to return (default: 50)") Integer limit) {
+        try {
+            int limitInt = limit != null ? limit : 50;
+            String botFilter = (botId != null && !botId.isBlank()) ? botId : null;
+            String convFilter = (conversationId != null && !conversationId.isBlank()) ? conversationId : null;
+            String levelFilter = (level != null && !level.isBlank()) ? level.toUpperCase() : null;
+
+            List<LogEntry> entries = boundedLogStore.getEntries(botFilter, convFilter, levelFilter, limitInt);
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("count", entries.size());
+            result.put("limit", limitInt);
+            if (botFilter != null) result.put("botId", botFilter);
+            if (convFilter != null) result.put("conversationId", convFilter);
+            if (levelFilter != null) result.put("level", levelFilter);
+            result.put("entries", entries);
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.error("MCP read_bot_logs failed", e);
+            return errorJson("Failed to read bot logs: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "read_audit_trail", description = "Read the audit trail for a conversation. " +
+            "Returns per-task execution records including: taskId, taskType, input/output data, " +
+            "LLM details (model, prompt, tokens, cost), tool calls, actions emitted, and timing. " +
+            "This shows EXACTLY what happened at each pipeline step — essential for optimizing bot behavior.")
+    public String readAuditTrail(
+            @ToolArg(description = "Conversation ID (required)") String conversationId,
+            @ToolArg(description = "Maximum number of entries to return (default: 20)") Integer limit) {
+        if (conversationId == null || conversationId.isBlank()) return errorJson("conversationId is required");
+        try {
+            int limitInt = limit != null ? limit : 20;
+            List<AuditEntry> entries = auditStore.getAuditTrail(conversationId, 0, limitInt);
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("conversationId", conversationId);
+            result.put("count", entries.size());
+            result.put("entries", entries);
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.error("MCP read_audit_trail failed for conversation " + conversationId, e);
+            return errorJson("Failed to read audit trail: " + e.getMessage());
         }
     }
 

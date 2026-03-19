@@ -10,7 +10,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 |----------|-------------|
 | `http://localhost:7070/mcp` | MCP server endpoint (default + admin) |
 
-## Available Tools (20)
+## Available Tools (27)
 
 ### Conversation Tools (9)
 
@@ -39,6 +39,23 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `update_bot` | Update a bot's name/description and optionally redeploy |
 | `read_package` | Read a package's full pipeline configuration |
 | `read_resource` | Read any resource config by type (behavior, langchain, httpcalls, output, etc.) |
+
+### Resource CRUD Tools (5)
+
+| Tool | Description |
+|------|-------------|
+| `update_resource` | Update any resource config by type and ID. Returns the new version URI |
+| `create_resource` | Create a new resource. Returns the new resource ID and URI |
+| `delete_resource` | Delete a resource (soft-delete by default, `permanent=true` for hard delete) |
+| `apply_bot_changes` | Batch-cascade URI changes through package → bot in ONE pass, optionally redeploy |
+| `list_bot_resources` | Walk bot → packages → extensions to get a complete resource inventory in one call |
+
+### Diagnostic Tools (2)
+
+| Tool | Description |
+|------|-------------|
+| `read_bot_logs` | Read server-side pipeline logs (errors, LLM timeouts) filtered by bot/conversation/level |
+| `read_audit_trail` | Read per-task audit entries with LLM details, timing, cost, and tool calls |
 
 ### Setup Tools (2)
 
@@ -86,9 +103,23 @@ Add to `claude_desktop_config.json`:
 ### Inspecting Bot Configuration
 
 ```
-1. get_bot(botId: "my-bot") → see packages and name
-2. read_package(packageId: "pkg-123") → see pipeline extensions with resource URIs
-3. read_resource(resourceType: "langchain", resourceId: "lc-456") → see LLM config
+1. list_bot_resources(botId: "my-bot") → complete resource inventory in one call
+2. read_resource(resourceType: "langchain", resourceId: "lc-456") → see LLM config details
+```
+
+### Modifying Resources + Cascade
+
+```
+1. read_resource("langchain", "lc-456") → get current config
+2. update_resource("langchain", "lc-456", version: 1, config: {...}) → new version 2
+3. apply_bot_changes(botId, botVersion, [{oldUri: "...?version=1", newUri: "...?version=2"}], redeploy: true)
+```
+
+### Debugging a Bot
+
+```
+1. read_bot_logs(botId: "my-bot") → see pipeline errors, LLM timeouts
+2. read_audit_trail(conversationId: "conv-123") → per-task execution details, LLM tokens, cost
 ```
 
 ## Configuration
@@ -107,7 +138,7 @@ eddi.docs.path=docs
 
 EDDI uses a **whitelist-based `ToolFilter`** (`McpToolFilter.java`) to control which tools are exposed via MCP.
 
-**Why?** EDDI's langchain4j integration registers internal bot tools (calculator, datetime, websearch, etc.) that are meant ONLY for bot pipeline execution — not for external MCP clients. The filter ensures only the 20 intended tools are visible.
+**Why?** EDDI's langchain4j integration registers internal bot tools (calculator, datetime, websearch, etc.) that are meant ONLY for bot pipeline execution — not for external MCP clients. The filter ensures only the 27 intended tools are visible.
 
 To add a new MCP tool: add it to the `MCP_TOOLS` set in `McpToolFilter.java`.
 
@@ -122,8 +153,8 @@ To add a new MCP tool: add it to the `MCP_TOOLS` set in `McpToolFilter.java`.
 
 | Role | Tools |
 |------|-------|
-| `mcp-user` | `list_bots`, `create_conversation`, `talk_to_bot`, `chat_with_bot`, `read_conversation*` |
-| `mcp-admin` | All user tools + `deploy_bot`, `undeploy_bot`, `create_bot`, `delete_bot`, `update_bot`, `setup_bot`, `create_api_bot` |
+| `mcp-user` | `list_bots`, `create_conversation`, `talk_to_bot`, `chat_with_bot`, `read_conversation*`, `read_bot_logs`, `read_audit_trail` |
+| `mcp-admin` | All user tools + `deploy_bot`, `undeploy_bot`, `create_bot`, `delete_bot`, `update_bot`, `setup_bot`, `create_api_bot`, resource CRUD, `apply_bot_changes`, `list_bot_resources` |
 
 ## Sentiment Monitoring
 

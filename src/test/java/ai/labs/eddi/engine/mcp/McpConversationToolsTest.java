@@ -8,10 +8,14 @@ import ai.labs.eddi.engine.IConversationService;
 import ai.labs.eddi.engine.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.IRestBotAdministration;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.model.LogEntry;
+import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import java.util.LinkedHashMap;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,6 +24,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.net.URI;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +45,8 @@ class McpConversationToolsTest {
     private IRestBotAdministration botAdmin;
     private IRestBotStore botStore;
     private IJsonSerialization jsonSerialization;
+    private BoundedLogStore boundedLogStore;
+    private IRestAuditStore auditStore;
     private McpConversationTools tools;
 
     @BeforeEach
@@ -49,9 +56,12 @@ class McpConversationToolsTest {
         botStore = mock(IRestBotStore.class);
         jsonSerialization = mock(IJsonSerialization.class);
         var restInterfaceFactory = mock(IRestInterfaceFactory.class);
+        boundedLogStore = mock(BoundedLogStore.class);
+        auditStore = mock(IRestAuditStore.class);
         // Default: lenient serialize returns empty JSON
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        tools = new McpConversationTools(conversationService, botAdmin, botStore, restInterfaceFactory, jsonSerialization);
+        tools = new McpConversationTools(conversationService, botAdmin, botStore,
+                restInterfaceFactory, jsonSerialization, boundedLogStore, auditStore);
     }
 
     // --- listBots ---
@@ -388,5 +398,69 @@ class McpConversationToolsTest {
         String result = tools.createConversation(null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("botId is required"));
+    }
+
+    // --- readBotLogs ---
+
+    @Test
+    void readBotLogs_returnsFilteredEntries() throws IOException {
+        var entry = new LogEntry(System.currentTimeMillis(), "ERROR", "ai.labs.test",
+                "Something failed", null, BOT_ID, 1, CONV_ID, null, "inst-1");
+        when(boundedLogStore.getEntries(BOT_ID, CONV_ID, "ERROR", 50))
+                .thenReturn(List.of(entry));
+        when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1,\"entries\":[]}");
+
+        String result = tools.readBotLogs(BOT_ID, CONV_ID, "ERROR", null);
+
+        assertNotNull(result);
+        verify(boundedLogStore).getEntries(BOT_ID, CONV_ID, "ERROR", 50);
+    }
+
+    @Test
+    void readBotLogs_allNullFilters_returnsAll() throws IOException {
+        when(boundedLogStore.getEntries(null, null, null, 50))
+                .thenReturn(Collections.emptyList());
+        when(jsonSerialization.serialize(any())).thenReturn("{\"count\":0}");
+
+        tools.readBotLogs(null, null, null, null);
+
+        verify(boundedLogStore).getEntries(null, null, null, 50);
+    }
+
+    @Test
+    void readBotLogs_handlesException() {
+        when(boundedLogStore.getEntries(any(), any(), any(), anyInt()))
+                .thenThrow(new RuntimeException("Ring buffer error"));
+
+        String result = tools.readBotLogs(BOT_ID, null, null, 10);
+
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("Ring buffer error"));
+    }
+
+    // --- readAuditTrail ---
+
+    @Test
+    void readAuditTrail_returnsEntries() throws IOException {
+        var auditEntry = new AuditEntry(
+                "ae1", CONV_ID, BOT_ID, 1, "user1", "unrestricted",
+                0, "ai.labs.langchain", "langchain", 0, 150,
+                Map.of("input", "hello"), Map.of("output", "hi"),
+                null, null, List.of("send_output"), 0.001, Instant.now(), null);
+        when(auditStore.getAuditTrail(CONV_ID, 0, 20))
+                .thenReturn(List.of(auditEntry));
+        when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1}");
+
+        String result = tools.readAuditTrail(CONV_ID, null);
+
+        assertNotNull(result);
+        verify(auditStore).getAuditTrail(CONV_ID, 0, 20);
+    }
+
+    @Test
+    void readAuditTrail_missingConversationId_returnsError() {
+        String result = tools.readAuditTrail(null, null);
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("conversationId is required"));
     }
 }
