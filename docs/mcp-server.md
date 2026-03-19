@@ -143,6 +143,240 @@ Add to `claude_desktop_config.json`:
 2. read_audit_trail(conversationId: "conv-123") → per-task execution details, LLM tokens, cost
 ```
 
+---
+
+## Tool Reference — Bot Discovery & Managed Conversations
+
+EDDI provides **two tiers** of conversation management:
+
+| Tier | Tools | Conversations | Use Case |
+|------|-------|---------------|----------|
+| **Low-level** | `create_conversation` + `talk_to_bot` | Multiple per user, manually managed | Custom apps, multi-conversation UIs |
+| **Managed** | `chat_managed` | One per intent+userId, auto-created | Single-window chat, intent-based routing |
+
+The managed tier relies on **bot triggers** — mappings from an _intent_ string to one or more bot deployments. Use the discovery and trigger tools below to configure and interact with this system.
+
+### `discover_bots`
+
+Discover deployed bots with their capabilities. Returns an enriched list of deployed bots, cross-referenced with intent mappings from bot triggers. This is the **best way to find bots by purpose**.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `filter` | string | No | `""` | Filter bots by name (case-insensitive substring match) |
+| `environment` | string | No | `"unrestricted"` | Environment: `unrestricted`, `restricted`, or `test` |
+
+**Response:**
+
+```json
+{
+  "count": 80,
+  "bots": [
+    {
+      "botId": "692f7fe8...",
+      "name": "Bob Marley 2",
+      "description": "gemini powered Bot",
+      "version": 1,
+      "status": "READY",
+      "environment": "unrestricted",
+      "intents": ["bob-marley-2-692f7fe8d6c14292d2b7f70c"]
+    },
+    {
+      "botId": "64513b3c...",
+      "name": "Bot Father",
+      "description": "Bot to create Connector Bots...",
+      "version": 110,
+      "status": "READY",
+      "environment": "unrestricted"
+    }
+  ]
+}
+```
+
+> **Note:** The `intents` array only appears for bots that have bot triggers configured. Bots without triggers are still returned — they can be interacted with via `chat_with_bot` (low-level tier) but not via `chat_managed`.
+
+---
+
+### `chat_managed`
+
+Send a message to a bot using **intent-based managed conversations**. Unlike `chat_with_bot` (which requires a botId and creates multiple conversations), this tool uses an _intent_ to find the right bot and maintains **exactly one conversation per intent+userId** — like a single chat window.
+
+The conversation is auto-created on first message and reused on subsequent calls. Requires a bot trigger to be configured for the intent (see `list_bot_triggers` / `create_bot_trigger`).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `intent` | string | **Yes** | Intent that maps to a bot trigger. E.g. `"customer_support"` |
+| `userId` | string | **Yes** | User ID for conversation management (one conversation per intent+userId) |
+| `message` | string | **Yes** | The user message to send |
+| `environment` | string | No | Environment: `unrestricted` (default), `restricted`, or `test` |
+
+**Response:**
+
+```json
+{
+  "environment": "unrestricted",
+  "conversationId": "69bc8b93...",
+  "botId": "692f7fe8...",
+  "userId": "user-123",
+  "intent": "bob-marley-2-692f7fe8...",
+  "actions": ["send_message", "unknown"],
+  "conversationState": "READY",
+  "response": {
+    "conversationOutputs": [{
+      "output": [{ "type": "text", "text": "Hello there! ..." }]
+    }],
+    "conversationSteps": [...]
+  }
+}
+```
+
+**Behavior:**
+- **First call** with a new intent+userId: creates a new conversation and sends the message
+- **Subsequent calls** with the same intent+userId: reuses the existing conversation (like continuing in the same chat window)
+- Returns an error if no bot trigger is configured for the given intent
+
+---
+
+### `list_bot_triggers`
+
+List all bot triggers (intent→bot mappings). Returns all configured intents with their bot deployments. Bot triggers enable intent-based conversation management via `chat_managed`.
+
+**Parameters:** None.
+
+**Response:**
+
+```json
+{
+  "count": 48,
+  "triggers": [
+    {
+      "intent": "customer_support",
+      "botDeployments": [{
+        "environment": "unrestricted",
+        "botId": "6544db9b...",
+        "initialContext": {}
+      }]
+    }
+  ]
+}
+```
+
+> **Tip:** Each trigger can map to **multiple bot deployments** — useful for A/B testing or environment-specific routing.
+
+---
+
+### `create_bot_trigger`
+
+Create a bot trigger that maps an intent to one or more bots. Once created, the intent can be used with `chat_managed` to talk to the bot.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `config` | string (JSON) | **Yes** | Full trigger configuration (see schema below) |
+
+**Config schema:**
+
+```json
+{
+  "intent": "customer_support",
+  "botDeployments": [
+    {
+      "botId": "64513b3c...",
+      "environment": "unrestricted",
+      "initialContext": {
+        "language": { "type": "string", "value": "en" }
+      }
+    }
+  ]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `intent` | string | **Yes** | Unique intent identifier. Convention: `slug-botId` (e.g. `support-bot-abc123`) |
+| `botDeployments` | array | **Yes** | List of bot deployments this intent routes to |
+| `botDeployments[].botId` | string | **Yes** | The bot ID to route messages to |
+| `botDeployments[].environment` | string | No | Deployment environment (default: `unrestricted`) |
+| `botDeployments[].initialContext` | object | No | Key-value pairs injected into the conversation context on creation |
+
+**Response:**
+
+```json
+{ "intent": "customer_support", "status": 200, "action": "created" }
+```
+
+---
+
+### `update_bot_trigger`
+
+Update an existing bot trigger. Changes the bot deployments for a given intent (e.g., to point to a new bot version, add A/B routing, or change the initial context).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `intent` | string | **Yes** | The intent to update |
+| `config` | string (JSON) | **Yes** | Full updated trigger configuration (same schema as `create_bot_trigger`) |
+
+**Response:**
+
+```json
+{ "intent": "customer_support", "status": 200, "action": "updated" }
+```
+
+---
+
+### `delete_bot_trigger`
+
+Delete a bot trigger for a given intent. After deletion, `chat_managed` calls with this intent will return an error. Existing conversations are **not** deleted — they become orphaned but can still be read.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `intent` | string | **Yes** | The intent to delete |
+
+**Response:**
+
+```json
+{ "intent": "customer_support", "status": 200, "action": "deleted" }
+```
+
+---
+
+### End-to-End Example: Setting Up Managed Chat
+
+```
+# 1. Create a bot (using setup_bot or the Manager UI)
+setup_bot(name: "Support Agent", systemPrompt: "You are a helpful support agent...", ...)
+→ { botId: "abc123", version: 1, status: "deployed" }
+
+# 2. Create a trigger mapping an intent to this bot
+create_bot_trigger(config: {
+  "intent": "customer_support",
+  "botDeployments": [{ "botId": "abc123", "environment": "unrestricted" }]
+})
+
+# 3. Chat using the intent — conversation auto-created
+chat_managed(intent: "customer_support", userId: "user-1", message: "I need help with billing")
+→ { conversationId: "conv-789", response: { output: "I'd be happy to help..." } }
+
+# 4. Continue the same conversation (same conversationId reused)
+chat_managed(intent: "customer_support", userId: "user-1", message: "Can you check order #1234?")
+→ { conversationId: "conv-789", response: { output: "Let me look that up..." } }
+
+# 5. Different user gets their own conversation
+chat_managed(intent: "customer_support", userId: "user-2", message: "Hello")
+→ { conversationId: "conv-999", response: { output: "Welcome! How can I help?" } }
+
+# 6. Discover what's available
+discover_bots(filter: "Support") → shows the bot with its intent
+```
+
 ## Configuration
 
 In `application.properties`:
