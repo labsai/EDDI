@@ -10,9 +10,9 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 |----------|-------------|
 | `http://localhost:7070/mcp` | MCP server endpoint (default + admin) |
 
-## Available Tools (27)
+## Available Tools (33)
 
-### Conversation Tools (9)
+### Conversation Tools (11)
 
 | Tool | Description |
 |------|-------------|
@@ -25,8 +25,10 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `read_conversation_log` | Read conversation log as formatted text |
 | `list_conversations` | List all conversations for a specific bot |
 | `get_bot` | Get a bot's full configuration (packages, name, description) |
+| `discover_bots` | Discover deployed bots enriched with intent mappings from bot triggers. Best way to find bots by purpose |
+| `chat_managed` | Send a message using intent-based managed conversations (one conversation per intent+userId, auto-creates on first message) |
 
-### Admin Tools (9)
+### Admin Tools (13)
 
 | Tool | Description |
 |------|-------------|
@@ -39,6 +41,10 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `update_bot` | Update a bot's name/description and optionally redeploy |
 | `read_package` | Read a package's full pipeline configuration |
 | `read_resource` | Read any resource config by type (behavior, langchain, httpcalls, output, etc.) |
+| `list_bot_triggers` | List all bot triggers (intent→bot mappings) for managed conversations |
+| `create_bot_trigger` | Create a bot trigger mapping an intent to one or more bot deployments |
+| `update_bot_trigger` | Update an existing bot trigger |
+| `delete_bot_trigger` | Delete a bot trigger for a given intent |
 
 ### Resource CRUD Tools (5)
 
@@ -100,6 +106,21 @@ Add to `claude_desktop_config.json`:
 4. read_conversation_log(conversationId: "...") → see full history
 ```
 
+### Discovering Bots by Purpose
+
+```
+1. discover_bots() → enriched list with intents per bot
+2. list_bot_triggers() → see all intent→bot mappings
+```
+
+### Intent-Based Managed Chat
+
+```
+1. create_bot_trigger(config: {"intent":"support","botDeployments":[{"botId":"bot-123"}]})
+2. chat_managed(intent: "support", userId: "user1", message: "Hello!") → auto-creates conversation
+3. chat_managed(intent: "support", userId: "user1", message: "I need help") → reuses same conversation
+```
+
 ### Inspecting Bot Configuration
 
 ```
@@ -138,7 +159,7 @@ eddi.docs.path=docs
 
 EDDI uses a **whitelist-based `ToolFilter`** (`McpToolFilter.java`) to control which tools are exposed via MCP.
 
-**Why?** EDDI's langchain4j integration registers internal bot tools (calculator, datetime, websearch, etc.) that are meant ONLY for bot pipeline execution — not for external MCP clients. The filter ensures only the 27 intended tools are visible.
+**Why?** EDDI's langchain4j integration registers internal bot tools (calculator, datetime, websearch, etc.) that are meant ONLY for bot pipeline execution — not for external MCP clients. The filter ensures only the 33 intended tools are visible.
 
 To add a new MCP tool: add it to the `MCP_TOOLS` set in `McpToolFilter.java`.
 
@@ -153,8 +174,8 @@ To add a new MCP tool: add it to the `MCP_TOOLS` set in `McpToolFilter.java`.
 
 | Role | Tools |
 |------|-------|
-| `mcp-user` | `list_bots`, `create_conversation`, `talk_to_bot`, `chat_with_bot`, `read_conversation*`, `read_bot_logs`, `read_audit_trail` |
-| `mcp-admin` | All user tools + `deploy_bot`, `undeploy_bot`, `create_bot`, `delete_bot`, `update_bot`, `setup_bot`, `create_api_bot`, resource CRUD, `apply_bot_changes`, `list_bot_resources` |
+| `mcp-user` | `list_bots`, `discover_bots`, `create_conversation`, `talk_to_bot`, `chat_with_bot`, `chat_managed`, `read_conversation*`, `list_bot_triggers`, `read_bot_logs`, `read_audit_trail` |
+| `mcp-admin` | All user tools + `deploy_bot`, `undeploy_bot`, `create_bot`, `delete_bot`, `update_bot`, `setup_bot`, `create_api_bot`, resource CRUD, `apply_bot_changes`, `list_bot_resources`, trigger CRUD |
 
 ## Sentiment Monitoring
 

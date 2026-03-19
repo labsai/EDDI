@@ -1,27 +1,28 @@
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.botmanagement.IRestBotTriggerStore;
+import ai.labs.eddi.configs.botmanagement.IUserConversationStore;
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IConversationService;
 import ai.labs.eddi.engine.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.IRestBotAdministration;
+import ai.labs.eddi.engine.IRestBotEngine;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
-import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.engine.model.*;
 import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
-import ai.labs.eddi.engine.model.BotDeploymentStatus;
-import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.engine.model.Deployment;
-import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
+import ai.labs.eddi.utils.RestUtilities;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.smallrye.common.annotation.Blocking;
@@ -29,10 +30,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.net.URI;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -61,6 +60,9 @@ public class McpConversationTools {
     private final IJsonSerialization jsonSerialization;
     private final BoundedLogStore boundedLogStore;
     private final IRestAuditStore auditStore;
+    private final IRestBotTriggerStore botTriggerStore;
+    private final IUserConversationStore userConversationStore;
+    private final IRestBotEngine restBotEngine;
 
     @Inject
     public McpConversationTools(IConversationService conversationService,
@@ -69,7 +71,10 @@ public class McpConversationTools {
             IRestInterfaceFactory restInterfaceFactory,
             IJsonSerialization jsonSerialization,
             BoundedLogStore boundedLogStore,
-            IRestAuditStore auditStore) {
+            IRestAuditStore auditStore,
+            IRestBotTriggerStore botTriggerStore,
+            IUserConversationStore userConversationStore,
+            IRestBotEngine restBotEngine) {
         this.conversationService = conversationService;
         this.botAdmin = botAdmin;
         this.botStore = botStore;
@@ -77,6 +82,9 @@ public class McpConversationTools {
         this.jsonSerialization = jsonSerialization;
         this.boundedLogStore = boundedLogStore;
         this.auditStore = auditStore;
+        this.botTriggerStore = botTriggerStore;
+        this.userConversationStore = userConversationStore;
+        this.restBotEngine = restBotEngine;
     }
 
     @Tool(name = "list_bots", description = "List all deployed bots with their status, version, and name. " +
@@ -375,6 +383,170 @@ public class McpConversationTools {
             LOGGER.error("MCP read_audit_trail failed for conversation " + conversationId, e);
             return errorJson("Failed to read audit trail: " + e.getMessage());
         }
+    }
+
+    @Tool(name = "discover_bots", description = "Discover deployed bots with their capabilities. " +
+            "Returns an enriched list of deployed bots, cross-referenced with intent mappings " +
+            "from bot triggers. Each bot entry includes: botId, name, description, version, status, " +
+            "and any intents it serves. This is the best way to find bots by purpose.")
+    public String discoverBots(
+            @ToolArg(description = "Optional filter string to search bot names") String filter,
+            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
+        try {
+            var env = parseEnvironment(environment);
+            List<BotDeploymentStatus> statuses = botAdmin.getDeploymentStatuses(env);
+
+            // Build botId -> intents mapping from triggers
+            Map<String, List<String>> botIntents = new LinkedHashMap<>();
+            try {
+                List<BotTriggerConfiguration> triggers = botTriggerStore.readAllBotTriggers();
+                for (var trigger : triggers) {
+                    for (var deployment : trigger.getBotDeployments()) {
+                        botIntents.computeIfAbsent(deployment.getBotId(), k -> new ArrayList<>())
+                                .add(trigger.getIntent());
+                    }
+                }
+            } catch (Exception e) {
+                LOGGER.warnv("Could not read bot triggers for discovery: {0}", e.getMessage());
+            }
+
+            // Build enriched results
+            var bots = new ArrayList<Map<String, Object>>();
+            for (var status : statuses) {
+                if (status.getDescriptor() != null && status.getDescriptor().isDeleted()) continue;
+
+                String name = status.getDescriptor() != null ? status.getDescriptor().getName() : "";
+                String desc = status.getDescriptor() != null ? status.getDescriptor().getDescription() : "";
+
+                // Apply name filter if provided
+                if (filter != null && !filter.isBlank()) {
+                    boolean matches = (name != null && name.toLowerCase().contains(filter.toLowerCase())) ||
+                            (desc != null && desc.toLowerCase().contains(filter.toLowerCase()));
+                    if (!matches) continue;
+                }
+
+                var bot = new LinkedHashMap<String, Object>();
+                bot.put("botId", status.getBotId());
+                bot.put("name", name);
+                bot.put("description", desc);
+                bot.put("version", status.getBotVersion());
+                bot.put("status", status.getStatus().name());
+                bot.put("environment", status.getEnvironment().name());
+                List<String> intents = botIntents.get(status.getBotId());
+                if (intents != null && !intents.isEmpty()) {
+                    bot.put("intents", intents);
+                }
+                bots.add(bot);
+            }
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("count", bots.size());
+            result.put("bots", bots);
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.error("MCP discover_bots failed", e);
+            return errorJson("Failed to discover bots: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "chat_managed", description = "Send a message to a bot using intent-based managed conversations. " +
+            "Unlike chat_with_bot (which requires a botId and creates multiple conversations), this " +
+            "tool uses an 'intent' to find the right bot and maintains exactly ONE conversation " +
+            "per intent+userId — like a single chat window. The conversation is auto-created on " +
+            "first message and reused on subsequent calls. Requires a bot trigger to be configured " +
+            "for the intent (see list_bot_triggers / create_bot_trigger).")
+    public String chatManaged(
+            @ToolArg(description = "Intent that maps to a bot trigger (required). E.g. 'customer_support'") String intent,
+            @ToolArg(description = "User ID for conversation management (required)") String userId,
+            @ToolArg(description = "The user message to send (required)") String message,
+            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
+        if (intent == null || intent.isBlank()) return errorJson("intent is required");
+        if (userId == null || userId.isBlank()) return errorJson("userId is required");
+        if (message == null || message.isBlank()) return errorJson("message is required");
+
+        try {
+            var env = parseEnvironment(environment);
+
+            // Step 1: Get or create the user conversation for this intent
+            var userConversation = getOrCreateManagedConversation(intent, userId, env);
+
+            // Step 2: Send the message using the existing sendMessageAndWait helper
+            var snapshot = sendMessageAndWait(
+                    userConversation.getEnvironment(),
+                    userConversation.getBotId(),
+                    userConversation.getConversationId(),
+                    message);
+
+            // Step 3: Build response
+            var result = buildConversationResponse(snapshot, userConversation.getConversationId());
+            result.putFirst("intent", intent);
+            result.putFirst("userId", userId);
+            result.putFirst("botId", userConversation.getBotId());
+            result.putFirst("conversationId", userConversation.getConversationId());
+            result.putFirst("environment", userConversation.getEnvironment().name());
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.errorv("MCP chat_managed failed for intent={0}, userId={1}: {2}", intent, userId, e.getMessage());
+            return errorJson("Failed to chat via managed bot: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Get an existing user conversation for the intent+userId, or create a new one.
+     * Mirrors the logic from {@code RestBotManagement.initUserConversation}.
+     */
+    private UserConversation getOrCreateManagedConversation(
+            String intent, String userId, Deployment.Environment env) throws Exception {
+
+        // Try to read existing conversation
+        UserConversation existing = null;
+        try {
+            existing = userConversationStore.readUserConversation(intent, userId);
+        } catch (IResourceStore.ResourceStoreException ignored) {
+            // Not found — will create
+        }
+
+        if (existing != null) {
+            // Check if conversation has ended
+            ConversationState state = restBotEngine.getConversationState(
+                    existing.getEnvironment(), existing.getConversationId());
+            if (!ConversationState.ENDED.equals(state)) {
+                return existing;
+            }
+            // Ended — delete and create fresh
+            userConversationStore.deleteUserConversation(intent, userId);
+        }
+
+        // Create a new conversation from the bot trigger
+        BotTriggerConfiguration trigger = botTriggerStore.readBotTrigger(intent);
+        if (trigger == null || trigger.getBotDeployments().isEmpty()) {
+            throw new RuntimeException("No bot trigger configured for intent: " + intent);
+        }
+
+        // Pick first deployment
+        BotDeployment deployment = trigger.getBotDeployments().getFirst();
+        String botId = deployment.getBotId();
+        var usedEnv = deployment.getEnvironment() != null ? deployment.getEnvironment() : env;
+
+        // Start a new conversation
+        var initialContext = new HashMap<>(deployment.getInitialContext());
+        jakarta.ws.rs.core.Response botResponse = restBotEngine.startConversationWithContext(
+                usedEnv, botId, userId, initialContext);
+
+        if (botResponse.getStatus() != 201) {
+            throw new RuntimeException("Failed to create conversation for intent=" + intent +
+                    ", botId=" + botId + ", status=" + botResponse.getStatus());
+        }
+
+        var locationUri = URI.create(botResponse.getHeaders().get("location").getFirst().toString());
+        var resourceId = RestUtilities.extractResourceId(locationUri);
+        String conversationId = resourceId.getId();
+
+        // Store the user conversation mapping
+        var userConversation = new UserConversation(intent, userId, usedEnv, botId, conversationId);
+        userConversationStore.createUserConversation(userConversation);
+
+        return userConversation;
     }
 
     /**

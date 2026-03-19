@@ -15,7 +15,7 @@ import java.util.Set;
  * bot tools (calculator, datetime, websearch, etc.), which are meant ONLY
  * for internal bot pipeline use — not for external MCP clients.
  * <p>
- * This whitelist ensures only the 27 intended MCP tools are visible.
+ * This whitelist ensures only the 33 intended MCP tools are visible.
  *
  * @author ginccc
  */
@@ -58,7 +58,15 @@ public class McpToolFilter implements ToolFilter {
             "list_bot_resources",
             // Diagnostic tools (Phase 8a.2)
             "read_bot_logs",
-            "read_audit_trail"
+            "read_audit_trail",
+            // Discovery + Managed Bots (Phase 8a.3)
+            "discover_bots",
+            "chat_managed",
+            // Bot Trigger CRUD (Phase 8a.3)
+            "list_bot_triggers",
+            "create_bot_trigger",
+            "update_bot_trigger",
+            "delete_bot_trigger"
     );
 
     @Override

@@ -2,6 +2,7 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.behavior.IRestBehaviorStore;
 import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
+import ai.labs.eddi.configs.botmanagement.IRestBotTriggerStore;
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
@@ -22,6 +23,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
+import ai.labs.eddi.engine.model.BotTriggerConfiguration;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -802,5 +804,90 @@ public class McpAdminTools {
     private <T> T getRestStore(Class<T> clazz) {
         return McpToolUtils.getRestStore(restInterfaceFactory, clazz);
     }
-}
 
+    // ── Bot Trigger CRUD ──────────────────────────────────────────────────
+
+    @Tool(name = "list_bot_triggers", description = "List all bot triggers (intent→bot mappings). " +
+            "Returns all configured intents with their bot deployments. " +
+            "Bot triggers enable intent-based conversation management via chat_managed.")
+    public String listBotTriggers() {
+        try {
+            var triggerStore = getRestStore(IRestBotTriggerStore.class);
+            List<BotTriggerConfiguration> triggers = triggerStore.readAllBotTriggers();
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("count", triggers.size());
+            result.put("triggers", triggers);
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.error("MCP list_bot_triggers failed", e);
+            return errorJson("Failed to list bot triggers: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "create_bot_trigger", description = "Create a bot trigger that maps an intent to one or more bots. " +
+            "Once created, the intent can be used with chat_managed to talk to the bot. " +
+            "The config must include: intent (string) and botDeployments (array of {botId, environment}).")
+    public String createBotTrigger(
+            @ToolArg(description = "Full JSON configuration: {\"intent\":\"...\",\"botDeployments\":[{\"botId\":\"...\",\"environment\":\"unrestricted\"}]} (required)") String config) {
+        if (config == null || config.isBlank()) return errorJson("config is required");
+        try {
+            var triggerStore = getRestStore(IRestBotTriggerStore.class);
+            BotTriggerConfiguration triggerConfig = jsonSerialization.deserialize(config, BotTriggerConfiguration.class);
+
+            if (triggerConfig.getIntent() == null || triggerConfig.getIntent().isBlank()) {
+                return errorJson("intent is required in config");
+            }
+
+            Response response = triggerStore.createBotTrigger(triggerConfig);
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("intent", triggerConfig.getIntent());
+            result.put("status", response.getStatus());
+            return resultJson("created", result);
+        } catch (Exception e) {
+            LOGGER.error("MCP create_bot_trigger failed", e);
+            return errorJson("Failed to create bot trigger: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "update_bot_trigger", description = "Update an existing bot trigger. " +
+            "Changes the bot deployments for a given intent.")
+    public String updateBotTrigger(
+            @ToolArg(description = "Intent to update (required)") String intent,
+            @ToolArg(description = "Full JSON configuration: {\"intent\":\"...\",\"botDeployments\":[{\"botId\":\"...\",\"environment\":\"unrestricted\"}]} (required)") String config) {
+        if (intent == null || intent.isBlank()) return errorJson("intent is required");
+        if (config == null || config.isBlank()) return errorJson("config is required");
+        try {
+            var triggerStore = getRestStore(IRestBotTriggerStore.class);
+            BotTriggerConfiguration triggerConfig = jsonSerialization.deserialize(config, BotTriggerConfiguration.class);
+            Response response = triggerStore.updateBotTrigger(intent, triggerConfig);
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("intent", intent);
+            result.put("status", response.getStatus());
+            return resultJson("updated", result);
+        } catch (Exception e) {
+            LOGGER.error("MCP update_bot_trigger failed for intent " + intent, e);
+            return errorJson("Failed to update bot trigger: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "delete_bot_trigger", description = "Delete a bot trigger for a given intent.")
+    public String deleteBotTrigger(
+            @ToolArg(description = "Intent to delete (required)") String intent) {
+        if (intent == null || intent.isBlank()) return errorJson("intent is required");
+        try {
+            var triggerStore = getRestStore(IRestBotTriggerStore.class);
+            Response response = triggerStore.deleteBotTrigger(intent);
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("intent", intent);
+            result.put("status", response.getStatus());
+            return resultJson("deleted", result);
+        } catch (Exception e) {
+            LOGGER.error("MCP delete_bot_trigger failed for intent " + intent, e);
+            return errorJson("Failed to delete bot trigger: " + e.getMessage());
+        }
+    }
+}

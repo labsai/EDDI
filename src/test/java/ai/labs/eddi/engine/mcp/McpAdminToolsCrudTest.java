@@ -2,6 +2,7 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.behavior.IRestBehaviorStore;
 import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
+import ai.labs.eddi.configs.botmanagement.IRestBotTriggerStore;
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
@@ -17,6 +18,7 @@ import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.regulardictionary.IRestRegularDictionaryStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IRestBotAdministration;
+import ai.labs.eddi.engine.model.BotTriggerConfiguration;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
@@ -38,6 +40,7 @@ import static org.mockito.Mockito.*;
 /**
  * Unit tests for McpAdminTools Phase 8a.2 —
  * update_resource, create_resource, delete_resource, apply_bot_changes, list_bot_resources.
+ * Phase 8a.3 — list_bot_triggers, create_bot_trigger, update_bot_trigger, delete_bot_trigger.
  */
 class McpAdminToolsCrudTest {
 
@@ -55,6 +58,7 @@ class McpAdminToolsCrudTest {
     private IRestOutputStore outputStore;
     private IRestPropertySetterStore propertySetterStore;
     private IRestRegularDictionaryStore dictionaryStore;
+    private IRestBotTriggerStore botTriggerStore;
     private IJsonSerialization jsonSerialization;
     private McpAdminTools tools;
 
@@ -70,6 +74,7 @@ class McpAdminToolsCrudTest {
         outputStore = mock(IRestOutputStore.class);
         propertySetterStore = mock(IRestPropertySetterStore.class);
         dictionaryStore = mock(IRestRegularDictionaryStore.class);
+        botTriggerStore = mock(IRestBotTriggerStore.class);
         jsonSerialization = mock(IJsonSerialization.class);
 
         var restInterfaceFactory = mock(IRestInterfaceFactory.class);
@@ -82,6 +87,7 @@ class McpAdminToolsCrudTest {
         when(restInterfaceFactory.get(IRestOutputStore.class)).thenReturn(outputStore);
         when(restInterfaceFactory.get(IRestPropertySetterStore.class)).thenReturn(propertySetterStore);
         when(restInterfaceFactory.get(IRestRegularDictionaryStore.class)).thenReturn(dictionaryStore);
+        when(restInterfaceFactory.get(IRestBotTriggerStore.class)).thenReturn(botTriggerStore);
 
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
         tools = new McpAdminTools(restInterfaceFactory, botAdmin, jsonSerialization);
@@ -453,5 +459,96 @@ class McpAdminToolsCrudTest {
         // Should still succeed (graceful degradation), but include error info
         assertNotNull(result);
         assertTrue(result.contains("error") || result.contains("packages"));
+    }
+
+    // ==================== list_bot_triggers ====================
+
+    @Test
+    void listBotTriggers_success() throws IOException {
+        var trigger = new BotTriggerConfiguration();
+        trigger.setIntent("support");
+        when(botTriggerStore.readAllBotTriggers()).thenReturn(List.of(trigger));
+        when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1}");
+
+        String result = tools.listBotTriggers();
+
+        assertNotNull(result);
+        verify(botTriggerStore).readAllBotTriggers();
+    }
+
+    @Test
+    void listBotTriggers_error_returnsError() {
+        when(botTriggerStore.readAllBotTriggers()).thenThrow(new RuntimeException("db error"));
+
+        String result = tools.listBotTriggers();
+
+        assertTrue(result.contains("error"));
+    }
+
+    // ==================== create_bot_trigger ====================
+
+    @Test
+    void createBotTrigger_success() throws IOException {
+        var config = new BotTriggerConfiguration();
+        config.setIntent("support");
+        when(jsonSerialization.deserialize(anyString(), eq(BotTriggerConfiguration.class))).thenReturn(config);
+        when(botTriggerStore.createBotTrigger(any())).thenReturn(Response.ok().build());
+        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\"}");
+
+        String result = tools.createBotTrigger("{\"intent\":\"support\",\"botDeployments\":[]}");
+
+        assertNotNull(result);
+        assertTrue(result.contains("created"));
+        verify(botTriggerStore).createBotTrigger(any());
+    }
+
+    @Test
+    void createBotTrigger_missingConfig_returnsError() {
+        String result = tools.createBotTrigger(null);
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("config is required"));
+    }
+
+    // ==================== update_bot_trigger ====================
+
+    @Test
+    void updateBotTrigger_success() throws IOException {
+        var config = new BotTriggerConfiguration();
+        when(jsonSerialization.deserialize(anyString(), eq(BotTriggerConfiguration.class))).thenReturn(config);
+        when(botTriggerStore.updateBotTrigger(eq("support"), any())).thenReturn(Response.ok().build());
+        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"updated\"}");
+
+        String result = tools.updateBotTrigger("support", "{\"intent\":\"support\"}");
+
+        assertNotNull(result);
+        assertTrue(result.contains("updated"));
+    }
+
+    @Test
+    void updateBotTrigger_missingIntent_returnsError() {
+        String result = tools.updateBotTrigger(null, "{}");
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("intent is required"));
+    }
+
+    // ==================== delete_bot_trigger ====================
+
+    @Test
+    void deleteBotTrigger_success() throws IOException {
+        when(botTriggerStore.deleteBotTrigger("support")).thenReturn(Response.ok().build());
+        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deleted\"}");
+
+        String result = tools.deleteBotTrigger("support");
+
+        assertNotNull(result);
+        assertTrue(result.contains("deleted"));
+        verify(botTriggerStore).deleteBotTrigger("support");
+    }
+
+    @Test
+    void deleteBotTrigger_missingIntent_returnsError() {
+        String result = tools.deleteBotTrigger(null);
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("intent is required"));
     }
 }

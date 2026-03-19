@@ -1,5 +1,7 @@
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.botmanagement.IRestBotTriggerStore;
+import ai.labs.eddi.configs.botmanagement.IUserConversationStore;
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
@@ -8,13 +10,12 @@ import ai.labs.eddi.engine.IConversationService;
 import ai.labs.eddi.engine.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.IRestBotAdministration;
+import ai.labs.eddi.engine.IRestBotEngine;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.eddi.engine.model.BotDeploymentStatus;
+import ai.labs.eddi.engine.model.*;
 import ai.labs.eddi.engine.model.Deployment.Environment;
-import ai.labs.eddi.engine.model.InputData;
-import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import java.util.LinkedHashMap;
@@ -47,6 +48,9 @@ class McpConversationToolsTest {
     private IJsonSerialization jsonSerialization;
     private BoundedLogStore boundedLogStore;
     private IRestAuditStore auditStore;
+    private IRestBotTriggerStore botTriggerStore;
+    private IUserConversationStore userConversationStore;
+    private IRestBotEngine restBotEngine;
     private McpConversationTools tools;
 
     @BeforeEach
@@ -58,10 +62,14 @@ class McpConversationToolsTest {
         var restInterfaceFactory = mock(IRestInterfaceFactory.class);
         boundedLogStore = mock(BoundedLogStore.class);
         auditStore = mock(IRestAuditStore.class);
+        botTriggerStore = mock(IRestBotTriggerStore.class);
+        userConversationStore = mock(IUserConversationStore.class);
+        restBotEngine = mock(IRestBotEngine.class);
         // Default: lenient serialize returns empty JSON
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
         tools = new McpConversationTools(conversationService, botAdmin, botStore,
-                restInterfaceFactory, jsonSerialization, boundedLogStore, auditStore);
+                restInterfaceFactory, jsonSerialization, boundedLogStore, auditStore,
+                botTriggerStore, userConversationStore, restBotEngine);
     }
 
     // --- listBots ---
@@ -462,5 +470,109 @@ class McpConversationToolsTest {
         String result = tools.readAuditTrail(null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("conversationId is required"));
+    }
+
+    // --- discover_bots ---
+
+    @Test
+    void discoverBots_returnsEnrichedList() throws IOException {
+        var status = new BotDeploymentStatus();
+        status.setBotId(BOT_ID);
+        status.setStatus(Deployment.Status.READY);
+        status.setEnvironment(Environment.unrestricted);
+        var descriptor = new DocumentDescriptor();
+        descriptor.setName("Test Bot");
+        descriptor.setDescription("A test bot");
+        status.setDescriptor(descriptor);
+
+        when(botAdmin.getDeploymentStatuses(Environment.unrestricted)).thenReturn(List.of(status));
+
+        var trigger = new BotTriggerConfiguration();
+        trigger.setIntent("test_intent");
+        var deployment = new BotDeployment();
+        deployment.setBotId(BOT_ID);
+        trigger.setBotDeployments(List.of(deployment));
+        when(botTriggerStore.readAllBotTriggers()).thenReturn(List.of(trigger));
+        when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1}");
+
+        String result = tools.discoverBots(null, "unrestricted");
+
+        assertNotNull(result);
+        verify(botAdmin).getDeploymentStatuses(Environment.unrestricted);
+        verify(botTriggerStore).readAllBotTriggers();
+    }
+
+    @Test
+    void discoverBots_withFilter_filtersResults() throws IOException {
+        var status = new BotDeploymentStatus();
+        status.setBotId(BOT_ID);
+        status.setStatus(Deployment.Status.READY);
+        status.setEnvironment(Environment.unrestricted);
+        var descriptor = new DocumentDescriptor();
+        descriptor.setName("Test Bot");
+        status.setDescriptor(descriptor);
+
+        when(botAdmin.getDeploymentStatuses(Environment.unrestricted)).thenReturn(List.of(status));
+        when(botTriggerStore.readAllBotTriggers()).thenReturn(Collections.emptyList());
+        when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1}");
+
+        String result = tools.discoverBots("Test", "unrestricted");
+
+        assertNotNull(result);
+    }
+
+    @Test
+    void discoverBots_triggerReadFailure_stillReturns() throws IOException {
+        var status = new BotDeploymentStatus();
+        status.setBotId(BOT_ID);
+        status.setStatus(Deployment.Status.READY);
+        status.setEnvironment(Environment.unrestricted);
+        var descriptor = new DocumentDescriptor();
+        descriptor.setName("Test Bot");
+        status.setDescriptor(descriptor);
+
+        when(botAdmin.getDeploymentStatuses(Environment.unrestricted)).thenReturn(List.of(status));
+        when(botTriggerStore.readAllBotTriggers()).thenThrow(new RuntimeException("trigger error"));
+        when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1}");
+
+        String result = tools.discoverBots(null, "unrestricted");
+
+        // Should still return results — trigger read is non-fatal
+        assertNotNull(result);
+        assertFalse(result.contains("error"));
+    }
+
+    // --- chat_managed ---
+
+    @Test
+    void chatManaged_missingIntent_returnsError() {
+        String result = tools.chatManaged(null, "user1", "hello", "unrestricted");
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("intent is required"));
+    }
+
+    @Test
+    void chatManaged_missingUserId_returnsError() {
+        String result = tools.chatManaged("support", null, "hello", "unrestricted");
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("userId is required"));
+    }
+
+    @Test
+    void chatManaged_missingMessage_returnsError() {
+        String result = tools.chatManaged("support", "user1", null, "unrestricted");
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("message is required"));
+    }
+
+    @Test
+    void chatManaged_noTriggerConfigured_returnsError() throws Exception {
+        when(userConversationStore.readUserConversation("no_trigger", "user1"))
+                .thenThrow(new ai.labs.eddi.datastore.IResourceStore.ResourceStoreException("not found"));
+        when(botTriggerStore.readBotTrigger("no_trigger")).thenReturn(null);
+
+        String result = tools.chatManaged("no_trigger", "user1", "hello", "unrestricted");
+
+        assertTrue(result.contains("error"));
     }
 }
