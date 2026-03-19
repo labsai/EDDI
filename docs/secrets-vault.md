@@ -79,13 +79,30 @@ Secret → random DEK → AES-256-GCM encrypt → ciphertext
 
 ### Configuration
 
-```properties
-# Master encryption key (REQUIRED for vault to function)
-eddi.secrets.master-key=your-strong-master-key
+The vault requires a master key (KEK) to encrypt/decrypt secrets. If not set, the vault is **disabled** — all `${eddivault:...}` references pass through unresolved and a prominent warning is logged at startup.
 
-# Algorithm parameters (defaults shown)
-# PBKDF2: 600,000 iterations, SHA-256
-# AES: 256-bit GCM, 12-byte IV, 16-byte salt
+Set the master key using **one** of these methods (in priority order):
+
+```bash
+# 1. System property (highest priority)
+./mvnw compile quarkus:dev -Deddi.vault.master-key=your-strong-passphrase
+
+# 2. Environment variable (recommended for production)
+export EDDI_VAULT_MASTER_KEY=your-strong-passphrase
+
+# 3. .env file in project root (recommended for local dev — add to .gitignore!)
+echo "EDDI_VAULT_MASTER_KEY=your-strong-passphrase" > .env
+
+# 4. application.properties (dev profile only — safe to commit)
+%dev.eddi.vault.master-key=dev-passphrase
+```
+
+Additional vault settings in `application.properties`:
+
+```properties
+# Cache for resolved secrets (avoids repeated decryption)
+eddi.vault.cache-ttl-minutes=5
+eddi.vault.cache-max-size=1000
 ```
 
 > **⚠️ Important:** The master key must be set via environment variable or secure configuration. If the master key is lost, all encrypted secrets become unrecoverable.

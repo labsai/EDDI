@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.langchain.IRestLangChainStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
+import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.model.Deployment.Environment;
@@ -34,6 +35,7 @@ class McpSetupToolsTest {
     private IRestBotStore botStore;
     private IRestDocumentDescriptorStore descriptorStore;
     private IRestBotAdministration botAdmin;
+    private IRestParserStore parserStore;
     private IJsonSerialization jsonSerialization;
     private McpSetupTools tools;
 
@@ -47,6 +49,7 @@ class McpSetupToolsTest {
         botStore = mock(IRestBotStore.class);
         descriptorStore = mock(IRestDocumentDescriptorStore.class);
         botAdmin = mock(IRestBotAdministration.class);
+        parserStore = mock(IRestParserStore.class);
         jsonSerialization = mock(IJsonSerialization.class);
 
         // Wire store mocks through IRestInterfaceFactory
@@ -58,9 +61,14 @@ class McpSetupToolsTest {
         when(restInterfaceFactory.get(IRestPackageStore.class)).thenReturn(packageStore);
         when(restInterfaceFactory.get(IRestBotStore.class)).thenReturn(botStore);
         when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
+        when(restInterfaceFactory.get(IRestParserStore.class)).thenReturn(parserStore);
 
         // Default serialization
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
+
+        // Default parser mock (needed by all setupBot calls)
+        lenient().when(parserStore.createParser(any()))
+                .thenReturn(Response.created(URI.create("/parserstore/parsers/par-1?version=1")).build());
 
         tools = new McpSetupTools(restInterfaceFactory, botAdmin, jsonSerialization);
     }
@@ -89,6 +97,7 @@ class McpSetupToolsTest {
         assertNotNull(result);
 
         // Verify all resources created in order
+        verify(parserStore).createParser(any());
         verify(behaviorStore).createBehaviorRuleSet(any());
         verify(langchainStore).createLangChain(any());
         verify(outputStore).createOutputSet(any());
@@ -96,8 +105,8 @@ class McpSetupToolsTest {
         verify(botStore).createBot(any());
         verify(botAdmin).deployBot(Environment.unrestricted, "bot-1", 1, true, true);
 
-        // Verify 5 descriptors patched (behavior, langchain, output, package, bot)
-        verify(descriptorStore, times(5)).patchDescriptor(any(), anyInt(), any());
+        // Verify 6 descriptors patched (parser, behavior, langchain, output, package, bot)
+        verify(descriptorStore, times(6)).patchDescriptor(any(), anyInt(), any());
     }
 
     @Test
@@ -110,16 +119,14 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
         when(botStore.createBot(any()))
                 .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
-        when(botAdmin.deployBot(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
-                .thenReturn(Response.ok().build());
 
         tools.setupBot("Test Bot", "You are helpful", null, null,
                 "sk-test", null, null, null, null, null, null, true, null);
 
         // Output store should NOT be called
         verify(outputStore, never()).createOutputSet(any());
-        // Only 4 descriptors patched (no output)
-        verify(descriptorStore, times(4)).patchDescriptor(any(), anyInt(), any());
+        // 5 descriptors patched (parser, behavior, langchain, package, bot — no output)
+        verify(descriptorStore, times(5)).patchDescriptor(any(), anyInt(), any());
     }
 
     @Test
@@ -268,11 +275,12 @@ class McpSetupToolsTest {
         verify(packageStore).createPackage(packageCaptor.capture());
 
         var pkgConfig = packageCaptor.getValue();
-        // Should have 3 extensions: behavior, langchain, output (no parser for LLM-powered bots)
-        assertEquals(3, pkgConfig.getPackageExtensions().size());
-        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getPackageExtensions().get(0).getType());
-        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getPackageExtensions().get(1).getType());
-        assertEquals(URI.create("eddi://ai.labs.output"), pkgConfig.getPackageExtensions().get(2).getType());
+        // Should have 4 extensions: parser, behavior, langchain, output
+        assertEquals(4, pkgConfig.getPackageExtensions().size());
+        assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getPackageExtensions().get(0).getType());
+        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getPackageExtensions().get(1).getType());
+        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getPackageExtensions().get(2).getType());
+        assertEquals(URI.create("eddi://ai.labs.output"), pkgConfig.getPackageExtensions().get(3).getType());
     }
 
     @Test
@@ -292,8 +300,8 @@ class McpSetupToolsTest {
         var packageCaptor = ArgumentCaptor.forClass(PackageConfiguration.class);
         verify(packageStore).createPackage(packageCaptor.capture());
 
-        // Without intro message, should have 2 extensions (no output, no parser)
-        assertEquals(2, packageCaptor.getValue().getPackageExtensions().size());
+        // Without intro message, should have 3 extensions: parser, behavior, langchain (no output)
+        assertEquals(3, packageCaptor.getValue().getPackageExtensions().size());
     }
 
     @Test
@@ -316,7 +324,7 @@ class McpSetupToolsTest {
     void createLangchainConfig_withTooling_setsToolFields() {
         var config = tools.createLangchainConfig(
                 "anthropic", "claude-sonnet-4-6", "key", "You are helpful",
-                true, "calculator,websearch", null, null);
+                true, "calculator,websearch", null, null, false, false);
 
         var task = config.tasks().get(0);
         assertTrue(task.getEnableBuiltInTools());
@@ -327,7 +335,7 @@ class McpSetupToolsTest {
     void createLangchainConfig_ollama_usesModelParam() {
         var config = tools.createLangchainConfig(
                 "ollama", "llama3.2:1b", null, "prompt",
-                false, null, "http://host.docker.internal:11434", null);
+                false, null, "http://host.docker.internal:11434", null, false, false);
 
         var task = config.tasks().get(0);
         var params = task.getParameters();
@@ -341,13 +349,40 @@ class McpSetupToolsTest {
     void createLangchainConfig_jlama_usesAuthToken() {
         var config = tools.createLangchainConfig(
                 "jlama", "tinyllama", "my-token", "prompt",
-                false, null, null, null);
+                false, null, null, null, false, false);
 
         var task = config.tasks().get(0);
         var params = task.getParameters();
         assertEquals("tinyllama", params.get("modelName"));
         assertEquals("my-token", params.get("authToken"));
         assertNull(params.get("apiKey"), "Jlama should use 'authToken' not 'apiKey'");
+    }
+
+    @Test
+    void createLangchainConfig_withJsonFormat_setsPostResponse() {
+        String jsonPrompt = McpSetupTools.buildPromptResponseJson(true, true);
+        var config = tools.createLangchainConfig(
+                "openai", "gpt-4o", "key", "prompt",
+                false, null, null, jsonPrompt, true, true);
+
+        var task = config.tasks().get(0);
+        assertEquals("aiOutput", task.getResponseObjectName());
+        assertNotNull(task.getPostResponse(), "PostResponse should be set for JSON format");
+        assertNull(task.getPostResponse().getPropertyInstructions(),
+                "propertyInstructions not needed — aiOutput fields accessed directly in templates");
+        assertNotNull(task.getPostResponse().getOutputBuildInstructions());
+        assertNotNull(task.getPostResponse().getQrBuildInstructions());
+    }
+
+    @Test
+    void createLangchainConfig_withoutJsonFormat_noPostResponse() {
+        var config = tools.createLangchainConfig(
+                "anthropic", "claude-sonnet-4-6", "key", "prompt",
+                false, null, null, null, false, false);
+
+        var task = config.tasks().get(0);
+        assertNull(task.getResponseObjectName());
+        assertNull(task.getPostResponse());
     }
 
     // --- Quick Replies & Sentiment Analysis tests ---
@@ -368,18 +403,22 @@ class McpSetupToolsTest {
 
         var lcCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
         verify(langchainStore).createLangChain(lcCaptor.capture());
-        var params = lcCaptor.getValue().tasks().get(0).getParameters();
+        var task = lcCaptor.getValue().tasks().get(0);
+        var params = task.getParameters();
 
         assertTrue(params.get("systemMessage").contains("quickReplies"),
                 "System message should contain quickReplies format");
         assertTrue(params.get("systemMessage").contains("htmlResponseText"),
                 "System message should contain htmlResponseText");
-        assertFalse(params.get("systemMessage").contains("sentimentScore"),
-                "System message should NOT contain sentiment fields");
         assertEquals("true", params.get("convertToObject"),
                 "convertToObject should be true for JSON format");
         assertEquals("json", params.get("responseFormat"),
                 "OpenAI should have responseFormat=json");
+
+        // Verify postResponse is set with QR instructions
+        assertNotNull(task.getPostResponse());
+        assertNotNull(task.getPostResponse().getQrBuildInstructions());
+        assertEquals(1, task.getPostResponse().getQrBuildInstructions().size());
     }
 
     @Test
@@ -398,24 +437,23 @@ class McpSetupToolsTest {
 
         var lcCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
         verify(langchainStore).createLangChain(lcCaptor.capture());
-        var params = lcCaptor.getValue().tasks().get(0).getParameters();
+        var task = lcCaptor.getValue().tasks().get(0);
+        var params = task.getParameters();
 
         assertTrue(params.get("systemMessage").contains("\"sentiment\":"),
                 "System message should contain nested sentiment object");
         assertTrue(params.get("systemMessage").contains("\"score\":"),
                 "System message should contain score field");
-        assertTrue(params.get("systemMessage").contains("\"emotions\":"),
-                "System message should contain emotions field");
-        assertTrue(params.get("systemMessage").contains("\"confidence\":"),
-                "System message should contain confidence field");
-        assertTrue(params.get("systemMessage").contains("\"topicTags\":"),
-                "System message should contain topicTags field");
         assertTrue(params.get("systemMessage").contains("htmlResponseText"),
                 "System message should contain htmlResponseText");
         assertFalse(params.get("systemMessage").contains("quickReplies"),
                 "System message should NOT contain quickReplies");
         assertEquals("json", params.get("responseFormat"),
                 "Gemini should have responseFormat=json");
+
+        // PostResponse should NOT have QR instructions (only sentiment, no QR)
+        assertNotNull(task.getPostResponse());
+        assertNull(task.getPostResponse().getQrBuildInstructions());
     }
 
     @Test
@@ -434,16 +472,19 @@ class McpSetupToolsTest {
 
         var lcCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
         verify(langchainStore).createLangChain(lcCaptor.capture());
-        var params = lcCaptor.getValue().tasks().get(0).getParameters();
+        var task = lcCaptor.getValue().tasks().get(0);
+        var params = task.getParameters();
 
         assertTrue(params.get("systemMessage").contains("quickReplies"));
         assertTrue(params.get("systemMessage").contains("\"sentiment\":"));
-        assertTrue(params.get("systemMessage").contains("\"score\":"));
-        assertTrue(params.get("systemMessage").contains("\"confidence\":"));
-        assertTrue(params.get("systemMessage").contains("\"topicTags\":"));
         assertTrue(params.get("systemMessage").contains("htmlResponseText"));
         assertEquals("true", params.get("convertToObject"));
         assertEquals("json", params.get("responseFormat"));
+
+        // PostResponse should have both output and QR instructions
+        assertNotNull(task.getPostResponse());
+        assertNotNull(task.getPostResponse().getOutputBuildInstructions());
+        assertNotNull(task.getPostResponse().getQrBuildInstructions());
     }
 
     @Test
@@ -543,6 +584,33 @@ class McpSetupToolsTest {
         assertEquals(1, output.getOutputs().size());
     }
 
+    @Test
+    void buildPostResponse_withQuickReplies_hasQrInstructions() {
+        var postResponse = tools.buildPostResponse(true, false);
+
+        // No propertyInstructions — aiOutput is already a Map in templateDataObjects
+        assertNull(postResponse.getPropertyInstructions());
+
+        assertNotNull(postResponse.getOutputBuildInstructions());
+        assertEquals("text", postResponse.getOutputBuildInstructions().get(0).getOutputType());
+        assertTrue(postResponse.getOutputBuildInstructions().get(0).getOutputValue()
+                .contains("aiOutput.htmlResponseText"));
+
+        assertNotNull(postResponse.getQrBuildInstructions());
+        assertEquals(1, postResponse.getQrBuildInstructions().size());
+        assertEquals("aiOutput.quickReplies",
+                postResponse.getQrBuildInstructions().get(0).getPathToTargetArray());
+    }
+
+    @Test
+    void buildPostResponse_withoutQuickReplies_noQrInstructions() {
+        var postResponse = tools.buildPostResponse(false, true);
+
+        assertNull(postResponse.getPropertyInstructions());
+        assertNotNull(postResponse.getOutputBuildInstructions());
+        assertNull(postResponse.getQrBuildInstructions());
+    }
+
     // --- create_api_bot tests ---
 
     private static final String SIMPLE_SPEC = """
@@ -589,12 +657,13 @@ class McpSetupToolsTest {
         String result = tools.createApiBot(
                 "API Bot", "You are an API assistant", SIMPLE_SPEC,
                 "anthropic", "claude-sonnet-4-6", "sk-test",
-                null, "Bearer api-key", null, true, null);
+                null, "Bearer api-key", null, null, null, true, null);
 
         assertNotNull(result);
 
         // Verify httpcalls created (2 groups: users, orders)
         verify(httpCallsStore, times(2)).createHttpCalls(any());
+        verify(parserStore).createParser(any());
         verify(behaviorStore).createBehaviorRuleSet(any());
         verify(langchainStore).createLangChain(any());
         verify(packageStore).createPackage(any());
@@ -614,7 +683,7 @@ class McpSetupToolsTest {
     @Test
     void createApiBot_missingSpec_returnsError() {
         String result = tools.createApiBot("Bot", "prompt", null,
-                null, null, "key", null, null, null, null, null);
+                null, null, "key", null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("OpenAPI spec is required"));
     }
@@ -622,7 +691,7 @@ class McpSetupToolsTest {
     @Test
     void createApiBot_missingApiKey_returnsError() {
         String result = tools.createApiBot("Bot", "prompt", SIMPLE_SPEC,
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("API key is required"));
     }
@@ -642,17 +711,18 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
 
         tools.createApiBot("Bot", "prompt", SIMPLE_SPEC,
-                null, null, "key", null, null, null, false, null);
+                null, null, "key", null, null, null, null, null, false, null);
 
         var packageCaptor = ArgumentCaptor.forClass(PackageConfiguration.class);
         verify(packageStore).createPackage(packageCaptor.capture());
 
         var pkgConfig = packageCaptor.getValue();
-        // Should have 4 extensions: behavior + 2 httpcalls groups + langchain (no parser for LLM-powered bots)
-        assertEquals(4, pkgConfig.getPackageExtensions().size());
-        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getPackageExtensions().get(0).getType());
-        assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getPackageExtensions().get(1).getType());
+        // Should have 5 extensions: parser + behavior + 2 httpcalls groups + langchain
+        assertEquals(5, pkgConfig.getPackageExtensions().size());
+        assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getPackageExtensions().get(0).getType());
+        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getPackageExtensions().get(1).getType());
         assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getPackageExtensions().get(2).getType());
-        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getPackageExtensions().get(3).getType());
+        assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getPackageExtensions().get(3).getType());
+        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getPackageExtensions().get(4).getType());
     }
 }

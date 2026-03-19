@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import java.util.LinkedHashMap;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,9 +48,10 @@ class McpConversationToolsTest {
         botAdmin = mock(IRestBotAdministration.class);
         botStore = mock(IRestBotStore.class);
         jsonSerialization = mock(IJsonSerialization.class);
+        var restInterfaceFactory = mock(IRestInterfaceFactory.class);
         // Default: lenient serialize returns empty JSON
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        tools = new McpConversationTools(conversationService, botAdmin, botStore, jsonSerialization);
+        tools = new McpConversationTools(conversationService, botAdmin, botStore, restInterfaceFactory, jsonSerialization);
     }
 
     // --- listBots ---

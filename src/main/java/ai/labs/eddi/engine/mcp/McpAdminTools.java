@@ -1,15 +1,21 @@
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.behavior.IRestBehaviorStore;
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.configs.http.IRestHttpCallsStore;
+import ai.labs.eddi.configs.langchain.IRestLangChainStore;
+import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
+import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.configs.patch.PatchInstruction;
+import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
+import ai.labs.eddi.configs.regulardictionary.IRestRegularDictionaryStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
-import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -80,14 +86,21 @@ public class McpAdminTools {
                     if (body != null && body.containsKey("status")) {
                         String deployStatus = body.get("status").toString();
                         result.put("deploymentStatus", deployStatus);
-                        result.put("deployed", "READY".equals(deployStatus));
+                        boolean ready = "READY".equals(deployStatus);
+                        result.put("deployed", ready);
+                        if (!ready && !"IN_PROGRESS".equals(deployStatus)) {
+                            result.put("action", "deploy_failed");
+                            result.put("error", "Deployment status is " + deployStatus +
+                                    ". Check bot configuration, LLM provider credentials, and model availability.");
+                            return jsonSerialization.serialize(result);
+                        }
                     }
                 } catch (Exception parseError) {
                     result.put("deployed", false);
                     result.put("parseWarning", "Could not read deployment status from response");
                 }
             } else if (httpStatus == 202) {
-                result.put("deployed", "pending");
+                result.put("deployed", false);
                 result.put("deploymentStatus", "IN_PROGRESS");
             }
 
@@ -179,6 +192,7 @@ public class McpAdminTools {
             @ToolArg(description = "Comma-separated list of package URIs to include (optional, " +
                     "format: eddi://ai.labs.package/packagestore/packages/ID?version=1)")
             String packageUris) {
+        if (name == null || name.isBlank()) return errorJson("Bot name is required");
         try {
             var botConfig = new BotConfiguration();
             if (packageUris != null && !packageUris.isBlank()) {
@@ -252,6 +266,129 @@ public class McpAdminTools {
         }
     }
 
+    @Tool(name = "update_bot", description = "Update a bot's name and/or description, and optionally redeploy. " +
+            "For structural changes (adding/removing packages, modifying resources), use the " +
+            "individual resource tools (read_package, read_resource) and the REST API directly.")
+    public String updateBot(
+            @ToolArg(description = "Bot ID (required)") String botId,
+            @ToolArg(description = "Version number (required)") Integer version,
+            @ToolArg(description = "New bot name (optional)") String name,
+            @ToolArg(description = "New bot description (optional)") String description,
+            @ToolArg(description = "Redeploy the bot after update? (default: false)") Boolean redeploy,
+            @ToolArg(description = "Environment for redeployment: 'unrestricted' (default), 'restricted', or 'test'")
+            String environment) {
+        try {
+            if (botId == null || botId.isBlank()) return errorJson("botId is required");
+            int ver = version != null ? version : 1;
+
+            // Update descriptor (name/description) via REST
+            if (name != null || description != null) {
+                var descriptor = new DocumentDescriptor();
+                if (name != null) descriptor.setName(name);
+                if (description != null) descriptor.setDescription(description);
+
+                var patch = new PatchInstruction<DocumentDescriptor>();
+                patch.setOperation(PatchInstruction.PatchOperation.SET);
+                patch.setDocument(descriptor);
+                getRestStore(IRestDocumentDescriptorStore.class).patchDescriptor(botId, ver, patch);
+            }
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("botId", botId);
+            result.put("version", ver);
+            result.put("updated", true);
+
+            // Redeploy if requested
+            if (Boolean.TRUE.equals(redeploy)) {
+                var env = parseEnvironment(environment);
+                try {
+                    Response response = botAdmin.deployBot(env, botId, ver, true, true);
+                    result.put("redeployed", response.getStatus() == 200);
+                    result.put("environment", env.name());
+                } catch (Exception deployError) {
+                    result.put("redeployed", false);
+                    result.put("deployError", "Redeployment failed: " + deployError.getMessage());
+                }
+            }
+
+            return resultJson("updated", result);
+        } catch (Exception e) {
+            LOGGER.error("MCP update_bot failed for bot " + botId, e);
+            return errorJson("Failed to update bot: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "read_package", description = "Read a package's full pipeline configuration. " +
+            "Returns the list of package extensions (parser, behavior, langchain, httpcalls, output, etc.) " +
+            "with their types and resource URIs. Use this to understand what's inside a bot's pipeline.")
+    public String readPackage(
+            @ToolArg(description = "Package ID (required)") String packageId,
+            @ToolArg(description = "Version number (default: 1)") Integer version) {
+        if (packageId == null || packageId.isBlank()) return errorJson("packageId is required");
+        try {
+            int ver = version != null ? version : 1;
+            PackageConfiguration config = getRestStore(IRestPackageStore.class).readPackage(packageId, ver);
+            if (config == null) {
+                return errorJson("Package not found: " + packageId + " version " + ver);
+            }
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("packageId", packageId);
+            result.put("version", ver);
+            result.put("extensionCount", config.getPackageExtensions().size());
+            result.put("configuration", config);
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.error("MCP read_package failed for package " + packageId, e);
+            return errorJson("Failed to read package: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "read_resource", description = "Read any EDDI resource configuration by type and ID. " +
+            "Supported types: 'behavior', 'langchain', 'httpcalls', 'output', " +
+            "'propertysetter', 'dictionaries'. Returns the full configuration JSON.")
+    public String readResource(
+            @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'output', " +
+                    "'propertysetter', or 'dictionaries' (required)") String resourceType,
+            @ToolArg(description = "Resource ID (required)") String resourceId,
+            @ToolArg(description = "Version number (default: 1)") Integer version) {
+        if (resourceType == null || resourceType.isBlank()) return errorJson("resourceType is required");
+        if (resourceId == null || resourceId.isBlank()) return errorJson("resourceId is required");
+        try {
+            int ver = version != null ? version : 1;
+            Object config = readResourceByType(resourceType.trim().toLowerCase(), resourceId, ver);
+            if (config == null) {
+                return errorJson("Resource not found: " + resourceType + "/" + resourceId + " version " + ver);
+            }
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("resourceType", resourceType);
+            result.put("resourceId", resourceId);
+            result.put("version", ver);
+            result.put("configuration", config);
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.error("MCP read_resource failed for " + resourceType + "/" + resourceId, e);
+            return errorJson("Failed to read resource: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Dispatch resource read to the correct REST store based on type.
+     */
+    private Object readResourceByType(String type, String id, int version) {
+        return switch (type) {
+            case "behavior" -> getRestStore(IRestBehaviorStore.class).readBehaviorRuleSet(id, version);
+            case "langchain" -> getRestStore(IRestLangChainStore.class).readLangChain(id, version);
+            case "httpcalls" -> getRestStore(IRestHttpCallsStore.class).readHttpCalls(id, version);
+            case "output" -> getRestStore(IRestOutputStore.class).readOutputSet(id, version, "", "", 0, 0);
+            case "propertysetter" -> getRestStore(IRestPropertySetterStore.class).readPropertySetter(id, version);
+            case "dictionaries" -> getRestStore(IRestRegularDictionaryStore.class)
+                    .readRegularDictionary(id, version, "", "", 0, 0);
+            default -> throw new IllegalArgumentException("Unknown resource type: " + type +
+                    ". Supported: behavior, langchain, httpcalls, output, propertysetter, dictionaries");
+        };
+    }
 
     private String resultJson(String action, Map<String, Object> data) {
         try {
@@ -263,11 +400,10 @@ public class McpAdminTools {
         }
     }
 
+    /**
+     * Get a REST interface proxy. Delegates to McpToolUtils.getRestStore().
+     */
     private <T> T getRestStore(Class<T> clazz) {
-        try {
-            return restInterfaceFactory.get(clazz);
-        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-            throw new RuntimeException("Failed to get REST proxy for " + clazz.getSimpleName(), e);
-        }
+        return McpToolUtils.getRestStore(restInterfaceFactory, clazz);
     }
 }

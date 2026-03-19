@@ -1,10 +1,16 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.behavior.IRestBehaviorStore;
+import ai.labs.eddi.configs.parser.IRestParserStore;
+import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
 import ai.labs.eddi.configs.behavior.model.BehaviorGroupConfiguration;
 import ai.labs.eddi.configs.behavior.model.BehaviorRuleConditionConfiguration;
 import ai.labs.eddi.configs.behavior.model.BehaviorRuleConfiguration;
+import ai.labs.eddi.configs.http.model.OutputBuildingInstruction;
+import ai.labs.eddi.configs.http.model.PostResponse;
+import ai.labs.eddi.configs.http.model.QuickRepliesBuildingInstruction;
+
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
@@ -20,7 +26,6 @@ import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
-import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -69,9 +74,9 @@ public class McpSetupTools {
             @ToolArg(description = "System prompt / role for the LLM (required). " +
                     "Describes the bot's personality and purpose.") String systemPrompt,
             @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', 'gemini', " +
-                    "'gemini-vertex', 'huggingface', 'ollama', or 'jlama'") String model,
+                    "'gemini-vertex', 'huggingface', 'ollama', or 'jlama'") String provider,
             @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default), 'gpt-5.4', " +
-                    "'gemini-3.1-pro-preview', 'deepseek-chat', 'llama3.2:1b' (ollama)") String modelName,
+                    "'gemini-3.1-pro-preview', 'deepseek-chat', 'llama3.2:1b' (ollama)") String model,
             @ToolArg(description = "API key for the LLM provider. Required for cloud providers " +
                     "(anthropic, openai, gemini). Optional/unused for local LLMs (ollama, jlama). " +
                     "Can be a vault reference like '${vault:openai-key}'.") String apiKey,
@@ -99,20 +104,29 @@ public class McpSetupTools {
                 return errorJson("System prompt is required");
             }
             // API key required for cloud LLM providers, optional for local ones
-            boolean isLocalLLM = isLocalLlmProvider(model);
+            boolean isLocalLLM = isLocalLlmProvider(provider);
             if (!isLocalLLM && (apiKey == null || apiKey.isBlank())) {
                 return errorJson("API key is required for cloud LLM providers (anthropic, openai, gemini)");
             }
 
-            var params = resolveParams(model, modelName, deploy, environment);
+            var params = resolveParams(provider, model, deploy, environment);
             boolean toolsEnabled = enableBuiltInTools != null && enableBuiltInTools;
             boolean quickReplies = enableQuickReplies != null && enableQuickReplies;
             boolean sentiment = enableSentimentAnalysis != null && enableSentimentAnalysis;
             String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
 
-            var createdResources = new LinkedHashMap<String, String>(); // track for result
+            var createdResources = new LinkedHashMap<String, Object>(); // track for result
 
-            // --- Step 1: Create Behavior Rules ---
+            // --- Step 1: Create Parser (minimal NLU for expression generation) ---
+            var parserConfig = createParserConfig();
+            Response parserResponse = getRestStore(IRestParserStore.class).createParser(parserConfig);
+            String parserLocation = parserResponse.getHeaderString("Location");
+            String parserId = extractIdFromLocation(parserLocation);
+            int parserVersion = extractVersionFromLocation(parserLocation);
+            createdResources.put("parserLocation", parserLocation);
+            patchDescriptor(parserId, parserVersion, name);
+
+            // --- Step 2: Create Behavior Rules ---
             var behaviorConfig = createBehaviorConfig();
             Response behaviorResponse = getRestStore(IRestBehaviorStore.class).createBehaviorRuleSet(behaviorConfig);
             String behaviorLocation = behaviorResponse.getHeaderString("Location");
@@ -121,10 +135,11 @@ public class McpSetupTools {
             createdResources.put("behaviorLocation", behaviorLocation);
             patchDescriptor(behaviorId, behaviorVersion, name);
 
-            // --- Step 2: Create LangChain Configuration ---
+            // --- Step 3: Create LangChain Configuration ---
             var langchainConfig = createLangchainConfig(
-                    params.modelType, params.modelId, apiKey, systemPrompt,
-                    toolsEnabled, builtInToolsWhitelist, baseUrl, promptResponseJson);
+                    params.providerType, params.modelId, apiKey, systemPrompt,
+                    toolsEnabled, builtInToolsWhitelist, baseUrl, promptResponseJson,
+                    quickReplies, sentiment);
             Response langchainResponse = getRestStore(IRestLangChainStore.class).createLangChain(langchainConfig);
             String langchainLocation = langchainResponse.getHeaderString("Location");
             String langchainId = extractIdFromLocation(langchainLocation);
@@ -132,7 +147,7 @@ public class McpSetupTools {
             createdResources.put("langchainLocation", langchainLocation);
             patchDescriptor(langchainId, langchainVersion, name);
 
-            // --- Step 3: Create Output Set (if intro message provided) ---
+            // --- Step 4: Create Output Set (if intro message provided) ---
             String outputLocation = null;
             if (introMessage != null && !introMessage.isBlank()) {
                 var outputConfig = createOutputConfig(introMessage);
@@ -144,8 +159,8 @@ public class McpSetupTools {
                 patchDescriptor(outputId, outputVersion, name);
             }
 
-            // --- Step 4: Create Package ---
-            var packageConfig = createPackageConfig(behaviorLocation, null, langchainLocation, outputLocation);
+            // --- Step 5: Create Package ---
+            var packageConfig = createPackageConfig(parserLocation, behaviorLocation, null, langchainLocation, outputLocation);
             Response packageResponse = getRestStore(IRestPackageStore.class).createPackage(packageConfig);
             String packageLocation = packageResponse.getHeaderString("Location");
             String packageId = extractIdFromLocation(packageLocation);
@@ -153,7 +168,7 @@ public class McpSetupTools {
             createdResources.put("packageLocation", packageLocation);
             patchDescriptor(packageId, packageVersion, name);
 
-            // --- Step 5: Create Bot ---
+            // --- Step 6: Create Bot ---
             var botConfig = new BotConfiguration();
             botConfig.setPackages(List.of(URI.create(packageLocation)));
             Response botResponse = getRestStore(IRestBotStore.class).createBot(botConfig);
@@ -163,7 +178,7 @@ public class McpSetupTools {
             createdResources.put("botLocation", botLocation);
             patchDescriptor(botId, botVersion, name);
 
-            // --- Step 6: Deploy (synchronous wait for completion) ---
+            // --- Step 7: Deploy (synchronous wait for completion) ---
             if (params.shouldDeploy && botId != null) {
                 var deployResult = deployAndWait(params.env, botId, botVersion);
                 createdResources.putAll(deployResult);
@@ -173,7 +188,8 @@ public class McpSetupTools {
             result.put("action", "setup_complete");
             result.put("botId", botId != null ? botId : "unknown");
             result.put("botName", name);
-            result.put("model", params.modelType + "/" + params.modelId);
+            result.put("provider", params.providerType);
+            result.put("model", params.modelId);
             if (quickReplies || sentiment) {
                 result.put("responseFormat", "json");
                 if (quickReplies) result.put("quickRepliesEnabled", true);
@@ -191,8 +207,23 @@ public class McpSetupTools {
     // --- Config Builders ---
 
     /**
+     * Create a minimal parser config with basic built-in dictionaries.
+     * The parser produces NLU expressions from user input, which the
+     * inputmatcher(*) condition needs to evaluate.
+     */
+    ParserConfiguration createParserConfig() {
+        var config = new ParserConfiguration();
+        config.setExtensions(Map.of(
+                "dictionaries", List.of(),
+                "corrections", List.of()
+        ));
+        return config;
+    }
+
+    /**
      * Create behavior rules: catch-all inputmatcher(*) → send_message action.
-     * This is the standard Bot Father pattern.
+     * The parser must be in the pipeline before behavior rules so that
+     * expressions are available for matching.
      */
     BehaviorConfiguration createBehaviorConfig() {
         var condition = new BehaviorRuleConditionConfiguration();
@@ -222,7 +253,8 @@ public class McpSetupTools {
     LangChainConfiguration createLangchainConfig(String modelType, String modelId,
             String apiKey, String systemPrompt,
             boolean enableTooling, String toolsWhitelist,
-            String baseUrl, String promptResponseJson) {
+            String baseUrl, String promptResponseJson,
+            boolean quickReplies, boolean sentiment) {
         var task = new LangChainConfiguration.Task();
         task.setActions(List.of("send_message"));
         task.setId(modelType);
@@ -237,15 +269,18 @@ public class McpSetupTools {
 
         var params = new LinkedHashMap<String, String>();
         params.put("systemMessage", effectiveSystemPrompt);
-        params.put("addToOutput", "true");
-        params.put("timeout", "60");
+        // When JSON format is active, postResponse extracts the clean text — don't also output raw JSON
+        // The raw LLM response is still stored in memory as langchain:{type}:{id} for debugging
+        params.put("addToOutput", promptResponseJson == null ? "true" : "false");
+        params.put("timeout", "60000");
         params.put("temperature", "0.3");
         params.put("logRequests", "true");
         params.put("logResponses", "true");
 
-        // When JSON response format is active, parse the response as a JSON object
+        // When JSON response format is active, store as named object for postResponse extraction
         if (promptResponseJson != null) {
             params.put("convertToObject", "true");
+            task.setResponseObjectName("aiOutput");
         }
 
         // Provider-specific parameter mapping
@@ -294,7 +329,49 @@ public class McpSetupTools {
         }
 
         task.setConversationHistoryLimit(10);
+
+        // Build postResponse to extract text output and quick replies from LLM JSON
+        if (promptResponseJson != null) {
+            task.setPostResponse(buildPostResponse(quickReplies, sentiment));
+        }
+
         return new LangChainConfiguration(List.of(task));
+    }
+
+    /**
+     * Build the postResponse that extracts structured data from the LLM JSON output:
+     * 1. propertyInstructions: parse aiOutput JSON string into aiOutputObject
+     * 2. outputBuildInstructions: extract htmlResponseText as text output to chat
+     * 3. qrBuildInstructions: iterate quickReplies array into QR buttons
+     * Sentiment stays internal (in memory) — not shown to user.
+     */
+    PostResponse buildPostResponse(boolean quickReplies, boolean sentiment) {
+        var postResponse = new PostResponse();
+
+        // The langchain task with convertToObject=true already puts the deserialized
+        // JSON response as a Map under templateDataObjects["aiOutput"] (the responseObjectName).
+        // We can reference aiOutput fields directly in templates — no propertyInstructions needed.
+
+        // Step 1: Extract htmlResponseText as the text output shown to the user
+        var outputInstruction = new OutputBuildingInstruction();
+        outputInstruction.setIterationObjectName("obj");
+        outputInstruction.setTemplateFilterExpression("");
+        outputInstruction.setOutputType("text");
+        outputInstruction.setOutputValue("[(${aiOutput.htmlResponseText})]");
+        postResponse.setOutputBuildInstructions(List.of(outputInstruction));
+
+        // Step 2: Build quick reply buttons from the quickReplies array
+        if (quickReplies) {
+            var qrInstruction = new QuickRepliesBuildingInstruction();
+            qrInstruction.setPathToTargetArray("aiOutput.quickReplies");
+            qrInstruction.setIterationObjectName("quickReply");
+            qrInstruction.setTemplateFilterExpression("");
+            qrInstruction.setQuickReplyValue("[(${quickReply})]");
+            qrInstruction.setQuickReplyExpressions("trigger(quick_reply)");
+            postResponse.setQrBuildInstructions(List.of(qrInstruction));
+        }
+
+        return postResponse;
     }
 
     /**
@@ -317,18 +394,24 @@ public class McpSetupTools {
     }
 
     /**
-     * Create package with behavior + [httpcalls...] + langchain [+ output]
-     * pipeline. Parser is NOT included — LLM-powered bots don't need NLU parsing.
+     * Create package with parser + behavior + [httpcalls...] + langchain [+ output] pipeline.
+     * The parser MUST be first in the pipeline — it produces NLU expressions
+     * that the behavior rules' inputmatcher condition needs.
      */
-    PackageConfiguration createPackageConfig(String behaviorLocation,
+    PackageConfiguration createPackageConfig(String parserLocation,
+            String behaviorLocation,
             List<String> httpCallsLocations,
             String langchainLocation,
             String outputLocation) {
         var extensions = new ArrayList<PackageConfiguration.PackageExtension>();
 
-        // Note: Parser extension is NOT added here. LLM-powered bots (created by setup_bot)
-        // don't need the NLU parser — the LangChain task processes user input directly.
-        // Adding a parser without dictionary config causes deployment failures.
+        // Parser (must be first — produces expressions for behavior rules)
+        if (parserLocation != null) {
+            var parser = new PackageConfiguration.PackageExtension();
+            parser.setType(URI.create("eddi://ai.labs.parser"));
+            parser.setConfig(Map.of("uri", parserLocation));
+            extensions.add(parser);
+        }
 
         // Behavior rules
         var behavior = new PackageConfiguration.PackageExtension();
@@ -375,14 +458,18 @@ public class McpSetupTools {
             @ToolArg(description = "System prompt / role for the LLM (required). " +
                     "Should describe the API and how the bot should use it.") String systemPrompt,
             @ToolArg(description = "OpenAPI 3.0/3.1 specification as JSON/YAML string or URL (required)") String openApiSpec,
-            @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', or 'gemini'") String model,
-            @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default), 'gpt-5.4', 'gemini-3.1-pro-preview', 'deepseek-chat'") String modelName,
+            @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', 'gemini', " +
+                    "'gemini-vertex', 'huggingface', 'ollama', or 'jlama'") String provider,
+            @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default), 'gpt-5.4', " +
+                    "'gemini-3.1-pro-preview', 'deepseek-chat', 'llama3.2:1b' (ollama)") String model,
             @ToolArg(description = "API key for the LLM provider (required). " +
                     "Can be a vault reference like '${vault:openai-key}'") String apiKey,
             @ToolArg(description = "Override the API base URL from the spec (optional)") String apiBaseUrl,
             @ToolArg(description = "API authorization header value or vault reference (optional). " +
                     "E.g. 'Bearer sk-...' or '${vault:api-key}'") String apiAuth,
             @ToolArg(description = "Comma-separated endpoint filter, e.g. 'GET /users,POST /orders' (optional, default: all)") String endpoints,
+            @ToolArg(description = "Enable quick reply buttons in bot responses? (default: false).") Boolean enableQuickReplies,
+            @ToolArg(description = "Enable sentiment analysis in bot responses? (default: false).") Boolean enableSentimentAnalysis,
             @ToolArg(description = "Automatically deploy the bot after creation? (default: true)") Boolean deploy,
             @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
         try {
@@ -400,7 +487,7 @@ public class McpSetupTools {
                 return errorJson("API key is required");
             }
 
-            var params = resolveParams(model, modelName, deploy, environment);
+            var params = resolveParams(provider, model, deploy, environment);
 
             var createdResources = new LinkedHashMap<String, Object>();
 
@@ -431,7 +518,15 @@ public class McpSetupTools {
             createdResources.put("httpCallsGroups", groupNames);
             createdResources.put("httpCallsLocations", httpCallsLocations);
 
-            // --- Step 3: Create Behavior Rules ---
+            // --- Step 3: Create Parser ---
+            var parserConfig = createParserConfig();
+            Response parserResponse = getRestStore(IRestParserStore.class).createParser(parserConfig);
+            String parserLocation = parserResponse.getHeaderString("Location");
+            createdResources.put("parserLocation", parserLocation);
+            patchDescriptor(extractIdFromLocation(parserLocation),
+                    extractVersionFromLocation(parserLocation), name);
+
+            // --- Step 4: Create Behavior Rules ---
             var behaviorConfig = createBehaviorConfig();
             Response behaviorResponse = getRestStore(IRestBehaviorStore.class).createBehaviorRuleSet(behaviorConfig);
             String behaviorLocation = behaviorResponse.getHeaderString("Location");
@@ -439,27 +534,31 @@ public class McpSetupTools {
             patchDescriptor(extractIdFromLocation(behaviorLocation),
                     extractVersionFromLocation(behaviorLocation), name);
 
-            // --- Step 4: Create LangChain Configuration ---
+            // --- Step 5: Create LangChain Configuration ---
             // Enrich system prompt with API summary
             String enrichedPrompt = systemPrompt + "\n\n" + buildResult.apiSummary();
+            boolean quickReplies = enableQuickReplies != null && enableQuickReplies;
+            boolean sentiment = enableSentimentAnalysis != null && enableSentimentAnalysis;
+            String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
             var langchainConfig = createLangchainConfig(
-                    params.modelType, params.modelId, apiKey, enrichedPrompt, false, null, null, null);
+                    params.providerType, params.modelId, apiKey, enrichedPrompt, false, null, null, promptResponseJson,
+                    quickReplies, sentiment);
             Response langchainResponse = getRestStore(IRestLangChainStore.class).createLangChain(langchainConfig);
             String langchainLocation = langchainResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);
             patchDescriptor(extractIdFromLocation(langchainLocation),
                     extractVersionFromLocation(langchainLocation), name);
 
-            // --- Step 5: Create Package (with httpcalls in pipeline) ---
+            // --- Step 6: Create Package (with httpcalls in pipeline) ---
             var packageConfig = createPackageConfig(
-                    behaviorLocation, httpCallsLocations, langchainLocation, null);
+                    parserLocation, behaviorLocation, httpCallsLocations, langchainLocation, null);
             Response packageResponse = getRestStore(IRestPackageStore.class).createPackage(packageConfig);
             String packageLocation = packageResponse.getHeaderString("Location");
             createdResources.put("packageLocation", packageLocation);
             patchDescriptor(extractIdFromLocation(packageLocation),
                     extractVersionFromLocation(packageLocation), name);
 
-            // --- Step 6: Create Bot ---
+            // --- Step 7: Create Bot ---
             var botConfig = new BotConfiguration();
             botConfig.setPackages(List.of(URI.create(packageLocation)));
             Response botResponse = getRestStore(IRestBotStore.class).createBot(botConfig);
@@ -469,7 +568,7 @@ public class McpSetupTools {
             createdResources.put("botLocation", botLocation);
             patchDescriptor(botId, botVersion, name);
 
-            // --- Step 7: Deploy (synchronous wait for completion) ---
+            // --- Step 8: Deploy (synchronous wait for completion) ---
             if (params.shouldDeploy && botId != null) {
                 var deployResult = deployAndWait(params.env, botId, botVersion);
                 createdResources.putAll(deployResult);
@@ -479,7 +578,8 @@ public class McpSetupTools {
             result.put("action", "api_bot_created");
             result.put("botId", botId != null ? botId : "unknown");
             result.put("botName", name);
-            result.put("model", params.modelType + "/" + params.modelId);
+            result.put("provider", params.providerType);
+            result.put("model", params.modelId);
             result.put("endpointCount", buildResult.endpointCount());
             result.put("groups", groupNames);
             result.put("resources", createdResources);
@@ -494,15 +594,15 @@ public class McpSetupTools {
     /**
      * Resolve common parameters with defaults.
      */
-    private record ResolvedParams(String modelType, String modelId,
+    private record ResolvedParams(String providerType, String modelId,
             boolean shouldDeploy, Deployment.Environment env) {
     }
 
-    private ResolvedParams resolveParams(String model, String modelName,
+    private ResolvedParams resolveParams(String provider, String model,
             Boolean deploy, String environment) {
         return new ResolvedParams(
-                model != null && !model.isBlank() ? model.trim().toLowerCase() : "anthropic",
-                modelName != null && !modelName.isBlank() ? modelName.trim() : "claude-sonnet-4-6",
+                provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : "anthropic",
+                model != null && !model.isBlank() ? model.trim() : "claude-sonnet-4-6",
                 deploy == null || deploy,
                 parseEnvironment(environment));
     }
@@ -511,8 +611,8 @@ public class McpSetupTools {
      * Deploy a bot using the REST endpoint with waitForCompletion=true.
      * The endpoint waits up to 30s for deployment to complete and returns the actual status.
      */
-    private Map<String, String> deployAndWait(Deployment.Environment env, String botId, int botVersion) {
-        var result = new LinkedHashMap<String, String>();
+    private Map<String, Object> deployAndWait(Deployment.Environment env, String botId, int botVersion) {
+        var result = new LinkedHashMap<String, Object>();
         result.put("environment", env.name());
         try {
             Response response = botAdmin.deployBot(env, botId, botVersion, true, true);
@@ -525,7 +625,7 @@ public class McpSetupTools {
                     var body = (java.util.Map<String, Object>) response.getEntity();
                     String deployStatus = body != null && body.containsKey("status")
                             ? body.get("status").toString() : "UNKNOWN";
-                    result.put("deployed", "READY".equals(deployStatus) ? "true" : "false");
+                    result.put("deployed", "READY".equals(deployStatus));
                     result.put("deploymentStatus", deployStatus);
                     if (body != null && body.containsKey("error")) {
                         result.put("deployError", body.get("error").toString());
@@ -540,22 +640,22 @@ public class McpSetupTools {
                     }
                 } catch (Exception parseError) {
                     LOGGER.debug("Could not parse deploy response", parseError);
-                    result.put("deployed", "false");
+                    result.put("deployed", false);
                     result.put("deploymentStatus", "UNKNOWN");
                     result.put("deployWarning", "Deploy returned 200 but could not parse status.");
                 }
             } else if (httpStatus == 202) {
                 // Async response (shouldn't happen with waitForCompletion=true, but handle it)
-                result.put("deployed", "false");
+                result.put("deployed", false);
                 result.put("deploymentStatus", "IN_PROGRESS");
                 result.put("deployWarning", "Deployment accepted but not yet complete.");
             } else {
-                result.put("deployed", "false");
+                result.put("deployed", false);
                 result.put("deployError", "Unexpected deploy response: HTTP " + httpStatus);
             }
         } catch (Exception deployError) {
             LOGGER.warn("MCP deploy failed for bot " + botId, deployError);
-            result.put("deployed", "false");
+            result.put("deployed", false);
             result.put("deployError", "Deployment failed. Check server logs for details.");
         }
         return result;
@@ -656,14 +756,9 @@ public class McpSetupTools {
 
     /**
      * Get a REST interface proxy via IRestInterfaceFactory.
-     * These proxies make HTTP calls that go through the full JAX-RS pipeline,
-     * including DocumentDescriptorFilter which auto-creates descriptors.
+     * Delegates to McpToolUtils.getRestStore().
      */
     private <T> T getRestStore(Class<T> clazz) {
-        try {
-            return restInterfaceFactory.get(clazz);
-        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-            throw new RuntimeException("Failed to get REST proxy for " + clazz.getSimpleName(), e);
-        }
+        return McpToolUtils.getRestStore(restInterfaceFactory, clazz);
     }
 }

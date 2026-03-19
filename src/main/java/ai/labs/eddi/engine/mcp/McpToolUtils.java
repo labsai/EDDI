@@ -1,6 +1,8 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 
 /**
  * Shared utility methods for MCP tool implementations.
@@ -11,6 +13,24 @@ final class McpToolUtils {
 
     private McpToolUtils() {
         // utility class
+    }
+
+    /**
+     * Get a REST interface proxy via IRestInterfaceFactory.
+     * These proxies make HTTP calls that go through the full JAX-RS pipeline,
+     * including DocumentDescriptorFilter which auto-creates descriptors.
+     *
+     * @param factory the REST interface factory
+     * @param clazz   the REST interface class to proxy
+     * @return the proxy instance
+     * @throws RuntimeException if the proxy cannot be created
+     */
+    static <T> T getRestStore(IRestInterfaceFactory factory, Class<T> clazz) {
+        try {
+            return factory.get(clazz);
+        } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+            throw new RuntimeException("Failed to get REST proxy for " + clazz.getSimpleName(), e);
+        }
     }
 
     /**

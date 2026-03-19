@@ -1,6 +1,7 @@
 package ai.labs.eddi.secrets.impl;
 
 import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.VaultStartupBanner;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
 import ai.labs.eddi.secrets.model.*;
 import jakarta.annotation.PostConstruct;
@@ -12,6 +13,7 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Optional;
 
 /**
  * Default ISecretProvider implementation using envelope encryption.
@@ -29,7 +31,7 @@ public class DatabaseSecretProvider implements ISecretProvider {
 
     private static final Logger LOGGER = Logger.getLogger(DatabaseSecretProvider.class);
 
-    private final String masterKeyConfig;
+    private final Optional<String> masterKeyConfig;
 
     private byte[] kek; // Key Encryption Key derived from master key
     private boolean available = false;
@@ -40,21 +42,20 @@ public class DatabaseSecretProvider implements ISecretProvider {
 
     @Inject
     public DatabaseSecretProvider(
-            @ConfigProperty(name = "eddi.vault.master-key", defaultValue = "") String masterKeyConfig) {
+            @ConfigProperty(name = "eddi.vault.master-key") Optional<String> masterKeyConfig) {
         this.masterKeyConfig = masterKeyConfig;
     }
 
     @PostConstruct
     void init() {
-        if (masterKeyConfig == null || masterKeyConfig.isBlank()) {
-            LOGGER.warn("EDDI_VAULT_MASTER_KEY not configured — Secrets Vault is DISABLED. " +
-                    "Plaintext values in configs will pass through unchanged.");
+        if (masterKeyConfig.isEmpty() || masterKeyConfig.get().isBlank()) {
+            VaultStartupBanner.printDisabled();
             return;
         }
 
-        this.kek = EnvelopeCrypto.deriveKeyFromString(masterKeyConfig);
+        this.kek = EnvelopeCrypto.deriveKeyFromString(masterKeyConfig.get());
         this.available = true;
-        LOGGER.info("Secrets Vault initialized — envelope encryption enabled.");
+        VaultStartupBanner.printEnabled();
     }
 
     @Override

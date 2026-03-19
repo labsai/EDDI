@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-18 (Phase 8a MCP improvements — cleaner responses, ollama/jlama, deploy verification)
+> **Last updated:** 2026-03-19 (Phase 8a MCP code review — fixes, resource tools, docs MCP resources)
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -548,10 +548,62 @@
 - `src/test/java/ai/labs/eddi/integration/CreateApiBotIT.java`
 - `docs/mcp-server.md`
 
+### Phase 8a (continued): MCP Code Review, Resource Tools, Docs MCP Resources ✅
+
+- [x] **Code review fixes**:
+  - Fixed `get_bot` N+1 query → direct `readDescriptor(id, ver)` call
+  - Fixed `deployBot` response → `deployed` consistently boolean (was `"pending"` string for 202)
+  - Fixed `ConversationState` import → moved to `engine.model`
+  - Fixed `McpToolFilter` missing imports (`ToolManager.ToolInfo`, `FilterContext`)
+  - Deduplicated `getRestStore()` → shared in `McpToolUtils` (3 classes now delegate)
+- [x] **Simplified `update_bot`** — now only updates name/description via `patchDescriptor()` + optional redeploy. Removed package add/remove business logic (wrong abstraction level).
+- [x] **New tools**: `read_package`, `read_resource` (thin REST delegates for inspecting bot internals)
+- [x] **`McpToolFilter`** whitelist updated: 18 → 20 tools
+- [x] **`McpDocResources.java`** — NEW: exposes docs as MCP resources (`eddi://docs/index`, `eddi://docs/{name}`)
+- [x] **`Dockerfile.jvm`** — COPY docs into container, `eddi.docs.path=/deployments/docs`
+- [x] **`mcp-server.md`** — rewritten: all 20 tools (snake_case), tool filtering, auth, sentiment monitoring, MCP resources sections
+- [x] 116 MCP tests pass (0 failures)
+
+**Key files (new):**
+
+- `src/main/java/ai/labs/eddi/engine/mcp/McpDocResources.java`
+
+**Key files (modified):**
+
+- `McpConversationTools.java` — N+1 fix, ConversationState import, removed unused import
+- `McpAdminTools.java` — simplified `update_bot`, added `read_package` + `read_resource`
+- `McpToolUtils.java` — shared `getRestStore()`
+- `McpSetupTools.java` — delegate `getRestStore()`, removed unused import
+- `McpToolFilter.java` — whitelist 18→20, added missing imports
+- `Dockerfile.jvm` — docs COPY + `eddi.docs.path`
+- `docs/mcp-server.md` — rewritten
+
 ### Phase 8: MCP + RAG Foundation
 
 - [x] ~~Phase 8a: MCP Servers~~ ✅
+- [ ] **Phase 8a.2: MCP Resource CRUD + Batch Cascade** (next — see implementation plan below)
 - [ ] Phase 8b: MCP Client + RAG Lifecycle Task + docs MCP (10 SP)
+
+### Phase 8a.2: MCP Resource CRUD + Batch Cascade (PLANNED)
+
+> **Implementation plan:** See Antigravity brain `implementation_plan.md`
+
+4 new MCP tools for full resource lifecycle management:
+
+| Tool | Description |
+|------|-------------|
+| `update_resource` | Update any resource config (behavior, langchain, etc.) → returns new version URI |
+| `create_resource` | Create a new resource → returns ID + URI |
+| `delete_resource` | Delete a resource (soft or permanent) |
+| `apply_bot_changes` | Batch-cascade multiple resource URI changes through package → bot in ONE pass, optional redeploy |
+
+**Key design**: `apply_bot_changes` reads each package, replaces ALL old→new URIs in-memory, saves ONCE per package, then saves bot ONCE. No N+1 version problem.
+
+**Existing REST endpoints used:**
+- `IRestXxxStore.updateXxx/createXxx/deleteXxx` — individual resource CRUD
+- `IRestPackageStore.readPackage/updatePackage` — package read/write for batch replace
+- `IRestBotStore.readBot/updateBot` — bot read/write for cascade
+- `updateResourceInPackage`, `updateResourceInBot` — NOT used (batch replaces in-memory instead)
 
 See `AGENTS.md` for the full roadmap (Phases 7–14b) and `docs/project-philosophy.md` for the 7 architectural pillars.
 

@@ -15,6 +15,34 @@ Each entry follows this format:
 
 ---
 
+## Phase 8a: MCP Code Review — Fixes, Resource Tools, Docs Resources (2026-03-19)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Comprehensive MCP code review identified and fixed 6 issues, added 2 new tools, simplified `update_bot`, created docs MCP resources, and rewrote documentation.
+
+**Fixes:**
+- `get_bot` N+1 query → direct `readDescriptor(id, ver)` (McpConversationTools)
+- `deployBot` response → `deployed` consistently boolean, not `"pending"` string (McpAdminTools)
+- `ConversationState` import → corrected to `engine.model` package
+- `McpToolFilter` missing `ToolManager.ToolInfo` + `FilterContext` imports
+- `getRestStore()` deduplicated → shared in `McpToolUtils`
+- `update_bot` simplified to name/description + redeploy only (removed package business logic)
+
+**New features:**
+- `read_package` tool — reads full pipeline config with extensions
+- `read_resource` tool — reads any resource config by type (6 types)
+- `McpDocResources.java` — exposes 40+ docs as MCP resources (`eddi://docs/{name}`)
+- `Dockerfile.jvm` — COPY docs into container + `eddi.docs.path` config
+
+**Decision:** `update_bot` was doing too much (package add/remove). Moved to thin REST delegation — resource management belongs in dedicated tools (`read_resource`, and the planned `update_resource` / `apply_bot_changes`).
+
+**Tests:** 116/116 MCP tests pass.
+
+---
+
 ## Phase 8a: MCP `setup_bot` — Quick Replies, Sentiment Analysis & JSON Mode (2026-03-18)
 
 ### Backend — Structured JSON LLM Output

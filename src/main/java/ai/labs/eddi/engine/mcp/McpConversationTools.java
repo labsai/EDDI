@@ -1,16 +1,23 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.bots.IRestBotStore;
+import ai.labs.eddi.configs.bots.model.BotConfiguration;
+import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IConversationService;
 import ai.labs.eddi.engine.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.smallrye.common.annotation.Blocking;
@@ -46,16 +53,19 @@ public class McpConversationTools {
     private final IConversationService conversationService;
     private final IRestBotAdministration botAdmin;
     private final IRestBotStore botStore;
+    private final IRestInterfaceFactory restInterfaceFactory;
     private final IJsonSerialization jsonSerialization;
 
     @Inject
     public McpConversationTools(IConversationService conversationService,
             IRestBotAdministration botAdmin,
             IRestBotStore botStore,
+            IRestInterfaceFactory restInterfaceFactory,
             IJsonSerialization jsonSerialization) {
         this.conversationService = conversationService;
         this.botAdmin = botAdmin;
         this.botStore = botStore;
+        this.restInterfaceFactory = restInterfaceFactory;
         this.jsonSerialization = jsonSerialization;
     }
 
@@ -220,6 +230,87 @@ public class McpConversationTools {
         }
     }
 
+    @Tool(name = "list_conversations", description = "List conversations for a specific bot. " +
+            "Returns conversation descriptors with IDs, creation time, and state. " +
+            "Useful for finding conversation IDs without knowing them beforehand.")
+    public String listConversations(
+            @ToolArg(description = "Bot ID (required)") String botId,
+            @ToolArg(description = "Bot version (default: latest)") Integer botVersion,
+            @ToolArg(description = "Filter by state: 'READY', 'IN_PROGRESS', 'ENDED', 'ERROR' (default: all)") String conversationState,
+            @ToolArg(description = "Maximum number of results (default: 20, max: 100)") Integer limit) {
+        if (botId == null || botId.isBlank()) return errorJson("botId is required");
+        try {
+            int limitInt = Math.min(limit != null ? limit : 20, 100);
+            int ver = botVersion != null ? botVersion : 0;
+
+            // Parse ConversationState enum if provided
+            ConversationState state = null;
+            if (conversationState != null && !conversationState.isBlank()) {
+                try {
+                    state = ConversationState.valueOf(conversationState.trim().toUpperCase());
+                } catch (IllegalArgumentException e) {
+                    return errorJson("Invalid conversationState: " + conversationState +
+                            ". Valid values: READY, IN_PROGRESS, ENDED, ERROR");
+                }
+            }
+
+            IRestConversationStore convStore;
+            try {
+                convStore = restInterfaceFactory.get(IRestConversationStore.class);
+            } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
+                return errorJson("Failed to get conversation store: " + e.getMessage());
+            }
+
+            List<ConversationDescriptor> descriptors = convStore.readConversationDescriptors(
+                    0, limitInt, null, null, botId, ver == 0 ? null : ver, state, null);
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("botId", botId);
+            result.put("count", descriptors.size());
+            result.put("conversations", descriptors);
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.error("MCP list_conversations failed for bot " + botId, e);
+            return errorJson("Failed to list conversations: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "get_bot", description = "Get a bot's full configuration including its packages, name, and description. " +
+            "Returns the BotConfiguration JSON with all package references.")
+    public String getBot(
+            @ToolArg(description = "Bot ID (required)") String botId,
+            @ToolArg(description = "Version number (default: latest)") Integer version) {
+        if (botId == null || botId.isBlank()) return errorJson("botId is required");
+        try {
+            int ver = version != null ? version : 1;
+            BotConfiguration config = botStore.readBot(botId, ver);
+            if (config == null) {
+                return errorJson("Bot not found: " + botId + " version " + ver);
+            }
+
+            // Read descriptor for name/description (direct by ID, not N+1)
+            var result = new LinkedHashMap<String, Object>();
+            result.put("botId", botId);
+            result.put("version", ver);
+            try {
+                DocumentDescriptor descriptor = McpToolUtils.getRestStore(
+                        restInterfaceFactory, IRestDocumentDescriptorStore.class)
+                        .readDescriptor(botId, ver);
+                if (descriptor != null) {
+                    result.put("name", descriptor.getName());
+                    result.put("description", descriptor.getDescription());
+                }
+            } catch (Exception e) {
+                LOGGER.debug("Could not read bot descriptor", e);
+            }
+            result.put("configuration", config);
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.error("MCP get_bot failed for bot " + botId, e);
+            return errorJson("Failed to get bot: " + e.getMessage());
+        }
+    }
+
     /**
      * Send a message to a bot synchronously and wait for the response.
      * Bridges the async callback pattern to a blocking call.
@@ -274,7 +365,10 @@ public class McpConversationTools {
                     }
                 }
                 if (!texts.isEmpty()) {
-                    result.put("botResponse", texts);
+                    result.put("botResponse", String.join(" ", texts));
+                    if (texts.size() > 1) {
+                        result.put("botResponseParts", texts);
+                    }
                 }
             }
 
