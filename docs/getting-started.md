@@ -23,9 +23,21 @@ Once running, you can:
 
 ## Installation Options
 
-You have two options to run **EDDI**: The most convenient way is to run **EDDI** with Docker. Alternatively, you can run **EDDI** from source by checking out the git repository and building the project with Maven.
+### Option 0 - One-Command Install (Recommended)
 
-## Option 1 - EDDI with Docker
+**Linux / macOS / WSL2:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/labsai/EDDI/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1 | iex
+```
+
+The wizard guides you through choosing a database (MongoDB or PostgreSQL), optional authentication (Keycloak), and monitoring (Grafana). After setup, Bot Father is deployed automatically to help you create your first AI bot.
+
+### Option 1 - EDDI with Docker (Manual)
 
 There are two ways to use `Docker` with **EDDI**, either with **`docker-compose`** or launch the container manually.
 

@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-20 (Phase 8b — MCP Client + Quarkus 3.32.4, 1045 tests pass)
+> **Last updated:** 2026-03-20 (One-Command Install, Phase 8b — MCP Client + Quarkus 3.32.4, 1045 tests pass)
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -654,6 +654,22 @@ Bots can now consume external MCP servers as tool providers. Upgraded Quarkus to
 - `pom.xml`
 
 See `AGENTS.md` for the full roadmap (Phases 7–14b) and `docs/project-philosophy.md` for the 7 architectural pillars.
+
+### One-Command Install & Onboarding Wizard ✅
+
+New users can set up EDDI with `curl ... | bash` (Linux/macOS/WSL) or `iwr ... | iex` (Windows). Interactive 3-step wizard.
+
+| File | Description |
+|------|-------------|
+| `install.sh` | Bash installer: platform-aware Docker install, DB/Auth/Monitoring wizard, `eddi` CLI wrapper, Bot Father import |
+| `install.ps1` | PowerShell installer: `winget` Docker Desktop auto-install, same wizard flow |
+| `docker-compose.postgres-only.yml` | PostgreSQL-only compose (no MongoDB) |
+| `docker-compose.auth.yml` | Keycloak overlay |
+| `docker-compose.monitoring.yml` | Grafana + Prometheus overlay (placeholder) |
+| `README.md` | Quick Start section |
+| `docs/getting-started.md` | Option 0 — one-command install |
+
+**Edge cases handled:** Idempotent re-runs, CTRL+C cleanup, piped stdin (`curl|bash`), disk space warning, input validation, macOS `wc -l` whitespace, Docker auto-install (Linux/Windows).
 
 ## Important Rules
 

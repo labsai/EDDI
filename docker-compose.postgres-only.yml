@@ -1,10 +1,13 @@
-version: '3.8'
+# EDDI with PostgreSQL (no MongoDB)
+# Used by: install.sh --db=postgres
+#
+# PostgreSQL serves as the sole database backend for all EDDI stores.
+# Activated via QUARKUS_PROFILE=postgres which switches IResourceStorageFactory
+# from MongoResourceStorageFactory to PostgresResourceStorageFactory.
 
 services:
   eddi:
-    image: labsai/eddi:latest
-    ports:
-      - "7070:7070"
+    image: labsai/eddi:6
     environment:
       QUARKUS_PROFILE: postgres
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/eddi
@@ -12,14 +15,18 @@ services:
       QUARKUS_DATASOURCE_PASSWORD: eddi
       EDDI_DATASTORE_TYPE: postgres
       EDDI_VAULT_MASTER_KEY: "local-dev-key-change-in-production"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "7070:7070"
+      - "7443:7443"
     depends_on:
       postgres:
         condition: service_healthy
 
   postgres:
     image: postgres:16-alpine
-    ports:
-      - "5432:5432"
+    restart: always
     environment:
       POSTGRES_DB: eddi
       POSTGRES_USER: eddi
@@ -34,4 +41,3 @@ services:
 
 volumes:
   pgdata:
-

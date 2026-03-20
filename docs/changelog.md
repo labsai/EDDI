@@ -15,6 +15,32 @@ Each entry follows this format:
 
 ---
 
+## One-Command Install & Onboarding Wizard (2026-03-20)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+New users can set up EDDI with a single command. Interactive wizard guides through database, auth, and monitoring choices.
+
+| Component | File | Description |
+|-----------|------|-------------|
+| **Bash installer** | `install.sh` | 3-step wizard (DB/Auth/Monitoring), Docker auto-install on Linux, `eddi` CLI wrapper, Bot Father deployment |
+| **PowerShell installer** | `install.ps1` | Windows parity, `winget` Docker Desktop auto-install, WSL2 prereq guidance |
+| **PostgreSQL-only compose** | `docker-compose.postgres-only.yml` | EDDI + PostgreSQL (no MongoDB), `QUARKUS_PROFILE=postgres` |
+| **Auth overlay** | `docker-compose.auth.yml` | Keycloak integration overlay with OIDC + test users |
+| **Monitoring overlay** | `docker-compose.monitoring.yml` | Grafana + Prometheus placeholder |
+| **README** | `README.md` | Quick Start section with one-liner commands |
+| **Getting Started** | `docs/getting-started.md` | Option 0 — one-command install as recommended method |
+
+**Key features:**
+- Platform-aware Docker install (Linux auto via `get.docker.com`, Windows via `winget`, macOS manual)
+- Idempotent re-runs — detects existing EDDI, skips duplicate bot imports
+- Input validation, config summary, CTRL+C cleanup, disk space warning, visible pull progress
+- Auto-opens browser after setup, Bot Father handoff for first-bot creation
+
+---
+
 ## Phase 8b: MCP Client — Bots Consume External MCP Tools + Quarkus 3.32.4 (2026-03-20)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

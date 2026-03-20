@@ -33,6 +33,20 @@ EDDI Chat:
 EDDI Manager:
 ![EDDI Screenshot Manager](/screenshots/EDDI-Screenshot-Manager-Interface.png)
 
+## Quick Start
+
+**Linux / macOS / WSL2:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/labsai/EDDI/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1 | iex
+```
+
+This starts an interactive wizard that sets up EDDI + database via Docker, deploys the Bot Father starter bot, and guides you through creating your first AI bot. Requires Docker ([install guide](https://docs.docker.com/get-docker/)).
+
 ## Overview
 
 E.D.D.I is a high performance **middleware orchestration service** for conversational AI. Unlike standalone chatbots or LLMs, 
