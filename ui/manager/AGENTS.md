@@ -189,7 +189,7 @@ All phases tracked in [`HANDOFF.md`](HANDOFF.md):
 | **4.4**  | **JSON Schema Enrichment** — victools migration + mock schema enrichment              | ✅     |
 | **4.5**  | **Production Build + Dashboard** — single bundle, loading indicator, old dashboard → Manager redirect | ✅     |
 
-**Phase 5+**: Phases 5–6 (NATS JetStream, PostgreSQL/DB-agnostic) ✅ complete. Phase 6E (langchain4j core + ObservableChatModel) ✅ complete. Phase 6F (Contextual Logging) ✅ complete. Phase 6D (Lombok Removal) ✅ complete. Then: Secrets+Audit+Tenancy (7), MCP Servers (8a), MCP Client+RAG (8b), DAG+OTel (9), HITL (9b), Multi-Bot (10a), Advanced RAG+Debate (10b), Persistent Memory+Heartbeat (11), CI/CD (12), **Advanced Manager UI — Debugger, Visual Pipeline, Taint Tracking (13)**, Website Astro (14). See EDDI [`AGENTS.md`](../EDDI/AGENTS.md) and [`project-philosophy.md`](../EDDI/docs/project-philosophy.md) for full roadmap and principles.
+**Phase 5+**: Phases 5–6 (NATS JetStream, PostgreSQL/DB-agnostic) ✅ complete. Phase 6E (langchain4j core + ObservableChatModel) ✅ complete. Phase 6F (Contextual Logging) ✅ complete. Phase 6D (Lombok Removal) ✅ complete. Phase 7 (Secrets+Audit+Tenancy) ✅ complete (33b remaining). Phase 8a (MCP Servers, 33 tools) ✅ complete. Phase 8b (MCP Client) ✅ complete. Then: RAG Foundation (8c), DAG+OTel (9), HITL (9b), Multi-Bot (10a), Advanced RAG+Debate (10b), Persistent Memory+Heartbeat (11), CI/CD (12), **Advanced Manager UI — Debugger, Visual Pipeline, Taint Tracking (13)**, Website Astro (14). See EDDI [`AGENTS.md`](../EDDI/AGENTS.md) and [`project-philosophy.md`](../EDDI/docs/project-philosophy.md) for full roadmap and principles.
 
 ---
 
