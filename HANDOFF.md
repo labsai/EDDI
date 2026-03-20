@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-20 (Phase 8a.3 — Bot Discovery & Managed Conversations, 33 MCP tools total)
+> **Last updated:** 2026-03-20 (Phase 8b — MCP Client + Quarkus 3.32.4, 1045 tests pass)
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -583,7 +583,7 @@
 - [x] ~~Phase 8a: MCP Servers~~ ✅
 - [x] ~~Phase 8a.2: MCP Resource CRUD + Batch Cascade~~ ✅
 - [x] ~~Phase 8a.3: Bot Discovery & Managed Conversations~~ ✅
-- [ ] Phase 8b: MCP Client + RAG Lifecycle Task + docs MCP (10 SP)
+- [x] ~~Phase 8b: MCP Client + RAG Foundation~~ ✅
 
 ### Phase 8a.2: MCP Resource CRUD + Batch Cascade ✅
 
@@ -629,6 +629,29 @@
 - `docs/mcp-server.md` — comprehensive Tool Reference section (parameter tables, response schemas, end-to-end examples)
 
 **Live test results:** All 6 tools tested against running backend — discover_bots (80 bots, filter works), triggers CRUD (create/update/delete), chat_managed (conversation auto-created, reused on follow-up).
+
+### Phase 8b: MCP Client + Quarkus 3.32.4 ✅
+
+Bots can now consume external MCP servers as tool providers. Upgraded Quarkus to 3.32.4.
+
+| Component | Change |
+|-----------|--------|
+| **POM** | Added `langchain4j-mcp` 1.12.2-beta22, upgraded Quarkus 3.30.8 → 3.32.4 |
+| **McpToolProviderManager** | NEW — `StreamableHttpMcpTransport`, connection caching, vault-ref, graceful errors |
+| **AgentOrchestrator** | MCP tools merged into tool-calling loop with budget/rate-limiting |
+| **LangChainConfiguration** | Added `mcpServers` + `McpServerConfig` (url, name, transport, apiKey, timeoutMs) |
+| **McpSetupTools** | `mcpServers` param on `setup_bot` tool |
+
+**Test results:** 1045 tests, 0 failures. `McpToolProviderManagerTest` (8 tests), updated `AgentOrchestratorTest` + `LangchainTaskTest` + `McpSetupToolsTest` (21 calls). Also fixed pre-existing `BotFactoryTest` failure.
+
+**Key files:**
+
+- `McpToolProviderManager.java` (NEW)
+- `McpToolProviderManagerTest.java` (NEW)
+- `AgentOrchestrator.java`
+- `LangChainConfiguration.java` (`McpServerConfig`)
+- `McpSetupTools.java`
+- `pom.xml`
 
 See `AGENTS.md` for the full roadmap (Phases 7–14b) and `docs/project-philosophy.md` for the 7 architectural pillars.
 

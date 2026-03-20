@@ -446,3 +446,85 @@ This data is stored in conversation memory and can be:
          │   eddi://docs/{name}  (filesystem I/O)    │
          └──────────────────────────────────────────┘
 ```
+
+## MCP Client — Bots as MCP Consumers
+
+In addition to acting as an MCP server, EDDI bots can also **consume external MCP servers** as tool providers. This enables bots to call tools exposed by other MCP-compatible services during conversations.
+
+### Configuration
+
+Add `mcpServers` to a LangChain task configuration:
+
+```json
+{
+  "tasks": [{
+    "type": "anthropic",
+    "mcpServers": [
+      {
+        "url": "http://localhost:7070/mcp",
+        "name": "eddi-docs",
+        "apiKey": "${vault:mcp-api-key}",
+        "timeoutMs": 30000
+      },
+      {
+        "url": "https://tools.example.com/mcp",
+        "name": "external-tools"
+      }
+    ]
+  }]
+}
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `url` | string | **Yes** | — | MCP server URL (Streamable HTTP transport) |
+| `name` | string | No | URL | Human-readable name for logging |
+| `transport` | string | No | `"streamableHttp"` | Transport type (only `streamableHttp` supported) |
+| `apiKey` | string | No | — | API key, sent as `Authorization: Bearer <key>`. Supports `${vault:key}` references |
+| `timeoutMs` | long | No | `30000` | Connection and request timeout in milliseconds |
+
+### Using `setup_bot` with MCP Servers
+
+```
+setup_bot(
+  name: "My Bot",
+  systemPrompt: "You are helpful",
+  mcpServers: "http://localhost:7070/mcp, https://tools.example.com/mcp",
+  ...
+)
+```
+
+The `mcpServers` parameter accepts a comma-separated list of URLs.
+
+### Architecture
+
+```
+┌──────────────┐     ┌──────────────────────┐
+│  User sends  │────▶│    LangchainTask      │
+│   message    │     │  (EDDI pipeline)      │
+└──────────────┘     └──────────┬────────────┘
+                                │
+                    ┌───────────┼───────────┐
+                    ▼           ▼           ▼
+           ┌──────────┐ ┌──────────┐ ┌──────────┐
+           │ Built-in │ │  Custom  │ │   MCP    │
+           │  Tools   │ │  Tools   │ │  Tools   │
+           │(calc,dt) │ │(HttpCall)│ │(external)│
+           └──────────┘ └──────────┘ └────┬─────┘
+                                          │
+                              ┌───────────┼───────────┐
+                              ▼                       ▼
+                    ┌──────────────┐       ┌──────────────┐
+                    │ MCP Server 1 │       │ MCP Server 2 │
+                    │ (EDDI docs)  │       │ (3rd party)  │
+                    └──────────────┘       └──────────────┘
+```
+
+### Key Behaviors
+
+- **Graceful degradation**: Failed MCP connections log warnings but never kill the pipeline
+- **Connection caching**: `McpToolProviderManager` reuses connections across conversation turns
+- **Budget/rate-limiting**: MCP tools are subject to the same `ToolExecutionService` controls as built-in tools
+- **Vault references**: API keys support `${vault:key}` syntax via `SecretResolver`
+- **Clean shutdown**: All MCP clients are closed on application shutdown via `@PreDestroy`
+
