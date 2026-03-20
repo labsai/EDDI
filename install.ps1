@@ -50,7 +50,7 @@ function Write-Banner {
     Write-Host ""
     Write-Host " ╔═══════════════════════════════════════════════════╗" -ForegroundColor Cyan
     Write-Host " ║             E . D . D . I                         ║" -ForegroundColor Cyan
-    Write-Host " ║    Multi-Agent Orchestration Middleware            ║" -ForegroundColor Cyan
+    Write-Host " ║    Multi-Agent Orchestration Middleware           ║" -ForegroundColor Cyan
     Write-Host " ║                                                   ║" -ForegroundColor Cyan
     Write-Host " ║    Setup Wizard                                   ║" -ForegroundColor Cyan
     Write-Host " ╚═══════════════════════════════════════════════════╝" -ForegroundColor Cyan

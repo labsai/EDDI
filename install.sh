@@ -90,7 +90,7 @@ banner() {
   echo -e "${CYAN}${BOLD}"
   echo " ╔═══════════════════════════════════════════════════╗"
   echo " ║             E . D . D . I                         ║"
-  echo " ║    Multi-Agent Orchestration Middleware            ║"
+  echo " ║    Multi-Agent Orchestration Middleware           ║"
   echo " ║                                                   ║"
   echo " ║    Setup Wizard                                   ║"
   echo " ╚═══════════════════════════════════════════════════╝"
