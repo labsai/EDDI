@@ -98,7 +98,8 @@ public class LangchainTask implements ILifecycleTask {
             PdfReaderTool pdfReaderTool,
             WeatherTool weatherTool,
             EddiToolBridge eddiToolBridge,
-            ToolExecutionService toolExecutionService) {
+            ToolExecutionService toolExecutionService,
+            McpToolProviderManager mcpToolProviderManager) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -113,7 +114,7 @@ public class LangchainTask implements ILifecycleTask {
         this.agentOrchestrator = new AgentOrchestrator(
                 calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
-                eddiToolBridge, toolExecutionService);
+                eddiToolBridge, toolExecutionService, mcpToolProviderManager);
     }
 
     @Override

@@ -90,6 +90,13 @@ public record LangChainConfiguration(List<Task> tasks) {
         private List<String> tools;
 
         /**
+         * External MCP servers to connect to as tool providers.
+         * Each entry defines a remote MCP server whose tools become available
+         * to the LLM alongside built-in and EDDI httpcall tools.
+         */
+        private List<McpServerConfig> mcpServers;
+
+        /**
          * Enable built-in tools (calculator, web search, datetime, etc.)
          * Default: false (opt-in for security)
          */
@@ -153,7 +160,8 @@ public record LangChainConfiguration(List<Task> tasks) {
          */
         public boolean isAgentMode() {
             return (tools != null && !tools.isEmpty()) ||
-                   (enableBuiltInTools != null && enableBuiltInTools);
+                   (enableBuiltInTools != null && enableBuiltInTools) ||
+                   (mcpServers != null && !mcpServers.isEmpty());
         }
 
         /**
@@ -241,6 +249,14 @@ public record LangChainConfiguration(List<Task> tasks) {
 
         public void setTools(List<String> tools) {
             this.tools = tools;
+        }
+
+        public List<McpServerConfig> getMcpServers() {
+            return mcpServers;
+        }
+
+        public void setMcpServers(List<McpServerConfig> mcpServers) {
+            this.mcpServers = mcpServers;
         }
 
         public Boolean getEnableBuiltInTools() {
@@ -345,6 +361,66 @@ public record LangChainConfiguration(List<Task> tasks) {
 
         public void setParallelExecutionTimeoutMs(Long parallelExecutionTimeoutMs) {
             this.parallelExecutionTimeoutMs = parallelExecutionTimeoutMs;
+        }
+    }
+
+    /**
+     * Configuration for an external MCP server that provides tools to the bot.
+     */
+    public static class McpServerConfig {
+        /** URL of the MCP server (required). Example: "http://localhost:7070/mcp" */
+        private String url;
+
+        /** Optional display name for this MCP server */
+        private String name;
+
+        /** Transport type: "http" (default) or "sse" */
+        private String transport = "http";
+
+        /** Optional API key or vault reference (e.g., "${vault:my-api-key}") */
+        private String apiKey;
+
+        /** Timeout for MCP operations in milliseconds (default: 30000) */
+        private Long timeoutMs = 30000L;
+
+        public String getUrl() {
+            return url;
+        }
+
+        public void setUrl(String url) {
+            this.url = url;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getTransport() {
+            return transport;
+        }
+
+        public void setTransport(String transport) {
+            this.transport = transport;
+        }
+
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey;
+        }
+
+        public Long getTimeoutMs() {
+            return timeoutMs;
+        }
+
+        public void setTimeoutMs(Long timeoutMs) {
+            this.timeoutMs = timeoutMs;
         }
     }
 

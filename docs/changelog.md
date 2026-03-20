@@ -15,6 +15,28 @@ Each entry follows this format:
 
 ---
 
+## Phase 8b: MCP Client — Bots Consume External MCP Tools + Quarkus 3.32.4 (2026-03-20)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Bots can now connect to external MCP servers and use their tools during conversations. Uses `langchain4j-mcp` 1.12.2-beta22 with `StreamableHttpMcpTransport`.
+
+| Component | Change |
+|-----------|--------|
+| **POM** | Added `langchain4j-mcp` 1.12.2-beta22, upgraded Quarkus 3.30.8 → 3.32.4 |
+| **LangChainConfiguration** | Added `mcpServers` + `McpServerConfig` (url, name, transport, apiKey, timeoutMs) |
+| **McpToolProviderManager** | NEW — Lifecycle mgmt, `StreamableHttpMcpTransport`, caching, vault-ref, graceful errors |
+| **AgentOrchestrator** | MCP tool specs merged into tool-calling loop with budget/rate-limiting |
+| **McpSetupTools** | `mcpServers` param on `setup_bot` — comma-separated URLs → `McpServerConfig` list |
+
+**Design:** StreamableHttpMcpTransport (non-deprecated), graceful degradation (MCP failures never kill pipeline), port 7070, `${vault:key}` support.
+
+**Tests:** `McpToolProviderManagerTest` (8 tests), updated `AgentOrchestratorTest` + `LangchainTaskTest` + `McpSetupToolsTest` (21 calls).
+
+---
+
 ## Security Fix: Path Traversal in McpDocResources (2026-03-20)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

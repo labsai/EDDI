@@ -43,7 +43,8 @@ class AgentOrchestratorTest {
         orchestrator = new AgentOrchestrator(
                 calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
-                mock(EddiToolBridge.class), mock(ToolExecutionService.class));
+                mock(EddiToolBridge.class), mock(ToolExecutionService.class),
+                mock(McpToolProviderManager.class));
     }
 
     // ==================== Tool Collection Tests ====================
@@ -198,6 +199,61 @@ class AgentOrchestratorTest {
         task.setTools(List.of());
 
         assertFalse(task.isAgentMode());
+    }
+
+    @Test
+    @DisplayName("isAgentMode should return true when mcpServers configured")
+    void testIsAgentMode_TrueWithMcpServers() {
+        var task = new LangChainConfiguration.Task();
+        task.setEnableBuiltInTools(false);
+        task.setTools(null);
+        var mcpServer = new LangChainConfiguration.McpServerConfig();
+        mcpServer.setUrl("http://localhost:8080/mcp");
+        mcpServer.setName("test-server");
+        task.setMcpServers(List.of(mcpServer));
+
+        assertTrue(task.isAgentMode());
+    }
+
+    @Test
+    @DisplayName("isAgentMode should return false when mcpServers list is empty")
+    void testIsAgentMode_FalseWithEmptyMcpServers() {
+        var task = new LangChainConfiguration.Task();
+        task.setEnableBuiltInTools(false);
+        task.setTools(null);
+        task.setMcpServers(List.of());
+
+        assertFalse(task.isAgentMode());
+    }
+
+    // ==================== McpServerConfig Tests ====================
+
+    @Test
+    @DisplayName("McpServerConfig should have sensible defaults")
+    void testMcpServerConfig_Defaults() {
+        var config = new LangChainConfiguration.McpServerConfig();
+        assertEquals("http", config.getTransport());
+        assertEquals(30000L, config.getTimeoutMs());
+        assertNull(config.getUrl());
+        assertNull(config.getName());
+        assertNull(config.getApiKey());
+    }
+
+    @Test
+    @DisplayName("McpServerConfig should store all fields")
+    void testMcpServerConfig_AllFields() {
+        var config = new LangChainConfiguration.McpServerConfig();
+        config.setUrl("http://localhost:8080/mcp");
+        config.setName("my-server");
+        config.setTransport("sse");
+        config.setApiKey("${vault:my-key}");
+        config.setTimeoutMs(60000L);
+
+        assertEquals("http://localhost:8080/mcp", config.getUrl());
+        assertEquals("my-server", config.getName());
+        assertEquals("sse", config.getTransport());
+        assertEquals("${vault:my-key}", config.getApiKey());
+        assertEquals(60000L, config.getTimeoutMs());
     }
 
     // ==================== getSystemMessage Tests ====================

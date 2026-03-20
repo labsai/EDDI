@@ -110,7 +110,8 @@ class LangchainTaskTest {
                                 pdfReaderTool,
                                 weatherTool,
                                 eddiToolBridge,
-                                toolExecutionService);
+                                toolExecutionService,
+                                mock(McpToolProviderManager.class));
         }
 
         static Stream<Arguments> provideParameters() {

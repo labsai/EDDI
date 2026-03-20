@@ -3,6 +3,7 @@ package ai.labs.eddi.modules.langchain.impl;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
+import ai.labs.eddi.modules.langchain.model.LangChainConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.langchain.tools.EddiToolBridge;
 import ai.labs.eddi.modules.langchain.tools.ToolExecutionService;
 import ai.labs.eddi.modules.langchain.tools.impl.*;
@@ -52,6 +53,7 @@ class AgentOrchestrator {
     private final WeatherTool weatherTool;
     private final EddiToolBridge eddiToolBridge;
     private final ToolExecutionService toolExecutionService;
+    private final McpToolProviderManager mcpToolProviderManager;
 
     AgentOrchestrator(CalculatorTool calculatorTool,
             DateTimeTool dateTimeTool,
@@ -62,7 +64,8 @@ class AgentOrchestrator {
             PdfReaderTool pdfReaderTool,
             WeatherTool weatherTool,
             EddiToolBridge eddiToolBridge,
-            ToolExecutionService toolExecutionService) {
+            ToolExecutionService toolExecutionService,
+            McpToolProviderManager mcpToolProviderManager) {
         this.calculatorTool = calculatorTool;
         this.dateTimeTool = dateTimeTool;
         this.webSearchTool = webSearchTool;
@@ -73,6 +76,7 @@ class AgentOrchestrator {
         this.weatherTool = weatherTool;
         this.eddiToolBridge = eddiToolBridge;
         this.toolExecutionService = toolExecutionService;
+        this.mcpToolProviderManager = mcpToolProviderManager;
     }
 
     /**
@@ -105,8 +109,16 @@ class AgentOrchestrator {
             enabledTools.add(eddiToolBridge);
         }
 
+        // Discover MCP server tools (if configured)
+        McpToolProviderManager.McpToolsResult mcpTools = null;
+        List<McpServerConfig> mcpServers = task.getMcpServers();
+        if (mcpServers != null && !mcpServers.isEmpty()) {
+            mcpTools = mcpToolProviderManager.discoverTools(mcpServers);
+        }
+        boolean hasMcpTools = mcpTools != null && !mcpTools.toolSpecs().isEmpty();
+
         // No tools? Return null — caller should use legacy mode
-        if (enabledTools.isEmpty()) {
+        if (enabledTools.isEmpty() && !hasMcpTools) {
             return null;
         }
 
@@ -128,8 +140,11 @@ class AgentOrchestrator {
             }
         }
 
-        LOGGER.info("Executing with " + enabledTools.size() + " enabled tools");
-        return executeWithTools(chatModel, effectiveSystemMessage, chatMessages, enabledTools, task, memory);
+        int totalTools = enabledTools.size() + (mcpTools != null ? mcpTools.toolSpecs().size() : 0);
+        LOGGER.info("Executing with " + totalTools + " enabled tools" +
+                (mcpTools != null && !mcpTools.toolSpecs().isEmpty()
+                        ? " (" + mcpTools.toolSpecs().size() + " from MCP servers)" : ""));
+        return executeWithTools(chatModel, effectiveSystemMessage, chatMessages, enabledTools, mcpTools, task, memory);
     }
 
     /**
@@ -137,10 +152,11 @@ class AgentOrchestrator {
      */
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage,
             List<ChatMessage> chatMessages, List<Object> tools,
+            McpToolProviderManager.McpToolsResult mcpTools,
             LangChainConfiguration.Task task, IConversationMemory memory)
             throws LifecycleException {
 
-        // Build tool specifications and executors from tool objects
+        // Build tool specifications and executors from built-in tool objects
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> toolExecutors = new HashMap<>();
 
@@ -157,6 +173,12 @@ class AgentOrchestrator {
                     toolExecutors.put(toolName, new DefaultToolExecutor(tool, method));
                 }
             }
+        }
+
+        // Merge MCP server tools (if any)
+        if (mcpTools != null && !mcpTools.toolSpecs().isEmpty()) {
+            toolSpecs.addAll(mcpTools.toolSpecs());
+            toolExecutors.putAll(mcpTools.executors());
         }
 
         // Build message list with system message if provided

@@ -93,6 +93,9 @@ public class McpSetupTools {
                     "When enabled, the LLM returns structured JSON with sentiment scores, " +
                     "emotion detection, intent classification, and urgency rating. " +
                     "Note: streaming is not supported when this is enabled.") Boolean enableSentimentAnalysis,
+            @ToolArg(description = "Comma-separated list of external MCP server URLs for tool discovery (optional). " +
+                    "The bot will connect to these servers and use their tools during conversations. " +
+                    "E.g. 'http://localhost:7070/mcp,http://tools.example.com/mcp'") String mcpServers,
             @ToolArg(description = "Automatically deploy the bot after creation? (default: true)") Boolean deploy,
             @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
         try {
@@ -139,7 +142,7 @@ public class McpSetupTools {
             var langchainConfig = createLangchainConfig(
                     params.providerType, params.modelId, apiKey, systemPrompt,
                     toolsEnabled, builtInToolsWhitelist, baseUrl, promptResponseJson,
-                    quickReplies, sentiment);
+                    quickReplies, sentiment, mcpServers);
             Response langchainResponse = getRestStore(IRestLangChainStore.class).createLangChain(langchainConfig);
             String langchainLocation = langchainResponse.getHeaderString("Location");
             String langchainId = extractIdFromLocation(langchainLocation);
@@ -254,7 +257,8 @@ public class McpSetupTools {
             String apiKey, String systemPrompt,
             boolean enableTooling, String toolsWhitelist,
             String baseUrl, String promptResponseJson,
-            boolean quickReplies, boolean sentiment) {
+            boolean quickReplies, boolean sentiment,
+            String mcpServers) {
         var task = new LangChainConfiguration.Task();
         task.setActions(List.of("send_message"));
         task.setId(modelType);
@@ -329,6 +333,22 @@ public class McpSetupTools {
         }
 
         task.setConversationHistoryLimit(10);
+
+        // MCP servers — external tool providers
+        if (mcpServers != null && !mcpServers.isBlank()) {
+            var mcpConfigs = new ArrayList<LangChainConfiguration.McpServerConfig>();
+            for (String serverUrl : mcpServers.split(",")) {
+                String trimmed = serverUrl.trim();
+                if (!trimmed.isEmpty()) {
+                    var mcpConfig = new LangChainConfiguration.McpServerConfig();
+                    mcpConfig.setUrl(trimmed);
+                    mcpConfigs.add(mcpConfig);
+                }
+            }
+            if (!mcpConfigs.isEmpty()) {
+                task.setMcpServers(mcpConfigs);
+            }
+        }
 
         // Build postResponse to extract text output and quick replies from LLM JSON
         if (promptResponseJson != null) {
@@ -542,7 +562,7 @@ public class McpSetupTools {
             String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
             var langchainConfig = createLangchainConfig(
                     params.providerType, params.modelId, apiKey, enrichedPrompt, false, null, null, promptResponseJson,
-                    quickReplies, sentiment);
+                    quickReplies, sentiment, null);
             Response langchainResponse = getRestStore(IRestLangChainStore.class).createLangChain(langchainConfig);
             String langchainLocation = langchainResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);
