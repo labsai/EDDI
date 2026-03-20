@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-19 (Phase 8a MCP code review — fixes, resource tools, docs MCP resources)
+> **Last updated:** 2026-03-20 (Phase 8a.3 — Bot Discovery & Managed Conversations, 33 MCP tools total)
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -581,14 +581,13 @@
 ### Phase 8: MCP + RAG Foundation
 
 - [x] ~~Phase 8a: MCP Servers~~ ✅
-- [ ] **Phase 8a.2: MCP Resource CRUD + Batch Cascade** (next — see implementation plan below)
+- [x] ~~Phase 8a.2: MCP Resource CRUD + Batch Cascade~~ ✅
+- [x] ~~Phase 8a.3: Bot Discovery & Managed Conversations~~ ✅
 - [ ] Phase 8b: MCP Client + RAG Lifecycle Task + docs MCP (10 SP)
 
-### Phase 8a.2: MCP Resource CRUD + Batch Cascade (PLANNED)
+### Phase 8a.2: MCP Resource CRUD + Batch Cascade ✅
 
-> **Implementation plan:** See Antigravity brain `implementation_plan.md`
-
-4 new MCP tools for full resource lifecycle management:
+5 new MCP tools for full resource lifecycle management:
 
 | Tool | Description |
 |------|-------------|
@@ -596,14 +595,40 @@
 | `create_resource` | Create a new resource → returns ID + URI |
 | `delete_resource` | Delete a resource (soft or permanent) |
 | `apply_bot_changes` | Batch-cascade multiple resource URI changes through package → bot in ONE pass, optional redeploy |
+| `list_bot_resources` | Walk bot → packages → extensions to get a complete resource inventory in one call |
 
-**Key design**: `apply_bot_changes` reads each package, replaces ALL old→new URIs in-memory, saves ONCE per package, then saves bot ONCE. No N+1 version problem.
+**Key files:**
 
-**Existing REST endpoints used:**
-- `IRestXxxStore.updateXxx/createXxx/deleteXxx` — individual resource CRUD
-- `IRestPackageStore.readPackage/updatePackage` — package read/write for batch replace
-- `IRestBotStore.readBot/updateBot` — bot read/write for cascade
-- `updateResourceInPackage`, `updateResourceInBot` — NOT used (batch replaces in-memory instead)
+- `McpAdminTools.java` — 5 new tools, `getRestStore()` shared helper
+- `McpToolFilter.java` — whitelist 20 → 27
+- `McpAdminToolsCrudTest.java` — 22 new tests
+- `docs/mcp-server.md` — updated
+
+### Phase 8a.3: Bot Discovery & Managed Conversations ✅ (commit `4ed7bce8`)
+
+6 new MCP tools for bot discovery and intent-based managed chat:
+
+| Tool | Description |
+|------|-------------|
+| `discover_bots` | Enriched bot list with intent cross-referencing from BotTriggerConfiguration |
+| `chat_managed` | Intent-based single-window conversations (one conv per intent+userId, auto-creates) |
+| `list_bot_triggers` | List all intent→bot mappings |
+| `create_bot_trigger` | Create intent-to-bot trigger |
+| `update_bot_trigger` | Update existing trigger |
+| `delete_bot_trigger` | Remove trigger by intent |
+
+**Key design:** Two-tier conversation model — low-level (`create_conversation` + `talk_to_bot`) for custom apps, managed (`chat_managed`) for single-window chat.
+
+**Key files:**
+
+- `McpConversationTools.java` — `discover_bots` + `chat_managed` + `getOrCreateManagedConversation` helper
+- `McpAdminTools.java` — 4 trigger CRUD tools
+- `McpToolFilter.java` — whitelist 27 → 33
+- `McpConversationToolsTest.java` — 7 new tests
+- `McpAdminToolsCrudTest.java` — 7 new tests
+- `docs/mcp-server.md` — comprehensive Tool Reference section (parameter tables, response schemas, end-to-end examples)
+
+**Live test results:** All 6 tools tested against running backend — discover_bots (80 bots, filter works), triggers CRUD (create/update/delete), chat_managed (conversation auto-created, reused on follow-up).
 
 See `AGENTS.md` for the full roadmap (Phases 7–14b) and `docs/project-philosophy.md` for the 7 architectural pillars.
 

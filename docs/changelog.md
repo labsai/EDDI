@@ -15,6 +15,84 @@ Each entry follows this format:
 
 ---
 
+## Phase 8a.3: Bot Discovery & Managed Conversations (2026-03-20)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+**Commit:** `4ed7bce8`
+
+**What changed:**
+
+6 new MCP tools bringing the total from 27 → **33 tools**. Introduces a two-tier conversation model:
+
+| Tier | Tools | Conversations | Use Case |
+|------|-------|---------------|----------|
+| **Low-level** | `create_conversation` + `talk_to_bot` | Multiple per user, manually managed | Custom apps, multi-conversation UIs |
+| **Managed** | `chat_managed` | One per intent+userId, auto-created | Single-window chat, intent-based routing |
+
+**New tools:**
+
+| Tool | Class | Description |
+|------|-------|-------------|
+| `discover_bots` | `McpConversationTools` | Enriched bot list — merges deployed bots with intent mappings from `BotTriggerConfiguration` |
+| `chat_managed` | `McpConversationTools` | Intent-based single-window chat — uses `IUserConversationStore` + `IRestBotTriggerStore` to auto-create/reuse conversations |
+| `list_bot_triggers` | `McpAdminTools` | List all intent→bot mappings |
+| `create_bot_trigger` | `McpAdminTools` | Map an intent to bot deployments |
+| `update_bot_trigger` | `McpAdminTools` | Modify existing trigger |
+| `delete_bot_trigger` | `McpAdminTools` | Remove trigger by intent |
+
+**Key decisions:**
+
+| # | Decision | Reasoning |
+|---|---|---|
+| 1 | `chat_managed` mirrors `RestBotManagement.initUserConversation` | Same proven logic — reads `IUserConversationStore`, falls back to trigger lookup, creates via `IRestBotEngine` |
+| 2 | `discover_bots` gracefully handles trigger read failures | Non-fatal — still returns bot list without intent enrichment |
+| 3 | Trigger CRUD uses `getRestStore()` proxy pattern | Consistent with all other admin tools — proper DocumentDescriptorFilter interceptor |
+| 4 | Comprehensive Tool Reference in `mcp-server.md` | Parameter tables, response schemas, config schema, end-to-end example |
+
+**Files changed:**
+
+| File | Change |
+|------|--------|
+| `McpConversationTools.java` | +3 deps (`IRestBotTriggerStore`, `IUserConversationStore`, `IRestBotEngine`), +2 tools, +1 helper |
+| `McpAdminTools.java` | +4 trigger CRUD tools |
+| `McpToolFilter.java` | Whitelist 27 → 33 |
+| `McpConversationToolsTest.java` | +7 tests (discover_bots × 3, chat_managed × 4) |
+| `McpAdminToolsCrudTest.java` | +7 tests (trigger CRUD: list/create/update/delete + error paths) |
+| `docs/mcp-server.md` | +234 lines: Tool Reference section with full docs |
+
+**Live testing:** ✅ All 6 tools tested against running backend:
+- `discover_bots`: 80 bots returned, filter works ("Bob Marley" → 1 result), intents enriched
+- `chat_managed`: Conversation auto-created (`69bc8b93...`), reused on follow-up (same conversationId)
+- Trigger CRUD: create/update/delete all returned status 200
+
+**Testing:** ✅ All MCP unit tests pass (14 new). Compilation clean.
+
+---
+
+## Phase 8a.2: MCP Resource CRUD + Batch Cascade (2026-03-19)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+5 new MCP tools for full resource lifecycle management, bringing the total from 22 → 27 tools.
+
+| Tool | Description |
+|------|-------------|
+| `update_resource` | Update any resource config by type and ID → returns new version URI |
+| `create_resource` | Create a new resource → returns ID + URI |
+| `delete_resource` | Delete a resource (soft by default, `permanent=true` for hard delete) |
+| `apply_bot_changes` | Batch-cascade URI changes through package → bot in ONE pass, optionally redeploy |
+| `list_bot_resources` | Walk bot → packages → extensions for complete resource inventory |
+
+**Key design:** `apply_bot_changes` reads each package, replaces ALL old→new URIs in-memory, saves ONCE per package, then saves bot ONCE. No N+1 version problem.
+
+**Files changed:** `McpAdminTools.java` (+5 tools), `McpToolFilter.java` (20→27), `McpAdminToolsCrudTest.java` (22 new tests), `docs/mcp-server.md`
+
+**Testing:** ✅ All MCP unit tests pass.
+
+---
+
 ## Phase 8a: MCP Code Review — Fixes, Resource Tools, Docs Resources (2026-03-19)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
