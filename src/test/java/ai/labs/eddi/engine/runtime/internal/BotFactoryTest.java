@@ -92,10 +92,17 @@ class BotFactoryTest {
                     .thenThrow(new ServiceException("DB connection failed"));
 
             DeploymentProcess process = mock(DeploymentProcess.class);
-            assertThrows(IllegalStateException.class,
+            // BotFactory.deployBot() catches ServiceException inside compute() lambda
+            // and sets ERROR status — it does NOT propagate the exception
+            assertDoesNotThrow(
                     () -> botFactory.deployBot(unrestricted, "bot1", 1, process));
 
             verify(process).completed(ERROR);
+
+            // The bot should be stored with ERROR status (not removed)
+            IBot errorBot = botFactory.getBot(unrestricted, "bot1", 1);
+            assertNotNull(errorBot, "Bot with ERROR status should still be in the environment");
+            assertEquals(ERROR, errorBot.getDeploymentStatus());
         }
 
         @Test
