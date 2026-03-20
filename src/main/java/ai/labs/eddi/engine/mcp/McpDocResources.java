@@ -46,11 +46,25 @@ public class McpDocResources {
                     "Pass the doc name without .md extension, " +
                     "e.g. 'getting-started', 'architecture', 'langchain'")
     public String readDoc(@ResourceTemplateArg(name = "name") String name) {
-        Path docFile = Path.of(docsPath, name + ".md");
+        // Path traversal protection: reject names with directory separators or parent refs
+        if (name == null || name.isEmpty()
+                || name.contains("/") || name.contains("\\") || name.contains("..")) {
+            return "Invalid document name: " + name;
+        }
+
+        Path docsDir = Path.of(docsPath).toAbsolutePath().normalize();
+        Path docFile = docsDir.resolve(name + ".md").normalize();
+
+        // Defense-in-depth: verify resolved path is within docs directory
+        if (!docFile.startsWith(docsDir)) {
+            LOGGER.warnf("Path traversal attempt blocked: %s", name);
+            return "Invalid document name: " + name;
+        }
+
         if (!Files.isRegularFile(docFile)) {
             // Try without adding .md in case the name already has it
-            docFile = Path.of(docsPath, name);
-            if (!Files.isRegularFile(docFile)) {
+            docFile = docsDir.resolve(name).normalize();
+            if (!docFile.startsWith(docsDir) || !Files.isRegularFile(docFile)) {
                 return "Document not found: " + name;
             }
         }
