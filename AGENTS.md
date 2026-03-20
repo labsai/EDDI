@@ -129,21 +129,25 @@ Phase 6F: Contextual Logging — MDC + Manager Log Panel (5 SP)   [QUICK WIN]  �
 Phase 6D: Lombok Removal (5 SP)   [QUICK WIN]  ✅
   6D. Delombok 114 files, explicit getters/setters, JBoss Logger    5 SP
 
-Phase 7: Secrets, Audit + Tenant Foundation (12 SP)
-  33. Secrets Vault — ${vault:key} references, export sanitization  5 SP
-  34. Immutable Audit Ledger — write-once trail, EU AI Act          5 SP
-  34b. Tenant Quota Stub — per-tenant rate limits, usage metering   2 SP
+Phase 7: Secrets, Audit + Tenant Foundation (12 SP) ✅ (33b remaining)
+  33. Secrets Vault — ${vault:key} references, export sanitization  5 SP  ✅
+  33b. Chat UI password field + Manager vault integration           2 SP
+  34. Immutable Audit Ledger — write-once trail, EU AI Act          5 SP  ✅
+  34b. Tenant Quota Stub — per-tenant rate limits, usage metering   2 SP  ✅
 
-Phase 8a: MCP Servers (8 SP)
-  35. MCP Server: Bot Conversations (talk_to_bot, list_bots)       5 SP
-  36. MCP Server: EDDI Admin API (manage bots/packages/deploy)     3 SP
+Phase 8a: MCP Servers (8 SP) ✅
+  35. MCP Server: Bot Conversations (11 tools)                      5 SP  ✅
+  36. MCP Server: Admin API (13 tools)                              3 SP  ✅
+  8a.2. MCP Resource CRUD + Batch Cascade (5 tools)                 3 SP  ✅
+  8a.3. Bot Discovery & Managed Conversations (6 tools)             3 SP  ✅
+  37. MCP Resources: EDDI Documentation (docs as MCP resources)     2 SP  ✅
 
-Phase 8b: MCP Client + RAG Foundation (10 SP)
-  37. MCP Server: EDDI Documentation (docs as MCP resources)       2 SP
-  38. MCP Client — bots consume external MCP tools                 5 SP
+Phase 8b: MCP Client (5 SP) ✅
+  38. MCP Client — bots consume external MCP tools                  5 SP  ✅
+
+Phase 8c: RAG Foundation (3 SP)
   38b. RAG Lifecycle Task — config-driven vector store retrieval    3 SP
       (langchain4j EmbeddingStore/EmbeddingModel abstractions)
-      (Phase 8b includes design doc for Workspace AI Operator)
 
 Phase 9: DAG Pipeline + Governance (10 SP)
   39. 3-Tier State Architecture (CQRS memory partitioning)         5 SP
@@ -160,7 +164,7 @@ Phase 10a: Multi-Bot Orchestration (8 SP)
 
 Phase 10b: Advanced RAG + Debate (8 SP)
   45. Advanced RAG (ingestion, provenance, tenant RLS, re-ranking) 5 SP
-      (builds on basic RAG task from Phase 8b)
+      (builds on basic RAG task from Phase 8c)
   46. Group-of-Experts / Debate Pattern                             3 SP
 
 Phase 11a: Persistent Memory + Heartbeat (8 SP)

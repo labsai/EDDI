@@ -543,37 +543,46 @@ Step-by-step wizard for new users:
 
 **Verification**: `./mvnw compile && ./mvnw test && ./mvnw dependency:tree | grep -i quarkiverse` (should return nothing)
 
-### Phase 7: Secrets, Audit + Tenant Foundation (v6.0-beta2, 12 SP)
+### Phase 7: Secrets, Audit + Tenant Foundation (v6.0-beta2, 12 SP) ✅ (33b remaining)
 
 > Remove production blockers. Low complexity, no dependencies, maximum enterprise unlock.
 
-| # | Item | SP | Priority |
-|---|------|----|----------|
-| 33 | **Secrets Vault** — `${vault:key}` references resolved at runtime, export sanitization scrubs plaintext keys | 5 | 🔴 Critical |
-| 34 | **Immutable Audit Ledger** — write-once append-only trail of compiled prompts, tool calls, responses, costs (EU AI Act) | 5 | 🔴 Critical |
-| 34b | **Tenant Quota Stub** — per-tenant API rate limits, usage metering counters, configurable resource caps (SaaS foundation) | 2 | 🟡 High |
+| # | Item | SP | Status |
+|---|------|----|--------|
+| 33 | **Secrets Vault** — `${vault:key}` references resolved at runtime, export sanitization scrubs plaintext keys | 5 | ✅ |
+| 33b | **Chat UI password field + Manager vault integration** | 2 | |
+| 34 | **Immutable Audit Ledger** — write-once append-only trail of compiled prompts, tool calls, responses, costs (EU AI Act) | 5 | ✅ |
+| 34b | **Tenant Quota Stub** — per-tenant API rate limits, usage metering counters, configurable resource caps (SaaS foundation) | 2 | ✅ |
 
-### Phase 8a: MCP Servers (v6.0-beta3, 8 SP)
+### Phase 8a: MCP Servers (v6.0-beta3, 8 SP) ✅
 
 > EDDI's integration story. The broadest MCP scope of any JVM platform.
 > **Leverage:** Core langchain4j `@Tool` annotations for MCP tool definitions. MCP server/client support available in core langchain4j.
 
+| # | Item | SP | Status |
+|---|------|----|--------|
+| 35 | **MCP Server: Bot Conversations** — 11 tools (talk_to_bot, chat_with_bot, list_bots, etc.) | 5 | ✅ |
+| 36 | **MCP Server: EDDI Admin API** — 13 tools (manage bots/packages/deploy/config via MCP) | 3 | ✅ |
+| 8a.2 | **MCP Resource CRUD + Batch Cascade** — 5 tools (update/create/delete resource, apply_bot_changes, list_bot_resources) | 3 | ✅ |
+| 8a.3 | **Bot Discovery & Managed Conversations** — 6 tools (discover_bots, chat_managed, trigger CRUD) | 3 | ✅ |
+| 37 | **MCP Resources: EDDI Documentation** — docs as MCP resources | 2 | ✅ |
+
+### Phase 8b: MCP Client (5 SP) ✅
+
+> Bots consume external MCP servers as tool providers. Uses `langchain4j-mcp` + `StreamableHttpMcpTransport`.
+
+| # | Item | SP | Status |
+|---|------|----|--------|
+| 38 | **MCP Client** — bots consume external MCP tools via McpToolProviderManager, connection caching, vault-ref support | 5 | ✅ |
+
+### Phase 8c: RAG Foundation (3 SP)
+
+> Basic RAG task. "EDDI bots can access any knowledge base."
+> **Leverage:** Core `langchain4j` `EmbeddingStore` + `EmbeddingModel` + `ContentRetriever` interfaces for vector store abstraction.
+
 | # | Item | SP | Priority |
 |---|------|----|----------|
-| 35 | **MCP Server: Bot Conversations** — `talk_to_bot`, `create_conversation`, `list_bots` tools | 5 | 🔴 Critical |
-| 36 | **MCP Server: EDDI Admin API** — manage bots/packages/deploy/config via MCP | 3 | 🟡 High |
-
-### Phase 8b: MCP Client + RAG Foundation (10 SP)
-
-> MCP Client + basic RAG together tell the story: "EDDI bots can access any tool AND any knowledge base."
-> **Leverage:** Core `langchain4j` `EmbeddingStore` + `EmbeddingModel` + `ContentRetriever` interfaces for vector store abstraction. Use `RetrievalAugmentor` and `EmbeddingStoreContentRetriever` from core langchain4j. Wrap in `ILifecycleTask` for config-driven orchestration.
-
-| # | Item | SP | Priority |
-|---|------|----|----------|
-| 37 | **MCP Server: EDDI Documentation** — docs.labs.ai content as MCP resources | 2 | 🟡 High |
-| 38 | **MCP Client** — bots consume external MCP tools (filesystem, database, code execution). Leverage core langchain4j MCP client support | 5 | 🟡 High |
 | 38b | **RAG Lifecycle Task** — new `ILifecycleTask` for vector store retrieval. Config-driven: embedding model, store type, chunk strategy, top-K. Uses langchain4j `EmbeddingStore`/`EmbeddingModel` abstractions for provider-agnostic vector search | 3 | 🟡 High |
-| — | Phase 8b includes design doc for Workspace AI Operator | — | 🟠 Medium |
 
 ### Phase 9: DAG Pipeline + Governance (v6.0-rc1, 10 SP)
 
@@ -608,7 +617,7 @@ Step-by-step wizard for new users:
 
 ### Phase 10b: Advanced RAG + Debate (8 SP)
 
-> Builds on the basic RAG task from Phase 8b. Adds provenance, multi-tenant isolation, and debate patterns.
+> Builds on the basic RAG task from Phase 8c. Adds provenance, multi-tenant isolation, and debate patterns.
 > **Leverage:** langchain4j `ContentRetriever`, `QueryTransformer`, `QueryRouter` for advanced retrieval strategies.
 
 | # | Item | SP | Priority |
