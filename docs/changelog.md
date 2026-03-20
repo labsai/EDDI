@@ -15,6 +15,24 @@ Each entry follows this format:
 
 ---
 
+## Security Fix: Path Traversal in McpDocResources (2026-03-20)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+`McpDocResources.readDoc()` had a path traversal vulnerability — names like `../../etc/passwd` resolved outside the docs directory via `Path.of(docsPath, name)`.
+
+| Fix | Change |
+|-----|--------|
+| **Input validation** | Reject names containing `/`, `\`, or `..` |
+| **Containment check** | `normalize()` + `startsWith(docsDir)` defense-in-depth |
+| **Warning log** | Blocked attempts logged at WARN level |
+
+**Files:** `McpDocResources.java` (fix), `McpDocResourcesTest.java` (NEW — 10 tests, 7 path traversal vectors)
+
+---
+
 ## Phase 8a.3: Bot Discovery & Managed Conversations (2026-03-20)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
