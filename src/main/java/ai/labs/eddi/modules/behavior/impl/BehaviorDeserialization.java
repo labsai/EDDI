@@ -1,7 +1,7 @@
 package ai.labs.eddi.modules.behavior.impl;
 
-import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
-import ai.labs.eddi.configs.behavior.model.BehaviorRuleConditionConfiguration;
+import ai.labs.eddi.configs.rules.model.BehaviorConfiguration;
+import ai.labs.eddi.configs.rules.model.BehaviorRuleConditionConfiguration;
 import ai.labs.eddi.datastore.serialization.DeserializationException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;

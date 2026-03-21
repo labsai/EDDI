@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.configs.httpcalls.model.HttpCall;
+import ai.labs.eddi.configs.apicalls.model.HttpCall;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

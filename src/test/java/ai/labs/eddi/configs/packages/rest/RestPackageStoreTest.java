@@ -1,10 +1,10 @@
-package ai.labs.eddi.configs.packages.rest;
+package ai.labs.eddi.configs.pipelines.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.packages.IPackageStore;
-import ai.labs.eddi.configs.packages.model.PackageConfiguration;
-import ai.labs.eddi.configs.packages.model.PackageConfiguration.PackageExtension;
+import ai.labs.eddi.configs.pipelines.IPackageStore;
+import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
+import ai.labs.eddi.configs.pipelines.model.PackageConfiguration.PackageExtension;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.client.configuration.ResourceClientLibrary;

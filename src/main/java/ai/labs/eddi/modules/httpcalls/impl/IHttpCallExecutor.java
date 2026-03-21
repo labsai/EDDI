@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.httpcalls.impl;
 
-import ai.labs.eddi.configs.httpcalls.model.HttpCall;
+import ai.labs.eddi.configs.apicalls.model.HttpCall;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 

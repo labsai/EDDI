@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.runtime.service;
 
-import ai.labs.eddi.configs.packages.model.PackageConfiguration;
+import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 
 /**

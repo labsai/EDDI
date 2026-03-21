@@ -1,10 +1,10 @@
-package ai.labs.eddi.configs.bots.rest;
+package ai.labs.eddi.configs.agents.rest;
 
-import ai.labs.eddi.configs.bots.IBotStore;
-import ai.labs.eddi.configs.bots.model.BotConfiguration;
+import ai.labs.eddi.configs.agents.IBotStore;
+import ai.labs.eddi.configs.agents.model.BotConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.packages.IRestPackageStore;
+import ai.labs.eddi.configs.pipelines.IRestPackageStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;

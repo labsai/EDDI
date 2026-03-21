@@ -1,8 +1,8 @@
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.configs.httpcalls.model.HttpCall;
-import ai.labs.eddi.configs.httpcalls.model.HttpCallsConfiguration;
-import ai.labs.eddi.configs.httpcalls.model.Request;
+import ai.labs.eddi.configs.apicalls.model.HttpCall;
+import ai.labs.eddi.configs.apicalls.model.HttpCallsConfiguration;
+import ai.labs.eddi.configs.apicalls.model.Request;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;

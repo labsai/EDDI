@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.runtime.service;
 
-import ai.labs.eddi.configs.bots.model.BotConfiguration;
+import ai.labs.eddi.configs.agents.model.BotConfiguration;
 
 /**
  * @author ginccc

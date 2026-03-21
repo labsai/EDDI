@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.behavior.impl;
 
-import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
+import ai.labs.eddi.configs.rules.model.BehaviorConfiguration;
 import ai.labs.eddi.datastore.serialization.DeserializationException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
@@ -11,7 +11,7 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
+import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
@@ -23,8 +23,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 
-import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
-import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType;
+import static ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.ConfigValue;
+import static ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.FieldType;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_PARSED;
 

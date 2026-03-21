@@ -1,7 +1,7 @@
 package ai.labs.eddi.modules.nlp;
 
-import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
-import ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
+import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor;
+import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
 import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
@@ -38,7 +38,7 @@ import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType.BOOLEAN;
+import static ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.FieldType.BOOLEAN;
 import static ai.labs.eddi.engine.memory.ContextUtilities.retrieveContextLanguageFromLongTermMemory;
 import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_PARSED;
 import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT;

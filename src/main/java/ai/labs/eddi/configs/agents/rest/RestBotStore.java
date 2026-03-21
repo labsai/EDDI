@@ -1,0 +1,211 @@
+package ai.labs.eddi.configs.agents.rest;
+
+import ai.labs.eddi.configs.agents.IBotStore;
+import ai.labs.eddi.configs.agents.IRestBotStore;
+import ai.labs.eddi.configs.agents.model.BotConfiguration;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.pipelines.IRestPackageStore;
+import ai.labs.eddi.configs.pipelines.rest.RestPackageStore;
+import ai.labs.eddi.configs.rest.RestVersionInfo;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.utils.RestUtilities;
+import org.jboss.logging.Logger;
+
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import java.net.URI;
+import java.util.List;
+
+import static ai.labs.eddi.configs.descriptors.ResourceUtilities.*;
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
+import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
+
+/**
+ * @author ginccc
+ */
+
+@ApplicationScoped
+public class RestBotStore implements IRestBotStore {
+    private static final String PACKAGE_URI = IRestPackageStore.resourceURI;
+    private final IBotStore botStore;
+    private final IRestPackageStore restPackageStore;
+    private final IJsonSchemaCreator jsonSchemaCreator;
+    private final RestVersionInfo<BotConfiguration> restVersionInfo;
+    private final IDocumentDescriptorStore documentDescriptorStore;
+    private final IScheduleStore scheduleStore;
+
+    private static final Logger log = Logger.getLogger(RestBotStore.class);
+
+    @Inject
+    public RestBotStore(IBotStore botStore,
+            IRestPackageStore restPackageStore,
+            IDocumentDescriptorStore documentDescriptorStore,
+            IJsonSchemaCreator jsonSchemaCreator,
+            IScheduleStore scheduleStore) {
+        restVersionInfo = new RestVersionInfo<>(resourceURI, botStore, documentDescriptorStore);
+        this.documentDescriptorStore = documentDescriptorStore;
+        this.botStore = botStore;
+        this.restPackageStore = restPackageStore;
+        this.jsonSchemaCreator = jsonSchemaCreator;
+        this.scheduleStore = scheduleStore;
+    }
+
+    @Override
+    public Response readJsonSchema() {
+        try {
+            return Response.ok(jsonSchemaCreator.generateSchema(BotConfiguration.class)).build();
+        } catch (Exception e) {
+            throw sneakyThrow(e);
+        }
+    }
+
+    @Override
+    public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit) {
+        return restVersionInfo.readDescriptors("ai.labs.bot", filter, index, limit);
+    }
+
+    @Override
+    public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit,
+            String containingPackageUri, Boolean includePreviousVersions) {
+
+        IResourceId validatedResourceId = validateUri(containingPackageUri);
+        if (validatedResourceId == null || !containingPackageUri.startsWith(PACKAGE_URI)) {
+            return createMalFormattedResourceUriException(containingPackageUri);
+        }
+
+        try {
+            return botStore.getBotDescriptorsContainingPackage(
+                    validatedResourceId.getId(), validatedResourceId.getVersion(), includePreviousVersions);
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
+        }
+    }
+
+    @Override
+    public BotConfiguration readBot(String id, Integer version) {
+        return restVersionInfo.read(id, version);
+    }
+
+    @Override
+    public Response updateBot(String id, Integer version, BotConfiguration botConfiguration) {
+        return restVersionInfo.update(id, version, botConfiguration);
+    }
+
+    @Override
+    public Response updateResourceInBot(String id, Integer version, URI resourceURI) {
+        String resourceURIString = resourceURI.toString();
+        String resourceURIWithoutVersion = resourceURIString.substring(0, resourceURIString.lastIndexOf("?"));
+
+        boolean updated = false;
+        BotConfiguration botConfiguration = readBot(id, version);
+        List<URI> packages = botConfiguration.getPackages();
+        for (int index = 0; index < packages.size(); index++) {
+            URI packageURI = packages.get(index);
+            if (packageURI.toString().startsWith(resourceURIWithoutVersion)) {
+                packages.set(index, resourceURI);
+                updated = true;
+            }
+        }
+
+        if (updated) {
+            return updateBot(id, version, botConfiguration);
+        } else {
+            URI uri = RestUtilities.createURI(RestPackageStore.resourceURI, id, versionQueryParam, version);
+            return Response.status(BAD_REQUEST).entity(uri).type(MediaType.TEXT_PLAIN).build();
+        }
+    }
+
+    @Override
+    public Response createBot(BotConfiguration botConfiguration) {
+        return restVersionInfo.create(botConfiguration);
+    }
+
+    @Override
+    public Response duplicateBot(String id, Integer version, Boolean deepCopy) {
+        restVersionInfo.validateParameters(id, version);
+        try {
+            BotConfiguration botConfiguration = botStore.read(id, version);
+            if (deepCopy) {
+                List<URI> packages = botConfiguration.getPackages();
+                for (int i = 0; i < packages.size(); i++) {
+                    URI packageUri = packages.get(i);
+                    IResourceId resourceId = RestUtilities.extractResourceId(packageUri);
+                    Response duplicateResourceResponse = restPackageStore.duplicatePackage(resourceId.getId(),
+                            resourceId.getVersion(), true);
+                    URI newResourceLocation = duplicateResourceResponse.getLocation();
+                    packages.set(i, newResourceLocation);
+                }
+            }
+
+            Response createBotResponse = restVersionInfo.create(botConfiguration);
+            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createBotResponse.getLocation());
+
+            return createBotResponse;
+        } catch (Exception e) {
+            throw sneakyThrow(e);
+        }
+    }
+
+    @Override
+    public Response deleteBot(String id, Integer version, Boolean permanent, Boolean cascade) {
+        if (cascade) {
+            // Cascade-delete all schedules for this bot first
+            try {
+                int deletedSchedules = scheduleStore.deleteSchedulesByBotId(id);
+                if (deletedSchedules > 0) {
+                    log.infof("Cascade-deleted %d schedule(s) for bot %s", deletedSchedules, id);
+                }
+            } catch (Exception e) {
+                log.warnf("Failed to cascade-delete schedules for bot %s: %s", id, e.getMessage());
+            }
+
+            try {
+                BotConfiguration botConfiguration = botStore.read(id, version);
+                for (URI packageUri : botConfiguration.getPackages()) {
+                    IResourceId resourceId = RestUtilities.extractResourceId(packageUri);
+                    try {
+                        // Check if this package is referenced by other bots
+                        var referencingBots = botStore.getBotDescriptorsContainingPackage(
+                                resourceId.getId(), resourceId.getVersion(), false);
+                        if (referencingBots.size() > 1) {
+                            log.infof("Skipping cascade-delete of package %s (v%d) — " +
+                                            "still referenced by %d other bot(s)",
+                                    resourceId.getId(), resourceId.getVersion(),
+                                    referencingBots.size() - 1);
+                            continue;
+                        }
+
+                        restPackageStore.deletePackage(
+                                resourceId.getId(), resourceId.getVersion(), permanent, true);
+                        log.infof("Cascade-deleted package %s (v%d) for bot %s",
+                                resourceId.getId(), resourceId.getVersion(), id);
+                    } catch (Exception e) {
+                        log.warnf("Failed to cascade-delete package %s: %s",
+                                resourceId.getId(), e.getMessage());
+                    }
+                }
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                log.warnf("Bot %s (v%d) not found for cascade — deleting bot only", id, version);
+            } catch (IResourceStore.ResourceStoreException e) {
+                log.warnf("Error reading bot %s for cascade: %s", id, e.getMessage());
+            }
+        }
+        return restVersionInfo.delete(id, version, permanent);
+    }
+
+    @Override
+    public String getResourceURI() {
+        return restVersionInfo.getResourceURI();
+    }
+
+    @Override
+    public IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
+        return botStore.getCurrentResourceId(id);
+    }
+}

@@ -1,6 +1,6 @@
 package ai.labs.eddi.configs.properties.model;
 
-import ai.labs.eddi.configs.httpcalls.model.HttpCodeValidator;
+import ai.labs.eddi.configs.apicalls.model.HttpCodeValidator;
 
 public class PropertyInstruction extends Property {
     private String fromObjectPath = "";

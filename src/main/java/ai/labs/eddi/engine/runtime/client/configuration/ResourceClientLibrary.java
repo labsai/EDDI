@@ -1,12 +1,12 @@
 package ai.labs.eddi.engine.runtime.client.configuration;
 
-import ai.labs.eddi.configs.behavior.IRestBehaviorStore;
-import ai.labs.eddi.configs.httpcalls.IRestHttpCallsStore;
-import ai.labs.eddi.configs.langchain.IRestLangChainStore;
+import ai.labs.eddi.configs.rules.IRestBehaviorStore;
+import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
+import ai.labs.eddi.configs.llm.IRestLangChainStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
-import ai.labs.eddi.configs.regulardictionary.IRestRegularDictionaryStore;
+import ai.labs.eddi.configs.dictionary.IRestRegularDictionaryStore;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;

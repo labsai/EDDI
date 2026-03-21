@@ -1,10 +1,10 @@
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.configs.bots.IRestBotStore;
-import ai.labs.eddi.configs.bots.model.BotConfiguration;
+import ai.labs.eddi.configs.agents.IRestBotStore;
+import ai.labs.eddi.configs.agents.model.BotConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.packages.IRestPackageStore;
+import ai.labs.eddi.configs.pipelines.IRestPackageStore;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;

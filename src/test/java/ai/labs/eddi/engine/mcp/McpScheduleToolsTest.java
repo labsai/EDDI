@@ -1,8 +1,8 @@
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.configs.bots.IRestBotStore;
+import ai.labs.eddi.configs.agents.IRestBotStore;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
-import ai.labs.eddi.configs.packages.IRestPackageStore;
+import ai.labs.eddi.configs.pipelines.IRestPackageStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;

@@ -1,11 +1,11 @@
 package ai.labs.eddi.modules.nlp.extensions.dictionaries.providers;
 
-import ai.labs.eddi.configs.regulardictionary.model.RegularDictionaryConfiguration;
+import ai.labs.eddi.configs.dictionary.model.RegularDictionaryConfiguration;
 import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
-import ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType;
+import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.ConfigValue;
+import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.FieldType;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;

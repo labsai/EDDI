@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.properties.impl;
 
-import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
+import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.PropertyInstruction;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;

@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine.runtime.service;
 
-import ai.labs.eddi.configs.bots.IRestBotStore;
-import ai.labs.eddi.configs.bots.model.BotConfiguration;
+import ai.labs.eddi.configs.agents.IRestBotStore;
+import ai.labs.eddi.configs.agents.model.BotConfiguration;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;

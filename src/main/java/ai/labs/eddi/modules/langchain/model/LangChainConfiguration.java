@@ -1,7 +1,7 @@
 package ai.labs.eddi.modules.langchain.model;
 
-import ai.labs.eddi.configs.httpcalls.model.PostResponse;
-import ai.labs.eddi.configs.httpcalls.model.PreRequest;
+import ai.labs.eddi.configs.apicalls.model.PostResponse;
+import ai.labs.eddi.configs.apicalls.model.PreRequest;
 
 import java.util.List;
 import java.util.Map;

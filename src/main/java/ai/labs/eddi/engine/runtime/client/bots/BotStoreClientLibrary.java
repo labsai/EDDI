@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.runtime.client.bots;
 
-import ai.labs.eddi.configs.bots.model.BotConfiguration;
+import ai.labs.eddi.configs.agents.model.BotConfiguration;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.runtime.IBot;
 import ai.labs.eddi.engine.runtime.IExecutablePackage;

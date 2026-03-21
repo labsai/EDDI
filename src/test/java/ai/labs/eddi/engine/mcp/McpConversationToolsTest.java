@@ -2,7 +2,7 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.engine.botmanagement.IRestBotTriggerStore;
 import ai.labs.eddi.engine.botmanagement.IUserConversationStore;
-import ai.labs.eddi.configs.bots.IRestBotStore;
+import ai.labs.eddi.configs.agents.IRestBotStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;

@@ -1,12 +1,12 @@
 package ai.labs.eddi.configs.schema;
 
-import ai.labs.eddi.configs.bots.model.BotConfiguration;
-import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
-import ai.labs.eddi.configs.httpcalls.model.HttpCallsConfiguration;
+import ai.labs.eddi.configs.agents.model.BotConfiguration;
+import ai.labs.eddi.configs.rules.model.BehaviorConfiguration;
+import ai.labs.eddi.configs.apicalls.model.HttpCallsConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
-import ai.labs.eddi.configs.packages.model.PackageConfiguration;
+import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
-import ai.labs.eddi.configs.regulardictionary.model.RegularDictionaryConfiguration;
+import ai.labs.eddi.configs.dictionary.model.RegularDictionaryConfiguration;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;

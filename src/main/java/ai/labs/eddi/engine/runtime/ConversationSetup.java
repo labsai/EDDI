@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.runtime;
 
-import ai.labs.eddi.configs.bots.IRestBotStore;
+import ai.labs.eddi.configs.agents.IRestBotStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;

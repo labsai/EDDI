@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.httpcalls.impl;
 
-import ai.labs.eddi.configs.httpcalls.model.*;
+import ai.labs.eddi.configs.apicalls.model.*;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;

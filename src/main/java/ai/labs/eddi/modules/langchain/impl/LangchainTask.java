@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.langchain.impl;
 
-import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
+import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
@@ -30,8 +30,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 
-import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
-import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType;
+import static ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.ConfigValue;
+import static ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.FieldType;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 

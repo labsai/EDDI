@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.runtime.internal;
 
-import ai.labs.eddi.configs.bots.IBotStore;
+import ai.labs.eddi.configs.agents.IBotStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;

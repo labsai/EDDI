@@ -1,9 +1,9 @@
 package ai.labs.eddi.modules.httpcalls.impl;
 
-import ai.labs.eddi.configs.httpcalls.model.HttpCodeValidator;
-import ai.labs.eddi.configs.httpcalls.model.PostResponse;
-import ai.labs.eddi.configs.httpcalls.model.PreRequest;
-import ai.labs.eddi.configs.httpcalls.model.QuickRepliesBuildingInstruction;
+import ai.labs.eddi.configs.apicalls.model.HttpCodeValidator;
+import ai.labs.eddi.configs.apicalls.model.PostResponse;
+import ai.labs.eddi.configs.apicalls.model.PreRequest;
+import ai.labs.eddi.configs.apicalls.model.QuickRepliesBuildingInstruction;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.PropertyInstruction;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;

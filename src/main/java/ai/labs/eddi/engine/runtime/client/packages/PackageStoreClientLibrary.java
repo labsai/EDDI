@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.runtime.client.packages;
 
-import ai.labs.eddi.configs.packages.model.PackageConfiguration;
+import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
 import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;

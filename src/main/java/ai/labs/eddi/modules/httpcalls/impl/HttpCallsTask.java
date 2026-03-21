@@ -1,9 +1,9 @@
 package ai.labs.eddi.modules.httpcalls.impl;
 
-import ai.labs.eddi.configs.httpcalls.model.*;
-import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
-import ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
-import ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType;
+import ai.labs.eddi.configs.apicalls.model.*;
+import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor;
+import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.ConfigValue;
+import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.FieldType;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;

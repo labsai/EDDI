@@ -1,13 +1,13 @@
 package ai.labs.eddi.configs.output.rest.keys;
 
-import ai.labs.eddi.configs.behavior.IBehaviorStore;
-import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
-import ai.labs.eddi.configs.behavior.model.BehaviorGroupConfiguration;
-import ai.labs.eddi.configs.behavior.model.BehaviorRuleConfiguration;
+import ai.labs.eddi.configs.rules.IBehaviorStore;
+import ai.labs.eddi.configs.rules.model.BehaviorConfiguration;
+import ai.labs.eddi.configs.rules.model.BehaviorGroupConfiguration;
+import ai.labs.eddi.configs.rules.model.BehaviorRuleConfiguration;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.keys.IRestOutputActions;
-import ai.labs.eddi.configs.packages.IPackageStore;
-import ai.labs.eddi.configs.packages.model.PackageConfiguration;
+import ai.labs.eddi.configs.pipelines.IPackageStore;
+import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.CollectionUtilities;
 import ai.labs.eddi.utils.RestUtilities;

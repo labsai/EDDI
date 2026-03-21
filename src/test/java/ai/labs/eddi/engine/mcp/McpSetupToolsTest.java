@@ -1,13 +1,13 @@
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.configs.behavior.IRestBehaviorStore;
-import ai.labs.eddi.configs.bots.IRestBotStore;
+import ai.labs.eddi.configs.rules.IRestBehaviorStore;
+import ai.labs.eddi.configs.agents.IRestBotStore;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
-import ai.labs.eddi.configs.httpcalls.IRestHttpCallsStore;
-import ai.labs.eddi.configs.langchain.IRestLangChainStore;
+import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
+import ai.labs.eddi.configs.llm.IRestLangChainStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
-import ai.labs.eddi.configs.packages.IRestPackageStore;
-import ai.labs.eddi.configs.packages.model.PackageConfiguration;
+import ai.labs.eddi.configs.pipelines.IRestPackageStore;
+import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestBotAdministration;

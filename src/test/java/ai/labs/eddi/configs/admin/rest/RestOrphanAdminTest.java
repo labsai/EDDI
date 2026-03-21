@@ -2,13 +2,13 @@ package ai.labs.eddi.configs.admin.rest;
 
 import ai.labs.eddi.configs.admin.model.OrphanInfo;
 import ai.labs.eddi.configs.admin.model.OrphanReport;
-import ai.labs.eddi.configs.bots.IBotStore;
-import ai.labs.eddi.configs.bots.model.BotConfiguration;
+import ai.labs.eddi.configs.agents.IBotStore;
+import ai.labs.eddi.configs.agents.model.BotConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.packages.IPackageStore;
-import ai.labs.eddi.configs.packages.model.PackageConfiguration;
-import ai.labs.eddi.configs.packages.model.PackageConfiguration.PackageExtension;
+import ai.labs.eddi.configs.pipelines.IPackageStore;
+import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
+import ai.labs.eddi.configs.pipelines.model.PackageConfiguration.PackageExtension;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
