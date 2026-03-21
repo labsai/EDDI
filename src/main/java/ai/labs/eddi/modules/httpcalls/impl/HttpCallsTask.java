@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.httpcalls.impl;
 
-import ai.labs.eddi.configs.http.model.*;
+import ai.labs.eddi.configs.httpcalls.model.*;
 import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType;

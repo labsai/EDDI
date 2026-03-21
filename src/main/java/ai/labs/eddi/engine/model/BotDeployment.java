@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.model;
 
-import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.model.Deployment.Environment;
 
 import java.util.HashMap;
 import java.util.Map;

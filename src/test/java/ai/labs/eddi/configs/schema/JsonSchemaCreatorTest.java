@@ -2,7 +2,7 @@ package ai.labs.eddi.configs.schema;
 
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
-import ai.labs.eddi.configs.http.model.HttpCallsConfiguration;
+import ai.labs.eddi.configs.httpcalls.model.HttpCallsConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;

@@ -3,7 +3,7 @@ package ai.labs.eddi.engine.memory;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
-import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
 
 import java.io.Serializable;

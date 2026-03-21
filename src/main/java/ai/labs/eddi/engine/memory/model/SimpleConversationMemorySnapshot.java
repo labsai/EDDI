@@ -1,8 +1,8 @@
 package ai.labs.eddi.engine.memory.model;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.engine.model.ConversationState;
-import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.model.ConversationState;
+import ai.labs.eddi.model.Deployment;
 
 import java.util.Date;
 import java.util.LinkedList;

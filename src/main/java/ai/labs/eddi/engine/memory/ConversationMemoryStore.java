@@ -3,7 +3,7 @@ package ai.labs.eddi.engine.memory;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.model.ConversationState;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
@@ -20,7 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 
 import static ai.labs.eddi.engine.model.Context.ContextType.valueOf;
-import static ai.labs.eddi.engine.model.ConversationState.ENDED;
+import static ai.labs.eddi.model.ConversationState.ENDED;
 
 /**
  * MongoDB implementation of {@link IConversationMemoryStore}.

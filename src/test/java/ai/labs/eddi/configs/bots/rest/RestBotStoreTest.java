@@ -2,10 +2,10 @@ package ai.labs.eddi.configs.bots.rest;
 
 import ai.labs.eddi.configs.bots.IBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
-import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
-import ai.labs.eddi.configs.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import jakarta.ws.rs.core.Response;

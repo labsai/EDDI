@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.internal;
 
-import ai.labs.eddi.engine.IRestCoordinatorAdmin;
+import ai.labs.eddi.engine.api.IRestCoordinatorAdmin;
 import ai.labs.eddi.engine.model.CoordinatorStatus;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;

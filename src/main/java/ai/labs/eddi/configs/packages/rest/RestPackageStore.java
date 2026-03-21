@@ -1,6 +1,6 @@
 package ai.labs.eddi.configs.packages.rest;
 
-import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 
 import ai.labs.eddi.configs.packages.IPackageStore;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
@@ -11,7 +11,7 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.client.configuration.ResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import org.jboss.logging.Logger;
 
@@ -23,7 +23,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
-import static ai.labs.eddi.configs.utilities.ResourceUtilities.*;
+import static ai.labs.eddi.configs.descriptors.ResourceUtilities.*;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;

@@ -1,8 +1,8 @@
 package ai.labs.eddi.modules.langchain.tools;
 
-import ai.labs.eddi.configs.http.IHttpCallsStore;
-import ai.labs.eddi.configs.http.model.HttpCall;
-import ai.labs.eddi.configs.http.model.HttpCallsConfiguration;
+import ai.labs.eddi.configs.httpcalls.IHttpCallsStore;
+import ai.labs.eddi.configs.httpcalls.model.HttpCall;
+import ai.labs.eddi.configs.httpcalls.model.HttpCallsConfiguration;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;

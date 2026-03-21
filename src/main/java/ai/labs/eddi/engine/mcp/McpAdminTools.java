@@ -2,13 +2,13 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.behavior.IRestBehaviorStore;
 import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
-import ai.labs.eddi.configs.botmanagement.IRestBotTriggerStore;
+import ai.labs.eddi.engine.botmanagement.IRestBotTriggerStore;
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
-import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
-import ai.labs.eddi.configs.http.IRestHttpCallsStore;
-import ai.labs.eddi.configs.http.model.HttpCallsConfiguration;
+import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.httpcalls.IRestHttpCallsStore;
+import ai.labs.eddi.configs.httpcalls.model.HttpCallsConfiguration;
 import ai.labs.eddi.configs.langchain.IRestLangChainStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
@@ -19,18 +19,18 @@ import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.regulardictionary.IRestRegularDictionaryStore;
 import ai.labs.eddi.configs.regulardictionary.model.RegularDictionaryConfiguration;
-import ai.labs.eddi.configs.schedule.IScheduleStore;
-import ai.labs.eddi.configs.schedule.model.ScheduleConfiguration;
-import ai.labs.eddi.configs.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.IRestBotAdministration;
+import ai.labs.eddi.engine.api.IRestBotAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.internal.CronDescriber;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
-import ai.labs.eddi.engine.model.BotTriggerConfiguration;
+import ai.labs.eddi.model.BotTriggerConfiguration;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -968,8 +968,8 @@ public class McpAdminTools {
             Instant nextFire;
             String description;
             if (type == ScheduleConfiguration.TriggerType.HEARTBEAT) {
-                nextFire = Instant.now().plusSeconds(heartbeatIntervalSeconds);
-                long sec = heartbeatIntervalSeconds;
+                long sec = heartbeatIntervalSeconds != null ? heartbeatIntervalSeconds : 300L;
+                nextFire = Instant.now().plusSeconds(sec);
                 description = sec < 60 ? "Every " + sec + " seconds"
                         : sec < 3600 ? "Every " + (sec / 60) + " minutes"
                         : "Every " + (sec / 3600) + " hours";

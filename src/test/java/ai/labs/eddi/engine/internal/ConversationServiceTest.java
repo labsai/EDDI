@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.properties.IPropertiesStore;
-import ai.labs.eddi.engine.IConversationService.*;
+import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
@@ -10,8 +10,8 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
-import ai.labs.eddi.engine.model.ConversationState;
-import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.model.ConversationState;
+import ai.labs.eddi.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IBot;
 import ai.labs.eddi.engine.runtime.IBotFactory;
@@ -19,7 +19,7 @@ import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
-import ai.labs.eddi.engine.utilities.IConversationSetup;
+import ai.labs.eddi.engine.runtime.IConversationSetup;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -377,7 +377,7 @@ class ConversationServiceTest {
 
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
 
-        var handler = mock(ai.labs.eddi.engine.IConversationService.StreamingResponseHandler.class);
+        var handler = mock(ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler.class);
 
         assertThrows(BotMismatchException.class,
                 () -> conversationService.sayStreaming(ENV, BOT_ID, CONVERSATION_ID,
@@ -402,7 +402,7 @@ class ConversationServiceTest {
         when(mockBot.continueConversation(any(), any(), any())).thenReturn(mockConversation);
         when(mockConversation.isEnded()).thenReturn(true);
 
-        var handler = mock(ai.labs.eddi.engine.IConversationService.StreamingResponseHandler.class);
+        var handler = mock(ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler.class);
 
         assertThrows(ConversationEndedException.class,
                 () -> conversationService.sayStreaming(ENV, BOT_ID, CONVERSATION_ID,
@@ -428,7 +428,7 @@ class ConversationServiceTest {
         when(mockBot.continueConversation(any(), any(), any())).thenReturn(mockConversation);
         when(mockConversation.isEnded()).thenReturn(false);
 
-        var handler = mock(ai.labs.eddi.engine.IConversationService.StreamingResponseHandler.class);
+        var handler = mock(ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler.class);
 
         conversationService.sayStreaming(ENV, BOT_ID, CONVERSATION_ID,
                 false, false, List.of(),

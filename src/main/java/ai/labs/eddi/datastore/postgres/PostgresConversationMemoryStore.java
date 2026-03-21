@@ -5,7 +5,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.model.ConversationState;
 import io.quarkus.arc.profile.IfBuildProfile;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static ai.labs.eddi.engine.model.Context.ContextType.valueOf;
-import static ai.labs.eddi.engine.model.ConversationState.ENDED;
+import static ai.labs.eddi.model.ConversationState.ENDED;
 
 /**
  * PostgreSQL implementation of {@link IConversationMemoryStore}.

@@ -1,9 +1,9 @@
 package ai.labs.eddi.engine.runtime.service;
 
-import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;

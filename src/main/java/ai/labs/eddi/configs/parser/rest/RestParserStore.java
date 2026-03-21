@@ -1,12 +1,12 @@
 package ai.labs.eddi.configs.parser.rest;
 
-import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;

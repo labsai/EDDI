@@ -1,12 +1,12 @@
 package ai.labs.eddi.engine.runtime.internal;
 
-import ai.labs.eddi.configs.schedule.IScheduleStore;
-import ai.labs.eddi.configs.schedule.model.ScheduleConfiguration;
-import ai.labs.eddi.configs.schedule.model.ScheduleConfiguration.TriggerType;
-import ai.labs.eddi.configs.schedule.model.ScheduleFireLog;
-import ai.labs.eddi.engine.IConversationService;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
+import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;

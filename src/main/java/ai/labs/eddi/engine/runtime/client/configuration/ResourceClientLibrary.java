@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine.runtime.client.configuration;
 
 import ai.labs.eddi.configs.behavior.IRestBehaviorStore;
-import ai.labs.eddi.configs.http.IRestHttpCallsStore;
+import ai.labs.eddi.configs.httpcalls.IRestHttpCallsStore;
 import ai.labs.eddi.configs.langchain.IRestLangChainStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;

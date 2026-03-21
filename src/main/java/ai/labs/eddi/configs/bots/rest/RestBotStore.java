@@ -3,15 +3,15 @@ package ai.labs.eddi.configs.bots.rest;
 import ai.labs.eddi.configs.bots.IBotStore;
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
-import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.packages.rest.RestPackageStore;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
-import ai.labs.eddi.configs.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import org.jboss.logging.Logger;
 
@@ -22,7 +22,7 @@ import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.util.List;
 
-import static ai.labs.eddi.configs.utilities.ResourceUtilities.*;
+import static ai.labs.eddi.configs.descriptors.ResourceUtilities.*;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
 

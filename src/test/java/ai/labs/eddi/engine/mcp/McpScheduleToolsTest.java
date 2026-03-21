@@ -1,15 +1,15 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.bots.IRestBotStore;
-import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
-import ai.labs.eddi.configs.schedule.IScheduleStore;
-import ai.labs.eddi.configs.schedule.model.ScheduleConfiguration;
-import ai.labs.eddi.configs.schedule.model.ScheduleConfiguration.FireStatus;
-import ai.labs.eddi.configs.schedule.model.ScheduleConfiguration.TriggerType;
-import ai.labs.eddi.configs.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
+import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.IRestBotAdministration;
+import ai.labs.eddi.engine.api.IRestBotAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;

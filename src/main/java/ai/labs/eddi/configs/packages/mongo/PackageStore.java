@@ -1,9 +1,9 @@
 package ai.labs.eddi.configs.packages.mongo;
 
-import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.packages.IPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;

@@ -1,10 +1,10 @@
 package ai.labs.eddi.engine.runtime.internal;
 
-import ai.labs.eddi.configs.schedule.IScheduleStore;
-import ai.labs.eddi.configs.schedule.model.ScheduleConfiguration;
-import ai.labs.eddi.configs.schedule.model.ScheduleConfiguration.FireStatus;
-import ai.labs.eddi.configs.schedule.model.ScheduleConfiguration.TriggerType;
-import ai.labs.eddi.configs.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
+import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -54,7 +54,6 @@ public class SchedulePollerService {
     private final int backoffMultiplier;
     private final String configuredInstanceId;
     private final String defaultTimeZone;
-    private final long minIntervalSeconds;
 
     private String instanceId;
     private Counter pollCounter;
@@ -82,9 +81,7 @@ public class SchedulePollerService {
             @ConfigProperty(name = "eddi.schedule.instance-id", defaultValue = "")
             String configuredInstanceId,
             @ConfigProperty(name = "eddi.schedule.default-timezone", defaultValue = "UTC")
-            String defaultTimeZone,
-            @ConfigProperty(name = "eddi.schedule.min-interval-seconds", defaultValue = "60")
-            long minIntervalSeconds) {
+            String defaultTimeZone) {
         this.scheduleStore = scheduleStore;
         this.fireExecutor = fireExecutor;
         this.meterRegistry = meterRegistry;
@@ -95,7 +92,6 @@ public class SchedulePollerService {
         this.backoffMultiplier = backoffMultiplier;
         this.configuredInstanceId = configuredInstanceId;
         this.defaultTimeZone = defaultTimeZone;
-        this.minIntervalSeconds = minIntervalSeconds;
     }
 
     @PostConstruct

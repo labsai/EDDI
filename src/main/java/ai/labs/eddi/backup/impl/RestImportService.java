@@ -9,11 +9,11 @@ import ai.labs.eddi.configs.behavior.IRestBehaviorStore;
 import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
 import ai.labs.eddi.configs.bots.IRestBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
-import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
-import ai.labs.eddi.configs.http.IRestHttpCallsStore;
-import ai.labs.eddi.configs.http.model.HttpCallsConfiguration;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.httpcalls.IRestHttpCallsStore;
+import ai.labs.eddi.configs.httpcalls.model.HttpCallsConfiguration;
 import ai.labs.eddi.configs.langchain.IRestLangChainStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.output.IRestOutputStore;
@@ -28,7 +28,7 @@ import ai.labs.eddi.configs.regulardictionary.model.RegularDictionaryConfigurati
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.IRestBotAdministration;
+import ai.labs.eddi.engine.api.IRestBotAdministration;
 import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
@@ -58,7 +58,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
-import static ai.labs.eddi.engine.model.Deployment.Environment.unrestricted;
+import static ai.labs.eddi.model.Deployment.Environment.unrestricted;
 import static ai.labs.eddi.utils.RuntimeUtilities.getResourceAsStream;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 

@@ -7,8 +7,8 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static ai.labs.eddi.engine.model.Deployment.Status.ERROR;
-import static ai.labs.eddi.engine.model.Deployment.Status.READY;
+import static ai.labs.eddi.model.Deployment.Status.ERROR;
+import static ai.labs.eddi.model.Deployment.Status.READY;
 
 @ApplicationScoped
 public class DeploymentListener implements IDeploymentListener {

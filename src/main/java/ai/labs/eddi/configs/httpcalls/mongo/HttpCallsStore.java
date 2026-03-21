@@ -1,0 +1,37 @@
+package ai.labs.eddi.configs.httpcalls.mongo;
+
+import ai.labs.eddi.configs.httpcalls.IHttpCallsStore;
+import ai.labs.eddi.configs.httpcalls.model.HttpCall;
+import ai.labs.eddi.configs.httpcalls.model.HttpCallsConfiguration;
+import ai.labs.eddi.datastore.AbstractResourceStore;
+import ai.labs.eddi.datastore.IResourceStorageFactory;
+import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import java.util.Collection;
+import java.util.List;
+import java.util.stream.Collectors;
+
+/**
+ * @author ginccc
+ */
+@ApplicationScoped
+public class HttpCallsStore extends AbstractResourceStore<HttpCallsConfiguration>
+        implements IHttpCallsStore {
+
+    @Inject
+    public HttpCallsStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
+        super(storageFactory, "httpcalls", documentBuilder, HttpCallsConfiguration.class);
+    }
+
+    @Override
+    public List<String> readActions(String id, Integer version, String filter, Integer limit)
+            throws ResourceNotFoundException, ResourceStoreException {
+
+        List<String> actions = read(id, version).getHttpCalls().stream().map(HttpCall::getActions)
+                .flatMap(Collection::stream).collect(Collectors.toList());
+
+        return limit > 0 ? actions.subList(0, limit) : actions;
+    }
+}

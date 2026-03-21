@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.internal;
 
-import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.model.Deployment;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.MDC;
 

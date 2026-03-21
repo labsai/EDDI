@@ -1,9 +1,9 @@
 package ai.labs.eddi.engine.model;
 
-import ai.labs.eddi.engine.model.Deployment.Environment;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.model.Deployment.Environment;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 
-import static ai.labs.eddi.engine.model.Deployment.Status;
+import static ai.labs.eddi.model.Deployment.Status;
 
 public class BotDeploymentStatus {
     private Environment environment = Environment.unrestricted;

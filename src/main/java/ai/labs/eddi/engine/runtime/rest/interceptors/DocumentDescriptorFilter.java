@@ -1,12 +1,10 @@
 package ai.labs.eddi.engine.runtime.rest.interceptors;
 
-import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
-import ai.labs.eddi.engine.model.ResourceDescriptor;
-import ai.labs.eddi.testing.descriptor.ITestCaseDescriptorStore;
-import ai.labs.eddi.testing.descriptor.model.TestCaseDescriptor;
+import ai.labs.eddi.model.ResourceDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
@@ -23,8 +21,8 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.util.Date;
 
-import static ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore.DESCRIPTOR_STORE_PATH;
-import static ai.labs.eddi.configs.utilities.ResourceUtilities.createDocumentDescriptor;
+import static ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore.DESCRIPTOR_STORE_PATH;
+import static ai.labs.eddi.configs.descriptors.ResourceUtilities.createDocumentDescriptor;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 /**
@@ -35,7 +33,6 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 public class DocumentDescriptorFilter implements ContainerResponseFilter {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
-    private final ITestCaseDescriptorStore testCaseDescriptorStore;
 
     private static final Logger log = Logger.getLogger(DocumentDescriptorFilter.class);
 
@@ -44,11 +41,9 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
 
     @Inject
     public DocumentDescriptorFilter(IDocumentDescriptorStore documentDescriptorStore,
-                                    IConversationDescriptorStore conversationDescriptorStore,
-                                    ITestCaseDescriptorStore testCaseDescriptorStore) {
+                                    IConversationDescriptorStore conversationDescriptorStore) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
-        this.testCaseDescriptorStore = testCaseDescriptorStore;
     }
 
     @Override
@@ -75,11 +70,6 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
                             // the resource was created successfully
                             if (httpStatus == 201) {
                                 if (isResourceIdValid(resourceId) &&
-                                        resourceLocationUri.startsWith("eddi://ai.labs.testcases")) {
-                                    testCaseDescriptorStore.createDescriptor(
-                                            resourceId.getId(), resourceId.getVersion(),
-                                            createTestCaseDescriptor(createdResourceURI));
-                                } else if (isResourceIdValid(resourceId) &&
                                         !resourceLocationUri.startsWith("eddi://ai.labs.conversation")) {
                                     try {
                                         documentDescriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion());
@@ -129,32 +119,15 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
         }
     }
 
-    @SuppressWarnings("rawtypes")
+    @SuppressWarnings("rawtypes")
     private IDescriptorStore getDescriptorStore(String createdResourceURIString) {
         IDescriptorStore descriptorStore;
-        if (createdResourceURIString.contains("testcases")) {
-            descriptorStore = testCaseDescriptorStore;
-        } else if (createdResourceURIString.contains("conversation")) {
+        if (createdResourceURIString.contains("conversation")) {
             descriptorStore = conversationDescriptorStore;
         } else {
             descriptorStore = documentDescriptorStore;
         }
         return descriptorStore;
-    }
-
-    private static TestCaseDescriptor createTestCaseDescriptor(URI resource/*, URI author*/) {
-        Date current = new Date(System.currentTimeMillis());
-
-        TestCaseDescriptor descriptor = new TestCaseDescriptor();
-        descriptor.setName("");
-        descriptor.setDescription("");
-        descriptor.setResource(resource);
-        descriptor.setCreatedOn(current);
-        descriptor.setLastModifiedOn(current);
-        /*descriptor.setCreatedBy(author);
-        descriptor.setLastModifiedBy(author);*/
-
-        return descriptor;
     }
 
     private static URI createNewVersionOfResource(final URI resource, Integer version) {

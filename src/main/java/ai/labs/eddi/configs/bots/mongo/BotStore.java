@@ -2,9 +2,9 @@ package ai.labs.eddi.configs.bots.mongo;
 
 import ai.labs.eddi.configs.bots.IBotStore;
 import ai.labs.eddi.configs.bots.model.BotConfiguration;
-import ai.labs.eddi.configs.descriptor.mongo.DocumentDescriptorStore;
-import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.configs.descriptors.mongo.DocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;

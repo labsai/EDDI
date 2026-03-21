@@ -2,7 +2,7 @@ package ai.labs.eddi.configs.behavior;
 
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import io.swagger.v3.oas.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;

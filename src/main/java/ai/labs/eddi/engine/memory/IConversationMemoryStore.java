@@ -2,7 +2,7 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
-import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.model.ConversationState;
 
 import java.util.List;
 

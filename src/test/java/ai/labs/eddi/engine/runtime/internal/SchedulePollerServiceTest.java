@@ -1,10 +1,10 @@
 package ai.labs.eddi.engine.runtime.internal;
 
-import ai.labs.eddi.configs.schedule.IScheduleStore;
-import ai.labs.eddi.configs.schedule.model.ScheduleConfiguration;
-import ai.labs.eddi.configs.schedule.model.ScheduleConfiguration.FireStatus;
-import ai.labs.eddi.configs.schedule.model.ScheduleConfiguration.TriggerType;
-import ai.labs.eddi.configs.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
+import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,8 +42,7 @@ class SchedulePollerServiceTest {
                 15,                      // backoffBaseSeconds
                 4,                       // backoffMultiplier
                 "test-instance",         // instanceId
-                "UTC",                   // defaultTimeZone
-                60                       // minIntervalSeconds
+                "UTC"                    // defaultTimeZone
         );
         poller.init();
     }
@@ -64,7 +63,7 @@ class SchedulePollerServiceTest {
     void init_disabledScheduler() {
         var disabled = new SchedulePollerService(
                 scheduleStore, fireExecutor, new SimpleMeterRegistry(),
-                false, Duration.ofMinutes(5), 5, 15, 4, "", "UTC", 60);
+                false, Duration.ofMinutes(5), 5, 15, 4, "", "UTC");
         disabled.init();
         assertFalse(disabled.isEnabled());
     }
@@ -73,7 +72,7 @@ class SchedulePollerServiceTest {
     void init_autoDetectsHostnameIfNotConfigured() {
         var autoId = new SchedulePollerService(
                 scheduleStore, fireExecutor, new SimpleMeterRegistry(),
-                true, Duration.ofMinutes(5), 5, 15, 4, "", "UTC", 60);
+                true, Duration.ofMinutes(5), 5, 15, 4, "", "UTC");
         autoId.init();
         assertNotNull(autoId.getInstanceId());
         assertFalse(autoId.getInstanceId().isBlank());
@@ -85,7 +84,7 @@ class SchedulePollerServiceTest {
     void poll_skipsWhenDisabled() throws Exception {
         var disabled = new SchedulePollerService(
                 scheduleStore, fireExecutor, new SimpleMeterRegistry(),
-                false, Duration.ofMinutes(5), 5, 15, 4, "", "UTC", 60);
+                false, Duration.ofMinutes(5), 5, 15, 4, "", "UTC");
         disabled.init();
 
         disabled.pollDueSchedules();

@@ -1,13 +1,16 @@
 package ai.labs.eddi.engine.internal;
 
-import ai.labs.eddi.configs.botmanagement.IRestBotTriggerStore;
-import ai.labs.eddi.configs.botmanagement.IUserConversationStore;
+import ai.labs.eddi.engine.botmanagement.IRestBotTriggerStore;
+import ai.labs.eddi.engine.botmanagement.IUserConversationStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceAlreadyExistsException;
-import ai.labs.eddi.engine.IRestBotEngine;
-import ai.labs.eddi.engine.IRestBotManagement;
+import ai.labs.eddi.engine.api.IRestBotEngine;
+import ai.labs.eddi.engine.api.IRestBotManagement;
 import ai.labs.eddi.engine.model.*;
+import ai.labs.eddi.model.BotTriggerConfiguration;
+import ai.labs.eddi.model.ConversationState;
+import ai.labs.eddi.model.UserConversation;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.utils.RestUtilities;
 import io.quarkus.security.UnauthorizedException;
@@ -28,7 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
-import static ai.labs.eddi.engine.model.Deployment.Environment.unrestricted;
+import static ai.labs.eddi.model.Deployment.Environment.unrestricted;
 
 @ApplicationScoped
 public class RestBotManagement implements IRestBotManagement {

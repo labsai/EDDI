@@ -1,7 +1,7 @@
 package ai.labs.eddi.configs.packages.rest;
 
-import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.packages.IPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration.PackageExtension;

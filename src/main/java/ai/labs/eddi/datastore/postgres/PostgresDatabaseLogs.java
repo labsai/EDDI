@@ -1,7 +1,7 @@
 package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.engine.model.DatabaseLog;
-import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import io.quarkus.arc.profile.IfBuildProfile;

@@ -3,7 +3,7 @@ package ai.labs.eddi.datastore.postgres;
 import ai.labs.eddi.configs.deployment.IDeploymentStorage;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.model.Deployment.Environment;
 import io.quarkus.arc.profile.IfBuildProfile;
 
 import jakarta.enterprise.context.ApplicationScoped;
