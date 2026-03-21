@@ -6,7 +6,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class BotDeployment {
-    private Environment environment = Environment.unrestricted;
+    private Environment environment = Environment.production;
     private String botId;
     private Map<String, Context> initialContext = new HashMap<>();
 

@@ -94,7 +94,7 @@ public class McpConversationTools {
     @Tool(name = "list_bots", description = "List all deployed bots with their status, version, and name. " +
             "Returns a JSON array of bot deployment statuses.")
     public String listBots(
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
+            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
         try {
             var env = parseEnvironment(environment);
             List<BotDeploymentStatus> statuses = botAdmin.getDeploymentStatuses(env);
@@ -126,7 +126,7 @@ public class McpConversationTools {
             "Tip: Use chat_with_bot instead if you want to send a message immediately.")
     public String createConversation(
             @ToolArg(description = "Bot ID (required)") String botId,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
+            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
         if (botId == null || botId.isBlank()) return errorJson("botId is required");
         try {
             var env = parseEnvironment(environment);
@@ -152,7 +152,7 @@ public class McpConversationTools {
             @ToolArg(description = "Bot ID (required)") String botId,
             @ToolArg(description = "Conversation ID from create_conversation (required)") String conversationId,
             @ToolArg(description = "The user message to send to the bot (required)") String message,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
+            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
         if (botId == null || botId.isBlank()) return errorJson("botId is required");
         if (conversationId == null || conversationId.isBlank()) return errorJson("conversationId is required");
         if (message == null || message.isBlank()) return errorJson("message is required");
@@ -177,7 +177,7 @@ public class McpConversationTools {
             @ToolArg(description = "Bot ID (required)") String botId,
             @ToolArg(description = "The user message to send to the bot (required)") String message,
             @ToolArg(description = "Conversation ID to continue (optional — creates new if omitted)") String conversationId,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
+            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
         if (botId == null || botId.isBlank()) return errorJson("botId is required");
         if (message == null || message.isBlank()) return errorJson("message is required");
         try {
@@ -212,7 +212,7 @@ public class McpConversationTools {
     public String readConversation(
             @ToolArg(description = "Bot ID (required)") String botId,
             @ToolArg(description = "Conversation ID (required)") String conversationId,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment,
+            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment,
             @ToolArg(description = "Return only the current (latest) step? (default: true)") Boolean currentStepOnly,
             @ToolArg(description = "Return detailed internal data? (default: false)") Boolean returnDetailed,
             @ToolArg(description = "Comma-separated list of fields to return (e.g. 'input,output,actions'). " +
@@ -395,7 +395,7 @@ public class McpConversationTools {
             "and any intents it serves. This is the best way to find bots by purpose.")
     public String discoverBots(
             @ToolArg(description = "Optional filter string to search bot names") String filter,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
+            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
         try {
             var env = parseEnvironment(environment);
             List<BotDeploymentStatus> statuses = botAdmin.getDeploymentStatuses(env);
@@ -463,7 +463,7 @@ public class McpConversationTools {
             @ToolArg(description = "Intent that maps to a bot trigger (required). E.g. 'customer_support'") String intent,
             @ToolArg(description = "User ID for conversation management (required)") String userId,
             @ToolArg(description = "The user message to send (required)") String message,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
+            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
         if (intent == null || intent.isBlank()) return errorJson("intent is required");
         if (userId == null || userId.isBlank()) return errorJson("userId is required");
         if (message == null || message.isBlank()) return errorJson("message is required");

@@ -6,7 +6,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import static ai.labs.eddi.engine.model.Deployment.Status;
 
 public class BotDeploymentStatus {
-    private Environment environment = Environment.unrestricted;
+    private Environment environment = Environment.production;
     private String botId;
     private Integer botVersion;
     private Status status = Status.NOT_FOUND;

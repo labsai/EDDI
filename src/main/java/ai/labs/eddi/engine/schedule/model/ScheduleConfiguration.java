@@ -43,7 +43,7 @@ public class ScheduleConfiguration {
     // -- Target --
     private String botId;
     private int botVersion;          // 0 = latest deployed
-    private String environment;      // "unrestricted" | "restricted" | "test"
+    private String environment;      // "production" | "restricted" | "test"
     private String tenantId;
 
     // -- Timing --

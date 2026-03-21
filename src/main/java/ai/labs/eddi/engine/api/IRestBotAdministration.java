@@ -56,5 +56,5 @@ public interface IRestBotAdministration {
     @Path("/{environment}/deploymentstatus")
     @Produces(MediaType.APPLICATION_JSON)
     List<BotDeploymentStatus> getDeploymentStatuses(
-            @PathParam("environment") @DefaultValue("unrestricted") Environment environment);
+            @PathParam("environment") @DefaultValue("production") Environment environment);
 }

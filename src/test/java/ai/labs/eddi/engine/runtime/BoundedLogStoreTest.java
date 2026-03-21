@@ -35,7 +35,7 @@ class BoundedLogStoreTest {
     private LogEntry createEntry(String level, String botId, String conversationId, String message) {
         return new LogEntry(
                 System.currentTimeMillis(), level, "test.Logger", message,
-                "unrestricted", botId, 1, conversationId, "user-1", "test-host-abcd"
+                "production", botId, 1, conversationId, "user-1", "test-host-abcd"
         );
     }
 

@@ -362,13 +362,13 @@ public class CreateApiBotIT {
     @Order(9)
     @DisplayName("should deploy the API bot successfully")
     void deployApiBot() throws InterruptedException {
-        given().post(String.format("administration/unrestricted/deploy/%s?version=%s&autoDeploy=false",
+        given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false",
                 botId, botVersion));
 
         // Poll until READY (max 30s)
         for (int i = 0; i < 60; i++) {
             Response response = given()
-                    .get(String.format("administration/unrestricted/deploymentstatus/%s?version=%s&format=text",
+                    .get(String.format("administration/production/deploymentstatus/%s?version=%s&format=text",
                             botId, botVersion));
             String status = response.getBody().print().trim();
             if ("READY".equals(status)) return;
@@ -386,7 +386,7 @@ public class CreateApiBotIT {
     @Order(10)
     @DisplayName("should start a conversation with the API bot")
     void startConversation() {
-        Response response = given().post("bots/unrestricted/" + botId + "?userId=apibot-test-user");
+        Response response = given().post("bots/production/" + botId + "?userId=apibot-test-user");
         String location = response.getHeader("location");
 
         Assertions.assertNotNull(location, "Conversation location should be returned");
@@ -399,7 +399,7 @@ public class CreateApiBotIT {
     static void cleanup() {
         if (botId != null) {
             try {
-                given().post(String.format("administration/unrestricted/undeploy/%s?version=%s", botId, botVersion));
+                given().post(String.format("administration/production/undeploy/%s?version=%s", botId, botVersion));
             } catch (Exception ignored) {
             }
         }

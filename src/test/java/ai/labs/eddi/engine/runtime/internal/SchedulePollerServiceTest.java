@@ -206,7 +206,7 @@ class SchedulePollerServiceTest {
         s.setBotId("bot-1");
         s.setCronExpression(cron);
         s.setMessage(message);
-        s.setEnvironment("unrestricted");
+        s.setEnvironment("production");
         s.setTimeZone("UTC");
         s.setFireStatus(FireStatus.PENDING);
         s.setNextFire(Instant.now().minusSeconds(60));
@@ -221,7 +221,7 @@ class SchedulePollerServiceTest {
         s.setBotId("bot-1");
         s.setHeartbeatIntervalSeconds(intervalSec);
         s.setMessage(message);
-        s.setEnvironment("unrestricted");
+        s.setEnvironment("production");
         s.setTimeZone("UTC");
         s.setFireStatus(FireStatus.PENDING);
         s.setNextFire(Instant.now().minusSeconds(60));

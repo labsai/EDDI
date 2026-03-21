@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
-import static ai.labs.eddi.engine.model.Deployment.Environment.unrestricted;
+import static ai.labs.eddi.engine.model.Deployment.Environment.production;
 import static ai.labs.eddi.engine.model.Deployment.Status.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -44,7 +44,7 @@ class BotFactoryTest {
         @Test
         @DisplayName("should return null when bot is not deployed")
         void getBot_notDeployed_returnsNull() {
-            IBot result = botFactory.getBot(unrestricted, "bot1", 1);
+            IBot result = botFactory.getBot(production, "bot1", 1);
             assertNull(result);
         }
 
@@ -55,9 +55,9 @@ class BotFactoryTest {
             Bot mockBot = createReadyBot("bot1", 1);
             when(botStoreClientLibrary.getBot("bot1", 1)).thenReturn(mockBot);
 
-            botFactory.deployBot(unrestricted, "bot1", 1, null);
+            botFactory.deployBot(production, "bot1", 1, null);
 
-            IBot result = botFactory.getBot(unrestricted, "bot1", 1);
+            IBot result = botFactory.getBot(production, "bot1", 1);
             assertNotNull(result);
             assertEquals(READY, result.getDeploymentStatus());
         }
@@ -76,11 +76,11 @@ class BotFactoryTest {
             when(botStoreClientLibrary.getBot("bot1", 1)).thenReturn(mockBot);
 
             DeploymentProcess process = mock(DeploymentProcess.class);
-            botFactory.deployBot(unrestricted, "bot1", 1, process);
+            botFactory.deployBot(production, "bot1", 1, process);
 
             verify(process).completed(READY);
 
-            IBot result = botFactory.getBot(unrestricted, "bot1", 1);
+            IBot result = botFactory.getBot(production, "bot1", 1);
             assertNotNull(result);
             assertEquals(READY, result.getDeploymentStatus());
         }
@@ -95,12 +95,12 @@ class BotFactoryTest {
             // BotFactory.deployBot() catches ServiceException inside compute() lambda
             // and sets ERROR status — it does NOT propagate the exception
             assertDoesNotThrow(
-                    () -> botFactory.deployBot(unrestricted, "bot1", 1, process));
+                    () -> botFactory.deployBot(production, "bot1", 1, process));
 
             verify(process).completed(ERROR);
 
             // The bot should be stored with ERROR status (not removed)
-            IBot errorBot = botFactory.getBot(unrestricted, "bot1", 1);
+            IBot errorBot = botFactory.getBot(production, "bot1", 1);
             assertNotNull(errorBot, "Bot with ERROR status should still be in the environment");
             assertEquals(ERROR, errorBot.getDeploymentStatus());
         }
@@ -114,8 +114,8 @@ class BotFactoryTest {
             DeploymentProcess process1 = mock(DeploymentProcess.class);
             DeploymentProcess process2 = mock(DeploymentProcess.class);
 
-            botFactory.deployBot(unrestricted, "bot1", 1, process1);
-            botFactory.deployBot(unrestricted, "bot1", 1, process2);
+            botFactory.deployBot(production, "bot1", 1, process1);
+            botFactory.deployBot(production, "bot1", 1, process2);
 
             // First deploy creates bot, second is a no-op
             verify(process1).completed(READY);
@@ -129,9 +129,9 @@ class BotFactoryTest {
             Bot mockBot = createReadyBot("bot1", 1);
             when(botStoreClientLibrary.getBot("bot1", 1)).thenReturn(mockBot);
 
-            assertDoesNotThrow(() -> botFactory.deployBot(unrestricted, "bot1", 1, null));
+            assertDoesNotThrow(() -> botFactory.deployBot(production, "bot1", 1, null));
 
-            IBot result = botFactory.getBot(unrestricted, "bot1", 1);
+            IBot result = botFactory.getBot(production, "bot1", 1);
             assertNotNull(result);
         }
     }
@@ -148,17 +148,17 @@ class BotFactoryTest {
             Bot mockBot = createReadyBot("bot1", 1);
             when(botStoreClientLibrary.getBot("bot1", 1)).thenReturn(mockBot);
 
-            botFactory.deployBot(unrestricted, "bot1", 1, null);
-            assertNotNull(botFactory.getBot(unrestricted, "bot1", 1));
+            botFactory.deployBot(production, "bot1", 1, null);
+            assertNotNull(botFactory.getBot(production, "bot1", 1));
 
-            botFactory.undeployBot(unrestricted, "bot1", 1);
-            assertNull(botFactory.getBot(unrestricted, "bot1", 1));
+            botFactory.undeployBot(production, "bot1", 1);
+            assertNull(botFactory.getBot(production, "bot1", 1));
         }
 
         @Test
         @DisplayName("should handle undeploy of non-existent bot gracefully")
         void undeployBot_nonExistent_noError() {
-            assertDoesNotThrow(() -> botFactory.undeployBot(unrestricted, "nobot", 1));
+            assertDoesNotThrow(() -> botFactory.undeployBot(production, "nobot", 1));
         }
     }
 
@@ -172,7 +172,7 @@ class BotFactoryTest {
         @Test
         @DisplayName("should return null when no bots deployed")
         void getLatestBot_noBots_returnsNull() {
-            assertNull(botFactory.getLatestBot(unrestricted, "bot1"));
+            assertNull(botFactory.getLatestBot(production, "bot1"));
         }
 
         @Test
@@ -183,10 +183,10 @@ class BotFactoryTest {
             when(botStoreClientLibrary.getBot("bot1", 1)).thenReturn(bot1v1);
             when(botStoreClientLibrary.getBot("bot1", 2)).thenReturn(bot1v2);
 
-            botFactory.deployBot(unrestricted, "bot1", 1, null);
-            botFactory.deployBot(unrestricted, "bot1", 2, null);
+            botFactory.deployBot(production, "bot1", 1, null);
+            botFactory.deployBot(production, "bot1", 2, null);
 
-            IBot latest = botFactory.getLatestBot(unrestricted, "bot1");
+            IBot latest = botFactory.getLatestBot(production, "bot1");
             assertNotNull(latest);
             assertEquals(2, latest.getBotVersion());
         }
@@ -196,9 +196,9 @@ class BotFactoryTest {
         void getLatestReadyBot_skipsNonReady() throws Exception {
             Bot bot1v1 = createReadyBot("bot1", 1);
             when(botStoreClientLibrary.getBot("bot1", 1)).thenReturn(bot1v1);
-            botFactory.deployBot(unrestricted, "bot1", 1, null);
+            botFactory.deployBot(production, "bot1", 1, null);
 
-            IBot readyBot = botFactory.getLatestReadyBot(unrestricted, "bot1");
+            IBot readyBot = botFactory.getLatestReadyBot(production, "bot1");
             assertNotNull(readyBot);
             assertEquals(READY, readyBot.getDeploymentStatus());
         }
@@ -213,7 +213,7 @@ class BotFactoryTest {
         @Test
         @DisplayName("should return empty list when no bots deployed")
         void getAllLatestBots_empty() {
-            var bots = botFactory.getAllLatestBots(unrestricted);
+            var bots = botFactory.getAllLatestBots(production);
             assertTrue(bots.isEmpty());
         }
 
@@ -225,10 +225,10 @@ class BotFactoryTest {
             when(botStoreClientLibrary.getBot("botA", 1)).thenReturn(botA);
             when(botStoreClientLibrary.getBot("botB", 1)).thenReturn(botB);
 
-            botFactory.deployBot(unrestricted, "botA", 1, null);
-            botFactory.deployBot(unrestricted, "botB", 1, null);
+            botFactory.deployBot(production, "botA", 1, null);
+            botFactory.deployBot(production, "botB", 1, null);
 
-            var all = botFactory.getAllLatestBots(unrestricted);
+            var all = botFactory.getAllLatestBots(production);
             assertEquals(2, all.size());
         }
     }
@@ -248,15 +248,15 @@ class BotFactoryTest {
                     .thenReturn(unrestrictedBot)
                     .thenReturn(restrictedBot);
 
-            botFactory.deployBot(unrestricted, "bot1", 1, null);
-            botFactory.deployBot(Deployment.Environment.restricted, "bot1", 1, null);
+            botFactory.deployBot(production, "bot1", 1, null);
+            botFactory.deployBot(Deployment.Environment.production, "bot1", 1, null);
 
-            assertNotNull(botFactory.getBot(unrestricted, "bot1", 1));
-            assertNotNull(botFactory.getBot(Deployment.Environment.restricted, "bot1", 1));
+            assertNotNull(botFactory.getBot(production, "bot1", 1));
+            assertNotNull(botFactory.getBot(Deployment.Environment.production, "bot1", 1));
 
-            botFactory.undeployBot(unrestricted, "bot1", 1);
-            assertNull(botFactory.getBot(unrestricted, "bot1", 1));
-            assertNotNull(botFactory.getBot(Deployment.Environment.restricted, "bot1", 1));
+            botFactory.undeployBot(production, "bot1", 1);
+            assertNull(botFactory.getBot(production, "bot1", 1));
+            assertNotNull(botFactory.getBot(Deployment.Environment.production, "bot1", 1));
         }
     }
 

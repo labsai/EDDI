@@ -53,7 +53,7 @@ class ConversationServiceTest {
     private AuditLedgerService auditLedgerService;
     private TenantQuotaService tenantQuotaService;
 
-    private static final Environment ENV = Environment.unrestricted;
+    private static final Environment ENV = Environment.production;
     private static final String BOT_ID = "test-bot-id";
     private static final String CONVERSATION_ID = "test-conversation-id";
     private static final String USER_ID = "test-user-id";

@@ -92,7 +92,7 @@ public class McpAdminTools {
     public String deployBot(
             @ToolArg(description = "Bot ID (required)") String botId,
             @ToolArg(description = "Version number to deploy (required)") Integer version,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'")
+            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'")
             String environment) {
         try {
             var env = parseEnvironment(environment);
@@ -144,7 +144,7 @@ public class McpAdminTools {
     public String undeployBot(
             @ToolArg(description = "Bot ID (required)") String botId,
             @ToolArg(description = "Version number to undeploy (required)") Integer version,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'")
+            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'")
             String environment,
             @ToolArg(description = "End all active conversations? (default: false)")
             Boolean endConversations) {
@@ -171,7 +171,7 @@ public class McpAdminTools {
     public String getDeploymentStatus(
             @ToolArg(description = "Bot ID (required)") String botId,
             @ToolArg(description = "Version number (required)") Integer version,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'")
+            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'")
             String environment) {
         try {
             var env = parseEnvironment(environment);
@@ -303,7 +303,7 @@ public class McpAdminTools {
             @ToolArg(description = "New bot name (optional)") String name,
             @ToolArg(description = "New bot description (optional)") String description,
             @ToolArg(description = "Redeploy the bot after update? (default: false)") Boolean redeploy,
-            @ToolArg(description = "Environment for redeployment: 'unrestricted' (default), 'restricted', or 'test'")
+            @ToolArg(description = "Environment for redeployment: 'production' (default), 'restricted', or 'test'")
             String environment) {
         try {
             if (botId == null || botId.isBlank()) return errorJson("botId is required");
@@ -526,7 +526,7 @@ public class McpAdminTools {
             @ToolArg(description = "JSON array of URI mappings: " +
                     "[{\"oldUri\":\"eddi://...?version=1\",\"newUri\":\"eddi://...?version=2\"}, ...]") String resourceMappings,
             @ToolArg(description = "Redeploy the bot after cascading changes? (default: false)") Boolean redeploy,
-            @ToolArg(description = "Environment for redeployment: 'unrestricted' (default), 'restricted', or 'test'")
+            @ToolArg(description = "Environment for redeployment: 'production' (default), 'restricted', or 'test'")
             String environment) {
         if (botId == null || botId.isBlank()) return errorJson("botId is required");
         if (resourceMappings == null || resourceMappings.isBlank()) return errorJson("resourceMappings is required");
@@ -847,7 +847,7 @@ public class McpAdminTools {
             "Once created, the intent can be used with chat_managed to talk to the bot. " +
             "The config must include: intent (string) and botDeployments (array of {botId, environment}).")
     public String createBotTrigger(
-            @ToolArg(description = "Full JSON configuration: {\"intent\":\"...\",\"botDeployments\":[{\"botId\":\"...\",\"environment\":\"unrestricted\"}]} (required)") String config) {
+            @ToolArg(description = "Full JSON configuration: {\"intent\":\"...\",\"botDeployments\":[{\"botId\":\"...\",\"environment\":\"production\"}]} (required)") String config) {
         if (config == null || config.isBlank()) return errorJson("config is required");
         try {
             var triggerStore = getRestStore(IRestBotTriggerStore.class);
@@ -873,7 +873,7 @@ public class McpAdminTools {
             "Changes the bot deployments for a given intent.")
     public String updateBotTrigger(
             @ToolArg(description = "Intent to update (required)") String intent,
-            @ToolArg(description = "Full JSON configuration: {\"intent\":\"...\",\"botDeployments\":[{\"botId\":\"...\",\"environment\":\"unrestricted\"}]} (required)") String config) {
+            @ToolArg(description = "Full JSON configuration: {\"intent\":\"...\",\"botDeployments\":[{\"botId\":\"...\",\"environment\":\"production\"}]} (required)") String config) {
         if (intent == null || intent.isBlank()) return errorJson("intent is required");
         if (config == null || config.isBlank()) return errorJson("config is required");
         try {
@@ -924,7 +924,7 @@ public class McpAdminTools {
             @ToolArg(description = "IANA time zone, e.g. 'Europe/Vienna' (default: UTC)") String timeZone,
             @ToolArg(description = "Conversation strategy: 'new' or 'persistent' (CRON defaults to 'new', HEARTBEAT defaults to 'persistent')") String conversationStrategy,
             @ToolArg(description = "User identity for the scheduled message (default: 'system:scheduler')") String userId,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
+            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
         if (botId == null || botId.isBlank()) return errorJson("botId is required");
         if (name == null || name.isBlank()) return errorJson("name is required");
         try {
@@ -955,7 +955,7 @@ public class McpAdminTools {
             schedule.setHeartbeatIntervalSeconds(heartbeatIntervalSeconds);
             schedule.setMessage(message != null && !message.isBlank() ? message
                     : (type == ScheduleConfiguration.TriggerType.HEARTBEAT ? "heartbeat" : null));
-            schedule.setEnvironment(environment != null && !environment.isBlank() ? environment : "unrestricted");
+            schedule.setEnvironment(environment != null && !environment.isBlank() ? environment : "production");
             schedule.setConversationStrategy(conversationStrategy != null && !conversationStrategy.isBlank()
                     ? conversationStrategy
                     : (type == ScheduleConfiguration.TriggerType.HEARTBEAT ? "persistent" : "new"));

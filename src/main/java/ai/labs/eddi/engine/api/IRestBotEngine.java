@@ -29,7 +29,7 @@ public interface IRestBotEngine {
     /**
      * create new conversation
      *
-     * @param environment [restricted|unrestricted|test]
+     * @param environment [restricted|production|test]
      * @param botId       String
      * @return Response HTTP 201 URI conversation ID
      */
@@ -43,7 +43,7 @@ public interface IRestBotEngine {
     /**
      * create new conversation
      *
-     * @param environment [restricted|unrestricted|test]
+     * @param environment [restricted|production|test]
      * @param botId       String
      * @param context     json context Map<String, Context>
      * @return Response HTTP 201 URI conversation ID

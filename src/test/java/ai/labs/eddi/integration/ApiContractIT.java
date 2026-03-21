@@ -149,7 +149,7 @@ public class ApiContractIT extends BaseIntegrationIT {
         @Test
         @DisplayName("deployment status endpoint should return JSON")
         void deploymentStatus_returnsJson() {
-                given().get("/administration/unrestricted/deploymentstatus")
+                given().get("/administration/production/deploymentstatus")
                                 .then().assertThat()
                                 .statusCode(200)
                                 .contentType(ContentType.JSON);

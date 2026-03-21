@@ -46,7 +46,7 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
     @DisplayName("should create conversation and return location header")
     void createConversation_returnsLocation() {
         Response response = given()
-                .post("bots/unrestricted/" + botResourceId.id() + "?userId=" + TEST_USER_ID);
+                .post("bots/production/" + botResourceId.id() + "?userId=" + TEST_USER_ID);
 
         response.then().assertThat()
                 .statusCode(anyOf(equalTo(200), equalTo(201)))
@@ -90,7 +90,7 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
 
         // Undo — path is /{env}/{botId}/undo/{convId}
         Response undoResponse = given()
-                .post(String.format("bots/unrestricted/%s/undo/%s", botResourceId.id(), conversationId.id()));
+                .post(String.format("bots/production/%s/undo/%s", botResourceId.id(), conversationId.id()));
 
         undoResponse.then().assertThat()
                 .statusCode(200);
@@ -105,11 +105,11 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
         sendUserInput(botResourceId.id(), conversationId.id(), "hello", false, false);
 
         // Undo — path is /{env}/{botId}/undo/{convId}
-        given().post(String.format("bots/unrestricted/%s/undo/%s", botResourceId.id(), conversationId.id()));
+        given().post(String.format("bots/production/%s/undo/%s", botResourceId.id(), conversationId.id()));
 
         // Redo — path is /{env}/{botId}/redo/{convId}
         Response redoResponse = given()
-                .post(String.format("bots/unrestricted/%s/redo/%s", botResourceId.id(), conversationId.id()));
+                .post(String.format("bots/production/%s/redo/%s", botResourceId.id(), conversationId.id()));
 
         redoResponse.then().assertThat()
                 .statusCode(200);
@@ -123,7 +123,7 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
         // Send bye to end conversation
         given().contentType(ContentType.JSON)
                 .body("{\"input\":\"bye\"}")
-                .post(String.format("bots/unrestricted/%s/%s?returnDetailed=true", botResourceId.id(),
+                .post(String.format("bots/production/%s/%s?returnDetailed=true", botResourceId.id(),
                         conversationId.id()));
 
         Thread.sleep(200);
@@ -131,7 +131,7 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
         // Verify conversation is ended
         Response response = given().contentType(ContentType.JSON)
                 .body("{\"input\":\"hello\"}")
-                .post(String.format("bots/unrestricted/%s/%s?returnDetailed=true", botResourceId.id(),
+                .post(String.format("bots/production/%s/%s?returnDetailed=true", botResourceId.id(),
                         conversationId.id()));
 
         response.then().assertThat()

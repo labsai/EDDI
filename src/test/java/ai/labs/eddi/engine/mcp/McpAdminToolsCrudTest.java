@@ -352,7 +352,7 @@ class McpAdminToolsCrudTest {
         when(botStore.updateBot(eq(BOT_ID), eq(1), any()))
                 .thenReturn(Response.ok().header("Location",
                         "/botstore/bots/" + BOT_ID + "?version=2").build());
-        when(botAdmin.deployBot(Environment.unrestricted, BOT_ID, 2, true, true))
+        when(botAdmin.deployBot(Environment.production, BOT_ID, 2, true, true))
                 .thenReturn(Response.ok().build());
 
         String mappingsJson = "[{\"oldUri\":\"eddi://ai.labs.behavior/behaviorstore/behaviorsets/b1?version=1\"," +
@@ -363,10 +363,10 @@ class McpAdminToolsCrudTest {
         when(jsonSerialization.deserialize(mappingsJson, List.class)).thenReturn(mappings);
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"redeployed\":true}");
 
-        String result = tools.applyBotChanges(BOT_ID, 1, mappingsJson, true, "unrestricted");
+        String result = tools.applyBotChanges(BOT_ID, 1, mappingsJson, true, "production");
 
         assertTrue(result.contains("cascaded"));
-        verify(botAdmin).deployBot(Environment.unrestricted, BOT_ID, 2, true, true);
+        verify(botAdmin).deployBot(Environment.production, BOT_ID, 2, true, true);
     }
 
     @Test

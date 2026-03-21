@@ -31,7 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
-import static ai.labs.eddi.engine.model.Deployment.Environment.unrestricted;
+import static ai.labs.eddi.engine.model.Deployment.Environment.production;
 
 @ApplicationScoped
 public class RestBotManagement implements IRestBotManagement {
@@ -335,7 +335,7 @@ public class RestBotManagement implements IRestBotManagement {
 
     private void checkUserAuthIfApplicable(UserConversation userConversation) throws UnauthorizedException {
         if (checkForUserAuthentication &&
-                !unrestricted.equals(userConversation.getEnvironment()) &&
+                !production.equals(userConversation.getEnvironment()) &&
                 identity.isAnonymous()) {
             throw new UnauthorizedException();
         }

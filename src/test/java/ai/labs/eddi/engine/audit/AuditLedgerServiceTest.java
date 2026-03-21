@@ -27,7 +27,7 @@ class AuditLedgerServiceTest {
                 "bot-1",
                 1,
                 "user-1",
-                "unrestricted",
+                "production",
                 0, taskId, "test-type", 0,
                 42L,
                 Map.of("userInput", "hello"),
@@ -199,7 +199,7 @@ class AuditLedgerServiceTest {
             inputWithSecret.put("normal", "hello world");
 
             AuditEntry entry = new AuditEntry(
-                    "id-1", "conv-1", "bot-1", 1, "user-1", "unrestricted",
+                    "id-1", "conv-1", "bot-1", 1, "user-1", "production",
                     0, "task-1", "test", 0, 10L,
                     inputWithSecret, null, null, null,
                     List.of("action-1"), 0.0, Instant.now(), null);
@@ -321,7 +321,7 @@ class AuditLedgerServiceTest {
             input.put("tokens", List.of("normal-text", "sk-abcdefghijklmnopqrstuvwxyz1234567890abcdefghijklmn"));
 
             AuditEntry entry = new AuditEntry(
-                    "id-1", "conv-1", "bot-1", 1, "user-1", "unrestricted",
+                    "id-1", "conv-1", "bot-1", 1, "user-1", "production",
                     0, "task-1", "test", 0, 10L,
                     input, null, null, null,
                     List.of(), 0.0, Instant.now(), null);
@@ -351,7 +351,7 @@ class AuditLedgerServiceTest {
             input.put("config", nested);
 
             AuditEntry entry = new AuditEntry(
-                    "id-1", "conv-1", "bot-1", 1, "user-1", "unrestricted",
+                    "id-1", "conv-1", "bot-1", 1, "user-1", "production",
                     0, "task-1", "test", 0, 10L,
                     input, null, null, null,
                     List.of(), 0.0, Instant.now(), null);

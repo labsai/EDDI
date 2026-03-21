@@ -25,7 +25,7 @@ import java.util.Map;
  * @param botId          Bot identifier
  * @param botVersion     Bot version
  * @param userId         User identifier
- * @param environment    Deployment environment (e.g. "unrestricted")
+ * @param environment    Deployment environment (e.g. "production")
  * @param stepIndex      0-based step position in the conversation
  * @param taskId         Lifecycle task ID (e.g. "ai.labs.parser")
  * @param taskType       Task type (e.g. "expressions", "langchain")

@@ -130,10 +130,10 @@ public class BotUseCaseIT extends BaseIntegrationIT {
     }
 
     private void deployBot(String id, int version) throws InterruptedException {
-        given().post(String.format("administration/unrestricted/deploy/%s?version=%s&autoDeploy=false", id, version));
+        given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false", id, version));
         for (int i = 0; i < 60; i++) {
             Response response = given()
-                    .get(String.format("administration/unrestricted/deploymentstatus/%s?version=%s&format=text", id,
+                    .get(String.format("administration/production/deploymentstatus/%s?version=%s&format=text", id,
                             version));
             String status = response.getBody().print().trim();
             if ("READY".equals(status))

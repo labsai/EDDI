@@ -41,7 +41,7 @@ class RestLogAdminTest {
     void shouldReturnRecentLogsFromBuffer() {
         LogEntry entry = new LogEntry(
                 System.currentTimeMillis(), "INFO", "test.Logger", "test message",
-                "unrestricted", "bot-1", 1, "conv-1", "user-1", "test-host-1234");
+                "production", "bot-1", 1, "conv-1", "user-1", "test-host-1234");
         when(boundedLogStore.getEntries("bot-1", null, null, 200))
                 .thenReturn(List.of(entry));
 
@@ -70,18 +70,18 @@ class RestLogAdminTest {
         dbLog.put("message", "historic error");
         dbLog.put("level", "ERROR");
         when(databaseLogs.getLogs(
-                Deployment.Environment.unrestricted, "bot-1", null,
+                Deployment.Environment.production, "bot-1", null,
                 null, null, null, 0, 50))
                 .thenReturn(List.of(dbLog));
 
         List<DatabaseLog> result = admin.getHistoryLogs(
-                Deployment.Environment.unrestricted, "bot-1", null,
+                Deployment.Environment.production, "bot-1", null,
                 null, null, null, 0, 50);
 
         assertEquals(1, result.size());
         assertEquals("historic error", result.get(0).get("message"));
         verify(databaseLogs).getLogs(
-                Deployment.Environment.unrestricted, "bot-1", null,
+                Deployment.Environment.production, "bot-1", null,
                 null, null, null, 0, 50);
     }
 

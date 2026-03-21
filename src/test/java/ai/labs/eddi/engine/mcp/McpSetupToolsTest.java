@@ -92,7 +92,7 @@ class McpSetupToolsTest {
         String result = tools.setupBot(
                 "Test Bot", "You are helpful", "anthropic", "claude-sonnet-4-6",
                 "sk-test", null, "Hello!", true, "calculator,datetime",
-                null, null, null, true, "unrestricted");
+                null, null, null, true, "production");
 
         assertNotNull(result);
 
@@ -103,7 +103,7 @@ class McpSetupToolsTest {
         verify(outputStore).createOutputSet(any());
         verify(packageStore).createPackage(any());
         verify(botStore).createBot(any());
-        verify(botAdmin).deployBot(Environment.unrestricted, "bot-1", 1, true, true);
+        verify(botAdmin).deployBot(Environment.production, "bot-1", 1, true, true);
 
         // Verify 6 descriptors patched (parser, behavior, langchain, output, package, bot)
         verify(descriptorStore, times(6)).patchDescriptor(any(), anyInt(), any());
@@ -668,7 +668,7 @@ class McpSetupToolsTest {
         verify(langchainStore).createLangChain(any());
         verify(packageStore).createPackage(any());
         verify(botStore).createBot(any());
-        verify(botAdmin).deployBot(Environment.unrestricted, "bot-1", 1, true, true);
+        verify(botAdmin).deployBot(Environment.production, "bot-1", 1, true, true);
 
         // Verify the system prompt was enriched with API summary
         var lcCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);

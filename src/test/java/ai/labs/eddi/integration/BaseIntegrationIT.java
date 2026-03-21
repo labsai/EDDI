@@ -122,11 +122,11 @@ public abstract class BaseIntegrationIT {
     // ==================== Bot Deployment Helpers ====================
 
     protected void deployBot(String id, Integer version) throws InterruptedException {
-        given().post(String.format("administration/unrestricted/deploy/%s?version=%s&autoDeploy=false", id, version));
+        given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false", id, version));
 
         for (int i = 0; i < 60; i++) { // max 30 seconds
             Response response = given()
-                    .get(String.format("administration/unrestricted/deploymentstatus/%s?version=%s&format=text", id,
+                    .get(String.format("administration/production/deploymentstatus/%s?version=%s&format=text", id,
                             version));
             String status = response.getBody().print().trim();
             if ("READY".equals(status))
@@ -140,7 +140,7 @@ public abstract class BaseIntegrationIT {
     }
 
     protected ResourceId createConversation(String botId, String userId) {
-        Response response = given().post("bots/unrestricted/" + botId + "?userId=" + userId);
+        Response response = given().post("bots/production/" + botId + "?userId=" + userId);
         String location = response.getHeader("location");
         return extractResourceId(location);
     }
@@ -151,14 +151,14 @@ public abstract class BaseIntegrationIT {
         return given()
                 .contentType(ContentType.TEXT)
                 .body(userInput)
-                .post(String.format("bots/unrestricted/%s/%s?returnDetailed=%s&returnCurrentStepOnly=%s",
+                .post(String.format("bots/production/%s/%s?returnDetailed=%s&returnCurrentStepOnly=%s",
                         botId, conversationId, returnDetailed, returnCurrentStepOnly));
     }
 
     protected Response getConversationLog(String botId, String conversationId,
             boolean returnDetailed) {
         return given()
-                .get(String.format("bots/unrestricted/%s/%s?returnDetailed=%s",
+                .get(String.format("bots/production/%s/%s?returnDetailed=%s",
                         botId, conversationId, returnDetailed));
     }
 
@@ -183,7 +183,7 @@ public abstract class BaseIntegrationIT {
      */
     protected static void undeployBotQuietly(String id, int version) {
         try {
-            given().post(String.format("administration/unrestricted/undeploy/%s?version=%s", id, version));
+            given().post(String.format("administration/production/undeploy/%s?version=%s", id, version));
         } catch (Exception ignored) {
         }
     }

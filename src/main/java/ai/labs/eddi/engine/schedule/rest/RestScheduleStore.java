@@ -250,7 +250,7 @@ public class RestScheduleStore implements IRestScheduleStore {
         }
 
         if (schedule.getEnvironment() == null || schedule.getEnvironment().isBlank()) {
-            schedule.setEnvironment("unrestricted");
+            schedule.setEnvironment("production");
         }
         if (schedule.getUserId() == null || schedule.getUserId().isBlank()) {
             schedule.setUserId("system:scheduler");

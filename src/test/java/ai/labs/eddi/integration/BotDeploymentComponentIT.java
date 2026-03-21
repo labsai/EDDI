@@ -34,14 +34,14 @@ public class BotDeploymentComponentIT extends BaseIntegrationIT {
                 ResourceId botId = createMinimalBot();
 
                 // Deploy
-                given().post(String.format("administration/unrestricted/deploy/%s?version=%s&autoDeploy=false",
+                given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false",
                                 botId.id(), botId.version()));
 
                 // Poll for READY
                 for (int i = 0; i < 30; i++) {
                         Response response = given()
                                         .get(String.format(
-                                                        "administration/unrestricted/deploymentstatus/%s?version=%s&format=text",
+                                                        "administration/production/deploymentstatus/%s?version=%s&format=text",
                                                         botId.id(), botId.version()));
                         String status = response.getBody().print().trim();
                         if ("READY".equals(status)) {
@@ -60,7 +60,7 @@ public class BotDeploymentComponentIT extends BaseIntegrationIT {
 
                 // Undeploy
                 Response response = given()
-                                .post(String.format("administration/unrestricted/undeploy/%s?version=%s",
+                                .post(String.format("administration/production/undeploy/%s?version=%s",
                                                 botId.id(), botId.version()));
 
                 response.then().statusCode(anyOf(equalTo(200), equalTo(202), equalTo(204)));
@@ -70,7 +70,7 @@ public class BotDeploymentComponentIT extends BaseIntegrationIT {
         @DisplayName("should list deployment status")
         void listDeploymentStatus() {
                 Response response = given()
-                                .get("administration/unrestricted/deploymentstatus");
+                                .get("administration/production/deploymentstatus");
 
                 response.then().assertThat()
                                 .statusCode(200)
@@ -84,7 +84,7 @@ public class BotDeploymentComponentIT extends BaseIntegrationIT {
                 deployBot(botId.id(), botId.version());
 
                 Response response = given()
-                                .get(String.format("administration/unrestricted/deploymentstatus/%s?version=%s",
+                                .get(String.format("administration/production/deploymentstatus/%s?version=%s",
                                                 botId.id(), botId.version()));
 
                 response.then().assertThat()

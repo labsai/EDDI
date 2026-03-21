@@ -63,7 +63,7 @@ class McpScheduleToolsTest {
         when(scheduleStore.createSchedule(any())).thenReturn("sched-1");
 
         String result = tools.createSchedule("bot-1", "CRON", "0 9 * * *", null,
-                "Good morning", "Morning greeting", "UTC", "new", null, "unrestricted");
+                "Good morning", "Morning greeting", "UTC", "new", null, "production");
 
         assertTrue(result.contains("schedule_created"));
         verify(scheduleStore).createSchedule(any());
@@ -74,7 +74,7 @@ class McpScheduleToolsTest {
         when(scheduleStore.createSchedule(any())).thenReturn("hb-1");
 
         String result = tools.createSchedule("bot-1", "HEARTBEAT", null, 300L,
-                null, "Health check", "UTC", null, null, "unrestricted");
+                null, "Health check", "UTC", null, null, "production");
 
         assertTrue(result.contains("schedule_created"));
         verify(scheduleStore).createSchedule(argThat(s ->
@@ -250,7 +250,7 @@ class McpScheduleToolsTest {
         s.setBotId("bot-1");
         s.setCronExpression("0 9 * * *");
         s.setMessage("Hello");
-        s.setEnvironment("unrestricted");
+        s.setEnvironment("production");
         s.setTimeZone("UTC");
         s.setFireStatus(FireStatus.PENDING);
         return s;

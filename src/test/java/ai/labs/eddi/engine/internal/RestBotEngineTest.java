@@ -18,7 +18,7 @@ import org.mockito.Mock;
 
 import java.net.URI;
 
-import static ai.labs.eddi.engine.model.Deployment.Environment.unrestricted;
+import static ai.labs.eddi.engine.model.Deployment.Environment.production;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -51,7 +51,7 @@ class RestBotEngineTest {
             when(conversationService.startConversation(any(), eq("bot1"), eq("user1"), anyMap()))
                     .thenReturn(result);
 
-            Response response = restBotEngine.startConversation(unrestricted, "bot1", "user1");
+            Response response = restBotEngine.startConversation(production, "bot1", "user1");
 
             assertEquals(201, response.getStatus());
             assertNotNull(response.getLocation());
@@ -63,7 +63,7 @@ class RestBotEngineTest {
             when(conversationService.startConversation(any(), eq("bot1"), eq("user1"), anyMap()))
                     .thenThrow(new BotNotReadyException("Bot not deployed"));
 
-            Response response = restBotEngine.startConversation(unrestricted, "bot1", "user1");
+            Response response = restBotEngine.startConversation(production, "bot1", "user1");
 
             assertEquals(404, response.getStatus());
         }
@@ -75,7 +75,7 @@ class RestBotEngineTest {
                     .thenThrow(new ResourceStoreException("DB error"));
 
             assertThrows(InternalServerErrorException.class,
-                    () -> restBotEngine.startConversation(unrestricted, "bot1", "user1"));
+                    () -> restBotEngine.startConversation(production, "bot1", "user1"));
         }
     }
 
@@ -106,12 +106,12 @@ class RestBotEngineTest {
         void readConversation_success() throws Exception {
             var snapshot = new SimpleConversationMemorySnapshot();
             when(conversationService.readConversation(
-                    eq(unrestricted), eq("bot1"), eq("conv1"),
+                    eq(production), eq("bot1"), eq("conv1"),
                     eq(true), eq(false), isNull()))
                     .thenReturn(snapshot);
 
             SimpleConversationMemorySnapshot result = restBotEngine.readConversation(
-                    unrestricted, "bot1", "conv1", true, false, null);
+                    production, "bot1", "conv1", true, false, null);
 
             assertNotNull(result);
             assertSame(snapshot, result);
@@ -129,12 +129,12 @@ class RestBotEngineTest {
         void say_delegatesToService() throws Exception {
             AsyncResponse asyncResponse = mock(AsyncResponse.class);
 
-            restBotEngine.say(unrestricted, "bot1", "conv1",
+            restBotEngine.say(production, "bot1", "conv1",
                     false, false, null, "Hello", asyncResponse);
 
             verify(asyncResponse).setTimeout(60, java.util.concurrent.TimeUnit.SECONDS);
             verify(conversationService).say(
-                    eq(unrestricted), eq("bot1"), eq("conv1"),
+                    eq(production), eq("bot1"), eq("conv1"),
                     eq(false), eq(false), isNull(),
                     any(InputData.class), eq(false), any());
         }
@@ -149,7 +149,7 @@ class RestBotEngineTest {
                             any(), any(), any(), any(), any(), any(),
                             any(), anyBoolean(), any());
 
-            restBotEngine.say(unrestricted, "bot1", "conv1",
+            restBotEngine.say(production, "bot1", "conv1",
                     false, false, null, "Hello", asyncResponse);
 
             // Capture the argument passed to resume
@@ -170,7 +170,7 @@ class RestBotEngineTest {
                             any(), any(), any(), any(), any(), any(),
                             any(), anyBoolean(), any());
 
-            restBotEngine.say(unrestricted, "bot1", "conv1",
+            restBotEngine.say(production, "bot1", "conv1",
                     false, false, null, "Hello", asyncResponse);
 
             ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
@@ -190,18 +190,18 @@ class RestBotEngineTest {
         @Test
         @DisplayName("isUndoAvailable should delegate to service")
         void isUndoAvailable() throws Exception {
-            when(conversationService.isUndoAvailable(unrestricted, "bot1", "conv1"))
+            when(conversationService.isUndoAvailable(production, "bot1", "conv1"))
                     .thenReturn(true);
 
-            assertTrue(restBotEngine.isUndoAvailable(unrestricted, "bot1", "conv1"));
+            assertTrue(restBotEngine.isUndoAvailable(production, "bot1", "conv1"));
         }
 
         @Test
         @DisplayName("undo should return 200 when successful")
         void undo_success() throws Exception {
-            when(conversationService.undo(unrestricted, "bot1", "conv1")).thenReturn(true);
+            when(conversationService.undo(production, "bot1", "conv1")).thenReturn(true);
 
-            Response response = restBotEngine.undo(unrestricted, "bot1", "conv1");
+            Response response = restBotEngine.undo(production, "bot1", "conv1");
 
             assertEquals(200, response.getStatus());
         }
@@ -209,9 +209,9 @@ class RestBotEngineTest {
         @Test
         @DisplayName("undo should return 409 when undo not available")
         void undo_notAvailable() throws Exception {
-            when(conversationService.undo(unrestricted, "bot1", "conv1")).thenReturn(false);
+            when(conversationService.undo(production, "bot1", "conv1")).thenReturn(false);
 
-            Response response = restBotEngine.undo(unrestricted, "bot1", "conv1");
+            Response response = restBotEngine.undo(production, "bot1", "conv1");
 
             assertEquals(409, response.getStatus());
         }
@@ -219,9 +219,9 @@ class RestBotEngineTest {
         @Test
         @DisplayName("redo should return 200 when successful")
         void redo_success() throws Exception {
-            when(conversationService.redo(unrestricted, "bot1", "conv1")).thenReturn(true);
+            when(conversationService.redo(production, "bot1", "conv1")).thenReturn(true);
 
-            Response response = restBotEngine.redo(unrestricted, "bot1", "conv1");
+            Response response = restBotEngine.redo(production, "bot1", "conv1");
 
             assertEquals(200, response.getStatus());
         }
@@ -229,10 +229,10 @@ class RestBotEngineTest {
         @Test
         @DisplayName("isRedoAvailable should delegate to service")
         void isRedoAvailable() throws Exception {
-            when(conversationService.isRedoAvailable(unrestricted, "bot1", "conv1"))
+            when(conversationService.isRedoAvailable(production, "bot1", "conv1"))
                     .thenReturn(false);
 
-            assertFalse(restBotEngine.isRedoAvailable(unrestricted, "bot1", "conv1"));
+            assertFalse(restBotEngine.isRedoAvailable(production, "bot1", "conv1"));
         }
     }
 
@@ -245,11 +245,11 @@ class RestBotEngineTest {
         @Test
         @DisplayName("should delegate to conversationService")
         void getConversationState() {
-            when(conversationService.getConversationState(unrestricted, "conv1"))
+            when(conversationService.getConversationState(production, "conv1"))
                     .thenReturn(ConversationState.READY);
 
             assertEquals(ConversationState.READY,
-                    restBotEngine.getConversationState(unrestricted, "conv1"));
+                    restBotEngine.getConversationState(production, "conv1"));
         }
     }
 }

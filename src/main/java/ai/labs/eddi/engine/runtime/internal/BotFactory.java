@@ -47,8 +47,7 @@ public class BotFactory implements IBotFactory {
     private Map<Deployment.Environment, ConcurrentHashMap<BotId, IBot>> createEmptyEnvironments() {
         Map<Deployment.Environment, ConcurrentHashMap<BotId, IBot>> environments =
                 new HashMap<>(Deployment.Environment.values().length);
-        environments.put(Deployment.Environment.restricted, new ConcurrentHashMap<>());
-        environments.put(Deployment.Environment.unrestricted, new ConcurrentHashMap<>());
+        environments.put(Deployment.Environment.production, new ConcurrentHashMap<>());
         environments.put(Deployment.Environment.test, new ConcurrentHashMap<>());
         return environments;
     }

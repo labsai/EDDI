@@ -58,7 +58,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
-import static ai.labs.eddi.engine.model.Deployment.Environment.unrestricted;
+import static ai.labs.eddi.engine.model.Deployment.Environment.production;
 import static ai.labs.eddi.utils.RuntimeUtilities.getResourceAsStream;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -120,7 +120,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                         deploymentFutures.add(deploymentFuture);
 
                                         restBotAdministration.deployBot(
-                                                unrestricted, botId.getId(), botId.getVersion(), true, false);
+                                                production, botId.getId(), botId.getVersion(), true, false);
 
                                         return true;
                                     }
@@ -134,7 +134,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             CompletableFuture.allOf(deploymentFutures.toArray(new CompletableFuture[0])).join();
 
             log.info("Imported & Deployed Initial Bots");
-            return restBotAdministration.getDeploymentStatuses(unrestricted);
+            return restBotAdministration.getDeploymentStatuses(production);
         } catch (IOException e) {
             throw sneakyThrow(e);
         }

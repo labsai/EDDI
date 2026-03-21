@@ -224,12 +224,12 @@ public class ScheduleFireExecutor {
 
     private static Environment resolveEnvironment(String envStr) {
         if (envStr == null || envStr.isBlank()) {
-            return Environment.unrestricted;
+            return Environment.production;
         }
         try {
             return Environment.valueOf(envStr.toLowerCase());
         } catch (IllegalArgumentException e) {
-            return Environment.unrestricted;
+            return Environment.production;
         }
     }
 }

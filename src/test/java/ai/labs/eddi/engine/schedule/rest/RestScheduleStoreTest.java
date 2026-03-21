@@ -57,7 +57,7 @@ class RestScheduleStoreTest {
         assertEquals(201, response.getStatus());
         var created = (ScheduleConfiguration) response.getEntity();
         assertEquals(TriggerType.CRON, created.getTriggerType());
-        assertEquals("unrestricted", created.getEnvironment());
+        assertEquals("production", created.getEnvironment());
         assertEquals("system:scheduler", created.getUserId());
         assertEquals("new", created.getConversationStrategy());
         assertEquals("UTC", created.getTimeZone());

@@ -188,12 +188,12 @@ class ScheduleFireExecutorTest {
     void fire_invalidEnvironment_defaultsToUnrestricted() throws Exception {
         var schedule = makeCronSchedule("sched-env", "new");
         schedule.setEnvironment("nonsense");
-        when(conversationService.startConversation(eq(Environment.unrestricted), any(), any(), any()))
+        when(conversationService.startConversation(eq(Environment.production), any(), any(), any()))
                 .thenReturn(new IConversationService.ConversationResult("conv-env", null));
         doAnswer(inv -> {
             ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
             return null;
-        }).when(conversationService).say(eq(Environment.unrestricted), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        }).when(conversationService).say(eq(Environment.production), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
 
         ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
 
@@ -210,7 +210,7 @@ class ScheduleFireExecutorTest {
         s.setBotId("bot-1");
         s.setCronExpression("0 9 * * *");
         s.setMessage("Good morning");
-        s.setEnvironment("unrestricted");
+        s.setEnvironment("production");
         s.setTimeZone("UTC");
         s.setUserId("system:scheduler");
         s.setConversationStrategy(strategy);
@@ -227,7 +227,7 @@ class ScheduleFireExecutorTest {
         s.setBotId("bot-1");
         s.setHeartbeatIntervalSeconds(300L);
         s.setMessage("check");
-        s.setEnvironment("unrestricted");
+        s.setEnvironment("production");
         s.setTimeZone("UTC");
         s.setUserId("system:scheduler");
         s.setConversationStrategy(strategy);

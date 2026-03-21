@@ -35,16 +35,16 @@ final class McpToolUtils {
 
     /**
      * Parse an environment string to the corresponding enum value.
-     * Defaults to {@link Environment#unrestricted} if null, blank, or unrecognized.
+     * Defaults to {@link Environment#production} if null, blank, or unrecognized.
      */
     static Environment parseEnvironment(String environment) {
         if (environment == null || environment.isBlank()) {
-            return Environment.unrestricted;
+            return Environment.production;
         }
         try {
             return Environment.valueOf(environment.trim().toLowerCase());
         } catch (IllegalArgumentException e) {
-            return Environment.unrestricted;
+            return Environment.production;
         }
     }
 

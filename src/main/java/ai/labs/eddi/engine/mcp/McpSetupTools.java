@@ -97,7 +97,7 @@ public class McpSetupTools {
                     "The bot will connect to these servers and use their tools during conversations. " +
                     "E.g. 'http://localhost:7070/mcp,http://tools.example.com/mcp'") String mcpServers,
             @ToolArg(description = "Automatically deploy the bot after creation? (default: true)") Boolean deploy,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
+            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
         try {
             // Validate required params
             if (name == null || name.isBlank()) {
@@ -491,7 +491,7 @@ public class McpSetupTools {
             @ToolArg(description = "Enable quick reply buttons in bot responses? (default: false).") Boolean enableQuickReplies,
             @ToolArg(description = "Enable sentiment analysis in bot responses? (default: false).") Boolean enableSentimentAnalysis,
             @ToolArg(description = "Automatically deploy the bot after creation? (default: true)") Boolean deploy,
-            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
+            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
         try {
             // Validate required params
             if (name == null || name.isBlank()) {

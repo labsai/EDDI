@@ -68,25 +68,25 @@ class McpAdminToolsTest {
 
     @Test
     void deployBot_success() throws IOException {
-        when(botAdmin.deployBot(Environment.unrestricted, BOT_ID, 1, true, true))
+        when(botAdmin.deployBot(Environment.production, BOT_ID, 1, true, true))
                 .thenReturn(Response.ok().build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deployed\"}");
 
-        String result = tools.deployBot(BOT_ID, 1, "unrestricted");
+        String result = tools.deployBot(BOT_ID, 1, "production");
 
         assertNotNull(result);
-        verify(botAdmin).deployBot(Environment.unrestricted, BOT_ID, 1, true, true);
+        verify(botAdmin).deployBot(Environment.production, BOT_ID, 1, true, true);
     }
 
     @Test
     void deployBot_defaultsToUnrestricted() throws IOException {
-        when(botAdmin.deployBot(Environment.unrestricted, BOT_ID, 2, true, true))
+        when(botAdmin.deployBot(Environment.production, BOT_ID, 2, true, true))
                 .thenReturn(Response.ok().build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deployed\"}");
 
         tools.deployBot(BOT_ID, 2, null);
 
-        verify(botAdmin).deployBot(Environment.unrestricted, BOT_ID, 2, true, true);
+        verify(botAdmin).deployBot(Environment.production, BOT_ID, 2, true, true);
     }
 
     @Test
@@ -104,50 +104,50 @@ class McpAdminToolsTest {
 
     @Test
     void undeployBot_success() throws IOException {
-        when(botAdmin.undeployBot(Environment.unrestricted, BOT_ID, 1, false, false))
+        when(botAdmin.undeployBot(Environment.production, BOT_ID, 1, false, false))
                 .thenReturn(Response.ok().build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"undeployed\"}");
 
-        String result = tools.undeployBot(BOT_ID, 1, "unrestricted", false);
+        String result = tools.undeployBot(BOT_ID, 1, "production", false);
 
         assertNotNull(result);
-        verify(botAdmin).undeployBot(Environment.unrestricted, BOT_ID, 1, false, false);
+        verify(botAdmin).undeployBot(Environment.production, BOT_ID, 1, false, false);
     }
 
     @Test
     void undeployBot_withEndConversations() throws IOException {
-        when(botAdmin.undeployBot(Environment.unrestricted, BOT_ID, 1, true, false))
+        when(botAdmin.undeployBot(Environment.production, BOT_ID, 1, true, false))
                 .thenReturn(Response.ok().build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"undeployed\"}");
 
         tools.undeployBot(BOT_ID, 1, null, true);
 
-        verify(botAdmin).undeployBot(Environment.unrestricted, BOT_ID, 1, true, false);
+        verify(botAdmin).undeployBot(Environment.production, BOT_ID, 1, true, false);
     }
 
     // --- getDeploymentStatus ---
 
     @Test
     void getDeploymentStatus_returnsStatus() throws IOException {
-        var status = new BotDeploymentStatus(Environment.unrestricted, BOT_ID, 1,
+        var status = new BotDeploymentStatus(Environment.production, BOT_ID, 1,
                 Status.READY, null);
-        when(botAdmin.getDeploymentStatus(Environment.unrestricted, BOT_ID, 1, "json"))
+        when(botAdmin.getDeploymentStatus(Environment.production, BOT_ID, 1, "json"))
                 .thenReturn(Response.ok(status).build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"status\":\"READY\"}");
 
-        String result = tools.getDeploymentStatus(BOT_ID, 1, "unrestricted");
+        String result = tools.getDeploymentStatus(BOT_ID, 1, "production");
 
         assertNotNull(result);
-        verify(botAdmin).getDeploymentStatus(Environment.unrestricted, BOT_ID, 1, "json");
+        verify(botAdmin).getDeploymentStatus(Environment.production, BOT_ID, 1, "json");
     }
 
     @Test
     void getDeploymentStatus_nullEntity_returnsFallback() throws IOException {
-        when(botAdmin.getDeploymentStatus(Environment.unrestricted, BOT_ID, 1, "json"))
+        when(botAdmin.getDeploymentStatus(Environment.production, BOT_ID, 1, "json"))
                 .thenReturn(Response.noContent().build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"status_check\",\"httpStatus\":204}");
 
-        String result = tools.getDeploymentStatus(BOT_ID, 1, "unrestricted");
+        String result = tools.getDeploymentStatus(BOT_ID, 1, "production");
 
         assertNotNull(result);
         // Should not throw on null entity
