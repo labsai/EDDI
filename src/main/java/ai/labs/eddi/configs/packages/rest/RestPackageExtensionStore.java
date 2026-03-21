@@ -10,8 +10,6 @@ import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
-
 @ApplicationScoped
 public class RestPackageExtensionStore implements IRestPackageExtensionStore {
     private final Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider;
@@ -30,6 +28,6 @@ public class RestPackageExtensionStore implements IRestPackageExtensionStore {
                 map(type -> {
                     Provider<ILifecycleTask> taskProvider = lifecycleExtensionsProvider.get(type);
                     return taskProvider.get().getExtensionDescriptor();
-                }).collect(Collectors.toList());
+                }).toList();
     }
 }

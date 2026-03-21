@@ -64,7 +64,7 @@ public final class LogCaptureFilter implements Filter {
                     store.capture(record);
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Exception _) {
             // CDI not ready yet — silently skip this record
         }
 

@@ -49,7 +49,7 @@ public class LanguageUtilities {
                     int i = Integer.parseInt(tmp2);
                     //if(i > 0 && i < 24)
                     return String.valueOf(i);
-                } catch (NumberFormatException nfe) {
+                } catch (NumberFormatException _) {
                     return null;
                 }
             }

@@ -9,7 +9,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
@@ -90,7 +89,7 @@ public class ActionMatcher extends BaseMatcher {
     }
 
     private List<String> convertToActions(String actions) {
-        return Stream.of(actions.split(",")).map(String::trim).collect(Collectors.toList());
+        return Stream.of(actions.split(",")).map(String::trim).toList();
     }
 
     private boolean isActionEmpty(List<String> actions) {

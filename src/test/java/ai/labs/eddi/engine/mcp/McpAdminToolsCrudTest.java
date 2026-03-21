@@ -16,11 +16,14 @@ import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.regulardictionary.IRestRegularDictionaryStore;
+import ai.labs.eddi.configs.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.model.BotTriggerConfiguration;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
+import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -60,6 +63,9 @@ class McpAdminToolsCrudTest {
     private IRestRegularDictionaryStore dictionaryStore;
     private IRestBotTriggerStore botTriggerStore;
     private IJsonSerialization jsonSerialization;
+    private IScheduleStore scheduleStore;
+    private ScheduleFireExecutor scheduleFireExecutor;
+    private SchedulePollerService schedulePollerService;
     private McpAdminTools tools;
 
     @BeforeEach
@@ -90,7 +96,11 @@ class McpAdminToolsCrudTest {
         when(restInterfaceFactory.get(IRestBotTriggerStore.class)).thenReturn(botTriggerStore);
 
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        tools = new McpAdminTools(restInterfaceFactory, botAdmin, jsonSerialization);
+        scheduleStore = mock(IScheduleStore.class);
+        scheduleFireExecutor = mock(ScheduleFireExecutor.class);
+        schedulePollerService = mock(SchedulePollerService.class);
+        tools = new McpAdminTools(restInterfaceFactory, botAdmin, jsonSerialization,
+                scheduleStore, scheduleFireExecutor, schedulePollerService);
     }
 
     // ==================== update_resource ====================

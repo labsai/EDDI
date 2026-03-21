@@ -14,20 +14,20 @@ public class MatchingUtilities {
         Object value = null;
         try {
             value = PathNavigator.getValue(valuePath, conversationValues);
-        } catch (Exception e) {
+        } catch (Exception _) {
             // no value was found, which is an expected case, so silent exception here
         }
         if (value != null) {
             if (!isNullOrEmpty(equals) && equals.equals(value.toString())) {
                 success = true;
             } else if (!isNullOrEmpty(contains)) {
-                if (value instanceof String && ((String) value).contains(contains)) {
+                if (value instanceof String s && s.contains(contains)) {
                     success = true;
-                } else if (value instanceof List && ((List<?>) value).contains(contains)) {
+                } else if (value instanceof List<?> l && l.contains(contains)) {
                     success = true;
                 }
-            } else if (value instanceof Boolean) {
-                success = (Boolean) value;
+            } else if (value instanceof Boolean b) {
+                success = b;
             } else if (isNullOrEmpty(equals) && isNullOrEmpty(contains)) {
                 success = true;
             }

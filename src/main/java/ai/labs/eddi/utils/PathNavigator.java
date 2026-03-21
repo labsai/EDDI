@@ -210,13 +210,13 @@ public class PathNavigator {
         // Integer
         try {
             return Integer.parseInt(value);
-        } catch (NumberFormatException ignored) {
+        } catch (NumberFormatException _) {
         }
 
         // Double
         try {
             return Double.parseDouble(value);
-        } catch (NumberFormatException ignored) {
+        } catch (NumberFormatException _) {
         }
 
         // Fallback: treat as string

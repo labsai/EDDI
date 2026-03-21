@@ -28,7 +28,7 @@ public final class FileUtilities {
             if (rd != null) {
                 try {
                     rd.close();
-                } catch (IOException e) {
+                } catch (IOException _) {
                     //do nothing
                 }
             }

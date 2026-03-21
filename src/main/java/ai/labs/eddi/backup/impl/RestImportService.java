@@ -647,7 +647,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             Response dictionaryResponse = restDictionaryStore.createRegularDictionary(regularDictionaryConfiguration);
             checkIfCreatedResponse(dictionaryResponse);
             return dictionaryResponse.getLocation();
-        }).collect(Collectors.toList());
+        }).toList();
     }
 
     private List<URI> createNewBehaviors(List<BehaviorConfiguration> behaviorConfigurations)
@@ -657,7 +657,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             Response behaviorResponse = restBehaviorStore.createBehaviorRuleSet(behaviorConfiguration);
             checkIfCreatedResponse(behaviorResponse);
             return behaviorResponse.getLocation();
-        }).collect(Collectors.toList());
+        }).toList();
     }
 
     private List<URI> createNewHttpCalls(List<HttpCallsConfiguration> httpCallsConfigurations)
@@ -667,7 +667,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             Response httpCallsResponse = restHttpCallsStore.createHttpCalls(httpCallsConfiguration);
             checkIfCreatedResponse(httpCallsResponse);
             return httpCallsResponse.getLocation();
-        }).collect(Collectors.toList());
+        }).toList();
     }
 
     private List<URI> createNewLangchain(List<LangChainConfiguration> langChainConfigurations)
@@ -677,7 +677,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             Response langchainResponse = restLangChainStore.createLangChain(langChainConfiguration);
             checkIfCreatedResponse(langchainResponse);
             return langchainResponse.getLocation();
-        }).collect(Collectors.toList());
+        }).toList();
     }
 
     private List<URI> createNewProperties(List<PropertySetterConfiguration> propertySetterConfigurations)
@@ -687,7 +687,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             Response propertySetter = restPropertySetterStore.createPropertySetter(propertySetterConfiguration);
             checkIfCreatedResponse(propertySetter);
             return propertySetter.getLocation();
-        }).collect(Collectors.toList());
+        }).toList();
     }
 
     private List<URI> createNewOutputs(List<OutputConfigurationSet> outputConfigurations)
@@ -697,7 +697,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             Response outputResponse = restOutputStore.createOutputSet(outputConfiguration);
             checkIfCreatedResponse(outputResponse);
             return outputResponse.getLocation();
-        }).collect(Collectors.toList());
+        }).toList();
     }
 
     // ==================== Resource Update (new merge logic) ====================

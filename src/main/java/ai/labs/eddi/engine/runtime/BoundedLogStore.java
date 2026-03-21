@@ -113,7 +113,7 @@ public class BoundedLogStore {
                 if (!dbWriter.awaitTermination(5, TimeUnit.SECONDS)) {
                     dbWriter.shutdownNow();
                 }
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 dbWriter.shutdownNow();
                 Thread.currentThread().interrupt();
             }
@@ -158,7 +158,7 @@ public class BoundedLogStore {
             if (bv != null) {
                 try {
                     botVersion = Integer.parseInt(bv);
-                } catch (NumberFormatException ignored) {
+                } catch (NumberFormatException _) {
                 }
             }
         } else {
@@ -171,7 +171,7 @@ public class BoundedLogStore {
             if (bv != null) {
                 try {
                     botVersion = Integer.parseInt(bv);
-                } catch (NumberFormatException ignored) {
+                } catch (NumberFormatException _) {
                 }
             }
         }
@@ -211,7 +211,7 @@ public class BoundedLogStore {
         for (Consumer<LogEntry> listener : listeners.values()) {
             try {
                 listener.accept(entry);
-            } catch (Exception e) {
+            } catch (Exception _) {
                 // Don't let a bad listener break logging
             }
         }
@@ -315,7 +315,7 @@ public class BoundedLogStore {
         if (params != null && params.length > 0) {
             try {
                 return java.text.MessageFormat.format(msg, params);
-            } catch (Exception e) {
+            } catch (Exception _) {
                 return msg; // fallback to raw pattern
             }
         }

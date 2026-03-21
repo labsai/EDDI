@@ -34,7 +34,6 @@ import jakarta.inject.Inject;
 
 import java.net.URI;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static ai.labs.eddi.configs.properties.model.Property.Scope.conversation;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
@@ -394,7 +393,7 @@ public class PropertySetterTask implements ILifecycleTask {
             propertyInstruction.setOverride(parseBoolean(property.getOrDefault(OVERRIDE, true).toString()));
 
             return propertyInstruction;
-        }).collect(Collectors.toList());
+        }).toList();
     }
 
     /**

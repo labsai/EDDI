@@ -156,12 +156,12 @@ public class OutputGenerationTask implements ILifecycleTask {
     private List<OutputValue> convertOutputMap(List<Map<String, Object>> outputMapList) {
         return outputMapList.stream().map(map -> new OutputValue(
                 objectMapper.convertValue(map.get(KEY_VALUE_ALTERNATIVES), new TypeReference<>() {
-                }))).collect(Collectors.toList());
+                }))).toList();
     }
 
     private List<QuickReply> convertQuickReplyMap(List<Map<String, String>> quickRepliesMapList) {
         return quickRepliesMapList.stream().map(map -> new QuickReply(map.get(KEY_VALUE), map.get(KEY_EXPRESSIONS),
-                Boolean.parseBoolean(map.getOrDefault(KEY_IS_DEFAULT, "false")))).collect(Collectors.toList());
+                Boolean.parseBoolean(map.getOrDefault(KEY_IS_DEFAULT, "false")))).toList();
     }
 
     private void selectAndStoreOutput(IWritableConversationStep currentStep, String action,

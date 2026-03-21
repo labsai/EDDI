@@ -22,7 +22,6 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
 import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.FieldType;
@@ -101,7 +100,7 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
             List<BehaviorRule> rules, boolean appendActions) {
 
         if (!rules.isEmpty()) {
-            var allCurrentBehaviorRuleNames = rules.stream().map(BehaviorRule::getName).collect(Collectors.toList());
+            var allCurrentBehaviorRuleNames = rules.stream().map(BehaviorRule::getName).toList();
             saveResults(memory, allCurrentBehaviorRuleNames, key,
                     false, false, appendActions);
         }
@@ -130,7 +129,7 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
             inputExpressions = expressionProvider.parseExpressions(data.getResult());
         }
 
-        return inputExpressions.stream().map(Expression::getExpressionName).collect(Collectors.toList());
+        return inputExpressions.stream().map(Expression::getExpressionName).toList();
     }
 
     private void saveResults(IConversationMemory memory, List<String> allCurrentActions, String key,

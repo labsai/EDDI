@@ -19,8 +19,6 @@ import java.util.Comparator;
 import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.stream.Collectors;
-
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
 
@@ -54,7 +52,7 @@ public class ResourceUtilities {
         Comparator<IResourceStore.IResourceId> comparator =
                 Comparator.comparing(IResourceStore.IResourceId::getId).thenComparingInt(IResourceStore.IResourceId::getVersion).reversed();
 
-        return allConfigsContainingResource.stream().sorted(comparator).collect(Collectors.toList());
+        return allConfigsContainingResource.stream().sorted(comparator).toList();
     }
 
     private static void extractIds(List<String> ids, FindIterable<Document> documentIterable) {

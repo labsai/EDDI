@@ -13,7 +13,6 @@ import ai.labs.eddi.modules.nlp.model.Unknown;
 
 import java.util.*;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -324,7 +323,7 @@ public class InputParser implements IInputParser {
 
     private List<IDictionary.IWord> convert(List<IDictionary.IFoundWord> foundWords) {
         return foundWords.stream().
-                map(IDictionary.IFoundWord::getFoundWord).collect(Collectors.toList());
+                map(IDictionary.IFoundWord::getFoundWord).toList();
     }
 
     private IDictionary.IFoundWord createPhrase(IDictionary.IPhrase phrase, double matchingAccuracy) {

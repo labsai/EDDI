@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Stack;
-import java.util.stream.Collectors;
 
 /**
  * @author ginccc
@@ -227,7 +226,7 @@ public class ConversationMemory implements IConversationMemory {
         public <T> List<IData<T>> getAllLatestData(String prefix) {
             return conversationSteps.stream()
                     .map((IConversationStep conversationStep) -> conversationStep.<T>getLatestData(prefix))
-                    .collect(Collectors.toList());
+                    .toList();
         }
 
         @Override

@@ -19,7 +19,6 @@ import java.io.IOException;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static ai.labs.eddi.modules.behavior.impl.conditions.IBehaviorCondition.CONDITION_PREFIX;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
@@ -128,7 +127,7 @@ public class BehaviorDeserialization implements IBehaviorDeserialization {
                         return null;
                     }
                 }
-        ).collect(Collectors.toList());
+        ).toList();
     }
 
     private IBehaviorCondition createCondition(String conditionsKey) {

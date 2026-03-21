@@ -26,7 +26,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 import static ai.labs.eddi.modules.nlp.DictionaryUtilities.extractExpressions;
 
@@ -67,7 +66,7 @@ public class RestSemanticParser implements IRestSemanticParser {
                 List<Solution> solutionExpressions = extractExpressions(rawSolutions, true, true);
                 asyncResponse.resume(solutionExpressions.stream().
                         map(solution -> new ResponseSolution(solution.getExpressions())).
-                        collect(Collectors.toList()));
+                        toList());
             } catch (IllegalArgumentException e) {
                 asyncResponse.resume(new BadRequestException(e.getLocalizedMessage()));
             } catch (Exception e) {

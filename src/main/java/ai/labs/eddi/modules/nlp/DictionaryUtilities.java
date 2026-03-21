@@ -11,7 +11,6 @@ import ai.labs.eddi.modules.output.model.QuickReply;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * @author ginccc
@@ -40,7 +39,7 @@ public class DictionaryUtilities {
             filteredExpressions.addAll(expressions.stream().
                     filter(expression -> includeUnused || !expression.getExpressionName().equals("unused")).
                     filter(expression -> includeUnknown || !expression.getExpressionName().equals("unknown")).
-                    collect(Collectors.toList()));
+                    toList());
             solutionExpressions.add(new Solution(filteredExpressions));
         }
 

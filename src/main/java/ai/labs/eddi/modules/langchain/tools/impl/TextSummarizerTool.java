@@ -46,7 +46,7 @@ public class TextSummarizerTool {
             List<Map.Entry<String, Double>> topSentences = sentenceScores.entrySet().stream()
                     .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
                     .limit(numSentences)
-                    .collect(Collectors.toList());
+                    .toList();
 
             // Maintain original order
             List<String> selectedSentences = new ArrayList<>();
@@ -135,7 +135,7 @@ public class TextSummarizerTool {
             List<Map.Entry<String, Integer>> topKeywords = filteredFreq.entrySet().stream()
                     .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
                     .limit(numKeywords)
-                    .collect(Collectors.toList());
+                    .toList();
 
             StringBuilder result = new StringBuilder();
             result.append("Top Keywords:\n\n");

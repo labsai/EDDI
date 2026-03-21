@@ -157,7 +157,7 @@ public class InputParserTask implements ILifecycleTask {
                             : generateExpression(value);
                     return new QuickReply(value, expressions, (Boolean) quickReplyData.get("default"));
                 })
-                .collect(Collectors.toList());
+                .toList();
     }
 
     private static String generateExpression(String value) {
@@ -197,7 +197,7 @@ public class InputParserTask implements ILifecycleTask {
                 currentStep.addConversationOutputString(KEY_EXPRESSIONS, expressionString);
 
                 List<String> intents = newExpressions.stream().map(Expression::getExpressionName).distinct()
-                        .collect(Collectors.toList());
+                        .toList();
 
                 Data<List<String>> intentData = new Data<>(INTENTS.key(), intents);
                 currentStep.storeData(intentData);
