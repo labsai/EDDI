@@ -13,6 +13,7 @@ import { ResourceListPage } from "@/pages/resource-list";
 import { ResourceDetailPage } from "@/pages/resource-detail";
 import { BotWizardPage } from "@/pages/bot-wizard";
 import { CoordinatorPage } from "@/pages/coordinator";
+import { SchedulesPage } from "@/pages/schedules";
 import { OrphansPage } from "@/pages/orphans";
 import { LogsPage } from "@/pages/logs";
 import { SecretsPage } from "@/pages/secrets";
@@ -31,6 +32,7 @@ export function App() {
         <Route path="/manage/packageview/:id" element={<PackageDetailPage />} />
         <Route path="/manage/conversations" element={<ConversationsPage />} />
         <Route path="/manage/coordinator" element={<CoordinatorPage />} />
+        <Route path="/manage/schedules" element={<SchedulesPage />} />
         <Route path="/manage/logs" element={<LogsPage />} />
         <Route path="/manage/orphans" element={<OrphansPage />} />
         <Route path="/manage/secrets" element={<SecretsPage />} />

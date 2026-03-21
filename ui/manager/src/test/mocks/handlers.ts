@@ -1351,3 +1351,166 @@ export const quotaHandlers = [
     return new HttpResponse(null, { status: 200 });
   }),
 ];
+
+// ─── Schedule Handlers ───────────────────────────────────────────────────────
+
+const SCHEDULES_MOCK = [
+  {
+    id: "sched-1",
+    name: "Daily Health Check",
+    triggerType: "CRON",
+    botId: "bot1",
+    botVersion: 0,
+    environment: "unrestricted",
+    cronExpression: "0 9 * * MON-FRI",
+    cronDescription: "At 09:00 AM, Monday through Friday",
+    message: "health_check",
+    conversationStrategy: "new",
+    enabled: true,
+    nextFire: Date.now() + 3600000,
+    lastFired: Date.now() - 86400000,
+    fireStatus: "COMPLETED",
+    failCount: 0,
+    createdAt: Date.now() - 604800000,
+    updatedAt: Date.now() - 86400000,
+  },
+  {
+    id: "sched-2",
+    name: "Heartbeat Monitor",
+    triggerType: "HEARTBEAT",
+    botId: "bot2",
+    botVersion: 0,
+    environment: "unrestricted",
+    heartbeatIntervalSeconds: 300,
+    message: "ping",
+    conversationStrategy: "persistent",
+    enabled: true,
+    nextFire: Date.now() + 60000,
+    lastFired: Date.now() - 300000,
+    fireStatus: "PENDING",
+    failCount: 0,
+    createdAt: Date.now() - 172800000,
+    updatedAt: Date.now() - 300000,
+  },
+  {
+    id: "sched-3",
+    name: "Failed Report",
+    triggerType: "CRON",
+    botId: "bot1",
+    botVersion: 0,
+    environment: "unrestricted",
+    cronExpression: "*/5 * * * *",
+    cronDescription: "Every 5 minutes",
+    message: "generate_report",
+    conversationStrategy: "new",
+    enabled: false,
+    nextFire: null,
+    lastFired: Date.now() - 7200000,
+    fireStatus: "DEAD_LETTERED",
+    failCount: 3,
+    createdAt: Date.now() - 259200000,
+    updatedAt: Date.now() - 7200000,
+  },
+];
+
+const FIRE_LOGS_MOCK = [
+  {
+    id: "fire-1",
+    scheduleId: "sched-1",
+    scheduleName: "Daily Health Check",
+    botId: "bot1",
+    conversationId: "conv-123",
+    firedAt: Date.now() - 86400000,
+    completedAt: Date.now() - 86399000,
+    durationMs: 1000,
+    success: true,
+    error: null,
+  },
+  {
+    id: "fire-2",
+    scheduleId: "sched-1",
+    scheduleName: "Daily Health Check",
+    botId: "bot1",
+    conversationId: "conv-124",
+    firedAt: Date.now() - 172800000,
+    completedAt: Date.now() - 172799500,
+    durationMs: 500,
+    success: false,
+    error: "Connection timeout",
+  },
+];
+
+export const scheduleHandlers = [
+  // List all schedules
+  http.get("*/schedulestore/schedules", ({ request }) => {
+    const url = new URL(request.url);
+    const botId = url.searchParams.get("botId");
+    if (botId) {
+      return HttpResponse.json(SCHEDULES_MOCK.filter((s) => s.botId === botId));
+    }
+    return HttpResponse.json(SCHEDULES_MOCK);
+  }),
+
+  // Get single schedule
+  http.get("*/schedulestore/schedules/:id", ({ params, request }) => {
+    const url = new URL(request.url);
+    // Skip sub-paths like /fires, /enable, etc.
+    if (url.pathname.includes("/fires") || url.pathname.includes("/admin")) return;
+    const schedule = SCHEDULES_MOCK.find((s) => s.id === params.id);
+    if (schedule) return HttpResponse.json(schedule);
+    return new HttpResponse(null, { status: 404 });
+  }),
+
+  // Create schedule
+  http.post("*/schedulestore/schedules", () => {
+    return new HttpResponse(null, {
+      status: 201,
+      headers: { Location: "/schedulestore/schedules/new-sched-1" },
+    });
+  }),
+
+  // Update schedule
+  http.put("*/schedulestore/schedules/:id", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Delete schedule
+  http.delete("*/schedulestore/schedules/:id", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Enable
+  http.post("*/schedulestore/schedules/:id/enable", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Disable
+  http.post("*/schedulestore/schedules/:id/disable", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Fire now
+  http.post("*/schedulestore/schedules/:id/fire", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Fire logs
+  http.get("*/schedulestore/schedules/:id/fires", () => {
+    return HttpResponse.json(FIRE_LOGS_MOCK);
+  }),
+
+  // Admin - failed fires
+  http.get("*/schedulestore/schedules/admin/failed", () => {
+    return HttpResponse.json(FIRE_LOGS_MOCK.filter((l) => !l.success));
+  }),
+
+  // Retry dead letter
+  http.post("*/schedulestore/schedules/:id/retry", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Dismiss dead letter
+  http.post("*/schedulestore/schedules/:id/dismiss", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+];

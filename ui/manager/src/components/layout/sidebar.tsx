@@ -14,6 +14,7 @@ import {
   BookOpen,
   FileJson,
   Activity,
+  Clock,
   Trash2,
   ScrollText,
   KeyRound,
@@ -51,6 +52,11 @@ const navSections = [
         path: "/manage/coordinator",
         icon: Activity,
         labelKey: "nav.coordinator",
+      },
+      {
+        path: "/manage/schedules",
+        icon: Clock,
+        labelKey: "nav.schedules",
       },
       {
         path: "/manage/logs",
