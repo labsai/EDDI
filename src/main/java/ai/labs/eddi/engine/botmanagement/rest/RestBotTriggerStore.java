@@ -5,7 +5,7 @@ import ai.labs.eddi.engine.botmanagement.IRestBotTriggerStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
-import ai.labs.eddi.model.BotTriggerConfiguration;
+import ai.labs.eddi.engine.botmanagement.model.BotTriggerConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;

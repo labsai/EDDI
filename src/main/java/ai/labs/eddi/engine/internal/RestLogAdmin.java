@@ -2,7 +2,7 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.api.IRestLogAdmin;
 import ai.labs.eddi.engine.model.DatabaseLog;
-import ai.labs.eddi.model.Deployment;
+import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;

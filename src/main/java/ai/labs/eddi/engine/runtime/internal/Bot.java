@@ -8,7 +8,7 @@ import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.runtime.IBot;
 import ai.labs.eddi.engine.runtime.IExecutablePackage;
 import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.model.Deployment;
+import ai.labs.eddi.engine.model.Deployment;
 
 import java.util.LinkedList;
 import java.util.List;

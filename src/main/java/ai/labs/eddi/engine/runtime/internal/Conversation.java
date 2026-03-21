@@ -11,7 +11,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.IExecutablePackage;
 import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
 

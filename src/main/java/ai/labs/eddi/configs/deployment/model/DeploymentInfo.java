@@ -1,6 +1,6 @@
 package ai.labs.eddi.configs.deployment.model;
 
-import ai.labs.eddi.model.Deployment.Environment;
+import ai.labs.eddi.engine.model.Deployment.Environment;
 
 /**
  * @author ginccc

@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine.runtime;
 
 import ai.labs.eddi.engine.model.DatabaseLog;
-import ai.labs.eddi.model.Deployment;
+import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.LogEntry;
 
 import java.util.List;

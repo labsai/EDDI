@@ -4,7 +4,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
-import ai.labs.eddi.model.ResourceDescriptor;
+import ai.labs.eddi.configs.descriptors.model.ResourceDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;

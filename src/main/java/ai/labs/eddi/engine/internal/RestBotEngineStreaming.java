@@ -3,7 +3,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IRestBotEngineStreaming;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.eddi.model.Deployment.Environment;
+import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;

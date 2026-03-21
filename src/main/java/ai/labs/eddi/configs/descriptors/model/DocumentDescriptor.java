@@ -1,8 +1,5 @@
 package ai.labs.eddi.configs.descriptors.model;
 
-
-import ai.labs.eddi.model.ResourceDescriptor;
-
 /**
  * @author ginccc
  */

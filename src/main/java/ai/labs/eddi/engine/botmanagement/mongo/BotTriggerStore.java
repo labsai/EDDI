@@ -5,7 +5,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceAlreadyExistsException;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.model.BotTriggerConfiguration;
+import ai.labs.eddi.engine.botmanagement.model.BotTriggerConfiguration;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;

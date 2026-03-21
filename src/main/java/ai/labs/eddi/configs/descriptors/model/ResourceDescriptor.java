@@ -1,4 +1,4 @@
-package ai.labs.eddi.model;
+package ai.labs.eddi.configs.descriptors.model;
 
 
 import java.net.URI;

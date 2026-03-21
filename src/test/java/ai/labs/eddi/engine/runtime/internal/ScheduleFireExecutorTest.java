@@ -6,7 +6,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.api.IConversationService;
-import ai.labs.eddi.model.Deployment.Environment;
+import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -58,7 +58,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
-import static ai.labs.eddi.model.Deployment.Environment.unrestricted;
+import static ai.labs.eddi.engine.model.Deployment.Environment.unrestricted;
 import static ai.labs.eddi.utils.RuntimeUtilities.getResourceAsStream;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 

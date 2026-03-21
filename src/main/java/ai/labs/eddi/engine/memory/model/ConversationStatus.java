@@ -1,4 +1,4 @@
-package ai.labs.eddi.model;
+package ai.labs.eddi.engine.memory.model;
 
 
 import java.util.Date;

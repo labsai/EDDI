@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.model.Deployment.Environment;
+import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 

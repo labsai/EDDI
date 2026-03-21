@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.model.Deployment.Environment;
+import ai.labs.eddi.engine.model.Deployment.Environment;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;

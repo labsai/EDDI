@@ -4,7 +4,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.eddi.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.InputData;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.container.AsyncResponse;
@@ -18,7 +18,7 @@ import org.mockito.Mock;
 
 import java.net.URI;
 
-import static ai.labs.eddi.model.Deployment.Environment.unrestricted;
+import static ai.labs.eddi.engine.model.Deployment.Environment.unrestricted;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;

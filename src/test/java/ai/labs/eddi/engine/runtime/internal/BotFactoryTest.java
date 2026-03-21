@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.runtime.internal;
 
-import ai.labs.eddi.model.Deployment;
+import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.IBot;
 import ai.labs.eddi.engine.runtime.IBotFactory.DeploymentProcess;
 import ai.labs.eddi.engine.runtime.client.bots.IBotStoreClientLibrary;
@@ -13,8 +13,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
-import static ai.labs.eddi.model.Deployment.Environment.unrestricted;
-import static ai.labs.eddi.model.Deployment.Status.*;
+import static ai.labs.eddi.engine.model.Deployment.Environment.unrestricted;
+import static ai.labs.eddi.engine.model.Deployment.Status.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.MockitoAnnotations.openMocks;

@@ -1,8 +1,8 @@
 package ai.labs.eddi.engine.memory.descriptor.model;
 
-import ai.labs.eddi.model.ConversationState;
-import ai.labs.eddi.model.Deployment;
-import ai.labs.eddi.model.ResourceDescriptor;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.configs.descriptors.model.ResourceDescriptor;
 
 import java.net.URI;
 

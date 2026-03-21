@@ -8,8 +8,8 @@ import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 
-import ai.labs.eddi.model.ConversationState;
-import ai.labs.eddi.model.ConversationStatus;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.ConversationStatus;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.ThreadContext;
 import io.quarkus.scheduler.Scheduled;

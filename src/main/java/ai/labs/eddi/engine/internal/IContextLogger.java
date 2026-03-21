@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.internal;
 
-import ai.labs.eddi.model.Deployment;
+import ai.labs.eddi.engine.model.Deployment;
 
 import java.util.Map;
 

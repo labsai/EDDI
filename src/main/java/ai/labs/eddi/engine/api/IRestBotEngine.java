@@ -3,8 +3,8 @@ package ai.labs.eddi.engine.api;
 
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.model.ConversationState;
-import ai.labs.eddi.model.Deployment;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.container.AsyncResponse;

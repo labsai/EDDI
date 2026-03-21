@@ -1,4 +1,4 @@
-package ai.labs.eddi.model;
+package ai.labs.eddi.engine.botmanagement.model;
 
 
 import ai.labs.eddi.engine.model.BotDeployment;

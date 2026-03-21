@@ -9,8 +9,8 @@ import ai.labs.eddi.engine.api.IRestBotAdministration;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.model.BotDeploymentStatus;
-import ai.labs.eddi.model.Deployment;
-import ai.labs.eddi.model.Deployment.Status;
+import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.Deployment.Status;
 import ai.labs.eddi.engine.runtime.IBot;
 import ai.labs.eddi.engine.runtime.IBotFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
@@ -31,7 +31,7 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import java.util.*;
 import java.util.concurrent.*;
 
-import static ai.labs.eddi.model.Deployment.Status.*;
+import static ai.labs.eddi.engine.model.Deployment.Status.*;
 
 /**
  * @author ginccc

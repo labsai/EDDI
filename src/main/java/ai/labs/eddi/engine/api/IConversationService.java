@@ -4,8 +4,8 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.model.ConversationState;
-import ai.labs.eddi.model.Deployment.Environment;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 
 import java.net.URI;

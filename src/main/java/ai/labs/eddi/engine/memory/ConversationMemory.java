@@ -4,7 +4,7 @@ import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
-import ai.labs.eddi.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 
 import java.util.ArrayList;
 import java.util.LinkedList;

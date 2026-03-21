@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.botmanagement;
 
-import ai.labs.eddi.model.UserConversation;
+import ai.labs.eddi.engine.botmanagement.model.UserConversation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.*;

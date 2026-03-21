@@ -11,7 +11,7 @@ import org.jboss.resteasy.reactive.NoCache;
 
 import java.util.List;
 
-import static ai.labs.eddi.model.Deployment.Environment;
+import static ai.labs.eddi.engine.model.Deployment.Environment;
 
 /**
  * @author ginccc
