@@ -46,13 +46,7 @@ class ScheduleFireExecutorTest {
 
         // say() calls the response handler immediately
         doAnswer(inv -> {
-            Runnable handler = inv.getArgument(8);
-            if (handler != null) {
-                new Thread(() -> {
-                    try { Thread.sleep(10); } catch (InterruptedException ignored) {}
-                    ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
-                }).start();
-            }
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
             return null;
         }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
 

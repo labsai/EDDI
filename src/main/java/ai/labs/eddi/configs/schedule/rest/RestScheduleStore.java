@@ -239,8 +239,9 @@ public class RestScheduleStore implements IRestScheduleStore {
     }
 
     private void applyDefaults(ScheduleConfiguration schedule) {
-        if (schedule.getTriggerType() == null) {
-            // Infer from fields
+        // Infer trigger type from fields — must also handle the case where the
+        // default CRON value is set but heartbeatIntervalSeconds indicates HEARTBEAT
+        if (schedule.getTriggerType() == null || schedule.getHeartbeatIntervalSeconds() != null) {
             if (schedule.getHeartbeatIntervalSeconds() != null) {
                 schedule.setTriggerType(TriggerType.HEARTBEAT);
             } else {
@@ -304,9 +305,19 @@ public class RestScheduleStore implements IRestScheduleStore {
             throw new IllegalArgumentException("botId is required");
         }
 
+        // Validate time zone early — before cron parsing which also uses ZoneId.of()
+        if (schedule.getTimeZone() != null && !schedule.getTimeZone().isBlank()) {
+            try {
+                ZoneId.of(schedule.getTimeZone());
+            } catch (Exception e) {
+                throw new IllegalArgumentException("Invalid time zone: " + schedule.getTimeZone());
+            }
+        }
+
+        // Infer trigger type: if heartbeatIntervalSeconds is set, treat as HEARTBEAT
+        // regardless of the default value in ScheduleConfiguration
         TriggerType type = schedule.getTriggerType();
-        if (type == null) {
-            // Infer
+        if (type == null || schedule.getHeartbeatIntervalSeconds() != null) {
             type = schedule.getHeartbeatIntervalSeconds() != null ? TriggerType.HEARTBEAT : TriggerType.CRON;
         }
 
@@ -353,15 +364,6 @@ public class RestScheduleStore implements IRestScheduleStore {
                                     "Use a less frequent schedule or contact admin to adjust eddi.schedule.min-interval-seconds",
                             intervalSec, minIntervalSeconds));
                 }
-            }
-        }
-
-        // Validate time zone
-        if (schedule.getTimeZone() != null && !schedule.getTimeZone().isBlank()) {
-            try {
-                ZoneId.of(schedule.getTimeZone());
-            } catch (Exception e) {
-                throw new IllegalArgumentException("Invalid time zone: " + schedule.getTimeZone());
             }
         }
 

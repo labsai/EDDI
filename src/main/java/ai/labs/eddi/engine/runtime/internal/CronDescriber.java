@@ -8,10 +8,10 @@ import java.util.Set;
  * <p>
  * Examples:
  * <ul>
- *   <li>{@code * * * * *} → "Every minute"</li>
- *   <li>{@code 0 9 * * MON-FRI} → "At 09:00 on every weekday"</li>
- *   <li>{@code 0 0 1 * *} → "At midnight on the 1st of every month"</li>
- *   <li>{@code */15 * * * *} → "Every 15 minutes"</li>
+ *   <li>{@code * * * * *} -&gt; "Every minute"</li>
+ *   <li>{@code 0 9 * * MON-FRI} -&gt; "At 09:00 on every weekday"</li>
+ *   <li>{@code 0 0 1 * *} -&gt; "At midnight on the 1st of every month"</li>
+ *   <li>{@code *}{@code /15 * * * *} -&gt; "Every 15 minutes"</li>
  * </ul>
  *
  * @author ginccc
