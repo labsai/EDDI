@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Documentation
+    url: https://docs.labs.ai/
+    about: Check the documentation for usage guides and API reference
+  - name: 💬 Questions & Discussions
+    url: https://github.com/labsai/EDDI/discussions
+    about: Ask questions and discuss ideas with the community
+  - name: 🔒 Security Vulnerability
+    url: https://github.com/labsai/EDDI/security/policy
+    about: Report security vulnerabilities privately (do NOT use public issues)

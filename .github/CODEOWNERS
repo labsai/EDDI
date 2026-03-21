@@ -1,0 +1,13 @@
+# CODEOWNERS — auto-request review on all PRs
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default: project maintainer reviews everything
+# TODO: Replace with your GitHub username
+* @labsai
+
+# Documentation can be reviewed by docs contributors
+# docs/ @labsai
+
+# Security-sensitive code requires maintainer review
+# src/main/java/ai/labs/eddi/secrets/ @labsai
+# src/main/java/ai/labs/eddi/utils/SecurityUtilities.java @labsai

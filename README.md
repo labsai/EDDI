@@ -22,7 +22,7 @@ Project website: [here](https://eddi.labs.ai/)
 
 Documentation: [here](https://docs.labs.ai/)
 
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=labsai/EDDI&amp;utm_campaign=Badge_Grade) [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/main.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/main)
+[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=labsai/EDDI&amp;utm_campaign=Badge_Grade)
 
 EDDI Dashboard:
 ![EDDI Screenshot Dashboard](/screenshots/EDDI-Screenshot-Dashboard-Interface.png)
@@ -158,8 +158,8 @@ Technical specifications:
 
 ## Prerequisites
 
-* Java 21
-* Maven 3.8.4
+* Java 25 ([Eclipse Temurin](https://adoptium.net/) recommended)
+* Maven 3.9+ (bundled via `mvnw` wrapper)
 * MongoDB >= 6.0
 
 ## How to run the project
@@ -233,3 +233,20 @@ Readiness endpoint:
 ```bash
 <eddi-instance>/q/health/ready
 ```
+
+## Contributing
+
+We welcome contributions! Please read our [Contributing Guide](CONTRIBUTING.md) for details on:
+- Setting up your development environment
+- Code style and commit conventions
+- The pull request process
+
+Every PR is automatically checked by CI (build + tests), CodeQL (security), dependency review, and AI-powered code review.
+
+## Security
+
+Please report security vulnerabilities privately — see our [Security Policy](SECURITY.md) for details.
+
+## Code of Conduct
+
+This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md).

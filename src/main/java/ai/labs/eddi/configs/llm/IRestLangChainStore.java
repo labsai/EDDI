@@ -2,7 +2,7 @@ package ai.labs.eddi.configs.llm;
 
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
+import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;

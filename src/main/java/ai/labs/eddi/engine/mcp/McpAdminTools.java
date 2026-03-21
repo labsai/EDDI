@@ -29,7 +29,7 @@ import ai.labs.eddi.engine.runtime.internal.CronDescriber;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
-import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
+import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
 import ai.labs.eddi.engine.botmanagement.model.BotTriggerConfiguration;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;

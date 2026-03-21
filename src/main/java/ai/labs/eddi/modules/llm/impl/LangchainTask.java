@@ -1,0 +1,346 @@
+package ai.labs.eddi.modules.llm.impl;
+
+import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
+import ai.labs.eddi.engine.memory.*;
+import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
+import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
+import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
+import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
+import ai.labs.eddi.modules.llm.model.LangChainConfiguration.Task;
+import ai.labs.eddi.modules.llm.tools.EddiToolBridge;
+import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
+import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.modules.llm.tools.impl.*;
+import ai.labs.eddi.modules.output.model.types.TextOutputItem;
+import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import dev.langchain4j.data.message.ChatMessage;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.inject.Provider;
+import org.jboss.logging.Logger;
+
+import java.io.IOException;
+import java.net.URI;
+import java.util.*;
+
+import static ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.ConfigValue;
+import static ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.FieldType;
+import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
+import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
+
+/**
+ * Lifecycle task for LLM interactions — supports both legacy chat and agent
+ * (tool-calling) modes.
+ * <p>
+ * This class is a thin orchestrator that delegates to:
+ * <ul>
+ * <li>{@link ChatModelRegistry} — model creation, caching, and lookup</li>
+ * <li>{@link ConversationHistoryBuilder} — memory → ChatMessage list
+ * conversion</li>
+ * <li>{@link LegacyChatExecutor} — simple chat mode (no tools)</li>
+ * <li>{@link AgentOrchestrator} — tool-calling agent loop</li>
+ * </ul>
+ */
+@ApplicationScoped
+public class LangchainTask implements ILifecycleTask {
+    public static final String ID = "ai.labs.langchain";
+
+    private static final String KEY_URI = "uri";
+    private static final String KEY_LANGCHAIN = "langchain";
+    private static final String KEY_SYSTEM_MESSAGE = "systemMessage";
+    private static final String KEY_PROMPT = "prompt";
+    private static final String KEY_LOG_SIZE_LIMIT = "logSizeLimit";
+    private static final String KEY_INCLUDE_FIRST_BOT_MESSAGE = "includeFirstBotMessage";
+    private static final String KEY_CONVERT_TO_OBJECT = "convertToObject";
+    private static final String KEY_ADD_TO_OUTPUT = "addToOutput";
+    private static final String MATCH_ALL_OPERATOR = "*";
+
+    static final String MEMORY_OUTPUT_IDENTIFIER = "output";
+    static final String LANGCHAIN_OUTPUT_IDENTIFIER = MEMORY_OUTPUT_IDENTIFIER + ":text:langchain";
+
+    private final IResourceClientLibrary resourceClientLibrary;
+    private final IDataFactory dataFactory;
+    private final IMemoryItemConverter memoryItemConverter;
+    private final ITemplatingEngine templatingEngine;
+    private final IJsonSerialization jsonSerialization;
+    private final PrePostUtils prePostUtils;
+
+    private final ChatModelRegistry chatModelRegistry;
+    private final ConversationHistoryBuilder conversationHistoryBuilder;
+    private final LegacyChatExecutor legacyChatExecutor;
+    private final StreamingLegacyChatExecutor streamingLegacyChatExecutor;
+    private final AgentOrchestrator agentOrchestrator;
+
+    private static final Logger LOGGER = Logger.getLogger(LangchainTask.class);
+
+    @Inject
+    public LangchainTask(IResourceClientLibrary resourceClientLibrary,
+            IDataFactory dataFactory,
+            IMemoryItemConverter memoryItemConverter,
+            ITemplatingEngine templatingEngine,
+            IJsonSerialization jsonSerialization,
+            PrePostUtils prePostUtils,
+            Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders,
+            SecretResolver secretResolver,
+            CalculatorTool calculatorTool,
+            DateTimeTool dateTimeTool,
+            WebSearchTool webSearchTool,
+            DataFormatterTool dataFormatterTool,
+            WebScraperTool webScraperTool,
+            TextSummarizerTool textSummarizerTool,
+            PdfReaderTool pdfReaderTool,
+            WeatherTool weatherTool,
+            EddiToolBridge eddiToolBridge,
+            ToolExecutionService toolExecutionService,
+            McpToolProviderManager mcpToolProviderManager) {
+        this.resourceClientLibrary = resourceClientLibrary;
+        this.dataFactory = dataFactory;
+        this.memoryItemConverter = memoryItemConverter;
+        this.templatingEngine = templatingEngine;
+        this.jsonSerialization = jsonSerialization;
+        this.prePostUtils = prePostUtils;
+
+        this.chatModelRegistry = new ChatModelRegistry(languageModelApiConnectorBuilders, secretResolver);
+        this.conversationHistoryBuilder = new ConversationHistoryBuilder();
+        this.legacyChatExecutor = new LegacyChatExecutor();
+        this.streamingLegacyChatExecutor = new StreamingLegacyChatExecutor();
+        this.agentOrchestrator = new AgentOrchestrator(
+                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
+                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
+                eddiToolBridge, toolExecutionService, mcpToolProviderManager);
+    }
+
+    @Override
+    public String getId() {
+        return ID;
+    }
+
+    @Override
+    public String getType() {
+        return KEY_LANGCHAIN;
+    }
+
+    @Override
+    public void execute(IConversationMemory memory, Object component) throws LifecycleException {
+        final var langChainConfig = (LangChainConfiguration) component;
+
+        try {
+            IWritableConversationStep currentStep = memory.getCurrentStep();
+            IData<List<String>> latestData = currentStep.getLatestData(ACTIONS);
+            if (latestData == null) {
+                return;
+            }
+
+            var templateDataObjects = memoryItemConverter.convert(memory);
+            var actions = latestData.getResult();
+            if (actions == null) {
+                return;
+            }
+
+            for (var task : langChainConfig.tasks()) {
+                if (task.getActions().contains(MATCH_ALL_OPERATOR) ||
+                        task.getActions().stream().anyMatch(actions::contains)) {
+                    executeTask(memory, task, currentStep, templateDataObjects);
+                }
+            }
+
+        } catch (ITemplatingEngine.TemplateEngineException | ChatModelRegistry.UnsupportedLangchainTaskException
+                | IOException | LifecycleException e) {
+            throw new LifecycleException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    /**
+     * Execute a single task — delegates to LegacyChatExecutor or AgentOrchestrator.
+     */
+    private void executeTask(IConversationMemory memory, Task task,
+            IWritableConversationStep currentStep,
+            Map<String, Object> templateDataObjects)
+            throws ITemplatingEngine.TemplateEngineException, ChatModelRegistry.UnsupportedLangchainTaskException,
+            IOException, LifecycleException {
+
+        var processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects);
+
+        // Parse history parameters
+        String systemMessage = processedParams.getOrDefault(KEY_SYSTEM_MESSAGE, "");
+        int logSizeLimit = task.getConversationHistoryLimit() != null ? task.getConversationHistoryLimit() : -1;
+        if (!isNullOrEmpty(processedParams.get(KEY_LOG_SIZE_LIMIT))) {
+            logSizeLimit = Integer.parseInt(processedParams.get(KEY_LOG_SIZE_LIMIT));
+        }
+        boolean includeFirstBotMessage = isNullOrEmpty(processedParams.get(KEY_INCLUDE_FIRST_BOT_MESSAGE))
+                || Boolean.parseBoolean(processedParams.get(KEY_INCLUDE_FIRST_BOT_MESSAGE));
+
+        // Build conversation messages
+        List<ChatMessage> messages = conversationHistoryBuilder.buildMessages(
+                memory, systemMessage, processedParams.get(KEY_PROMPT), logSizeLimit, includeFirstBotMessage);
+
+        if (messages.isEmpty()) {
+            return;
+        }
+
+        var chatModel = chatModelRegistry.getOrCreate(task.getType(), processedParams);
+        prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
+
+        // Detect streaming mode — event sink is set when SSE endpoint is used
+        ConversationEventSink eventSink = memory.getEventSink();
+
+        // Execute: try agent mode first, fall back to legacy
+        String responseContent;
+        Map<String, Object> responseMetadata = new HashMap<>();
+        List<Map<String, Object>> toolTrace = new ArrayList<>();
+
+        // Build chat messages without system message for agent mode
+        // (agent orchestrator adds system message internally)
+        List<ChatMessage> chatMessagesWithoutSystem = messages.stream()
+                .filter(m -> !(m instanceof dev.langchain4j.data.message.SystemMessage))
+                .toList();
+
+        var agentResult = agentOrchestrator.executeIfToolsEnabled(
+                chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task, memory);
+
+        if (agentResult != null) {
+            // Agent mode — tools execute synchronously, stream final response if sink
+            // available
+            responseContent = agentResult.response();
+            toolTrace = agentResult.trace();
+            // Stream the final agent response if streaming is active
+            if (eventSink != null && responseContent != null) {
+                eventSink.onToken(responseContent);
+            }
+        } else if (eventSink != null) {
+            // Legacy mode with streaming — try to get a streaming model
+            var streamingModel = chatModelRegistry.getOrCreateStreaming(task.getType(), processedParams);
+            if (streamingModel != null) {
+                responseContent = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink);
+            } else {
+                // Streaming not supported by this builder — fall back to sync, emit as single
+                // chunk
+                var chatResult = legacyChatExecutor.execute(chatModel, messages, task);
+                responseContent = chatResult.response();
+                responseMetadata = chatResult.responseMetadata();
+                eventSink.onToken(responseContent);
+            }
+        } else {
+            // Standard non-streaming legacy mode
+            var chatResult = legacyChatExecutor.execute(chatModel, messages, task);
+            responseContent = chatResult.response();
+            responseMetadata = chatResult.responseMetadata();
+        }
+
+        // Store metadata if configured
+        var responseMetadataObjectName = task.getResponseMetadataObjectName();
+        if (!isNullOrEmpty(responseMetadataObjectName)) {
+            templateDataObjects.put(responseMetadataObjectName, responseMetadata);
+            prePostUtils.createMemoryEntry(currentStep, responseMetadata, responseMetadataObjectName, KEY_LANGCHAIN);
+        }
+
+        // Store response content
+        var responseObjectName = task.getResponseObjectName();
+        if (isNullOrEmpty(responseObjectName)) {
+            responseObjectName = task.getId();
+        }
+
+        if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
+            var contentAsObject = jsonSerialization.deserialize(responseContent, Map.class);
+            templateDataObjects.put(responseObjectName, contentAsObject);
+        } else {
+            templateDataObjects.put(responseObjectName, responseContent);
+        }
+
+        var langchainData = dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(),
+                responseContent);
+        currentStep.storeData(langchainData);
+
+        // Write audit:* memory keys for the audit ledger (only if auditing is enabled)
+        if (memory.getAuditCollector() != null) {
+            var compiledPrompt = dataFactory.createData("audit:compiled_prompt",
+                    systemMessage + "\n---\n" + (processedParams.get(KEY_PROMPT) != null
+                            ? processedParams.get(KEY_PROMPT) : ""));
+            currentStep.storeData(compiledPrompt);
+
+            if (responseContent != null) {
+                var modelResponse = dataFactory.createData("audit:model_response", responseContent);
+                currentStep.storeData(modelResponse);
+            }
+
+            String modelName = processedParams.getOrDefault("model", task.getType());
+            var modelNameData = dataFactory.createData("audit:model_name", modelName);
+            currentStep.storeData(modelNameData);
+        }
+
+        // Store tool trace if available
+        if (!toolTrace.isEmpty()) {
+            var traceData = dataFactory.createData(KEY_LANGCHAIN + ":trace:" + task.getType() + ":" + task.getId(),
+                    toolTrace);
+            currentStep.storeData(traceData);
+        }
+
+        // Add to output if configured (or if in agent mode with tools)
+        boolean shouldAddToOutput = agentResult != null ||
+                (!isNullOrEmpty(processedParams.get(KEY_ADD_TO_OUTPUT)) &&
+                        Boolean.parseBoolean(processedParams.get(KEY_ADD_TO_OUTPUT)));
+
+        if (shouldAddToOutput) {
+            var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(),
+                    responseContent);
+            currentStep.storeData(outputData);
+            var outputItem = new TextOutputItem(responseContent, 0);
+            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
+        }
+
+        prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, 200, false);
+    }
+
+    private HashMap<String, String> runTemplateEngineOnParams(Map<String, String> parameters,
+            Map<String, Object> templateDataObjects) {
+
+        var processedParams = new HashMap<>(parameters);
+        processedParams.forEach((key, value) -> {
+            try {
+                if (!isNullOrEmpty(value)) {
+                    processedParams.put(key, templatingEngine.processTemplate(value, templateDataObjects));
+                }
+            } catch (ITemplatingEngine.TemplateEngineException e) {
+                LOGGER.error(e.getLocalizedMessage(), e);
+            }
+        });
+        return processedParams;
+    }
+
+    @Override
+    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
+            throws PackageConfigurationException {
+
+        Object uriObj = configuration.get(KEY_URI);
+        if (!isNullOrEmpty(uriObj)) {
+            URI uri = URI.create(uriObj.toString());
+
+            try {
+                return resourceClientLibrary.getResource(uri, LangChainConfiguration.class);
+            } catch (ServiceException e) {
+                LOGGER.error(e.getLocalizedMessage(), e);
+                throw new PackageConfigurationException(e.getLocalizedMessage(), e);
+            }
+        }
+
+        throw new PackageConfigurationException("No resource URI has been defined! [LangChainConfiguration]");
+    }
+
+    @Override
+    public ExtensionDescriptor getExtensionDescriptor() {
+        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
+        extensionDescriptor.setDisplayName("Lang Chain");
+
+        ConfigValue configValue = new ConfigValue("Resource URI", FieldType.URI, false, null);
+        extensionDescriptor.getConfigs().put(KEY_URI, configValue);
+
+        return extensionDescriptor;
+    }
+}

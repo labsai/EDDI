@@ -1,0 +1,48 @@
+version: 2
+updates:
+  # Maven dependencies
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - chore
+    groups:
+      # Group minor/patch Quarkus updates together
+      quarkus:
+        patterns:
+          - "io.quarkus*"
+        update-types:
+          - minor
+          - patch
+      # Group minor/patch LangChain4j updates together
+      langchain4j:
+        patterns:
+          - "dev.langchain4j*"
+        update-types:
+          - minor
+          - patch
+      # Group all other minor/patch updates
+      minor-and-patch:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "io.quarkus*"
+          - "dev.langchain4j*"
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions versions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci

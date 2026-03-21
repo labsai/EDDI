@@ -26,7 +26,7 @@ import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
 import ai.labs.eddi.engine.api.IRestBotAdministration;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
-import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
+import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import io.quarkiverse.mcp.server.Tool;
