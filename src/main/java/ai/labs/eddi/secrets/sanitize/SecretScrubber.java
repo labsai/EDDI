@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
 
 /**
  * AST-based JSON scrubber that replaces secret values with vault-redacted placeholders.
- * Used during bot export to prevent plaintext secrets from leaking into ZIP archives.
+ * Used during Agent export to prevent plaintext secrets from leaking into ZIP archives.
  * <p>
  * Detection strategy (defense-in-depth):
  * <ol>

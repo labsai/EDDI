@@ -28,8 +28,8 @@ public interface IRestConversationStore {
                                                              @QueryParam("limit") @DefaultValue("20") Integer limit,
                                                              @QueryParam("filter") String filter,
                                                              @QueryParam("conversationId") String conversationId,
-                                                             @QueryParam("botId") String botId,
-                                                             @QueryParam("botVersion") Integer botVersion,
+                                                             @QueryParam("agentId") String agentId,
+                                                             @QueryParam("agentVersion") Integer agentVersion,
                                                              @QueryParam("conversationState") ConversationState conversationState,
                                                              @QueryParam("viewState") ConversationDescriptor.ViewState viewState);
 
@@ -60,11 +60,11 @@ public interface IRestConversationStore {
             throws ResourceStoreException, ResourceNotFoundException, ResourceModifiedException;
 
     @GET
-    @Path("/active/{botId}")
+    @Path("/active/{agentId}")
     @Produces(MediaType.APPLICATION_JSON)
-    List<ConversationStatus> getActiveConversations(@PathParam("botId") String botId,
-                                                    @Parameter(name = "botVersion", required = true, example = "1")
-                                                    @QueryParam("botVersion") Integer botVersion)
+    List<ConversationStatus> getActiveConversations(@PathParam("agentId") String agentId,
+                                                    @Parameter(name = "agentVersion", required = true, example = "1")
+                                                    @QueryParam("agentVersion") Integer agentVersion)
             throws ResourceStoreException, ResourceNotFoundException;
 
     @POST

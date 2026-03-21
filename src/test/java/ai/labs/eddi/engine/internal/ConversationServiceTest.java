@@ -13,8 +13,8 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
-import ai.labs.eddi.engine.runtime.IBot;
-import ai.labs.eddi.engine.runtime.IBotFactory;
+import ai.labs.eddi.engine.runtime.IAgent;
+import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
@@ -33,14 +33,14 @@ import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for ConversationService — the core conversation lifecycle logic
- * extracted from RestBotEngine.
+ * extracted from RestAgentEngine.
  */
 class ConversationServiceTest {
 
     private ConversationService conversationService;
 
     // Mocked dependencies
-    private IBotFactory botFactory;
+    private IAgentFactory AgentFactory;
     private IConversationMemoryStore conversationMemoryStore;
     private IConversationDescriptorStore conversationDescriptorStore;
     private IPropertiesStore propertiesStore;
@@ -54,7 +54,7 @@ class ConversationServiceTest {
     private TenantQuotaService tenantQuotaService;
 
     private static final Environment ENV = Environment.production;
-    private static final String BOT_ID = "test-bot-id";
+    private static final String AGENT_ID = "test-bot-id";
     private static final String CONVERSATION_ID = "test-conversation-id";
     private static final String USER_ID = "test-user-id";
     private static final int BOT_TIMEOUT = 60;
@@ -62,7 +62,7 @@ class ConversationServiceTest {
     @SuppressWarnings("unchecked")
     @BeforeEach
     void setUp() {
-        botFactory = mock(IBotFactory.class);
+        AgentFactory = mock(IAgentFactory.class);
         conversationMemoryStore = mock(IConversationMemoryStore.class);
         conversationDescriptorStore = mock(IConversationDescriptorStore.class);
         propertiesStore = mock(IPropertiesStore.class);
@@ -84,7 +84,7 @@ class ConversationServiceTest {
                 .thenReturn(new HashMap<>());
 
         conversationService = new ConversationService(
-                botFactory, conversationMemoryStore, conversationDescriptorStore,
+                AgentFactory, conversationMemoryStore, conversationDescriptorStore,
                 propertiesStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService,
                 tenantQuotaService, meterRegistry, BOT_TIMEOUT);
@@ -95,11 +95,11 @@ class ConversationServiceTest {
     @Test
     void startConversation_withReadyBot_returnsConversationResult() throws Exception {
         // Arrange
-        IBot mockBot = mock(IBot.class);
+        IAgent mockBot = mock(IAgent.class);
         IConversation mockConversation = mock(IConversation.class);
         IConversationMemory mockMemory = mock(IConversationMemory.class);
 
-        when(botFactory.getLatestReadyBot(ENV, BOT_ID)).thenReturn(mockBot);
+        when(AgentFactory.getLatestReadyAgent(ENV, AGENT_ID)).thenReturn(mockBot);
         when(conversationSetup.computeAnonymousUserIdIfEmpty(eq(USER_ID), any())).thenReturn(USER_ID);
         when(mockBot.startConversation(eq(USER_ID), anyMap(), any(), any())).thenReturn(mockConversation);
         when(mockConversation.getConversationMemory()).thenReturn(mockMemory);
@@ -115,7 +115,7 @@ class ConversationServiceTest {
         when(conversationMemoryStore.storeConversationMemorySnapshot(any())).thenReturn(CONVERSATION_ID);
 
         // Act
-        var result = conversationService.startConversation(ENV, BOT_ID, USER_ID, new LinkedHashMap<>());
+        var result = conversationService.startConversation(ENV, AGENT_ID, USER_ID, new LinkedHashMap<>());
 
         // Assert
         assertNotNull(result);
@@ -123,25 +123,25 @@ class ConversationServiceTest {
         assertNotNull(result.conversationUri());
         verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
         verify(conversationStateCache).put(CONVERSATION_ID, ConversationState.READY);
-        verify(conversationSetup).createConversationDescriptor(eq(BOT_ID), eq(mockBot), eq(USER_ID),
+        verify(conversationSetup).createConversationDescriptor(eq(AGENT_ID), eq(mockBot), eq(USER_ID),
                 eq(CONVERSATION_ID), any());
     }
 
     @Test
     void startConversation_noBotReady_throwsBotNotReadyException() throws Exception {
-        when(botFactory.getLatestReadyBot(ENV, BOT_ID)).thenReturn(null);
+        when(AgentFactory.getLatestReadyAgent(ENV, AGENT_ID)).thenReturn(null);
 
         assertThrows(BotNotReadyException.class,
-                () -> conversationService.startConversation(ENV, BOT_ID, USER_ID, null));
+                () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, null));
     }
 
     @Test
     void startConversation_withNullContext_createsEmptyContext() throws Exception {
-        IBot mockBot = mock(IBot.class);
+        IAgent mockBot = mock(IAgent.class);
         IConversation mockConversation = mock(IConversation.class);
         IConversationMemory mockMemory = mock(IConversationMemory.class);
 
-        when(botFactory.getLatestReadyBot(ENV, BOT_ID)).thenReturn(mockBot);
+        when(AgentFactory.getLatestReadyAgent(ENV, AGENT_ID)).thenReturn(mockBot);
         when(conversationSetup.computeAnonymousUserIdIfEmpty(eq(USER_ID), any())).thenReturn(USER_ID);
         when(mockBot.startConversation(eq(USER_ID), anyMap(), any(), any())).thenReturn(mockConversation);
         when(mockConversation.getConversationMemory()).thenReturn(mockMemory);
@@ -157,7 +157,7 @@ class ConversationServiceTest {
         when(conversationMemoryStore.storeConversationMemorySnapshot(any())).thenReturn(CONVERSATION_ID);
 
         // Should not throw even with null context
-        var result = conversationService.startConversation(ENV, BOT_ID, USER_ID, null);
+        var result = conversationService.startConversation(ENV, AGENT_ID, USER_ID, null);
         assertNotNull(result);
     }
 
@@ -209,26 +209,26 @@ class ConversationServiceTest {
     @Test
     void readConversation_botMismatch_throwsBotMismatchException() throws Exception {
         var snapshot = new ConversationMemorySnapshot();
-        snapshot.setBotId("different-bot-id");
+        snapshot.setAgentId("different-bot-id");
 
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
 
         assertThrows(BotMismatchException.class,
-                () -> conversationService.readConversation(ENV, BOT_ID, CONVERSATION_ID,
+                () -> conversationService.readConversation(ENV, AGENT_ID, CONVERSATION_ID,
                         false, false, List.of()));
     }
 
     @Test
     void readConversation_validRequest_returnsSnapshot() throws Exception {
         var snapshot = new ConversationMemorySnapshot();
-        snapshot.setBotId(BOT_ID);
+        snapshot.setAgentId(AGENT_ID);
         snapshot.setUserId(USER_ID);
         snapshot.setConversationState(ConversationState.READY);
         snapshot.setConversationSteps(new ArrayList<>());
 
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
 
-        var result = conversationService.readConversation(ENV, BOT_ID, CONVERSATION_ID,
+        var result = conversationService.readConversation(ENV, AGENT_ID, CONVERSATION_ID,
                 false, false, List.of());
 
         assertNotNull(result);
@@ -240,41 +240,41 @@ class ConversationServiceTest {
     @Test
     void isUndoAvailable_delegatesToMemory() throws Exception {
         var snapshot = new ConversationMemorySnapshot();
-        snapshot.setBotId(BOT_ID);
+        snapshot.setAgentId(AGENT_ID);
         snapshot.setConversationState(ConversationState.READY);
         snapshot.setConversationSteps(new ArrayList<>());
 
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
 
         // New conversation has no steps to undo
-        Boolean result = conversationService.isUndoAvailable(ENV, BOT_ID, CONVERSATION_ID);
+        Boolean result = conversationService.isUndoAvailable(ENV, AGENT_ID, CONVERSATION_ID);
         assertFalse(result);
     }
 
     @Test
     void undo_botMismatch_throwsBotMismatchException() throws Exception {
         var snapshot = new ConversationMemorySnapshot();
-        snapshot.setBotId("different-bot-id");
+        snapshot.setAgentId("different-bot-id");
         snapshot.setConversationState(ConversationState.READY);
         snapshot.setConversationSteps(new ArrayList<>());
 
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
 
         assertThrows(BotMismatchException.class,
-                () -> conversationService.undo(ENV, BOT_ID, CONVERSATION_ID));
+                () -> conversationService.undo(ENV, AGENT_ID, CONVERSATION_ID));
     }
 
     @Test
     void redo_botMismatch_throwsBotMismatchException() throws Exception {
         var snapshot = new ConversationMemorySnapshot();
-        snapshot.setBotId("different-bot-id");
+        snapshot.setAgentId("different-bot-id");
         snapshot.setConversationState(ConversationState.READY);
         snapshot.setConversationSteps(new ArrayList<>());
 
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
 
         assertThrows(BotMismatchException.class,
-                () -> conversationService.redo(ENV, BOT_ID, CONVERSATION_ID));
+                () -> conversationService.redo(ENV, AGENT_ID, CONVERSATION_ID));
     }
 
     // --- say tests ---
@@ -282,9 +282,9 @@ class ConversationServiceTest {
     @Test
     void say_botMismatch_throwsBotMismatchException() throws Exception {
         var snapshot = new ConversationMemorySnapshot();
-        snapshot.setBotId("different-bot-id");
+        snapshot.setAgentId("different-bot-id");
         snapshot.setUserId(USER_ID);
-        snapshot.setBotVersion(1);
+        snapshot.setAgentVersion(1);
         snapshot.setConversationState(ConversationState.READY);
         snapshot.setConversationSteps(new ArrayList<>());
 
@@ -293,7 +293,7 @@ class ConversationServiceTest {
         var handler = mock(ConversationResponseHandler.class);
 
         assertThrows(BotMismatchException.class,
-                () -> conversationService.say(ENV, BOT_ID, CONVERSATION_ID,
+                () -> conversationService.say(ENV, AGENT_ID, CONVERSATION_ID,
                         false, false, List.of(),
                         new InputData("hello", Map.of()), false, handler));
     }
@@ -301,24 +301,24 @@ class ConversationServiceTest {
     @Test
     void say_conversationEnded_throwsConversationEndedException() throws Exception {
         var snapshot = new ConversationMemorySnapshot();
-        snapshot.setBotId(BOT_ID);
+        snapshot.setAgentId(AGENT_ID);
         snapshot.setUserId(USER_ID);
-        snapshot.setBotVersion(1);
+        snapshot.setAgentVersion(1);
         snapshot.setConversationState(ConversationState.READY);
         snapshot.setConversationSteps(new ArrayList<>());
 
-        IBot mockBot = mock(IBot.class);
+        IAgent mockBot = mock(IAgent.class);
         IConversation mockConversation = mock(IConversation.class);
 
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
-        when(botFactory.getBot(ENV, BOT_ID, 1)).thenReturn(mockBot);
+        when(AgentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(mockBot);
         when(mockBot.continueConversation(any(), any(), any())).thenReturn(mockConversation);
         when(mockConversation.isEnded()).thenReturn(true);
 
         var handler = mock(ConversationResponseHandler.class);
 
         assertThrows(ConversationEndedException.class,
-                () -> conversationService.say(ENV, BOT_ID, CONVERSATION_ID,
+                () -> conversationService.say(ENV, AGENT_ID, CONVERSATION_ID,
                         false, false, List.of(),
                         new InputData("hello", Map.of()), false, handler));
     }
@@ -326,23 +326,23 @@ class ConversationServiceTest {
     @Test
     void say_validInput_submitsToCoordinator() throws Exception {
         var snapshot = new ConversationMemorySnapshot();
-        snapshot.setBotId(BOT_ID);
+        snapshot.setAgentId(AGENT_ID);
         snapshot.setUserId(USER_ID);
-        snapshot.setBotVersion(1);
+        snapshot.setAgentVersion(1);
         snapshot.setConversationState(ConversationState.READY);
         snapshot.setConversationSteps(new ArrayList<>());
 
-        IBot mockBot = mock(IBot.class);
+        IAgent mockBot = mock(IAgent.class);
         IConversation mockConversation = mock(IConversation.class);
 
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
-        when(botFactory.getBot(ENV, BOT_ID, 1)).thenReturn(mockBot);
+        when(AgentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(mockBot);
         when(mockBot.continueConversation(any(), any(), any())).thenReturn(mockConversation);
         when(mockConversation.isEnded()).thenReturn(false);
 
         var handler = mock(ConversationResponseHandler.class);
 
-        conversationService.say(ENV, BOT_ID, CONVERSATION_ID,
+        conversationService.say(ENV, AGENT_ID, CONVERSATION_ID,
                 false, false, List.of(),
                 new InputData("hello", Map.of()), false, handler);
 
@@ -369,9 +369,9 @@ class ConversationServiceTest {
     @Test
     void sayStreaming_botMismatch_throwsBotMismatchException() throws Exception {
         var snapshot = new ConversationMemorySnapshot();
-        snapshot.setBotId("different-bot-id");
+        snapshot.setAgentId("different-bot-id");
         snapshot.setUserId(USER_ID);
-        snapshot.setBotVersion(1);
+        snapshot.setAgentVersion(1);
         snapshot.setConversationState(ConversationState.READY);
         snapshot.setConversationSteps(new ArrayList<>());
 
@@ -380,7 +380,7 @@ class ConversationServiceTest {
         var handler = mock(ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler.class);
 
         assertThrows(BotMismatchException.class,
-                () -> conversationService.sayStreaming(ENV, BOT_ID, CONVERSATION_ID,
+                () -> conversationService.sayStreaming(ENV, AGENT_ID, CONVERSATION_ID,
                         false, false, List.of(),
                         new InputData("hello", Map.of()), handler));
     }
@@ -388,24 +388,24 @@ class ConversationServiceTest {
     @Test
     void sayStreaming_conversationEnded_throwsConversationEndedException() throws Exception {
         var snapshot = new ConversationMemorySnapshot();
-        snapshot.setBotId(BOT_ID);
+        snapshot.setAgentId(AGENT_ID);
         snapshot.setUserId(USER_ID);
-        snapshot.setBotVersion(1);
+        snapshot.setAgentVersion(1);
         snapshot.setConversationState(ConversationState.READY);
         snapshot.setConversationSteps(new ArrayList<>());
 
-        IBot mockBot = mock(IBot.class);
+        IAgent mockBot = mock(IAgent.class);
         IConversation mockConversation = mock(IConversation.class);
 
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
-        when(botFactory.getBot(ENV, BOT_ID, 1)).thenReturn(mockBot);
+        when(AgentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(mockBot);
         when(mockBot.continueConversation(any(), any(), any())).thenReturn(mockConversation);
         when(mockConversation.isEnded()).thenReturn(true);
 
         var handler = mock(ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler.class);
 
         assertThrows(ConversationEndedException.class,
-                () -> conversationService.sayStreaming(ENV, BOT_ID, CONVERSATION_ID,
+                () -> conversationService.sayStreaming(ENV, AGENT_ID, CONVERSATION_ID,
                         false, false, List.of(),
                         new InputData("hello", Map.of()), handler));
     }
@@ -414,23 +414,23 @@ class ConversationServiceTest {
     @Test
     void sayStreaming_validInput_submitsToCoordinator() throws Exception {
         var snapshot = new ConversationMemorySnapshot();
-        snapshot.setBotId(BOT_ID);
+        snapshot.setAgentId(AGENT_ID);
         snapshot.setUserId(USER_ID);
-        snapshot.setBotVersion(1);
+        snapshot.setAgentVersion(1);
         snapshot.setConversationState(ConversationState.READY);
         snapshot.setConversationSteps(new ArrayList<>());
 
-        IBot mockBot = mock(IBot.class);
+        IAgent mockBot = mock(IAgent.class);
         IConversation mockConversation = mock(IConversation.class);
 
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
-        when(botFactory.getBot(ENV, BOT_ID, 1)).thenReturn(mockBot);
+        when(AgentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(mockBot);
         when(mockBot.continueConversation(any(), any(), any())).thenReturn(mockConversation);
         when(mockConversation.isEnded()).thenReturn(false);
 
         var handler = mock(ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler.class);
 
-        conversationService.sayStreaming(ENV, BOT_ID, CONVERSATION_ID,
+        conversationService.sayStreaming(ENV, AGENT_ID, CONVERSATION_ID,
                 false, false, List.of(),
                 new InputData("hello", Map.of()), handler);
 

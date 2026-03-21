@@ -16,7 +16,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Resolves {@code ${eddivault:tenantId/botId/keyName}} references in parameter maps.
+ * Resolves {@code ${eddivault:tenantId/agentId/keyName}} references in parameter maps.
  * <p>
  * This is the central integration point between the vault and the execution pipeline.
  * It is called <b>after</b> Thymeleaf template processing and <b>before</b> the final
@@ -109,13 +109,13 @@ public class SecretResolver {
         while (matcher.find()) {
             String fullMatch = matcher.group(0);
             String tenantId = matcher.group(1);
-            String botId = matcher.group(2);
+            String agentId = matcher.group(2);
             String keyName = matcher.group(3);
 
-            String cacheKey = tenantId + "/" + botId + "/" + keyName;
+            String cacheKey = tenantId + "/" + agentId + "/" + keyName;
             String resolved = cache.get(cacheKey, k -> {
                 try {
-                    return secretProvider.resolve(new SecretReference(tenantId, botId, keyName));
+                    return secretProvider.resolve(new SecretReference(tenantId, agentId, keyName));
                 } catch (ISecretProvider.SecretNotFoundException e) {
                     LOGGER.warnv("Vault reference not found: {0} — passing through unchanged", fullMatch);
                     return null;
@@ -140,7 +140,7 @@ public class SecretResolver {
      * Invalidate a specific cache entry (called on secret rotation).
      */
     public void invalidateCache(SecretReference reference) {
-        String cacheKey = reference.tenantId() + "/" + reference.botId() + "/" + reference.keyName();
+        String cacheKey = reference.tenantId() + "/" + reference.agentId() + "/" + reference.keyName();
         cache.invalidate(cacheKey);
         LOGGER.infov("Cache invalidated for: {0}", cacheKey);
     }

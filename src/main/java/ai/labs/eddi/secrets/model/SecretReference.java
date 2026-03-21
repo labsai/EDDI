@@ -2,16 +2,16 @@ package ai.labs.eddi.secrets.model;
 
 /**
  * Immutable reference to a secret stored in the vault.
- * Parsed from the {@code ${eddivault:tenantId/botId/keyName}} syntax.
+ * Parsed from the {@code ${eddivault:tenantId/agentId/keyName}} syntax.
  *
  * @param tenantId the tenant namespace (default: "default" for single-tenant)
- * @param botId    the bot identifier
+ * @param agentId    the Agent identifier
  * @param keyName  the secret key name
  */
-public record SecretReference(String tenantId, String botId, String keyName) {
+public record SecretReference(String tenantId, String agentId, String keyName) {
 
     /**
-     * Regex pattern for vault references: ${eddivault:tenantId/botId/keyName}
+     * Regex pattern for vault references: ${eddivault:tenantId/agentId/keyName}
      */
     public static final String VAULT_PATTERN = "\\$\\{eddivault:([^/]+)/([^/]+)/([^}]+)\\}";
 
@@ -27,7 +27,7 @@ public record SecretReference(String tenantId, String botId, String keyName) {
         if (!matcher.find()) {
             throw new IllegalArgumentException(
                     "Invalid vault reference: " + reference +
-                            ". Expected format: ${eddivault:tenantId/botId/keyName}");
+                            ". Expected format: ${eddivault:tenantId/agentId/keyName}");
         }
         return new SecretReference(matcher.group(1), matcher.group(2), matcher.group(3));
     }
@@ -36,7 +36,7 @@ public record SecretReference(String tenantId, String botId, String keyName) {
      * Construct the vault reference string from this reference.
      */
     public String toReferenceString() {
-        return "${eddivault:" + tenantId + "/" + botId + "/" + keyName + "}";
+        return "${eddivault:" + tenantId + "/" + agentId + "/" + keyName + "}";
     }
 
     /**

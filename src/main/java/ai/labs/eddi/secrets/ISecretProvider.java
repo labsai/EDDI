@@ -59,14 +59,14 @@ public interface ISecretProvider {
     SecretMetadata getMetadata(SecretReference reference) throws SecretNotFoundException, SecretProviderException;
 
     /**
-     * List all secret keys for a given tenant and bot namespace.
+     * List all secret keys for a given tenant and Agent namespace.
      *
      * @param tenantId the tenant identifier
-     * @param botId    the bot identifier
+     * @param agentId    the Agent identifier
      * @return list of metadata for all secrets in the namespace
      * @throws SecretProviderException if the operation fails
      */
-    List<SecretMetadata> listKeys(String tenantId, String botId) throws SecretProviderException;
+    List<SecretMetadata> listKeys(String tenantId, String agentId) throws SecretProviderException;
 
     /**
      * Check if the secret provider is properly configured and operational.

@@ -10,10 +10,10 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 
 /**
- * Component test for Bot Deployment lifecycle with real MongoDB.
+ * Component test for Agent Deployment lifecycle with real MongoDB.
  * <p>
  * Tests deploy, undeploy, status transitions, and error handling
- * for the bot deployment management system.
+ * for the Agent deployment management system.
  */
 @QuarkusTest
 @TestProfile(IntegrationTestProfile.class)
@@ -23,26 +23,26 @@ public class BotDeploymentComponentIT extends BaseIntegrationIT {
 
         @AfterAll
         static void cleanup() {
-                for (ResourceId botId : createdBots) {
-                        undeployBotQuietly(botId.id(), botId.version());
+                for (ResourceId agentId : createdBots) {
+                        undeployBotQuietly(agentId.id(), agentId.version());
                 }
         }
 
         @Test
-        @DisplayName("should deploy a bot and reach READY status")
+        @DisplayName("should deploy a Agent and reach READY status")
         void deployBot_reachesReady() throws Exception {
-                ResourceId botId = createMinimalBot();
+                ResourceId agentId = createMinimalBot();
 
                 // Deploy
                 given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false",
-                                botId.id(), botId.version()));
+                                agentId.id(), agentId.version()));
 
                 // Poll for READY
                 for (int i = 0; i < 30; i++) {
                         Response response = given()
                                         .get(String.format(
                                                         "administration/production/deploymentstatus/%s?version=%s&format=text",
-                                                        botId.id(), botId.version()));
+                                                        agentId.id(), agentId.version()));
                         String status = response.getBody().print().trim();
                         if ("READY".equals(status)) {
                                 return; // test passes
@@ -55,13 +55,13 @@ public class BotDeploymentComponentIT extends BaseIntegrationIT {
         @Test
         @DisplayName("should undeploy a deployed bot")
         void undeployBot_succeeds() throws Exception {
-                ResourceId botId = createMinimalBot();
-                deployBot(botId.id(), botId.version());
+                ResourceId agentId = createMinimalBot();
+                deployAgent(agentId.id(), agentId.version());
 
                 // Undeploy
                 Response response = given()
                                 .post(String.format("administration/production/undeploy/%s?version=%s",
-                                                botId.id(), botId.version()));
+                                                agentId.id(), agentId.version()));
 
                 response.then().statusCode(anyOf(equalTo(200), equalTo(202), equalTo(204)));
         }
@@ -78,14 +78,14 @@ public class BotDeploymentComponentIT extends BaseIntegrationIT {
         }
 
         @Test
-        @DisplayName("should return deployment status for a bot version")
+        @DisplayName("should return deployment status for a Agent version")
         void getDeploymentStatus_forBot() throws Exception {
-                ResourceId botId = createMinimalBot();
-                deployBot(botId.id(), botId.version());
+                ResourceId agentId = createMinimalBot();
+                deployAgent(agentId.id(), agentId.version());
 
                 Response response = given()
                                 .get(String.format("administration/production/deploymentstatus/%s?version=%s",
-                                                botId.id(), botId.version()));
+                                                agentId.id(), agentId.version()));
 
                 response.then().assertThat()
                                 .statusCode(200)
@@ -107,7 +107,7 @@ public class BotDeploymentComponentIT extends BaseIntegrationIT {
                 String packageBody = String.format(
                                 """
                                                 {
-                                                  "packageExtensions": [
+                                                  "PipelineSteps": [
                                                     {
                                                       "type": "eddi://ai.labs.parser",
                                                       "config": {},
@@ -124,12 +124,12 @@ public class BotDeploymentComponentIT extends BaseIntegrationIT {
                                                 }""",
                                 locationDictionary, locationBehavior, locationOutput);
 
-                String locationPackage = createResource(packageBody, "/packagestore/packages");
+                String locationPackage = createResource(packageBody, "/PipelineStore/packages");
                 String botBody = String.format("""
                                 {"packages": ["%s"]}""", locationPackage);
-                String botLocation = createResource(botBody, "/botstore/bots");
-                ResourceId botId = extractResourceId(botLocation);
-                createdBots.add(botId);
-                return botId;
+                String botLocation = createResource(botBody, "/AgentStore/bots");
+                ResourceId agentId = extractResourceId(botLocation);
+                createdBots.add(AgentId);
+                return agentId;
         }
 }

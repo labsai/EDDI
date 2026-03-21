@@ -12,7 +12,7 @@ import jakarta.ws.rs.core.Response;
 import java.util.List;
 
 /**
- * REST API for managing scheduled bot triggers.
+ * REST API for managing scheduled Agent triggers.
  * <p>
  * Provides CRUD operations for schedules, plus admin endpoints
  * for managing fire history and dead-lettered schedules.
@@ -21,13 +21,13 @@ import java.util.List;
  * @since 6.0.0
  */
 @Path("/schedulestore/schedules")
-@Tag(name = "11. Schedules", description = "Manage scheduled bot triggers (heartbeat, cron jobs)")
+@Tag(name = "11. Schedules", description = "Manage scheduled Agent triggers (heartbeat, cron jobs)")
 public interface IRestScheduleStore {
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "List all schedules. Optional filter by botId.")
-    List<ScheduleConfiguration> readAllSchedules(@QueryParam("botId") String botId);
+    @Operation(description = "List all schedules. Optional filter by agentId.")
+    List<ScheduleConfiguration> readAllSchedules(@QueryParam("agentId") String agentId);
 
     @GET
     @Path("/{scheduleId}")

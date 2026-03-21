@@ -32,8 +32,8 @@ public class AuditStore implements IAuditStore {
     // Document field names
     private static final String F_ID = "_id";
     private static final String F_CONVERSATION_ID = "conversationId";
-    private static final String F_BOT_ID = "botId";
-    private static final String F_BOT_VERSION = "botVersion";
+    private static final String F_BOT_ID = "agentId";
+    private static final String F_BOT_VERSION = "agentVersion";
     private static final String F_USER_ID = "userId";
     private static final String F_ENVIRONMENT = "environment";
     private static final String F_STEP_INDEX = "stepIndex";
@@ -86,10 +86,10 @@ public class AuditStore implements IAuditStore {
     }
 
     @Override
-    public List<AuditEntry> getEntriesByBot(String botId, Integer botVersion, int skip, int limit) {
-        Document filter = new Document(F_BOT_ID, botId);
-        if (botVersion != null) {
-            filter.append(F_BOT_VERSION, botVersion);
+    public List<AuditEntry> getEntriesByBot(String agentId, Integer agentVersion, int skip, int limit) {
+        Document filter = new Document(F_BOT_ID, agentId);
+        if (agentVersion != null) {
+            filter.append(F_BOT_VERSION, agentVersion);
         }
         return query(filter, skip, limit);
     }
@@ -119,8 +119,8 @@ public class AuditStore implements IAuditStore {
         Document doc = new Document();
         doc.put(F_ID, entry.id());
         doc.put(F_CONVERSATION_ID, entry.conversationId());
-        doc.put(F_BOT_ID, entry.botId());
-        doc.put(F_BOT_VERSION, entry.botVersion());
+        doc.put(F_BOT_ID, entry.agentId());
+        doc.put(F_BOT_VERSION, entry.agentVersion());
         doc.put(F_USER_ID, entry.userId());
         doc.put(F_ENVIRONMENT, entry.environment());
         doc.put(F_STEP_INDEX, entry.stepIndex());

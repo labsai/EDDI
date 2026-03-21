@@ -16,8 +16,8 @@ public record LogEntry(
         String loggerName,
         String message,
         String environment,
-        String botId,
-        Integer botVersion,
+        String agentId,
+        Integer agentVersion,
         String conversationId,
         String userId,
         String instanceId

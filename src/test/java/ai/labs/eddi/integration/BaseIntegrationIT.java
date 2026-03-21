@@ -20,7 +20,7 @@ import static org.hamcrest.Matchers.*;
  * <li>{@link #load(String)} — load JSON test resources</li>
  * <li>{@link #createResource(String, String)} — POST to create and return
  * Location</li>
- * <li>{@link #deployBot(String, Integer)} — deploy bot and poll until
+ * <li>{@link #deployAgent(String, Integer)} — deploy Agent and poll until
  * READY</li>
  * <li>{@link #createConversation(String, String)} — start a new
  * conversation</li>
@@ -119,9 +119,9 @@ public abstract class BaseIntegrationIT {
         given().get(requestUri).then().statusCode(404);
     }
 
-    // ==================== Bot Deployment Helpers ====================
+    // ==================== Agent Deployment Helpers ====================
 
-    protected void deployBot(String id, Integer version) throws InterruptedException {
+    protected void deployAgent(String id, Integer version) throws InterruptedException {
         given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false", id, version));
 
         for (int i = 0; i < 60; i++) { // max 30 seconds
@@ -139,27 +139,27 @@ public abstract class BaseIntegrationIT {
         throw new RuntimeException("Bot deployment timed out");
     }
 
-    protected ResourceId createConversation(String botId, String userId) {
-        Response response = given().post("bots/production/" + botId + "?userId=" + userId);
+    protected ResourceId createConversation(String agentId, String userId) {
+        Response response = given().post("bots/production/" + agentId + "?userId=" + userId);
         String location = response.getHeader("location");
         return extractResourceId(location);
     }
 
-    protected Response sendUserInput(String botId, String conversationId,
+    protected Response sendUserInput(String agentId, String conversationId,
             String userInput,
             boolean returnDetailed, boolean returnCurrentStepOnly) {
         return given()
                 .contentType(ContentType.TEXT)
                 .body(userInput)
                 .post(String.format("bots/production/%s/%s?returnDetailed=%s&returnCurrentStepOnly=%s",
-                        botId, conversationId, returnDetailed, returnCurrentStepOnly));
+                        agentId, conversationId, returnDetailed, returnCurrentStepOnly));
     }
 
-    protected Response getConversationLog(String botId, String conversationId,
+    protected Response getConversationLog(String agentId, String conversationId,
             boolean returnDetailed) {
         return given()
                 .get(String.format("bots/production/%s/%s?returnDetailed=%s",
-                        botId, conversationId, returnDetailed));
+                        agentId, conversationId, returnDetailed));
     }
 
     // ==================== URI Utilities ====================

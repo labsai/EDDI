@@ -16,7 +16,7 @@ import org.jboss.resteasy.reactive.Cache;
 
 @Path("/chat")
 @Produces(MediaType.TEXT_HTML)
-@Tag(name = "13. Bot Chat UI", description = "Responsive Chat Window")
+@Tag(name = "13. Agent Chat UI", description = "Responsive Chat Window")
 public interface IRestHtmlChatResource {
 
     @GET

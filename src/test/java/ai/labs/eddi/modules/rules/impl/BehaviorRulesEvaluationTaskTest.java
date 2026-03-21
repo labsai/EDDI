@@ -4,7 +4,7 @@ import ai.labs.eddi.configs.rules.model.BehaviorConfiguration;
 import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PipelineConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -208,7 +208,7 @@ class BehaviorRulesEvaluationTaskTest {
         }
 
         @Test
-        @DisplayName("should throw PackageConfigurationException when resource loading fails")
+        @DisplayName("should throw PipelineConfigurationException when resource loading fails")
         void configure_serviceError_throwsException() throws Exception {
             Map<String, Object> config = new HashMap<>();
             config.put("uri", "http://example.com/behavior");
@@ -216,7 +216,7 @@ class BehaviorRulesEvaluationTaskTest {
             when(resourceClientLibrary.getResource(any(URI.class), eq(BehaviorConfiguration.class)))
                     .thenThrow(new ServiceException("not found"));
 
-            assertThrows(PackageConfigurationException.class,
+            assertThrows(PipelineConfigurationException.class,
                     () -> task.configure(config, Collections.emptyMap()));
         }
 

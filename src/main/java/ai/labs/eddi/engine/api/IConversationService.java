@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Core conversation lifecycle service — extracted from RestBotEngine.
+ * Core conversation lifecycle service — extracted from RestAgentEngine.
  * All conversation operations are available here without JAX-RS dependencies.
  *
  * @author ginccc
@@ -24,13 +24,13 @@ public interface IConversationService {
     }
 
     /**
-     * Start a new conversation with the latest ready bot version.
+     * Start a new conversation with the latest ready Agent version.
      *
-     * @throws BotNotReadyException      if no version of the bot is deployed
+     * @throws BotNotReadyException      if no version of the Agent is deployed
      * @throws ResourceStoreException    on persistence failures
      * @throws ResourceNotFoundException if referenced resources are not found
      */
-    ConversationResult startConversation(Environment environment, String botId,
+    ConversationResult startConversation(Environment environment, String agentId,
             String userId, Map<String, Context> context)
             throws BotNotReadyException, ResourceStoreException, ResourceNotFoundException;
 
@@ -51,11 +51,11 @@ public interface IConversationService {
      * Read a conversation memory snapshot.
      *
      * @throws BotMismatchException      if the conversationId does not belong to
-     *                                   the given botId
+     *                                   the given agentId
      * @throws ResourceStoreException    on persistence failures
      * @throws ResourceNotFoundException if the conversation is not found
      */
-    SimpleConversationMemorySnapshot readConversation(Environment environment, String botId,
+    SimpleConversationMemorySnapshot readConversation(Environment environment, String agentId,
             String conversationId,
             Boolean returnDetailed,
             Boolean returnCurrentStepOnly,
@@ -78,12 +78,12 @@ public interface IConversationService {
      * Process a user input (say) or rerun the last step.
      * Results are delivered via the responseHandler callback.
      *
-     * @throws BotMismatchException       if botId doesn't match the conversation's
+     * @throws BotMismatchException       if agentId doesn't match the conversation's
      *                                    bot
      * @throws ConversationEndedException if the conversation has already ended
      * @throws ResourceNotFoundException  if the conversation is not found
      */
-    void say(Environment environment, String botId, String conversationId,
+    void say(Environment environment, String agentId, String conversationId,
             Boolean returnDetailed, Boolean returnCurrentStepOnly,
             List<String> returningFields, InputData inputData,
             boolean rerunOnly, ConversationResponseHandler responseHandler)
@@ -113,27 +113,27 @@ public interface IConversationService {
      * Process user input with SSE streaming. Token and step events are
      * delivered via the streamingHandler callback.
      */
-    void sayStreaming(Environment environment, String botId, String conversationId,
+    void sayStreaming(Environment environment, String agentId, String conversationId,
             Boolean returnDetailed, Boolean returnCurrentStepOnly,
             List<String> returningFields, InputData inputData,
             StreamingResponseHandler streamingHandler) throws Exception;
 
-    Boolean isUndoAvailable(Environment environment, String botId, String conversationId)
+    Boolean isUndoAvailable(Environment environment, String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException;
 
     /**
      * @return true if undo was performed, false if not available
      */
-    boolean undo(Environment environment, String botId, String conversationId)
+    boolean undo(Environment environment, String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException, BotMismatchException;
 
-    Boolean isRedoAvailable(Environment environment, String botId, String conversationId)
+    Boolean isRedoAvailable(Environment environment, String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException;
 
     /**
      * @return true if redo was performed, false if not available
      */
-    boolean redo(Environment environment, String botId, String conversationId)
+    boolean redo(Environment environment, String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException, BotMismatchException;
 
     // --- Domain exceptions (no JAX-RS dependency) ---

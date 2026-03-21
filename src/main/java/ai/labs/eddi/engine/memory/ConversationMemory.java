@@ -16,8 +16,8 @@ import java.util.Stack;
  */
 public class ConversationMemory implements IConversationMemory {
     private String conversationId;
-    private final String botId;
-    private final Integer botVersion;
+    private final String agentId;
+    private final Integer agentVersion;
     private String userId;
     private IWritableConversationStep currentStep;
     private final Stack<IConversationStep> previousSteps;
@@ -32,19 +32,19 @@ public class ConversationMemory implements IConversationMemory {
     /** Transient — never serialized to MongoDB. Set per-turn for audit capture. */
     private transient IAuditEntryCollector auditCollector;
 
-    public ConversationMemory(String conversationId, String botId, Integer botVersion, String userId) {
-        this(botId, botVersion, userId);
+    public ConversationMemory(String conversationId, String agentId, Integer agentVersion, String userId) {
+        this(agentId, agentVersion, userId);
         this.conversationId = conversationId;
     }
 
-    public ConversationMemory(String botId, Integer botVersion, String userId) {
-        this(botId, botVersion);
+    public ConversationMemory(String agentId, Integer agentVersion, String userId) {
+        this(agentId, agentVersion);
         this.userId = userId;
     }
 
-    public ConversationMemory(String botId, Integer botVersion) {
-        this.botId = botId;
-        this.botVersion = botVersion;
+    public ConversationMemory(String agentId, Integer agentVersion) {
+        this.agentId = agentId;
+        this.agentVersion = agentVersion;
         var conversationOutput = new ConversationOutput();
         this.conversationOutputs.add(conversationOutput);
         this.currentStep = new ConversationStep(conversationOutput);
@@ -136,8 +136,8 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
-    public String getBotId() {
-        return botId;
+    public String getAgentId() {
+        return agentId;
     }
 
     @Override
@@ -146,8 +146,8 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
-    public Integer getBotVersion() {
-        return botVersion;
+    public Integer getAgentVersion() {
+        return agentVersion;
     }
 
     public List<ConversationOutput> getConversationOutputs() {

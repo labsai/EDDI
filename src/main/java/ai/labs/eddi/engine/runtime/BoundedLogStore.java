@@ -144,33 +144,33 @@ public class BoundedLogStore {
 
         // Read MDC context from ExtLogRecord if available, otherwise from SLF4J MDC
         String environment = null;
-        String botId = null;
+        String agentId = null;
         String conversationId = null;
         String userId = null;
-        Integer botVersion = null;
+        Integer agentVersion = null;
 
         if (record instanceof org.jboss.logmanager.ExtLogRecord extRecord) {
             environment = extRecord.getMdc("environment");
-            botId = extRecord.getMdc("botId");
+            agentId = extRecord.getMdc("agentId");
             conversationId = extRecord.getMdc("conversationId");
             userId = extRecord.getMdc("userId");
-            String bv = extRecord.getMdc("botVersion");
+            String bv = extRecord.getMdc("agentVersion");
             if (bv != null) {
                 try {
-                    botVersion = Integer.parseInt(bv);
+                    agentVersion = Integer.parseInt(bv);
                 } catch (NumberFormatException _) {
                 }
             }
         } else {
             // Fallback: read from SLF4J MDC
             environment = org.slf4j.MDC.get("environment");
-            botId = org.slf4j.MDC.get("botId");
+            agentId = org.slf4j.MDC.get("agentId");
             conversationId = org.slf4j.MDC.get("conversationId");
             userId = org.slf4j.MDC.get("userId");
-            String bv = org.slf4j.MDC.get("botVersion");
+            String bv = org.slf4j.MDC.get("agentVersion");
             if (bv != null) {
                 try {
-                    botVersion = Integer.parseInt(bv);
+                    agentVersion = Integer.parseInt(bv);
                 } catch (NumberFormatException _) {
                 }
             }
@@ -182,8 +182,8 @@ public class BoundedLogStore {
                 loggerName,
                 message,
                 environment,
-                botId,
-                botVersion,
+                agentId,
+                agentVersion,
                 conversationId,
                 userId,
                 instanceIdProducer.getInstanceId()
@@ -225,7 +225,7 @@ public class BoundedLogStore {
     /**
      * Get entries from the ring buffer, optionally filtered.
      */
-    public List<LogEntry> getEntries(String botId, String conversationId, String level, int limit) {
+    public List<LogEntry> getEntries(String agentId, String conversationId, String level, int limit) {
         lock.readLock().lock();
         try {
             List<LogEntry> result = new ArrayList<>();
@@ -233,7 +233,7 @@ public class BoundedLogStore {
             Iterator<LogEntry> it = buffer.descendingIterator();
             while (it.hasNext() && result.size() < limit) {
                 LogEntry entry = it.next();
-                if (matchesFilter(entry, botId, conversationId, level)) {
+                if (matchesFilter(entry, agentId, conversationId, level)) {
                     result.add(entry);
                 }
             }
@@ -322,8 +322,8 @@ public class BoundedLogStore {
         return msg;
     }
 
-    private boolean matchesFilter(LogEntry entry, String botId, String conversationId, String level) {
-        if (botId != null && !botId.equals(entry.botId())) return false;
+    private boolean matchesFilter(LogEntry entry, String agentId, String conversationId, String level) {
+        if (agentId != null && !agentId.equals(entry.agentId())) return false;
         if (conversationId != null && !conversationId.equals(entry.conversationId())) return false;
         if (level != null && !level.equalsIgnoreCase(entry.level())) return false;
         return true;

@@ -3,15 +3,15 @@ package ai.labs.eddi.backup.impl;
 import ai.labs.eddi.backup.IRestExportService;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.configs.rules.IBehaviorStore;
-import ai.labs.eddi.configs.agents.IBotStore;
-import ai.labs.eddi.configs.agents.model.BotConfiguration;
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IHttpCallsStore;
 import ai.labs.eddi.configs.llm.ILangChainStore;
 import ai.labs.eddi.configs.output.IOutputStore;
-import ai.labs.eddi.configs.pipelines.IPackageStore;
-import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
+import ai.labs.eddi.configs.pipelines.IPipelineStore;
+import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.dictionary.IRegularDictionaryStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -51,8 +51,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 @ApplicationScoped
 public class RestExportService extends AbstractBackupService implements IRestExportService {
     private final IDocumentDescriptorStore documentDescriptorStore;
-    private final IBotStore botStore;
-    private final IPackageStore packageStore;
+    private final IAgentStore AgentStore;
+    private final IPipelineStore PipelineStore;
     private final IRegularDictionaryStore regularDictionaryStore;
     private final IBehaviorStore behaviorStore;
     private final IHttpCallsStore httpCallsStore;
@@ -70,8 +70,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     @Inject
     public RestExportService(IDocumentDescriptorStore documentDescriptorStore,
-                             IBotStore botStore,
-                             IPackageStore packageStore,
+                             IAgentStore AgentStore,
+                             IPipelineStore PipelineStore,
                              IRegularDictionaryStore regularDictionaryStore,
                              IBehaviorStore behaviorStore,
                              IHttpCallsStore httpCallsStore,
@@ -83,8 +83,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                              SecretScrubber secretScrubber,
                              IScheduleStore scheduleStore) {
         this.documentDescriptorStore = documentDescriptorStore;
-        this.botStore = botStore;
-        this.packageStore = packageStore;
+        this.AgentStore = AgentStore;
+        this.PipelineStore = PipelineStore;
         this.regularDictionaryStore = regularDictionaryStore;
         this.behaviorStore = behaviorStore;
         this.httpCallsStore = httpCallsStore;
@@ -116,55 +116,55 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     }
 
     @Override
-    public Response exportBot(String botId, Integer botVersion) {
+    public Response exportBot(String agentId, Integer agentVersion) {
         try {
-            BotConfiguration botConfiguration = botStore.read(botId, botVersion);
-            Path botPath = writeDirAndDocument(botId, botVersion, jsonSerialization.serialize(botConfiguration), tmpPath, BOT_EXT);
-            Map<IResourceId, PackageConfiguration> packageConfigurations =
-                    readConfigs(packageStore, botConfiguration.getPackages());
+            AgentConfiguration AgentConfiguration = AgentStore.read(agentId, agentVersion);
+            Path botPath = writeDirAndDocument(agentId, agentVersion, jsonSerialization.serialize(AgentConfiguration), tmpPath, BOT_EXT);
+            Map<IResourceId, PipelineConfiguration> PipelineConfigurations =
+                    readConfigs(PipelineStore, AgentConfiguration.getPipelines());
 
-            DocumentDescriptor botDocumentDescriptor = writeDocumentDescriptor(botPath, botId, botVersion);
+            DocumentDescriptor botDocumentDescriptor = writeDocumentDescriptor(botPath, agentId, agentVersion);
 
-            for (IResourceId resourceId : packageConfigurations.keySet()) {
-                PackageConfiguration packageConfiguration = packageConfigurations.get(resourceId);
-                String packageConfigurationString = jsonSerialization.serialize(packageConfiguration);
+            for (IResourceId resourceId : PipelineConfigurations.keySet()) {
+                PipelineConfiguration PipelineConfiguration = PipelineConfigurations.get(resourceId);
+                String PipelineConfigurationString = jsonSerialization.serialize(PipelineConfiguration);
                 Path packagePath = writeDirAndDocument(resourceId.getId(), resourceId.getVersion(),
-                        packageConfigurationString, botPath, PACKAGE_EXT);
+                        PipelineConfigurationString, botPath, PACKAGE_EXT);
                 writeDocumentDescriptor(packagePath, resourceId.getId(), resourceId.getVersion());
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(regularDictionaryStore,
-                        extractResourcesUris(packageConfigurationString, DICTIONARY_URI_PATTERN))), DICTIONARY_EXT);
+                        extractResourcesUris(PipelineConfigurationString, DICTIONARY_URI_PATTERN))), DICTIONARY_EXT);
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(behaviorStore,
-                        extractResourcesUris(packageConfigurationString, BEHAVIOR_URI_PATTERN))), BEHAVIOR_EXT);
+                        extractResourcesUris(PipelineConfigurationString, BEHAVIOR_URI_PATTERN))), BEHAVIOR_EXT);
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(httpCallsStore,
-                        extractResourcesUris(packageConfigurationString, HTTPCALLS_URI_PATTERN))), HTTPCALLS_EXT);
+                        extractResourcesUris(PipelineConfigurationString, HTTPCALLS_URI_PATTERN))), HTTPCALLS_EXT);
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(langChainStore,
-                        extractResourcesUris(packageConfigurationString, LANGCHAIN_URI_PATTERN))), LANGCHAIN_EXT);
+                        extractResourcesUris(PipelineConfigurationString, LANGCHAIN_URI_PATTERN))), LANGCHAIN_EXT);
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(propertySetterStore,
-                        extractResourcesUris(packageConfigurationString, PROPERTY_URI_PATTERN))), PROPERTY_EXT);
+                        extractResourcesUris(PipelineConfigurationString, PROPERTY_URI_PATTERN))), PROPERTY_EXT);
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(outputStore,
-                        extractResourcesUris(packageConfigurationString, OUTPUT_URI_PATTERN))), OUTPUT_EXT);
+                        extractResourcesUris(PipelineConfigurationString, OUTPUT_URI_PATTERN))), OUTPUT_EXT);
 
-                Path unusedPath = Files.createDirectories(Paths.get(tmpPath.toString(), botId, "unused"));
+                Path unusedPath = Files.createDirectories(Paths.get(tmpPath.toString(), agentId, "unused"));
 
-                writeAllVersionsOfUris(unusedPath, regularDictionaryStore, extractResourcesUris(packageConfigurationString, DICTIONARY_URI_PATTERN), DICTIONARY_EXT);
-                writeAllVersionsOfUris(unusedPath, behaviorStore, extractResourcesUris(packageConfigurationString, BEHAVIOR_URI_PATTERN), BEHAVIOR_EXT);
-                writeAllVersionsOfUris(unusedPath, httpCallsStore, extractResourcesUris(packageConfigurationString, HTTPCALLS_URI_PATTERN), HTTPCALLS_EXT);
-                writeAllVersionsOfUris(unusedPath, langChainStore, extractResourcesUris(packageConfigurationString, LANGCHAIN_URI_PATTERN), LANGCHAIN_EXT);
-                writeAllVersionsOfUris(unusedPath, propertySetterStore, extractResourcesUris(packageConfigurationString, PROPERTY_URI_PATTERN), PROPERTY_EXT);
-                writeAllVersionsOfUris(unusedPath, outputStore, extractResourcesUris(packageConfigurationString, OUTPUT_URI_PATTERN), OUTPUT_EXT);
+                writeAllVersionsOfUris(unusedPath, regularDictionaryStore, extractResourcesUris(PipelineConfigurationString, DICTIONARY_URI_PATTERN), DICTIONARY_EXT);
+                writeAllVersionsOfUris(unusedPath, behaviorStore, extractResourcesUris(PipelineConfigurationString, BEHAVIOR_URI_PATTERN), BEHAVIOR_EXT);
+                writeAllVersionsOfUris(unusedPath, httpCallsStore, extractResourcesUris(PipelineConfigurationString, HTTPCALLS_URI_PATTERN), HTTPCALLS_EXT);
+                writeAllVersionsOfUris(unusedPath, langChainStore, extractResourcesUris(PipelineConfigurationString, LANGCHAIN_URI_PATTERN), LANGCHAIN_EXT);
+                writeAllVersionsOfUris(unusedPath, propertySetterStore, extractResourcesUris(PipelineConfigurationString, PROPERTY_URI_PATTERN), PROPERTY_EXT);
+                writeAllVersionsOfUris(unusedPath, outputStore, extractResourcesUris(PipelineConfigurationString, OUTPUT_URI_PATTERN), OUTPUT_EXT);
 
             }
 
             // Export schedules for this bot
-            exportSchedules(botId, botPath);
+            exportSchedules(agentId, botPath);
 
-            String zipFilename = prepareZipFilename(botDocumentDescriptor, botId, botVersion);
+            String zipFilename = prepareZipFilename(botDocumentDescriptor, agentId, agentVersion);
             String targetZipPath = FileUtilities.buildPath(tmpPath.toString(), zipFilename);
             this.zipArchive.createZip(botPath.toString(), targetZipPath);
             return Response.ok().location(URI.create("/backup/export/" + zipFilename)).build();
@@ -214,13 +214,13 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     }
 
-    private String prepareZipFilename(DocumentDescriptor botDocumentDescriptor, String botId, Integer botVersion)
+    private String prepareZipFilename(DocumentDescriptor botDocumentDescriptor, String agentId, Integer agentVersion)
             throws UnsupportedEncodingException {
         String zipFilename = "";
         if (!isNullOrEmpty(botDocumentDescriptor.getName())) {
             zipFilename = URLEncoder.encode(botDocumentDescriptor.getName() + "-", StandardCharsets.UTF_8);
         }
-        zipFilename += botId + "-" + botVersion + ".zip";
+        zipFilename += agentId + "-" + agentVersion + ".zip";
         return zipFilename;
     }
 
@@ -337,9 +337,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         return botFilename;
     }
 
-    private void exportSchedules(String botId, Path botPath) {
+    private void exportSchedules(String agentId, Path botPath) {
         try {
-            List<ScheduleConfiguration> schedules = scheduleStore.readSchedulesByBotId(botId);
+            List<ScheduleConfiguration> schedules = scheduleStore.readSchedulesByBotId(AgentId);
             if (schedules.isEmpty()) {
                 return;
             }
@@ -355,9 +355,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                     writer.write(json);
                 }
             }
-            log.infof("Exported %d schedule(s) for bot %s", schedules.size(), botId);
+            log.infof("Exported %d schedule(s) for Agent %s", schedules.size(), agentId);
         } catch (Exception e) {
-            log.warnf("Failed to export schedules for bot %s: %s", botId, e.getMessage());
+            log.warnf("Failed to export schedules for Agent %s: %s", agentId, e.getMessage());
         }
     }
 }

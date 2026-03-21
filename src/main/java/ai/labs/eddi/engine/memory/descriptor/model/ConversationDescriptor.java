@@ -15,7 +15,7 @@ public class ConversationDescriptor extends ResourceDescriptor {
         SEEN
     }
 
-    private String botName;
+    private String agentName;
     private String userId;
     private URI botResource;
     private ViewState viewState;
@@ -24,12 +24,12 @@ public class ConversationDescriptor extends ResourceDescriptor {
     private Deployment.Environment environment;
     private ConversationState conversationState;
 
-    public String getBotName() {
-        return botName;
+    public String getAgentName() {
+        return agentName;
     }
 
-    public void setBotName(String botName) {
-        this.botName = botName;
+    public void setAgentName(String agentName) {
+        this.agentName = agentName;
     }
 
     public String getUserId() {

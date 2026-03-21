@@ -94,18 +94,18 @@ public class ApiContractIT extends BaseIntegrationIT {
         @Test
         @DisplayName("conversation log should have correct structure")
         void conversationLog_hasCorrectStructure() throws Exception {
-                ResourceId botId = createAndDeployBot();
-                ResourceId convId = createConversation(botId.id(), "contractTestUser");
+                ResourceId agentId = createAndDeployBot();
+                ResourceId convId = createConversation(agentId.id(), "contractTestUser");
 
-                sendUserInput(botId.id(), convId.id(), "hello", false, false);
+                sendUserInput(agentId.id(), convId.id(), "hello", false, false);
 
-                Response response = getConversationLog(botId.id(), convId.id(), false);
+                Response response = getConversationLog(agentId.id(), convId.id(), false);
 
                 response.then().assertThat()
                                 .statusCode(200)
                                 .contentType(ContentType.JSON)
-                                .body("botId", notNullValue())
-                                .body("botVersion", notNullValue())
+                                .body("agentId", notNullValue())
+                                .body("agentVersion", notNullValue())
                                 .body("conversationSteps", notNullValue())
                                 .body("conversationSteps", not(empty()))
                                 .body("conversationState", anyOf(equalTo("READY"), equalTo("IN_PROGRESS")))
@@ -116,10 +116,10 @@ public class ApiContractIT extends BaseIntegrationIT {
         @Test
         @DisplayName("detailed conversation log should include conversationOutputs")
         void detailedConversationLog_hasOutputs() throws Exception {
-                ResourceId botId = createAndDeployBot();
-                ResourceId convId = createConversation(botId.id(), "contractTestUser2");
+                ResourceId agentId = createAndDeployBot();
+                ResourceId convId = createConversation(agentId.id(), "contractTestUser2");
 
-                Response response = sendUserInput(botId.id(), convId.id(), "hello", true, false);
+                Response response = sendUserInput(agentId.id(), convId.id(), "hello", true, false);
 
                 response.then().assertThat()
                                 .statusCode(200)
@@ -131,7 +131,7 @@ public class ApiContractIT extends BaseIntegrationIT {
         @Test
         @DisplayName("bot store should return descriptors list")
         void botStore_listDescriptors() {
-                given().get("/botstore/bots/descriptors")
+                given().get("/AgentStore/bots/descriptors")
                                 .then().assertThat()
                                 .statusCode(200)
                                 .contentType(ContentType.JSON);
@@ -140,7 +140,7 @@ public class ApiContractIT extends BaseIntegrationIT {
         @Test
         @DisplayName("package store should return descriptors list")
         void packageStore_listDescriptors() {
-                given().get("/packagestore/packages/descriptors")
+                given().get("/PipelineStore/packages/descriptors")
                                 .then().assertThat()
                                 .statusCode(200)
                                 .contentType(ContentType.JSON);
@@ -169,7 +169,7 @@ public class ApiContractIT extends BaseIntegrationIT {
                 String packageBody = String.format(
                                 """
                                                 {
-                                                  "packageExtensions": [
+                                                  "PipelineSteps": [
                                                     {
                                                       "type": "eddi://ai.labs.parser",
                                                       "config": {},
@@ -188,13 +188,13 @@ public class ApiContractIT extends BaseIntegrationIT {
                                                 }""",
                                 locationDictionary, locationBehavior, locationOutput);
 
-                String locationPackage = createResource(packageBody, "/packagestore/packages");
+                String locationPackage = createResource(packageBody, "/PipelineStore/packages");
                 String botBody = String.format("""
                                 {"packages": ["%s"]}""", locationPackage);
-                String botLocation = createResource(botBody, "/botstore/bots");
+                String botLocation = createResource(botBody, "/AgentStore/bots");
 
-                ResourceId botId = extractResourceId(botLocation);
-                deployBot(botId.id(), botId.version());
-                return botId;
+                ResourceId agentId = extractResourceId(botLocation);
+                deployAgent(agentId.id(), agentId.version());
+                return agentId;
         }
 }

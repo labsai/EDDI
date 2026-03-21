@@ -164,7 +164,7 @@ Technical specifications:
 
 ## How to run the project
 
-1. Setup a local mongodb \(&gt; v5.0\)
+1. Setup a local mongodb \(&gt; v6.0\)
 2. On a terminal, under project root folder, run the following command:
 
 ```shell script

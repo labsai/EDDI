@@ -18,8 +18,8 @@ import static org.hamcrest.Matchers.*;
  *   <li>Create Behavior Rules and LangChain configuration</li>
  *   <li>Create Package with 5 extensions (parser + behavior + 2×httpcalls + langchain)</li>
  *   <li>Verify all resources are persisted and readable</li>
- *   <li>Create Bot referencing the package</li>
- *   <li>Deploy the bot and verify READY status</li>
+ *   <li>Create Agent referencing the package</li>
+ *   <li>Deploy the Agent and verify READY status</li>
  *   <li>Start a conversation to verify the pipeline is wired correctly</li>
  * </ol>
  * <p>
@@ -46,8 +46,8 @@ public class CreateApiBotIT {
     private static String behaviorLocation;
     private static String langchainLocation;
     private static String packageLocation;
-    private static String botId;
-    private static int botVersion;
+    private static String agentId;
+    private static int agentVersion;
 
     @BeforeAll
     static void configureBaseUrl() {
@@ -291,7 +291,7 @@ public class CreateApiBotIT {
     void createPackage() {
         String packageJson = String.format("""
                 {
-                  "packageExtensions": [
+                  "PipelineSteps": [
                     { "type": "eddi://ai.labs.parser", "config": {} },
                     { "type": "eddi://ai.labs.behavior", "config": { "uri": "%s" } },
                     { "type": "eddi://ai.labs.httpcalls", "config": { "uri": "%s" } },
@@ -304,11 +304,11 @@ public class CreateApiBotIT {
         Response response = given()
                 .contentType(ContentType.JSON)
                 .body(packageJson)
-                .post("/packagestore/packages");
+                .post("/PipelineStore/packages");
 
         response.then().assertThat()
                 .statusCode(201)
-                .header("location", containsString("/packagestore/packages/"));
+                .header("location", containsString("/PipelineStore/packages/"));
 
         packageLocation = response.getHeader("location");
     }
@@ -319,23 +319,23 @@ public class CreateApiBotIT {
     void readPackage() {
         ResourceId res = extractResourceId(packageLocation);
         given()
-                .get("/packagestore/packages/" + res.id() + "?version=" + res.version())
+                .get("/PipelineStore/packages/" + res.id() + "?version=" + res.version())
                 .then().assertThat()
                 .statusCode(200)
-                .body("packageExtensions.size()", equalTo(5))
-                .body("packageExtensions[0].type", equalTo("eddi://ai.labs.parser"))
-                .body("packageExtensions[1].type", equalTo("eddi://ai.labs.behavior"))
-                .body("packageExtensions[2].type", equalTo("eddi://ai.labs.httpcalls"))
-                .body("packageExtensions[3].type", equalTo("eddi://ai.labs.httpcalls"))
-                .body("packageExtensions[4].type", equalTo("eddi://ai.labs.langchain"));
+                .body("PipelineSteps.size()", equalTo(5))
+                .body("PipelineSteps[0].type", equalTo("eddi://ai.labs.parser"))
+                .body("PipelineSteps[1].type", equalTo("eddi://ai.labs.behavior"))
+                .body("PipelineSteps[2].type", equalTo("eddi://ai.labs.httpcalls"))
+                .body("PipelineSteps[3].type", equalTo("eddi://ai.labs.httpcalls"))
+                .body("PipelineSteps[4].type", equalTo("eddi://ai.labs.langchain"));
     }
 
-    // ==================== Step 5: Create Bot ====================
+    // ==================== Step 5: Create Agent ====================
 
     @Test
     @Order(8)
-    @DisplayName("should create bot referencing the package")
-    void createBot() {
+    @DisplayName("should create Agent referencing the package")
+    void createAgent() {
         String botJson = String.format("""
                 {
                   "packages": ["%s"]
@@ -345,35 +345,35 @@ public class CreateApiBotIT {
         Response response = given()
                 .contentType(ContentType.JSON)
                 .body(botJson)
-                .post("/botstore/bots");
+                .post("/AgentStore/bots");
 
         response.then().assertThat()
                 .statusCode(201)
-                .header("location", containsString("/botstore/bots/"));
+                .header("location", containsString("/AgentStore/bots/"));
 
         ResourceId res = extractResourceId(response.getHeader("location"));
-        botId = res.id();
-        botVersion = res.version();
+        agentId = res.id();
+        agentVersion = res.version();
     }
 
     // ==================== Step 6: Deploy ====================
 
     @Test
     @Order(9)
-    @DisplayName("should deploy the API bot successfully")
-    void deployApiBot() throws InterruptedException {
+    @DisplayName("should deploy the API Agent successfully")
+    void deployApIAgent() throws InterruptedException {
         given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false",
-                botId, botVersion));
+                agentId, agentVersion));
 
         // Poll until READY (max 30s)
         for (int i = 0; i < 60; i++) {
             Response response = given()
                     .get(String.format("administration/production/deploymentstatus/%s?version=%s&format=text",
-                            botId, botVersion));
+                            agentId, agentVersion));
             String status = response.getBody().print().trim();
             if ("READY".equals(status)) return;
             if ("ERROR".equals(status)) {
-                throw new RuntimeException("Bot deployment failed (id=" + botId + ", version=" + botVersion + ")");
+                throw new RuntimeException("Bot deployment failed (id=" + agentId + ", version=" + agentVersion + ")");
             }
             Thread.sleep(500);
         }
@@ -386,20 +386,20 @@ public class CreateApiBotIT {
     @Order(10)
     @DisplayName("should start a conversation with the API bot")
     void startConversation() {
-        Response response = given().post("bots/production/" + botId + "?userId=apibot-test-user");
+        Response response = given().post("bots/production/" + agentId + "?userId=apIAgent-test-user");
         String location = response.getHeader("location");
 
         Assertions.assertNotNull(location, "Conversation location should be returned");
-        Assertions.assertTrue(location.contains(botId), "Conversation should reference the bot");
+        Assertions.assertTrue(location.contains(AgentId), "Conversation should reference the bot");
     }
 
     // ==================== Cleanup ====================
 
     @AfterAll
     static void cleanup() {
-        if (botId != null) {
+        if (agentId != null) {
             try {
-                given().post(String.format("administration/production/undeploy/%s?version=%s", botId, botVersion));
+                given().post(String.format("administration/production/undeploy/%s?version=%s", agentId, agentVersion));
             } catch (Exception ignored) {
             }
         }

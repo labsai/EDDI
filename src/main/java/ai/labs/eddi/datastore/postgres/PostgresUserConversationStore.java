@@ -1,9 +1,9 @@
 package ai.labs.eddi.datastore.postgres;
 
-import ai.labs.eddi.engine.botmanagement.IUserConversationStore;
+import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.botmanagement.model.UserConversation;
+import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import io.quarkus.arc.profile.IfBuildProfile;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;

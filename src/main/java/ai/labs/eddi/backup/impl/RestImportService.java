@@ -7,8 +7,8 @@ import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import ai.labs.eddi.configs.rules.IRestBehaviorStore;
 import ai.labs.eddi.configs.rules.model.BehaviorConfiguration;
-import ai.labs.eddi.configs.agents.IRestBotStore;
-import ai.labs.eddi.configs.agents.model.BotConfiguration;
+import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -18,8 +18,8 @@ import ai.labs.eddi.configs.llm.IRestLangChainStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
-import ai.labs.eddi.configs.pipelines.IRestPackageStore;
-import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
+import ai.labs.eddi.configs.pipelines.IRestPipelineStore;
+import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
@@ -28,8 +28,8 @@ import ai.labs.eddi.configs.dictionary.model.RegularDictionaryConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.api.IRestBotAdministration;
-import ai.labs.eddi.engine.model.BotDeploymentStatus;
+import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
@@ -68,7 +68,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 @ApplicationScoped
 public class RestImportService extends AbstractBackupService implements IRestImportService {
     private static final Pattern EDDI_URI_PATTERN = Pattern.compile("\"eddi://ai.labs..*?\"");
-    private static final String BOT_FILE_ENDING = ".bot.json";
+    private static final String BOT_FILE_ENDING = ".agent.json";
     private static final String DESCRIPTOR_FILE_ENDING = ".descriptor.json";
     private static final String STRATEGY_MERGE = "merge";
 
@@ -76,7 +76,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final IZipArchive zipArchive;
     private final IJsonSerialization jsonSerialization;
     private final IRestInterfaceFactory restInterfaceFactory;
-    private final IRestBotAdministration restBotAdministration;
+    private final IRestAgentAdministration RestAgentAdministration;
     private final IMigrationManager migrationManager;
     private final IDeploymentListener deploymentListener;
     private final IDocumentDescriptorStore documentDescriptorStore;
@@ -87,21 +87,21 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     public RestImportService(IZipArchive zipArchive,
                              IJsonSerialization jsonSerialization,
                              IRestInterfaceFactory restInterfaceFactory,
-                             IRestBotAdministration restBotAdministration,
+                             IRestAgentAdministration RestAgentAdministration,
                              IMigrationManager migrationManager,
                              IDeploymentListener deploymentListener,
                              IDocumentDescriptorStore documentDescriptorStore) {
         this.zipArchive = zipArchive;
         this.jsonSerialization = jsonSerialization;
         this.restInterfaceFactory = restInterfaceFactory;
-        this.restBotAdministration = restBotAdministration;
+        this.RestAgentAdministration = RestAgentAdministration;
         this.migrationManager = migrationManager;
         this.deploymentListener = deploymentListener;
         this.documentDescriptorStore = documentDescriptorStore;
     }
 
     @Override
-    public List<BotDeploymentStatus> importInitialBots() {
+    public List<AgentDeploymentStatus> importInitialBots() {
         try {
             var botExampleFiles = getResourceFiles("/initial-bots/available_bots.txt");
             List<CompletableFuture<Void>> deploymentFutures = new ArrayList<>();
@@ -113,14 +113,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             @Override
                             public boolean resume(Object responseObj) {
                                 if (responseObj instanceof Response response) {
-                                    var botId = RestUtilities.extractResourceId(response.getLocation());
-                                    if (botId != null) {
+                                    var agentId = RestUtilities.extractResourceId(response.getLocation());
+                                    if (agentId != null) {
                                         var deploymentFuture =
-                                                deploymentListener.registerBotDeployment(botId.getId(), botId.getVersion());
+                                                deploymentListener.registerAgentDeployment(agentId.getId(), agentId.getVersion());
                                         deploymentFutures.add(deploymentFuture);
 
-                                        restBotAdministration.deployBot(
-                                                production, botId.getId(), botId.getVersion(), true, false);
+                                        RestAgentAdministration.deployAgent(
+                                                production, agentId.getId(), agentId.getVersion(), true, false);
 
                                         return true;
                                     }
@@ -134,7 +134,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             CompletableFuture.allOf(deploymentFutures.toArray(new CompletableFuture[0])).join();
 
             log.info("Imported & Deployed Initial Bots");
-            return restBotAdministration.getDeploymentStatuses(production);
+            return RestAgentAdministration.getDeploymentStatuses(production);
         } catch (IOException e) {
             throw sneakyThrow(e);
         }
@@ -170,18 +170,18 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 for (Path botFilePath : directoryStream) {
                     String botFileString = readFile(botFilePath);
                     String botOriginId = extractIdFromBotFilename(botFilePath);
-                    String botName = readNameFromDescriptor(Paths.get(targetDirPath), botOriginId);
+                    String agentName = readNameFromDescriptor(Paths.get(targetDirPath), botOriginId);
 
                     List<ResourceDiff> diffs = new ArrayList<>();
 
-                    // Bot itself
-                    diffs.add(buildResourceDiff(botOriginId, "bot", botName));
+                    // Agent itself
+                    diffs.add(buildResourceDiff(botOriginId, "bot", agentName));
 
                     // Packages & their extensions
-                    BotConfiguration botConfiguration =
-                            jsonSerialization.deserialize(botFileString, BotConfiguration.class);
-                    for (URI packageUri : botConfiguration.getPackages()) {
-                        IResourceId packageResourceId = RestUtilities.extractResourceId(packageUri);
+                    AgentConfiguration AgentConfiguration =
+                            jsonSerialization.deserialize(botFileString, AgentConfiguration.class);
+                    for (URI pipelineUri : AgentConfiguration.getPipelines()) {
+                        IResourceId packageResourceId = RestUtilities.extractResourceId(pipelineUri);
                         if (packageResourceId == null) continue;
 
                         String packageId = packageResourceId.getId();
@@ -201,7 +201,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         }
                     }
 
-                    return new ImportPreview(botOriginId, botName, diffs);
+                    return new ImportPreview(botOriginId, agentName, diffs);
                 }
             }
 
@@ -317,17 +317,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 try {
                     String botOriginId = extractIdFromBotFilename(botFilePath);
                     String botFileString = readFile(botFilePath);
-                    BotConfiguration botConfiguration =
-                            jsonSerialization.deserialize(botFileString, BotConfiguration.class);
-                    botConfiguration.getPackages().forEach(packageUri ->
-                            parsePackage(targetDirPath, packageUri, botConfiguration,
+                    AgentConfiguration AgentConfiguration =
+                            jsonSerialization.deserialize(botFileString, AgentConfiguration.class);
+                    AgentConfiguration.getPipelines().forEach(pipelineUri ->
+                            parsePackage(targetDirPath, pipelineUri, AgentConfiguration,
                                     response, isMerge, selectedSet));
 
                     URI newBotUri;
                     if (isMerge && isSelected(selectedSet, botOriginId)) {
-                        newBotUri = createOrUpdateBot(botConfiguration, botOriginId);
+                        newBotUri = createOrUpdateBot(AgentConfiguration, botOriginId);
                     } else {
-                        newBotUri = createNewBot(botConfiguration);
+                        newBotUri = createNewBot(AgentConfiguration);
                     }
 
                     updateDocumentDescriptor(Paths.get(targetDirPath), buildOldBotUri(botFilePath), newBotUri);
@@ -349,13 +349,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         String oldBotId = botPathString.substring(botPathString.lastIndexOf(File.separator) + 1,
                 botPathString.lastIndexOf(BOT_FILE_ENDING));
 
-        return URI.create(IRestBotStore.resourceURI + oldBotId + IRestBotStore.versionQueryParam + "1");
+        return URI.create(IRestAgentStore.resourceURI + oldBotId + IRestAgentStore.versionQueryParam + "1");
     }
 
-    private void parsePackage(String targetDirPath, URI packageUri, BotConfiguration
-            botConfiguration, AsyncResponse response, boolean isMerge, Set<String> selectedSet) {
+    private void parsePackage(String targetDirPath, URI pipelineUri, AgentConfiguration
+            AgentConfiguration, AsyncResponse response, boolean isMerge, Set<String> selectedSet) {
         try {
-            IResourceId packageResourceId = RestUtilities.extractResourceId(packageUri);
+            IResourceId packageResourceId = RestUtilities.extractResourceId(pipelineUri);
             if (packageResourceId == null) {
                 return;
             }
@@ -440,7 +440,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                 updateDocumentDescriptor(packagePath, outputUris, newOutputUris);
                                 packageFileString = replaceURIs(packageFileString, outputUris, newOutputUris);
 
-                                // creating updated package and replacing references in bot config
+                                // creating updated package and replacing references in Agent config
                                 URI newPackageUri;
                                 if (isMerge && isSelected(selectedSet, packageId)) {
                                     newPackageUri = createOrUpdatePackage(packageFileString, packageId);
@@ -451,9 +451,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                 // Set originId on the package's descriptor
                                 setOriginIdOnDescriptor(newPackageUri, packageId);
 
-                                updateDocumentDescriptor(packagePath, packageUri, newPackageUri);
-                                botConfiguration.setPackages(botConfiguration.getPackages().stream().
-                                        map(uri -> uri.equals(packageUri) ? newPackageUri : uri).
+                                updateDocumentDescriptor(packagePath, pipelineUri, newPackageUri);
+                                AgentConfiguration.setPipelines(AgentConfiguration.getPipelines().stream().
+                                        map(uri -> uri.equals(pipelineUri) ? newPackageUri : uri).
                                         collect(Collectors.toList()));
 
                             } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException |
@@ -556,24 +556,24 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return null;
     }
 
-    private URI createOrUpdateBot(BotConfiguration botConfiguration, String botOriginId)
+    private URI createOrUpdateBot(AgentConfiguration AgentConfiguration, String botOriginId)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
         URI existingUri = findLocalUriByOriginId(botOriginId);
         if (existingUri != null) {
             IResourceId localResId = RestUtilities.extractResourceId(existingUri);
             if (localResId != null) {
-                IRestBotStore restBotStore = getRestResourceStore(IRestBotStore.class);
-                Response updateResponse = restBotStore.updateBot(
-                        localResId.getId(), localResId.getVersion(), botConfiguration);
+                IRestAgentStore restAgentStore = getRestResourceStore(IRestAgentStore.class);
+                Response updateResponse = restAgentStore.updateBot(
+                        localResId.getId(), localResId.getVersion(), AgentConfiguration);
                 if (updateResponse.getStatus() == 200) {
                     // updated — new version = old version + 1
                     int newVersion = localResId.getVersion() + 1;
-                    return URI.create(IRestBotStore.resourceURI + localResId.getId() +
-                            IRestBotStore.versionQueryParam + newVersion);
+                    return URI.create(IRestAgentStore.resourceURI + localResId.getId() +
+                            IRestAgentStore.versionQueryParam + newVersion);
                 }
             }
         }
-        return createNewBot(botConfiguration);
+        return createNewBot(AgentConfiguration);
     }
 
     private URI createOrUpdatePackage(String packageFileString, String packageOriginId)
@@ -582,15 +582,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (existingUri != null) {
             IResourceId localResId = RestUtilities.extractResourceId(existingUri);
             if (localResId != null) {
-                PackageConfiguration packageConfiguration =
-                        jsonSerialization.deserialize(packageFileString, PackageConfiguration.class);
-                IRestPackageStore restPackageStore = getRestResourceStore(IRestPackageStore.class);
-                Response updateResponse = restPackageStore.updatePackage(
-                        localResId.getId(), localResId.getVersion(), packageConfiguration);
+                PipelineConfiguration PipelineConfiguration =
+                        jsonSerialization.deserialize(packageFileString, PipelineConfiguration.class);
+                IRestPipelineStore restPipelineStore = getRestResourceStore(IRestPipelineStore.class);
+                Response updateResponse = restPipelineStore.updatePackage(
+                        localResId.getId(), localResId.getVersion(), PipelineConfiguration);
                 if (updateResponse.getStatus() == 200) {
                     int newVersion = localResId.getVersion() + 1;
-                    return URI.create(IRestPackageStore.resourceURI + localResId.getId() +
-                            IRestPackageStore.versionQueryParam + newVersion);
+                    return URI.create(IRestPipelineStore.resourceURI + localResId.getId() +
+                            IRestPipelineStore.versionQueryParam + newVersion);
                 }
             }
         }
@@ -622,20 +622,20 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     // ==================== Resource Creation (original logic) ====================
 
-    private URI createNewBot(BotConfiguration botConfiguration)
+    private URI createNewBot(AgentConfiguration AgentConfiguration)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestBotStore restPackageStore = getRestResourceStore(IRestBotStore.class);
-        Response botResponse = restPackageStore.createBot(botConfiguration);
+        IRestAgentStore restPipelineStore = getRestResourceStore(IRestAgentStore.class);
+        Response botResponse = restPipelineStore.createAgent(AgentConfiguration);
         checkIfCreatedResponse(botResponse);
         return botResponse.getLocation();
     }
 
     private URI createNewPackage(String packageFileString)
             throws RestInterfaceFactory.RestInterfaceFactoryException, IOException {
-        PackageConfiguration packageConfiguration =
-                jsonSerialization.deserialize(packageFileString, PackageConfiguration.class);
-        IRestPackageStore restPackageStore = getRestResourceStore(IRestPackageStore.class);
-        Response packageResponse = restPackageStore.createPackage(packageConfiguration);
+        PipelineConfiguration PipelineConfiguration =
+                jsonSerialization.deserialize(packageFileString, PipelineConfiguration.class);
+        IRestPipelineStore restPipelineStore = getRestResourceStore(IRestPipelineStore.class);
+        Response packageResponse = restPipelineStore.createPackage(PipelineConfiguration);
         checkIfCreatedResponse(packageResponse);
         return packageResponse.getLocation();
     }

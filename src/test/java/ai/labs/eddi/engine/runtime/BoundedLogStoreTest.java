@@ -32,10 +32,10 @@ class BoundedLogStoreTest {
         store = BoundedLogStore.createForTesting(instanceIdProducer, databaseLogs, 5, false, 5, "WARN");
     }
 
-    private LogEntry createEntry(String level, String botId, String conversationId, String message) {
+    private LogEntry createEntry(String level, String agentId, String conversationId, String message) {
         return new LogEntry(
                 System.currentTimeMillis(), level, "test.Logger", message,
-                "production", botId, 1, conversationId, "user-1", "test-host-abcd"
+                "production", agentId, 1, conversationId, "user-1", "test-host-abcd"
         );
     }
 
@@ -114,7 +114,7 @@ class BoundedLogStoreTest {
             List<LogEntry> entries = store.getEntries("bot-a", null, null, 10);
 
             assertEquals(2, entries.size());
-            assertTrue(entries.stream().allMatch(e -> "bot-a".equals(e.botId())));
+            assertTrue(entries.stream().allMatch(e -> "bot-a".equals(e.agentId())));
         }
 
         @Test

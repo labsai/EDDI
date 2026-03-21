@@ -4,7 +4,7 @@ import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
-import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PipelineConfigurationException;
 import ai.labs.eddi.engine.lifecycle.exceptions.UnrecognizedExtensionException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -208,7 +208,7 @@ public class InputParserTask implements ILifecycleTask {
 
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws PackageConfigurationException,
+            throws PipelineConfigurationException,
             IllegalExtensionConfigurationException,
             UnrecognizedExtensionException {
 

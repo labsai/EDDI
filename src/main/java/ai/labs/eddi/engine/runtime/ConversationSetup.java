@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.runtime;
 
-import ai.labs.eddi.configs.agents.IRestBotStore;
+import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
@@ -29,18 +29,18 @@ public class ConversationSetup implements IConversationSetup {
     }
 
     @Override
-    public void createConversationDescriptor(String botId, IBot latestBot, String userId, String conversationId, URI conversationUri)
+    public void createConversationDescriptor(String agentId, IAgent latestBot, String userId, String conversationId, URI conversationUri)
             throws ResourceStoreException, ResourceNotFoundException {
 
-        var botVersion = latestBot.getBotVersion();
+        var agentVersion = latestBot.getAgentVersion();
         var botResourceUri =
-                createURI(IRestBotStore.resourceURI, botId, IRestBotStore.versionQueryParam, botVersion);
+                createURI(IRestAgentStore.resourceURI, agentId, IRestAgentStore.versionQueryParam, agentVersion);
         var conversationDescriptor =
                 createConversationDescriptorDocument(conversationUri, botResourceUri, userId);
         var botDescriptor =
-                documentDescriptorStore.readDescriptor(latestBot.getBotId(), latestBot.getBotVersion());
+                documentDescriptorStore.readDescriptor(latestBot.getAgentId(), latestBot.getAgentVersion());
 
-        conversationDescriptor.setBotName(botDescriptor.getName());
+        conversationDescriptor.setAgentName(botDescriptor.getName());
         conversationDescriptorStore.createDescriptor(conversationId, 0, conversationDescriptor);
     }
 

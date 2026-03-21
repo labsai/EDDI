@@ -2,9 +2,9 @@ package ai.labs.eddi.configs.pipelines.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.pipelines.IPackageStore;
-import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
-import ai.labs.eddi.configs.pipelines.model.PackageConfiguration.PackageExtension;
+import ai.labs.eddi.configs.pipelines.IPipelineStore;
+import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
+import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration.PipelineStep;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.client.configuration.ResourceClientLibrary;
@@ -24,10 +24,10 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.MockitoAnnotations.openMocks;
 
-class RestPackageStoreTest {
+class RestPipelineStoreTest {
 
     @Mock
-    private IPackageStore packageStore;
+    private IPipelineStore PipelineStore;
     @Mock
     private ResourceClientLibrary resourceClientLibrary;
     @Mock
@@ -35,18 +35,18 @@ class RestPackageStoreTest {
     @Mock
     private IJsonSchemaCreator jsonSchemaCreator;
 
-    private RestPackageStore restPackageStore;
+    private RestPipelineStore restPipelineStore;
 
     @BeforeEach
     void setUp() {
         openMocks(this);
-        restPackageStore = new RestPackageStore(
-                packageStore, resourceClientLibrary, documentDescriptorStore, jsonSchemaCreator);
+        restPipelineStore = new RestPipelineStore(
+                PipelineStore, resourceClientLibrary, documentDescriptorStore, jsonSchemaCreator);
     }
 
     /** Helper — by default, resources are only referenced by 1 package (safe to delete) */
     private void mockSingleReference() throws Exception {
-        when(packageStore.getPackageDescriptorsContainingResource(anyString(), eq(false)))
+        when(PipelineStore.getPackageDescriptorsContainingResource(anyString(), eq(false)))
                 .thenReturn(List.of(new DocumentDescriptor()));
     }
 
@@ -57,7 +57,7 @@ class RestPackageStoreTest {
         @Test
         @DisplayName("should delete package without cascade when cascade=false")
         void deletePackage_noCascade() throws Exception {
-            restPackageStore.deletePackage("pkg1", 1, false, false);
+            restPipelineStore.deletePackage("pkg1", 1, false, false);
 
             verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
         }
@@ -67,34 +67,34 @@ class RestPackageStoreTest {
         void deletePackage_cascade_deletesExtensions() throws Exception {
             mockSingleReference();
 
-            PackageConfiguration config = new PackageConfiguration();
+            PipelineConfiguration config = new PipelineConfiguration();
 
-            PackageExtension behaviorExt = new PackageExtension();
+            PipelineStep behaviorExt = new PipelineStep();
             behaviorExt.setType(URI.create("eddi://ai.labs.behavior"));
             behaviorExt.setConfig(new HashMap<>(Map.of(
                     "uri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/beh1?version=1"
             )));
-            config.getPackageExtensions().add(behaviorExt);
+            config.getPipelineSteps().add(behaviorExt);
 
-            PackageExtension httpExt = new PackageExtension();
+            PipelineStep httpExt = new PipelineStep();
             httpExt.setType(URI.create("eddi://ai.labs.httpcalls"));
             httpExt.setConfig(new HashMap<>(Map.of(
                     "uri", "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/http1?version=3"
             )));
-            config.getPackageExtensions().add(httpExt);
+            config.getPipelineSteps().add(httpExt);
 
-            PackageExtension outputExt = new PackageExtension();
+            PipelineStep outputExt = new PipelineStep();
             outputExt.setType(URI.create("eddi://ai.labs.output"));
             outputExt.setConfig(new HashMap<>(Map.of(
                     "uri", "eddi://ai.labs.output/outputstore/outputsets/out1?version=1"
             )));
-            config.getPackageExtensions().add(outputExt);
+            config.getPipelineSteps().add(outputExt);
 
-            when(packageStore.read("pkg1", 1)).thenReturn(config);
+            when(PipelineStore.read("pkg1", 1)).thenReturn(config);
             when(resourceClientLibrary.deleteResource(any(), anyBoolean()))
                     .thenReturn(Response.ok().build());
 
-            restPackageStore.deletePackage("pkg1", 1, true, true);
+            restPipelineStore.deletePackage("pkg1", 1, true, true);
 
             verify(resourceClientLibrary).deleteResource(
                     URI.create("eddi://ai.labs.behavior/behaviorstore/behaviorsets/beh1?version=1"), true);
@@ -109,9 +109,9 @@ class RestPackageStoreTest {
         void deletePackage_cascade_deletesParserDictionaries() throws Exception {
             mockSingleReference();
 
-            PackageConfiguration config = new PackageConfiguration();
+            PipelineConfiguration config = new PipelineConfiguration();
 
-            PackageExtension parserExt = new PackageExtension();
+            PipelineStep parserExt = new PipelineStep();
             parserExt.setType(URI.create("eddi://ai.labs.parser"));
 
             Map<String, Object> dictEntry = new HashMap<>();
@@ -124,13 +124,13 @@ class RestPackageStoreTest {
             dictionaries.add(dictEntry);
             parserExt.getExtensions().put("dictionaries", dictionaries);
 
-            config.getPackageExtensions().add(parserExt);
+            config.getPipelineSteps().add(parserExt);
 
-            when(packageStore.read("pkg1", 1)).thenReturn(config);
+            when(PipelineStore.read("pkg1", 1)).thenReturn(config);
             when(resourceClientLibrary.deleteResource(any(), anyBoolean()))
                     .thenReturn(Response.ok().build());
 
-            restPackageStore.deletePackage("pkg1", 1, true, true);
+            restPipelineStore.deletePackage("pkg1", 1, true, true);
 
             verify(resourceClientLibrary).deleteResource(
                     URI.create("eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/dict1?version=1"),
@@ -140,40 +140,40 @@ class RestPackageStoreTest {
         @Test
         @DisplayName("should skip resources shared with other packages")
         void deletePackage_cascade_skipsSharedResources() throws Exception {
-            PackageConfiguration config = new PackageConfiguration();
+            PipelineConfiguration config = new PipelineConfiguration();
 
             // Behavior extension — shared with 2 packages → should be SKIPPED
-            PackageExtension sharedExt = new PackageExtension();
+            PipelineStep sharedExt = new PipelineStep();
             sharedExt.setType(URI.create("eddi://ai.labs.behavior"));
             sharedExt.setConfig(new HashMap<>(Map.of(
                     "uri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/shared1?version=1"
             )));
-            config.getPackageExtensions().add(sharedExt);
+            config.getPipelineSteps().add(sharedExt);
 
             // Output extension — only in this package → should be deleted
-            PackageExtension uniqueExt = new PackageExtension();
+            PipelineStep uniqueExt = new PipelineStep();
             uniqueExt.setType(URI.create("eddi://ai.labs.output"));
             uniqueExt.setConfig(new HashMap<>(Map.of(
                     "uri", "eddi://ai.labs.output/outputstore/outputsets/unique1?version=1"
             )));
-            config.getPackageExtensions().add(uniqueExt);
+            config.getPipelineSteps().add(uniqueExt);
 
-            when(packageStore.read("pkg1", 1)).thenReturn(config);
+            when(PipelineStore.read("pkg1", 1)).thenReturn(config);
 
             // Shared resource referenced by 2 packages
             String sharedUri = "eddi://ai.labs.behavior/behaviorstore/behaviorsets/shared1?version=1";
-            when(packageStore.getPackageDescriptorsContainingResource(eq(sharedUri), eq(false)))
+            when(PipelineStore.getPackageDescriptorsContainingResource(eq(sharedUri), eq(false)))
                     .thenReturn(List.of(new DocumentDescriptor(), new DocumentDescriptor()));
 
             // Unique resource referenced by only 1 package
             String uniqueUri = "eddi://ai.labs.output/outputstore/outputsets/unique1?version=1";
-            when(packageStore.getPackageDescriptorsContainingResource(eq(uniqueUri), eq(false)))
+            when(PipelineStore.getPackageDescriptorsContainingResource(eq(uniqueUri), eq(false)))
                     .thenReturn(List.of(new DocumentDescriptor()));
 
             when(resourceClientLibrary.deleteResource(any(), anyBoolean()))
                     .thenReturn(Response.ok().build());
 
-            restPackageStore.deletePackage("pkg1", 1, true, true);
+            restPipelineStore.deletePackage("pkg1", 1, true, true);
 
             // Only the unique resource should be deleted
             verify(resourceClientLibrary, never()).deleteResource(
@@ -187,23 +187,23 @@ class RestPackageStoreTest {
         void deletePackage_cascade_partialFailure() throws Exception {
             mockSingleReference();
 
-            PackageConfiguration config = new PackageConfiguration();
+            PipelineConfiguration config = new PipelineConfiguration();
 
-            PackageExtension ext1 = new PackageExtension();
+            PipelineStep ext1 = new PipelineStep();
             ext1.setType(URI.create("eddi://ai.labs.behavior"));
             ext1.setConfig(new HashMap<>(Map.of(
                     "uri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/beh1?version=1"
             )));
-            config.getPackageExtensions().add(ext1);
+            config.getPipelineSteps().add(ext1);
 
-            PackageExtension ext2 = new PackageExtension();
+            PipelineStep ext2 = new PipelineStep();
             ext2.setType(URI.create("eddi://ai.labs.output"));
             ext2.setConfig(new HashMap<>(Map.of(
                     "uri", "eddi://ai.labs.output/outputstore/outputsets/out1?version=1"
             )));
-            config.getPackageExtensions().add(ext2);
+            config.getPipelineSteps().add(ext2);
 
-            when(packageStore.read("pkg1", 1)).thenReturn(config);
+            when(PipelineStore.read("pkg1", 1)).thenReturn(config);
             when(resourceClientLibrary.deleteResource(
                     URI.create("eddi://ai.labs.behavior/behaviorstore/behaviorsets/beh1?version=1"), true))
                     .thenThrow(new ServiceException("DB error"));
@@ -211,7 +211,7 @@ class RestPackageStoreTest {
                     URI.create("eddi://ai.labs.output/outputstore/outputsets/out1?version=1"), true))
                     .thenReturn(Response.ok().build());
 
-            assertDoesNotThrow(() -> restPackageStore.deletePackage("pkg1", 1, true, true));
+            assertDoesNotThrow(() -> restPipelineStore.deletePackage("pkg1", 1, true, true));
 
             verify(resourceClientLibrary, times(2)).deleteResource(any(), anyBoolean());
         }
@@ -219,10 +219,10 @@ class RestPackageStoreTest {
         @Test
         @DisplayName("should handle package not found for cascade gracefully")
         void deletePackage_cascade_packageNotFound() throws Exception {
-            when(packageStore.read("pkg1", 1))
+            when(PipelineStore.read("pkg1", 1))
                     .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
 
-            assertDoesNotThrow(() -> restPackageStore.deletePackage("pkg1", 1, true, true));
+            assertDoesNotThrow(() -> restPipelineStore.deletePackage("pkg1", 1, true, true));
 
             verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
         }
@@ -230,15 +230,15 @@ class RestPackageStoreTest {
         @Test
         @DisplayName("should skip extensions without config.uri")
         void deletePackage_cascade_noUri() throws Exception {
-            PackageConfiguration config = new PackageConfiguration();
+            PipelineConfiguration config = new PipelineConfiguration();
 
-            PackageExtension ext = new PackageExtension();
+            PipelineStep ext = new PipelineStep();
             ext.setType(URI.create("eddi://ai.labs.parser"));
-            config.getPackageExtensions().add(ext);
+            config.getPipelineSteps().add(ext);
 
-            when(packageStore.read("pkg1", 1)).thenReturn(config);
+            when(PipelineStore.read("pkg1", 1)).thenReturn(config);
 
-            assertDoesNotThrow(() -> restPackageStore.deletePackage("pkg1", 1, true, true));
+            assertDoesNotThrow(() -> restPipelineStore.deletePackage("pkg1", 1, true, true));
 
             verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
         }

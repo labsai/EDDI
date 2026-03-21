@@ -33,8 +33,8 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
                 logger_name VARCHAR(512),
                 timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 environment VARCHAR(64),
-                bot_id VARCHAR(255),
-                bot_version INTEGER,
+                AGENT_ID VARCHAR(255),
+                AGENT_VERSION INTEGER,
                 conversation_id VARCHAR(255),
                 user_id VARCHAR(255),
                 instance_id VARCHAR(128)
@@ -67,20 +67,20 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
     }
 
     @Override
-    public List<DatabaseLog> getLogs(Environment environment, String botId, Integer botVersion,
+    public List<DatabaseLog> getLogs(Environment environment, String agentId, Integer agentVersion,
                                      String conversationId, String userId, String instanceId,
                                      Integer skip, Integer limit) {
         ensureSchema();
         return getLogsInternal(environment != null ? environment.toString() : null,
-                botId, botVersion, conversationId, userId, instanceId, skip, limit);
+                agentId, agentVersion, conversationId, userId, instanceId, skip, limit);
     }
 
     @Override
-    public void addLogs(String environment, String botId, Integer botVersion,
+    public void addLogs(String environment, String agentId, Integer agentVersion,
                         String conversationId, String userId, String instanceId, String message) {
         ensureSchema();
         String sql = """
-                INSERT INTO database_logs (message, timestamp, environment, bot_id, bot_version, conversation_id, user_id, instance_id)
+                INSERT INTO database_logs (message, timestamp, environment, AGENT_ID, AGENT_VERSION, conversation_id, user_id, instance_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """;
         try (Connection conn = dataSource.getConnection();
@@ -88,9 +88,9 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
             ps.setString(1, message);
             ps.setTimestamp(2, new Timestamp(System.currentTimeMillis()));
             ps.setString(3, environment);
-            ps.setString(4, botId);
-            if (botVersion != null) {
-                ps.setInt(5, botVersion);
+            ps.setString(4, agentId);
+            if (agentVersion != null) {
+                ps.setInt(5, agentVersion);
             } else {
                 ps.setNull(5, Types.INTEGER);
             }
@@ -109,7 +109,7 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
         ensureSchema();
 
         String sql = """
-                INSERT INTO database_logs (message, level, logger_name, timestamp, environment, bot_id, bot_version, conversation_id, user_id, instance_id)
+                INSERT INTO database_logs (message, level, logger_name, timestamp, environment, AGENT_ID, AGENT_VERSION, conversation_id, user_id, instance_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
         try (Connection conn = dataSource.getConnection();
@@ -120,9 +120,9 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
                 ps.setString(3, entry.loggerName());
                 ps.setTimestamp(4, new Timestamp(entry.timestamp()));
                 ps.setString(5, entry.environment());
-                ps.setString(6, entry.botId());
-                if (entry.botVersion() != null) {
-                    ps.setInt(7, entry.botVersion());
+                ps.setString(6, entry.agentId());
+                if (entry.agentVersion() != null) {
+                    ps.setInt(7, entry.agentVersion());
                 } else {
                     ps.setNull(7, Types.INTEGER);
                 }
@@ -137,7 +137,7 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
         }
     }
 
-    private List<DatabaseLog> getLogsInternal(String environment, String botId, Integer botVersion,
+    private List<DatabaseLog> getLogsInternal(String environment, String agentId, Integer agentVersion,
                                                String conversationId, String userId, String instanceId,
                                                Integer skip, Integer limit) {
         List<DatabaseLog> logs = new ArrayList<>();
@@ -148,13 +148,13 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
             sql.append(" AND environment = ?");
             params.add(environment);
         }
-        if (botId != null) {
-            sql.append(" AND bot_id = ?");
-            params.add(botId);
+        if (agentId != null) {
+            sql.append(" AND AGENT_ID = ?");
+            params.add(agentId);
         }
-        if (botVersion != null) {
-            sql.append(" AND bot_version = ?");
-            params.add(botVersion);
+        if (agentVersion != null) {
+            sql.append(" AND AGENT_VERSION = ?");
+            params.add(agentVersion);
         }
         if (conversationId != null) {
             sql.append(" AND conversation_id = ?");
@@ -189,8 +189,8 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
                     logRecord.put("loggerName", rs.getString("logger_name"));
                     logRecord.put("timestamp", rs.getTimestamp("timestamp"));
                     logRecord.put("environment", rs.getString("environment"));
-                    logRecord.put("botId", rs.getString("bot_id"));
-                    logRecord.put("botVersion", rs.getObject("bot_version"));
+                    logRecord.put("agentId", rs.getString("AGENT_ID"));
+                    logRecord.put("agentVersion", rs.getObject("AGENT_VERSION"));
                     logRecord.put("conversationId", rs.getString("conversation_id"));
                     logRecord.put("userId", rs.getString("user_id"));
                     logRecord.put("instanceId", rs.getString("instance_id"));

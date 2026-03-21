@@ -60,7 +60,7 @@ public class MongoScheduleStore implements IScheduleStore {
     private static final String NEXT_RETRY_AT = "nextRetryAt";
     private static final String LAST_FIRED = "lastFired";
     private static final String UPDATED_AT = "updatedAt";
-    private static final String BOT_ID = "botId";
+    private static final String AGENT_ID = "agentId";
     private static final String TENANT_ID = "tenantId";
     private static final String SCHEDULE_ID = "scheduleId";
     private static final String STARTED_AT = "startedAt";
@@ -89,7 +89,7 @@ public class MongoScheduleStore implements IScheduleStore {
                 new IndexOptions().name("idx_schedules_due")
         );
         scheduleCollection.createIndex(
-                Indexes.ascending(BOT_ID),
+                Indexes.ascending(AGENT_ID),
                 new IndexOptions().name("idx_schedules_botId")
         );
         scheduleCollection.createIndex(
@@ -130,8 +130,8 @@ public class MongoScheduleStore implements IScheduleStore {
             // Fix #6: Store Instants as epoch-millis for consistent BSON comparison
             storeInstantsAsLong(doc);
             scheduleCollection.insertOne(doc);
-            LOGGER.infof("Created schedule '%s' (id=%s, type=%s) for bot %s",
-                    schedule.getName(), id, schedule.getTriggerType(), schedule.getBotId());
+            LOGGER.infof("Created schedule '%s' (id=%s, type=%s) for Agent %s",
+                    schedule.getName(), id, schedule.getTriggerType(), schedule.getAgentId());
             return id;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to create schedule", e);
@@ -216,16 +216,16 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public int deleteSchedulesByBotId(String botId) throws IResourceStore.ResourceStoreException {
+    public int deleteSchedulesByBotId(String agentId) throws IResourceStore.ResourceStoreException {
         try {
-            var result = scheduleCollection.deleteMany(eq(BOT_ID, botId));
+            var result = scheduleCollection.deleteMany(eq(AGENT_ID, agentId));
             int count = (int) result.getDeletedCount();
             if (count > 0) {
-                LOGGER.infof("Cascade-deleted %d schedule(s) for bot %s", count, botId);
+                LOGGER.infof("Cascade-deleted %d schedule(s) for Agent %s", count, agentId);
             }
             return count;
         } catch (Exception e) {
-            throw new IResourceStore.ResourceStoreException("Failed to delete schedules for bot " + botId, e);
+            throw new IResourceStore.ResourceStoreException("Failed to delete schedules for Agent " + agentId, e);
         }
     }
 
@@ -236,8 +236,8 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public List<ScheduleConfiguration> readSchedulesByBotId(String botId) throws IResourceStore.ResourceStoreException {
-        return readSchedulesWithFilter(new Document(BOT_ID, botId), 500);
+    public List<ScheduleConfiguration> readSchedulesByBotId(String agentId) throws IResourceStore.ResourceStoreException {
+        return readSchedulesWithFilter(new Document(AGENT_ID, agentId), 500);
     }
 
     // ========================= Polling & Claiming =========================

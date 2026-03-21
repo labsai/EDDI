@@ -203,7 +203,7 @@ class SchedulePollerServiceTest {
         s.setId(id);
         s.setName("Test Schedule");
         s.setTriggerType(TriggerType.CRON);
-        s.setBotId("bot-1");
+        s.setAgentId("bot-1");
         s.setCronExpression(cron);
         s.setMessage(message);
         s.setEnvironment("production");
@@ -218,7 +218,7 @@ class SchedulePollerServiceTest {
         s.setId(id);
         s.setName("Test Heartbeat");
         s.setTriggerType(TriggerType.HEARTBEAT);
-        s.setBotId("bot-1");
+        s.setAgentId("bot-1");
         s.setHeartbeatIntervalSeconds(intervalSec);
         s.setMessage(message);
         s.setEnvironment("production");

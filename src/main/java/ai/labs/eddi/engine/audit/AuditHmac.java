@@ -91,8 +91,8 @@ public final class AuditHmac {
         StringBuilder sb = new StringBuilder(512);
         sb.append("id=").append(nullSafe(entry.id()));
         sb.append("|cid=").append(nullSafe(entry.conversationId()));
-        sb.append("|bid=").append(nullSafe(entry.botId()));
-        sb.append("|bv=").append(entry.botVersion());
+        sb.append("|bid=").append(nullSafe(entry.agentId()));
+        sb.append("|bv=").append(entry.agentVersion());
         sb.append("|uid=").append(nullSafe(entry.userId()));
         sb.append("|env=").append(nullSafe(entry.environment()));
         sb.append("|si=").append(entry.stepIndex());

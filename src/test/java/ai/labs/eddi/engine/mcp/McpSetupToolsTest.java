@@ -1,16 +1,16 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.rules.IRestBehaviorStore;
-import ai.labs.eddi.configs.agents.IRestBotStore;
+import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
 import ai.labs.eddi.configs.llm.IRestLangChainStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
-import ai.labs.eddi.configs.pipelines.IRestPackageStore;
-import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
+import ai.labs.eddi.configs.pipelines.IRestPipelineStore;
+import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.api.IRestBotAdministration;
+import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
@@ -31,10 +31,10 @@ class McpSetupToolsTest {
     private IRestLangChainStore langchainStore;
     private IRestOutputStore outputStore;
     private IRestHttpCallsStore httpCallsStore;
-    private IRestPackageStore packageStore;
-    private IRestBotStore botStore;
+    private IRestPipelineStore PipelineStore;
+    private IRestAgentStore AgentStore;
     private IRestDocumentDescriptorStore descriptorStore;
-    private IRestBotAdministration botAdmin;
+    private IRestAgentAdministration botAdmin;
     private IRestParserStore parserStore;
     private IJsonSerialization jsonSerialization;
     private McpSetupTools tools;
@@ -45,10 +45,10 @@ class McpSetupToolsTest {
         langchainStore = mock(IRestLangChainStore.class);
         outputStore = mock(IRestOutputStore.class);
         httpCallsStore = mock(IRestHttpCallsStore.class);
-        packageStore = mock(IRestPackageStore.class);
-        botStore = mock(IRestBotStore.class);
+        PipelineStore = mock(IRestPipelineStore.class);
+        AgentStore = mock(IRestAgentStore.class);
         descriptorStore = mock(IRestDocumentDescriptorStore.class);
-        botAdmin = mock(IRestBotAdministration.class);
+        botAdmin = mock(IRestAgentAdministration.class);
         parserStore = mock(IRestParserStore.class);
         jsonSerialization = mock(IJsonSerialization.class);
 
@@ -58,8 +58,8 @@ class McpSetupToolsTest {
         when(restInterfaceFactory.get(IRestLangChainStore.class)).thenReturn(langchainStore);
         when(restInterfaceFactory.get(IRestOutputStore.class)).thenReturn(outputStore);
         when(restInterfaceFactory.get(IRestHttpCallsStore.class)).thenReturn(httpCallsStore);
-        when(restInterfaceFactory.get(IRestPackageStore.class)).thenReturn(packageStore);
-        when(restInterfaceFactory.get(IRestBotStore.class)).thenReturn(botStore);
+        when(restInterfaceFactory.get(IRestPipelineStore.class)).thenReturn(PipelineStore);
+        when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(AgentStore);
         when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
         when(restInterfaceFactory.get(IRestParserStore.class)).thenReturn(parserStore);
 
@@ -82,11 +82,11 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
         when(outputStore.createOutputSet(any()))
                 .thenReturn(Response.created(URI.create("/outputstore/outputsets/out-1?version=1")).build());
-        when(packageStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
-        when(botStore.createBot(any()))
-                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
-        when(botAdmin.deployBot(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
+        when(PipelineStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any()))
+                .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
+        when(botAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
                 .thenReturn(Response.ok().build());
 
         String result = tools.setupBot(
@@ -101,11 +101,11 @@ class McpSetupToolsTest {
         verify(behaviorStore).createBehaviorRuleSet(any());
         verify(langchainStore).createLangChain(any());
         verify(outputStore).createOutputSet(any());
-        verify(packageStore).createPackage(any());
-        verify(botStore).createBot(any());
-        verify(botAdmin).deployBot(Environment.production, "bot-1", 1, true, true);
+        verify(PipelineStore).createPackage(any());
+        verify(AgentStore).createAgent(any());
+        verify(botAdmin).deployAgent(Environment.production, "bot-1", 1, true, true);
 
-        // Verify 6 descriptors patched (parser, behavior, langchain, output, package, bot)
+        // Verify 6 descriptors patched (parser, behavior, langchain, output, package, agent)
         verify(descriptorStore, times(6)).patchDescriptor(any(), anyInt(), any());
     }
 
@@ -115,17 +115,17 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(packageStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
-        when(botStore.createBot(any()))
-                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+        when(PipelineStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any()))
+                .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
         tools.setupBot("Test Bot", "You are helpful", null, null,
                 "sk-test", null, null, null, null, null, null, null, true, null);
 
         // Output store should NOT be called
         verify(outputStore, never()).createOutputSet(any());
-        // 5 descriptors patched (parser, behavior, langchain, package, bot — no output)
+        // 5 descriptors patched (parser, behavior, langchain, package, Agent — no output)
         verify(descriptorStore, times(5)).patchDescriptor(any(), anyInt(), any());
     }
 
@@ -135,16 +135,16 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(packageStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
-        when(botStore.createBot(any()))
-                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+        when(PipelineStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any()))
+                .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
         tools.setupBot("Test Bot", "You are helpful", null, null,
                 "sk-test", null, null, null, null, null, null, null, false, null);
 
         // Deploy should NOT be called
-        verify(botAdmin, never()).deployBot(any(), any(), anyInt(), anyBoolean(), anyBoolean());
+        verify(botAdmin, never()).deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean());
     }
 
     @Test
@@ -153,11 +153,11 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(packageStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
-        when(botStore.createBot(any()))
-                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
-        when(botAdmin.deployBot(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
+        when(PipelineStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any()))
+                .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
+        when(botAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
                 .thenThrow(new RuntimeException("Deploy failed"));
 
         String result = tools.setupBot("Test Bot", "You are helpful", null, null,
@@ -195,10 +195,10 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(packageStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
-        when(botStore.createBot(any()))
-                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+        when(PipelineStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any()))
+                .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
         // Ollama should NOT require an apiKey
         String result = tools.setupBot("Ollama Bot", "You are helpful", "ollama", "llama3.2:1b",
@@ -215,10 +215,10 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(packageStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
-        when(botStore.createBot(any()))
-                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+        when(PipelineStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any()))
+                .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
         String result = tools.setupBot("Jlama Bot", "You are helpful", "jlama", "tinyllama",
                 null, null, null, null, null, null, null, null, false, null);
@@ -233,10 +233,10 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(packageStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
-        when(botStore.createBot(any()))
-                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+        when(PipelineStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any()))
+                .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
         tools.setupBot("My Bot", "You are a pirate", "anthropic", "claude-3-5-sonnet",
                 "sk-ant-key", null, null, null, null, null, null, null, false, null);
@@ -262,25 +262,25 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
         when(outputStore.createOutputSet(any()))
                 .thenReturn(Response.created(URI.create("/outputstore/outputsets/out-1?version=1")).build());
-        when(packageStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
-        when(botStore.createBot(any()))
-                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+        when(PipelineStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any()))
+                .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
         tools.setupBot("Bot", "prompt", null, null, "key", null, "Hello!",
                 null, null, null, null, null, false, null);
 
         // Capture package config
-        var packageCaptor = ArgumentCaptor.forClass(PackageConfiguration.class);
-        verify(packageStore).createPackage(packageCaptor.capture());
+        var packageCaptor = ArgumentCaptor.forClass(PipelineConfiguration.class);
+        verify(PipelineStore).createPackage(packageCaptor.capture());
 
         var pkgConfig = packageCaptor.getValue();
         // Should have 4 extensions: parser, behavior, langchain, output
-        assertEquals(4, pkgConfig.getPackageExtensions().size());
-        assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getPackageExtensions().get(0).getType());
-        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getPackageExtensions().get(1).getType());
-        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getPackageExtensions().get(2).getType());
-        assertEquals(URI.create("eddi://ai.labs.output"), pkgConfig.getPackageExtensions().get(3).getType());
+        assertEquals(4, pkgConfig.getPipelineSteps().size());
+        assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getPipelineSteps().get(0).getType());
+        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getPipelineSteps().get(1).getType());
+        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getPipelineSteps().get(2).getType());
+        assertEquals(URI.create("eddi://ai.labs.output"), pkgConfig.getPipelineSteps().get(3).getType());
     }
 
     @Test
@@ -289,19 +289,19 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(packageStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
-        when(botStore.createBot(any()))
-                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+        when(PipelineStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any()))
+                .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
         tools.setupBot("Bot", "prompt", null, null, "key", null, null,
                 null, null, null, null, null, false, null);
 
-        var packageCaptor = ArgumentCaptor.forClass(PackageConfiguration.class);
-        verify(packageStore).createPackage(packageCaptor.capture());
+        var packageCaptor = ArgumentCaptor.forClass(PipelineConfiguration.class);
+        verify(PipelineStore).createPackage(packageCaptor.capture());
 
         // Without intro message, should have 3 extensions: parser, behavior, langchain (no output)
-        assertEquals(3, packageCaptor.getValue().getPackageExtensions().size());
+        assertEquals(3, packageCaptor.getValue().getPipelineSteps().size());
     }
 
     @Test
@@ -393,10 +393,10 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(packageStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
-        when(botStore.createBot(any()))
-                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+        when(PipelineStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any()))
+                .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
         tools.setupBot("QR Bot", "You are helpful", "openai", "gpt-4o",
                 "sk-test", null, null, null, null, true, null, null, false, null);
@@ -427,10 +427,10 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(packageStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
-        when(botStore.createBot(any()))
-                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+        when(PipelineStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any()))
+                .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
         tools.setupBot("Sentiment Bot", "You are helpful", "gemini", "gemini-2.0-flash",
                 "key", null, null, null, null, null, true, null, false, null);
@@ -462,10 +462,10 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(packageStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
-        when(botStore.createBot(any()))
-                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+        when(PipelineStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any()))
+                .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
         tools.setupBot("Full Bot", "You are helpful", "openai", "gpt-4o",
                 "sk-test", null, null, null, null, true, true, null, false, null);
@@ -493,10 +493,10 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(packageStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
-        when(botStore.createBot(any()))
-                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+        when(PipelineStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any()))
+                .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
         tools.setupBot("Anthropic Bot", "You are helpful", "anthropic", "claude-sonnet-4-6",
                 "sk-test", null, null, null, null, true, null, null, false, null);
@@ -647,14 +647,14 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(packageStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
-        when(botStore.createBot(any()))
-                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
-        when(botAdmin.deployBot(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
+        when(PipelineStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any()))
+                .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
+        when(botAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
                 .thenReturn(Response.ok().build());
 
-        String result = tools.createApiBot(
+        String result = tools.createApIAgent(
                 "API Bot", "You are an API assistant", SIMPLE_SPEC,
                 "anthropic", "claude-sonnet-4-6", "sk-test",
                 null, "Bearer api-key", null, null, null, true, null);
@@ -666,9 +666,9 @@ class McpSetupToolsTest {
         verify(parserStore).createParser(any());
         verify(behaviorStore).createBehaviorRuleSet(any());
         verify(langchainStore).createLangChain(any());
-        verify(packageStore).createPackage(any());
-        verify(botStore).createBot(any());
-        verify(botAdmin).deployBot(Environment.production, "bot-1", 1, true, true);
+        verify(PipelineStore).createPackage(any());
+        verify(AgentStore).createAgent(any());
+        verify(botAdmin).deployAgent(Environment.production, "bot-1", 1, true, true);
 
         // Verify the system prompt was enriched with API summary
         var lcCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
@@ -682,7 +682,7 @@ class McpSetupToolsTest {
 
     @Test
     void createApiBot_missingSpec_returnsError() {
-        String result = tools.createApiBot("Bot", "prompt", null,
+        String result = tools.createApIAgent("Bot", "prompt", null,
                 null, null, "key", null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("OpenAPI spec is required"));
@@ -690,7 +690,7 @@ class McpSetupToolsTest {
 
     @Test
     void createApiBot_missingApiKey_returnsError() {
-        String result = tools.createApiBot("Bot", "prompt", SIMPLE_SPEC,
+        String result = tools.createApIAgent("Bot", "prompt", SIMPLE_SPEC,
                 null, null, null, null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("API key is required"));
@@ -705,24 +705,24 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(packageStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/packagestore/packages/pkg-1?version=1")).build());
-        when(botStore.createBot(any()))
-                .thenReturn(Response.created(URI.create("/botstore/bots/bot-1?version=1")).build());
+        when(PipelineStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any()))
+                .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
-        tools.createApiBot("Bot", "prompt", SIMPLE_SPEC,
+        tools.createApIAgent("Bot", "prompt", SIMPLE_SPEC,
                 null, null, "key", null, null, null, null, null, false, null);
 
-        var packageCaptor = ArgumentCaptor.forClass(PackageConfiguration.class);
-        verify(packageStore).createPackage(packageCaptor.capture());
+        var packageCaptor = ArgumentCaptor.forClass(PipelineConfiguration.class);
+        verify(PipelineStore).createPackage(packageCaptor.capture());
 
         var pkgConfig = packageCaptor.getValue();
         // Should have 5 extensions: parser + behavior + 2 httpcalls groups + langchain
-        assertEquals(5, pkgConfig.getPackageExtensions().size());
-        assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getPackageExtensions().get(0).getType());
-        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getPackageExtensions().get(1).getType());
-        assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getPackageExtensions().get(2).getType());
-        assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getPackageExtensions().get(3).getType());
-        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getPackageExtensions().get(4).getType());
+        assertEquals(5, pkgConfig.getPipelineSteps().size());
+        assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getPipelineSteps().get(0).getType());
+        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getPipelineSteps().get(1).getType());
+        assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getPipelineSteps().get(2).getType());
+        assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getPipelineSteps().get(3).getType());
+        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getPipelineSteps().get(4).getType());
     }
 }

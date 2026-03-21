@@ -207,7 +207,7 @@ class ScheduleFireExecutorTest {
         s.setId(id);
         s.setName("Test Schedule");
         s.setTriggerType(TriggerType.CRON);
-        s.setBotId("bot-1");
+        s.setAgentId("bot-1");
         s.setCronExpression("0 9 * * *");
         s.setMessage("Good morning");
         s.setEnvironment("production");
@@ -224,7 +224,7 @@ class ScheduleFireExecutorTest {
         s.setId(id);
         s.setName("Test Heartbeat");
         s.setTriggerType(TriggerType.HEARTBEAT);
-        s.setBotId("bot-1");
+        s.setAgentId("bot-1");
         s.setHeartbeatIntervalSeconds(300L);
         s.setMessage("check");
         s.setEnvironment("production");

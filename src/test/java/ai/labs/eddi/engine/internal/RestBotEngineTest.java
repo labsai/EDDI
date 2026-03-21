@@ -29,12 +29,12 @@ class RestBotEngineTest {
     @Mock
     private IConversationService conversationService;
 
-    private RestBotEngine restBotEngine;
+    private RestAgentEngine RestAgentEngine;
 
     @BeforeEach
     void setUp() {
         openMocks(this);
-        restBotEngine = new RestBotEngine(conversationService, 60);
+        RestAgentEngine = new RestAgentEngine(conversationService, 60);
     }
 
     // ==================== startConversation Tests ====================
@@ -51,19 +51,19 @@ class RestBotEngineTest {
             when(conversationService.startConversation(any(), eq("bot1"), eq("user1"), anyMap()))
                     .thenReturn(result);
 
-            Response response = restBotEngine.startConversation(production, "bot1", "user1");
+            Response response = RestAgentEngine.startConversation(production, "bot1", "user1");
 
             assertEquals(201, response.getStatus());
             assertNotNull(response.getLocation());
         }
 
         @Test
-        @DisplayName("should return 404 when bot is not ready")
+        @DisplayName("should return 404 when Agent is not ready")
         void startConversation_botNotReady() throws Exception {
             when(conversationService.startConversation(any(), eq("bot1"), eq("user1"), anyMap()))
                     .thenThrow(new BotNotReadyException("Bot not deployed"));
 
-            Response response = restBotEngine.startConversation(production, "bot1", "user1");
+            Response response = RestAgentEngine.startConversation(production, "bot1", "user1");
 
             assertEquals(404, response.getStatus());
         }
@@ -75,7 +75,7 @@ class RestBotEngineTest {
                     .thenThrow(new ResourceStoreException("DB error"));
 
             assertThrows(InternalServerErrorException.class,
-                    () -> restBotEngine.startConversation(production, "bot1", "user1"));
+                    () -> RestAgentEngine.startConversation(production, "bot1", "user1"));
         }
     }
 
@@ -88,7 +88,7 @@ class RestBotEngineTest {
         @Test
         @DisplayName("should return 200 on success")
         void endConversation_success() {
-            Response response = restBotEngine.endConversation("conv1");
+            Response response = RestAgentEngine.endConversation("conv1");
 
             assertEquals(200, response.getStatus());
             verify(conversationService).endConversation("conv1");
@@ -110,7 +110,7 @@ class RestBotEngineTest {
                     eq(true), eq(false), isNull()))
                     .thenReturn(snapshot);
 
-            SimpleConversationMemorySnapshot result = restBotEngine.readConversation(
+            SimpleConversationMemorySnapshot result = RestAgentEngine.readConversation(
                     production, "bot1", "conv1", true, false, null);
 
             assertNotNull(result);
@@ -129,7 +129,7 @@ class RestBotEngineTest {
         void say_delegatesToService() throws Exception {
             AsyncResponse asyncResponse = mock(AsyncResponse.class);
 
-            restBotEngine.say(production, "bot1", "conv1",
+            RestAgentEngine.say(production, "bot1", "conv1",
                     false, false, null, "Hello", asyncResponse);
 
             verify(asyncResponse).setTimeout(60, java.util.concurrent.TimeUnit.SECONDS);
@@ -149,7 +149,7 @@ class RestBotEngineTest {
                             any(), any(), any(), any(), any(), any(),
                             any(), anyBoolean(), any());
 
-            restBotEngine.say(production, "bot1", "conv1",
+            RestAgentEngine.say(production, "bot1", "conv1",
                     false, false, null, "Hello", asyncResponse);
 
             // Capture the argument passed to resume
@@ -170,7 +170,7 @@ class RestBotEngineTest {
                             any(), any(), any(), any(), any(), any(),
                             any(), anyBoolean(), any());
 
-            restBotEngine.say(production, "bot1", "conv1",
+            RestAgentEngine.say(production, "bot1", "conv1",
                     false, false, null, "Hello", asyncResponse);
 
             ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
@@ -193,7 +193,7 @@ class RestBotEngineTest {
             when(conversationService.isUndoAvailable(production, "bot1", "conv1"))
                     .thenReturn(true);
 
-            assertTrue(restBotEngine.isUndoAvailable(production, "bot1", "conv1"));
+            assertTrue(RestAgentEngine.isUndoAvailable(production, "bot1", "conv1"));
         }
 
         @Test
@@ -201,7 +201,7 @@ class RestBotEngineTest {
         void undo_success() throws Exception {
             when(conversationService.undo(production, "bot1", "conv1")).thenReturn(true);
 
-            Response response = restBotEngine.undo(production, "bot1", "conv1");
+            Response response = RestAgentEngine.undo(production, "bot1", "conv1");
 
             assertEquals(200, response.getStatus());
         }
@@ -211,7 +211,7 @@ class RestBotEngineTest {
         void undo_notAvailable() throws Exception {
             when(conversationService.undo(production, "bot1", "conv1")).thenReturn(false);
 
-            Response response = restBotEngine.undo(production, "bot1", "conv1");
+            Response response = RestAgentEngine.undo(production, "bot1", "conv1");
 
             assertEquals(409, response.getStatus());
         }
@@ -221,7 +221,7 @@ class RestBotEngineTest {
         void redo_success() throws Exception {
             when(conversationService.redo(production, "bot1", "conv1")).thenReturn(true);
 
-            Response response = restBotEngine.redo(production, "bot1", "conv1");
+            Response response = RestAgentEngine.redo(production, "bot1", "conv1");
 
             assertEquals(200, response.getStatus());
         }
@@ -232,7 +232,7 @@ class RestBotEngineTest {
             when(conversationService.isRedoAvailable(production, "bot1", "conv1"))
                     .thenReturn(false);
 
-            assertFalse(restBotEngine.isRedoAvailable(production, "bot1", "conv1"));
+            assertFalse(RestAgentEngine.isRedoAvailable(production, "bot1", "conv1"));
         }
     }
 
@@ -249,7 +249,7 @@ class RestBotEngineTest {
                     .thenReturn(ConversationState.READY);
 
             assertEquals(ConversationState.READY,
-                    restBotEngine.getConversationState(production, "conv1"));
+                    RestAgentEngine.getConversationState(production, "conv1"));
         }
     }
 }

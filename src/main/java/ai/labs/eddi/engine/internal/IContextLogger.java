@@ -6,7 +6,7 @@ import java.util.Map;
 
 public interface IContextLogger {
     Map<String, String> createLoggingContext(Deployment.Environment environment,
-                                             String botId,
+                                             String agentId,
                                              String conversationId,
                                              String userId);
 

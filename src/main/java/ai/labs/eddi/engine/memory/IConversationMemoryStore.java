@@ -14,7 +14,7 @@ public interface IConversationMemoryStore {
 
     ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
-    List<ConversationMemorySnapshot> loadActiveConversationMemorySnapshot(String botId, Integer botVersion) throws IResourceStore.ResourceStoreException;
+    List<ConversationMemorySnapshot> loadActiveConversationMemorySnapshot(String agentId, Integer agentVersion) throws IResourceStore.ResourceStoreException;
 
     void setConversationState(String conversationId, ConversationState conversationState);
 
@@ -22,7 +22,7 @@ public interface IConversationMemoryStore {
 
     ConversationState getConversationState(String conversationId);
 
-    Long getActiveConversationCount(String botId, Integer botVersion);
+    Long getActiveConversationCount(String agentId, Integer agentVersion);
 
     List<String> getEndedConversationIds();
 }

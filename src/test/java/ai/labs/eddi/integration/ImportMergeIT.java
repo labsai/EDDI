@@ -34,7 +34,7 @@ public class ImportMergeIT extends BaseIntegrationIT {
 
     @Test
     @Order(1)
-    @DisplayName("import bot with default strategy should create new resources and set originId")
+    @DisplayName("import Agent with default strategy should create new resources and set originId")
     void importCreate() throws Exception {
         File botZip = loadTestZip("weather_bot_v1");
 
@@ -64,7 +64,7 @@ public class ImportMergeIT extends BaseIntegrationIT {
         assertThat("originId should be set on the descriptor", firstImportBotOriginId, notNullValue());
     }
 
-    // ==================== Test 2: Export the imported bot ====================
+    // ==================== Test 2: Export the imported Agent ====================
 
     @Test
     @Order(2)
@@ -75,7 +75,7 @@ public class ImportMergeIT extends BaseIntegrationIT {
         // Trigger export
         Response exportResponse = given()
                 .post("/backup/export/" + firstImportBotId.id() +
-                        "?botVersion=" + firstImportBotId.version());
+                        "?agentVersion=" + firstImportBotId.version());
 
         exportResponse.then().statusCode(200);
 
@@ -117,18 +117,18 @@ public class ImportMergeIT extends BaseIntegrationIT {
         assertThat("At least some resources should be marked UPDATE",
                 updateCount, greaterThan(0L));
 
-        // The bot itself should be UPDATE
+        // The Agent itself should be UPDATE
         boolean botIsUpdate = preview.resources().stream()
                 .anyMatch(r -> "bot".equals(r.resourceType()) &&
                         r.action() == ImportPreview.DiffAction.UPDATE);
         assertThat("Bot resource should be UPDATE", botIsUpdate, is(true));
     }
 
-    // ==================== Test 4: Merge import should reuse the same bot ID ====================
+    // ==================== Test 4: Merge import should reuse the same Agent ID ====================
 
     @Test
     @Order(4)
-    @DisplayName("merge import should update existing bot instead of creating a duplicate")
+    @DisplayName("merge import should update existing Agent instead of creating a duplicate")
     void mergeImportReusesId() {
         assertThat("exportedZipBytes must be set by test 2", exportedZipBytes, notNullValue());
         assertThat("firstImportBotId must be set by test 1", firstImportBotId, notNullValue());
@@ -146,8 +146,8 @@ public class ImportMergeIT extends BaseIntegrationIT {
 
         ResourceId mergedBotId = extractResourceId(mergeLocation);
 
-        // The bot ID should be the SAME as the first import
-        assertThat("Merge should reuse the same bot ID",
+        // The Agent ID should be the SAME as the first import
+        assertThat("Merge should reuse the same Agent ID",
                 mergedBotId.id(), equalTo(firstImportBotId.id()));
 
         // The version should be incremented (updated, not duplicated)
@@ -197,7 +197,7 @@ public class ImportMergeIT extends BaseIntegrationIT {
         ImportPreview preview = previewResponse.as(ImportPreview.class);
         assertThat("Preview should have resources", preview.resources(), not(empty()));
 
-        // Select only the bot resource
+        // Select only the Agent resource
         String botOriginId = preview.resources().stream()
                 .filter(r -> "bot".equals(r.resourceType()))
                 .map(ImportPreview.ResourceDiff::originId)
@@ -221,7 +221,7 @@ public class ImportMergeIT extends BaseIntegrationIT {
 
     @Test
     @Order(7)
-    @DisplayName("create strategy should always produce a new bot ID (not merge)")
+    @DisplayName("create strategy should always produce a new Agent ID (not merge)")
     void createAlwaysNew() throws Exception {
         File botZip = loadTestZip("weather_bot_v1");
 
@@ -237,8 +237,8 @@ public class ImportMergeIT extends BaseIntegrationIT {
 
         ResourceId secondBotId = extractResourceId(location);
 
-        // A fresh create import should produce a DIFFERENT bot ID
-        assertThat("Create strategy should produce a new bot ID (not merge)",
+        // A fresh create import should produce a DIFFERENT Agent ID
+        assertThat("Create strategy should produce a new Agent ID (not merge)",
                 secondBotId.id(), not(equalTo(firstImportBotId.id())));
     }
 

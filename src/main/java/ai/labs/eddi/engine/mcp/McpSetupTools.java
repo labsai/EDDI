@@ -11,8 +11,8 @@ import ai.labs.eddi.configs.apicalls.model.OutputBuildingInstruction;
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.QuickRepliesBuildingInstruction;
 
-import ai.labs.eddi.configs.agents.IRestBotStore;
-import ai.labs.eddi.configs.agents.model.BotConfiguration;
+import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
@@ -21,9 +21,9 @@ import ai.labs.eddi.configs.llm.IRestLangChainStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
-import ai.labs.eddi.configs.pipelines.IRestPackageStore;
-import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
-import ai.labs.eddi.engine.api.IRestBotAdministration;
+import ai.labs.eddi.configs.pipelines.IRestPipelineStore;
+import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
+import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
@@ -42,8 +42,8 @@ import java.util.*;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
 
 /**
- * MCP composite tool for setting up a fully working bot in a single call.
- * Codifies the Bot Father's 12-step pipeline as a programmatic Java operation.
+ * MCP composite tool for setting up a fully working Agent in a single call.
+ * Codifies the Agent Father's 12-step pipeline as a programmatic Java operation.
  *
  * @author ginccc
  */
@@ -53,22 +53,22 @@ public class McpSetupTools {
     private static final Logger LOGGER = Logger.getLogger(McpSetupTools.class);
 
     private final IRestInterfaceFactory restInterfaceFactory;
-    private final IRestBotAdministration botAdmin;
+    private final IRestAgentAdministration botAdmin;
     private final IJsonSerialization jsonSerialization;
 
     @Inject
     public McpSetupTools(IRestInterfaceFactory restInterfaceFactory,
-            IRestBotAdministration botAdmin,
+            IRestAgentAdministration botAdmin,
             IJsonSerialization jsonSerialization) {
         this.restInterfaceFactory = restInterfaceFactory;
         this.botAdmin = botAdmin;
         this.jsonSerialization = jsonSerialization;
     }
 
-    @Tool(name = "setup_bot", description = "Create a fully working, deployed bot in a single call. " +
+    @Tool(name = "setup_bot", description = "Create a fully working, deployed Agent in a single call. " +
             "This creates all necessary resources (behavior rules, LLM connection, " +
-            "output set, package, bot), names them, and optionally deploys the bot. " +
-            "This is the fastest way to get a new bot running — equivalent to the Bot Father workflow.")
+            "output set, package, agent), names them, and optionally deploys the agent. " +
+            "This is the fastest way to get a new Agent running — equivalent to the Agent Father workflow.")
     public String setupBot(
             @ToolArg(description = "Bot name (required)") String name,
             @ToolArg(description = "System prompt / role for the LLM (required). " +
@@ -86,17 +86,17 @@ public class McpSetupTools {
             @ToolArg(description = "Enable built-in tools like calculator, datetime, websearch? (default: false)") Boolean enableBuiltInTools,
             @ToolArg(description = "Comma-separated list of specific built-in tools to enable " +
                     "(e.g. 'calculator,datetime,websearch'). Only used if enableBuiltInTools is true.") String builtInToolsWhitelist,
-            @ToolArg(description = "Enable quick reply buttons in bot responses? (default: false). " +
+            @ToolArg(description = "Enable quick reply buttons in Agent responses? (default: false). " +
                     "When enabled, the LLM returns structured JSON with quick reply suggestions. " +
                     "Note: streaming is not supported when this is enabled.") Boolean enableQuickReplies,
-            @ToolArg(description = "Enable ad-hoc sentiment analysis in bot responses? (default: false). " +
+            @ToolArg(description = "Enable ad-hoc sentiment analysis in Agent responses? (default: false). " +
                     "When enabled, the LLM returns structured JSON with sentiment scores, " +
                     "emotion detection, intent classification, and urgency rating. " +
                     "Note: streaming is not supported when this is enabled.") Boolean enableSentimentAnalysis,
             @ToolArg(description = "Comma-separated list of external MCP server URLs for tool discovery (optional). " +
-                    "The bot will connect to these servers and use their tools during conversations. " +
+                    "The Agent will connect to these servers and use their tools during conversations. " +
                     "E.g. 'http://localhost:7070/mcp,http://tools.example.com/mcp'") String mcpServers,
-            @ToolArg(description = "Automatically deploy the bot after creation? (default: true)") Boolean deploy,
+            @ToolArg(description = "Automatically deploy the Agent after creation? (default: true)") Boolean deploy,
             @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
         try {
             // Validate required params
@@ -164,33 +164,33 @@ public class McpSetupTools {
 
             // --- Step 5: Create Package ---
             var packageConfig = createPackageConfig(parserLocation, behaviorLocation, null, langchainLocation, outputLocation);
-            Response packageResponse = getRestStore(IRestPackageStore.class).createPackage(packageConfig);
+            Response packageResponse = getRestStore(IRestPipelineStore.class).createPackage(packageConfig);
             String packageLocation = packageResponse.getHeaderString("Location");
             String packageId = extractIdFromLocation(packageLocation);
             int packageVersion = extractVersionFromLocation(packageLocation);
             createdResources.put("packageLocation", packageLocation);
             patchDescriptor(packageId, packageVersion, name);
 
-            // --- Step 6: Create Bot ---
-            var botConfig = new BotConfiguration();
-            botConfig.setPackages(List.of(URI.create(packageLocation)));
-            Response botResponse = getRestStore(IRestBotStore.class).createBot(botConfig);
+            // --- Step 6: Create Agent ---
+            var botConfig = new AgentConfiguration();
+            botConfig.setPipelines(List.of(URI.create(packageLocation)));
+            Response botResponse = getRestStore(IRestAgentStore.class).createAgent(botConfig);
             String botLocation = botResponse.getHeaderString("Location");
-            String botId = extractIdFromLocation(botLocation);
-            int botVersion = extractVersionFromLocation(botLocation);
+            String agentId = extractIdFromLocation(botLocation);
+            int agentVersion = extractVersionFromLocation(botLocation);
             createdResources.put("botLocation", botLocation);
-            patchDescriptor(botId, botVersion, name);
+            patchDescriptor(agentId, agentVersion, name);
 
             // --- Step 7: Deploy (synchronous wait for completion) ---
-            if (params.shouldDeploy && botId != null) {
-                var deployResult = deployAndWait(params.env, botId, botVersion);
+            if (params.shouldDeploy && agentId != null) {
+                var deployResult = deployAndWait(params.env, agentId, agentVersion);
                 createdResources.putAll(deployResult);
             }
 
             var result = new LinkedHashMap<String, Object>();
             result.put("action", "setup_complete");
-            result.put("botId", botId != null ? botId : "unknown");
-            result.put("botName", name);
+            result.put("agentId", agentId != null ? agentId : "unknown");
+            result.put("agentName", name);
             result.put("provider", params.providerType);
             result.put("model", params.modelId);
             if (quickReplies || sentiment) {
@@ -418,23 +418,23 @@ public class McpSetupTools {
      * The parser MUST be first in the pipeline — it produces NLU expressions
      * that the behavior rules' inputmatcher condition needs.
      */
-    PackageConfiguration createPackageConfig(String parserLocation,
+    PipelineConfiguration createPackageConfig(String parserLocation,
             String behaviorLocation,
             List<String> httpCallsLocations,
             String langchainLocation,
             String outputLocation) {
-        var extensions = new ArrayList<PackageConfiguration.PackageExtension>();
+        var extensions = new ArrayList<PipelineConfiguration.PipelineStep>();
 
         // Parser (must be first — produces expressions for behavior rules)
         if (parserLocation != null) {
-            var parser = new PackageConfiguration.PackageExtension();
+            var parser = new PipelineConfiguration.PipelineStep();
             parser.setType(URI.create("eddi://ai.labs.parser"));
             parser.setConfig(Map.of("uri", parserLocation));
             extensions.add(parser);
         }
 
         // Behavior rules
-        var behavior = new PackageConfiguration.PackageExtension();
+        var behavior = new PipelineConfiguration.PipelineStep();
         behavior.setType(URI.create("eddi://ai.labs.behavior"));
         behavior.setConfig(Map.of("uri", behaviorLocation));
         extensions.add(behavior);
@@ -442,7 +442,7 @@ public class McpSetupTools {
         // HttpCalls (zero or more groups)
         if (httpCallsLocations != null) {
             for (String httpCallsLocation : httpCallsLocations) {
-                var httpCalls = new PackageConfiguration.PackageExtension();
+                var httpCalls = new PipelineConfiguration.PipelineStep();
                 httpCalls.setType(URI.create("eddi://ai.labs.httpcalls"));
                 httpCalls.setConfig(Map.of("uri", httpCallsLocation));
                 extensions.add(httpCalls);
@@ -450,33 +450,33 @@ public class McpSetupTools {
         }
 
         // LangChain
-        var langchain = new PackageConfiguration.PackageExtension();
+        var langchain = new PipelineConfiguration.PipelineStep();
         langchain.setType(URI.create("eddi://ai.labs.langchain"));
         langchain.setConfig(Map.of("uri", langchainLocation));
         extensions.add(langchain);
 
         // Output (optional)
         if (outputLocation != null) {
-            var output = new PackageConfiguration.PackageExtension();
+            var output = new PipelineConfiguration.PipelineStep();
             output.setType(URI.create("eddi://ai.labs.output"));
             output.setConfig(Map.of("uri", outputLocation));
             extensions.add(output);
         }
 
-        var config = new PackageConfiguration();
-        config.setPackageExtensions(extensions);
+        var config = new PipelineConfiguration();
+        config.setPipelineSteps(extensions);
         return config;
     }
 
-    @Tool(name = "create_api_bot", description = "Create a bot that can call any REST API described by an OpenAPI specification. "
+    @Tool(name = "create_api_bot", description = "Create a Agent that can call any REST API described by an OpenAPI specification. "
             +
             "Parses the OpenAPI spec, generates HttpCalls configurations (grouped by API tag), " +
-            "and creates a fully deployed bot with LLM-powered API interaction. " +
+            "and creates a fully deployed Agent with LLM-powered API interaction. " +
             "The LLM can then call the API endpoints as tools through EDDI's controlled pipeline.")
-    public String createApiBot(
+    public String createApIAgent(
             @ToolArg(description = "Bot name (required)") String name,
             @ToolArg(description = "System prompt / role for the LLM (required). " +
-                    "Should describe the API and how the bot should use it.") String systemPrompt,
+                    "Should describe the API and how the Agent should use it.") String systemPrompt,
             @ToolArg(description = "OpenAPI 3.0/3.1 specification as JSON/YAML string or URL (required)") String openApiSpec,
             @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', 'gemini', " +
                     "'gemini-vertex', 'huggingface', 'ollama', or 'jlama'") String provider,
@@ -488,9 +488,9 @@ public class McpSetupTools {
             @ToolArg(description = "API authorization header value or vault reference (optional). " +
                     "E.g. 'Bearer sk-...' or '${vault:api-key}'") String apiAuth,
             @ToolArg(description = "Comma-separated endpoint filter, e.g. 'GET /users,POST /orders' (optional, default: all)") String endpoints,
-            @ToolArg(description = "Enable quick reply buttons in bot responses? (default: false).") Boolean enableQuickReplies,
-            @ToolArg(description = "Enable sentiment analysis in bot responses? (default: false).") Boolean enableSentimentAnalysis,
-            @ToolArg(description = "Automatically deploy the bot after creation? (default: true)") Boolean deploy,
+            @ToolArg(description = "Enable quick reply buttons in Agent responses? (default: false).") Boolean enableQuickReplies,
+            @ToolArg(description = "Enable sentiment analysis in Agent responses? (default: false).") Boolean enableSentimentAnalysis,
+            @ToolArg(description = "Automatically deploy the Agent after creation? (default: true)") Boolean deploy,
             @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
         try {
             // Validate required params
@@ -530,7 +530,7 @@ public class McpSetupTools {
                 httpCallsLocations.add(httpCallsLocation);
                 groupNames.add(groupName);
 
-                // Patch descriptor with "{botName} - {groupName}"
+                // Patch descriptor with "{agentName} - {groupName}"
                 String httpCallsId = extractIdFromLocation(httpCallsLocation);
                 int httpCallsVersion = extractVersionFromLocation(httpCallsLocation);
                 patchDescriptor(httpCallsId, httpCallsVersion, name + " - " + groupName);
@@ -572,32 +572,32 @@ public class McpSetupTools {
             // --- Step 6: Create Package (with httpcalls in pipeline) ---
             var packageConfig = createPackageConfig(
                     parserLocation, behaviorLocation, httpCallsLocations, langchainLocation, null);
-            Response packageResponse = getRestStore(IRestPackageStore.class).createPackage(packageConfig);
+            Response packageResponse = getRestStore(IRestPipelineStore.class).createPackage(packageConfig);
             String packageLocation = packageResponse.getHeaderString("Location");
             createdResources.put("packageLocation", packageLocation);
             patchDescriptor(extractIdFromLocation(packageLocation),
                     extractVersionFromLocation(packageLocation), name);
 
-            // --- Step 7: Create Bot ---
-            var botConfig = new BotConfiguration();
-            botConfig.setPackages(List.of(URI.create(packageLocation)));
-            Response botResponse = getRestStore(IRestBotStore.class).createBot(botConfig);
+            // --- Step 7: Create Agent ---
+            var botConfig = new AgentConfiguration();
+            botConfig.setPipelines(List.of(URI.create(packageLocation)));
+            Response botResponse = getRestStore(IRestAgentStore.class).createAgent(botConfig);
             String botLocation = botResponse.getHeaderString("Location");
-            String botId = extractIdFromLocation(botLocation);
-            int botVersion = extractVersionFromLocation(botLocation);
+            String agentId = extractIdFromLocation(botLocation);
+            int agentVersion = extractVersionFromLocation(botLocation);
             createdResources.put("botLocation", botLocation);
-            patchDescriptor(botId, botVersion, name);
+            patchDescriptor(agentId, agentVersion, name);
 
             // --- Step 8: Deploy (synchronous wait for completion) ---
-            if (params.shouldDeploy && botId != null) {
-                var deployResult = deployAndWait(params.env, botId, botVersion);
+            if (params.shouldDeploy && agentId != null) {
+                var deployResult = deployAndWait(params.env, agentId, agentVersion);
                 createdResources.putAll(deployResult);
             }
 
             var result = new LinkedHashMap<String, Object>();
             result.put("action", "api_bot_created");
-            result.put("botId", botId != null ? botId : "unknown");
-            result.put("botName", name);
+            result.put("agentId", agentId != null ? agentId : "unknown");
+            result.put("agentName", name);
             result.put("provider", params.providerType);
             result.put("model", params.modelId);
             result.put("endpointCount", buildResult.endpointCount());
@@ -628,14 +628,14 @@ public class McpSetupTools {
     }
 
     /**
-     * Deploy a bot using the REST endpoint with waitForCompletion=true.
+     * Deploy a Agent using the REST endpoint with waitForCompletion=true.
      * The endpoint waits up to 30s for deployment to complete and returns the actual status.
      */
-    private Map<String, Object> deployAndWait(Deployment.Environment env, String botId, int botVersion) {
+    private Map<String, Object> deployAndWait(Deployment.Environment env, String agentId, int agentVersion) {
         var result = new LinkedHashMap<String, Object>();
         result.put("environment", env.name());
         try {
-            Response response = botAdmin.deployBot(env, botId, botVersion, true, true);
+            Response response = botAdmin.deployAgent(env, agentId, agentVersion, true, true);
             int httpStatus = response.getStatus();
 
             if (httpStatus == 200) {
@@ -652,7 +652,7 @@ public class McpSetupTools {
                     }
                     if (!"READY".equals(deployStatus)) {
                         String warning = "Bot created but deployment status is " + deployStatus +
-                                ". Check bot configuration and credentials.";
+                                ". Check Agent configuration and credentials.";
                         if (body != null && body.containsKey("error")) {
                             warning += " Error: " + body.get("error");
                         }
@@ -674,7 +674,7 @@ public class McpSetupTools {
                 result.put("deployError", "Unexpected deploy response: HTTP " + httpStatus);
             }
         } catch (Exception deployError) {
-            LOGGER.warn("MCP deploy failed for bot " + botId, deployError);
+            LOGGER.warn("MCP deploy failed for Agent " + agentId, deployError);
             result.put("deployed", false);
             result.put("deployError", "Deployment failed. Check server logs for details.");
         }
@@ -755,7 +755,7 @@ public class McpSetupTools {
     }
 
     /**
-     * Patch a resource descriptor with the bot name.
+     * Patch a resource descriptor with the Agent name.
      * Descriptors are auto-created by DocumentDescriptorFilter when using REST HTTP proxies.
      */
     private void patchDescriptor(String id, int version, String name) {

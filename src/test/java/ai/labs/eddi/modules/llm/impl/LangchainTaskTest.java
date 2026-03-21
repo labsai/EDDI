@@ -3,7 +3,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PipelineConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
@@ -576,17 +576,17 @@ class LangchainTaskTest {
                 }
 
                 @Test
-                @DisplayName("Should throw PackageConfigurationException when URI is missing")
+                @DisplayName("Should throw PipelineConfigurationException when URI is missing")
                 void testMissingUri() {
                         Map<String, Object> configuration = new HashMap<>();
                         // No URI provided
 
-                        assertThrows(PackageConfigurationException.class,
+                        assertThrows(PipelineConfigurationException.class,
                                         () -> langChainTask.configure(configuration, Collections.emptyMap()));
                 }
 
                 @Test
-                @DisplayName("Should throw PackageConfigurationException when resource loading fails")
+                @DisplayName("Should throw PipelineConfigurationException when resource loading fails")
                 void testResourceLoadingFailure() throws Exception {
                         Map<String, Object> configuration = new HashMap<>();
                         configuration.put("uri", "http://example.com/config");
@@ -594,7 +594,7 @@ class LangchainTaskTest {
                         when(resourceClientLibrary.getResource(any(URI.class), eq(LangChainConfiguration.class)))
                                         .thenThrow(new ServiceException("Connection failed"));
 
-                        assertThrows(PackageConfigurationException.class,
+                        assertThrows(PipelineConfigurationException.class,
                                         () -> langChainTask.configure(configuration, Collections.emptyMap()));
                 }
         }

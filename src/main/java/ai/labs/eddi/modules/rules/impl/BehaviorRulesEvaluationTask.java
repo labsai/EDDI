@@ -5,7 +5,7 @@ import ai.labs.eddi.datastore.serialization.DeserializationException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PipelineConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Data;
@@ -158,7 +158,7 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
 
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws PackageConfigurationException {
+            throws PipelineConfigurationException {
 
         Object uriObj = configuration.get(BEHAVIOR_CONFIG_URI);
         URI uri = URI.create(uriObj.toString());
@@ -187,11 +187,11 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
         } catch (IOException | DeserializationException e) {
             String message = "Error while configuring BehaviorRuleLifecycleTask!";
             log.debug(message, e);
-            throw new PackageConfigurationException(message, e);
+            throw new PipelineConfigurationException(message, e);
         } catch (ServiceException e) {
             String message = "Error while fetching BehaviorRuleConfigurationSet!\n" + e.getLocalizedMessage();
             log.debug(message, e);
-            throw new PackageConfigurationException(message, e);
+            throw new PipelineConfigurationException(message, e);
         }
     }
 

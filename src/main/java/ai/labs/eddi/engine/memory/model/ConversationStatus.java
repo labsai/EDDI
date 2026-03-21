@@ -8,8 +8,8 @@ import java.util.Date;
  */
 public class ConversationStatus {
     private String conversationId;
-    private String botId;
-    private Integer botVersion;
+    private String agentId;
+    private Integer agentVersion;
     private ConversationState conversationState;
     private Date lastInteraction;
 
@@ -21,20 +21,20 @@ public class ConversationStatus {
         this.conversationId = conversationId;
     }
 
-    public String getBotId() {
-        return botId;
+    public String getAgentId() {
+        return agentId;
     }
 
-    public void setBotId(String botId) {
-        this.botId = botId;
+    public void setAgentId(String agentId) {
+        this.agentId = agentId;
     }
 
-    public Integer getBotVersion() {
-        return botVersion;
+    public Integer getAgentVersion() {
+        return agentVersion;
     }
 
-    public void setBotVersion(Integer botVersion) {
-        this.botVersion = botVersion;
+    public void setAgentVersion(Integer agentVersion) {
+        this.agentVersion = agentVersion;
     }
 
     public ConversationState getConversationState() {

@@ -59,8 +59,8 @@ public class ConversationMemoryUtilities {
             snapshot.setConversationId(conversationMemory.getConversationId());
         }
 
-        snapshot.setBotId(conversationMemory.getBotId());
-        snapshot.setBotVersion(conversationMemory.getBotVersion());
+        snapshot.setAgentId(conversationMemory.getAgentId());
+        snapshot.setAgentVersion(conversationMemory.getAgentVersion());
         snapshot.setConversationState(conversationMemory.getConversationState());
         return snapshot;
     }
@@ -70,7 +70,7 @@ public class ConversationMemoryUtilities {
 
         if (!conversationStep.isEmpty()) {
             var packageRunSnapshot = new PackageRunSnapshot();
-            conversationStepSnapshot.getPackages().add(packageRunSnapshot);
+            conversationStepSnapshot.getPipelines().add(packageRunSnapshot);
             for (var data : conversationStep.getAllElements()) {
                 var resultSnapshot = new ResultSnapshot(
                         data.getKey(),
@@ -91,7 +91,7 @@ public class ConversationMemoryUtilities {
         for (var redoStep : redoSteps) {
             IWritableConversationStep conversationStep = new ConversationStep(new ConversationOutput());
             conversationSteps.add(conversationStep);
-            for (var packageRunSnapshot : redoStep.getPackages()) {
+            for (var packageRunSnapshot : redoStep.getPipelines()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     @SuppressWarnings("unchecked")
                     var data = new Data<Object>(resultSnapshot.getKey(), resultSnapshot.getResult(),
@@ -107,7 +107,7 @@ public class ConversationMemoryUtilities {
 
     public static IConversationMemory convertConversationMemorySnapshot(ConversationMemorySnapshot snapshot) {
         var conversationMemory = new ConversationMemory(snapshot.getConversationId(),
-                snapshot.getBotId(), snapshot.getBotVersion(), snapshot.getUserId());
+                snapshot.getAgentId(), snapshot.getAgentVersion(), snapshot.getUserId());
 
         conversationMemory.setConversationState(snapshot.getConversationState());
         conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
@@ -128,7 +128,7 @@ public class ConversationMemoryUtilities {
             }
 
             var conversationStepSnapshot = conversationSteps.get(i);
-            for (var packageRunSnapshot : conversationStepSnapshot.getPackages()) {
+            for (var packageRunSnapshot : conversationStepSnapshot.getPipelines()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     @SuppressWarnings("unchecked")
                     var data = new Data<Object>(resultSnapshot.getKey(), resultSnapshot.getResult(),
@@ -174,7 +174,7 @@ public class ConversationMemoryUtilities {
         for (var conversationStepSnapshot : conversationSteps) {
             var simpleConversationStep = new SimpleConversationStep();
             newSnapshot.getConversationSteps().add(simpleConversationStep);
-            for (var packageRunSnapshot : conversationStepSnapshot.getPackages()) {
+            for (var packageRunSnapshot : conversationStepSnapshot.getPipelines()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     var key = resultSnapshot.getKey();
                     if (returnDetailed ||
@@ -211,8 +211,8 @@ public class ConversationMemoryUtilities {
         }
 
         simpleSnapshot.setConversationId(conversationMemorySnapshot.getConversationId());
-        simpleSnapshot.setBotId(conversationMemorySnapshot.getBotId());
-        simpleSnapshot.setBotVersion(conversationMemorySnapshot.getBotVersion());
+        simpleSnapshot.setAgentId(conversationMemorySnapshot.getAgentId());
+        simpleSnapshot.setAgentVersion(conversationMemorySnapshot.getAgentVersion());
         simpleSnapshot.setConversationState(conversationMemorySnapshot.getConversationState());
         simpleSnapshot.setEnvironment(conversationMemorySnapshot.getEnvironment());
         simpleSnapshot.setUndoAvailable(conversationMemorySnapshot.getConversationSteps().size() > 1);

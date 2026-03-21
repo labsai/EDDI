@@ -16,7 +16,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 
 /**
- * Integration test for bot use cases: import, deploy, multi-turn conversation.
+ * Integration test for Agent use cases: import, deploy, multi-turn conversation.
  * <p>
  * Ported from {@code RestUseCaseTest} in EDDI-integration-tests.
  */
@@ -43,7 +43,7 @@ public class BotUseCaseIT extends BaseIntegrationIT {
         }
     }
 
-    // ==================== Weather Bot Tests ====================
+    // ==================== Weather Agent Tests ====================
 
     @Test
     @DisplayName("should handle multi-turn weather conversation with property extraction")
@@ -59,8 +59,8 @@ public class BotUseCaseIT extends BaseIntegrationIT {
         Response response = sendUserInput(weatherBotId.id(), conversationId.id(), "Vienna", true, false);
 
         response.then().assertThat()
-                .body("botId", equalTo(weatherBotId.id()))
-                .body("botVersion", equalTo(weatherBotId.version()))
+                .body("agentId", equalTo(weatherBotId.id()))
+                .body("agentVersion", equalTo(weatherBotId.version()))
                 .body("conversationOutputs[1].input", equalTo("weather"))
                 .body("conversationOutputs[1].actions[0]", equalTo("ask_for_city"))
                 .body("conversationOutputs[2].input", equalTo("Vienna"))
@@ -70,24 +70,24 @@ public class BotUseCaseIT extends BaseIntegrationIT {
     }
 
     @Test
-    @DisplayName("should support managed bot API with bot triggers")
+    @DisplayName("should support managed Agent API with Agent triggers")
     void useBotManagement() throws IOException {
         String intent = "weather-bot";
         String userId = "12345";
 
         // Delete any stale trigger from a previous test run
-        given().delete("/bottriggerstore/bottriggers/" + intent);
+        given().delete("/AgentTriggerStore/bottriggers/" + intent);
 
-        // Register bot trigger (create via POST)
+        // Register Agent trigger (create via POST)
         given().contentType(ContentType.JSON)
-                .body(String.format(load("useCases/botdeployment.json"), weatherBotId.id()))
-                .post("/bottriggerstore/bottriggers")
+                .body(String.format(load("useCases/AgentDeployment.json"), weatherBotId.id()))
+                .post("/AgentTriggerStore/bottriggers")
                 .then().statusCode(200);
 
         // End any existing conversation
         given().post("/managedbots/" + intent + "/" + userId + "/endConversation");
 
-        // Send input via managed bot API
+        // Send input via managed Agent API
         Response response = given().contentType(ContentType.JSON)
                 .body("{\"input\":\"weather\"}")
                 .queryParam("returnCurrentStepOnly", "false")
@@ -95,8 +95,8 @@ public class BotUseCaseIT extends BaseIntegrationIT {
 
         response.then().assertThat()
                 .statusCode(200)
-                .body("botId", equalTo(weatherBotId.id()))
-                .body("botVersion", equalTo(weatherBotId.version()))
+                .body("agentId", equalTo(weatherBotId.id()))
+                .body("agentVersion", equalTo(weatherBotId.version()))
                 .body("conversationSteps[1].conversationStep[1].key", equalTo("actions"))
                 .body("conversationSteps[1].conversationStep[1].value[0]", equalTo("ask_for_city"));
     }
@@ -125,11 +125,11 @@ public class BotUseCaseIT extends BaseIntegrationIT {
         }
 
         ResourceId resourceId = extractResourceId(location);
-        deployBot(resourceId.id(), resourceId.version());
+        deployAgent(resourceId.id(), resourceId.version());
         return resourceId;
     }
 
-    private void deployBot(String id, int version) throws InterruptedException {
+    private void deployAgent(String id, int version) throws InterruptedException {
         given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false", id, version));
         for (int i = 0; i < 60; i++) {
             Response response = given()

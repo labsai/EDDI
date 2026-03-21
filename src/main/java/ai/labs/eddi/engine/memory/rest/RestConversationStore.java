@@ -65,7 +65,7 @@ public class RestConversationStore implements IRestConversationStore {
 
     @Override
     public List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter,
-            String conversationId, String botId, Integer botVersion,
+            String conversationId, String agentId, Integer agentVersion,
             ConversationState conversationState,
             ConversationDescriptor.ViewState viewState) {
         try {
@@ -88,11 +88,11 @@ public class RestConversationStore implements IRestConversationStore {
 
                     populateDataToDescriptor(conversationDescriptor, botResourceId);
 
-                    if (!isNullOrEmpty(botId) && !botId.equals(botResourceId.getId())) {
+                    if (!isNullOrEmpty(agentId) && !agentId.equals(botResourceId.getId())) {
                         continue;
                     }
 
-                    if (!isNullOrEmpty(botVersion) && !botVersion.equals(botResourceId.getVersion())) {
+                    if (!isNullOrEmpty(agentVersion) && !agentVersion.equals(botResourceId.getVersion())) {
                         continue;
                     }
 
@@ -141,11 +141,11 @@ public class RestConversationStore implements IRestConversationStore {
             conversationDescriptor.setEnvironment(memorySnapshot.getEnvironment());
             conversationDescriptor.setConversationStepSize(memorySnapshot.getConversationSteps().size());
             conversationDescriptor.setConversationState(memorySnapshot.getConversationState());
-            if (isNullOrEmpty(conversationDescriptor.getBotName())) {
-                var documentDescriptor = documentDescriptorStore.readDescriptor(memorySnapshot.getBotId(),
-                        memorySnapshot.getBotVersion());
+            if (isNullOrEmpty(conversationDescriptor.getAgentName())) {
+                var documentDescriptor = documentDescriptorStore.readDescriptor(memorySnapshot.getAgentId(),
+                        memorySnapshot.getAgentVersion());
 
-                conversationDescriptor.setBotName(documentDescriptor.getName());
+                conversationDescriptor.setAgentName(documentDescriptor.getName());
             }
 
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -241,21 +241,21 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     @Override
-    public List<ConversationStatus> getActiveConversations(String botId, Integer botVersion)
+    public List<ConversationStatus> getActiveConversations(String agentId, Integer agentVersion)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-        checkNotNull(botId, "botId");
-        checkNotNull(botVersion, "botVersion");
+        checkNotNull(agentId, "agentId");
+        checkNotNull(agentVersion, "agentVersion");
 
         List<ConversationMemorySnapshot> conversationMemorySnapshots;
         List<ConversationStatus> conversationStatuses = new LinkedList<>();
 
-        conversationMemorySnapshots = conversationMemoryStore.loadActiveConversationMemorySnapshot(botId, botVersion);
+        conversationMemorySnapshots = conversationMemoryStore.loadActiveConversationMemorySnapshot(agentId, agentVersion);
         for (var snapshot : conversationMemorySnapshots) {
             ConversationStatus conversationStatus = new ConversationStatus();
             String conversationId = snapshot.getId();
             conversationStatus.setConversationId(conversationId);
-            conversationStatus.setBotId(botId);
-            conversationStatus.setBotVersion(botVersion);
+            conversationStatus.setAgentId(agentId);
+            conversationStatus.setAgentVersion(agentVersion);
             conversationStatus.setConversationState(snapshot.getConversationState());
             var conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
             conversationStatus.setLastInteraction(conversationDescriptor.getLastModifiedOn());

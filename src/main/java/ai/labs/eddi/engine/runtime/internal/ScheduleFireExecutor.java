@@ -73,7 +73,7 @@ public class ScheduleFireExecutor {
             var latch = new CountDownLatch(1);
             conversationService.say(
                     env,
-                    schedule.getBotId(),
+                    schedule.getAgentId(),
                     conversationId,
                     false,         // returnDetailed
                     true,          // returnCurrentStepOnly
@@ -89,9 +89,9 @@ public class ScheduleFireExecutor {
             }
 
             status = ScheduleConfiguration.FireStatus.COMPLETED.name();
-            LOGGER.infof("[SCHEDULE] Fired schedule '%s' (id=%s, type=%s) for bot %s → conversation %s",
+            LOGGER.infof("[SCHEDULE] Fired schedule '%s' (id=%s, type=%s) for Agent %s → conversation %s",
                     schedule.getName(), schedule.getId(), schedule.getTriggerType(),
-                    schedule.getBotId(), conversationId);
+                    schedule.getAgentId(), conversationId);
 
         } catch (Exception e) {
             status = ScheduleConfiguration.FireStatus.FAILED.name();
@@ -144,7 +144,7 @@ public class ScheduleFireExecutor {
 
         var result = conversationService.startConversation(
                 env,
-                schedule.getBotId(),
+                schedule.getAgentId(),
                 userId,
                 Collections.emptyMap()
         );
@@ -160,7 +160,7 @@ public class ScheduleFireExecutor {
             try {
                 conversationService.readConversation(
                         env,
-                        schedule.getBotId(),
+                        schedule.getAgentId(),
                         conversationId,
                         false, true, List.of()
                 );
@@ -196,7 +196,7 @@ public class ScheduleFireExecutor {
 
         Map<String, Context> contextMap = new HashMap<>();
 
-        // Inject schedule context so the bot knows this is a scheduled trigger
+        // Inject schedule context so the Agent knows this is a scheduled trigger
         Map<String, Object> scheduleContext = new LinkedHashMap<>();
         scheduleContext.put("trigger", schedule.getTriggerType() == TriggerType.HEARTBEAT
                 ? "heartbeat" : "scheduled");

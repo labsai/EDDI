@@ -26,8 +26,8 @@ import java.util.List;
 @DefaultBean
 public class DatabaseLogs implements IDatabaseLogs {
     private static final String COLLECTION_NAME = "logs";
-    private static final String KEY_BOT_ID = "botId";
-    private static final String KEY_BOT_VERSION = "botVersion";
+    private static final String KEY_BOT_ID = "agentId";
+    private static final String KEY_BOT_VERSION = "agentVersion";
     private static final String KEY_ENVIRONMENT = "environment";
     private static final String KEY_CONVERSATION_ID = "conversationId";
     private static final String KEY_USER_ID = "userId";
@@ -52,21 +52,21 @@ public class DatabaseLogs implements IDatabaseLogs {
     }
 
     @Override
-    public List<DatabaseLog> getLogs(Environment environment, String botId, Integer botVersion,
+    public List<DatabaseLog> getLogs(Environment environment, String agentId, Integer agentVersion,
                                      String conversationId, String userId, String instanceId,
                                      Integer skip, Integer limit) {
-        return getLogs(createFilter(environment, botId, botVersion, conversationId, userId, instanceId), skip, limit);
+        return getLogs(createFilter(environment, agentId, agentVersion, conversationId, userId, instanceId), skip, limit);
     }
 
     @Override
-    public void addLogs(String environment, String botId, Integer botVersion,
+    public void addLogs(String environment, String agentId, Integer agentVersion,
                         String conversationId, String userId, String instanceId, String message) {
         Document document = new Document();
         document.put(KEY_MESSAGE, message);
         document.put(TIMESTAMP, new Date(System.currentTimeMillis()));
         document.put(KEY_ENVIRONMENT, environment);
-        document.put(KEY_BOT_ID, botId);
-        document.put(KEY_BOT_VERSION, botVersion);
+        document.put(KEY_BOT_ID, agentId);
+        document.put(KEY_BOT_VERSION, agentVersion);
         if (conversationId != null) {
             document.put(KEY_CONVERSATION_ID, conversationId);
         }
@@ -91,8 +91,8 @@ public class DatabaseLogs implements IDatabaseLogs {
             doc.put(KEY_LOGGER, entry.loggerName());
             doc.put(TIMESTAMP, new Date(entry.timestamp()));
             doc.put(KEY_ENVIRONMENT, entry.environment());
-            doc.put(KEY_BOT_ID, entry.botId());
-            doc.put(KEY_BOT_VERSION, entry.botVersion());
+            doc.put(KEY_BOT_ID, entry.agentId());
+            doc.put(KEY_BOT_VERSION, entry.agentVersion());
             if (entry.conversationId() != null) {
                 doc.put(KEY_CONVERSATION_ID, entry.conversationId());
             }
@@ -112,17 +112,17 @@ public class DatabaseLogs implements IDatabaseLogs {
         }
     }
 
-    private Document createFilter(Environment environment, String botId, Integer botVersion,
+    private Document createFilter(Environment environment, String agentId, Integer agentVersion,
                                    String conversationId, String userId, String instanceId) {
         Document filter = new Document();
         if (environment != null) {
             filter.put(KEY_ENVIRONMENT, environment.toString());
         }
-        if (botId != null) {
-            filter.put(KEY_BOT_ID, botId);
+        if (agentId != null) {
+            filter.put(KEY_BOT_ID, agentId);
         }
-        if (botVersion != null) {
-            filter.put(KEY_BOT_VERSION, botVersion);
+        if (agentVersion != null) {
+            filter.put(KEY_BOT_VERSION, agentVersion);
         }
         if (conversationId != null) {
             filter.put(KEY_CONVERSATION_ID, conversationId);

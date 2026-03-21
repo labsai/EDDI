@@ -28,13 +28,13 @@ class UUIDWrapperTest {
     @Test
     void extractId_botLocation() {
         assertEquals("6740832b2b0f614abcaee7ca",
-                wrapper.extractId("http://localhost:7070/botstore/bots/6740832b2b0f614abcaee7ca?version=1"));
+                wrapper.extractId("http://localhost:7070/AgentStore/bots/6740832b2b0f614abcaee7ca?version=1"));
     }
 
     @Test
     void extractId_packageLocation() {
         assertEquals("c1d2e3f4-a5b6-47c8-9d0e-f1a2b3c4d5e6",
-                wrapper.extractId("http://localhost:7070/packagestore/packages/c1d2e3f4-a5b6-47c8-9d0e-f1a2b3c4d5e6?version=2"));
+                wrapper.extractId("http://localhost:7070/PipelineStore/packages/c1d2e3f4-a5b6-47c8-9d0e-f1a2b3c4d5e6?version=2"));
     }
 
     @Test

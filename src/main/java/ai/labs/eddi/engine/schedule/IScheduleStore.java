@@ -41,15 +41,15 @@ public interface IScheduleStore {
     void deleteSchedule(String scheduleId) throws IResourceStore.ResourceStoreException;
 
     /**
-     * Delete all schedules for a bot (cascade delete).
+     * Delete all schedules for a Agent (cascade delete).
      *
      * @return number of deleted schedules
      */
-    int deleteSchedulesByBotId(String botId) throws IResourceStore.ResourceStoreException;
+    int deleteSchedulesByBotId(String agentId) throws IResourceStore.ResourceStoreException;
 
     List<ScheduleConfiguration> readAllSchedules(int limit) throws IResourceStore.ResourceStoreException;
 
-    List<ScheduleConfiguration> readSchedulesByBotId(String botId) throws IResourceStore.ResourceStoreException;
+    List<ScheduleConfiguration> readSchedulesByBotId(String agentId) throws IResourceStore.ResourceStoreException;
 
     // --- Polling & Claiming ---
 

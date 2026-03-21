@@ -28,7 +28,7 @@ class ConversationHistoryBuilder {
      * @param prompt                 optional prompt to replace last user message
      *                               (may be null/empty)
      * @param logSizeLimit           conversation history limit (-1 = unlimited)
-     * @param includeFirstBotMessage whether to include the initial bot greeting
+     * @param includeFirstBotMessage whether to include the initial Agent greeting
      * @return ordered list of ChatMessages (system → history → user/prompt)
      */
     List<ChatMessage> buildMessages(IConversationMemory memory,

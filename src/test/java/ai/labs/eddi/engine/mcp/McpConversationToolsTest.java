@@ -1,21 +1,21 @@
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.engine.botmanagement.IRestBotTriggerStore;
-import ai.labs.eddi.engine.botmanagement.IUserConversationStore;
-import ai.labs.eddi.configs.agents.IRestBotStore;
+import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
+import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
+import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
-import ai.labs.eddi.engine.api.IRestBotAdministration;
-import ai.labs.eddi.engine.api.IRestBotEngine;
+import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.*;
-import ai.labs.eddi.engine.botmanagement.model.BotTriggerConfiguration;
+import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
@@ -37,52 +37,52 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Unit tests for McpConversationTools — MCP tools for bot conversations.
+ * Unit tests for McpConversationTools — MCP tools for Agent conversations.
  */
 class McpConversationToolsTest {
 
-    private static final String BOT_ID = "test-bot-id";
+    private static final String AGENT_ID = "test-bot-id";
     private static final String CONV_ID = "test-conv-id";
 
     private IConversationService conversationService;
-    private IRestBotAdministration botAdmin;
-    private IRestBotStore botStore;
+    private IRestAgentAdministration botAdmin;
+    private IRestAgentStore AgentStore;
     private IJsonSerialization jsonSerialization;
     private BoundedLogStore boundedLogStore;
     private IRestAuditStore auditStore;
-    private IRestBotTriggerStore botTriggerStore;
+    private IRestAgentTriggerStore AgentTriggerStore;
     private IUserConversationStore userConversationStore;
-    private IRestBotEngine restBotEngine;
+    private IRestAgentEngine RestAgentEngine;
     private McpConversationTools tools;
 
     @BeforeEach
     void setUp() throws IOException {
         conversationService = mock(IConversationService.class);
-        botAdmin = mock(IRestBotAdministration.class);
-        botStore = mock(IRestBotStore.class);
+        botAdmin = mock(IRestAgentAdministration.class);
+        AgentStore = mock(IRestAgentStore.class);
         jsonSerialization = mock(IJsonSerialization.class);
         var restInterfaceFactory = mock(IRestInterfaceFactory.class);
         boundedLogStore = mock(BoundedLogStore.class);
         auditStore = mock(IRestAuditStore.class);
-        botTriggerStore = mock(IRestBotTriggerStore.class);
+        AgentTriggerStore = mock(IRestAgentTriggerStore.class);
         userConversationStore = mock(IUserConversationStore.class);
-        restBotEngine = mock(IRestBotEngine.class);
+        RestAgentEngine = mock(IRestAgentEngine.class);
         // Default: lenient serialize returns empty JSON
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        tools = new McpConversationTools(conversationService, botAdmin, botStore,
+        tools = new McpConversationTools(conversationService, botAdmin, AgentStore,
                 restInterfaceFactory, jsonSerialization, boundedLogStore, auditStore,
-                botTriggerStore, userConversationStore, restBotEngine);
+                AgentTriggerStore, userConversationStore, RestAgentEngine);
     }
 
     // --- listBots ---
 
     @Test
     void listBots_returnsDeployedBots() throws IOException {
-        var status = new BotDeploymentStatus();
-        status.setBotId(BOT_ID);
+        var status = new AgentDeploymentStatus();
+        status.setAgentId(AGENT_ID);
         when(botAdmin.getDeploymentStatuses(Environment.production))
                 .thenReturn(List.of(status));
-        when(jsonSerialization.serialize(any())).thenReturn("[{\"botId\":\"test-bot-id\"}]");
+        when(jsonSerialization.serialize(any())).thenReturn("[{\"agentId\":\"test-bot-id\"}]");
 
         String result = tools.listBots("production");
 
@@ -118,25 +118,25 @@ class McpConversationToolsTest {
     @Test
     void listBotConfigs_returnsDescriptors() throws IOException {
         var descriptor = new DocumentDescriptor();
-        when(botStore.readBotDescriptors("", 0, 20))
+        when(AgentStore.readBotDescriptors("", 0, 20))
                 .thenReturn(List.of(descriptor));
         when(jsonSerialization.serialize(any())).thenReturn("[{\"name\":\"TestBot\"}]");
 
         String result = tools.listBotConfigs(null, null);
 
         assertNotNull(result);
-        verify(botStore).readBotDescriptors("", 0, 20);
+        verify(AgentStore).readBotDescriptors("", 0, 20);
     }
 
     @Test
     void listBotConfigs_withFilterAndLimit() throws IOException {
-        when(botStore.readBotDescriptors("search", 0, 5))
+        when(AgentStore.readBotDescriptors("search", 0, 5))
                 .thenReturn(Collections.emptyList());
         when(jsonSerialization.serialize(any())).thenReturn("[]");
 
         tools.listBotConfigs("search", 5);
 
-        verify(botStore).readBotDescriptors("search", 0, 5);
+        verify(AgentStore).readBotDescriptors("search", 0, 5);
     }
 
     // --- createConversation ---
@@ -144,12 +144,12 @@ class McpConversationToolsTest {
     @Test
     void createConversation_returnsConversationId() throws Exception {
         when(conversationService.startConversation(
-                eq(Environment.production), eq(BOT_ID), isNull(), anyMap()))
+                eq(Environment.production), eq(AGENT_ID), isNull(), anyMap()))
                 .thenReturn(new ConversationResult(CONV_ID, URI.create("eddi://conv/" + CONV_ID)));
         when(jsonSerialization.serialize(any(Map.class)))
                 .thenReturn("{\"conversationId\":\"test-conv-id\"}");
 
-        String result = tools.createConversation(BOT_ID, "production");
+        String result = tools.createConversation(AGENT_ID, "production");
 
         assertNotNull(result);
         assertTrue(result.contains("test-conv-id"));
@@ -157,10 +157,10 @@ class McpConversationToolsTest {
 
     @Test
     void createConversation_botNotReady_returnsError() throws Exception {
-        when(conversationService.startConversation(any(), eq(BOT_ID), isNull(), anyMap()))
+        when(conversationService.startConversation(any(), eq(AGENT_ID), isNull(), anyMap()))
                 .thenThrow(new IConversationService.BotNotReadyException("Bot not deployed"));
 
-        String result = tools.createConversation(BOT_ID, null);
+        String result = tools.createConversation(AGENT_ID, null);
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("Bot not deployed"));
@@ -176,14 +176,14 @@ class McpConversationToolsTest {
             handler.onComplete(new SimpleConversationMemorySnapshot());
             return null;
         }).when(conversationService).say(
-                any(), eq(BOT_ID), eq(CONV_ID),
+                any(), eq(AGENT_ID), eq(CONV_ID),
                 anyBoolean(), anyBoolean(), anyList(),
                 any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
 
         when(jsonSerialization.serialize(any(LinkedHashMap.class)))
                 .thenReturn("{\"conversationState\":\"READY\",\"response\":{\"conversationSteps\":[]}}");
 
-        String result = tools.talkToBot(BOT_ID, CONV_ID, "Hello bot!", "production");
+        String result = tools.talkToBot(AGENT_ID, CONV_ID, "Hello bot!", "production");
 
         assertNotNull(result);
         assertTrue(result.contains("conversationState"));
@@ -191,7 +191,7 @@ class McpConversationToolsTest {
         // Verify the message was sent correctly
         ArgumentCaptor<InputData> inputCaptor = ArgumentCaptor.forClass(InputData.class);
         verify(conversationService).say(
-                eq(Environment.production), eq(BOT_ID), eq(CONV_ID),
+                eq(Environment.production), eq(AGENT_ID), eq(CONV_ID),
                 eq(false), eq(true), eq(Collections.emptyList()),
                 inputCaptor.capture(), eq(false), any());
 
@@ -208,7 +208,7 @@ class McpConversationToolsTest {
                 any(), any(), any(), anyBoolean(), anyBoolean(),
                 anyList(), any(), anyBoolean(), any(ConversationResponseHandler.class));
 
-        String result = tools.talkToBot(BOT_ID, CONV_ID, "Hello!", null);
+        String result = tools.talkToBot(AGENT_ID, CONV_ID, "Hello!", null);
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("null response"));
@@ -221,7 +221,7 @@ class McpConversationToolsTest {
                         any(), any(), any(), anyBoolean(), anyBoolean(),
                         anyList(), any(), anyBoolean(), any());
 
-        String result = tools.talkToBot(BOT_ID, CONV_ID, "Hello!", null);
+        String result = tools.talkToBot(AGENT_ID, CONV_ID, "Hello!", null);
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("Connection lost"));
@@ -233,7 +233,7 @@ class McpConversationToolsTest {
     void chatWithBot_createsConversationAndSendsMessage() throws Exception {
         // Mock conversation creation
         when(conversationService.startConversation(
-                eq(Environment.production), eq(BOT_ID), isNull(), anyMap()))
+                eq(Environment.production), eq(AGENT_ID), isNull(), anyMap()))
                 .thenReturn(new ConversationResult(CONV_ID, URI.create("eddi://conv/" + CONV_ID)));
 
         // Mock say
@@ -242,19 +242,19 @@ class McpConversationToolsTest {
             handler.onComplete(new SimpleConversationMemorySnapshot());
             return null;
         }).when(conversationService).say(
-                any(), eq(BOT_ID), eq(CONV_ID),
+                any(), eq(AGENT_ID), eq(CONV_ID),
                 anyBoolean(), anyBoolean(), anyList(),
                 any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
 
         when(jsonSerialization.serialize(any(Map.class)))
                 .thenReturn("{\"conversationId\":\"test-conv-id\",\"response\":{}}");
 
-        String result = tools.chatWithBot(BOT_ID, "Hello!", null, "production");
+        String result = tools.chatWithBot(AGENT_ID, "Hello!", null, "production");
 
         assertNotNull(result);
         assertTrue(result.contains("test-conv-id"));
-        verify(conversationService).startConversation(any(), eq(BOT_ID), isNull(), anyMap());
-        verify(conversationService).say(any(), eq(BOT_ID), eq(CONV_ID),
+        verify(conversationService).startConversation(any(), eq(AGENT_ID), isNull(), anyMap());
+        verify(conversationService).say(any(), eq(AGENT_ID), eq(CONV_ID),
                 anyBoolean(), anyBoolean(), anyList(), any(), anyBoolean(), any());
     }
 
@@ -265,19 +265,19 @@ class McpConversationToolsTest {
             handler.onComplete(new SimpleConversationMemorySnapshot());
             return null;
         }).when(conversationService).say(
-                any(), eq(BOT_ID), eq(CONV_ID),
+                any(), eq(AGENT_ID), eq(CONV_ID),
                 anyBoolean(), anyBoolean(), anyList(),
                 any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
 
         when(jsonSerialization.serialize(any(Map.class)))
                 .thenReturn("{\"conversationId\":\"test-conv-id\"}");
 
-        tools.chatWithBot(BOT_ID, "Follow-up", CONV_ID, null);
+        tools.chatWithBot(AGENT_ID, "Follow-up", CONV_ID, null);
 
         // Should NOT create a new conversation
         verify(conversationService, never()).startConversation(any(), any(), any(), anyMap());
         // Should send message to existing conversation
-        verify(conversationService).say(any(), eq(BOT_ID), eq(CONV_ID),
+        verify(conversationService).say(any(), eq(AGENT_ID), eq(CONV_ID),
                 anyBoolean(), anyBoolean(), anyList(), any(), anyBoolean(), any());
     }
 
@@ -287,13 +287,13 @@ class McpConversationToolsTest {
     void readConversation_defaultsToCurrentStepOnly() throws Exception {
         var snapshot = new SimpleConversationMemorySnapshot();
         when(conversationService.readConversation(
-                eq(Environment.production), eq(BOT_ID), eq(CONV_ID),
+                eq(Environment.production), eq(AGENT_ID), eq(CONV_ID),
                 eq(false), eq(true), eq(Collections.emptyList())))
                 .thenReturn(snapshot);
         when(jsonSerialization.serialize(snapshot))
-                .thenReturn("{\"botId\":\"test-bot-id\"}");
+                .thenReturn("{\"agentId\":\"test-bot-id\"}");
 
-        String result = tools.readConversation(BOT_ID, CONV_ID, "production",
+        String result = tools.readConversation(AGENT_ID, CONV_ID, "production",
                 null, null, null);
 
         assertNotNull(result);
@@ -307,12 +307,12 @@ class McpConversationToolsTest {
     void readConversation_withReturningFields() throws Exception {
         var snapshot = new SimpleConversationMemorySnapshot();
         when(conversationService.readConversation(
-                eq(Environment.production), eq(BOT_ID), eq(CONV_ID),
+                eq(Environment.production), eq(AGENT_ID), eq(CONV_ID),
                 eq(false), eq(false), eq(List.of("input", "output"))))
                 .thenReturn(snapshot);
         when(jsonSerialization.serialize(snapshot)).thenReturn("{}");
 
-        tools.readConversation(BOT_ID, CONV_ID, "production",
+        tools.readConversation(AGENT_ID, CONV_ID, "production",
                 false, false, "input,output");
 
         verify(conversationService).readConversation(
@@ -325,7 +325,7 @@ class McpConversationToolsTest {
                 anyBoolean(), anyBoolean(), anyList()))
                 .thenThrow(new ResourceNotFoundException("Not found"));
 
-        String result = tools.readConversation(BOT_ID, "unknown-id", null,
+        String result = tools.readConversation(AGENT_ID, "unknown-id", null,
                 null, null, null);
 
         assertTrue(result.contains("error"));
@@ -361,19 +361,19 @@ class McpConversationToolsTest {
     void talkToBot_nullBotId_returnsError() {
         String result = tools.talkToBot(null, CONV_ID, "Hello!", null);
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("botId is required"));
+        assertTrue(result.contains("agentId is required"));
     }
 
     @Test
     void talkToBot_nullConversationId_returnsError() {
-        String result = tools.talkToBot(BOT_ID, null, "Hello!", null);
+        String result = tools.talkToBot(AGENT_ID, null, "Hello!", null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("conversationId is required"));
     }
 
     @Test
     void talkToBot_nullMessage_returnsError() {
-        String result = tools.talkToBot(BOT_ID, CONV_ID, null, null);
+        String result = tools.talkToBot(AGENT_ID, CONV_ID, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("message is required"));
     }
@@ -382,22 +382,22 @@ class McpConversationToolsTest {
     void chatWithBot_nullBotId_returnsError() {
         String result = tools.chatWithBot(null, "Hello!", null, null);
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("botId is required"));
+        assertTrue(result.contains("agentId is required"));
     }
 
     @Test
     void chatWithBot_nullMessage_returnsError() {
-        String result = tools.chatWithBot(BOT_ID, null, null, null);
+        String result = tools.chatWithBot(AGENT_ID, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("message is required"));
     }
 
     @Test
     void chatWithBot_conversationCreationFails_returnsError() throws Exception {
-        when(conversationService.startConversation(any(), eq(BOT_ID), isNull(), anyMap()))
+        when(conversationService.startConversation(any(), eq(AGENT_ID), isNull(), anyMap()))
                 .thenThrow(new IConversationService.BotNotReadyException("Bot not deployed"));
 
-        String result = tools.chatWithBot(BOT_ID, "Hello!", null, null);
+        String result = tools.chatWithBot(AGENT_ID, "Hello!", null, null);
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("Bot not deployed"));
@@ -407,7 +407,7 @@ class McpConversationToolsTest {
     void createConversation_nullBotId_returnsError() {
         String result = tools.createConversation(null, null);
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("botId is required"));
+        assertTrue(result.contains("agentId is required"));
     }
 
     // --- readBotLogs ---
@@ -415,15 +415,15 @@ class McpConversationToolsTest {
     @Test
     void readBotLogs_returnsFilteredEntries() throws IOException {
         var entry = new LogEntry(System.currentTimeMillis(), "ERROR", "ai.labs.test",
-                "Something failed", null, BOT_ID, 1, CONV_ID, null, "inst-1");
-        when(boundedLogStore.getEntries(BOT_ID, CONV_ID, "ERROR", 50))
+                "Something failed", null, AGENT_ID, 1, CONV_ID, null, "inst-1");
+        when(boundedLogStore.getEntries(AGENT_ID, CONV_ID, "ERROR", 50))
                 .thenReturn(List.of(entry));
         when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1,\"entries\":[]}");
 
-        String result = tools.readBotLogs(BOT_ID, CONV_ID, "ERROR", null);
+        String result = tools.readBotLogs(AGENT_ID, CONV_ID, "ERROR", null);
 
         assertNotNull(result);
-        verify(boundedLogStore).getEntries(BOT_ID, CONV_ID, "ERROR", 50);
+        verify(boundedLogStore).getEntries(AGENT_ID, CONV_ID, "ERROR", 50);
     }
 
     @Test
@@ -442,7 +442,7 @@ class McpConversationToolsTest {
         when(boundedLogStore.getEntries(any(), any(), any(), anyInt()))
                 .thenThrow(new RuntimeException("Ring buffer error"));
 
-        String result = tools.readBotLogs(BOT_ID, null, null, 10);
+        String result = tools.readBotLogs(AGENT_ID, null, null, 10);
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("Ring buffer error"));
@@ -453,7 +453,7 @@ class McpConversationToolsTest {
     @Test
     void readAuditTrail_returnsEntries() throws IOException {
         var auditEntry = new AuditEntry(
-                "ae1", CONV_ID, BOT_ID, 1, "user1", "production",
+                "ae1", CONV_ID, AGENT_ID, 1, "user1", "production",
                 0, "ai.labs.langchain", "langchain", 0, 150,
                 Map.of("input", "hello"), Map.of("output", "hi"),
                 null, null, List.of("send_output"), 0.001, Instant.now(), null);
@@ -478,8 +478,8 @@ class McpConversationToolsTest {
 
     @Test
     void discoverBots_returnsEnrichedList() throws IOException {
-        var status = new BotDeploymentStatus();
-        status.setBotId(BOT_ID);
+        var status = new AgentDeploymentStatus();
+        status.setAgentId(AGENT_ID);
         status.setStatus(Deployment.Status.READY);
         status.setEnvironment(Environment.production);
         var descriptor = new DocumentDescriptor();
@@ -489,25 +489,25 @@ class McpConversationToolsTest {
 
         when(botAdmin.getDeploymentStatuses(Environment.production)).thenReturn(List.of(status));
 
-        var trigger = new BotTriggerConfiguration();
+        var trigger = new AgentTriggerConfiguration();
         trigger.setIntent("test_intent");
-        var deployment = new BotDeployment();
-        deployment.setBotId(BOT_ID);
+        var deployment = new AgentDeployment();
+        deployment.setAgentId(AGENT_ID);
         trigger.setBotDeployments(List.of(deployment));
-        when(botTriggerStore.readAllBotTriggers()).thenReturn(List.of(trigger));
+        when(AgentTriggerStore.readAllBotTriggers()).thenReturn(List.of(trigger));
         when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1}");
 
         String result = tools.discoverBots(null, "production");
 
         assertNotNull(result);
         verify(botAdmin).getDeploymentStatuses(Environment.production);
-        verify(botTriggerStore).readAllBotTriggers();
+        verify(AgentTriggerStore).readAllBotTriggers();
     }
 
     @Test
     void discoverBots_withFilter_filtersResults() throws IOException {
-        var status = new BotDeploymentStatus();
-        status.setBotId(BOT_ID);
+        var status = new AgentDeploymentStatus();
+        status.setAgentId(AGENT_ID);
         status.setStatus(Deployment.Status.READY);
         status.setEnvironment(Environment.production);
         var descriptor = new DocumentDescriptor();
@@ -515,7 +515,7 @@ class McpConversationToolsTest {
         status.setDescriptor(descriptor);
 
         when(botAdmin.getDeploymentStatuses(Environment.production)).thenReturn(List.of(status));
-        when(botTriggerStore.readAllBotTriggers()).thenReturn(Collections.emptyList());
+        when(AgentTriggerStore.readAllBotTriggers()).thenReturn(Collections.emptyList());
         when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1}");
 
         String result = tools.discoverBots("Test", "production");
@@ -525,8 +525,8 @@ class McpConversationToolsTest {
 
     @Test
     void discoverBots_triggerReadFailure_stillReturns() throws IOException {
-        var status = new BotDeploymentStatus();
-        status.setBotId(BOT_ID);
+        var status = new AgentDeploymentStatus();
+        status.setAgentId(AGENT_ID);
         status.setStatus(Deployment.Status.READY);
         status.setEnvironment(Environment.production);
         var descriptor = new DocumentDescriptor();
@@ -534,7 +534,7 @@ class McpConversationToolsTest {
         status.setDescriptor(descriptor);
 
         when(botAdmin.getDeploymentStatuses(Environment.production)).thenReturn(List.of(status));
-        when(botTriggerStore.readAllBotTriggers()).thenThrow(new RuntimeException("trigger error"));
+        when(AgentTriggerStore.readAllBotTriggers()).thenThrow(new RuntimeException("trigger error"));
         when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1}");
 
         String result = tools.discoverBots(null, "production");
@@ -571,7 +571,7 @@ class McpConversationToolsTest {
     void chatManaged_noTriggerConfigured_returnsError() throws Exception {
         when(userConversationStore.readUserConversation("no_trigger", "user1"))
                 .thenThrow(new ai.labs.eddi.datastore.IResourceStore.ResourceStoreException("not found"));
-        when(botTriggerStore.readBotTrigger("no_trigger")).thenReturn(null);
+        when(AgentTriggerStore.readBotTrigger("no_trigger")).thenReturn(null);
 
         String result = tools.chatManaged("no_trigger", "user1", "hello", "production");
 

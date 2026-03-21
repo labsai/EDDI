@@ -1,7 +1,7 @@
 package ai.labs.eddi.backup;
 
 import ai.labs.eddi.backup.model.ImportPreview;
-import ai.labs.eddi.engine.model.BotDeploymentStatus;
+import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
@@ -21,11 +21,11 @@ public interface IRestImportService {
     @POST
     @Path("/initialBots")
     @Produces(MediaType.APPLICATION_JSON)
-    List<BotDeploymentStatus> importInitialBots();
+    List<AgentDeploymentStatus> importInitialBots();
 
     @POST
     @Consumes("application/zip")
-    @Operation(description = "Import a bot from a zip file. " +
+    @Operation(description = "Import a Agent from a zip file. " +
             "strategy=create (default) always creates new resources. " +
             "strategy=merge looks up existing resources by origin ID and updates them.")
     void importBot(InputStream zippedBotConfigFiles,

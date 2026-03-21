@@ -47,7 +47,7 @@ class RestScheduleStoreTest {
         when(scheduleStore.createSchedule(any())).thenReturn("new-id");
 
         var schedule = new ScheduleConfiguration();
-        schedule.setBotId("bot-1");
+        schedule.setAgentId("bot-1");
         schedule.setCronExpression("0 9 * * *");
         schedule.setMessage("Good morning");
         schedule.setName("Morning check");
@@ -69,7 +69,7 @@ class RestScheduleStoreTest {
         when(scheduleStore.createSchedule(any())).thenReturn("hb-id");
 
         var schedule = new ScheduleConfiguration();
-        schedule.setBotId("bot-1");
+        schedule.setAgentId("bot-1");
         schedule.setHeartbeatIntervalSeconds(300L);
         schedule.setName("Health check");
 
@@ -97,7 +97,7 @@ class RestScheduleStoreTest {
     @Test
     void create_rejectsCronWithoutMessage() {
         var schedule = new ScheduleConfiguration();
-        schedule.setBotId("bot-1");
+        schedule.setAgentId("bot-1");
         schedule.setCronExpression("0 9 * * *");
 
         Response response = rest.createSchedule(schedule);
@@ -108,7 +108,7 @@ class RestScheduleStoreTest {
     @Test
     void create_rejectsHeartbeatWithoutInterval() {
         var schedule = new ScheduleConfiguration();
-        schedule.setBotId("bot-1");
+        schedule.setAgentId("bot-1");
         schedule.setTriggerType(TriggerType.HEARTBEAT);
         schedule.setName("Bad heartbeat");
 
@@ -120,7 +120,7 @@ class RestScheduleStoreTest {
     @Test
     void create_rejectsIntervalBelowMinimum() {
         var schedule = new ScheduleConfiguration();
-        schedule.setBotId("bot-1");
+        schedule.setAgentId("bot-1");
         schedule.setTriggerType(TriggerType.HEARTBEAT);
         schedule.setHeartbeatIntervalSeconds(30L); // below 60s minimum
         schedule.setName("Too fast");
@@ -134,7 +134,7 @@ class RestScheduleStoreTest {
     @Test
     void create_rejectsInvalidCron() {
         var schedule = new ScheduleConfiguration();
-        schedule.setBotId("bot-1");
+        schedule.setAgentId("bot-1");
         schedule.setCronExpression("not valid");
         schedule.setMessage("Hello");
 
@@ -146,7 +146,7 @@ class RestScheduleStoreTest {
     @Test
     void create_rejectsInvalidTimezone() {
         var schedule = new ScheduleConfiguration();
-        schedule.setBotId("bot-1");
+        schedule.setAgentId("bot-1");
         schedule.setCronExpression("0 9 * * *");
         schedule.setMessage("Hello");
         schedule.setTimeZone("Invalid/Zone");
@@ -204,7 +204,7 @@ class RestScheduleStoreTest {
         s.setId(id);
         s.setName("Test");
         s.setTriggerType(TriggerType.CRON);
-        s.setBotId("bot-1");
+        s.setAgentId("bot-1");
         s.setCronExpression("0 9 * * *");
         s.setMessage("Hello");
         s.setTimeZone("UTC");

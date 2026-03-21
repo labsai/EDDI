@@ -35,8 +35,8 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     private static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS conversation_memories (
                 id UUID PRIMARY KEY,
-                bot_id TEXT NOT NULL,
-                bot_version INTEGER NOT NULL,
+                AGENT_ID TEXT NOT NULL,
+                AGENT_VERSION INTEGER NOT NULL,
                 conversation_state TEXT NOT NULL DEFAULT 'IN_PROGRESS',
                 data JSONB NOT NULL
             )
@@ -45,7 +45,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     private static final String CREATE_INDEX_STATE =
             "CREATE INDEX IF NOT EXISTS idx_conv_state ON conversation_memories (conversation_state)";
     private static final String CREATE_INDEX_BOT =
-            "CREATE INDEX IF NOT EXISTS idx_conv_bot ON conversation_memories (bot_id, bot_version)";
+            "CREATE INDEX IF NOT EXISTS idx_conv_bot ON conversation_memories (AGENT_ID, AGENT_VERSION)";
 
     private final DataSource dataSource;
     private final IJsonSerialization jsonSerialization;
@@ -81,13 +81,13 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 // Update existing
                 String sql = """
                         UPDATE conversation_memories
-                        SET bot_id = ?, bot_version = ?, conversation_state = ?, data = ?::jsonb
+                        SET AGENT_ID = ?, AGENT_VERSION = ?, conversation_state = ?, data = ?::jsonb
                         WHERE id = ?::uuid
                         """;
                 try (Connection conn = dataSource.getConnection();
                      PreparedStatement ps = conn.prepareStatement(sql)) {
-                    ps.setString(1, snapshot.getBotId());
-                    ps.setInt(2, snapshot.getBotVersion());
+                    ps.setString(1, snapshot.getAgentId());
+                    ps.setInt(2, snapshot.getAgentVersion());
                     ps.setString(3, snapshot.getConversationState().name());
                     ps.setString(4, json);
                     ps.setString(5, conversationId);
@@ -99,14 +99,14 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 snapshot.setId(conversationId);
                 String json2 = jsonSerialization.serialize(snapshot); // re-serialize with ID
                 String sql = """
-                        INSERT INTO conversation_memories (id, bot_id, bot_version, conversation_state, data)
+                        INSERT INTO conversation_memories (id, AGENT_ID, AGENT_VERSION, conversation_state, data)
                         VALUES (?::uuid, ?, ?, ?, ?::jsonb)
                         """;
                 try (Connection conn = dataSource.getConnection();
                      PreparedStatement ps = conn.prepareStatement(sql)) {
                     ps.setString(1, conversationId);
-                    ps.setString(2, snapshot.getBotId());
-                    ps.setInt(3, snapshot.getBotVersion());
+                    ps.setString(2, snapshot.getAgentId());
+                    ps.setInt(3, snapshot.getAgentVersion());
                     ps.setString(4, snapshot.getConversationState() != null
                             ? snapshot.getConversationState().name() : "IN_PROGRESS");
                     ps.setString(5, json2);
@@ -141,15 +141,15 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
-    public List<ConversationMemorySnapshot> loadActiveConversationMemorySnapshot(String botId, Integer botVersion)
+    public List<ConversationMemorySnapshot> loadActiveConversationMemorySnapshot(String agentId, Integer agentVersion)
             throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "SELECT data FROM conversation_memories " +
-                "WHERE bot_id = ? AND bot_version = ? AND conversation_state != ?";
+                "WHERE AGENT_ID = ? AND AGENT_VERSION = ? AND conversation_state != ?";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, botId);
-            ps.setInt(2, botVersion);
+            ps.setString(1, agentId);
+            ps.setInt(2, agentVersion);
             ps.setString(3, ENDED.toString());
             try (ResultSet rs = ps.executeQuery()) {
                 List<ConversationMemorySnapshot> results = new ArrayList<>();
@@ -210,14 +210,14 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
-    public Long getActiveConversationCount(String botId, Integer botVersion) {
+    public Long getActiveConversationCount(String agentId, Integer agentVersion) {
         ensureSchema();
         String sql = "SELECT COUNT(*) FROM conversation_memories " +
-                "WHERE bot_id = ? AND bot_version = ? AND conversation_state != ?";
+                "WHERE AGENT_ID = ? AND AGENT_VERSION = ? AND conversation_state != ?";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, botId);
-            ps.setInt(2, botVersion);
+            ps.setString(1, agentId);
+            ps.setInt(2, agentVersion);
             ps.setString(3, ENDED.toString());
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
@@ -299,7 +299,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     @SuppressWarnings("unchecked")
     private void fixContextTypes(ConversationMemorySnapshot snapshot) {
         for (var conversationStep : snapshot.getConversationSteps()) {
-            for (var aPackage : conversationStep.getPackages()) {
+            for (var aPackage : conversationStep.getPipelines()) {
                 for (var lifecycleTask : aPackage.getLifecycleTasks()) {
                     if (lifecycleTask.getKey().startsWith("context")) {
                         var result = lifecycleTask.getResult();

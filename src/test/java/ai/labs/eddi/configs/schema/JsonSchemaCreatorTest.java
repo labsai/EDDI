@@ -1,10 +1,10 @@
 package ai.labs.eddi.configs.schema;
 
-import ai.labs.eddi.configs.agents.model.BotConfiguration;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.rules.model.BehaviorConfiguration;
 import ai.labs.eddi.configs.apicalls.model.HttpCallsConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
-import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
+import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.dictionary.model.RegularDictionaryConfiguration;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -35,8 +35,8 @@ public class JsonSchemaCreatorTest {
 
     static Stream<Class<?>> configurationClasses() {
         return Stream.of(
-                BotConfiguration.class,
-                PackageConfiguration.class,
+                AgentConfiguration.class,
+                PipelineConfiguration.class,
                 BehaviorConfiguration.class,
                 HttpCallsConfiguration.class,
                 OutputConfigurationSet.class,
@@ -75,15 +75,15 @@ public class JsonSchemaCreatorTest {
     }
 
     @Test
-    void generateSchema_botConfiguration_hasExpectedProperties() throws Exception {
-        String schemaJson = schemaCreator.generateSchema(BotConfiguration.class);
+    void generateSchema_AgentConfiguration_hasExpectedProperties() throws Exception {
+        String schemaJson = schemaCreator.generateSchema(AgentConfiguration.class);
         JsonNode schema = objectMapper.readTree(schemaJson);
         JsonNode properties = schema.get("properties");
 
         assertTrue(properties.has("packages"),
-                "BotConfiguration schema must have 'packages' property");
+                "AgentConfiguration schema must have 'packages' property");
         assertTrue(properties.has("channels"),
-                "BotConfiguration schema must have 'channels' property");
+                "AgentConfiguration schema must have 'channels' property");
     }
 
     @Test

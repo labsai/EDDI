@@ -1,0 +1,22 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ----------------------------< ai.labs:eddi >----------------------------
+[INFO] Building eddi 6.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[WARNING] The artifact io.quarkus:quarkus-junit5:jar:3.32.4 has been relocated to io.quarkus:quarkus-junit:jar:3.32.4: Update the artifactId in your project build file. Refer to https://github.com/quarkusio/quarkus/wiki/Migration-Guide-3.31 for more information.
+[INFO] 
+[INFO] --- checkstyle:3.6.0:check (validate) @ eddi ---
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  5.688 s
+[INFO] Finished at: 2026-03-21T20:15:09+01:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-checkstyle-plugin:3.6.0:check (validate) on project eddi: Failed during checkstyle configuration: cannot initialize module TreeWalker - TreeWalker is not allowed as a parent of LineLength Please review 'Parent Module' section for this Check in web documentation if Check is standard. -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoExecutionException

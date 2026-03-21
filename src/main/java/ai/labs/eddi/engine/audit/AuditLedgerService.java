@@ -194,8 +194,8 @@ public class AuditLedgerService {
         return new AuditEntry(
                 entry.id(),
                 entry.conversationId(),
-                entry.botId(),
-                entry.botVersion(),
+                entry.agentId(),
+                entry.agentVersion(),
                 entry.userId(),
                 entry.environment(),
                 entry.stepIndex(),

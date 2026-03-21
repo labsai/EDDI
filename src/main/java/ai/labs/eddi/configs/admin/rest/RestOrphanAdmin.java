@@ -3,13 +3,13 @@ package ai.labs.eddi.configs.admin.rest;
 import ai.labs.eddi.configs.admin.IRestOrphanAdmin;
 import ai.labs.eddi.configs.admin.model.OrphanInfo;
 import ai.labs.eddi.configs.admin.model.OrphanReport;
-import ai.labs.eddi.configs.agents.IBotStore;
-import ai.labs.eddi.configs.agents.model.BotConfiguration;
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.pipelines.IPackageStore;
-import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
-import ai.labs.eddi.configs.pipelines.model.PackageConfiguration.PackageExtension;
+import ai.labs.eddi.configs.pipelines.IPipelineStore;
+import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
+import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration.PipelineStep;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.utils.RestUtilities;
@@ -58,18 +58,18 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
 
     private static final int BATCH_SIZE = 200;
 
-    private final IBotStore botStore;
-    private final IPackageStore packageStore;
+    private final IAgentStore AgentStore;
+    private final IPipelineStore PipelineStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IResourceClientLibrary resourceClientLibrary;
 
     @Inject
-    public RestOrphanAdmin(IBotStore botStore,
-                           IPackageStore packageStore,
+    public RestOrphanAdmin(IAgentStore AgentStore,
+                           IPipelineStore PipelineStore,
                            IDocumentDescriptorStore documentDescriptorStore,
                            IResourceClientLibrary resourceClientLibrary) {
-        this.botStore = botStore;
-        this.packageStore = packageStore;
+        this.AgentStore = AgentStore;
+        this.PipelineStore = PipelineStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.resourceClientLibrary = resourceClientLibrary;
     }
@@ -133,7 +133,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
     }
 
     /**
-     * Build the complete set of all URIs that are referenced by at least one bot or package.
+     * Build the complete set of all URIs that are referenced by at least one Agent or package.
      */
     private Set<String> buildReferencedUrisSet() {
         Set<String> referencedUris = new HashSet<>();
@@ -146,17 +146,17 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                     var resourceId = RestUtilities.extractResourceId(botDescriptor.getResource());
                     if (resourceId == null || resourceId.getId() == null) continue;
 
-                    BotConfiguration botConfig = botStore.read(
+                    AgentConfiguration botConfig = AgentStore.read(
                             resourceId.getId(), resourceId.getVersion());
-                    if (botConfig.getPackages() != null) {
-                        for (URI packageUri : botConfig.getPackages()) {
-                            referencedUris.add(packageUri.toString());
+                    if (botConfig.getPipelines() != null) {
+                        for (URI pipelineUri : botConfig.getPipelines()) {
+                            referencedUris.add(pipelineUri.toString());
                         }
                     }
                 } catch (IResourceStore.ResourceNotFoundException e) {
-                    // Bot descriptor exists but resource doesn't — skip
+                    // Agent descriptor exists but resource doesn't — skip
                 } catch (Exception e) {
-                    log.debugf("Error reading bot %s: %s", botDescriptor.getResource(), e.getMessage());
+                    log.debugf("Error reading Agent %s: %s", botDescriptor.getResource(), e.getMessage());
                 }
             }
 
@@ -167,7 +167,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                     var resourceId = RestUtilities.extractResourceId(pkgDescriptor.getResource());
                     if (resourceId == null || resourceId.getId() == null) continue;
 
-                    PackageConfiguration pkgConfig = packageStore.read(
+                    PipelineConfiguration pkgConfig = PipelineStore.read(
                             resourceId.getId(), resourceId.getVersion());
                     collectExtensionUris(pkgConfig, referencedUris);
                 } catch (IResourceStore.ResourceNotFoundException e) {
@@ -186,10 +186,10 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
 
     /**
      * Extract all extension resource URIs from a package configuration.
-     * Follows the same traversal as RestPackageStore.deletePackageCascade().
+     * Follows the same traversal as RestPipelineStore.deletePackageCascade().
      */
-    private void collectExtensionUris(PackageConfiguration pkgConfig, Set<String> referencedUris) {
-        for (PackageExtension ext : pkgConfig.getPackageExtensions()) {
+    private void collectExtensionUris(PipelineConfiguration pkgConfig, Set<String> referencedUris) {
+        for (PipelineStep ext : pkgConfig.getPipelineSteps()) {
             // Main extension resource URI (config.uri)
             Map<String, Object> config = ext.getConfig();
             if (config != null) {

@@ -51,11 +51,11 @@ public class RestScheduleStore implements IRestScheduleStore {
     long minIntervalSeconds;
 
     @Override
-    public List<ScheduleConfiguration> readAllSchedules(String botId) {
+    public List<ScheduleConfiguration> readAllSchedules(String agentId) {
         try {
             List<ScheduleConfiguration> schedules;
-            if (botId != null && !botId.isBlank()) {
-                schedules = scheduleStore.readSchedulesByBotId(botId);
+            if (agentId != null && !agentId.isBlank()) {
+                schedules = scheduleStore.readSchedulesByBotId(agentId);
             } else {
                 schedules = scheduleStore.readAllSchedules(500); // Fix #12
             }
@@ -301,8 +301,8 @@ public class RestScheduleStore implements IRestScheduleStore {
     }
 
     private void validateSchedule(ScheduleConfiguration schedule) {
-        if (schedule.getBotId() == null || schedule.getBotId().isBlank()) {
-            throw new IllegalArgumentException("botId is required");
+        if (schedule.getAgentId() == null || schedule.getAgentId().isBlank()) {
+            throw new IllegalArgumentException("agentId is required");
         }
 
         // Validate time zone early — before cron parsing which also uses ZoneId.of()

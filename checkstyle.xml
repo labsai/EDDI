@@ -45,7 +45,7 @@
         <!-- Line length: 120 (relaxed from Google's 100) -->
         <module name="LineLength">
             <property name="max" value="120"/>
-            <property name="ignorePattern" value="^package.*|^import.*|a]* href|href|http://|https://|ftp://"/>
+            <property name="ignorePattern" value="^package.*|^import.*|href|http://|https://|ftp://"/>
         </module>
 
         <!-- Whitespace -->

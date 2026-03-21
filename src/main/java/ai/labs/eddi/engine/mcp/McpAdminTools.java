@@ -2,9 +2,9 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.rules.IRestBehaviorStore;
 import ai.labs.eddi.configs.rules.model.BehaviorConfiguration;
-import ai.labs.eddi.engine.botmanagement.IRestBotTriggerStore;
-import ai.labs.eddi.configs.agents.IRestBotStore;
-import ai.labs.eddi.configs.agents.model.BotConfiguration;
+import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
+import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
@@ -12,8 +12,8 @@ import ai.labs.eddi.configs.apicalls.model.HttpCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLangChainStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
-import ai.labs.eddi.configs.pipelines.IRestPackageStore;
-import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
+import ai.labs.eddi.configs.pipelines.IRestPipelineStore;
+import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
@@ -23,14 +23,14 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.api.IRestBotAdministration;
+import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.internal.CronDescriber;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
-import ai.labs.eddi.engine.botmanagement.model.BotTriggerConfiguration;
+import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -65,7 +65,7 @@ public class McpAdminTools {
     private static final Logger LOGGER = Logger.getLogger(McpAdminTools.class);
 
     private final IRestInterfaceFactory restInterfaceFactory;
-    private final IRestBotAdministration botAdmin;
+    private final IRestAgentAdministration botAdmin;
     private final IJsonSerialization jsonSerialization;
     private final IScheduleStore scheduleStore;
     private final ScheduleFireExecutor scheduleFireExecutor;
@@ -73,7 +73,7 @@ public class McpAdminTools {
 
     @Inject
     public McpAdminTools(IRestInterfaceFactory restInterfaceFactory,
-                         IRestBotAdministration botAdmin,
+                         IRestAgentAdministration botAdmin,
                          IJsonSerialization jsonSerialization,
                          IScheduleStore scheduleStore,
                          ScheduleFireExecutor scheduleFireExecutor,
@@ -87,21 +87,21 @@ public class McpAdminTools {
     }
 
     @Tool(name = "deploy_bot",
-            description = "Deploy a bot to an environment. The bot must exist and have a valid configuration. " +
+            description = "Deploy a Agent to an environment. The Agent must exist and have a valid configuration. " +
                     "Returns the deployment status.")
-    public String deployBot(
-            @ToolArg(description = "Bot ID (required)") String botId,
+    public String deployAgent(
+            @ToolArg(description = "Bot ID (required)") String agentId,
             @ToolArg(description = "Version number to deploy (required)") Integer version,
             @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'")
             String environment) {
         try {
             var env = parseEnvironment(environment);
             int ver = version != null ? version : 1;
-            Response response = botAdmin.deployBot(env, botId, ver, true, true);
+            Response response = botAdmin.deployAgent(env, agentId, ver, true, true);
             int httpStatus = response.getStatus();
 
             var result = new java.util.LinkedHashMap<String, Object>();
-            result.put("botId", botId);
+            result.put("agentId", agentId);
             result.put("version", ver);
             result.put("environment", env.name());
             result.put("httpStatus", httpStatus);
@@ -119,7 +119,7 @@ public class McpAdminTools {
                         if (!ready && !"IN_PROGRESS".equals(deployStatus)) {
                             result.put("action", "deploy_failed");
                             result.put("error", "Deployment status is " + deployStatus +
-                                    ". Check bot configuration, LLM provider credentials, and model availability.");
+                                    ". Check Agent configuration, LLM provider credentials, and model availability.");
                             return jsonSerialization.serialize(result);
                         }
                     }
@@ -134,15 +134,15 @@ public class McpAdminTools {
 
             return resultJson("deployed", result);
         } catch (Exception e) {
-            LOGGER.error("MCP deploy_bot failed for bot " + botId, e);
-            return errorJson("Failed to deploy bot. Check server logs for details.");
+            LOGGER.error("MCP deploy_bot failed for Agent " + agentId, e);
+            return errorJson("Failed to deploy agent. Check server logs for details.");
         }
     }
 
     @Tool(name = "undeploy_bot",
-            description = "Undeploy a bot from an environment. Optionally end all active conversations.")
-    public String undeployBot(
-            @ToolArg(description = "Bot ID (required)") String botId,
+            description = "Undeploy a Agent from an environment. Optionally end all active conversations.")
+    public String undeployAgent(
+            @ToolArg(description = "Bot ID (required)") String agentId,
             @ToolArg(description = "Version number to undeploy (required)") Integer version,
             @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'")
             String environment,
@@ -152,42 +152,42 @@ public class McpAdminTools {
             var env = parseEnvironment(environment);
             int ver = version != null ? version : 1;
             boolean endAll = endConversations != null ? endConversations : false;
-            Response response = botAdmin.undeployBot(env, botId, ver, endAll, false);
+            Response response = botAdmin.undeployAgent(env, agentId, ver, endAll, false);
             return resultJson("undeployed", Map.of(
-                    "botId", botId,
+                    "agentId", agentId,
                     "version", ver,
                     "environment", env.name(),
                     "endedConversations", endAll,
                     "status", response.getStatus()
             ));
         } catch (Exception e) {
-            LOGGER.error("MCP undeploy_bot failed for bot " + botId, e);
+            LOGGER.error("MCP undeploy_bot failed for Agent " + agentId, e);
             return errorJson("Failed to undeploy bot: " + e.getMessage());
         }
     }
 
     @Tool(name = "get_deployment_status",
-            description = "Get the deployment status of a specific bot version in an environment.")
+            description = "Get the deployment status of a specific Agent version in an environment.")
     public String getDeploymentStatus(
-            @ToolArg(description = "Bot ID (required)") String botId,
+            @ToolArg(description = "Bot ID (required)") String agentId,
             @ToolArg(description = "Version number (required)") Integer version,
             @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'")
             String environment) {
         try {
             var env = parseEnvironment(environment);
             int ver = version != null ? version : 1;
-            Response response = botAdmin.getDeploymentStatus(env, botId, ver, "json");
+            Response response = botAdmin.getDeploymentStatus(env, agentId, ver, "json");
             Object entity = response.getEntity();
             if (entity == null) {
                 return resultJson("status_check", Map.of(
-                        "botId", botId,
+                        "agentId", agentId,
                         "version", ver,
                         "httpStatus", response.getStatus()
                 ));
             }
             return jsonSerialization.serialize(entity);
         } catch (Exception e) {
-            LOGGER.error("MCP get_deployment_status failed for bot " + botId, e);
+            LOGGER.error("MCP get_deployment_status failed for Agent " + agentId, e);
             return errorJson("Failed to get deployment status: " + e.getMessage());
         }
     }
@@ -201,7 +201,7 @@ public class McpAdminTools {
         try {
             int limitInt = limit != null ? limit : 20;
             String filterStr = filter != null ? filter : "";
-            List<DocumentDescriptor> descriptors = getRestStore(IRestPackageStore.class)
+            List<DocumentDescriptor> descriptors = getRestStore(IRestPipelineStore.class)
                     .readPackageDescriptors(filterStr, 0, limitInt);
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
@@ -211,34 +211,34 @@ public class McpAdminTools {
     }
 
     @Tool(name = "create_bot",
-            description = "Create a new bot with a given name and optional packages. " +
-                    "The bot is created and its descriptor is updated with the provided name and description. " +
-                    "Returns the bot ID and Location URI of the newly created bot.")
-    public String createBot(
+            description = "Create a new Agent with a given name and optional packages. " +
+                    "The Agent is created and its descriptor is updated with the provided name and description. " +
+                    "Returns the Agent ID and Location URI of the newly created agent.")
+    public String createAgent(
             @ToolArg(description = "Bot name (required)") String name,
             @ToolArg(description = "Bot description (optional)") String description,
             @ToolArg(description = "Comma-separated list of package URIs to include (optional, " +
-                    "format: eddi://ai.labs.package/packagestore/packages/ID?version=1)")
-            String packageUris) {
+                    "format: eddi://ai.labs.package/PipelineStore/packages/ID?version=1)")
+            String pipelineUris) {
         if (name == null || name.isBlank()) return errorJson("Bot name is required");
         try {
-            var botConfig = new BotConfiguration();
-            if (packageUris != null && !packageUris.isBlank()) {
+            var botConfig = new AgentConfiguration();
+            if (pipelineUris != null && !pipelineUris.isBlank()) {
                 var uris = new ArrayList<URI>();
-                for (String uri : packageUris.split(",")) {
+                for (String uri : pipelineUris.split(",")) {
                     uris.add(URI.create(uri.trim()));
                 }
-                botConfig.setPackages(uris);
+                botConfig.setPipelines(uris);
             }
 
-            Response response = getRestStore(IRestBotStore.class).createBot(botConfig);
+            Response response = getRestStore(IRestAgentStore.class).createAgent(botConfig);
             String location = response.getHeaderString("Location");
 
-            // Extract bot ID from location header (format: /botstore/bots/{id}?version=1)
-            String botId = extractIdFromLocation(location);
+            // Extract Agent ID from location header (format: /AgentStore/bots/{id}?version=1)
+            String agentId = extractIdFromLocation(location);
 
             // Update descriptor with name and description
-            if (botId != null && (name != null || description != null)) {
+            if (agentId != null && (name != null || description != null)) {
                 try {
                     var descriptor = new DocumentDescriptor();
                     if (name != null) descriptor.setName(name);
@@ -247,15 +247,15 @@ public class McpAdminTools {
                     var patch = new PatchInstruction<DocumentDescriptor>();
                     patch.setOperation(PatchInstruction.PatchOperation.SET);
                     patch.setDocument(descriptor);
-                    getRestStore(IRestDocumentDescriptorStore.class).patchDescriptor(botId, 1, patch);
+                    getRestStore(IRestDocumentDescriptorStore.class).patchDescriptor(agentId, 1, patch);
                 } catch (Exception patchError) {
-                    LOGGER.warn("MCP create_bot: bot created but descriptor update failed for " + botId, patchError);
-                    // Bot was still created — return success with warning
+                    LOGGER.warn("MCP create_bot: Agent created but descriptor update failed for " + agentId, patchError);
+                    // Agent was still created — return success with warning
                 }
             }
 
             return resultJson("created", Map.of(
-                    "botId", botId != null ? botId : "unknown",
+                    "agentId", agentId != null ? agentId : "unknown",
                     "name", name != null ? name : "",
                     "description", description != null ? description : "",
                     "location", location != null ? location : "unknown",
@@ -268,9 +268,9 @@ public class McpAdminTools {
     }
 
     @Tool(name = "delete_bot",
-            description = "Delete a bot. Optionally cascade-delete all referenced packages and resources.")
+            description = "Delete a agent. Optionally cascade-delete all referenced packages and resources.")
     public String deleteBot(
-            @ToolArg(description = "Bot ID (required)") String botId,
+            @ToolArg(description = "Bot ID (required)") String agentId,
             @ToolArg(description = "Version number (required)") Integer version,
             @ToolArg(description = "Permanently delete? (default: false)")
             Boolean permanent,
@@ -280,16 +280,16 @@ public class McpAdminTools {
             int ver = version != null ? version : 1;
             boolean isPermanent = permanent != null ? permanent : false;
             boolean isCascade = cascade != null ? cascade : false;
-            Response response = getRestStore(IRestBotStore.class).deleteBot(botId, ver, isPermanent, isCascade);
+            Response response = getRestStore(IRestAgentStore.class).deleteBot(agentId, ver, isPermanent, isCascade);
             return resultJson("deleted", Map.of(
-                    "botId", botId,
+                    "agentId", agentId,
                     "version", ver,
                     "permanent", isPermanent,
                     "cascade", isCascade,
                     "status", response.getStatus()
             ));
         } catch (Exception e) {
-            LOGGER.error("MCP delete_bot failed for bot " + botId, e);
+            LOGGER.error("MCP delete_bot failed for Agent " + agentId, e);
             return errorJson("Failed to delete bot: " + e.getMessage());
         }
     }
@@ -298,15 +298,15 @@ public class McpAdminTools {
             "For structural changes (adding/removing packages, modifying resources), use the " +
             "individual resource tools (read_package, read_resource) and the REST API directly.")
     public String updateBot(
-            @ToolArg(description = "Bot ID (required)") String botId,
+            @ToolArg(description = "Bot ID (required)") String agentId,
             @ToolArg(description = "Version number (required)") Integer version,
-            @ToolArg(description = "New bot name (optional)") String name,
-            @ToolArg(description = "New bot description (optional)") String description,
-            @ToolArg(description = "Redeploy the bot after update? (default: false)") Boolean redeploy,
+            @ToolArg(description = "New Agent name (optional)") String name,
+            @ToolArg(description = "New Agent description (optional)") String description,
+            @ToolArg(description = "Redeploy the Agent after update? (default: false)") Boolean redeploy,
             @ToolArg(description = "Environment for redeployment: 'production' (default), 'restricted', or 'test'")
             String environment) {
         try {
-            if (botId == null || botId.isBlank()) return errorJson("botId is required");
+            if (agentId == null || agentId.isBlank()) return errorJson("agentId is required");
             int ver = version != null ? version : 1;
 
             // Update descriptor (name/description) via REST
@@ -318,11 +318,11 @@ public class McpAdminTools {
                 var patch = new PatchInstruction<DocumentDescriptor>();
                 patch.setOperation(PatchInstruction.PatchOperation.SET);
                 patch.setDocument(descriptor);
-                getRestStore(IRestDocumentDescriptorStore.class).patchDescriptor(botId, ver, patch);
+                getRestStore(IRestDocumentDescriptorStore.class).patchDescriptor(agentId, ver, patch);
             }
 
             var result = new LinkedHashMap<String, Object>();
-            result.put("botId", botId);
+            result.put("agentId", agentId);
             result.put("version", ver);
             result.put("updated", true);
 
@@ -330,7 +330,7 @@ public class McpAdminTools {
             if (Boolean.TRUE.equals(redeploy)) {
                 var env = parseEnvironment(environment);
                 try {
-                    Response response = botAdmin.deployBot(env, botId, ver, true, true);
+                    Response response = botAdmin.deployAgent(env, agentId, ver, true, true);
                     result.put("redeployed", response.getStatus() == 200);
                     result.put("environment", env.name());
                 } catch (Exception deployError) {
@@ -341,7 +341,7 @@ public class McpAdminTools {
 
             return resultJson("updated", result);
         } catch (Exception e) {
-            LOGGER.error("MCP update_bot failed for bot " + botId, e);
+            LOGGER.error("MCP update_bot failed for Agent " + agentId, e);
             return errorJson("Failed to update bot: " + e.getMessage());
         }
     }
@@ -355,7 +355,7 @@ public class McpAdminTools {
         if (packageId == null || packageId.isBlank()) return errorJson("packageId is required");
         try {
             int ver = version != null ? version : 1;
-            PackageConfiguration config = getRestStore(IRestPackageStore.class).readPackage(packageId, ver);
+            PipelineConfiguration config = getRestStore(IRestPipelineStore.class).readPackage(packageId, ver);
             if (config == null) {
                 return errorJson("Package not found: " + packageId + " version " + ver);
             }
@@ -363,7 +363,7 @@ public class McpAdminTools {
             var result = new LinkedHashMap<String, Object>();
             result.put("packageId", packageId);
             result.put("version", ver);
-            result.put("extensionCount", config.getPackageExtensions().size());
+            result.put("extensionCount", config.getPipelineSteps().size());
             result.put("configuration", config);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
@@ -517,39 +517,39 @@ public class McpAdminTools {
     }
 
     @Tool(name = "apply_bot_changes", description = "Batch-cascade multiple resource URI changes through " +
-            "package → bot in ONE pass. After updating resources with update_resource, use this to wire " +
+            "package → Agent in ONE pass. After updating resources with update_resource, use this to wire " +
             "the new versions into the bot's packages and optionally redeploy. " +
             "This replaces ALL URIs in-memory and saves each package/bot ONCE — no wasteful intermediate versions.")
     public String applyBotChanges(
-            @ToolArg(description = "Bot ID (required)") String botId,
-            @ToolArg(description = "Current bot version (required)") Integer botVersion,
+            @ToolArg(description = "Bot ID (required)") String agentId,
+            @ToolArg(description = "Current Agent version (required)") Integer agentVersion,
             @ToolArg(description = "JSON array of URI mappings: " +
                     "[{\"oldUri\":\"eddi://...?version=1\",\"newUri\":\"eddi://...?version=2\"}, ...]") String resourceMappings,
-            @ToolArg(description = "Redeploy the bot after cascading changes? (default: false)") Boolean redeploy,
+            @ToolArg(description = "Redeploy the Agent after cascading changes? (default: false)") Boolean redeploy,
             @ToolArg(description = "Environment for redeployment: 'production' (default), 'restricted', or 'test'")
             String environment) {
-        if (botId == null || botId.isBlank()) return errorJson("botId is required");
+        if (agentId == null || agentId.isBlank()) return errorJson("agentId is required");
         if (resourceMappings == null || resourceMappings.isBlank()) return errorJson("resourceMappings is required");
         try {
-            int ver = botVersion != null ? botVersion : 1;
+            int ver = agentVersion != null ? agentVersion : 1;
 
             // 1. Parse resource mappings
             @SuppressWarnings("unchecked")
             List<Map<String, String>> mappings = jsonSerialization.deserialize(resourceMappings, List.class);
             if (mappings == null || mappings.isEmpty()) {
-                return resultJson("no_changes", Map.of("botId", botId, "reason", "Empty resource mappings"));
+                return resultJson("no_changes", Map.of("agentId", agentId, "reason", "Empty resource mappings"));
             }
 
-            // 2. Read bot config
-            var botStore = getRestStore(IRestBotStore.class);
-            BotConfiguration botConfig = botStore.readBot(botId, ver);
+            // 2. Read Agent config
+            var AgentStore = getRestStore(IRestAgentStore.class);
+            AgentConfiguration botConfig = AgentStore.readBot(agentId, ver);
             if (botConfig == null) {
-                return errorJson("Bot not found: " + botId + " version " + ver);
+                return errorJson("Bot not found: " + agentId + " version " + ver);
             }
 
             // 3. Process each package
-            var pkgStore = getRestStore(IRestPackageStore.class);
-            List<URI> originalPackageUris = new ArrayList<>(botConfig.getPackages());
+            var pkgStore = getRestStore(IRestPipelineStore.class);
+            List<URI> originalPackageUris = new ArrayList<>(botConfig.getPipelines());
             List<URI> updatedPackageUris = new ArrayList<>();
             int updatedPackageCount = 0;
 
@@ -561,7 +561,7 @@ public class McpAdminTools {
                     continue;
                 }
 
-                PackageConfiguration pkgConfig = pkgStore.readPackage(pkgId, pkgVersion);
+                PipelineConfiguration pkgConfig = pkgStore.readPackage(pkgId, pkgVersion);
                 if (pkgConfig == null) {
                     updatedPackageUris.add(pkgUri);
                     continue;
@@ -569,7 +569,7 @@ public class McpAdminTools {
 
                 // Replace URIs in package extensions
                 boolean packageModified = false;
-                for (var ext : pkgConfig.getPackageExtensions()) {
+                for (var ext : pkgConfig.getPipelineSteps()) {
                     Object uriObj = ext.getConfig().get("uri");
                     if (uriObj != null) {
                         String currentUri = uriObj.toString();
@@ -604,11 +604,11 @@ public class McpAdminTools {
                 }
             }
 
-            // 4. Update bot if any packages changed
+            // 4. Update Agent if any packages changed
             int newBotVersion = ver;
             if (updatedPackageCount > 0) {
-                botConfig.setPackages(updatedPackageUris);
-                Response botResponse = botStore.updateBot(botId, ver, botConfig);
+                botConfig.setPipelines(updatedPackageUris);
+                Response botResponse = AgentStore.updateBot(agentId, ver, botConfig);
                 String botLocation = botResponse.getHeaderString("Location");
                 newBotVersion = botLocation != null
                         ? extractVersionFromLocation(botLocation)
@@ -617,7 +617,7 @@ public class McpAdminTools {
 
             // 5. Redeploy if requested
             var result = new LinkedHashMap<String, Object>();
-            result.put("botId", botId);
+            result.put("agentId", agentId);
             result.put("previousBotVersion", ver);
             result.put("newBotVersion", newBotVersion);
             result.put("updatedPackages", updatedPackageCount);
@@ -627,7 +627,7 @@ public class McpAdminTools {
             if (Boolean.TRUE.equals(redeploy) && updatedPackageCount > 0) {
                 var env = parseEnvironment(environment);
                 try {
-                    Response deployResponse = botAdmin.deployBot(env, botId, newBotVersion, true, true);
+                    Response deployResponse = botAdmin.deployAgent(env, agentId, newBotVersion, true, true);
                     result.put("redeployed", deployResponse.getStatus() == 200);
                     result.put("environment", env.name());
                 } catch (Exception deployErr) {
@@ -638,45 +638,45 @@ public class McpAdminTools {
 
             return resultJson("cascaded", result);
         } catch (Exception e) {
-            LOGGER.error("MCP apply_bot_changes failed for bot " + botId, e);
-            return errorJson("Failed to apply bot changes: " + e.getMessage());
+            LOGGER.error("MCP apply_bot_changes failed for Agent " + agentId, e);
+            return errorJson("Failed to apply Agent changes: " + e.getMessage());
         }
     }
 
     @Tool(name = "list_bot_resources", description = "Get a complete inventory of all resources in a bot's pipeline. " +
-            "Walks bot → packages → extensions and returns a flat summary with all resource IDs, types, and URIs. " +
+            "Walks Agent → packages → extensions and returns a flat summary with all resource IDs, types, and URIs. " +
             "This is the fastest way to understand a bot's full configuration before making changes.")
     public String listBotResources(
-            @ToolArg(description = "Bot ID (required)") String botId,
+            @ToolArg(description = "Bot ID (required)") String agentId,
             @ToolArg(description = "Bot version (default: 1)") Integer version) {
-        if (botId == null || botId.isBlank()) return errorJson("botId is required");
+        if (agentId == null || agentId.isBlank()) return errorJson("agentId is required");
         try {
             int ver = version != null ? version : 1;
 
-            // Read bot config
-            var botStore = getRestStore(IRestBotStore.class);
-            BotConfiguration botConfig = botStore.readBot(botId, ver);
+            // Read Agent config
+            var AgentStore = getRestStore(IRestAgentStore.class);
+            AgentConfiguration botConfig = AgentStore.readBot(agentId, ver);
             if (botConfig == null) {
-                return errorJson("Bot not found: " + botId + " version " + ver);
+                return errorJson("Bot not found: " + agentId + " version " + ver);
             }
 
-            // Read bot name from descriptor
-            String botName = null;
+            // Read Agent name from descriptor
+            String agentName = null;
             try {
                 DocumentDescriptor descriptor = getRestStore(IRestDocumentDescriptorStore.class)
-                        .readDescriptor(botId, ver);
+                        .readDescriptor(agentId, ver);
                 if (descriptor != null) {
-                    botName = descriptor.getName();
+                    agentName = descriptor.getName();
                 }
             } catch (Exception e) {
-                LOGGER.debug("Could not read bot descriptor for " + botId, e);
+                LOGGER.debug("Could not read Agent descriptor for " + agentId, e);
             }
 
             // Walk packages → extensions
-            var pkgStore = getRestStore(IRestPackageStore.class);
+            var pkgStore = getRestStore(IRestPipelineStore.class);
             var packages = new ArrayList<Map<String, Object>>();
 
-            for (URI pkgUri : botConfig.getPackages()) {
+            for (URI pkgUri : botConfig.getPipelines()) {
                 String pkgId = extractIdFromLocation(pkgUri.toString());
                 int pkgVersion = extractVersionFromLocation(pkgUri.toString());
                 if (pkgId == null) continue;
@@ -684,13 +684,13 @@ public class McpAdminTools {
                 var pkgInfo = new LinkedHashMap<String, Object>();
                 pkgInfo.put("packageId", pkgId);
                 pkgInfo.put("packageVersion", pkgVersion);
-                pkgInfo.put("packageUri", pkgUri.toString());
+                pkgInfo.put("pipelineUri", pkgUri.toString());
 
                 try {
-                    PackageConfiguration pkgConfig = pkgStore.readPackage(pkgId, pkgVersion);
+                    PipelineConfiguration pkgConfig = pkgStore.readPackage(pkgId, pkgVersion);
                     if (pkgConfig != null) {
                         var extensions = new ArrayList<Map<String, Object>>();
-                        for (var ext : pkgConfig.getPackageExtensions()) {
+                        for (var ext : pkgConfig.getPipelineSteps()) {
                             var extInfo = new LinkedHashMap<String, Object>();
                             if (ext.getType() != null) {
                                 extInfo.put("type", ext.getType().toString());
@@ -716,15 +716,15 @@ public class McpAdminTools {
             }
 
             var result = new LinkedHashMap<String, Object>();
-            result.put("botId", botId);
-            result.put("botVersion", ver);
-            if (botName != null) result.put("botName", botName);
+            result.put("agentId", agentId);
+            result.put("agentVersion", ver);
+            if (agentName != null) result.put("agentName", agentName);
             result.put("packageCount", packages.size());
             result.put("packages", packages);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
-            LOGGER.error("MCP list_bot_resources failed for bot " + botId, e);
-            return errorJson("Failed to list bot resources: " + e.getMessage());
+            LOGGER.error("MCP list_bot_resources failed for Agent " + agentId, e);
+            return errorJson("Failed to list Agent resources: " + e.getMessage());
         }
     }
 
@@ -823,15 +823,15 @@ public class McpAdminTools {
         return McpToolUtils.getRestStore(restInterfaceFactory, clazz);
     }
 
-    // ── Bot Trigger CRUD ──────────────────────────────────────────────────
+    // ── Agent Trigger CRUD ──────────────────────────────────────────────────
 
-    @Tool(name = "list_bot_triggers", description = "List all bot triggers (intent→bot mappings). " +
-            "Returns all configured intents with their bot deployments. " +
+    @Tool(name = "list_bot_triggers", description = "List all Agent triggers (intent→bot mappings). " +
+            "Returns all configured intents with their Agent deployments. " +
             "Bot triggers enable intent-based conversation management via chat_managed.")
     public String listBotTriggers() {
         try {
-            var triggerStore = getRestStore(IRestBotTriggerStore.class);
-            List<BotTriggerConfiguration> triggers = triggerStore.readAllBotTriggers();
+            var triggerStore = getRestStore(IRestAgentTriggerStore.class);
+            List<AgentTriggerConfiguration> triggers = triggerStore.readAllBotTriggers();
 
             var result = new LinkedHashMap<String, Object>();
             result.put("count", triggers.size());
@@ -839,25 +839,25 @@ public class McpAdminTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP list_bot_triggers failed", e);
-            return errorJson("Failed to list bot triggers: " + e.getMessage());
+            return errorJson("Failed to list Agent triggers: " + e.getMessage());
         }
     }
 
-    @Tool(name = "create_bot_trigger", description = "Create a bot trigger that maps an intent to one or more bots. " +
-            "Once created, the intent can be used with chat_managed to talk to the bot. " +
-            "The config must include: intent (string) and botDeployments (array of {botId, environment}).")
-    public String createBotTrigger(
-            @ToolArg(description = "Full JSON configuration: {\"intent\":\"...\",\"botDeployments\":[{\"botId\":\"...\",\"environment\":\"production\"}]} (required)") String config) {
+    @Tool(name = "create_bot_trigger", description = "Create a Agent trigger that maps an intent to one or more bots. " +
+            "Once created, the intent can be used with chat_managed to talk to the agent. " +
+            "The config must include: intent (string) and agentDeployments (array of {agentId, environment}).")
+    public String createAgentTrigger(
+            @ToolArg(description = "Full JSON configuration: {\"intent\":\"...\",\"agentDeployments\":[{\"agentId\":\"...\",\"environment\":\"production\"}]} (required)") String config) {
         if (config == null || config.isBlank()) return errorJson("config is required");
         try {
-            var triggerStore = getRestStore(IRestBotTriggerStore.class);
-            BotTriggerConfiguration triggerConfig = jsonSerialization.deserialize(config, BotTriggerConfiguration.class);
+            var triggerStore = getRestStore(IRestAgentTriggerStore.class);
+            AgentTriggerConfiguration triggerConfig = jsonSerialization.deserialize(config, AgentTriggerConfiguration.class);
 
             if (triggerConfig.getIntent() == null || triggerConfig.getIntent().isBlank()) {
                 return errorJson("intent is required in config");
             }
 
-            Response response = triggerStore.createBotTrigger(triggerConfig);
+            Response response = triggerStore.createAgentTrigger(triggerConfig);
 
             var result = new LinkedHashMap<String, Object>();
             result.put("intent", triggerConfig.getIntent());
@@ -865,20 +865,20 @@ public class McpAdminTools {
             return resultJson("created", result);
         } catch (Exception e) {
             LOGGER.error("MCP create_bot_trigger failed", e);
-            return errorJson("Failed to create bot trigger: " + e.getMessage());
+            return errorJson("Failed to create Agent trigger: " + e.getMessage());
         }
     }
 
-    @Tool(name = "update_bot_trigger", description = "Update an existing bot trigger. " +
-            "Changes the bot deployments for a given intent.")
+    @Tool(name = "update_bot_trigger", description = "Update an existing Agent trigger. " +
+            "Changes the Agent deployments for a given intent.")
     public String updateBotTrigger(
             @ToolArg(description = "Intent to update (required)") String intent,
-            @ToolArg(description = "Full JSON configuration: {\"intent\":\"...\",\"botDeployments\":[{\"botId\":\"...\",\"environment\":\"production\"}]} (required)") String config) {
+            @ToolArg(description = "Full JSON configuration: {\"intent\":\"...\",\"agentDeployments\":[{\"agentId\":\"...\",\"environment\":\"production\"}]} (required)") String config) {
         if (intent == null || intent.isBlank()) return errorJson("intent is required");
         if (config == null || config.isBlank()) return errorJson("config is required");
         try {
-            var triggerStore = getRestStore(IRestBotTriggerStore.class);
-            BotTriggerConfiguration triggerConfig = jsonSerialization.deserialize(config, BotTriggerConfiguration.class);
+            var triggerStore = getRestStore(IRestAgentTriggerStore.class);
+            AgentTriggerConfiguration triggerConfig = jsonSerialization.deserialize(config, AgentTriggerConfiguration.class);
             Response response = triggerStore.updateBotTrigger(intent, triggerConfig);
 
             var result = new LinkedHashMap<String, Object>();
@@ -887,16 +887,16 @@ public class McpAdminTools {
             return resultJson("updated", result);
         } catch (Exception e) {
             LOGGER.error("MCP update_bot_trigger failed for intent " + intent, e);
-            return errorJson("Failed to update bot trigger: " + e.getMessage());
+            return errorJson("Failed to update Agent trigger: " + e.getMessage());
         }
     }
 
-    @Tool(name = "delete_bot_trigger", description = "Delete a bot trigger for a given intent.")
+    @Tool(name = "delete_bot_trigger", description = "Delete a Agent trigger for a given intent.")
     public String deleteBotTrigger(
             @ToolArg(description = "Intent to delete (required)") String intent) {
         if (intent == null || intent.isBlank()) return errorJson("intent is required");
         try {
-            var triggerStore = getRestStore(IRestBotTriggerStore.class);
+            var triggerStore = getRestStore(IRestAgentTriggerStore.class);
             Response response = triggerStore.deleteBotTrigger(intent);
 
             var result = new LinkedHashMap<String, Object>();
@@ -905,27 +905,27 @@ public class McpAdminTools {
             return resultJson("deleted", result);
         } catch (Exception e) {
             LOGGER.error("MCP delete_bot_trigger failed for intent " + intent, e);
-            return errorJson("Failed to delete bot trigger: " + e.getMessage());
+            return errorJson("Failed to delete Agent trigger: " + e.getMessage());
         }
     }
 
     // ── Schedule Management ───────────────────────────────────────────────
 
-    @Tool(name = "create_schedule", description = "Create a new scheduled bot trigger (cron job or heartbeat). " +
+    @Tool(name = "create_schedule", description = "Create a new scheduled Agent trigger (cron job or heartbeat). " +
             "For CRON: provide cronExpression. For HEARTBEAT: provide heartbeatIntervalSeconds. " +
             "Returns the created schedule with human-readable description and next fire time.")
     public String createSchedule(
-            @ToolArg(description = "Bot ID to trigger (required)") String botId,
+            @ToolArg(description = "Bot ID to trigger (required)") String agentId,
             @ToolArg(description = "Trigger type: 'CRON' (default) or 'HEARTBEAT'") String triggerType,
             @ToolArg(description = "5-field cron expression, e.g. '0 9 * * MON-FRI' (required for CRON)") String cron,
             @ToolArg(description = "Heartbeat interval in seconds, e.g. 300 for 5 min (required for HEARTBEAT)") Long heartbeatIntervalSeconds,
-            @ToolArg(description = "Message text to send to the bot on each fire (required for CRON, defaults to 'heartbeat' for HEARTBEAT)") String message,
+            @ToolArg(description = "Message text to send to the Agent on each fire (required for CRON, defaults to 'heartbeat' for HEARTBEAT)") String message,
             @ToolArg(description = "Human-readable name for this schedule (required)") String name,
             @ToolArg(description = "IANA time zone, e.g. 'Europe/Vienna' (default: UTC)") String timeZone,
             @ToolArg(description = "Conversation strategy: 'new' or 'persistent' (CRON defaults to 'new', HEARTBEAT defaults to 'persistent')") String conversationStrategy,
             @ToolArg(description = "User identity for the scheduled message (default: 'system:scheduler')") String userId,
             @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
-        if (botId == null || botId.isBlank()) return errorJson("botId is required");
+        if (agentId == null || agentId.isBlank()) return errorJson("agentId is required");
         if (name == null || name.isBlank()) return errorJson("name is required");
         try {
             // Determine trigger type
@@ -949,7 +949,7 @@ public class McpAdminTools {
 
             var schedule = new ScheduleConfiguration();
             schedule.setName(name);
-            schedule.setBotId(botId);
+            schedule.setAgentId(AgentId);
             schedule.setTriggerType(type);
             schedule.setCronExpression(cron);
             schedule.setHeartbeatIntervalSeconds(heartbeatIntervalSeconds);
@@ -986,7 +986,7 @@ public class McpAdminTools {
             result.put("scheduleId", id);
             result.put("name", name);
             result.put("triggerType", type.name());
-            result.put("botId", botId);
+            result.put("agentId", agentId);
             if (cron != null) result.put("cronExpression", cron);
             if (heartbeatIntervalSeconds != null) result.put("heartbeatIntervalSeconds", heartbeatIntervalSeconds);
             result.put("description", description);
@@ -1003,15 +1003,15 @@ public class McpAdminTools {
         }
     }
 
-    @Tool(name = "list_schedules", description = "List all scheduled bot triggers. " +
+    @Tool(name = "list_schedules", description = "List all scheduled Agent triggers. " +
             "Returns schedules with name, type, bot, cron/interval, status, next fire time, and fire count. " +
-            "Optionally filter by botId.")
+            "Optionally filter by agentId.")
     public String listSchedules(
-            @ToolArg(description = "Filter by bot ID (optional)") String botId) {
+            @ToolArg(description = "Filter by Agent ID (optional)") String agentId) {
         try {
             List<ScheduleConfiguration> schedules;
-            if (botId != null && !botId.isBlank()) {
-                schedules = scheduleStore.readSchedulesByBotId(botId);
+            if (agentId != null && !agentId.isBlank()) {
+                schedules = scheduleStore.readSchedulesByBotId(AgentId);
             } else {
                 schedules = scheduleStore.readAllSchedules(100);
             }
@@ -1023,7 +1023,7 @@ public class McpAdminTools {
                 item.put("scheduleId", s.getId());
                 item.put("name", s.getName());
                 item.put("triggerType", s.getTriggerType() != null ? s.getTriggerType().name() : "CRON");
-                item.put("botId", s.getBotId());
+                item.put("agentId", s.getAgentId());
                 if (s.getCronExpression() != null) {
                     item.put("cronExpression", s.getCronExpression());
                     item.put("cronDescription", CronDescriber.describe(s.getCronExpression()));
@@ -1063,7 +1063,7 @@ public class McpAdminTools {
             result.put("scheduleId", schedule.getId());
             result.put("name", schedule.getName());
             result.put("triggerType", schedule.getTriggerType() != null ? schedule.getTriggerType().name() : "CRON");
-            result.put("botId", schedule.getBotId());
+            result.put("agentId", schedule.getAgentId());
             if (schedule.getCronExpression() != null) {
                 result.put("cronExpression", schedule.getCronExpression());
                 result.put("cronDescription", CronDescriber.describe(schedule.getCronExpression()));
@@ -1089,7 +1089,7 @@ public class McpAdminTools {
         }
     }
 
-    @Tool(name = "delete_schedule", description = "Delete a scheduled bot trigger.")
+    @Tool(name = "delete_schedule", description = "Delete a scheduled Agent trigger.")
     public String deleteSchedule(
             @ToolArg(description = "Schedule ID (required)") String scheduleId) {
         if (scheduleId == null || scheduleId.isBlank()) return errorJson("scheduleId is required");

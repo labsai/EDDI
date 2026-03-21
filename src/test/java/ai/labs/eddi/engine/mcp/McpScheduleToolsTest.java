@@ -1,15 +1,15 @@
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.configs.agents.IRestBotStore;
+import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
-import ai.labs.eddi.configs.pipelines.IRestPackageStore;
+import ai.labs.eddi.configs.pipelines.IRestPipelineStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.api.IRestBotAdministration;
+import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
@@ -42,8 +42,8 @@ class McpScheduleToolsTest {
         jsonSerialization = mock(IJsonSerialization.class);
 
         var restInterfaceFactory = mock(IRestInterfaceFactory.class);
-        when(restInterfaceFactory.get(IRestBotStore.class)).thenReturn(mock(IRestBotStore.class));
-        when(restInterfaceFactory.get(IRestPackageStore.class)).thenReturn(mock(IRestPackageStore.class));
+        when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(mock(IRestAgentStore.class));
+        when(restInterfaceFactory.get(IRestPipelineStore.class)).thenReturn(mock(IRestPipelineStore.class));
         when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(mock(IRestDocumentDescriptorStore.class));
 
         lenient().when(jsonSerialization.serialize(any())).thenAnswer(inv -> {
@@ -52,7 +52,7 @@ class McpScheduleToolsTest {
         });
         when(pollerService.getInstanceId()).thenReturn("test-instance");
 
-        tools = new McpAdminTools(restInterfaceFactory, mock(IRestBotAdministration.class), jsonSerialization,
+        tools = new McpAdminTools(restInterfaceFactory, mock(IRestAgentAdministration.class), jsonSerialization,
                 scheduleStore, fireExecutor, pollerService);
     }
 
@@ -104,7 +104,7 @@ class McpScheduleToolsTest {
                 "Hello", "Test", "UTC", "new", null, null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("botId is required"));
+        assertTrue(result.contains("agentId is required"));
     }
 
     @Test
@@ -247,7 +247,7 @@ class McpScheduleToolsTest {
         s.setId(id);
         s.setName("Test Schedule");
         s.setTriggerType(TriggerType.CRON);
-        s.setBotId("bot-1");
+        s.setAgentId("bot-1");
         s.setCronExpression("0 9 * * *");
         s.setMessage("Hello");
         s.setEnvironment("production");

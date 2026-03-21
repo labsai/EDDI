@@ -6,7 +6,7 @@ import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.FieldType;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
-import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PipelineConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
@@ -212,7 +212,7 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws PackageConfigurationException {
+            throws PipelineConfigurationException {
         try {
             Object uriObj = configuration.get(OUTPUT_SET_CONFIG_URI);
             if (uriObj != null) {
@@ -242,7 +242,7 @@ public class OutputGenerationTask implements ILifecycleTask {
             }
         } catch (ServiceException e) {
             String message = "Error while fetching OutputConfigurationSet!\n" + e.getLocalizedMessage();
-            throw new PackageConfigurationException(message, e);
+            throw new PipelineConfigurationException(message, e);
         }
     }
 

@@ -25,10 +25,10 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
     private static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS deployments (
                 environment TEXT NOT NULL,
-                bot_id TEXT NOT NULL,
-                bot_version INTEGER NOT NULL,
+                AGENT_ID TEXT NOT NULL,
+                AGENT_VERSION INTEGER NOT NULL,
                 deployment_status TEXT NOT NULL,
-                PRIMARY KEY (environment, bot_id, bot_version)
+                PRIMARY KEY (environment, AGENT_ID, AGENT_VERSION)
             )
             """;
 
@@ -52,20 +52,20 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
     }
 
     @Override
-    public void setDeploymentInfo(String environment, String botId, Integer botVersion,
+    public void setDeploymentInfo(String environment, String agentId, Integer agentVersion,
                                    DeploymentInfo.DeploymentStatus deploymentStatus) {
         ensureSchema();
         String sql = """
-                INSERT INTO deployments (environment, bot_id, bot_version, deployment_status)
+                INSERT INTO deployments (environment, AGENT_ID, AGENT_VERSION, deployment_status)
                 VALUES (?, ?, ?, ?)
-                ON CONFLICT (environment, bot_id, bot_version) DO UPDATE
+                ON CONFLICT (environment, AGENT_ID, AGENT_VERSION) DO UPDATE
                 SET deployment_status = EXCLUDED.deployment_status
                 """;
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, environment);
-            ps.setString(2, botId);
-            ps.setInt(3, botVersion);
+            ps.setString(2, agentId);
+            ps.setInt(3, agentVersion);
             ps.setString(4, deploymentStatus.toString());
             ps.executeUpdate();
         } catch (SQLException e) {
@@ -74,16 +74,16 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
     }
 
     @Override
-    public DeploymentInfo readDeploymentInfo(String environment, String botId, Integer botVersion)
+    public DeploymentInfo readDeploymentInfo(String environment, String agentId, Integer agentVersion)
             throws IResourceStore.ResourceStoreException {
         ensureSchema();
-        String sql = "SELECT environment, bot_id, bot_version, deployment_status FROM deployments " +
-                "WHERE environment = ? AND bot_id = ? AND bot_version = ?";
+        String sql = "SELECT environment, AGENT_ID, AGENT_VERSION, deployment_status FROM deployments " +
+                "WHERE environment = ? AND AGENT_ID = ? AND AGENT_VERSION = ?";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, environment);
-            ps.setString(2, botId);
-            ps.setInt(3, botVersion);
+            ps.setString(2, agentId);
+            ps.setInt(3, agentVersion);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     return toDeploymentInfo(rs);
@@ -106,8 +106,8 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
         ensureSchema();
         List<DeploymentInfo> results = new ArrayList<>();
         String sql = deploymentStatus != null
-                ? "SELECT environment, bot_id, bot_version, deployment_status FROM deployments WHERE deployment_status = ?"
-                : "SELECT environment, bot_id, bot_version, deployment_status FROM deployments";
+                ? "SELECT environment, AGENT_ID, AGENT_VERSION, deployment_status FROM deployments WHERE deployment_status = ?"
+                : "SELECT environment, AGENT_ID, AGENT_VERSION, deployment_status FROM deployments";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             if (deploymentStatus != null) {
@@ -127,8 +127,8 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
     private DeploymentInfo toDeploymentInfo(ResultSet rs) throws SQLException {
         DeploymentInfo info = new DeploymentInfo();
         info.setEnvironment(Environment.valueOf(rs.getString("environment")));
-        info.setBotId(rs.getString("bot_id"));
-        info.setBotVersion(rs.getInt("bot_version"));
+        info.setAgentId(rs.getString("AGENT_ID"));
+        info.setAgentVersion(rs.getInt("AGENT_VERSION"));
         info.setDeploymentStatus(DeploymentInfo.DeploymentStatus.valueOf(rs.getString("deployment_status")));
         return info;
     }

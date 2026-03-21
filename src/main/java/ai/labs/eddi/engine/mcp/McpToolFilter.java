@@ -12,8 +12,8 @@ import java.util.Set;
  * <p>
  * Without this filter, the quarkus-mcp-server extension also picks up
  * {@code dev.langchain4j.agent.tool.Tool} annotations from EDDI's built-in
- * bot tools (calculator, datetime, websearch, etc.), which are meant ONLY
- * for internal bot pipeline use — not for external MCP clients.
+ * Agent tools (calculator, datetime, websearch, etc.), which are meant ONLY
+ * for internal Agent pipeline use — not for external MCP clients.
  * <p>
  * This whitelist ensures only the 33 intended MCP tools are visible.
  *
@@ -24,7 +24,7 @@ public class McpToolFilter implements ToolFilter {
 
     /**
      * Whitelist of MCP tool names that should be exposed to external clients.
-     * All other tools (built-in langchain4j bot tools) are hidden.
+     * All other tools (built-in langchain4j Agent tools) are hidden.
      */
     private static final Set<String> MCP_TOOLS = Set.of(
             // Conversation tools
@@ -62,7 +62,7 @@ public class McpToolFilter implements ToolFilter {
             // Discovery + Managed Bots (Phase 8a.3)
             "discover_bots",
             "chat_managed",
-            // Bot Trigger CRUD (Phase 8a.3)
+            // Agent Trigger CRUD (Phase 8a.3)
             "list_bot_triggers",
             "create_bot_trigger",
             "update_bot_trigger",

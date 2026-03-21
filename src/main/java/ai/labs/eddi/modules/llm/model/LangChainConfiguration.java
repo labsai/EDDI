@@ -365,7 +365,7 @@ public record LangChainConfiguration(List<Task> tasks) {
     }
 
     /**
-     * Configuration for an external MCP server that provides tools to the bot.
+     * Configuration for an external MCP server that provides tools to the agent.
      */
     public static class McpServerConfig {
         /** URL of the MCP server (required). Example: "http://localhost:7070/mcp" */

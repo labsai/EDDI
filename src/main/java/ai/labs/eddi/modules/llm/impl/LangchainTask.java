@@ -5,7 +5,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PipelineConfigurationException;
 import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -316,7 +316,7 @@ public class LangchainTask implements ILifecycleTask {
 
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws PackageConfigurationException {
+            throws PipelineConfigurationException {
 
         Object uriObj = configuration.get(KEY_URI);
         if (!isNullOrEmpty(uriObj)) {
@@ -326,11 +326,11 @@ public class LangchainTask implements ILifecycleTask {
                 return resourceClientLibrary.getResource(uri, LangChainConfiguration.class);
             } catch (ServiceException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
-                throw new PackageConfigurationException(e.getLocalizedMessage(), e);
+                throw new PipelineConfigurationException(e.getLocalizedMessage(), e);
             }
         }
 
-        throw new PackageConfigurationException("No resource URI has been defined! [LangChainConfiguration]");
+        throw new PipelineConfigurationException("No resource URI has been defined! [LangChainConfiguration]");
     }
 
     @Override

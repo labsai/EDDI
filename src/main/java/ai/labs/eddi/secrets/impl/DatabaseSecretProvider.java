@@ -65,7 +65,7 @@ public class DatabaseSecretProvider implements ISecretProvider {
         EncryptedSecret secret = secretStore.get(key);
         if (secret == null) {
             throw new SecretNotFoundException(
-                    "Secret not found: " + reference.tenantId() + "/" + reference.botId() + "/" + reference.keyName());
+                    "Secret not found: " + reference.tenantId() + "/" + reference.agentId() + "/" + reference.keyName());
         }
 
         // Decrypt: KEK -> DEK -> plaintext
@@ -93,7 +93,7 @@ public class DatabaseSecretProvider implements ISecretProvider {
         EncryptedSecret secret = new EncryptedSecret(
                 existing != null ? existing.getId() : UUID.randomUUID().toString(),
                 reference.tenantId(),
-                reference.botId(),
+                reference.agentId(),
                 reference.keyName(),
                 result.ciphertext(),
                 result.iv(),
@@ -103,7 +103,7 @@ public class DatabaseSecretProvider implements ISecretProvider {
                 null);
 
         secretStore.put(key, secret);
-        LOGGER.infov("Secret stored: {0}/{1}/{2}", reference.tenantId(), reference.botId(), reference.keyName());
+        LOGGER.infov("Secret stored: {0}/{1}/{2}", reference.tenantId(), reference.agentId(), reference.keyName());
     }
 
     @Override
@@ -113,9 +113,9 @@ public class DatabaseSecretProvider implements ISecretProvider {
         EncryptedSecret removed = secretStore.remove(key);
         if (removed == null) {
             throw new SecretNotFoundException(
-                    "Secret not found: " + reference.tenantId() + "/" + reference.botId() + "/" + reference.keyName());
+                    "Secret not found: " + reference.tenantId() + "/" + reference.agentId() + "/" + reference.keyName());
         }
-        LOGGER.infov("Secret deleted: {0}/{1}/{2}", reference.tenantId(), reference.botId(), reference.keyName());
+        LOGGER.infov("Secret deleted: {0}/{1}/{2}", reference.tenantId(), reference.agentId(), reference.keyName());
     }
 
     @Override
@@ -125,11 +125,11 @@ public class DatabaseSecretProvider implements ISecretProvider {
         EncryptedSecret secret = secretStore.get(key);
         if (secret == null) {
             throw new SecretNotFoundException(
-                    "Secret not found: " + reference.tenantId() + "/" + reference.botId() + "/" + reference.keyName());
+                    "Secret not found: " + reference.tenantId() + "/" + reference.agentId() + "/" + reference.keyName());
         }
         return new SecretMetadata(
                 secret.getTenantId(),
-                secret.getBotId(),
+                secret.getAgentId(),
                 secret.getKeyName(),
                 secret.getCreatedAt(),
                 secret.getLastAccessedAt(),
@@ -137,12 +137,12 @@ public class DatabaseSecretProvider implements ISecretProvider {
     }
 
     @Override
-    public List<SecretMetadata> listKeys(String tenantId, String botId) throws SecretProviderException {
+    public List<SecretMetadata> listKeys(String tenantId, String agentId) throws SecretProviderException {
         ensureAvailable();
         return secretStore.values().stream()
-                .filter(s -> s.getTenantId().equals(tenantId) && s.getBotId().equals(botId))
+                .filter(s -> s.getTenantId().equals(tenantId) && s.getAgentId().equals(agentId))
                 .map(s -> new SecretMetadata(
-                        s.getTenantId(), s.getBotId(), s.getKeyName(),
+                        s.getTenantId(), s.getAgentId(), s.getKeyName(),
                         s.getCreatedAt(), s.getLastAccessedAt(), s.getChecksum()))
                 .toList();
     }
@@ -185,6 +185,6 @@ public class DatabaseSecretProvider implements ISecretProvider {
     }
 
     private static String compositeKey(SecretReference ref) {
-        return ref.tenantId() + "/" + ref.botId() + "/" + ref.keyName();
+        return ref.tenantId() + "/" + ref.agentId() + "/" + ref.keyName();
     }
 }

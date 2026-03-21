@@ -146,7 +146,7 @@ class McpToolSchemaValidationTest {
     @Test
     void validPropertyKeyPattern_acceptsValidKeys() {
         assertTrue(VALID_PROPERTY_KEY.matcher("expression").matches());
-        assertTrue(VALID_PROPERTY_KEY.matcher("botId").matches());
+        assertTrue(VALID_PROPERTY_KEY.matcher("agentId").matches());
         assertTrue(VALID_PROPERTY_KEY.matcher("api_key").matches());
         assertTrue(VALID_PROPERTY_KEY.matcher("model.name").matches());
         assertTrue(VALID_PROPERTY_KEY.matcher("my-param").matches());

@@ -28,8 +28,8 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
     private static final String COLLECTION_DEPLOYMENTS = "deployments";
     private static final String FIELD_DEPLOYMENT_STATUS = "deploymentStatus";
     private static final String FIELD_ENVIRONMENT = "environment";
-    private static final String FIELD_BOT_ID = "botId";
-    private static final String FIELD_BOT_VERSION = "botVersion";
+    private static final String FIELD_AGENT_ID = "agentId";
+    private static final String FIELD_AGENT_VERSION = "agentVersion";
 
     private final MongoCollection<Document> deploymentsCollection;
     private final IDocumentBuilder documentBuilder;
@@ -39,13 +39,13 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
         this.deploymentsCollection = database.getCollection(COLLECTION_DEPLOYMENTS);
         this.documentBuilder = documentBuilder;
         deploymentsCollection.createIndex(
-                Indexes.ascending(FIELD_DEPLOYMENT_STATUS, FIELD_ENVIRONMENT, FIELD_BOT_ID, FIELD_BOT_VERSION));
+                Indexes.ascending(FIELD_DEPLOYMENT_STATUS, FIELD_ENVIRONMENT, FIELD_AGENT_ID, FIELD_AGENT_VERSION));
     }
 
     @Override
-    public void setDeploymentInfo(String environment, String botId, Integer botVersion,
+    public void setDeploymentInfo(String environment, String agentId, Integer agentVersion,
                                    DeploymentInfo.DeploymentStatus deploymentStatus) {
-        Document filter = createFilter(environment, botId, botVersion);
+        Document filter = createFilter(environment, agentId, agentVersion);
         Document newDeploymentInfo = new Document(filter);
         newDeploymentInfo.put(FIELD_DEPLOYMENT_STATUS, deploymentStatus.toString());
 
@@ -56,11 +56,11 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
     }
 
     @Override
-    public DeploymentInfo readDeploymentInfo(String environment, String botId, Integer botVersion)
+    public DeploymentInfo readDeploymentInfo(String environment, String agentId, Integer agentVersion)
             throws IResourceStore.ResourceStoreException {
         try {
             var document = deploymentsCollection.find(
-                    createFilter(environment, botId, botVersion)).first();
+                    createFilter(environment, agentId, agentVersion)).first();
             if (document == null) {
                 return null;
             }
@@ -92,11 +92,11 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
         }
     }
 
-    private static Document createFilter(String environment, String botId, Integer botVersion) {
+    private static Document createFilter(String environment, String agentId, Integer agentVersion) {
         var filter = new Document();
         filter.put(FIELD_ENVIRONMENT, environment);
-        filter.put(FIELD_BOT_ID, botId);
-        filter.put(FIELD_BOT_VERSION, botVersion);
+        filter.put(FIELD_AGENT_ID, agentId);
+        filter.put(FIELD_AGENT_VERSION, agentVersion);
         return filter;
     }
 }

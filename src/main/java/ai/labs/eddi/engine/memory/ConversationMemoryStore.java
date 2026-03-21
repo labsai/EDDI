@@ -39,8 +39,8 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     private static final String KEY_CONTEXT = "context";
     private static final String KEY_TYPE = "type";
     private static final String KEY_VALUE = "value";
-    private static final String KEY_BOT_ID = "botId";
-    private static final String KEY_BOT_VERSION = "botVersion";
+    private static final String KEY_BOT_ID = "agentId";
+    private static final String KEY_BOT_VERSION = "agentVersion";
     private static final String KEY_CONVERSATION_STATE = "conversationState";
     private final MongoCollection<Document> conversationCollectionDocument;
     private final MongoCollection<ConversationMemorySnapshot> conversationCollectionObject;
@@ -78,7 +78,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         }
 
         for (var conversationStep : memorySnapshot.getConversationSteps()) {
-            for (var aPackage : conversationStep.getPackages()) {
+            for (var aPackage : conversationStep.getPipelines()) {
                 for (var lifecycleTask : aPackage.getLifecycleTasks()) {
                     if (lifecycleTask.getKey().startsWith(KEY_CONTEXT)) {
                         var result = lifecycleTask.getResult();
@@ -98,15 +98,15 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
-    public List<ConversationMemorySnapshot> loadActiveConversationMemorySnapshot(String botId, Integer botVersion)
+    public List<ConversationMemorySnapshot> loadActiveConversationMemorySnapshot(String agentId, Integer agentVersion)
             throws IResourceStore.ResourceStoreException {
 
         try {
             ArrayList<ConversationMemorySnapshot> retRet = new ArrayList<>();
 
             Document query = new Document();
-            query.put(KEY_BOT_ID, botId);
-            query.put(KEY_BOT_VERSION, botVersion);
+            query.put(KEY_BOT_ID, agentId);
+            query.put(KEY_BOT_VERSION, agentVersion);
             query.put(KEY_CONVERSATION_STATE, new Document("$ne", ENDED.toString()));
 
             conversationCollectionObject.find(query).forEach(retRet::add);
@@ -147,8 +147,8 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
-    public Long getActiveConversationCount(String botId, Integer botVersion) {
-        Bson query = Filters.and(Filters.eq(KEY_BOT_ID, botId), Filters.eq(KEY_BOT_VERSION, botVersion),
+    public Long getActiveConversationCount(String agentId, Integer agentVersion) {
+        Bson query = Filters.and(Filters.eq(KEY_BOT_ID, agentId), Filters.eq(KEY_BOT_VERSION, agentVersion),
                 Filters.not(new Document(KEY_CONVERSATION_STATE, ENDED.toString())));
         return conversationCollectionDocument.countDocuments(query);
     }

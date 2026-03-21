@@ -50,7 +50,7 @@ class SecretRedactionFilterTest {
 
     @Test
     void redact_safeMessages() {
-        String safe = "User said hello, bot responded with greeting";
+        String safe = "User said hello, Agent responded with greeting";
         assertEquals(safe, SecretRedactionFilter.redact(safe));
     }
 }

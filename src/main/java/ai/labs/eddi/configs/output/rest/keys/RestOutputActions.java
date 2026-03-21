@@ -6,8 +6,8 @@ import ai.labs.eddi.configs.rules.model.BehaviorGroupConfiguration;
 import ai.labs.eddi.configs.rules.model.BehaviorRuleConfiguration;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.keys.IRestOutputActions;
-import ai.labs.eddi.configs.pipelines.IPackageStore;
-import ai.labs.eddi.configs.pipelines.model.PackageConfiguration;
+import ai.labs.eddi.configs.pipelines.IPipelineStore;
+import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.CollectionUtilities;
 import ai.labs.eddi.utils.RestUtilities;
@@ -28,17 +28,17 @@ import java.util.Map;
 
 @ApplicationScoped
 public class RestOutputActions implements IRestOutputActions {
-    private final IPackageStore packageStore;
+    private final IPipelineStore PipelineStore;
     private final IBehaviorStore behaviorStore;
     private final IOutputStore outputStore;
 
 
 
     @Inject
-    public RestOutputActions(IPackageStore packageStore,
+    public RestOutputActions(IPipelineStore PipelineStore,
                              IBehaviorStore behaviorStore,
                              IOutputStore outputStore) {
-        this.packageStore = packageStore;
+        this.PipelineStore = PipelineStore;
         this.behaviorStore = behaviorStore;
         this.outputStore = outputStore;
     }
@@ -47,9 +47,9 @@ public class RestOutputActions implements IRestOutputActions {
     public List<String> readOutputActions(String packageId, Integer packageVersion, String filter, Integer limit) {
         List<String> retOutputKeys = new LinkedList<>();
         try {
-            PackageConfiguration packageConfiguration = packageStore.read(packageId, packageVersion);
+            PipelineConfiguration PipelineConfiguration = PipelineStore.read(packageId, packageVersion);
             List<IResourceStore.IResourceId> resourceIds;
-            resourceIds = readBehaviorRuleSetResourceIds(packageConfiguration);
+            resourceIds = readBehaviorRuleSetResourceIds(PipelineConfiguration);
             for (IResourceStore.IResourceId resourceId : resourceIds) {
                 BehaviorConfiguration behaviorConfiguration = behaviorStore.read(resourceId.getId(), resourceId.getVersion());
                 for (BehaviorGroupConfiguration groupConfiguration : behaviorConfiguration.getBehaviorGroups()) {
@@ -66,7 +66,7 @@ public class RestOutputActions implements IRestOutputActions {
                 }
             }
 
-            resourceIds = readOutputSetResourceIds(packageConfiguration);
+            resourceIds = readOutputSetResourceIds(PipelineConfiguration);
             for (IResourceStore.IResourceId resourceId : resourceIds) {
                 List<String> outputKeys = outputStore.readActions(resourceId.getId(), resourceId.getVersion(), filter, limit);
                 CollectionUtilities.addAllWithoutDuplicates(retOutputKeys, outputKeys);
@@ -88,15 +88,15 @@ public class RestOutputActions implements IRestOutputActions {
         return retOutputKeys;
     }
 
-    private List<IResourceStore.IResourceId> readBehaviorRuleSetResourceIds(PackageConfiguration packageConfiguration) {
+    private List<IResourceStore.IResourceId> readBehaviorRuleSetResourceIds(PipelineConfiguration PipelineConfiguration) {
         List<IResourceStore.IResourceId> resourceIds = new LinkedList<>();
 
-        for (PackageConfiguration.PackageExtension packageExtension : packageConfiguration.getPackageExtensions()) {
-            if (!packageExtension.getType().toString().startsWith("eddi://ai.labs.behavior")) {
+        for (PipelineConfiguration.PipelineStep PipelineStep : PipelineConfiguration.getPipelineSteps()) {
+            if (!PipelineStep.getType().toString().startsWith("eddi://ai.labs.behavior")) {
                 continue;
             }
 
-            Map<String, Object> config = packageExtension.getConfig();
+            Map<String, Object> config = PipelineStep.getConfig();
             String uri = (String) config.get("uri");
             resourceIds.add(RestUtilities.extractResourceId(URI.create(uri)));
         }
@@ -105,15 +105,15 @@ public class RestOutputActions implements IRestOutputActions {
 
     }
 
-    private List<IResourceStore.IResourceId> readOutputSetResourceIds(PackageConfiguration packageConfiguration) {
+    private List<IResourceStore.IResourceId> readOutputSetResourceIds(PipelineConfiguration PipelineConfiguration) {
         List<IResourceStore.IResourceId> resourceIds = new LinkedList<>();
 
-        for (PackageConfiguration.PackageExtension packageExtension : packageConfiguration.getPackageExtensions()) {
-            if (!packageExtension.getType().toString().startsWith("eddi://ai.labs.output")) {
+        for (PipelineConfiguration.PipelineStep PipelineStep : PipelineConfiguration.getPipelineSteps()) {
+            if (!PipelineStep.getType().toString().startsWith("eddi://ai.labs.output")) {
                 continue;
             }
 
-            Map<String, Object> config = packageExtension.getConfig();
+            Map<String, Object> config = PipelineStep.getConfig();
             String uri = (String) config.get("uri");
             resourceIds.add(RestUtilities.extractResourceId(URI.create(uri)));
         }

@@ -12,12 +12,12 @@ import java.util.List;
 public interface IDeploymentStore {
 
     DeploymentInfo getDeploymentInfo(String environment,
-                                     String botId,
-                                     Integer botVersion) throws IResourceStore.ResourceStoreException;
+                                     String agentId,
+                                     Integer agentVersion) throws IResourceStore.ResourceStoreException;
 
     void setDeploymentInfo(String environment,
-                           String botId,
-                           Integer botVersion,
+                           String agentId,
+                           Integer agentVersion,
                            DeploymentStatus deploymentStatus);
 
     List<DeploymentInfo> readDeploymentInfos() throws IResourceStore.ResourceStoreException;

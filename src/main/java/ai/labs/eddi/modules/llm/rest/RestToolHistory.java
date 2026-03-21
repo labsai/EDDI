@@ -55,7 +55,7 @@ public class RestToolHistory {
             List<ToolCall> toolCalls = new ArrayList<>();
 
             for (ConversationStepSnapshot step : snapshot.getConversationSteps()) {
-                for (PackageRunSnapshot packageRun : step.getPackages()) {
+                for (PackageRunSnapshot packageRun : step.getPipelines()) {
                     for (ResultSnapshot data : packageRun.getLifecycleTasks()) {
                         if (data.getKey() != null && data.getKey().startsWith("langchain:trace:")) {
                             Object result = data.getResult();

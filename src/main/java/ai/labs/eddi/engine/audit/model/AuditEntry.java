@@ -22,8 +22,8 @@ import java.util.Map;
  *
  * @param id             Auto-generated UUID
  * @param conversationId The conversation this entry belongs to
- * @param botId          Bot identifier
- * @param botVersion     Bot version
+ * @param agentId          Agent identifier
+ * @param agentVersion     Agent version
  * @param userId         User identifier
  * @param environment    Deployment environment (e.g. "production")
  * @param stepIndex      0-based step position in the conversation
@@ -45,8 +45,8 @@ import java.util.Map;
 public record AuditEntry(
         String id,
         String conversationId,
-        String botId,
-        Integer botVersion,
+        String agentId,
+        Integer agentVersion,
         String userId,
         String environment,
         int stepIndex,
@@ -70,7 +70,7 @@ public record AuditEntry(
      */
     public AuditEntry withEnvironment(String env) {
         return new AuditEntry(
-                id, conversationId, botId, botVersion, userId, env,
+                id, conversationId, agentId, agentVersion, userId, env,
                 stepIndex, taskId, taskType, taskIndex, durationMs,
                 input, output, llmDetail, toolCalls, actions,
                 cost, timestamp, hmac);
@@ -82,7 +82,7 @@ public record AuditEntry(
      */
     public AuditEntry withHmac(String hmacValue) {
         return new AuditEntry(
-                id, conversationId, botId, botVersion, userId, environment,
+                id, conversationId, agentId, agentVersion, userId, environment,
                 stepIndex, taskId, taskType, taskIndex, durationMs,
                 input, output, llmDetail, toolCalls, actions,
                 cost, timestamp, hmacValue);

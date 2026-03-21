@@ -13,7 +13,7 @@ class SecretReferenceTest {
         var ref = SecretReference.parse("${eddivault:default/myBot/openaiKey}");
 
         assertEquals("default", ref.tenantId());
-        assertEquals("myBot", ref.botId());
+        assertEquals("myBot", ref.agentId());
         assertEquals("openaiKey", ref.keyName());
     }
 

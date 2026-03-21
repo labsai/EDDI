@@ -12,7 +12,7 @@ public class ContextLogger implements IContextLogger {
 
     @Override
     public Map<String, String> createLoggingContext(Deployment.Environment environment,
-                                                    String botId,
+                                                    String agentId,
                                                     String conversationId,
                                                     String userId) {
 
@@ -20,7 +20,7 @@ public class ContextLogger implements IContextLogger {
         Map<String, String> context = new HashMap<>();
 
         context.put("environment", environment.toString());
-        context.put("botId", botId);
+        context.put("agentId", agentId);
         if (conversationId != null) {
             context.put("conversationId", conversationId);
         }

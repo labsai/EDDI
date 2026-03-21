@@ -10,7 +10,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 
 /**
- * Integration test for Bot Engine conversation lifecycle.
+ * Integration test for Agent Engine conversation lifecycle.
  * <p>
  * Ported from {@code RestBotEngineTest} in EDDI-integration-tests.
  * Uses Quarkus DevServices for MongoDB (requires Docker).
@@ -76,8 +76,8 @@ public class BotEngineIT extends BaseIntegrationIT {
 
                 response.then().assertThat()
                                 .statusCode(200)
-                                .body("botId", equalTo(botResourceId.id()))
-                                .body("botVersion", equalTo(botResourceId.version()))
+                                .body("agentId", equalTo(botResourceId.id()))
+                                .body("agentVersion", equalTo(botResourceId.version()))
                                 .body("conversationSteps", hasSize(1))
                                 .body("conversationSteps[0].conversationStep[0].key", equalTo("actions"))
                                 .body("conversationSteps[0].conversationStep[0].value[1]", equalTo("welcome"))
@@ -140,17 +140,17 @@ public class BotEngineIT extends BaseIntegrationIT {
                                                 equalTo("Did we already say hi ?! Well, twice is better than not at all! ;-)"));
         }
 
-        // ==================== Second Bot ====================
+        // ==================== Second Agent ====================
 
         @Test
-        @DisplayName("should route to second deployed bot correctly")
+        @DisplayName("should route to second deployed Agent correctly")
         void checkSecondBotDeployed() {
                 ResourceId convId2 = createConversation(bot2ResourceId.id(), TEST_USER_ID);
                 Response response = sendUserInput(bot2ResourceId.id(), convId2.id(), "hi", true, false);
 
                 response.then().assertThat()
                                 .statusCode(200)
-                                .body("botId", equalTo(bot2ResourceId.id()))
+                                .body("agentId", equalTo(bot2ResourceId.id()))
                                 .body("conversationSteps", hasSize(2))
                                 .body("conversationSteps[1].conversationStep[0].value", equalTo("hi"));
         }
@@ -263,16 +263,16 @@ public class BotEngineIT extends BaseIntegrationIT {
                 String behavior = load(behaviorPath);
                 String output = load(outputPath);
 
-                String locationDictionary = createBotResource(dictionary,
+                String locationDictionary = createAgentResource(dictionary,
                                 "/regulardictionarystore/regulardictionaries");
-                String locationBehavior = createBotResource(behavior, "/behaviorstore/behaviorsets");
-                String locationOutput = createBotResource(output, "/outputstore/outputsets");
+                String locationBehavior = createAgentResource(behavior, "/behaviorstore/behaviorsets");
+                String locationOutput = createAgentResource(output, "/outputstore/outputsets");
 
                 // Create package with all extensions
                 String packageBody = String.format(
                                 """
                                                 {
-                                                  "packageExtensions": [
+                                                  "PipelineSteps": [
                                                     {
                                                       "type": "eddi://ai.labs.parser",
                                                       "config": {},
@@ -300,22 +300,22 @@ public class BotEngineIT extends BaseIntegrationIT {
                                                 }""",
                                 locationDictionary, locationBehavior, locationOutput);
 
-                String locationPackage = createBotResource(packageBody, "/packagestore/packages");
+                String locationPackage = createAgentResource(packageBody, "/PipelineStore/packages");
 
                 // Create bot
                 String botBody = String.format("""
                                 {"packages": ["%s"]}""", locationPackage);
-                String botLocation = createBotResource(botBody, "/botstore/bots");
+                String botLocation = createAgentResource(botBody, "/AgentStore/bots");
 
-                ResourceId botId = extractResourceId(botLocation);
+                ResourceId agentId = extractResourceId(botLocation);
 
                 // Deploy the bot
-                deployBot(botId.id(), botId.version());
+                deployAgent(agentId.id(), agentId.version());
 
-                return botId;
+                return agentId;
         }
 
-        private String createBotResource(String body, String path) {
+        private String createAgentResource(String body, String path) {
                 Response response = given()
                                 .body(body)
                                 .contentType(ContentType.JSON)
@@ -324,7 +324,7 @@ public class BotEngineIT extends BaseIntegrationIT {
                 return response.getHeader("location");
         }
 
-        private void deployBot(String id, int version) throws InterruptedException {
+        private void deployAgent(String id, int version) throws InterruptedException {
                 given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false", id,
                                 version));
                 for (int i = 0; i < 60; i++) {
@@ -342,12 +342,12 @@ public class BotEngineIT extends BaseIntegrationIT {
                 throw new RuntimeException("Bot deployment timed out");
         }
 
-        private Response sendJsonInput(String botId, String conversationId, String jsonBody, boolean returnDetailed) {
+        private Response sendJsonInput(String agentId, String conversationId, String jsonBody, boolean returnDetailed) {
                 return given()
                                 .contentType(ContentType.JSON)
                                 .body(jsonBody)
                                 .post(String.format(
                                                 "bots/production/%s/%s?returnDetailed=%s&returnCurrentStepOnly=%s",
-                                                botId, conversationId, returnDetailed, false));
+                                                agentId, conversationId, returnDetailed, false));
         }
 }

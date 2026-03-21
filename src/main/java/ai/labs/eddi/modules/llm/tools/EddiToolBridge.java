@@ -122,7 +122,7 @@ public class EddiToolBridge {
             ConversationMemorySnapshot snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
 
             // Create a temporary memory instance to satisfy HttpCallExecutor contract
-            ConversationMemory memory = new ConversationMemory(conversationId, snapshot.getBotId(), snapshot.getBotVersion(), snapshot.getUserId());
+            ConversationMemory memory = new ConversationMemory(conversationId, snapshot.getAgentId(), snapshot.getAgentVersion(), snapshot.getUserId());
 
             // Build template data by merging agent arguments with conversation memory
             // Note: In real usage, we'd need an IConversationMemory instance, not a snapshot

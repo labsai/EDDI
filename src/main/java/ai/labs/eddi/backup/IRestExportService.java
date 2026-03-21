@@ -17,7 +17,7 @@ public interface IRestExportService {
     Response getBotZipArchive(@PathParam("botFilename") String botFilename);
 
     @POST
-    @Path("{botId}")
-    Response exportBot(@PathParam("botId") String botId,
-                       @QueryParam("botVersion") @DefaultValue("1") Integer botVersion);
+    @Path("{agentId}")
+    Response exportBot(@PathParam("agentId") String agentId,
+                       @QueryParam("agentVersion") @DefaultValue("1") Integer agentVersion);
 }

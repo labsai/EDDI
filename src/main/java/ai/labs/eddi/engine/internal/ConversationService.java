@@ -24,8 +24,8 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
-import ai.labs.eddi.engine.runtime.IBot;
-import ai.labs.eddi.engine.runtime.IBotFactory;
+import ai.labs.eddi.engine.runtime.IAgent;
+import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
@@ -50,7 +50,7 @@ import static jakarta.ws.rs.core.MediaType.APPLICATION_JSON;
 import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 
 /**
- * Core conversation lifecycle service — extracted from RestBotEngine.
+ * Core conversation lifecycle service — extracted from RestAgentEngine.
  * Contains all business logic for conversation management, metrics, and
  * caching.
  * No JAX-RS dependencies — results are returned as domain objects or via
@@ -65,7 +65,7 @@ public class ConversationService implements IConversationService {
     private static final String CACHE_NAME_CONVERSATION_STATE = "conversationState";
     private static final String USER_ID = "userId";
 
-    private final IBotFactory botFactory;
+    private final IAgentFactory AgentFactory;
     private final IConversationMemoryStore conversationMemoryStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IPropertiesStore propertiesStore;
@@ -97,7 +97,7 @@ public class ConversationService implements IConversationService {
     private static final Logger LOGGER = Logger.getLogger(ConversationService.class);
 
     @Inject
-    public ConversationService(IBotFactory botFactory,
+    public ConversationService(IAgentFactory AgentFactory,
             IConversationMemoryStore conversationMemoryStore,
             IConversationDescriptorStore conversationDescriptorStore,
             IPropertiesStore propertiesStore,
@@ -110,7 +110,7 @@ public class ConversationService implements IConversationService {
             TenantQuotaService tenantQuotaService,
             MeterRegistry meterRegistry,
             @ConfigProperty(name = "systemRuntime.botTimeoutInSeconds") int botTimeout) {
-        this.botFactory = botFactory;
+        this.AgentFactory = AgentFactory;
         this.conversationMemoryStore = conversationMemoryStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.propertiesStore = propertiesStore;
@@ -143,13 +143,13 @@ public class ConversationService implements IConversationService {
     }
 
     @Override
-    public ConversationResult startConversation(Environment environment, String botId,
+    public ConversationResult startConversation(Environment environment, String agentId,
             String userId, Map<String, Context> context)
             throws BotNotReadyException, ResourceStoreException, ResourceNotFoundException {
 
         long startTime = System.nanoTime();
         checkNotNull(environment, "environment");
-        checkNotNull(botId, "botId");
+        checkNotNull(agentId, "agentId");
         if (context == null) {
             context = new LinkedHashMap<>();
         }
@@ -161,10 +161,10 @@ public class ConversationService implements IConversationService {
                 throw new QuotaExceededException(quotaCheck.reason());
             }
 
-            IBot latestBot = botFactory.getLatestReadyBot(environment, botId);
+            IAgent latestBot = AgentFactory.getLatestReadyAgent(environment, agentId);
             if (latestBot == null) {
-                String message = "No version of bot (botId=%s) ready for interaction (environment=%s)!";
-                message = String.format(message, botId, environment);
+                String message = "No version of Agent (agentId=%s) ready for interaction (environment=%s)!";
+                message = String.format(message, agentId, environment);
                 throw new BotNotReadyException(message);
             }
 
@@ -178,13 +178,13 @@ public class ConversationService implements IConversationService {
             tenantQuotaService.recordConversationStart();
             var conversationUri = createURI(RESOURCE_URI, conversationId);
 
-            conversationSetup.createConversationDescriptor(botId, latestBot, userId, conversationId, conversationUri);
+            conversationSetup.createConversationDescriptor(agentId, latestBot, userId, conversationId, conversationUri);
 
             return new ConversationResult(conversationId, conversationUri);
         } catch (BotNotReadyException e) {
             throw e;
         } catch (ServiceException | InstantiationException | LifecycleException | IllegalAccessException e) {
-            contextLogger.setLoggingContext(contextLogger.createLoggingContext(environment, botId, null, userId));
+            contextLogger.setLoggingContext(contextLogger.createLoggingContext(environment, agentId, null, userId));
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new ResourceStoreException(e.getLocalizedMessage(), e);
         } finally {
@@ -220,7 +220,7 @@ public class ConversationService implements IConversationService {
     }
 
     @Override
-    public SimpleConversationMemorySnapshot readConversation(Environment environment, String botId,
+    public SimpleConversationMemorySnapshot readConversation(Environment environment, String agentId,
             String conversationId,
             Boolean returnDetailed,
             Boolean returnCurrentStepOnly,
@@ -228,8 +228,8 @@ public class ConversationService implements IConversationService {
             throws BotMismatchException, ResourceStoreException, ResourceNotFoundException {
 
         long startTime = System.nanoTime();
-        validateParams(environment, botId, conversationId);
-        Map<String, String> loggingContext = contextLogger.createLoggingContext(environment, botId, conversationId,
+        validateParams(environment, agentId, conversationId);
+        Map<String, String> loggingContext = contextLogger.createLoggingContext(environment, agentId, conversationId,
                 null);
         contextLogger.setLoggingContext(loggingContext);
 
@@ -238,10 +238,10 @@ public class ConversationService implements IConversationService {
             loggingContext.put(USER_ID, conversationMemorySnapshot.getUserId());
             contextLogger.setLoggingContext(loggingContext);
 
-            if (!botId.equals(conversationMemorySnapshot.getBotId())) {
-                String message = "conversationId: '%s' does not belong to bot with conversationId: '%s'. " +
-                        "(provided botId='%s', botId in ConversationMemory='%s')";
-                message = String.format(message, conversationId, botId, botId, conversationMemorySnapshot.getBotId());
+            if (!agentId.equals(conversationMemorySnapshot.getAgentId())) {
+                String message = "conversationId: '%s' does not belong to Agent with conversationId: '%s'. " +
+                        "(provided agentId='%s', agentId in ConversationMemory='%s')";
+                message = String.format(message, conversationId, agentId, agentId, conversationMemorySnapshot.getAgentId());
                 throw new BotMismatchException(message);
             }
 
@@ -271,7 +271,7 @@ public class ConversationService implements IConversationService {
     }
 
     @Override
-    public void say(Environment environment, String botId, String conversationId,
+    public void say(Environment environment, String agentId, String conversationId,
             Boolean returnDetailed, Boolean returnCurrentStepOnly,
             List<String> returningFields, InputData inputData,
             boolean rerunOnly, ConversationResponseHandler responseHandler)
@@ -286,25 +286,25 @@ public class ConversationService implements IConversationService {
             }
             tenantQuotaService.recordApiCall();
 
-            processingConversationReferences.add(createReferenceForMetrics(botId, conversationId));
+            processingConversationReferences.add(createReferenceForMetrics(agentId, conversationId));
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
-            var loggingContext = contextLogger.createLoggingContext(environment, botId,
+            var loggingContext = contextLogger.createLoggingContext(environment, agentId,
                     conversationId, conversationMemory.getUserId());
-            Integer botVersion = conversationMemory.getBotVersion();
-            loggingContext.put("botVersion", botVersion.toString());
+            Integer agentVersion = conversationMemory.getAgentVersion();
+            loggingContext.put("agentVersion", agentVersion.toString());
             contextLogger.setLoggingContext(loggingContext);
 
-            if (!botId.equals(conversationMemory.getBotId())) {
-                String message = "Supplied botId (%s) is incompatible with conversationId (%s)";
-                message = String.format(message, botId, conversationId);
+            if (!agentId.equals(conversationMemory.getAgentId())) {
+                String message = "Supplied agentId (%s) is incompatible with conversationId (%s)";
+                message = String.format(message, agentId, conversationId);
                 throw new BotMismatchException(message);
             }
 
-            IBot bot = getBot(environment, botId, botVersion);
+            IAgent Agent = getAgent(environment, agentId, agentVersion);
             if (bot == null) {
                 String msg = "Bot not deployed (environment=%s, conversationId=%s, version=%s)";
-                msg = String.format(msg, environment, conversationMemory.getBotId(), botVersion);
+                msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
                 throw new BotNotReadyException(msg);
             }
 
@@ -315,7 +315,7 @@ public class ConversationService implements IConversationService {
                         auditLedgerService.submit(entry.withEnvironment(envName)));
             }
 
-            final IConversation conversation = bot.continueConversation(conversationMemory,
+            final IConversation conversation = agent.continueConversation(conversationMemory,
                     createPropertiesHandler(conversationMemory.getUserId()),
                     returnConversationMemory -> {
                         SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(
@@ -327,7 +327,7 @@ public class ConversationService implements IConversationService {
                         cacheConversationState(conversationId, memorySnapshot.getConversationState());
                         conversationDescriptorStore.updateTimeStamp(conversationId);
                         recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                        processingConversationReferences.remove(createReferenceForMetrics(botId, conversationId));
+                        processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
                         responseHandler.onComplete(memorySnapshot);
                     });
 
@@ -365,17 +365,17 @@ public class ConversationService implements IConversationService {
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (BotMismatchException | BotNotReadyException | ConversationEndedException e) {
-            processingConversationReferences.remove(createReferenceForMetrics(botId, conversationId));
+            processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
             throw e;
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            processingConversationReferences.remove(createReferenceForMetrics(botId, conversationId));
+            processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
             throw e;
         }
     }
 
     @Override
-    public void sayStreaming(Environment environment, String botId, String conversationId,
+    public void sayStreaming(Environment environment, String agentId, String conversationId,
             Boolean returnDetailed, Boolean returnCurrentStepOnly,
             List<String> returningFields, InputData inputData,
             StreamingResponseHandler streamingHandler) throws Exception {
@@ -389,25 +389,25 @@ public class ConversationService implements IConversationService {
             }
             tenantQuotaService.recordApiCall();
 
-            processingConversationReferences.add(createReferenceForMetrics(botId, conversationId));
+            processingConversationReferences.add(createReferenceForMetrics(agentId, conversationId));
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
-            var loggingContext = contextLogger.createLoggingContext(environment, botId,
+            var loggingContext = contextLogger.createLoggingContext(environment, agentId,
                     conversationId, conversationMemory.getUserId());
-            Integer botVersion = conversationMemory.getBotVersion();
-            loggingContext.put("botVersion", botVersion.toString());
+            Integer agentVersion = conversationMemory.getAgentVersion();
+            loggingContext.put("agentVersion", agentVersion.toString());
             contextLogger.setLoggingContext(loggingContext);
 
-            if (!botId.equals(conversationMemory.getBotId())) {
-                String message = "Supplied botId (%s) is incompatible with conversationId (%s)";
-                message = String.format(message, botId, conversationId);
+            if (!agentId.equals(conversationMemory.getAgentId())) {
+                String message = "Supplied agentId (%s) is incompatible with conversationId (%s)";
+                message = String.format(message, agentId, conversationId);
                 throw new BotMismatchException(message);
             }
 
-            IBot bot = getBot(environment, botId, botVersion);
+            IAgent Agent = getAgent(environment, agentId, agentVersion);
             if (bot == null) {
                 String msg = "Bot not deployed (environment=%s, conversationId=%s, version=%s)";
-                msg = String.format(msg, environment, conversationMemory.getBotId(), botVersion);
+                msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
                 throw new BotNotReadyException(msg);
             }
 
@@ -450,7 +450,7 @@ public class ConversationService implements IConversationService {
                         auditLedgerService.submit(entry.withEnvironment(envName)));
             }
 
-            final IConversation conversation = bot.continueConversation(conversationMemory,
+            final IConversation conversation = agent.continueConversation(conversationMemory,
                     createPropertiesHandler(conversationMemory.getUserId()),
                     returnConversationMemory -> {
                         SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(
@@ -462,7 +462,7 @@ public class ConversationService implements IConversationService {
                         cacheConversationState(conversationId, memorySnapshot.getConversationState());
                         conversationDescriptorStore.updateTimeStamp(conversationId);
                         recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                        processingConversationReferences.remove(createReferenceForMetrics(botId, conversationId));
+                        processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
                         streamingHandler.onComplete(memorySnapshot);
                     });
 
@@ -488,32 +488,32 @@ public class ConversationService implements IConversationService {
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (BotMismatchException | BotNotReadyException | ConversationEndedException e) {
-            processingConversationReferences.remove(createReferenceForMetrics(botId, conversationId));
+            processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
             throw e;
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            processingConversationReferences.remove(createReferenceForMetrics(botId, conversationId));
+            processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
             throw e;
         }
     }
 
     @Override
-    public Boolean isUndoAvailable(Environment environment, String botId, String conversationId)
+    public Boolean isUndoAvailable(Environment environment, String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException {
 
-        validateParams(environment, botId, conversationId);
+        validateParams(environment, agentId, conversationId);
         final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
         return conversationMemory.isUndoAvailable();
     }
 
     @Override
-    public boolean undo(Environment environment, String botId, String conversationId)
+    public boolean undo(Environment environment, String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException, BotMismatchException {
 
-        validateParams(environment, botId, conversationId);
+        validateParams(environment, agentId, conversationId);
         long startTime = System.nanoTime();
         try {
-            IConversationMemory conversationMemory = loadAndValidateConversationMemory(botId, conversationId);
+            IConversationMemory conversationMemory = loadAndValidateConversationMemory(agentId, conversationId);
 
             if (conversationMemory.isUndoAvailable()) {
                 conversationMemory.undoLastStep();
@@ -528,22 +528,22 @@ public class ConversationService implements IConversationService {
     }
 
     @Override
-    public Boolean isRedoAvailable(Environment environment, String botId, String conversationId)
+    public Boolean isRedoAvailable(Environment environment, String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException {
 
-        validateParams(environment, botId, conversationId);
+        validateParams(environment, agentId, conversationId);
         var conversationMemory = loadConversationMemory(conversationId);
         return conversationMemory.isRedoAvailable();
     }
 
     @Override
-    public boolean redo(Environment environment, String botId, String conversationId)
+    public boolean redo(Environment environment, String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException, BotMismatchException {
 
-        validateParams(environment, botId, conversationId);
+        validateParams(environment, agentId, conversationId);
         long startTime = System.nanoTime();
         try {
-            IConversationMemory conversationMemory = loadAndValidateConversationMemory(botId, conversationId);
+            IConversationMemory conversationMemory = loadAndValidateConversationMemory(agentId, conversationId);
 
             if (conversationMemory.isRedoAvailable()) {
                 conversationMemory.redoLastStep();
@@ -584,16 +584,16 @@ public class ConversationService implements IConversationService {
         };
     }
 
-    private IBot getBot(Environment environment, String botId, Integer botVersion)
+    private IAgent getAgent(Environment environment, String agentId, Integer agentVersion)
             throws ServiceException, IllegalAccessException {
 
-        IBot bot = botFactory.getBot(environment, botId, botVersion);
+        IAgent Agent = AgentFactory.getAgent(environment, agentId, agentVersion);
         if (bot == null) {
-            botFactory.deployBot(environment, botId, botVersion, null);
-            bot = botFactory.getBot(environment, botId, botVersion);
+            AgentFactory.deployAgent(environment, agentId, agentVersion, null);
+            Agent = AgentFactory.getAgent(environment, agentId, agentVersion);
         }
 
-        return bot;
+        return agent;
     }
 
     private Callable<Void> processConversationStep(Environment environment,
@@ -659,13 +659,13 @@ public class ConversationService implements IConversationService {
         LOGGER.error(msg, t);
     }
 
-    private IConversationMemory loadAndValidateConversationMemory(String botId, String conversationId)
+    private IConversationMemory loadAndValidateConversationMemory(String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException, BotMismatchException {
         var conversationMemory = loadConversationMemory(conversationId);
         checkConversationMemoryNotNull(conversationMemory, conversationId);
 
-        if (!botId.equals(conversationMemory.getBotId())) {
-            throw new BotMismatchException("Supplied botId is incompatible to conversationId");
+        if (!agentId.equals(conversationMemory.getAgentId())) {
+            throw new BotMismatchException("Supplied agentId is incompatible to conversationId");
         }
 
         return conversationMemory;
@@ -701,9 +701,9 @@ public class ConversationService implements IConversationService {
         }
     }
 
-    private static void validateParams(Environment environment, String botId, String conversationId) {
+    private static void validateParams(Environment environment, String agentId, String conversationId) {
         checkNotNull(environment, "environment");
-        checkNotNull(botId, "botId");
+        checkNotNull(agentId, "agentId");
         checkNotNull(conversationId, "conversationId");
     }
 
@@ -712,7 +712,7 @@ public class ConversationService implements IConversationService {
         timer.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
     }
 
-    private static String createReferenceForMetrics(String botId, String conversationId) {
-        return botId.concat(":").concat(conversationId);
+    private static String createReferenceForMetrics(String agentId, String conversationId) {
+        return agentId.concat(":").concat(conversationId);
     }
 }

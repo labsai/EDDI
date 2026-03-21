@@ -6,7 +6,7 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 
 /**
- * Runs all Bot Engine tests against PostgreSQL.
+ * Runs all Agent Engine tests against PostgreSQL.
  */
 @QuarkusTest
 @TestProfile(PostgresIntegrationTestProfile.class)

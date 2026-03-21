@@ -7,7 +7,7 @@ import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PipelineConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import ai.labs.eddi.engine.memory.IData;
@@ -291,7 +291,7 @@ public class PropertySetterTask implements ILifecycleTask {
 
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws PackageConfigurationException {
+            throws PipelineConfigurationException {
 
         List<SetOnActions> setOnActionsList = new LinkedList<>();
 
@@ -311,7 +311,7 @@ public class PropertySetterTask implements ILifecycleTask {
             }
         } catch (ServiceException e) {
             String message = "Error while fetching PropertySetterConfiguration!\n" + e.getLocalizedMessage();
-            throw new PackageConfigurationException(message, e);
+            throw new PipelineConfigurationException(message, e);
         }
 
         return new PropertySetter(new LinkedList<>(setOnActionsList));
@@ -400,10 +400,10 @@ public class PropertySetterTask implements ILifecycleTask {
      * Store a plaintext secret in the vault and return the vault reference string.
      * Also scrubs the raw user input from conversation memory to prevent leakage.
      *
-     * @param memory    the conversation memory (used for botId and input scrubbing)
+     * @param memory    the conversation memory (used for agentId and input scrubbing)
      * @param keyName   the property name used as the vault key
      * @param plaintext the secret value to store
-     * @return the vault reference string, e.g. {@code ${eddivault:default/botId/keyName}}
+     * @return the vault reference string, e.g. {@code ${eddivault:default/agentId/keyName}}
      */
     private String autoVaultSecret(IConversationMemory memory, String keyName, String plaintext) {
         // Determine tenantId — use conversation property if set, else "default"
@@ -416,8 +416,8 @@ public class PropertySetterTask implements ILifecycleTask {
             }
         }
 
-        String botId = memory.getBotId();
-        var ref = new SecretReference(tenantId, botId, keyName);
+        String agentId = memory.getAgentId();
+        var ref = new SecretReference(tenantId, agentId, keyName);
 
         // Store the plaintext in the vault (encrypted at rest)
         try {

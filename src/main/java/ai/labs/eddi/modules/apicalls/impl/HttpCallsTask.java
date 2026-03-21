@@ -6,7 +6,7 @@ import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.FieldType;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PipelineConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
@@ -88,7 +88,7 @@ public class HttpCallsTask implements ILifecycleTask {
 
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws PackageConfigurationException {
+            throws PipelineConfigurationException {
 
         Object uriObj = configuration.get("uri");
         if (!isNullOrEmpty(uriObj)) {
@@ -111,11 +111,11 @@ public class HttpCallsTask implements ILifecycleTask {
                 return httpCallsConfig;
             } catch (ServiceException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
-                throw new PackageConfigurationException(e.getMessage(), e);
+                throw new PipelineConfigurationException(e.getMessage(), e);
             }
         }
 
-        throw new PackageConfigurationException("No resource URI has been defined! [HttpCallsConfiguration]");
+        throw new PipelineConfigurationException("No resource URI has been defined! [HttpCallsConfiguration]");
     }
 
     @Override

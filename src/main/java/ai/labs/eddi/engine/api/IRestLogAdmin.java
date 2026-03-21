@@ -27,7 +27,7 @@ public interface IRestLogAdmin {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Get recent logs from the in-memory ring buffer.")
     List<LogEntry> getRecentLogs(
-            @QueryParam("botId") String botId,
+            @QueryParam("agentId") String agentId,
             @QueryParam("conversationId") String conversationId,
             @QueryParam("level") String level,
             @QueryParam("limit") @DefaultValue("200") int limit);
@@ -38,8 +38,8 @@ public interface IRestLogAdmin {
     @Operation(description = "Get historical logs from the database (survives restarts, cross-instance).")
     List<DatabaseLog> getHistoryLogs(
             @QueryParam("environment") Deployment.Environment environment,
-            @QueryParam("botId") String botId,
-            @QueryParam("botVersion") Integer botVersion,
+            @QueryParam("agentId") String agentId,
+            @QueryParam("agentVersion") Integer agentVersion,
             @QueryParam("conversationId") String conversationId,
             @QueryParam("userId") String userId,
             @QueryParam("instanceId") String instanceId,
@@ -51,7 +51,7 @@ public interface IRestLogAdmin {
     @Produces(MediaType.SERVER_SENT_EVENTS)
     @Operation(description = "Live-tail log stream via SSE. Pushes log entries as they occur.")
     void streamLogs(
-            @QueryParam("botId") String botId,
+            @QueryParam("agentId") String agentId,
             @QueryParam("conversationId") String conversationId,
             @QueryParam("level") String level,
             @Context SseEventSink eventSink,

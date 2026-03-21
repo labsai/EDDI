@@ -9,7 +9,7 @@ import java.time.Instant;
 public class EncryptedSecret {
     private String id;
     private String tenantId;
-    private String botId;
+    private String agentId;
     private String keyName;
     /** Base64-encoded AES-256-GCM ciphertext (includes auth tag) */
     private String encryptedValue;
@@ -25,12 +25,12 @@ public class EncryptedSecret {
     public EncryptedSecret() {
     }
 
-    public EncryptedSecret(String id, String tenantId, String botId, String keyName,
+    public EncryptedSecret(String id, String tenantId, String agentId, String keyName,
                            String encryptedValue, String iv, String dekId, String checksum,
                            Instant createdAt, Instant lastAccessedAt) {
         this.id = id;
         this.tenantId = tenantId;
-        this.botId = botId;
+        this.agentId = agentId;
         this.keyName = keyName;
         this.encryptedValue = encryptedValue;
         this.iv = iv;
@@ -46,8 +46,8 @@ public class EncryptedSecret {
     public String getTenantId() { return tenantId; }
     public void setTenantId(String tenantId) { this.tenantId = tenantId; }
 
-    public String getBotId() { return botId; }
-    public void setBotId(String botId) { this.botId = botId; }
+    public String getAgentId() { return agentId; }
+    public void setAgentId(String agentId) { this.agentId = agentId; }
 
     public String getKeyName() { return keyName; }
     public void setKeyName(String keyName) { this.keyName = keyName; }

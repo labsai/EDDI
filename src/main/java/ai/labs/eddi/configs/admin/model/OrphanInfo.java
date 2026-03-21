@@ -4,7 +4,7 @@ package ai.labs.eddi.configs.admin.model;
 import java.net.URI;
 
 /**
- * Represents an orphaned resource that is not referenced by any bot or package.
+ * Represents an orphaned resource that is not referenced by any Agent or package.
  */
 public class OrphanInfo {
     private URI resourceUri;

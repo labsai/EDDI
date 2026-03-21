@@ -1,0 +1,122 @@
+package ai.labs.eddi.engine.runtime.client.pipelines;
+
+import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
+import ai.labs.eddi.engine.lifecycle.IComponentCache;
+import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
+import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
+import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PipelineConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.UnrecognizedExtensionException;
+import ai.labs.eddi.engine.lifecycle.internal.LifecycleManager;
+import ai.labs.eddi.engine.runtime.IExecutablePipeline;
+import ai.labs.eddi.engine.runtime.service.IPipelineStoreService;
+import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.utils.RestUtilities;
+
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.inject.Provider;
+import java.net.URI;
+import java.util.List;
+import java.util.Map;
+
+import static ai.labs.eddi.utils.LifecycleUtilities.createComponentKey;
+import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
+
+/**
+ * @author ginccc
+ */
+@ApplicationScoped
+public class PipelineStoreClientLibrary implements IPipelineStoreClientLibrary {
+    private final IPipelineStoreService PipelineStoreService;
+    private final Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider;
+    private static final String URI_SCHEME_ID = "eddi";
+    private final IComponentCache componentCache;
+
+    @Inject
+    public PipelineStoreClientLibrary(IPipelineStoreService PipelineStoreService,
+                                     IComponentCache componentCache,
+                                     @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider) {
+        this.PipelineStoreService = PipelineStoreService;
+        this.lifecycleExtensionsProvider = lifecycleExtensionsProvider;
+
+        this.componentCache = componentCache;
+    }
+
+    @Override
+    public IExecutablePipeline getExecutablePipeline(final String packageId, final Integer packageVersion) throws ServiceException {
+        try {
+            DocumentDescriptor packageDocumentDescriptor = PipelineStoreService.getPackageDocumentDescriptor(packageId, packageVersion);
+            PipelineConfiguration knowledgePackage = PipelineStoreService.getKnowledgePackage(packageId, packageVersion);
+            return createExecutablePackage(packageDocumentDescriptor, knowledgePackage);
+        } catch (PackageInitializationException e) {
+            throw new ServiceException("Error while creating executablePipeline!", e);
+        } catch (PipelineConfigurationException e) {
+            throw new ServiceException("Error while configuring executablePipeline!", e);
+        }
+    }
+
+    private IExecutablePipeline createExecutablePackage(final DocumentDescriptor documentDescriptor,
+                                                       final PipelineConfiguration PipelineConfiguration)
+            throws PackageInitializationException, PipelineConfigurationException {
+
+        final var packageId = extractResourceId(documentDescriptor.getResource());
+        final var lifecycleManager = new LifecycleManager(componentCache, packageId);
+
+        try {
+            List<PipelineConfiguration.PipelineStep> PipelineSteps = PipelineConfiguration.getPipelineSteps();
+            for (int indexInPackage = 0; indexInPackage < PipelineSteps.size(); indexInPackage++) {
+                PipelineConfiguration.PipelineStep PipelineStep = PipelineSteps.get(indexInPackage);
+                URI extensionType = PipelineStep.getType();
+                if (URI_SCHEME_ID.equals(extensionType.getScheme())) {
+                    String type = extensionType.getHost();
+                    if (!lifecycleExtensionsProvider.containsKey(type)) {
+                        throw new UnrecognizedExtensionException(String.format("Extension '%s' not found", type));
+                    }
+
+                    var componentKey = createComponentKey(packageId.getId(), packageId.getVersion(), indexInPackage);
+                    var lifecycleTask = lifecycleExtensionsProvider.get(type).get();
+                    var component = lifecycleTask.
+                            configure(PipelineStep.getConfig(), PipelineStep.getExtensions());
+
+                    if (component != null) {
+                        componentCache.put(type, componentKey, component);
+                    }
+                    lifecycleManager.addLifecycleTask(lifecycleTask);
+                }
+            }
+        } catch (IllegalExtensionConfigurationException | UnrecognizedExtensionException e) {
+            throw new PackageInitializationException(e.getMessage(), e);
+        }
+
+        return new IExecutablePipeline() {
+            @Override
+            public String getName() {
+                return documentDescriptor.getName();
+            }
+
+            @Override
+            public String getDescription() {
+                return documentDescriptor.getDescription();
+            }
+
+            @Override
+            public String getPackageId() {
+                return RestUtilities.extractResourceId(documentDescriptor.getResource()).getId();
+            }
+
+            @Override
+            public ILifecycleManager getLifecycleManager() {
+                return lifecycleManager;
+            }
+        };
+    }
+
+    public static class PackageInitializationException extends Exception {
+        PackageInitializationException(String message, Throwable e) {
+            super(message, e);
+        }
+    }
+}

@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * Read-only REST API for the immutable audit ledger.
  * <p>
- * Provides query access to audit entries by conversation or bot.
+ * Provides query access to audit entries by conversation or agent.
  * No create/update/delete endpoints — entries are created internally
  * by the lifecycle pipeline.
  *
@@ -36,19 +36,19 @@ public interface IRestAuditStore {
             @QueryParam("limit") @DefaultValue("100") int limit);
 
     /**
-     * Get the audit trail for a specific bot.
+     * Get the audit trail for a specific agent.
      *
-     * @param botId      the bot identifier
-     * @param botVersion the bot version (optional, null = all versions)
+     * @param agentId      the Agent identifier
+     * @param agentVersion the Agent version (optional, null = all versions)
      * @param skip       number of entries to skip (default: 0)
      * @param limit      maximum entries to return (default: 100)
      * @return list of audit entries, newest first
      */
     @GET
-    @Path("/bot/{botId}")
+    @Path("/bot/{agentId}")
     List<AuditEntry> getAuditTrailByBot(
-            @PathParam("botId") String botId,
-            @QueryParam("botVersion") Integer botVersion,
+            @PathParam("agentId") String agentId,
+            @QueryParam("agentVersion") Integer agentVersion,
             @QueryParam("skip") @DefaultValue("0") int skip,
             @QueryParam("limit") @DefaultValue("100") int limit);
 

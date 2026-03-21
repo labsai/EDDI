@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
  * grouped by OpenAPI tag. Each tag becomes a separate HttpCallsConfiguration with
  * proper naming (e.g. "MyAPI - Users", "MyAPI - Orders").
  *
- * <p>This is a stateless utility used by {@link McpSetupTools#createApiBot}.</p>
+ * <p>This is a stateless utility used by {@link McpSetupTools#createApIAgent}.</p>
  *
  * @author ginccc
  */

@@ -88,7 +88,7 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
         // Send input first
         sendUserInput(botResourceId.id(), conversationId.id(), "hello", false, false);
 
-        // Undo — path is /{env}/{botId}/undo/{convId}
+        // Undo — path is /{env}/{agentId}/undo/{convId}
         Response undoResponse = given()
                 .post(String.format("bots/production/%s/undo/%s", botResourceId.id(), conversationId.id()));
 
@@ -104,10 +104,10 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
         // Send input
         sendUserInput(botResourceId.id(), conversationId.id(), "hello", false, false);
 
-        // Undo — path is /{env}/{botId}/undo/{convId}
+        // Undo — path is /{env}/{agentId}/undo/{convId}
         given().post(String.format("bots/production/%s/undo/%s", botResourceId.id(), conversationId.id()));
 
-        // Redo — path is /{env}/{botId}/redo/{convId}
+        // Redo — path is /{env}/{agentId}/redo/{convId}
         Response redoResponse = given()
                 .post(String.format("bots/production/%s/redo/%s", botResourceId.id(), conversationId.id()));
 
@@ -169,7 +169,7 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
 
         String packageBody = String.format("""
                 {
-                  "packageExtensions": [
+                  "PipelineSteps": [
                     {
                       "type": "eddi://ai.labs.parser",
                       "config": {},
@@ -187,14 +187,14 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
                   ]
                 }""", locationDictionary, locationBehavior, locationOutput);
 
-        String locationPackage = createResource(packageBody, "/packagestore/packages");
+        String locationPackage = createResource(packageBody, "/PipelineStore/packages");
 
         String botBody = String.format("""
                 {"packages": ["%s"]}""", locationPackage);
-        String botLocation = createResource(botBody, "/botstore/bots");
+        String botLocation = createResource(botBody, "/AgentStore/bots");
 
-        ResourceId botId = extractResourceId(botLocation);
-        deployBot(botId.id(), botId.version());
-        return botId;
+        ResourceId agentId = extractResourceId(botLocation);
+        deployAgent(agentId.id(), agentId.version());
+        return agentId;
     }
 }

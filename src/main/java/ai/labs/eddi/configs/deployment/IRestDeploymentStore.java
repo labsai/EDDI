@@ -15,7 +15,7 @@ import java.util.List;
  */
 // @Api(value = "Bot Administration", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/deploymentstore/deployments")
-@Tag(name = "08. Bot Administration", description = "Deploy & Undeploy Bots")
+@Tag(name = "08. Agent Administration", description = "Deploy & Undeploy Bots")
 public interface IRestDeploymentStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)

@@ -86,10 +86,10 @@ public class LogAdminIT {
 
     @Test
     @Order(5)
-    @DisplayName("GET /administration/logs with nonexistent botId should return empty or filtered list")
+    @DisplayName("GET /administration/logs with nonexistent agentId should return empty or filtered list")
     void getRecentLogs_filtersByBotId() {
         given()
-                .queryParam("botId", "nonexistent-bot")
+                .queryParam("agentId", "nonexistent-bot")
                 .get(BASE)
                 .then().assertThat()
                 .statusCode(200)
@@ -116,7 +116,7 @@ public class LogAdminIT {
     @DisplayName("GET /administration/logs/history with filters should return filtered results")
     void getHistoryLogs_acceptsFilters() {
         given()
-                .queryParam("botId", "nonexistent-bot")
+                .queryParam("agentId", "nonexistent-bot")
                 .queryParam("limit", 10)
                 .queryParam("skip", 0)
                 .get(BASE + "/history")

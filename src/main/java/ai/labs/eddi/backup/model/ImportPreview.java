@@ -8,7 +8,7 @@ import java.util.List;
  */
 public record ImportPreview(
         String botOriginId,
-        String botName,
+        String agentName,
         List<ResourceDiff> resources
 ) {
     public record ResourceDiff(

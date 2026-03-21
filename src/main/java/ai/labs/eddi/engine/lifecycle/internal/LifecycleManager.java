@@ -31,7 +31,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  *
  * <h2>Lifecycle Pipeline Concept</h2>
  * <p>
- * Instead of hard-coded bot logic, EDDI processes conversations through a
+ * Instead of hard-coded Agent logic, EDDI processes conversations through a
  * configurable
  * pipeline of tasks:
  * </p>
@@ -92,7 +92,7 @@ public class LifecycleManager implements ILifecycleManager {
 
     /**
      * The ordered list of lifecycle tasks to execute.
-     * Tasks are added during bot initialization based on package configuration.
+     * Tasks are added during Agent initialization based on package configuration.
      */
     private final List<ILifecycleTask> lifecycleTasks;
 
@@ -293,8 +293,8 @@ public class LifecycleManager implements ILifecycleManager {
         return new AuditEntry(
                 UUID.randomUUID().toString(),
                 memory.getConversationId(),
-                memory.getBotId(),
-                memory.getBotVersion(),
+                memory.getAgentId(),
+                memory.getAgentVersion(),
                 memory.getUserId(),
                 null, // environment is set by ConversationService
                 stepIndex,
@@ -382,7 +382,7 @@ public class LifecycleManager implements ILifecycleManager {
      * <p>
      * Tasks are executed in the order they are added. This method is typically
      * called
-     * during bot initialization, when the bot's package configuration is being
+     * during Agent initialization, when the bot's package configuration is being
      * loaded.
      * </p>
      *

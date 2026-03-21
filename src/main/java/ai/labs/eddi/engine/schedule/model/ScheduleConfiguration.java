@@ -4,7 +4,7 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * Configuration for a scheduled bot trigger.
+ * Configuration for a scheduled Agent trigger.
  * <p>
  * Supports cron schedules, heartbeat intervals, and one-shot triggers:
  * <ul>
@@ -41,8 +41,8 @@ public class ScheduleConfiguration {
     private TriggerType triggerType = TriggerType.CRON;
 
     // -- Target --
-    private String botId;
-    private int botVersion;          // 0 = latest deployed
+    private String agentId;
+    private int agentVersion;          // 0 = latest deployed
     private String environment;      // "production" | "restricted" | "test"
     private String tenantId;
 
@@ -111,20 +111,20 @@ public class ScheduleConfiguration {
         this.triggerType = triggerType;
     }
 
-    public String getBotId() {
-        return botId;
+    public String getAgentId() {
+        return agentId;
     }
 
-    public void setBotId(String botId) {
-        this.botId = botId;
+    public void setAgentId(String agentId) {
+        this.agentId = agentId;
     }
 
-    public int getBotVersion() {
-        return botVersion;
+    public int getAgentVersion() {
+        return agentVersion;
     }
 
-    public void setBotVersion(int botVersion) {
-        this.botVersion = botVersion;
+    public void setAgentVersion(int agentVersion) {
+        this.agentVersion = agentVersion;
     }
 
     public String getEnvironment() {

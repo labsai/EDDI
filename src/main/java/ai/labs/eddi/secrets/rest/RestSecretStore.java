@@ -42,10 +42,10 @@ public class RestSecretStore implements IRestSecretStore {
     }
 
     @Override
-    public Response storeSecret(String tenantId, String botId, String keyName, SecretRequest body) {
+    public Response storeSecret(String tenantId, String agentId, String keyName, SecretRequest body) {
         try {
             validateId(tenantId, "tenantId");
-            validateId(botId, "botId");
+            validateId(agentId, "agentId");
             validateId(keyName, "keyName");
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST)
@@ -58,7 +58,7 @@ public class RestSecretStore implements IRestSecretStore {
         }
 
         try {
-            var ref = new SecretReference(tenantId, botId, keyName);
+            var ref = new SecretReference(tenantId, agentId, keyName);
 
             // Check if exists (for correct HTTP status)
             boolean exists;
@@ -74,7 +74,7 @@ public class RestSecretStore implements IRestSecretStore {
             var responseRef = Map.of(
                     "reference", ref.toReferenceString(),
                     "tenantId", tenantId,
-                    "botId", botId,
+                    "agentId", agentId,
                     "keyName", keyName);
 
             if (exists) {
@@ -84,7 +84,7 @@ public class RestSecretStore implements IRestSecretStore {
             }
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.errorv("Failed to store secret: {0}/{1}/{2} — {3}",
-                    tenantId, botId, keyName, e.getMessage());
+                    tenantId, agentId, keyName, e.getMessage());
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
                     .entity(Map.of("error", "Failed to store secret"))
                     .build();
@@ -92,17 +92,17 @@ public class RestSecretStore implements IRestSecretStore {
     }
 
     @Override
-    public Response deleteSecret(String tenantId, String botId, String keyName) {
+    public Response deleteSecret(String tenantId, String agentId, String keyName) {
         try {
             validateId(tenantId, "tenantId");
-            validateId(botId, "botId");
+            validateId(agentId, "agentId");
             validateId(keyName, "keyName");
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity(Map.of("error", e.getMessage())).build();
         }
         try {
-            secretProvider.delete(new SecretReference(tenantId, botId, keyName));
+            secretProvider.delete(new SecretReference(tenantId, agentId, keyName));
             return Response.noContent().build();
         } catch (ISecretProvider.SecretNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND)
@@ -110,7 +110,7 @@ public class RestSecretStore implements IRestSecretStore {
                     .build();
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.errorv("Failed to delete secret: {0}/{1}/{2} — {3}",
-                    tenantId, botId, keyName, e.getMessage());
+                    tenantId, agentId, keyName, e.getMessage());
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
                     .entity(Map.of("error", "Failed to delete secret"))
                     .build();
@@ -118,17 +118,17 @@ public class RestSecretStore implements IRestSecretStore {
     }
 
     @Override
-    public Response getSecretMetadata(String tenantId, String botId, String keyName) {
+    public Response getSecretMetadata(String tenantId, String agentId, String keyName) {
         try {
             validateId(tenantId, "tenantId");
-            validateId(botId, "botId");
+            validateId(agentId, "agentId");
             validateId(keyName, "keyName");
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity(Map.of("error", e.getMessage())).build();
         }
         try {
-            SecretMetadata metadata = secretProvider.getMetadata(new SecretReference(tenantId, botId, keyName));
+            SecretMetadata metadata = secretProvider.getMetadata(new SecretReference(tenantId, agentId, keyName));
             return Response.ok(metadata).build();
         } catch (ISecretProvider.SecretNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND)
@@ -136,7 +136,7 @@ public class RestSecretStore implements IRestSecretStore {
                     .build();
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.errorv("Failed to get secret metadata: {0}/{1}/{2} — {3}",
-                    tenantId, botId, keyName, e.getMessage());
+                    tenantId, agentId, keyName, e.getMessage());
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
                     .entity(Map.of("error", "Failed to get metadata"))
                     .build();
@@ -144,18 +144,18 @@ public class RestSecretStore implements IRestSecretStore {
     }
 
     @Override
-    public List<?> listSecrets(String tenantId, String botId) {
+    public List<?> listSecrets(String tenantId, String agentId) {
         try {
             validateId(tenantId, "tenantId");
-            validateId(botId, "botId");
+            validateId(agentId, "agentId");
         } catch (IllegalArgumentException e) {
             return List.of();
         }
         try {
-            return secretProvider.listKeys(tenantId, botId);
+            return secretProvider.listKeys(tenantId, agentId);
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.errorv("Failed to list secrets: {0}/{1} — {2}",
-                    tenantId, botId, e.getMessage());
+                    tenantId, agentId, e.getMessage());
             return List.of();
         }
     }

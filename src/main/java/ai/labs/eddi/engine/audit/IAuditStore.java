@@ -43,15 +43,15 @@ public interface IAuditStore {
     List<AuditEntry> getEntries(String conversationId, int skip, int limit);
 
     /**
-     * Retrieve audit entries for a specific bot version, ordered by timestamp descending.
+     * Retrieve audit entries for a specific Agent version, ordered by timestamp descending.
      *
-     * @param botId      the bot identifier
-     * @param botVersion the bot version (null = all versions)
+     * @param agentId      the Agent identifier
+     * @param agentVersion the Agent version (null = all versions)
      * @param skip       number of entries to skip
      * @param limit      maximum entries to return
      * @return list of audit entries, newest first
      */
-    List<AuditEntry> getEntriesByBot(String botId, Integer botVersion, int skip, int limit);
+    List<AuditEntry> getEntriesByBot(String agentId, Integer agentVersion, int skip, int limit);
 
     /**
      * Count the total number of audit entries for a conversation.

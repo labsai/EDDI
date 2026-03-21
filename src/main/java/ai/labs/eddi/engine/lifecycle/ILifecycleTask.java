@@ -2,7 +2,7 @@ package ai.labs.eddi.engine.lifecycle;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.PipelineConfigurationException;
 import ai.labs.eddi.engine.lifecycle.exceptions.UnrecognizedExtensionException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor;
@@ -12,12 +12,12 @@ import java.util.Map;
 /**
  * Core interface for EDDI's Lifecycle Pipeline architecture.
  *
- * <p>ILifecycleTask represents a single processing step in EDDI's configurable bot pipeline.
+ * <p>ILifecycleTask represents a single processing step in EDDI's configurable Agent pipeline.
  * Each bot's behavior is defined by a sequence of lifecycle tasks that execute in order,
  * transforming the conversation memory at each step.</p>
  *
  * <h2>Lifecycle Pipeline Concept</h2>
- * <p>Instead of hard-coded bot logic, EDDI processes user interactions through a sequential
+ * <p>Instead of hard-coded Agent logic, EDDI processes user interactions through a sequential
  * pipeline of pluggable tasks:</p>
  * <pre>
  * User Input → Parser → Behavior Rules → API/LLM Calls → Output Generation → Save
@@ -147,7 +147,7 @@ public interface ILifecycleTask {
     /**
      * Configures this lifecycle task with extension-specific settings.
      *
-     * <p>This method is called during bot initialization to set up task-specific
+     * <p>This method is called during Agent initialization to set up task-specific
      * configurations from package extensions. The default implementation returns null,
      * indicating no configuration is needed.</p>
      *
@@ -163,7 +163,7 @@ public interface ILifecycleTask {
      * @Override
      * public Object configure(Map<String, Object> configuration,
      *                         Map<String, Object> extensions)
-     *         throws PackageConfigurationException {
+     *         throws PipelineConfigurationException {
      *     String uri = (String) extensions.get("uri");
      *     MyConfig config = configStore.load(uri);
      *     return config;
@@ -173,12 +173,12 @@ public interface ILifecycleTask {
      * @param configuration task-specific configuration parameters from package config
      * @param extensions extension URIs and metadata from package definition
      * @return configured component object to be passed to execute(), or null if no configuration needed
-     * @throws PackageConfigurationException if configuration is invalid
+     * @throws PipelineConfigurationException if configuration is invalid
      * @throws IllegalExtensionConfigurationException if extension configuration is malformed
      * @throws UnrecognizedExtensionException if the extension type is not supported
      */
     default Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws PackageConfigurationException, IllegalExtensionConfigurationException, UnrecognizedExtensionException {
+            throws PipelineConfigurationException, IllegalExtensionConfigurationException, UnrecognizedExtensionException {
 
         //to be overridden if needed
         return null;

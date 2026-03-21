@@ -6,8 +6,8 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
  * @author ginccc
  */
 public class DeploymentInfo {
-    private String botId;
-    private Integer botVersion;
+    private String agentId;
+    private Integer agentVersion;
     private Environment environment;
     private DeploymentStatus deploymentStatus;
 
@@ -16,20 +16,20 @@ public class DeploymentInfo {
         undeployed
     }
 
-    public String getBotId() {
-        return botId;
+    public String getAgentId() {
+        return agentId;
     }
 
-    public void setBotId(String botId) {
-        this.botId = botId;
+    public void setAgentId(String agentId) {
+        this.agentId = agentId;
     }
 
-    public Integer getBotVersion() {
-        return botVersion;
+    public Integer getAgentVersion() {
+        return agentVersion;
     }
 
-    public void setBotVersion(Integer botVersion) {
-        this.botVersion = botVersion;
+    public void setAgentVersion(Integer agentVersion) {
+        this.agentVersion = agentVersion;
     }
 
     public Environment getEnvironment() {

@@ -43,24 +43,24 @@ public class RestLogAdmin implements IRestLogAdmin {
     }
 
     @Override
-    public List<LogEntry> getRecentLogs(String botId, String conversationId, String level, int limit) {
-        return boundedLogStore.getEntries(botId, conversationId, level, limit);
+    public List<LogEntry> getRecentLogs(String agentId, String conversationId, String level, int limit) {
+        return boundedLogStore.getEntries(agentId, conversationId, level, limit);
     }
 
     @Override
-    public List<DatabaseLog> getHistoryLogs(Deployment.Environment environment, String botId,
-                                             Integer botVersion, String conversationId,
+    public List<DatabaseLog> getHistoryLogs(Deployment.Environment environment, String agentId,
+                                             Integer agentVersion, String conversationId,
                                              String userId, String instanceId,
                                              Integer skip, Integer limit) {
-        return databaseLogs.getLogs(environment, botId, botVersion, conversationId, userId, instanceId, skip, limit);
+        return databaseLogs.getLogs(environment, agentId, agentVersion, conversationId, userId, instanceId, skip, limit);
     }
 
     @Override
-    public void streamLogs(String botId, String conversationId, String level,
+    public void streamLogs(String agentId, String conversationId, String level,
                            SseEventSink eventSink, Sse sse) {
 
         // Send initial batch from ring buffer
-        List<LogEntry> initial = boundedLogStore.getEntries(botId, conversationId, level, 50);
+        List<LogEntry> initial = boundedLogStore.getEntries(agentId, conversationId, level, 50);
         for (int i = initial.size() - 1; i >= 0; i--) {
             sendEvent(eventSink, sse, initial.get(i));
         }
@@ -70,7 +70,7 @@ public class RestLogAdmin implements IRestLogAdmin {
             if (eventSink.isClosed()) return;
 
             // Apply filters
-            if (botId != null && !botId.equals(entry.botId())) return;
+            if (agentId != null && !agentId.equals(entry.agentId())) return;
             if (conversationId != null && !conversationId.equals(entry.conversationId())) return;
             if (level != null && !level.equalsIgnoreCase(entry.level())) return;
 
@@ -96,8 +96,8 @@ public class RestLogAdmin implements IRestLogAdmin {
             }
         });
 
-        log.debugv("SSE log stream started (listenerId={0}, botId={1}, level={2})",
-                listenerId, botId, level);
+        log.debugv("SSE log stream started (listenerId={0}, agentId={1}, level={2})",
+                listenerId, agentId, level);
     }
 
     @Override

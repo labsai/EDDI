@@ -18,9 +18,9 @@ import java.util.Stack;
 public interface IConversationMemory extends Serializable {
     String getConversationId();
 
-    String getBotId();
+    String getAgentId();
 
-    Integer getBotVersion();
+    Integer getAgentVersion();
 
     String getUserId();
 

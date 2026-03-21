@@ -48,7 +48,7 @@ public abstract class AbstractMongoResourceStore<T> extends AbstractResourceStor
     /**
      * Constructor for subclasses that build custom HistorizedResourceStore
      * instances.
-     * Used by BotStore and PackageStore which have inner classes extending
+     * Used by AgentStore and PipelineStore which have inner classes extending
      * MongoResourceStorage.
      */
     @Deprecated

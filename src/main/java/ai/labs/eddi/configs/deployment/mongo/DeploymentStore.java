@@ -26,15 +26,15 @@ public class DeploymentStore implements IDeploymentStore {
     }
 
     @Override
-    public DeploymentInfo getDeploymentInfo(String environment, String botId, Integer botVersion)
+    public DeploymentInfo getDeploymentInfo(String environment, String agentId, Integer agentVersion)
             throws IResourceStore.ResourceStoreException {
-        return storage.readDeploymentInfo(environment, botId, botVersion);
+        return storage.readDeploymentInfo(environment, agentId, agentVersion);
     }
 
     @Override
-    public void setDeploymentInfo(String environment, String botId, Integer botVersion,
+    public void setDeploymentInfo(String environment, String agentId, Integer agentVersion,
                                   DeploymentInfo.DeploymentStatus deploymentStatus) {
-        storage.setDeploymentInfo(environment, botId, botVersion, deploymentStatus);
+        storage.setDeploymentInfo(environment, agentId, agentVersion, deploymentStatus);
     }
 
     @Override

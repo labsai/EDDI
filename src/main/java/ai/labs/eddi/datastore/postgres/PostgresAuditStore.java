@@ -33,8 +33,8 @@ public class PostgresAuditStore implements IAuditStore {
             CREATE TABLE IF NOT EXISTS audit_ledger (
                 id UUID PRIMARY KEY,
                 conversation_id TEXT NOT NULL,
-                bot_id TEXT NOT NULL,
-                bot_version INTEGER NOT NULL,
+                AGENT_ID TEXT NOT NULL,
+                AGENT_VERSION INTEGER NOT NULL,
                 user_id TEXT,
                 environment TEXT,
                 step_index INTEGER NOT NULL,
@@ -52,19 +52,19 @@ public class PostgresAuditStore implements IAuditStore {
     private static final String CREATE_INDEX_CONV =
             "CREATE INDEX IF NOT EXISTS idx_audit_conv ON audit_ledger (conversation_id)";
     private static final String CREATE_INDEX_BOT =
-            "CREATE INDEX IF NOT EXISTS idx_audit_bot ON audit_ledger (bot_id, bot_version)";
+            "CREATE INDEX IF NOT EXISTS idx_audit_bot ON audit_ledger (AGENT_ID, AGENT_VERSION)";
     private static final String CREATE_INDEX_TS =
             "CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_ledger (created_at DESC)";
 
     private static final String INSERT_SQL = """
             INSERT INTO audit_ledger
-                (id, conversation_id, bot_id, bot_version, user_id, environment,
+                (id, conversation_id, AGENT_ID, AGENT_VERSION, user_id, environment,
                  step_index, task_id, task_type, task_index, duration_ms, cost, hmac, created_at, data)
             VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
             """;
 
     private static final String SELECT_ALL = """
-            id, conversation_id, bot_id, bot_version, user_id, environment,
+            id, conversation_id, AGENT_ID, AGENT_VERSION, user_id, environment,
             step_index, task_id, task_type, task_index, duration_ms, cost, hmac, created_at, data
             """;
 
@@ -129,15 +129,15 @@ public class PostgresAuditStore implements IAuditStore {
     }
 
     @Override
-    public List<AuditEntry> getEntriesByBot(String botId, Integer botVersion, int skip, int limit) {
+    public List<AuditEntry> getEntriesByBot(String agentId, Integer agentVersion, int skip, int limit) {
         ensureSchema();
-        if (botVersion != null) {
+        if (agentVersion != null) {
             String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger" +
-                    " WHERE bot_id = ? AND bot_version = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
+                    " WHERE AGENT_ID = ? AND AGENT_VERSION = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
             try (Connection conn = dataSource.getConnection();
                  PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, botId);
-                ps.setInt(2, botVersion);
+                ps.setString(1, agentId);
+                ps.setInt(2, agentVersion);
                 ps.setInt(3, limit);
                 ps.setInt(4, skip);
                 return readEntries(ps);
@@ -146,8 +146,8 @@ public class PostgresAuditStore implements IAuditStore {
             }
         } else {
             String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger" +
-                    " WHERE bot_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
-            return queryEntries(sql, botId, limit, skip);
+                    " WHERE AGENT_ID = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
+            return queryEntries(sql, agentId, limit, skip);
         }
     }
 
@@ -180,8 +180,8 @@ public class PostgresAuditStore implements IAuditStore {
 
         ps.setString(1, entry.id() != null ? entry.id() : UUID.randomUUID().toString());
         ps.setString(2, entry.conversationId());
-        ps.setString(3, entry.botId());
-        ps.setInt(4, entry.botVersion());
+        ps.setString(3, entry.agentId());
+        ps.setInt(4, entry.agentVersion());
         ps.setString(5, entry.userId());
         ps.setString(6, entry.environment());
         ps.setInt(7, entry.stepIndex());
@@ -227,8 +227,8 @@ public class PostgresAuditStore implements IAuditStore {
         return new AuditEntry(
                 rs.getString("id"),
                 rs.getString("conversation_id"),
-                rs.getString("bot_id"),
-                rs.getInt("bot_version"),
+                rs.getString("AGENT_ID"),
+                rs.getInt("AGENT_VERSION"),
                 rs.getString("user_id"),
                 rs.getString("environment"),
                 rs.getInt("step_index"),
