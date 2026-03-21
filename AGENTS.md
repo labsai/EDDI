@@ -129,9 +129,9 @@ Phase 6F: Contextual Logging — MDC + Manager Log Panel (5 SP)   [QUICK WIN]  �
 Phase 6D: Lombok Removal (5 SP)   [QUICK WIN]  ✅
   6D. Delombok 114 files, explicit getters/setters, JBoss Logger    5 SP
 
-Phase 7: Secrets, Audit + Tenant Foundation (12 SP) ✅ (33b remaining)
+Phase 7: Secrets, Audit + Tenant Foundation (12 SP) ✅
   33. Secrets Vault — ${vault:key} references, export sanitization  5 SP  ✅
-  33b. Chat UI password field + Manager vault integration           2 SP
+  33b. Chat UI password field + Manager vault integration           2 SP  ✅
   34. Immutable Audit Ledger — write-once trail, EU AI Act          5 SP  ✅
   34b. Tenant Quota Stub — per-tenant rate limits, usage metering   2 SP  ✅
 

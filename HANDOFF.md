@@ -561,7 +561,7 @@ All hooks are **non-fatal** — if schedule operations fail, the primary bot ope
 ### Phase 7 (continued)
 
 - [x] ~~Item 33: Secrets Vault~~ ✅
-- [ ] Item 33b: Chat UI password field + Manager integration (remaining vault work)
+- [x] ~~Item 33b: Chat UI password field + Manager integration~~ ✅
 - [x] ~~Item 34: Immutable Audit Ledger~~ ✅
 - [x] ~~Item 34b: Tenant Quota Stub~~ ✅
 
