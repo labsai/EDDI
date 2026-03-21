@@ -498,6 +498,58 @@
 - `LangchainTaskTest.java` — updated storeData expected counts
 - `ConversationServiceTest.java` — updated constructor
 
+### Scheduled Triggers & Heartbeats ✅
+
+Two trigger types on a shared engine:
+
+| Trigger | Config | Default Strategy | Next Fire Logic |
+|---------|--------|-----------------|-----------------|
+| **CRON** | `cronExpression` (5-field) | `new` (fresh conversation per fire) | Recomputed from cron |
+| **HEARTBEAT** | `heartbeatIntervalSeconds` | `persistent` (single conversation) | `now + interval` (drift-proof) |
+
+**Exactly-once execution:** Atomic CAS via MongoDB `findOneAndUpdate` with `PENDING` + `nextRetryAt ≤ now` guards. Dead-lettering after configurable `maxRetries` with exponential backoff (`base × multiplier^failCount`).
+
+**Engine flow:** `SchedulePollerService.poll()` → `tryClaim()` → `ScheduleFireExecutor.fire()` → `ConversationService.say()` → `markCompleted()` / `markFailed()` / `markDeadLettered()`
+
+**MCP tools (6):** `create_schedule`, `list_schedules`, `read_schedule`, `delete_schedule`, `fire_schedule_now`, `retry_failed_schedule`
+
+**Key files:**
+
+- `src/main/java/ai/labs/eddi/configs/schedule/model/ScheduleConfiguration.java` — `TriggerType`, `FireStatus` enums
+- `src/main/java/ai/labs/eddi/configs/schedule/mongo/MongoScheduleStore.java` — CAS, atomic ops, epoch-millis
+- `src/main/java/ai/labs/eddi/engine/runtime/internal/SchedulePollerService.java` — poll + claim + backoff
+- `src/main/java/ai/labs/eddi/engine/runtime/internal/ScheduleFireExecutor.java` — fire + context injection
+- `src/main/java/ai/labs/eddi/configs/schedule/rest/RestScheduleStore.java` — REST + validation
+- `src/main/java/ai/labs/eddi/engine/mcp/McpAdminTools.java` — 6 schedule MCP tools
+- Tests: `SchedulePollerServiceTest` (12), `ScheduleFireExecutorTest` (9), `RestScheduleStoreTest` (13), `McpScheduleToolsTest` (21), `CronParserTest` (16), `CronDescriberTest` (8)
+
+**Configuration (`application.properties`):**
+
+```properties
+eddi.schedule.enabled=true
+eddi.schedule.poll-interval=30s
+eddi.schedule.lease-timeout=5m
+eddi.schedule.max-retries=5
+eddi.schedule.backoff-base-seconds=15
+eddi.schedule.backoff-multiplier=4
+eddi.schedule.min-interval-seconds=60
+```
+
+**Bot ↔ Schedule Lifecycle Hooks:**
+
+| Bot Event | Schedule Effect | Where |
+|-----------|----------------|-------|
+| **Deploy** | Auto-enable all disabled schedules for botId | `RestBotAdministration.enableSchedulesForBot()` |
+| **Undeploy** | Auto-disable all enabled schedules for botId | `RestBotAdministration.disableSchedulesForBot()` |
+| **Delete (cascade)** | Delete all schedules for botId (before package cascade) | `RestBotStore.deleteBot()` → `scheduleStore.deleteSchedulesByBotId()` |
+| **Export** | Include schedules as `{id}.schedule.json` in export ZIP | `RestExportService.exportSchedules()` |
+
+All hooks are **non-fatal** — if schedule operations fail, the primary bot operation still succeeds (logged as warning).
+
+**EDDI Manager:** No schedule UI yet. Backend REST API + MCP tools are the only interfaces.
+
+
+
 ## Next Up
 
 ### Quick Wins

@@ -5,6 +5,7 @@ import ai.labs.eddi.configs.bots.model.BotConfiguration;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
+import ai.labs.eddi.configs.schedule.IScheduleStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import jakarta.ws.rs.core.Response;
@@ -38,6 +39,8 @@ class RestBotStoreTest {
     private IDocumentDescriptorStore documentDescriptorStore;
     @Mock
     private IJsonSchemaCreator jsonSchemaCreator;
+    @Mock
+    private IScheduleStore scheduleStore;
 
     private RestBotStore restBotStore;
 
@@ -45,7 +48,7 @@ class RestBotStoreTest {
     void setUp() {
         openMocks(this);
         restBotStore = new RestBotStore(
-                botStore, restPackageStore, documentDescriptorStore, jsonSchemaCreator);
+                botStore, restPackageStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore);
     }
 
     /** Helper to create a dummy DocumentDescriptor for reference-count mocking */

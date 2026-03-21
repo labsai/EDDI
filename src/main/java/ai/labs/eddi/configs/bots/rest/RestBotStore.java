@@ -7,6 +7,7 @@ import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.packages.rest.RestPackageStore;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
+import ai.labs.eddi.configs.schedule.IScheduleStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
@@ -37,6 +38,7 @@ public class RestBotStore implements IRestBotStore {
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<BotConfiguration> restVersionInfo;
     private final IDocumentDescriptorStore documentDescriptorStore;
+    private final IScheduleStore scheduleStore;
 
     private static final Logger log = Logger.getLogger(RestBotStore.class);
 
@@ -44,12 +46,14 @@ public class RestBotStore implements IRestBotStore {
     public RestBotStore(IBotStore botStore,
             IRestPackageStore restPackageStore,
             IDocumentDescriptorStore documentDescriptorStore,
-            IJsonSchemaCreator jsonSchemaCreator) {
+            IJsonSchemaCreator jsonSchemaCreator,
+            IScheduleStore scheduleStore) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, botStore, documentDescriptorStore);
         this.documentDescriptorStore = documentDescriptorStore;
         this.botStore = botStore;
         this.restPackageStore = restPackageStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
+        this.scheduleStore = scheduleStore;
     }
 
     @Override
@@ -151,6 +155,16 @@ public class RestBotStore implements IRestBotStore {
     @Override
     public Response deleteBot(String id, Integer version, Boolean permanent, Boolean cascade) {
         if (cascade) {
+            // Cascade-delete all schedules for this bot first
+            try {
+                int deletedSchedules = scheduleStore.deleteSchedulesByBotId(id);
+                if (deletedSchedules > 0) {
+                    log.infof("Cascade-deleted %d schedule(s) for bot %s", deletedSchedules, id);
+                }
+            } catch (Exception e) {
+                log.warnf("Failed to cascade-delete schedules for bot %s: %s", id, e.getMessage());
+            }
+
             try {
                 BotConfiguration botConfiguration = botStore.read(id, version);
                 for (URI packageUri : botConfiguration.getPackages()) {

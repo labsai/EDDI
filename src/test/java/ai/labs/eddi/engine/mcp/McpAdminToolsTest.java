@@ -6,12 +6,15 @@ import ai.labs.eddi.configs.documentdescriptor.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
 import ai.labs.eddi.configs.packages.IRestPackageStore;
 import ai.labs.eddi.configs.patch.PatchInstruction;
+import ai.labs.eddi.configs.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.model.BotDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.Deployment.Status;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
+import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,8 +55,13 @@ class McpAdminToolsTest {
         when(restInterfaceFactory.get(IRestPackageStore.class)).thenReturn(packageStore);
         when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
 
+        var scheduleStore = mock(IScheduleStore.class);
+        var scheduleFireExecutor = mock(ScheduleFireExecutor.class);
+        var schedulePollerService = mock(SchedulePollerService.class);
+
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        tools = new McpAdminTools(restInterfaceFactory, botAdmin, jsonSerialization);
+        tools = new McpAdminTools(restInterfaceFactory, botAdmin, jsonSerialization,
+                scheduleStore, scheduleFireExecutor, schedulePollerService);
     }
 
     // --- deployBot ---

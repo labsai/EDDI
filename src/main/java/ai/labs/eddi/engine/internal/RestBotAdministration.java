@@ -3,6 +3,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -43,6 +44,7 @@ public class RestBotAdministration implements IRestBotAdministration {
     private final IRestConversationStore restConversationStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IDeploymentListener deploymentListener;
+    private final IScheduleStore scheduleStore;
     private final IRuntime runtime;
 
     private static final Logger log = Logger.getLogger(RestBotAdministration.class);
@@ -54,7 +56,8 @@ public class RestBotAdministration implements IRestBotAdministration {
             IConversationMemoryStore conversationMemoryStore,
             IRestConversationStore restConversationStore,
             IDocumentDescriptorStore documentDescriptorStore,
-            IDeploymentListener deploymentListener) {
+            IDeploymentListener deploymentListener,
+            IScheduleStore scheduleStore) {
         this.runtime = runtime;
         this.botFactory = botFactory;
         this.deploymentStore = deploymentStore;
@@ -62,6 +65,7 @@ public class RestBotAdministration implements IRestBotAdministration {
         this.restConversationStore = restConversationStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.deploymentListener = deploymentListener;
+        this.scheduleStore = scheduleStore;
     }
 
     @Override
@@ -131,6 +135,9 @@ public class RestBotAdministration implements IRestBotAdministration {
 
                 deploymentListener.onDeploymentEvent(
                         new DeploymentEvent(botId, version, environment, READY));
+
+                // Lifecycle hook: auto-enable schedules for this bot
+                enableSchedulesForBot(botId);
 
             } catch (Exception e) {
                 handleDeploymentException(e, botId, version, environment);
@@ -210,6 +217,9 @@ public class RestBotAdministration implements IRestBotAdministration {
                 botFactory.undeployBot(environment, botId, version);
                 deploymentStore.setDeploymentInfo(environment.toString(),
                         botId, version, DeploymentInfo.DeploymentStatus.undeployed);
+
+                // Lifecycle hook: auto-disable schedules for this bot
+                disableSchedulesForBot(botId);
             } catch (ServiceException e) {
                 throwError(botId, version, e, "Error while undeploying bot! (botId=%s , version=%s)");
             } catch (IllegalAccessException e) {
@@ -291,5 +301,40 @@ public class RestBotAdministration implements IRestBotAdministration {
         message = String.format(message, botId, version);
         log.error(message, e);
         throw new WebApplicationException(new Throwable(message), Response.Status.FORBIDDEN.getStatusCode());
+    }
+
+    // --- Schedule Lifecycle Hooks ---
+
+    private void enableSchedulesForBot(String botId) {
+        try {
+            var schedules = scheduleStore.readSchedulesByBotId(botId);
+            for (var schedule : schedules) {
+                if (!schedule.isEnabled()) {
+                    var nextFire = schedule.getNextFire() != null
+                            ? schedule.getNextFire()
+                            : java.time.Instant.now();
+                    scheduleStore.setScheduleEnabled(schedule.getId(), true, nextFire);
+                    log.infof("[SCHEDULE] Auto-enabled schedule '%s' (id=%s) on bot %s deploy",
+                            schedule.getName(), schedule.getId(), botId);
+                }
+            }
+        } catch (Exception e) {
+            log.warnf(e, "[SCHEDULE] Failed to auto-enable schedules for bot %s (non-fatal)", botId);
+        }
+    }
+
+    private void disableSchedulesForBot(String botId) {
+        try {
+            var schedules = scheduleStore.readSchedulesByBotId(botId);
+            for (var schedule : schedules) {
+                if (schedule.isEnabled()) {
+                    scheduleStore.setScheduleEnabled(schedule.getId(), false, null);
+                    log.infof("[SCHEDULE] Auto-disabled schedule '%s' (id=%s) on bot %s undeploy",
+                            schedule.getName(), schedule.getId(), botId);
+                }
+            }
+        } catch (Exception e) {
+            log.warnf(e, "[SCHEDULE] Failed to auto-disable schedules for bot %s (non-fatal)", botId);
+        }
     }
 }

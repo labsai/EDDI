@@ -19,9 +19,16 @@ import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.regulardictionary.IRestRegularDictionaryStore;
 import ai.labs.eddi.configs.regulardictionary.model.RegularDictionaryConfiguration;
+import ai.labs.eddi.configs.schedule.IScheduleStore;
+import ai.labs.eddi.configs.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.configs.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.IRestBotAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.engine.runtime.internal.CronDescriber;
+import ai.labs.eddi.engine.runtime.internal.CronParser;
+import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
+import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.modules.langchain.model.LangChainConfiguration;
 import ai.labs.eddi.engine.model.BotTriggerConfiguration;
 import io.quarkiverse.mcp.server.Tool;
@@ -33,6 +40,8 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.net.URI;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -58,14 +67,23 @@ public class McpAdminTools {
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IRestBotAdministration botAdmin;
     private final IJsonSerialization jsonSerialization;
+    private final IScheduleStore scheduleStore;
+    private final ScheduleFireExecutor scheduleFireExecutor;
+    private final SchedulePollerService schedulePollerService;
 
     @Inject
     public McpAdminTools(IRestInterfaceFactory restInterfaceFactory,
                          IRestBotAdministration botAdmin,
-                         IJsonSerialization jsonSerialization) {
+                         IJsonSerialization jsonSerialization,
+                         IScheduleStore scheduleStore,
+                         ScheduleFireExecutor scheduleFireExecutor,
+                         SchedulePollerService schedulePollerService) {
         this.restInterfaceFactory = restInterfaceFactory;
         this.botAdmin = botAdmin;
         this.jsonSerialization = jsonSerialization;
+        this.scheduleStore = scheduleStore;
+        this.scheduleFireExecutor = scheduleFireExecutor;
+        this.schedulePollerService = schedulePollerService;
     }
 
     @Tool(name = "deploy_bot",
@@ -888,6 +906,243 @@ public class McpAdminTools {
         } catch (Exception e) {
             LOGGER.error("MCP delete_bot_trigger failed for intent " + intent, e);
             return errorJson("Failed to delete bot trigger: " + e.getMessage());
+        }
+    }
+
+    // ── Schedule Management ───────────────────────────────────────────────
+
+    @Tool(name = "create_schedule", description = "Create a new scheduled bot trigger (cron job or heartbeat). " +
+            "For CRON: provide cronExpression. For HEARTBEAT: provide heartbeatIntervalSeconds. " +
+            "Returns the created schedule with human-readable description and next fire time.")
+    public String createSchedule(
+            @ToolArg(description = "Bot ID to trigger (required)") String botId,
+            @ToolArg(description = "Trigger type: 'CRON' (default) or 'HEARTBEAT'") String triggerType,
+            @ToolArg(description = "5-field cron expression, e.g. '0 9 * * MON-FRI' (required for CRON)") String cron,
+            @ToolArg(description = "Heartbeat interval in seconds, e.g. 300 for 5 min (required for HEARTBEAT)") Long heartbeatIntervalSeconds,
+            @ToolArg(description = "Message text to send to the bot on each fire (required for CRON, defaults to 'heartbeat' for HEARTBEAT)") String message,
+            @ToolArg(description = "Human-readable name for this schedule (required)") String name,
+            @ToolArg(description = "IANA time zone, e.g. 'Europe/Vienna' (default: UTC)") String timeZone,
+            @ToolArg(description = "Conversation strategy: 'new' or 'persistent' (CRON defaults to 'new', HEARTBEAT defaults to 'persistent')") String conversationStrategy,
+            @ToolArg(description = "User identity for the scheduled message (default: 'system:scheduler')") String userId,
+            @ToolArg(description = "Environment: 'unrestricted' (default), 'restricted', or 'test'") String environment) {
+        if (botId == null || botId.isBlank()) return errorJson("botId is required");
+        if (name == null || name.isBlank()) return errorJson("name is required");
+        try {
+            // Determine trigger type
+            ScheduleConfiguration.TriggerType type = ScheduleConfiguration.TriggerType.CRON;
+            if (triggerType != null && !triggerType.isBlank()) {
+                type = ScheduleConfiguration.TriggerType.valueOf(triggerType.toUpperCase());
+            } else if (heartbeatIntervalSeconds != null) {
+                type = ScheduleConfiguration.TriggerType.HEARTBEAT;
+            }
+
+            // Validate based on type
+            if (type == ScheduleConfiguration.TriggerType.CRON) {
+                if (cron == null || cron.isBlank()) return errorJson("cron expression is required for CRON triggers");
+                if (message == null || message.isBlank()) return errorJson("message is required for CRON triggers");
+                CronParser.validate(cron);
+            } else {
+                if (heartbeatIntervalSeconds == null || heartbeatIntervalSeconds <= 0) {
+                    return errorJson("heartbeatIntervalSeconds is required and must be > 0 for HEARTBEAT triggers");
+                }
+            }
+
+            var schedule = new ScheduleConfiguration();
+            schedule.setName(name);
+            schedule.setBotId(botId);
+            schedule.setTriggerType(type);
+            schedule.setCronExpression(cron);
+            schedule.setHeartbeatIntervalSeconds(heartbeatIntervalSeconds);
+            schedule.setMessage(message != null && !message.isBlank() ? message
+                    : (type == ScheduleConfiguration.TriggerType.HEARTBEAT ? "heartbeat" : null));
+            schedule.setEnvironment(environment != null && !environment.isBlank() ? environment : "unrestricted");
+            schedule.setConversationStrategy(conversationStrategy != null && !conversationStrategy.isBlank()
+                    ? conversationStrategy
+                    : (type == ScheduleConfiguration.TriggerType.HEARTBEAT ? "persistent" : "new"));
+            schedule.setTimeZone(timeZone != null && !timeZone.isBlank() ? timeZone : "UTC");
+            schedule.setUserId(userId != null && !userId.isBlank() ? userId : "system:scheduler");
+            schedule.setFireStatus(ScheduleConfiguration.FireStatus.PENDING);
+            schedule.setEnabled(true);
+
+            // Compute initial nextFire
+            Instant nextFire;
+            String description;
+            if (type == ScheduleConfiguration.TriggerType.HEARTBEAT) {
+                nextFire = Instant.now().plusSeconds(heartbeatIntervalSeconds);
+                long sec = heartbeatIntervalSeconds;
+                description = sec < 60 ? "Every " + sec + " seconds"
+                        : sec < 3600 ? "Every " + (sec / 60) + " minutes"
+                        : "Every " + (sec / 3600) + " hours";
+            } else {
+                ZoneId zone = ZoneId.of(schedule.getTimeZone());
+                nextFire = CronParser.computeNextFire(cron, Instant.now(), zone);
+                description = CronDescriber.describe(cron);
+            }
+            schedule.setNextFire(nextFire);
+
+            String id = scheduleStore.createSchedule(schedule);
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("scheduleId", id);
+            result.put("name", name);
+            result.put("triggerType", type.name());
+            result.put("botId", botId);
+            if (cron != null) result.put("cronExpression", cron);
+            if (heartbeatIntervalSeconds != null) result.put("heartbeatIntervalSeconds", heartbeatIntervalSeconds);
+            result.put("description", description);
+            result.put("timeZone", schedule.getTimeZone());
+            result.put("nextFire", nextFire.toString());
+            result.put("conversationStrategy", schedule.getConversationStrategy());
+            result.put("environment", schedule.getEnvironment());
+            return resultJson("schedule_created", result);
+        } catch (IllegalArgumentException e) {
+            return errorJson("Invalid schedule: " + e.getMessage());
+        } catch (Exception e) {
+            LOGGER.error("MCP create_schedule failed", e);
+            return errorJson("Failed to create schedule: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "list_schedules", description = "List all scheduled bot triggers. " +
+            "Returns schedules with name, type, bot, cron/interval, status, next fire time, and fire count. " +
+            "Optionally filter by botId.")
+    public String listSchedules(
+            @ToolArg(description = "Filter by bot ID (optional)") String botId) {
+        try {
+            List<ScheduleConfiguration> schedules;
+            if (botId != null && !botId.isBlank()) {
+                schedules = scheduleStore.readSchedulesByBotId(botId);
+            } else {
+                schedules = scheduleStore.readAllSchedules(100);
+            }
+
+            // Build enriched response
+            var items = new ArrayList<Map<String, Object>>();
+            for (var s : schedules) {
+                var item = new LinkedHashMap<String, Object>();
+                item.put("scheduleId", s.getId());
+                item.put("name", s.getName());
+                item.put("triggerType", s.getTriggerType() != null ? s.getTriggerType().name() : "CRON");
+                item.put("botId", s.getBotId());
+                if (s.getCronExpression() != null) {
+                    item.put("cronExpression", s.getCronExpression());
+                    item.put("cronDescription", CronDescriber.describe(s.getCronExpression()));
+                }
+                if (s.getHeartbeatIntervalSeconds() != null) {
+                    item.put("heartbeatIntervalSeconds", s.getHeartbeatIntervalSeconds());
+                }
+                item.put("enabled", s.isEnabled());
+                item.put("fireStatus", s.getFireStatus() != null ? s.getFireStatus().name() : null);
+                item.put("nextFire", s.getNextFire() != null ? s.getNextFire().toString() : null);
+                item.put("lastFired", s.getLastFired() != null ? s.getLastFired().toString() : null);
+                item.put("failCount", s.getFailCount());
+                item.put("conversationStrategy", s.getConversationStrategy());
+                items.add(item);
+            }
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("count", items.size());
+            result.put("schedules", items);
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.error("MCP list_schedules failed", e);
+            return errorJson("Failed to list schedules: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "read_schedule", description = "Read a schedule's full configuration including fire history. " +
+            "Returns the schedule config, human-readable description, and recent fire logs.")
+    public String readSchedule(
+            @ToolArg(description = "Schedule ID (required)") String scheduleId) {
+        if (scheduleId == null || scheduleId.isBlank()) return errorJson("scheduleId is required");
+        try {
+            var schedule = scheduleStore.readSchedule(scheduleId);
+            var fireLogs = scheduleStore.readFireLogs(scheduleId, 10);
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("scheduleId", schedule.getId());
+            result.put("name", schedule.getName());
+            result.put("triggerType", schedule.getTriggerType() != null ? schedule.getTriggerType().name() : "CRON");
+            result.put("botId", schedule.getBotId());
+            if (schedule.getCronExpression() != null) {
+                result.put("cronExpression", schedule.getCronExpression());
+                result.put("cronDescription", CronDescriber.describe(schedule.getCronExpression()));
+            }
+            if (schedule.getHeartbeatIntervalSeconds() != null) {
+                result.put("heartbeatIntervalSeconds", schedule.getHeartbeatIntervalSeconds());
+            }
+            result.put("timeZone", schedule.getTimeZone());
+            result.put("message", schedule.getMessage());
+            result.put("enabled", schedule.isEnabled());
+            result.put("fireStatus", schedule.getFireStatus() != null ? schedule.getFireStatus().name() : null);
+            result.put("nextFire", schedule.getNextFire() != null ? schedule.getNextFire().toString() : null);
+            result.put("lastFired", schedule.getLastFired() != null ? schedule.getLastFired().toString() : null);
+            result.put("failCount", schedule.getFailCount());
+            result.put("conversationStrategy", schedule.getConversationStrategy());
+            result.put("environment", schedule.getEnvironment());
+            result.put("maxCostPerFire", schedule.getMaxCostPerFire());
+            result.put("recentFires", fireLogs);
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.error("MCP read_schedule failed for " + scheduleId, e);
+            return errorJson("Failed to read schedule: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "delete_schedule", description = "Delete a scheduled bot trigger.")
+    public String deleteSchedule(
+            @ToolArg(description = "Schedule ID (required)") String scheduleId) {
+        if (scheduleId == null || scheduleId.isBlank()) return errorJson("scheduleId is required");
+        try {
+            scheduleStore.deleteSchedule(scheduleId);
+            return resultJson("schedule_deleted", Map.of("scheduleId", scheduleId));
+        } catch (Exception e) {
+            LOGGER.error("MCP delete_schedule failed for " + scheduleId, e);
+            return errorJson("Failed to delete schedule: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "fire_schedule_now", description = "Manually trigger a schedule fire immediately. " +
+            "Useful for testing or one-off executions. Returns the fire result with conversation ID.")
+    public String fireScheduleNow(
+            @ToolArg(description = "Schedule ID (required)") String scheduleId) {
+        if (scheduleId == null || scheduleId.isBlank()) return errorJson("scheduleId is required");
+        try {
+            var schedule = scheduleStore.readSchedule(scheduleId);
+            ScheduleFireLog fireLog = scheduleFireExecutor.fire(schedule, schedulePollerService.getInstanceId(), 1);
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("scheduleId", scheduleId);
+            result.put("scheduleName", schedule.getName());
+            result.put("fireStatus", fireLog.status());
+            result.put("conversationId", fireLog.conversationId());
+            result.put("duration", fireLog.completedAt() != null && fireLog.startedAt() != null
+                    ? (fireLog.completedAt().toEpochMilli() - fireLog.startedAt().toEpochMilli()) + "ms" : null);
+            if (fireLog.errorMessage() != null) {
+                result.put("error", fireLog.errorMessage());
+            }
+            return resultJson("schedule_fired", result);
+        } catch (Exception e) {
+            LOGGER.error("MCP fire_schedule_now failed for " + scheduleId, e);
+            return errorJson("Failed to fire schedule: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "retry_failed_schedule", description = "Re-queue a dead-lettered schedule for another fire attempt. " +
+            "Use after investigating and fixing the cause of failure.")
+    public String retryFailedSchedule(
+            @ToolArg(description = "Schedule ID (required)") String scheduleId) {
+        if (scheduleId == null || scheduleId.isBlank()) return errorJson("scheduleId is required");
+        try {
+            scheduleStore.requeueDeadLetter(scheduleId);
+            return resultJson("schedule_requeued", Map.of(
+                    "scheduleId", scheduleId,
+                    "status", "PENDING",
+                    "message", "Schedule requeued for next poll cycle"
+            ));
+        } catch (Exception e) {
+            LOGGER.error("MCP retry_failed_schedule failed for " + scheduleId, e);
+            return errorJson("Failed to retry schedule: " + e.getMessage());
         }
     }
 }

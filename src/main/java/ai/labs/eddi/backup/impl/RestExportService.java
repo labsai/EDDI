@@ -14,6 +14,8 @@ import ai.labs.eddi.configs.packages.IPackageStore;
 import ai.labs.eddi.configs.packages.model.PackageConfiguration;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.regulardictionary.IRegularDictionaryStore;
+import ai.labs.eddi.configs.schedule.IScheduleStore;
+import ai.labs.eddi.configs.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -60,9 +62,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private final IJsonSerialization jsonSerialization;
     private final IZipArchive zipArchive;
     private final SecretScrubber secretScrubber;
+    private final IScheduleStore scheduleStore;
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp"));
 
     private static final Logger log = Logger.getLogger(RestExportService.class);
+    private static final String SCHEDULE_EXT = "schedule";
 
     @Inject
     public RestExportService(IDocumentDescriptorStore documentDescriptorStore,
@@ -76,7 +80,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                              IOutputStore outputStore,
                              IJsonSerialization jsonSerialization,
                              IZipArchive zipArchive,
-                             SecretScrubber secretScrubber) {
+                             SecretScrubber secretScrubber,
+                             IScheduleStore scheduleStore) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.botStore = botStore;
         this.packageStore = packageStore;
@@ -89,6 +94,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         this.jsonSerialization = jsonSerialization;
         this.zipArchive = zipArchive;
         this.secretScrubber = secretScrubber;
+        this.scheduleStore = scheduleStore;
     }
 
     @Override
@@ -154,6 +160,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 writeAllVersionsOfUris(unusedPath, outputStore, extractResourcesUris(packageConfigurationString, OUTPUT_URI_PATTERN), OUTPUT_EXT);
 
             }
+
+            // Export schedules for this bot
+            exportSchedules(botId, botPath);
 
             String zipFilename = prepareZipFilename(botDocumentDescriptor, botId, botVersion);
             String targetZipPath = FileUtilities.buildPath(tmpPath.toString(), zipFilename);
@@ -326,5 +335,29 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         }
 
         return botFilename;
+    }
+
+    private void exportSchedules(String botId, Path botPath) {
+        try {
+            List<ScheduleConfiguration> schedules = scheduleStore.readSchedulesByBotId(botId);
+            if (schedules.isEmpty()) {
+                return;
+            }
+
+            Path schedulesDir = Files.createDirectories(Paths.get(botPath.toString(), "schedules"));
+            for (ScheduleConfiguration schedule : schedules) {
+                String json = jsonSerialization.serialize(schedule);
+                json = secretScrubber.scrubJson(json);
+                String filename = schedule.getId() + "." + SCHEDULE_EXT + ".json";
+                Path filePath = Paths.get(schedulesDir.toString(), filename);
+                deleteFileIfExists(filePath);
+                try (BufferedWriter writer = Files.newBufferedWriter(filePath)) {
+                    writer.write(json);
+                }
+            }
+            log.infof("Exported %d schedule(s) for bot %s", schedules.size(), botId);
+        } catch (Exception e) {
+            log.warnf("Failed to export schedules for bot %s: %s", botId, e.getMessage());
+        }
     }
 }

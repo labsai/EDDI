@@ -43,6 +43,60 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-20 — Scheduled Triggers & Heartbeats (Code Review + TriggerType)
+
+**Repo:** EDDI
+**Branch:** `feature/version-6.0.0`
+
+**What changed:**
+
+**Core model:**
+- `ScheduleConfiguration.java` [MODIFIED]: `FireStatus` converted from String constants to proper enum. Added `TriggerType` enum (`CRON`, `HEARTBEAT`) and `heartbeatIntervalSeconds` field
+- `IScheduleStore.java` [MODIFIED]: Added `setScheduleEnabled()` for atomic operations, `readAllSchedules(int limit)` for bounded queries
+- `ScheduleFireLog.java` [MODIFIED]: `attemptNumber` now caller-provided
+
+**Store:**
+- `MongoScheduleStore.java` [MODIFIED]: 7 fixes — CAS filter guards `nextRetryAt ≤ now`, atomic `setScheduleEnabled()`, one-shot auto-disables, all `Instant` fields stored as epoch-millis `Long`, `tenantId` index, bounded queries, fire log status index
+
+**Engine:**
+- `ScheduleFireExecutor.java` [MODIFIED]: `attemptNumber` passed by caller (not stale snapshot), heartbeat context in `InputData` (trigger="heartbeat", triggerType="HEARTBEAT"), defaults message to "heartbeat" for heartbeat triggers
+- `SchedulePollerService.java` [MODIFIED]: Constructor injection, heartbeat drift-proof scheduling (`nextFire = now + interval`), one-shot handling, exponential backoff
+- `CronParser.java` [MODIFIED]: `DOW_NAMES`/`MONTH_NAMES` maps now package-visible
+- `CronDescriber.java` [MODIFIED]: Reuses maps from `CronParser` (DRY fix)
+
+**REST + MCP:**
+- `RestScheduleStore.java` [MODIFIED]: Atomic enable/disable, heartbeat validation (minimum interval), type-aware defaults
+- `McpAdminTools.java` [MODIFIED]: `create_schedule` supports CRON/HEARTBEAT + `userId` param, updated API signatures
+
+**Tests added:**
+- `SchedulePollerServiceTest.java` [NEW]: 12 tests (poll flow, claim conflicts, backoff, dead-lettering, heartbeat scheduling, one-shot)
+- `ScheduleFireExecutorTest.java` [NEW]: 9 tests (fire flow, conversation strategies, heartbeat defaults, context injection, error handling)
+- `RestScheduleStoreTest.java` [NEW]: 13 tests (create validation, heartbeat defaults, enable/disable, read delegation)
+- `McpScheduleToolsTest.java` [NEW]: 21 tests (create cron/heartbeat, inferred type, validation, list, read, fire, delete, retry)
+
+**Docs updated:**
+- `docs/mcp-server.md`: Added Schedule Management Tools (6 tools), cron + heartbeat workflow examples
+- `docs/v6-planning/changelog.md`: This entry
+- `HANDOFF.md`: Schedule architecture section + lifecycle hooks table
+
+**Lifecycle hooks (bot ↔ schedule):**
+- `RestBotAdministration.java` [MODIFIED]: `enableSchedulesForBot()` on deploy, `disableSchedulesForBot()` on undeploy
+- `RestBotStore.java` [MODIFIED]: `scheduleStore.deleteSchedulesByBotId()` on cascade delete
+- `RestExportService.java` [MODIFIED]: `exportSchedules()` includes schedules in bot export ZIP
+- `IScheduleStore.java` [MODIFIED]: Added `deleteSchedulesByBotId(String botId)` method
+- `MongoScheduleStore.java` [MODIFIED]: Implemented `deleteSchedulesByBotId` via `deleteMany`
+- `RestBotStoreTest.java` [MODIFIED]: Constructor updated with `IScheduleStore` mock
+
+**Design decisions:**
+- CRON vs HEARTBEAT: Same engine, different defaults (persistent conversation, "heartbeat" message, drift-proof timing)
+- Exactly-once execution: Atomic CAS via MongoDB `findOneAndUpdate` with `PENDING` + `nextRetryAt ≤ now` guards
+- Exponential backoff: `base × multiplier^failCount` with configurable parameters, dead-lettering after `maxRetries`
+- All Instants stored as epoch-millis `Long` to avoid BSON type comparison issues
+- Lifecycle hooks: non-fatal (warn on failure, primary bot operation continues)
+
+---
+
+
 ### 2026-03-17 — Phase 7 Item 34b: Tenant Quota Stub
 
 **Repos:** EDDI, EDDI-Manager

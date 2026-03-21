@@ -10,7 +10,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 |----------|-------------|
 | `http://localhost:7070/mcp` | MCP server endpoint (default + admin) |
 
-## Available Tools (33)
+## Available Tools (39)
 
 ### Conversation Tools (11)
 
@@ -69,6 +69,17 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 |------|-------------|
 | `setup_bot` | Create a fully working bot in one call: creates behavior rules, LangChain config, optional output/greeting, package, bot, and deploys. Supports built-in tools, quick replies, and sentiment analysis. Default: `anthropic`/`claude-sonnet-4-6` |
 | `create_api_bot` | Create a bot from an OpenAPI 3.0/3.1 spec. Parses the spec, generates HttpCalls configs (grouped by API tag), creates the full pipeline, and deploys. Supports endpoint filtering, base URL override, and auth header propagation |
+
+### Schedule Management Tools (6)
+
+| Tool | Description |
+|------|-------------|
+| `create_schedule` | Create a new scheduled bot trigger (cron job or heartbeat). For CRON: provide `cronExpression`. For HEARTBEAT: provide `heartbeatIntervalSeconds`. Heartbeats default to persistent conversations |
+| `list_schedules` | List all scheduled bot triggers with name, type, cron/interval, status, next fire time, and fire count. Optionally filter by botId |
+| `read_schedule` | Read a schedule's full configuration including recent fire history (last 10 executions) |
+| `delete_schedule` | Delete a scheduled bot trigger |
+| `fire_schedule_now` | Manually trigger a schedule fire immediately. Useful for testing or one-off executions |
+| `retry_failed_schedule` | Re-queue a dead-lettered schedule for another fire attempt after fixing the cause of failure |
 
 ## MCP Resources
 
@@ -141,6 +152,28 @@ Add to `claude_desktop_config.json`:
 ```
 1. read_bot_logs(botId: "my-bot") → see pipeline errors, LLM timeouts
 2. read_audit_trail(conversationId: "conv-123") → per-task execution details, LLM tokens, cost
+```
+
+### Scheduling a Cron Job
+
+```
+1. create_schedule(botId: "my-bot", triggerType: "CRON", cron: "0 9 * * MON-FRI",
+     message: "Daily morning check-in", name: "Weekday Morning Check")
+   → { scheduleId: "sched-1", description: "At 09:00 on every weekday", nextFire: "..." }
+2. list_schedules() → see all scheduled triggers with status
+3. fire_schedule_now(scheduleId: "sched-1") → test immediately
+4. read_schedule(scheduleId: "sched-1") → see full config + fire logs
+```
+
+### Setting Up a Heartbeat
+
+```
+1. create_schedule(botId: "my-bot", triggerType: "HEARTBEAT", heartbeatIntervalSeconds: 300,
+     name: "Health Heartbeat")
+   → { scheduleId: "hb-1", description: "Every 5 minutes", conversationStrategy: "persistent" }
+   # Heartbeats default to: persistent conversation, "heartbeat" message, drift-proof scheduling
+2. read_schedule(scheduleId: "hb-1") → check next fire time and conversation ID
+3. retry_failed_schedule(scheduleId: "hb-1") → requeue if dead-lettered
 ```
 
 ---
