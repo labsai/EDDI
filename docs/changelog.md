@@ -13,6 +13,28 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Refactor: Dissolve `ai.labs.eddi.model` Package (2026-03-21)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+**Commit:** `4ec9e78`
+
+**What changed:**
+
+The grab-bag `ai.labs.eddi.model` package (6 unrelated classes) was dissolved. Each class moved to its natural domain package:
+
+| Class | Old Package | New Package | Rationale |
+|---|---|---|---|
+| `Deployment` | `model` | `engine.model` | Joins `BotDeployment`, `BotDeploymentStatus` |
+| `ConversationState` | `model` | `engine.memory.model` | Conversation-memory concept, used by snapshots |
+| `ConversationStatus` | `model` | `engine.memory.model` | DTO alongside `ConversationState` |
+| `BotTriggerConfiguration` | `model` | `engine.botmanagement.model` | Used exclusively by bot trigger store/API |
+| `UserConversation` | `model` | `engine.botmanagement.model` | Managed conversation mapping for triggers |
+| `ResourceDescriptor` | `model` | `configs.descriptors.model` | Base class for `DocumentDescriptor` |
+
+**Scope:** 72 files changed (regular imports, static imports, inner-class imports). Removed 3 now-redundant same-package imports. Pure rename refactor — no logic changes.
+
+**Testing:** ✅ Full compile + test suite pass.
+
 ---
 
 ## One-Command Install & Onboarding Wizard (2026-03-20)

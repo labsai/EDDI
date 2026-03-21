@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-20 (One-Command Install, Phase 8b — MCP Client + Quarkus 3.32.4, 1045 tests pass)
+> **Last updated:** 2026-03-21 (Dissolved `ai.labs.eddi.model` package, 1045 tests pass)
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
