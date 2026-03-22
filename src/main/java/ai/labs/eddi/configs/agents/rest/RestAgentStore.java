@@ -4,8 +4,8 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
-import ai.labs.eddi.configs.pipelines.IRestPipelineStore;
-import ai.labs.eddi.configs.pipelines.rest.RestPipelineStore;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.rest.RestWorkflowStore;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
@@ -32,9 +32,9 @@ import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
 
 @ApplicationScoped
 public class RestAgentStore implements IRestAgentStore {
-    private static final String PACKAGE_URI = IRestPipelineStore.resourceURI;
-    private final IAgentStore AgentStore;
-    private final IRestPipelineStore restPipelineStore;
+    private static final String PACKAGE_URI = IRestWorkflowStore.resourceURI;
+    private final IAgentStore agentStore;
+    private final IRestWorkflowStore restWorkflowStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<AgentConfiguration> restVersionInfo;
     private final IDocumentDescriptorStore documentDescriptorStore;
@@ -43,15 +43,15 @@ public class RestAgentStore implements IRestAgentStore {
     private static final Logger log = Logger.getLogger(RestAgentStore.class);
 
     @Inject
-    public RestAgentStore(IAgentStore AgentStore,
-            IRestPipelineStore restPipelineStore,
+    public RestAgentStore(IAgentStore agentStore,
+            IRestWorkflowStore restWorkflowStore,
             IDocumentDescriptorStore documentDescriptorStore,
             IJsonSchemaCreator jsonSchemaCreator,
             IScheduleStore scheduleStore) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, AgentStore, documentDescriptorStore);
+        restVersionInfo = new RestVersionInfo<>(resourceURI, agentStore, documentDescriptorStore);
         this.documentDescriptorStore = documentDescriptorStore;
-        this.AgentStore = AgentStore;
-        this.restPipelineStore = restPipelineStore;
+        this.agentStore = agentStore;
+        this.restWorkflowStore = restWorkflowStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
         this.scheduleStore = scheduleStore;
     }
@@ -80,7 +80,7 @@ public class RestAgentStore implements IRestAgentStore {
         }
 
         try {
-            return AgentStore.getBotDescriptorsContainingPackage(
+            return agentStore.getBotDescriptorsContainingPackage(
                     validatedResourceId.getId(), validatedResourceId.getVersion(), includePreviousVersions);
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
@@ -93,8 +93,8 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     @Override
-    public Response updateBot(String id, Integer version, AgentConfiguration AgentConfiguration) {
-        return restVersionInfo.update(id, version, AgentConfiguration);
+    public Response updateBot(String id, Integer version, AgentConfiguration agentConfiguration) {
+        return restVersionInfo.update(id, version, agentConfiguration);
     }
 
     @Override
@@ -103,47 +103,47 @@ public class RestAgentStore implements IRestAgentStore {
         String resourceURIWithoutVersion = resourceURIString.substring(0, resourceURIString.lastIndexOf("?"));
 
         boolean updated = false;
-        AgentConfiguration AgentConfiguration = readBot(id, version);
-        List<URI> packages = AgentConfiguration.getPipelines();
+        AgentConfiguration agentConfig = readBot(id, version);
+        List<URI> packages = agentConfig.getWorkflows();
         for (int index = 0; index < packages.size(); index++) {
-            URI pipelineUri = packages.get(index);
-            if (pipelineUri.toString().startsWith(resourceURIWithoutVersion)) {
+            URI workflowUri = packages.get(index);
+            if (workflowUri.toString().startsWith(resourceURIWithoutVersion)) {
                 packages.set(index, resourceURI);
                 updated = true;
             }
         }
 
         if (updated) {
-            return updateBot(id, version, AgentConfiguration);
+            return updateBot(id, version, agentConfig);
         } else {
-            URI uri = RestUtilities.createURI(RestPipelineStore.resourceURI, id, versionQueryParam, version);
+            URI uri = RestUtilities.createURI(RestWorkflowStore.resourceURI, id, versionQueryParam, version);
             return Response.status(BAD_REQUEST).entity(uri).type(MediaType.TEXT_PLAIN).build();
         }
     }
 
     @Override
-    public Response createAgent(AgentConfiguration AgentConfiguration) {
-        return restVersionInfo.create(AgentConfiguration);
+    public Response createAgent(AgentConfiguration agentConfiguration) {
+        return restVersionInfo.create(agentConfiguration);
     }
 
     @Override
     public Response duplicateBot(String id, Integer version, Boolean deepCopy) {
         restVersionInfo.validateParameters(id, version);
         try {
-            AgentConfiguration AgentConfiguration = AgentStore.read(id, version);
+            AgentConfiguration agentConfig = agentStore.read(id, version);
             if (deepCopy) {
-                List<URI> packages = AgentConfiguration.getPipelines();
+                List<URI> packages = agentConfig.getWorkflows();
                 for (int i = 0; i < packages.size(); i++) {
-                    URI pipelineUri = packages.get(i);
-                    IResourceId resourceId = RestUtilities.extractResourceId(pipelineUri);
-                    Response duplicateResourceResponse = restPipelineStore.duplicatePackage(resourceId.getId(),
+                    URI workflowUri = packages.get(i);
+                    IResourceId resourceId = RestUtilities.extractResourceId(workflowUri);
+                    Response duplicateResourceResponse = restWorkflowStore.duplicatePackage(resourceId.getId(),
                             resourceId.getVersion(), true);
                     URI newResourceLocation = duplicateResourceResponse.getLocation();
                     packages.set(i, newResourceLocation);
                 }
             }
 
-            Response createAgentResponse = restVersionInfo.create(AgentConfiguration);
+            Response createAgentResponse = restVersionInfo.create(agentConfig);
             createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createAgentResponse.getLocation());
 
             return createAgentResponse;
@@ -166,12 +166,12 @@ public class RestAgentStore implements IRestAgentStore {
             }
 
             try {
-                AgentConfiguration AgentConfiguration = AgentStore.read(id, version);
-                for (URI pipelineUri : AgentConfiguration.getPipelines()) {
-                    IResourceId resourceId = RestUtilities.extractResourceId(pipelineUri);
+                AgentConfiguration agentConfig = agentStore.read(id, version);
+                for (URI workflowUri : agentConfig.getWorkflows()) {
+                    IResourceId resourceId = RestUtilities.extractResourceId(workflowUri);
                     try {
                         // Check if this package is referenced by other bots
-                        var referencingBots = AgentStore.getBotDescriptorsContainingPackage(
+                        var referencingBots = agentStore.getBotDescriptorsContainingPackage(
                                 resourceId.getId(), resourceId.getVersion(), false);
                         if (referencingBots.size() > 1) {
                             log.infof("Skipping cascade-delete of package %s (v%d) — " +
@@ -181,7 +181,7 @@ public class RestAgentStore implements IRestAgentStore {
                             continue;
                         }
 
-                        restPipelineStore.deletePackage(
+                        restWorkflowStore.deletePackage(
                                 resourceId.getId(), resourceId.getVersion(), permanent, true);
                         log.infof("Cascade-deleted package %s (v%d) for Agent %s",
                                 resourceId.getId(), resourceId.getVersion(), id);
@@ -206,6 +206,6 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
-        return AgentStore.getCurrentResourceId(id);
+        return agentStore.getCurrentResourceId(id);
     }
 }

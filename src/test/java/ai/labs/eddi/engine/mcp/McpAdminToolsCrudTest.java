@@ -12,8 +12,8 @@ import ai.labs.eddi.configs.apicalls.model.HttpCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLangChainStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
-import ai.labs.eddi.configs.pipelines.IRestPipelineStore;
-import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.dictionary.IRestRegularDictionaryStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -53,7 +53,7 @@ class McpAdminToolsCrudTest {
 
     private IRestAgentAdministration botAdmin;
     private IRestAgentStore AgentStore;
-    private IRestPipelineStore PipelineStore;
+    private IRestWorkflowStore WorkflowStore;
     private IRestDocumentDescriptorStore descriptorStore;
     private IRestBehaviorStore behaviorStore;
     private IRestLangChainStore langChainStore;
@@ -72,7 +72,7 @@ class McpAdminToolsCrudTest {
     void setUp() throws Exception {
         botAdmin = mock(IRestAgentAdministration.class);
         AgentStore = mock(IRestAgentStore.class);
-        PipelineStore = mock(IRestPipelineStore.class);
+        WorkflowStore = mock(IRestWorkflowStore.class);
         descriptorStore = mock(IRestDocumentDescriptorStore.class);
         behaviorStore = mock(IRestBehaviorStore.class);
         langChainStore = mock(IRestLangChainStore.class);
@@ -85,7 +85,7 @@ class McpAdminToolsCrudTest {
 
         var restInterfaceFactory = mock(IRestInterfaceFactory.class);
         when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(AgentStore);
-        when(restInterfaceFactory.get(IRestPipelineStore.class)).thenReturn(PipelineStore);
+        when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(WorkflowStore);
         when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
         when(restInterfaceFactory.get(IRestBehaviorStore.class)).thenReturn(behaviorStore);
         when(restInterfaceFactory.get(IRestLangChainStore.class)).thenReturn(langChainStore);
@@ -260,24 +260,24 @@ class McpAdminToolsCrudTest {
     void applyBotChanges_singlePackage_success() throws IOException {
         // Set up Agent with 1 package
         var botConfig = new AgentConfiguration();
-        botConfig.setPipelines(List.of(
-                URI.create("eddi://ai.labs.package/PipelineStore/packages/" + PKG_ID + "?version=1")));
+        botConfig.setWorkflows(List.of(
+                URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG_ID + "?version=1")));
         when(AgentStore.readBot(AGENT_ID, 1)).thenReturn(botConfig);
 
         // Set up package with one extension containing the old URI
-        var ext = new PipelineConfiguration.PipelineStep();
+        var ext = new WorkflowConfiguration.WorkflowStep();
         ext.setType(URI.create("eddi://ai.labs.langchain"));
         var configMap = new HashMap<String, Object>();
         configMap.put("uri", "eddi://ai.labs.langchain/langchainstore/langchains/lc1?version=1");
         ext.setConfig(configMap);
-        var pkgConfig = new PipelineConfiguration();
-        pkgConfig.setPipelineSteps(new ArrayList<>(List.of(ext)));
-        when(PipelineStore.readPackage(PKG_ID, 1)).thenReturn(pkgConfig);
+        var pkgConfig = new WorkflowConfiguration();
+        pkgConfig.setWorkflowSteps(new ArrayList<>(List.of(ext)));
+        when(WorkflowStore.readPackage(PKG_ID, 1)).thenReturn(pkgConfig);
 
         // Mock updates
-        when(PipelineStore.updatePackage(eq(PKG_ID), eq(1), any()))
+        when(WorkflowStore.updatePackage(eq(PKG_ID), eq(1), any()))
                 .thenReturn(Response.ok().header("Location",
-                        "/PipelineStore/packages/" + PKG_ID + "?version=2").build());
+                        "/WorkflowStore/packages/" + PKG_ID + "?version=2").build());
         when(AgentStore.updateBot(eq(AGENT_ID), eq(1), any()))
                 .thenReturn(Response.ok().header("Location",
                         "/AgentStore/bots/" + AGENT_ID + "?version=2").build());
@@ -295,25 +295,25 @@ class McpAdminToolsCrudTest {
 
         assertNotNull(result);
         assertTrue(result.contains("cascaded"));
-        verify(PipelineStore).updatePackage(eq(PKG_ID), eq(1), any());
+        verify(WorkflowStore).updatePackage(eq(PKG_ID), eq(1), any());
         verify(AgentStore).updateBot(eq(AGENT_ID), eq(1), any());
     }
 
     @Test
     void applyBotChanges_noMatchingUris_noUpdates() throws IOException {
         var botConfig = new AgentConfiguration();
-        botConfig.setPipelines(List.of(
-                URI.create("eddi://ai.labs.package/PipelineStore/packages/" + PKG_ID + "?version=1")));
+        botConfig.setWorkflows(List.of(
+                URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG_ID + "?version=1")));
         when(AgentStore.readBot(AGENT_ID, 1)).thenReturn(botConfig);
 
-        var ext = new PipelineConfiguration.PipelineStep();
+        var ext = new WorkflowConfiguration.WorkflowStep();
         ext.setType(URI.create("eddi://ai.labs.langchain"));
         var configMap = new HashMap<String, Object>();
         configMap.put("uri", "eddi://ai.labs.langchain/langchainstore/langchains/lc1?version=1");
         ext.setConfig(configMap);
-        var pkgConfig = new PipelineConfiguration();
-        pkgConfig.setPipelineSteps(new ArrayList<>(List.of(ext)));
-        when(PipelineStore.readPackage(PKG_ID, 1)).thenReturn(pkgConfig);
+        var pkgConfig = new WorkflowConfiguration();
+        pkgConfig.setWorkflowSteps(new ArrayList<>(List.of(ext)));
+        when(WorkflowStore.readPackage(PKG_ID, 1)).thenReturn(pkgConfig);
 
         // Mappings don't match any existing URIs
         String mappingsJson = "[{\"oldUri\":\"eddi://different/resource?version=1\",\"newUri\":\"eddi://different/resource?version=2\"}]";
@@ -326,29 +326,29 @@ class McpAdminToolsCrudTest {
         tools.applyBotChanges(AGENT_ID, 1, mappingsJson, false, null);
 
         // No package or Agent updates should occur
-        verify(PipelineStore, never()).updatePackage(any(), anyInt(), any());
+        verify(WorkflowStore, never()).updatePackage(any(), anyInt(), any());
         verify(AgentStore, never()).updateBot(any(), anyInt(), any());
     }
 
     @Test
     void applyBotChanges_withRedeploy_success() throws IOException {
         var botConfig = new AgentConfiguration();
-        botConfig.setPipelines(List.of(
-                URI.create("eddi://ai.labs.package/PipelineStore/packages/" + PKG_ID + "?version=1")));
+        botConfig.setWorkflows(List.of(
+                URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG_ID + "?version=1")));
         when(AgentStore.readBot(AGENT_ID, 1)).thenReturn(botConfig);
 
-        var ext = new PipelineConfiguration.PipelineStep();
+        var ext = new WorkflowConfiguration.WorkflowStep();
         ext.setType(URI.create("eddi://ai.labs.behavior"));
         var configMap = new HashMap<String, Object>();
         configMap.put("uri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/b1?version=1");
         ext.setConfig(configMap);
-        var pkgConfig = new PipelineConfiguration();
-        pkgConfig.setPipelineSteps(new ArrayList<>(List.of(ext)));
-        when(PipelineStore.readPackage(PKG_ID, 1)).thenReturn(pkgConfig);
+        var pkgConfig = new WorkflowConfiguration();
+        pkgConfig.setWorkflowSteps(new ArrayList<>(List.of(ext)));
+        when(WorkflowStore.readPackage(PKG_ID, 1)).thenReturn(pkgConfig);
 
-        when(PipelineStore.updatePackage(eq(PKG_ID), eq(1), any()))
+        when(WorkflowStore.updatePackage(eq(PKG_ID), eq(1), any()))
                 .thenReturn(Response.ok().header("Location",
-                        "/PipelineStore/packages/" + PKG_ID + "?version=2").build());
+                        "/WorkflowStore/packages/" + PKG_ID + "?version=2").build());
         when(AgentStore.updateBot(eq(AGENT_ID), eq(1), any()))
                 .thenReturn(Response.ok().header("Location",
                         "/AgentStore/bots/" + AGENT_ID + "?version=2").build());
@@ -405,8 +405,8 @@ class McpAdminToolsCrudTest {
     void listBotResources_success() throws IOException {
         // Set up Agent with 1 package
         var botConfig = new AgentConfiguration();
-        botConfig.setPipelines(List.of(
-                URI.create("eddi://ai.labs.package/PipelineStore/packages/" + PKG_ID + "?version=1")));
+        botConfig.setWorkflows(List.of(
+                URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG_ID + "?version=1")));
         when(AgentStore.readBot(AGENT_ID, 1)).thenReturn(botConfig);
 
         // Agent descriptor
@@ -415,15 +415,15 @@ class McpAdminToolsCrudTest {
         when(descriptorStore.readDescriptor(AGENT_ID, 1)).thenReturn(descriptor);
 
         // Package with 2 extensions
-        var ext1 = new PipelineConfiguration.PipelineStep();
+        var ext1 = new WorkflowConfiguration.WorkflowStep();
         ext1.setType(URI.create("eddi://ai.labs.langchain"));
         ext1.setConfig(Map.of("uri", "eddi://ai.labs.langchain/langchainstore/langchains/lc1?version=1"));
-        var ext2 = new PipelineConfiguration.PipelineStep();
+        var ext2 = new WorkflowConfiguration.WorkflowStep();
         ext2.setType(URI.create("eddi://ai.labs.behavior"));
         ext2.setConfig(Map.of("uri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/b1?version=1"));
-        var pkgConfig = new PipelineConfiguration();
-        pkgConfig.setPipelineSteps(List.of(ext1, ext2));
-        when(PipelineStore.readPackage(PKG_ID, 1)).thenReturn(pkgConfig);
+        var pkgConfig = new WorkflowConfiguration();
+        pkgConfig.setWorkflowSteps(List.of(ext1, ext2));
+        when(WorkflowStore.readPackage(PKG_ID, 1)).thenReturn(pkgConfig);
 
         when(jsonSerialization.serialize(any())).thenReturn(
                 "{\"agentId\":\"test-bot-id\",\"agentName\":\"Test Bot\",\"packageCount\":1}");
@@ -433,7 +433,7 @@ class McpAdminToolsCrudTest {
         assertNotNull(result);
         assertTrue(result.contains("Test Bot"));
         verify(AgentStore).readBot(AGENT_ID, 1);
-        verify(PipelineStore).readPackage(PKG_ID, 1);
+        verify(WorkflowStore).readPackage(PKG_ID, 1);
     }
 
     @Test
@@ -456,11 +456,11 @@ class McpAdminToolsCrudTest {
     @Test
     void listBotResources_packageReadFailure_includesError() throws IOException {
         var botConfig = new AgentConfiguration();
-        botConfig.setPipelines(List.of(
-                URI.create("eddi://ai.labs.package/PipelineStore/packages/" + PKG_ID + "?version=1")));
+        botConfig.setWorkflows(List.of(
+                URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG_ID + "?version=1")));
         when(AgentStore.readBot(AGENT_ID, 1)).thenReturn(botConfig);
 
-        when(PipelineStore.readPackage(PKG_ID, 1))
+        when(WorkflowStore.readPackage(PKG_ID, 1))
                 .thenThrow(new RuntimeException("Package corrupted"));
         when(jsonSerialization.serialize(any())).thenReturn("{\"packages\":[{\"error\":\"Failed to read package\"}]}");
 

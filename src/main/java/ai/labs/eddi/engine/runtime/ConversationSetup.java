@@ -29,16 +29,16 @@ public class ConversationSetup implements IConversationSetup {
     }
 
     @Override
-    public void createConversationDescriptor(String agentId, IAgent latestBot, String userId, String conversationId, URI conversationUri)
+    public void createConversationDescriptor(String agentId, IAgent latestAgent, String userId, String conversationId, URI conversationUri)
             throws ResourceStoreException, ResourceNotFoundException {
 
-        var agentVersion = latestBot.getAgentVersion();
+        var agentVersion = latestAgent.getAgentVersion();
         var botResourceUri =
                 createURI(IRestAgentStore.resourceURI, agentId, IRestAgentStore.versionQueryParam, agentVersion);
         var conversationDescriptor =
                 createConversationDescriptorDocument(conversationUri, botResourceUri, userId);
         var botDescriptor =
-                documentDescriptorStore.readDescriptor(latestBot.getAgentId(), latestBot.getAgentVersion());
+                documentDescriptorStore.readDescriptor(latestAgent.getAgentId(), latestAgent.getAgentVersion());
 
         conversationDescriptor.setAgentName(botDescriptor.getName());
         conversationDescriptorStore.createDescriptor(conversationId, 0, conversationDescriptor);

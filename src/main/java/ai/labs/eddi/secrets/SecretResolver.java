@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
 /**
  * Resolves {@code ${eddivault:tenantId/agentId/keyName}} references in parameter maps.
  * <p>
- * This is the central integration point between the vault and the execution pipeline.
+ * This is the central integration point between the vault and the execution workflow.
  * It is called <b>after</b> Thymeleaf template processing and <b>before</b> the final
  * API call (late-binding resolution).
  * <p>

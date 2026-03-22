@@ -34,7 +34,7 @@ public class AgentTriggerStore implements IAgentTriggerStore {
     private final MongoCollection<Document> collection;
     private final IDocumentBuilder documentBuilder;
     private final IJsonSerialization jsonSerialization;
-    private final BotTriggerResourceStore AgentTriggerStore;
+    private final BotTriggerResourceStore agentTriggerStore;
 
     @Inject
     public AgentTriggerStore(MongoDatabase database,
@@ -44,13 +44,13 @@ public class AgentTriggerStore implements IAgentTriggerStore {
         RuntimeUtilities.checkNotNull(database, "database");
         this.collection = database.getCollection(COLLECTION_BOT_TRIGGERS);
         this.documentBuilder = documentBuilder;
-        this.AgentTriggerStore = new BotTriggerResourceStore();
+        this.agentTriggerStore = new BotTriggerResourceStore();
         collection.createIndex(Indexes.ascending(INTENT_FIELD), new IndexOptions().unique(true));
     }
 
     @Override
     public List<AgentTriggerConfiguration> readAllBotTriggers() throws IResourceStore.ResourceStoreException {
-        return AgentTriggerStore.readAllBotTriggers();
+        return agentTriggerStore.readAllBotTriggers();
     }
 
     @Override
@@ -58,31 +58,31 @@ public class AgentTriggerStore implements IAgentTriggerStore {
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(intent, INTENT_FIELD);
 
-        return AgentTriggerStore.readBotTrigger(intent);
+        return agentTriggerStore.readBotTrigger(intent);
     }
 
     @Override
-    public void updateBotTrigger(String intent, AgentTriggerConfiguration AgentTriggerConfiguration)
+    public void updateBotTrigger(String intent, AgentTriggerConfiguration agentTriggerConfiguration)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkNotNull(intent, INTENT_FIELD);
-        RuntimeUtilities.checkNotNull(AgentTriggerConfiguration, "AgentTriggerConfiguration");
+        RuntimeUtilities.checkNotNull(agentTriggerConfiguration, "AgentTriggerConfiguration");
 
-        AgentTriggerStore.updateBotTrigger(intent, AgentTriggerConfiguration);
+        agentTriggerStore.updateBotTrigger(intent, agentTriggerConfiguration);
     }
 
     @Override
-    public void createAgentTrigger(AgentTriggerConfiguration AgentTriggerConfiguration)
+    public void createAgentTrigger(AgentTriggerConfiguration agentTriggerConfiguration)
             throws ResourceAlreadyExistsException, IResourceStore.ResourceStoreException {
-        RuntimeUtilities.checkNotNull(AgentTriggerConfiguration, "AgentTriggerConfiguration");
+        RuntimeUtilities.checkNotNull(agentTriggerConfiguration, "AgentTriggerConfiguration");
 
-        AgentTriggerStore.createAgentTrigger(AgentTriggerConfiguration);
+        agentTriggerStore.createAgentTrigger(agentTriggerConfiguration);
     }
 
     @Override
     public void deleteBotTrigger(String intent) {
         RuntimeUtilities.checkNotNull(intent, INTENT_FIELD);
 
-        AgentTriggerStore.deleteBotTrigger(intent);
+        agentTriggerStore.deleteBotTrigger(intent);
     }
 
     private class BotTriggerResourceStore {
@@ -120,10 +120,10 @@ public class AgentTriggerStore implements IAgentTriggerStore {
             }
         }
 
-        void updateBotTrigger(String intent, AgentTriggerConfiguration AgentTriggerConfiguration)
+        void updateBotTrigger(String intent, AgentTriggerConfiguration agentTriggerConfiguration)
                 throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
-            Document document = createDocument(AgentTriggerConfiguration);
+            Document document = createDocument(agentTriggerConfiguration);
             var result = collection.replaceOne(new Document(INTENT_FIELD, intent), document);
             if (result.getMatchedCount() == 0) {
                 String message = "AgentTriggerConfiguration with intent=%s does not exist";
@@ -132,28 +132,28 @@ public class AgentTriggerStore implements IAgentTriggerStore {
             }
         }
 
-        void createAgentTrigger(AgentTriggerConfiguration AgentTriggerConfiguration)
+        void createAgentTrigger(AgentTriggerConfiguration agentTriggerConfiguration)
                 throws IResourceStore.ResourceStoreException, ResourceAlreadyExistsException {
 
             Document existing = collection.find(
-                    new Document(INTENT_FIELD, AgentTriggerConfiguration.getIntent())).first();
+                    new Document(INTENT_FIELD, agentTriggerConfiguration.getIntent())).first();
             if (existing != null) {
                 String message = "AgentTriggerConfiguration with intent=%s already exists";
-                message = String.format(message, AgentTriggerConfiguration.getIntent());
+                message = String.format(message, agentTriggerConfiguration.getIntent());
                 throw new ResourceAlreadyExistsException(message);
             }
 
-            collection.insertOne(createDocument(AgentTriggerConfiguration));
+            collection.insertOne(createDocument(agentTriggerConfiguration));
         }
 
         void deleteBotTrigger(String intent) {
             collection.deleteOne(new Document(INTENT_FIELD, intent));
         }
 
-        private Document createDocument(AgentTriggerConfiguration AgentTriggerConfiguration)
+        private Document createDocument(AgentTriggerConfiguration agentTriggerConfiguration)
                 throws IResourceStore.ResourceStoreException {
             try {
-                return jsonSerialization.deserialize(jsonSerialization.serialize(AgentTriggerConfiguration),
+                return jsonSerialization.deserialize(jsonSerialization.serialize(agentTriggerConfiguration),
                         Document.class);
             } catch (IOException e) {
                 throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);

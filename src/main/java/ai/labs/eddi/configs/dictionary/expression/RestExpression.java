@@ -1,7 +1,7 @@
 package ai.labs.eddi.configs.dictionary.expression;
 
-import ai.labs.eddi.configs.pipelines.IPipelineStore;
-import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.dictionary.IRegularDictionaryStore;
 import ai.labs.eddi.configs.dictionary.IRestExpression;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -23,15 +23,15 @@ import java.util.Map;
 
 @ApplicationScoped
 public class RestExpression implements IRestExpression {
-    private final IPipelineStore PipelineStore;
+    private final IWorkflowStore workflowStore;
     private final IRegularDictionaryStore regularDictionaryStore;
 
 
 
     @Inject
-    public RestExpression(IPipelineStore PipelineStore,
+    public RestExpression(IWorkflowStore workflowStore,
                           IRegularDictionaryStore regularDictionaryStore) {
-        this.PipelineStore = PipelineStore;
+        this.workflowStore = workflowStore;
         this.regularDictionaryStore = regularDictionaryStore;
     }
 
@@ -39,8 +39,8 @@ public class RestExpression implements IRestExpression {
     public List<String> readExpressions(String packageId, Integer packageVersion, String filter, Integer limit) {
         List<String> retExpressions = new LinkedList<>();
         try {
-            PipelineConfiguration PipelineConfiguration = PipelineStore.read(packageId, packageVersion);
-            List<IResourceStore.IResourceId> resourceIds = readDictionaryResourceIds(PipelineConfiguration);
+            WorkflowConfiguration workflowConfig = workflowStore.read(packageId, packageVersion);
+            List<IResourceStore.IResourceId> resourceIds = readDictionaryResourceIds(workflowConfig);
             for (IResourceStore.IResourceId resourceId : resourceIds) {
                 List<String> expressions = regularDictionaryStore.readExpressions(resourceId.getId(), resourceId.getVersion(), filter, "asc", 0, limit);
                 CollectionUtilities.addAllWithoutDuplicates(retExpressions, expressions);
@@ -53,15 +53,15 @@ public class RestExpression implements IRestExpression {
         }
     }
 
-    private List<IResourceStore.IResourceId> readDictionaryResourceIds(PipelineConfiguration PipelineConfiguration) {
+    private List<IResourceStore.IResourceId> readDictionaryResourceIds(WorkflowConfiguration workflowConfiguration) {
         List<IResourceStore.IResourceId> resourceIds = new LinkedList<>();
 
-        for (PipelineConfiguration.PipelineStep PipelineStep : PipelineConfiguration.getPipelineSteps()) {
-            if (!PipelineStep.getType().toString().startsWith("eddi://ai.labs.parser")) {
+        for (WorkflowConfiguration.WorkflowStep workflowStep : workflowConfiguration.getWorkflowSteps()) {
+            if (!workflowStep.getType().toString().startsWith("eddi://ai.labs.parser")) {
                 continue;
             }
 
-            Map<String, Object> extensionTypes = PipelineStep.getExtensions();
+            Map<String, Object> extensionTypes = workflowStep.getExtensions();
             for (String extensionKey : extensionTypes.keySet()) {
                 if (!extensionKey.equals("dictionaries")) {
                     continue;

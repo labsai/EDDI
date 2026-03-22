@@ -13,7 +13,7 @@ import java.util.Set;
  * Without this filter, the quarkus-mcp-server extension also picks up
  * {@code dev.langchain4j.agent.tool.Tool} annotations from EDDI's built-in
  * Agent tools (calculator, datetime, websearch, etc.), which are meant ONLY
- * for internal Agent pipeline use — not for external MCP clients.
+ * for internal Agent workflow use — not for external MCP clients.
  * <p>
  * This whitelist ensures only the 33 intended MCP tools are visible.
  *

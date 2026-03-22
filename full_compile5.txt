@@ -1,0 +1,26 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ----------------------------< ai.labs:eddi >----------------------------
+[INFO] Building eddi 6.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[WARNING] The artifact io.quarkus:quarkus-junit5:jar:3.32.4 has been relocated to io.quarkus:quarkus-junit:jar:3.32.4: Update the artifactId in your project build file. Refer to https://github.com/quarkusio/quarkus/wiki/Migration-Guide-3.31 for more information.
+[INFO] 
+[INFO] --- checkstyle:3.6.0:check (validate) @ eddi ---
+[INFO] 
+[INFO] --- jacoco:0.8.12:prepare-agent (default) @ eddi ---
+[INFO] argLine set to -javaagent:C:\\Users\\GregorJarisch\\.m2\\repository\\org\\jacoco\\org.jacoco.agent\\0.8.12\\org.jacoco.agent-0.8.12-runtime.jar=destfile=C:\\dev\\git\\EDDI\\target\\jacoco.exec --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-exports=java.base/jdk.internal.module=ALL-UNNAMED
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ eddi ---
+[INFO] Copying 25 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- quarkus:3.32.4:generate-code (default) @ eddi ---
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ eddi ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  5.206 s
+[INFO] Finished at: 2026-03-22T12:55:32+01:00
+[INFO] ------------------------------------------------------------------------

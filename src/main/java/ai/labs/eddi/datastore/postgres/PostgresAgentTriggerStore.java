@@ -93,13 +93,13 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
     }
 
     @Override
-    public void updateBotTrigger(String intent, AgentTriggerConfiguration AgentTriggerConfiguration)
+    public void updateBotTrigger(String intent, AgentTriggerConfiguration agentTriggerConfiguration)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         ensureSchema();
         String sql = "UPDATE bot_triggers SET data = ?::jsonb WHERE intent = ?";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, jsonSerialization.serialize(AgentTriggerConfiguration));
+            ps.setString(1, jsonSerialization.serialize(agentTriggerConfiguration));
             ps.setString(2, intent);
             int rows = ps.executeUpdate();
             if (rows == 0) {
@@ -114,19 +114,19 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
     }
 
     @Override
-    public void createAgentTrigger(AgentTriggerConfiguration AgentTriggerConfiguration)
+    public void createAgentTrigger(AgentTriggerConfiguration agentTriggerConfiguration)
             throws IResourceStore.ResourceAlreadyExistsException, IResourceStore.ResourceStoreException {
         ensureSchema();
         // Check existence
         String check = "SELECT 1 FROM bot_triggers WHERE intent = ?";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(check)) {
-            ps.setString(1, AgentTriggerConfiguration.getIntent());
+            ps.setString(1, agentTriggerConfiguration.getIntent());
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     throw new IResourceStore.ResourceAlreadyExistsException(
                             String.format("AgentTriggerConfiguration with intent=%s already exists",
-                                    AgentTriggerConfiguration.getIntent()));
+                                    agentTriggerConfiguration.getIntent()));
                 }
             }
         } catch (IResourceStore.ResourceAlreadyExistsException e) {
@@ -138,8 +138,8 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
         String sql = "INSERT INTO bot_triggers (intent, data) VALUES (?, ?::jsonb)";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, AgentTriggerConfiguration.getIntent());
-            ps.setString(2, jsonSerialization.serialize(AgentTriggerConfiguration));
+            ps.setString(1, agentTriggerConfiguration.getIntent());
+            ps.setString(2, jsonSerialization.serialize(agentTriggerConfiguration));
             ps.executeUpdate();
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);

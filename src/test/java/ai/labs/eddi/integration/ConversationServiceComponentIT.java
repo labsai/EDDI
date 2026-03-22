@@ -159,9 +159,9 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
     // ==================== Helpers ====================
 
     private ResourceId setupAndDeployMinimalBot() throws Exception {
-        String dictionary = load("botengine/regularDictionary.json");
-        String behavior = load("botengine/behavior.json");
-        String output = load("botengine/output.json");
+        String dictionary = load("agentengine/dictionary.json");
+        String behavior = load("agentengine/rules.json");
+        String output = load("agentengine/output.json");
 
         String locationDictionary = createResource(dictionary, "/regulardictionarystore/regulardictionaries");
         String locationBehavior = createResource(behavior, "/behaviorstore/behaviorsets");
@@ -169,7 +169,7 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
 
         String packageBody = String.format("""
                 {
-                  "PipelineSteps": [
+                  "WorkflowSteps": [
                     {
                       "type": "eddi://ai.labs.parser",
                       "config": {},
@@ -187,7 +187,7 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
                   ]
                 }""", locationDictionary, locationBehavior, locationOutput);
 
-        String locationPackage = createResource(packageBody, "/PipelineStore/packages");
+        String locationPackage = createResource(packageBody, "/WorkflowStore/packages");
 
         String botBody = String.format("""
                 {"packages": ["%s"]}""", locationPackage);

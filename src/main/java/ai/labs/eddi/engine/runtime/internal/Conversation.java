@@ -9,7 +9,7 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.model.Data;
-import ai.labs.eddi.engine.runtime.IExecutablePipeline;
+import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
@@ -33,16 +33,16 @@ public class Conversation implements IConversation {
     private static final String KEY_CONTEXT = "context";
     private static final String KEY_SECRET_INPUT = "secretInput";
     private static final String SECRET_INPUT_PLACEHOLDER = "<secret input>";
-    private final List<IExecutablePipeline> executablePipelines;
+    private final List<IExecutableWorkflow> executableWorkflows;
     private final IConversationMemory conversationMemory;
     private final IPropertiesHandler propertiesHandler;
     private final IConversation.IConversationOutputRenderer outputProvider;
 
-    Conversation(List<IExecutablePipeline> executablePipelines,
+    Conversation(List<IExecutableWorkflow> executableWorkflows,
             IConversationMemory conversationMemory,
             IPropertiesHandler propertiesHandler,
             IConversationOutputRenderer outputProvider) {
-        this.executablePipelines = executablePipelines;
+        this.executableWorkflows = executableWorkflows;
         this.conversationMemory = conversationMemory;
         this.propertiesHandler = propertiesHandler;
         this.outputProvider = outputProvider;
@@ -338,11 +338,11 @@ public class Conversation implements IConversation {
 
     private void executePackages(List<IData<?>> data, List<String> lifecycleTaskTypes)
             throws LifecycleException, ConversationStopException {
-        for (IExecutablePipeline executablePipeline : executablePipelines) {
-            conversationMemory.getCurrentStep().setCurrentPackageId(executablePipeline.getPackageId());
+        for (IExecutableWorkflow executableWorkflow : executableWorkflows) {
+            conversationMemory.getCurrentStep().setCurrentPackageId(executableWorkflow.getPackageId());
             data.stream().filter(Objects::nonNull)
                     .forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
-            ILifecycleManager lifecycleManager = executablePipeline.getLifecycleManager();
+            ILifecycleManager lifecycleManager = executableWorkflow.getLifecycleManager();
             lifecycleManager.executeLifecycle(conversationMemory, lifecycleTaskTypes);
         }
     }

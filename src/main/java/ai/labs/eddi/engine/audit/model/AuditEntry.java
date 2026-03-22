@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Immutable record representing one pipeline task's audit data for a single conversation step.
+ * Immutable record representing one workflow task's audit data for a single conversation step.
  * <p>
  * Each entry captures the complete context of a lifecycle task execution:
  * what was read (input), what was produced (output), LLM-specific details,
@@ -29,7 +29,7 @@ import java.util.Map;
  * @param stepIndex      0-based step position in the conversation
  * @param taskId         Lifecycle task ID (e.g. "ai.labs.parser")
  * @param taskType       Task type (e.g. "expressions", "langchain")
- * @param taskIndex      0-based task position in the pipeline
+ * @param taskIndex      0-based task position in the workflow
  * @param durationMs     Task execution time in milliseconds
  * @param input          Key data read by the task (user input, actions)
  * @param output         Key data written by the task (output text, tool results)

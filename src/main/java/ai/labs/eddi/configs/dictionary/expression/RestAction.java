@@ -3,8 +3,8 @@ package ai.labs.eddi.configs.dictionary.expression;
 import ai.labs.eddi.configs.rules.IBehaviorStore;
 import ai.labs.eddi.configs.apicalls.IHttpCallsStore;
 import ai.labs.eddi.configs.output.IOutputStore;
-import ai.labs.eddi.configs.pipelines.IPipelineStore;
-import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration.PipelineStep;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration.WorkflowStep;
 import ai.labs.eddi.configs.dictionary.IRestAction;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.CollectionUtilities;
@@ -24,7 +24,7 @@ import java.util.List;
 
 @ApplicationScoped
 public class RestAction implements IRestAction {
-    private final IPipelineStore PipelineStore;
+    private final IWorkflowStore workflowStore;
     private final IBehaviorStore behaviorStore;
     private final IHttpCallsStore httpCallsStore;
     private final IOutputStore outputStore;
@@ -32,11 +32,11 @@ public class RestAction implements IRestAction {
 
 
     @Inject
-    public RestAction(IPipelineStore PipelineStore,
+    public RestAction(IWorkflowStore workflowStore,
                       IBehaviorStore behaviorStore,
                       IHttpCallsStore httpCallsStore,
                       IOutputStore outputStore) {
-        this.PipelineStore = PipelineStore;
+        this.workflowStore = workflowStore;
         this.behaviorStore = behaviorStore;
         this.httpCallsStore = httpCallsStore;
         this.outputStore = outputStore;
@@ -46,12 +46,12 @@ public class RestAction implements IRestAction {
     public List<String> readActions(String packageId, Integer packageVersion, String filter, Integer limit) {
         List<String> retActions = new LinkedList<>();
         try {
-            var PipelineConfiguration = PipelineStore.read(packageId, packageVersion);
+            var workflowConfiguration = workflowStore.read(packageId, packageVersion);
 
             List<String> actions;
-            for (var PipelineStep : PipelineConfiguration.getPipelineSteps()) {
-                var type = PipelineStep.getType().toString();
-                var resourceId = extractUriFromConfig(PipelineStep);
+            for (var workflowStep : workflowConfiguration.getWorkflowSteps()) {
+                var type = workflowStep.getType().toString();
+                var resourceId = extractUriFromConfig(workflowStep);
                 var id = resourceId.getId();
                 var version = resourceId.getVersion();
 
@@ -77,8 +77,8 @@ public class RestAction implements IRestAction {
         }
     }
 
-    private static IResourceStore.IResourceId extractUriFromConfig(PipelineStep PipelineStep) {
-        var config = PipelineStep.getConfig();
+    private static IResourceStore.IResourceId extractUriFromConfig(WorkflowStep workflowStep) {
+        var config = workflowStep.getConfig();
         var uri = URI.create(config.get("uri").toString());
         return RestUtilities.extractResourceId(uri);
     }

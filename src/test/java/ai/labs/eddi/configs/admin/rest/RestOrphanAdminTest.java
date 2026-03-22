@@ -6,9 +6,9 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.pipelines.IPipelineStore;
-import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
-import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration.PipelineStep;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration.WorkflowStep;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,7 +37,7 @@ class RestOrphanAdminTest {
     @Mock
     private IAgentStore AgentStore;
     @Mock
-    private IPipelineStore PipelineStore;
+    private IWorkflowStore WorkflowStore;
     @Mock
     private IDocumentDescriptorStore documentDescriptorStore;
     @Mock
@@ -49,7 +49,7 @@ class RestOrphanAdminTest {
     void setUp() {
         openMocks(this);
         restOrphanAdmin = new RestOrphanAdmin(
-                AgentStore, PipelineStore, documentDescriptorStore, resourceClientLibrary);
+                AgentStore, WorkflowStore, documentDescriptorStore, resourceClientLibrary);
     }
 
     private DocumentDescriptor descriptor(String type, String id, int version, String name) {
@@ -63,7 +63,7 @@ class RestOrphanAdminTest {
     private String storePath(String type) {
         return switch (type) {
             case "ai.labs.bot" -> "AgentStore/bots";
-            case "ai.labs.package" -> "PipelineStore/packages";
+            case "ai.labs.package" -> "WorkflowStore/packages";
             case "ai.labs.behavior" -> "behaviorstore/behaviorsets";
             case "ai.labs.httpcalls" -> "httpcallsstore/httpcalls";
             case "ai.labs.output" -> "outputstore/outputsets";
@@ -89,8 +89,8 @@ class RestOrphanAdminTest {
                     .thenReturn(Collections.emptyList());
 
             AgentConfiguration botConfig = new AgentConfiguration();
-            botConfig.setPipelines(new ArrayList<>(List.of(
-                    URI.create("eddi://ai.labs.package/PipelineStore/packages/" + PKG1_ID + "?version=1")
+            botConfig.setWorkflows(new ArrayList<>(List.of(
+                    URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG1_ID + "?version=1")
             )));
             when(AgentStore.read(BOT1_ID, 1)).thenReturn(botConfig);
 
@@ -100,14 +100,14 @@ class RestOrphanAdminTest {
                     .thenReturn(List.of(pkgDesc))
                     .thenReturn(Collections.emptyList());
 
-            PipelineConfiguration pkgConfig = new PipelineConfiguration();
-            PipelineStep ext = new PipelineStep();
+            WorkflowConfiguration pkgConfig = new WorkflowConfiguration();
+            WorkflowStep ext = new WorkflowStep();
             ext.setType(URI.create("eddi://ai.labs.behavior"));
             ext.setConfig(new HashMap<>(Map.of(
                     "uri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/" + BEH1_ID + "?version=1"
             )));
-            pkgConfig.getPipelineSteps().add(ext);
-            when(PipelineStore.read(PKG1_ID, 1)).thenReturn(pkgConfig);
+            pkgConfig.getWorkflowSteps().add(ext);
+            when(WorkflowStore.read(PKG1_ID, 1)).thenReturn(pkgConfig);
 
             // Store scans: package store has the one referenced package, behavior store has the one referenced behavior
             // All other stores are empty
@@ -133,8 +133,8 @@ class RestOrphanAdminTest {
                     .thenReturn(Collections.emptyList());
 
             AgentConfiguration botConfig = new AgentConfiguration();
-            botConfig.setPipelines(new ArrayList<>(List.of(
-                    URI.create("eddi://ai.labs.package/PipelineStore/packages/" + PKG1_ID + "?version=1")
+            botConfig.setWorkflows(new ArrayList<>(List.of(
+                    URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG1_ID + "?version=1")
             )));
             when(AgentStore.read(BOT1_ID, 1)).thenReturn(botConfig);
 
@@ -144,14 +144,14 @@ class RestOrphanAdminTest {
                     .thenReturn(List.of(pkgDesc))
                     .thenReturn(Collections.emptyList());
 
-            PipelineConfiguration pkgConfig = new PipelineConfiguration();
-            PipelineStep ext = new PipelineStep();
+            WorkflowConfiguration pkgConfig = new WorkflowConfiguration();
+            WorkflowStep ext = new WorkflowStep();
             ext.setType(URI.create("eddi://ai.labs.behavior"));
             ext.setConfig(new HashMap<>(Map.of(
                     "uri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/" + BEH1_ID + "?version=1"
             )));
-            pkgConfig.getPipelineSteps().add(ext);
-            when(PipelineStore.read(PKG1_ID, 1)).thenReturn(pkgConfig);
+            pkgConfig.getWorkflowSteps().add(ext);
+            when(WorkflowStore.read(PKG1_ID, 1)).thenReturn(pkgConfig);
 
             // Store scans: package store has PKG1 (used) + ORPHAN_PKG (orphan)
             // Behavior store has BEH1 (used) + ORPHAN_BEH (orphan)
@@ -207,7 +207,7 @@ class RestOrphanAdminTest {
                     .thenReturn(Collections.emptyList());
 
             AgentConfiguration botConfig = new AgentConfiguration();
-            botConfig.setPipelines(new ArrayList<>());
+            botConfig.setWorkflows(new ArrayList<>());
             when(AgentStore.read(BOT1_ID, 1)).thenReturn(botConfig);
 
             // One orphan package in the store

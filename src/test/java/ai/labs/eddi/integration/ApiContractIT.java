@@ -24,7 +24,7 @@ public class ApiContractIT extends BaseIntegrationIT {
         @Test
         @DisplayName("POST create behavior should return 201 with Location header")
         void createBehavior_returns201WithLocation() throws Exception {
-                String json = load("behavior/createBehavior.json");
+                String json = load("rules/createRules.json");
 
                 Response response = given()
                                 .contentType(ContentType.JSON)
@@ -41,7 +41,7 @@ public class ApiContractIT extends BaseIntegrationIT {
         @Test
         @DisplayName("GET should return JSON with correct content type")
         void readBehavior_returnsJson() throws Exception {
-                String json = load("behavior/createBehavior.json");
+                String json = load("rules/createRules.json");
                 String location = createResource(json, "/behaviorstore/behaviorsets/");
                 ResourceId id = extractResourceId(location);
 
@@ -77,7 +77,7 @@ public class ApiContractIT extends BaseIntegrationIT {
         @Test
         @DisplayName("POST create dictionary should return 201 with Location header")
         void createDictionary_returns201WithLocation() throws Exception {
-                String json = load("regularDictionary/createRegularDictionary.json");
+                String json = load("dictionary/createDictionary.json");
 
                 given().contentType(ContentType.JSON)
                                 .body(json)
@@ -140,7 +140,7 @@ public class ApiContractIT extends BaseIntegrationIT {
         @Test
         @DisplayName("package store should return descriptors list")
         void packageStore_listDescriptors() {
-                given().get("/PipelineStore/packages/descriptors")
+                given().get("/WorkflowStore/packages/descriptors")
                                 .then().assertThat()
                                 .statusCode(200)
                                 .contentType(ContentType.JSON);
@@ -158,9 +158,9 @@ public class ApiContractIT extends BaseIntegrationIT {
         // ==================== Helpers ====================
 
         private ResourceId createAndDeployBot() throws Exception {
-                String dictionary = load("botengine/regularDictionary.json");
-                String behavior = load("botengine/behavior.json");
-                String output = load("botengine/output.json");
+                String dictionary = load("agentengine/dictionary.json");
+                String behavior = load("agentengine/rules.json");
+                String output = load("agentengine/output.json");
 
                 String locationDictionary = createResource(dictionary, "/regulardictionarystore/regulardictionaries");
                 String locationBehavior = createResource(behavior, "/behaviorstore/behaviorsets");
@@ -169,7 +169,7 @@ public class ApiContractIT extends BaseIntegrationIT {
                 String packageBody = String.format(
                                 """
                                                 {
-                                                  "PipelineSteps": [
+                                                  "WorkflowSteps": [
                                                     {
                                                       "type": "eddi://ai.labs.parser",
                                                       "config": {},
@@ -188,7 +188,7 @@ public class ApiContractIT extends BaseIntegrationIT {
                                                 }""",
                                 locationDictionary, locationBehavior, locationOutput);
 
-                String locationPackage = createResource(packageBody, "/PipelineStore/packages");
+                String locationPackage = createResource(packageBody, "/WorkflowStore/packages");
                 String botBody = String.format("""
                                 {"packages": ["%s"]}""", locationPackage);
                 String botLocation = createResource(botBody, "/AgentStore/bots");

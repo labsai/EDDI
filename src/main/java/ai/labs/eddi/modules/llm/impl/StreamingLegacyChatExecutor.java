@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * via the {@link ConversationEventSink}.
  * <p>
  * This class blocks until the full response is received (via CountDownLatch)
- * so that the lifecycle pipeline can proceed synchronously while tokens
+ * so that the lifecycle workflow can proceed synchronously while tokens
  * stream to the client.
  */
 class StreamingLegacyChatExecutor {

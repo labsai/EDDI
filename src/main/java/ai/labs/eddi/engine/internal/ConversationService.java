@@ -65,7 +65,7 @@ public class ConversationService implements IConversationService {
     private static final String CACHE_NAME_CONVERSATION_STATE = "conversationState";
     private static final String USER_ID = "userId";
 
-    private final IAgentFactory AgentFactory;
+    private final IAgentFactory agentFactory;
     private final IConversationMemoryStore conversationMemoryStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IPropertiesStore propertiesStore;
@@ -97,7 +97,7 @@ public class ConversationService implements IConversationService {
     private static final Logger LOGGER = Logger.getLogger(ConversationService.class);
 
     @Inject
-    public ConversationService(IAgentFactory AgentFactory,
+    public ConversationService(IAgentFactory agentFactory,
             IConversationMemoryStore conversationMemoryStore,
             IConversationDescriptorStore conversationDescriptorStore,
             IPropertiesStore propertiesStore,
@@ -110,7 +110,7 @@ public class ConversationService implements IConversationService {
             TenantQuotaService tenantQuotaService,
             MeterRegistry meterRegistry,
             @ConfigProperty(name = "systemRuntime.botTimeoutInSeconds") int botTimeout) {
-        this.AgentFactory = AgentFactory;
+        this.agentFactory = agentFactory;
         this.conversationMemoryStore = conversationMemoryStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.propertiesStore = propertiesStore;
@@ -161,15 +161,15 @@ public class ConversationService implements IConversationService {
                 throw new QuotaExceededException(quotaCheck.reason());
             }
 
-            IAgent latestBot = AgentFactory.getLatestReadyAgent(environment, agentId);
-            if (latestBot == null) {
-                String message = "No version of Agent (agentId=%s) ready for interaction (environment=%s)!";
+            IAgent latestAgent = agentFactory.getLatestReadyAgent(environment, agentId);
+            if (latestAgent == null) {
+                String message = "No version of agent (agentId=%s) ready for interaction (environment=%s)!";
                 message = String.format(message, agentId, environment);
                 throw new BotNotReadyException(message);
             }
 
             userId = conversationSetup.computeAnonymousUserIdIfEmpty(userId, context.get(USER_ID));
-            IConversation conversation = latestBot.startConversation(userId, context,
+            IConversation conversation = latestAgent.startConversation(userId, context,
                     createPropertiesHandler(userId), null);
 
             var conversationMemory = conversation.getConversationMemory();
@@ -178,7 +178,7 @@ public class ConversationService implements IConversationService {
             tenantQuotaService.recordConversationStart();
             var conversationUri = createURI(RESOURCE_URI, conversationId);
 
-            conversationSetup.createConversationDescriptor(agentId, latestBot, userId, conversationId, conversationUri);
+            conversationSetup.createConversationDescriptor(agentId, latestAgent, userId, conversationId, conversationUri);
 
             return new ConversationResult(conversationId, conversationUri);
         } catch (BotNotReadyException e) {
@@ -301,9 +301,9 @@ public class ConversationService implements IConversationService {
                 throw new BotMismatchException(message);
             }
 
-            IAgent Agent = getAgent(environment, agentId, agentVersion);
-            if (bot == null) {
-                String msg = "Bot not deployed (environment=%s, conversationId=%s, version=%s)";
+            IAgent agent = getAgent(environment, agentId, agentVersion);
+            if (agent == null) {
+                String msg = "Agent not deployed (environment=%s, conversationId=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
                 throw new BotNotReadyException(msg);
             }
@@ -404,9 +404,9 @@ public class ConversationService implements IConversationService {
                 throw new BotMismatchException(message);
             }
 
-            IAgent Agent = getAgent(environment, agentId, agentVersion);
-            if (bot == null) {
-                String msg = "Bot not deployed (environment=%s, conversationId=%s, version=%s)";
+            IAgent agent = getAgent(environment, agentId, agentVersion);
+            if (agent == null) {
+                String msg = "Agent not deployed (environment=%s, conversationId=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
                 throw new BotNotReadyException(msg);
             }
@@ -587,10 +587,10 @@ public class ConversationService implements IConversationService {
     private IAgent getAgent(Environment environment, String agentId, Integer agentVersion)
             throws ServiceException, IllegalAccessException {
 
-        IAgent Agent = AgentFactory.getAgent(environment, agentId, agentVersion);
-        if (bot == null) {
-            AgentFactory.deployAgent(environment, agentId, agentVersion, null);
-            Agent = AgentFactory.getAgent(environment, agentId, agentVersion);
+        IAgent agent = agentFactory.getAgent(environment, agentId, agentVersion);
+        if (agent == null) {
+            agentFactory.deployAgent(environment, agentId, agentVersion, null);
+            agent = agentFactory.getAgent(environment, agentId, agentVersion);
         }
 
         return agent;

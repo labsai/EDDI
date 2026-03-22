@@ -8,7 +8,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
-import ai.labs.eddi.engine.runtime.IExecutablePipeline;
+import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.runtime.client.agents.IAgentStoreClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -40,7 +40,7 @@ public class AgentFactory implements IAgentFactory {
         this.agentStoreClientLibrary = agentStoreClientLibrary;
         this.deploymentListener = deploymentListener;
         this.deployedAgents = new LinkedList<>();
-        meterRegistry.gaugeCollectionSize("eddi_bots_deployed", Tags.empty(), deployedAgents);
+        meterRegistry.gaugeCollectionSize("eddi_agents_deployed", Tags.empty(), deployedAgents);
         this.environments = Collections.unmodifiableMap(createEmptyEnvironments());
     }
 
@@ -54,7 +54,7 @@ public class AgentFactory implements IAgentFactory {
 
     @Override
     public IAgent getLatestAgent(Deployment.Environment environment, String agentId) {
-        return findLatestAgent(environment, agentId, null); // No filter, return the most recent Agent in any state
+        return findLatestAgent(environment, agentId, null);
     }
 
     @Override
@@ -63,20 +63,20 @@ public class AgentFactory implements IAgentFactory {
     }
 
     private IAgent findLatestAgent(Deployment.Environment environment, String agentId, Deployment.Status requiredStatus) {
-        Map<AgentId, IAgent> bots = getAgentEnvironment(environment);
-        List<AgentId> agentVersions = bots.keySet().stream()
-                .filter(id -> id.getId().equals(AgentId))
-                .sorted(Collections.reverseOrder(Comparator.comparingInt(agentId::getVersion)))
+        Map<AgentId, IAgent> agents = getAgentEnvironment(environment);
+        List<AgentId> agentVersions = agents.keySet().stream()
+                .filter(id -> id.getId().equals(agentId))
+                .sorted(Collections.reverseOrder(Comparator.comparingInt(AgentId::getVersion)))
                 .toList();
 
         for (AgentId agentVersion : agentVersions) {
-            IAgent Agent = bots.get(agentVersion);
-            if (bot != null && (requiredStatus == null || agent.getDeploymentStatus() == requiredStatus)) {
+            IAgent agent = agents.get(agentVersion);
+            if (agent != null && (requiredStatus == null || agent.getDeploymentStatus() == requiredStatus)) {
                 return agent;
             }
         }
 
-        return null; // Return null if no matching Agent is found
+        return null;
     }
 
     @Override
@@ -90,8 +90,8 @@ public class AgentFactory implements IAgentFactory {
             }
 
             String agentId = agentIdObj.getId();
-            IAgent currentAgent = ret.get(AgentId);
-            if (ret.containsKey(AgentId)) {
+            IAgent currentAgent = ret.get(agentId);
+            if (ret.containsKey(agentId)) {
                 if (currentAgent.getAgentVersion() < nextAgent.getAgentVersion()) {
                     ret.put(agentId, nextAgent);
                 }
@@ -106,12 +106,12 @@ public class AgentFactory implements IAgentFactory {
 
     @Override
     public IAgent getAgent(Deployment.Environment environment, final String agentId, final Integer version) {
-        var bots = getAgentEnvironment(environment);
+        var agents = getAgentEnvironment(environment);
         var agentIdObj = new AgentId(agentId, version);
 
-        // Check if the Agent is already in a non-IN_PROGRESS state
-        IAgent Agent = bots.get(agentIdObj);
-        if (bot != null) {
+        // Check if the agent is already in a non-IN_PROGRESS state
+        IAgent agent = agents.get(agentIdObj);
+        if (agent != null) {
             if (agent.getDeploymentStatus() != Deployment.Status.IN_PROGRESS) {
                 return agent;
             } else {
@@ -130,19 +130,19 @@ public class AgentFactory implements IAgentFactory {
                 deploymentFuture.orTimeout(60, TimeUnit.SECONDS).join();
             }
 
-            // Re-fetch the Agent after deployment is complete
-            IAgent Agent = getAgentEnvironment(environment).get(agentIdObj);
-            if (bot == null || agent.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
-                log.error("Bot deployment did not complete successfully for agentId: " + agentIdObj);
+            // Re-fetch the agent after deployment is complete
+            IAgent agent = getAgentEnvironment(environment).get(agentIdObj);
+            if (agent == null || agent.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
+                log.error("Agent deployment did not complete successfully for agentId: " + agentIdObj);
                 return null;
             }
 
             return agent;
         } catch (CancellationException e) {
-            log.error("Waited too long for Agent deployment to complete (timeout reached at 60s).", e);
+            log.error("Waited too long for agent deployment to complete (timeout reached at 60s).", e);
             return null;
         } catch (Exception e) {
-            log.error("Error while waiting for Agent deployment: " + e.getMessage(), e);
+            log.error("Error while waiting for agent deployment: " + e.getMessage(), e);
             return null;
         }
     }
@@ -158,15 +158,15 @@ public class AgentFactory implements IAgentFactory {
 
         agentEnvironment.compute(id, (key, existingAgent) -> {
             if (existingAgent != null) {
-                // If a Agent already exists, ensure it is in a valid state
+                // If an agent already exists, ensure it is in a valid state
                 if (existingAgent.getDeploymentStatus() == Deployment.Status.READY) {
-                    log.debug(String.format("Bot is already deployed: %s (environment=%s, version=%d)", agentId, environment, version));
+                    log.debug(String.format("Agent is already deployed: %s (environment=%s, version=%d)", agentId, environment, version));
                     finalDeploymentProcess.completed(Deployment.Status.READY);
                     return existingAgent; // No need to redeploy
                 }
 
                 if (existingAgent.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
-                    log.debug(String.format("Bot deployment is already in progress: %s (environment=%s, version=%d)", agentId, environment, version));
+                    log.debug(String.format("Agent deployment is already in progress: %s (environment=%s, version=%d)", agentId, environment, version));
                     return existingAgent; // Keep the IN_PROGRESS state
                 }
             }
@@ -176,27 +176,25 @@ public class AgentFactory implements IAgentFactory {
             var progressDummyAgent = createInProgressDummyAgent(agentId, version);
 
             try {
-                IAgent Agent = agentStoreClientLibrary.getAgent(agentId, version);
+                IAgent agent = agentStoreClientLibrary.getAgent(agentId, version);
                 ((Agent) agent).setDeploymentStatus(Deployment.Status.READY);
 
                 finalDeploymentProcess.completed(Deployment.Status.READY);
                 logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.READY);
 
-                // Add the deployed Agent to the deployedAgents list if it's not already there
+                // Add the deployed agent to the deployedAgents list if it's not already there
                 synchronized (deployedAgents) {
                     if (!deployedAgents.contains(id)) {
                         deployedAgents.add(id);
                     }
                 }
 
-                return agent; // Replace the dummy Agent with the actual bot
+                return agent; // Replace the dummy agent with the actual agent
             } catch (ServiceException e) {
-                log.error("Bot deployment failed for " + agentId + " v" + version + ": " + e.getMessage(), e);
+                log.error("Agent deployment failed for " + agentId + " v" + version + ": " + e.getMessage(), e);
                 progressDummyAgent.setDeploymentStatus(Deployment.Status.ERROR);
                 finalDeploymentProcess.completed(Deployment.Status.ERROR);
                 logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
-                // Return the dummy Agent with ERROR status so checkDeploymentStatus() can report it
-                // (ConcurrentHashMap.compute() discards the result if the function throws)
                 return progressDummyAgent;
             } catch (IllegalAccessException e) {
                 throw new RuntimeException(e);
@@ -223,9 +221,9 @@ public class AgentFactory implements IAgentFactory {
     }
 
     private Agent createInProgressDummyAgent(String agentId, Integer version) {
-        Agent bot = new Agent(agentId, version) {
+        Agent dummyAgent = new Agent(agentId, version) {
             @Override
-            public void addPipeline(IExecutablePipeline executablePipeline) throws IllegalAccessException {
+            public void addWorkflow(IExecutableWorkflow executableWorkflow) throws IllegalAccessException {
                 throw createAgentInProgressException();
             }
 
@@ -249,20 +247,20 @@ public class AgentFactory implements IAgentFactory {
             }
         };
 
-        agent.setDeploymentStatus(Deployment.Status.IN_PROGRESS);
-        return agent;
+        dummyAgent.setDeploymentStatus(Deployment.Status.IN_PROGRESS);
+        return dummyAgent;
     }
 
     private static IllegalAccessException createAgentInProgressException() {
-        return new IllegalAccessException("Bot deployment is still in progress!");
+        return new IllegalAccessException("Agent deployment is still in progress!");
     }
 
     private void logAgentDeployment(String environment, String agentId, Integer agentVersion, Deployment.Status status) {
         if (status == Deployment.Status.IN_PROGRESS) {
-            log.info(String.format("Deploying agent... (environment=%s, agentId=%s , version=%s)",
+            log.info(String.format("Deploying agent... (environment=%s, agentId=%s, version=%s)",
                     environment, agentId, agentVersion));
         } else {
-            log.info(String.format("Bot deployed with status: %s (environment=%s, agentId=%s , version=%s)", status,
+            log.info(String.format("Agent deployed with status: %s (environment=%s, agentId=%s, version=%s)", status,
                     environment, agentId, agentVersion));
         }
     }

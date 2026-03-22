@@ -20,7 +20,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
- * Executes the Lifecycle Pipeline - EDDI's core processing engine.
+ * Executes the Lifecycle Workflow - EDDI's core processing engine.
  *
  * <p>
  * The LifecycleManager is responsible for executing a bot's configured sequence
@@ -29,11 +29,11 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * task in order.
  * </p>
  *
- * <h2>Lifecycle Pipeline Concept</h2>
+ * <h2>Lifecycle Workflow Concept</h2>
  * <p>
  * Instead of hard-coded Agent logic, EDDI processes conversations through a
  * configurable
- * pipeline of tasks:
+ * workflow of tasks:
  * </p>
  * 
  * <pre>
@@ -53,7 +53,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * <li><strong>Stateless Design</strong>: Tasks don't maintain state; all state
  * is in
  * the memory object</li>
- * <li><strong>Interruptible</strong>: Pipeline can stop early if
+ * <li><strong>Interruptible</strong>: Workflow can stop early if
  * STOP_CONVERSATION
  * action is triggered</li>
  * <li><strong>Selective Execution</strong>: Can execute only a subset of tasks
@@ -116,7 +116,7 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     /**
-     * Executes the lifecycle pipeline, transforming the conversation memory.
+     * Executes the lifecycle workflow, transforming the conversation memory.
      *
      * <p>
      * This method iterates through the configured lifecycle tasks, executing each
@@ -143,7 +143,7 @@ public class LifecycleManager implements ILifecycleManager {
      * <h3>Selective Execution</h3>
      * <p>
      * If {@code lifecycleTaskTypes} is provided, only tasks starting from the first
-     * matching type will be executed. This allows partial pipeline execution,
+     * matching type will be executed. This allows partial workflow execution,
      * useful for
      * debugging or specialized processing.
      * </p>
@@ -151,7 +151,7 @@ public class LifecycleManager implements ILifecycleManager {
      * <h3>Example</h3>
      * 
      * <pre>{@code
-     * // Execute full pipeline
+     * // Execute full workflow
      * lifecycleManager.executeLifecycle(memory, null);
      *
      * // Execute only from behavior rules onward
@@ -317,7 +317,7 @@ public class LifecycleManager implements ILifecycleManager {
      * Filters lifecycle tasks to execute only those starting from specified types.
      *
      * <p>
-     * This enables partial pipeline execution. For example, if you specify
+     * This enables partial workflow execution. For example, if you specify
      * ["behavior_rules"], it will execute behavior_rules and all subsequent tasks,
      * but skip earlier tasks like parsing.
      * </p>
@@ -348,7 +348,7 @@ public class LifecycleManager implements ILifecycleManager {
      *
      * <p>
      * STOP_CONVERSATION is a special action that can be triggered by behavior rules
-     * to immediately halt the lifecycle pipeline and end the conversation. This is
+     * to immediately halt the lifecycle workflow and end the conversation. This is
      * useful
      * for scenarios like:
      * </p>
@@ -377,7 +377,7 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     /**
-     * Adds a lifecycle task to this manager's execution pipeline.
+     * Adds a lifecycle task to this manager's execution workflow.
      *
      * <p>
      * Tasks are executed in the order they are added. This method is typically
@@ -389,7 +389,7 @@ public class LifecycleManager implements ILifecycleManager {
      * <p>
      * <strong>Important:</strong> Tasks should be added in the correct order to
      * ensure
-     * proper pipeline flow. A typical order is:
+     * proper workflow flow. A typical order is:
      * </p>
      * <ol>
      * <li>Input normalization/parsing</li>
@@ -400,7 +400,7 @@ public class LifecycleManager implements ILifecycleManager {
      * <li>Output generation</li>
      * </ol>
      *
-     * @param lifecycleTask the task to add to the pipeline
+     * @param lifecycleTask the task to add to the workflow
      * @throws IllegalArgumentException if lifecycleTask is null
      */
     @Override

@@ -4,7 +4,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.rules.model.BehaviorConfiguration;
 import ai.labs.eddi.configs.apicalls.model.HttpCallsConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
-import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.dictionary.model.RegularDictionaryConfiguration;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -36,7 +36,7 @@ public class JsonSchemaCreatorTest {
     static Stream<Class<?>> configurationClasses() {
         return Stream.of(
                 AgentConfiguration.class,
-                PipelineConfiguration.class,
+                WorkflowConfiguration.class,
                 BehaviorConfiguration.class,
                 HttpCallsConfiguration.class,
                 OutputConfigurationSet.class,
@@ -80,8 +80,8 @@ public class JsonSchemaCreatorTest {
         JsonNode schema = objectMapper.readTree(schemaJson);
         JsonNode properties = schema.get("properties");
 
-        assertTrue(properties.has("packages"),
-                "AgentConfiguration schema must have 'packages' property");
+        assertTrue(properties.has("workflows"),
+                "AgentConfiguration schema must have 'workflows' property");
         assertTrue(properties.has("channels"),
                 "AgentConfiguration schema must have 'channels' property");
     }

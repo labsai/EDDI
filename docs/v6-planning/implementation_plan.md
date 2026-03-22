@@ -680,6 +680,23 @@ Step-by-step wizard for new users:
 | 58 | Documentation pages (Content Collections) | 5 | 🟠 Medium |
 | 59 | GitHub Actions deployment | 1 | 🟠 Medium |
 
+### Phase 15: EDDI SDK Ecosystem (44 SP, post-GA)
+
+> Full specification: [eddi-sdk-architecture.md](file:///c:/dev/git/EDDI/docs/v6-planning/eddi-sdk-architecture.md) (Appendix O)
+>
+> Three repos: `quarkiverse/quarkus-eddi` (REST + MCP client SDKs), `labsai/eddi-helm` (Helm chart + Kustomize), sync pipeline in `labsai/EDDI`.
+
+| Phase | What | Where | SP | Dependencies |
+|---|---|---|---|---|
+| **15A** | Scaffolding + OpenAPI codegen + `EddiClient` facade + health + unit tests | `quarkiverse/quarkus-eddi` | 16 | v6 GA |
+| **15B** | SSE streaming + DevServices + native image verification | `quarkiverse/quarkus-eddi` | 8 | 15A |
+| **15C** | `EddiMcpClient` + typed tool wrappers + tests | `quarkiverse/quarkus-eddi` | 5 | 15A |
+| **15D** | Helm chart + Kustomize overlays + lint CI | `labsai/eddi-helm` | 7 | Independent |
+| **15E** | Sync pipeline + Antora docs + observability polish | All 3 repos | 8 | All phases |
+
+> [!TIP]
+> **Phase 15D (Helm chart) can start immediately** — it has no dependency on v6 GA or the Java SDK. It only needs the existing Docker image.
+
 ### Future: Deployment Coordination Enhancement
 
 > Replace the current 10-second `@Scheduled` DB polling for bot deployments with NATS pub/sub deployment events for instant cross-instance coordination.

@@ -3,7 +3,7 @@ package ai.labs.eddi.engine.audit;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 
 /**
- * Functional interface for collecting audit entries from the lifecycle pipeline.
+ * Functional interface for collecting audit entries from the lifecycle workflow.
  * <p>
  * Implementations receive audit data after each task completes and delegate
  * to {@link AuditLedgerService} for async persistence.

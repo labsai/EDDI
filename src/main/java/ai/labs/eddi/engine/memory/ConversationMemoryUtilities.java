@@ -70,7 +70,7 @@ public class ConversationMemoryUtilities {
 
         if (!conversationStep.isEmpty()) {
             var packageRunSnapshot = new PackageRunSnapshot();
-            conversationStepSnapshot.getPipelines().add(packageRunSnapshot);
+            conversationStepSnapshot.getWorkflows().add(packageRunSnapshot);
             for (var data : conversationStep.getAllElements()) {
                 var resultSnapshot = new ResultSnapshot(
                         data.getKey(),
@@ -91,7 +91,7 @@ public class ConversationMemoryUtilities {
         for (var redoStep : redoSteps) {
             IWritableConversationStep conversationStep = new ConversationStep(new ConversationOutput());
             conversationSteps.add(conversationStep);
-            for (var packageRunSnapshot : redoStep.getPipelines()) {
+            for (var packageRunSnapshot : redoStep.getWorkflows()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     @SuppressWarnings("unchecked")
                     var data = new Data<Object>(resultSnapshot.getKey(), resultSnapshot.getResult(),
@@ -128,7 +128,7 @@ public class ConversationMemoryUtilities {
             }
 
             var conversationStepSnapshot = conversationSteps.get(i);
-            for (var packageRunSnapshot : conversationStepSnapshot.getPipelines()) {
+            for (var packageRunSnapshot : conversationStepSnapshot.getWorkflows()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     @SuppressWarnings("unchecked")
                     var data = new Data<Object>(resultSnapshot.getKey(), resultSnapshot.getResult(),
@@ -174,7 +174,7 @@ public class ConversationMemoryUtilities {
         for (var conversationStepSnapshot : conversationSteps) {
             var simpleConversationStep = new SimpleConversationStep();
             newSnapshot.getConversationSteps().add(simpleConversationStep);
-            for (var packageRunSnapshot : conversationStepSnapshot.getPipelines()) {
+            for (var packageRunSnapshot : conversationStepSnapshot.getWorkflows()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     var key = resultSnapshot.getKey();
                     if (returnDetailed ||

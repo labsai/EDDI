@@ -18,7 +18,7 @@ import static org.mockito.Mockito.*;
 /**
  * Tests for the streaming event emission in {@link LifecycleManager}.
  * Verifies that task_start/task_complete events are emitted when an event
- * sink is present, and that the pipeline works normally without one.
+ * sink is present, and that the workflow works normally without one.
  */
 class LifecycleManagerStreamingTest {
 

@@ -14,7 +14,7 @@ public interface ILifecycleManager {
             throws LifecycleException, ConversationStopException;
 
     /**
-     * Execute the lifecycle pipeline with an optional event sink for SSE streaming.
+     * Execute the lifecycle workflow with an optional event sink for SSE streaming.
      * The sink receives task_start/task_complete events for each lifecycle task.
      */
     default void executeLifecycle(final IConversationMemory conversationMemory, List<String> lifecycleTaskTypes,

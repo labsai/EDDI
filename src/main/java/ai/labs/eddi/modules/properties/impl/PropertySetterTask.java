@@ -1,13 +1,13 @@
 package ai.labs.eddi.modules.properties.impl;
 
-import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor;
+import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.PropertyInstruction;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import ai.labs.eddi.engine.lifecycle.exceptions.PipelineConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import ai.labs.eddi.engine.memory.IData;
@@ -291,7 +291,7 @@ public class PropertySetterTask implements ILifecycleTask {
 
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws PipelineConfigurationException {
+            throws WorkflowConfigurationException {
 
         List<SetOnActions> setOnActionsList = new LinkedList<>();
 
@@ -311,7 +311,7 @@ public class PropertySetterTask implements ILifecycleTask {
             }
         } catch (ServiceException e) {
             String message = "Error while fetching PropertySetterConfiguration!\n" + e.getLocalizedMessage();
-            throw new PipelineConfigurationException(message, e);
+            throw new WorkflowConfigurationException(message, e);
         }
 
         return new PropertySetter(new LinkedList<>(setOnActionsList));
@@ -424,7 +424,7 @@ public class PropertySetterTask implements ILifecycleTask {
             secretProvider.store(ref, plaintext);
         } catch (ISecretProvider.SecretProviderException e) {
             // If vault storage fails, log and return the plaintext as-is (degraded mode).
-            // This prevents the PropertySetter from breaking the pipeline.
+            // This prevents the PropertySetter from breaking the workflow.
             LOGGER.error("Failed to store secret in vault for key '" + keyName + "': " + e.getMessage());
             return plaintext;
         }

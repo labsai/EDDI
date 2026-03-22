@@ -7,9 +7,9 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.pipelines.IPipelineStore;
-import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
-import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration.PipelineStep;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration.WorkflowStep;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.utils.RestUtilities;
@@ -58,18 +58,18 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
 
     private static final int BATCH_SIZE = 200;
 
-    private final IAgentStore AgentStore;
-    private final IPipelineStore PipelineStore;
+    private final IAgentStore agentStore;
+    private final IWorkflowStore workflowStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IResourceClientLibrary resourceClientLibrary;
 
     @Inject
-    public RestOrphanAdmin(IAgentStore AgentStore,
-                           IPipelineStore PipelineStore,
+    public RestOrphanAdmin(IAgentStore agentStore,
+                           IWorkflowStore workflowStore,
                            IDocumentDescriptorStore documentDescriptorStore,
                            IResourceClientLibrary resourceClientLibrary) {
-        this.AgentStore = AgentStore;
-        this.PipelineStore = PipelineStore;
+        this.agentStore = agentStore;
+        this.workflowStore = workflowStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.resourceClientLibrary = resourceClientLibrary;
     }
@@ -146,11 +146,11 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                     var resourceId = RestUtilities.extractResourceId(botDescriptor.getResource());
                     if (resourceId == null || resourceId.getId() == null) continue;
 
-                    AgentConfiguration botConfig = AgentStore.read(
+                    AgentConfiguration botConfig = agentStore.read(
                             resourceId.getId(), resourceId.getVersion());
-                    if (botConfig.getPipelines() != null) {
-                        for (URI pipelineUri : botConfig.getPipelines()) {
-                            referencedUris.add(pipelineUri.toString());
+                    if (botConfig.getWorkflows() != null) {
+                        for (URI workflowUri : botConfig.getWorkflows()) {
+                            referencedUris.add(workflowUri.toString());
                         }
                     }
                 } catch (IResourceStore.ResourceNotFoundException e) {
@@ -167,7 +167,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                     var resourceId = RestUtilities.extractResourceId(pkgDescriptor.getResource());
                     if (resourceId == null || resourceId.getId() == null) continue;
 
-                    PipelineConfiguration pkgConfig = PipelineStore.read(
+                    WorkflowConfiguration pkgConfig = workflowStore.read(
                             resourceId.getId(), resourceId.getVersion());
                     collectExtensionUris(pkgConfig, referencedUris);
                 } catch (IResourceStore.ResourceNotFoundException e) {
@@ -186,10 +186,10 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
 
     /**
      * Extract all extension resource URIs from a package configuration.
-     * Follows the same traversal as RestPipelineStore.deletePackageCascade().
+     * Follows the same traversal as RestWorkflowStore.deletePackageCascade().
      */
-    private void collectExtensionUris(PipelineConfiguration pkgConfig, Set<String> referencedUris) {
-        for (PipelineStep ext : pkgConfig.getPipelineSteps()) {
+    private void collectExtensionUris(WorkflowConfiguration pkgConfig, Set<String> referencedUris) {
+        for (WorkflowStep ext : pkgConfig.getWorkflowSteps()) {
             // Main extension resource URI (config.uri)
             Map<String, Object> config = ext.getConfig();
             if (config != null) {

@@ -28,11 +28,11 @@ public interface IRestAgentTriggerStore {
     @PUT
     @Path("/{intent}")
     @Consumes(MediaType.APPLICATION_JSON)
-    Response updateBotTrigger(@PathParam("intent") String intent, AgentTriggerConfiguration AgentTriggerConfiguration);
+    Response updateBotTrigger(@PathParam("intent") String intent, AgentTriggerConfiguration agentTriggerConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    Response createAgentTrigger(AgentTriggerConfiguration AgentTriggerConfiguration);
+    Response createAgentTrigger(AgentTriggerConfiguration agentTriggerConfiguration);
 
     @DELETE
     @Path("/{intent}")

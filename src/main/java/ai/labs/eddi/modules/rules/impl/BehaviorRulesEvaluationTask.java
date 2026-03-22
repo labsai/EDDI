@@ -5,13 +5,13 @@ import ai.labs.eddi.datastore.serialization.DeserializationException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import ai.labs.eddi.engine.lifecycle.exceptions.PipelineConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor;
+import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
@@ -23,8 +23,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 
-import static ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.ConfigValue;
-import static ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.FieldType;
+import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
+import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_PARSED;
 
@@ -158,7 +158,7 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
 
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws PipelineConfigurationException {
+            throws WorkflowConfigurationException {
 
         Object uriObj = configuration.get(BEHAVIOR_CONFIG_URI);
         URI uri = URI.create(uriObj.toString());
@@ -187,11 +187,11 @@ public class BehaviorRulesEvaluationTask implements ILifecycleTask {
         } catch (IOException | DeserializationException e) {
             String message = "Error while configuring BehaviorRuleLifecycleTask!";
             log.debug(message, e);
-            throw new PipelineConfigurationException(message, e);
+            throw new WorkflowConfigurationException(message, e);
         } catch (ServiceException e) {
             String message = "Error while fetching BehaviorRuleConfigurationSet!\n" + e.getLocalizedMessage();
             log.debug(message, e);
-            throw new PipelineConfigurationException(message, e);
+            throw new WorkflowConfigurationException(message, e);
         }
     }
 

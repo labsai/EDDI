@@ -83,7 +83,7 @@ public class ScheduleFireExecutor {
                     snapshot -> latch.countDown() // responseHandler
             );
 
-            // Wait for pipeline completion (max 5 minutes)
+            // Wait for workflow completion (max 5 minutes)
             if (!latch.await(5, TimeUnit.MINUTES)) {
                 throw new RuntimeException("Schedule fire timed out after 5 minutes");
             }

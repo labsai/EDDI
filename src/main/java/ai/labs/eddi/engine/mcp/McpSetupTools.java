@@ -21,8 +21,8 @@ import ai.labs.eddi.configs.llm.IRestLangChainStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
-import ai.labs.eddi.configs.pipelines.IRestPipelineStore;
-import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
@@ -43,7 +43,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
 
 /**
  * MCP composite tool for setting up a fully working Agent in a single call.
- * Codifies the Agent Father's 12-step pipeline as a programmatic Java operation.
+ * Codifies the Agent Father's 12-step workflow as a programmatic Java operation.
  *
  * @author ginccc
  */
@@ -164,7 +164,7 @@ public class McpSetupTools {
 
             // --- Step 5: Create Package ---
             var packageConfig = createPackageConfig(parserLocation, behaviorLocation, null, langchainLocation, outputLocation);
-            Response packageResponse = getRestStore(IRestPipelineStore.class).createPackage(packageConfig);
+            Response packageResponse = getRestStore(IRestWorkflowStore.class).createPackage(packageConfig);
             String packageLocation = packageResponse.getHeaderString("Location");
             String packageId = extractIdFromLocation(packageLocation);
             int packageVersion = extractVersionFromLocation(packageLocation);
@@ -173,7 +173,7 @@ public class McpSetupTools {
 
             // --- Step 6: Create Agent ---
             var botConfig = new AgentConfiguration();
-            botConfig.setPipelines(List.of(URI.create(packageLocation)));
+            botConfig.setWorkflows(List.of(URI.create(packageLocation)));
             Response botResponse = getRestStore(IRestAgentStore.class).createAgent(botConfig);
             String botLocation = botResponse.getHeaderString("Location");
             String agentId = extractIdFromLocation(botLocation);
@@ -225,7 +225,7 @@ public class McpSetupTools {
 
     /**
      * Create behavior rules: catch-all inputmatcher(*) → send_message action.
-     * The parser must be in the pipeline before behavior rules so that
+     * The parser must be in the workflow before behavior rules so that
      * expressions are available for matching.
      */
     BehaviorConfiguration createBehaviorConfig() {
@@ -414,27 +414,27 @@ public class McpSetupTools {
     }
 
     /**
-     * Create package with parser + behavior + [httpcalls...] + langchain [+ output] pipeline.
-     * The parser MUST be first in the pipeline — it produces NLU expressions
+     * Create package with parser + behavior + [httpcalls...] + langchain [+ output] workflow.
+     * The parser MUST be first in the workflow — it produces NLU expressions
      * that the behavior rules' inputmatcher condition needs.
      */
-    PipelineConfiguration createPackageConfig(String parserLocation,
+    WorkflowConfiguration createPackageConfig(String parserLocation,
             String behaviorLocation,
             List<String> httpCallsLocations,
             String langchainLocation,
             String outputLocation) {
-        var extensions = new ArrayList<PipelineConfiguration.PipelineStep>();
+        var extensions = new ArrayList<WorkflowConfiguration.WorkflowStep>();
 
         // Parser (must be first — produces expressions for behavior rules)
         if (parserLocation != null) {
-            var parser = new PipelineConfiguration.PipelineStep();
+            var parser = new WorkflowConfiguration.WorkflowStep();
             parser.setType(URI.create("eddi://ai.labs.parser"));
             parser.setConfig(Map.of("uri", parserLocation));
             extensions.add(parser);
         }
 
         // Behavior rules
-        var behavior = new PipelineConfiguration.PipelineStep();
+        var behavior = new WorkflowConfiguration.WorkflowStep();
         behavior.setType(URI.create("eddi://ai.labs.behavior"));
         behavior.setConfig(Map.of("uri", behaviorLocation));
         extensions.add(behavior);
@@ -442,7 +442,7 @@ public class McpSetupTools {
         // HttpCalls (zero or more groups)
         if (httpCallsLocations != null) {
             for (String httpCallsLocation : httpCallsLocations) {
-                var httpCalls = new PipelineConfiguration.PipelineStep();
+                var httpCalls = new WorkflowConfiguration.WorkflowStep();
                 httpCalls.setType(URI.create("eddi://ai.labs.httpcalls"));
                 httpCalls.setConfig(Map.of("uri", httpCallsLocation));
                 extensions.add(httpCalls);
@@ -450,21 +450,21 @@ public class McpSetupTools {
         }
 
         // LangChain
-        var langchain = new PipelineConfiguration.PipelineStep();
+        var langchain = new WorkflowConfiguration.WorkflowStep();
         langchain.setType(URI.create("eddi://ai.labs.langchain"));
         langchain.setConfig(Map.of("uri", langchainLocation));
         extensions.add(langchain);
 
         // Output (optional)
         if (outputLocation != null) {
-            var output = new PipelineConfiguration.PipelineStep();
+            var output = new WorkflowConfiguration.WorkflowStep();
             output.setType(URI.create("eddi://ai.labs.output"));
             output.setConfig(Map.of("uri", outputLocation));
             extensions.add(output);
         }
 
-        var config = new PipelineConfiguration();
-        config.setPipelineSteps(extensions);
+        var config = new WorkflowConfiguration();
+        config.setWorkflowSteps(extensions);
         return config;
     }
 
@@ -472,7 +472,7 @@ public class McpSetupTools {
             +
             "Parses the OpenAPI spec, generates HttpCalls configurations (grouped by API tag), " +
             "and creates a fully deployed Agent with LLM-powered API interaction. " +
-            "The LLM can then call the API endpoints as tools through EDDI's controlled pipeline.")
+            "The LLM can then call the API endpoints as tools through EDDI's controlled workflow.")
     public String createApIAgent(
             @ToolArg(description = "Bot name (required)") String name,
             @ToolArg(description = "System prompt / role for the LLM (required). " +
@@ -569,10 +569,10 @@ public class McpSetupTools {
             patchDescriptor(extractIdFromLocation(langchainLocation),
                     extractVersionFromLocation(langchainLocation), name);
 
-            // --- Step 6: Create Package (with httpcalls in pipeline) ---
+            // --- Step 6: Create Package (with httpcalls in workflow) ---
             var packageConfig = createPackageConfig(
                     parserLocation, behaviorLocation, httpCallsLocations, langchainLocation, null);
-            Response packageResponse = getRestStore(IRestPipelineStore.class).createPackage(packageConfig);
+            Response packageResponse = getRestStore(IRestWorkflowStore.class).createPackage(packageConfig);
             String packageLocation = packageResponse.getHeaderString("Location");
             createdResources.put("packageLocation", packageLocation);
             patchDescriptor(extractIdFromLocation(packageLocation),
@@ -580,7 +580,7 @@ public class McpSetupTools {
 
             // --- Step 7: Create Agent ---
             var botConfig = new AgentConfiguration();
-            botConfig.setPipelines(List.of(URI.create(packageLocation)));
+            botConfig.setWorkflows(List.of(URI.create(packageLocation)));
             Response botResponse = getRestStore(IRestAgentStore.class).createAgent(botConfig);
             String botLocation = botResponse.getHeaderString("Location");
             String agentId = extractIdFromLocation(botLocation);

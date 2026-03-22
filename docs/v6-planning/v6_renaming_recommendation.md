@@ -19,7 +19,7 @@ EDDI is an AI orchestration platform. Its terminology dates from the chatbot era
 | # | Rename | From → To | Status |
 |---|--------|-----------|--------|
 | 1 | Core concept | `Bot` → `Agent` | ✅ Confirmed |
-| 2 | Core concept | `Package` → `Pipeline` | ✅ Confirmed |
+| 2 | Core concept | `Package` → `Workflow` | ✅ Confirmed |
 | 3 | Core concept | `LangChain` → `LLM` | ✅ Confirmed |
 | 4 | Config type | `Behavior` → `Rules` | ✅ Confirmed |
 | 5 | Config type | `RegularDictionary` → `Dictionary` | ✅ Confirmed |
@@ -125,37 +125,46 @@ The LLM industry has standardized on "agent" for an autonomous entity that reaso
 
 ---
 
-## 2. `Package` → `Pipeline`
+## 2. `Package` → `Workflow`
 
 ### Reasoning
-A Package is a sequential chain of lifecycle tasks (parser → behavior → httpcalls → langchain → output). That's literally a pipeline. "Workflow" implies branching/conditionals (like BPMN), which is misleading. "Flow" is overloaded. "Pipeline" is precise and used by competitors (Rasa, Haystack, LangChain).
+A Package defines *what should happen under what conditions* — behavior rules evaluate expressions, produce actions, and those actions control which API calls fire, which output renders, and what properties get set. This is conditional logic driving execution — a workflow.
+
+While the current `LifecycleManager` executes tasks sequentially (a `for` loop), this is an implementation detail:
+- Behavior rules form a **decision tree** (IF conditions → THEN actions)
+- Downstream tasks **selectively execute** based on those actions (HttpCallsTask filters by `httpCallActions.contains(action)`)
+- The `AgentOrchestrator` adds iterative LLM↔tool loops (up to 10 iterations)
+- **DAG execution is on the roadmap**, making Workflow the forward-looking choice
+- Versioning could lead to branching/forking — Workflow encompasses this future
+
+"Pipeline" was rejected as too narrow — it implies dumb data flow without decisions. "Flow" is overloaded (LangFlow, Node-RED). "Playbook" was considered but feels too casual for enterprise. **Workflow** is universally understood, used by competitors (n8n, Make, AWS Step Functions), and accurate at the conceptual level.
 
 ### Source Files to Rename (15 files)
 
 | Current File | New File |
 |---|---|
-| `configs/packages/IPackageStore.java` | `configs/pipelines/IPipelineStore.java` |
-| `configs/packages/IRestPackageStore.java` | `configs/pipelines/IRestPipelineStore.java` |
-| `configs/packages/IRestPackageExtensionStore.java` | `configs/pipelines/IRestPipelineStepStore.java` |
-| `configs/packages/model/PackageConfiguration.java` | `configs/pipelines/model/PipelineConfiguration.java` |
-| `configs/packages/mongo/PackageStore.java` | `configs/pipelines/mongo/PipelineStore.java` |
-| `configs/packages/rest/RestPackageStore.java` | `configs/pipelines/rest/RestPipelineStore.java` |
-| `configs/packages/rest/RestPackageExtensionStore.java` | `configs/pipelines/rest/RestPipelineStepStore.java` |
-| `engine/runtime/IExecutablePackage.java` | `engine/runtime/IExecutablePipeline.java` |
-| `engine/runtime/IPackageFactory.java` | `engine/runtime/IPipelineFactory.java` |
-| `engine/runtime/internal/PackageFactory.java` | `engine/runtime/internal/PipelineFactory.java` |
-| `engine/runtime/client/packages/IPackageStoreClientLibrary.java` | `engine/runtime/client/pipelines/IPipelineStoreClientLibrary.java` |
-| `engine/runtime/client/packages/PackageStoreClientLibrary.java` | `engine/runtime/client/pipelines/PipelineStoreClientLibrary.java` |
-| `engine/runtime/service/IPackageStoreService.java` | `engine/runtime/service/IPipelineStoreService.java` |
-| `engine/runtime/service/PackageStoreService.java` | `engine/runtime/service/PipelineStoreService.java` |
-| `engine/lifecycle/exceptions/PackageConfigurationException.java` | `engine/lifecycle/exceptions/PipelineConfigurationException.java` |
+| `configs/packages/IPackageStore.java` | `configs/workflows/IWorkflowStore.java` |
+| `configs/packages/IRestPackageStore.java` | `configs/workflows/IRestWorkflowStore.java` |
+| `configs/packages/IRestPackageExtensionStore.java` | `configs/workflows/IRestWorkflowStepStore.java` |
+| `configs/packages/model/PackageConfiguration.java` | `configs/workflows/model/WorkflowConfiguration.java` |
+| `configs/packages/mongo/PackageStore.java` | `configs/workflows/mongo/WorkflowStore.java` |
+| `configs/packages/rest/RestPackageStore.java` | `configs/workflows/rest/RestWorkflowStore.java` |
+| `configs/packages/rest/RestPackageExtensionStore.java` | `configs/workflows/rest/RestWorkflowStepStore.java` |
+| `engine/runtime/IExecutablePackage.java` | `engine/runtime/IExecutableWorkflow.java` |
+| `engine/runtime/IPackageFactory.java` | `engine/runtime/IWorkflowFactory.java` |
+| `engine/runtime/internal/PackageFactory.java` | `engine/runtime/internal/WorkflowFactory.java` |
+| `engine/runtime/client/packages/IPackageStoreClientLibrary.java` | `engine/runtime/client/workflows/IWorkflowStoreClientLibrary.java` |
+| `engine/runtime/client/packages/PackageStoreClientLibrary.java` | `engine/runtime/client/workflows/WorkflowStoreClientLibrary.java` |
+| `engine/runtime/service/IPackageStoreService.java` | `engine/runtime/service/IWorkflowStoreService.java` |
+| `engine/runtime/service/PackageStoreService.java` | `engine/runtime/service/WorkflowStoreService.java` |
+| `engine/lifecycle/exceptions/PackageConfigurationException.java` | `engine/lifecycle/exceptions/WorkflowConfigurationException.java` |
 
 ### Inner Class Rename
-- `PackageConfiguration.PackageExtension` → `PipelineConfiguration.PipelineStep`
+- `PackageConfiguration.PackageExtension` → `WorkflowConfiguration.WorkflowStep`
 
 ### JSON Field
-- `AgentConfiguration` (formerly `BotConfiguration`) field `packages` → `pipelines`
-- Use `@JsonAlias("packages")` on the `pipelines` field for backwards compatibility
+- `AgentConfiguration` (formerly `BotConfiguration`) field `packages` → `workflows`
+- Use `@JsonAlias("packages")` on the `workflows` field for backwards compatibility
 
 ---
 
@@ -315,7 +324,7 @@ public enum Environment {
 | Current URI | New URI (v6) |
 |---|---|
 | `eddi://ai.labs.bot/botstore/bots/{id}?version=V` | `eddi://ai.labs.agent/agentstore/agents/{id}?version=V` |
-| `eddi://ai.labs.package/packagestore/packages/{id}?version=V` | `eddi://ai.labs.pipeline/pipelinestore/pipelines/{id}?version=V` |
+| `eddi://ai.labs.package/packagestore/packages/{id}?version=V` | `eddi://ai.labs.workflow/workflowstore/workflows/{id}?version=V` |
 | `eddi://ai.labs.langchain/langchainstore/langchains/{id}?version=V` | `eddi://ai.labs.llm/llmstore/llmconfigs/{id}?version=V` |
 | `eddi://ai.labs.behavior/behaviorstore/behaviorsets/{id}?version=V` | `eddi://ai.labs.rules/rulestore/rulesets/{id}?version=V` |
 | `eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/{id}?version=V` | `eddi://ai.labs.apicalls/apicallstore/apicalls/{id}?version=V` |
@@ -338,7 +347,7 @@ public enum Environment {
 | Old REST Path | New REST Path |
 |---|---|
 | `/botstore/bots` | `/agentstore/agents` |
-| `/packagestore/packages` | `/pipelinestore/pipelines` |
+| `/packagestore/packages` | `/workflowstore/workflows` |
 | `/langchainstore/langchains` | `/llmstore/llmconfigs` |
 | `/behaviorstore/behaviorsets` | `/rulestore/rulesets` |
 | `/httpcallsstore/httpcalls` | `/apicallstore/apicalls` |
@@ -355,7 +364,7 @@ public enum Environment {
 public class LegacyPathRewriteFilter implements ContainerRequestFilter {
     private static final Map<String, String> REWRITES = Map.of(
         "/botstore/bots", "/agentstore/agents",
-        "/packagestore/packages", "/pipelinestore/pipelines",
+        "/packagestore/packages", "/workflowstore/workflows",
         "/langchainstore/langchains", "/llmstore/llmconfigs",
         "/behaviorstore/behaviorsets", "/rulestore/rulesets",
         "/httpcallsstore/httpcalls", "/apicallstore/apicalls",
@@ -397,8 +406,8 @@ All MCP tools are in `engine/mcp/` (3 files: `McpSetupTools.java`, `McpConversat
 | `create_bot` | `create_agent` | `McpAdminTools.java` |
 | `delete_bot` | `delete_agent` | `McpAdminTools.java` |
 | `update_bot` | `update_agent` | `McpAdminTools.java` |
-| `list_packages` | `list_pipelines` | `McpAdminTools.java` |
-| `read_package` | `read_pipeline` | `McpAdminTools.java` |
+| `list_packages` | `list_workflows` | `McpAdminTools.java` |
+| `read_package` | `read_workflow` | `McpAdminTools.java` |
 | `apply_bot_changes` | `apply_agent_changes` | `McpAdminTools.java` |
 | `list_bot_resources` | `list_agent_resources` | `McpAdminTools.java` |
 | `list_bot_triggers` | `list_agent_triggers` | `McpAdminTools.java` |
@@ -417,7 +426,7 @@ All MCP tools are in `engine/mcp/` (3 files: `McpSetupTools.java`, `McpConversat
 | `retry_failed_schedule` | **no change** | `McpAdminTools.java` |
 
 ### MCP Tool Descriptions
-All tool descriptions and parameter descriptions that reference "bot" or "package" must be updated to "agent" or "pipeline" respectively. Also update the `resourceType` accepted values in `read_resource`/`update_resource`/`create_resource`/`delete_resource` — replace `"langchain"` with `"llm"`, `"behavior"` with `"rules"`, `"httpcalls"` with `"apicalls"`, `"dictionaries"` stays as `"dictionaries"`.
+All tool descriptions and parameter descriptions that reference "bot" or "package" must be updated to "agent" or "workflow" respectively. Also update the `resourceType` accepted values in `read_resource`/`update_resource`/`create_resource`/`delete_resource` — replace `"langchain"` with `"llm"`, `"behavior"` with `"rules"`, `"httpcalls"` with `"apicalls"`, `"dictionaries"` stays as `"dictionaries"`.
 
 ### MCP Doc Resources
 - `McpDocResources.java` — update resource URIs and descriptions that reference bots/packages
@@ -438,7 +447,7 @@ This is already architecturally handled:
 | Old Mongo Collection | New Mongo Collection |
 |---|---|
 | `bots` + `bots.history` | `agents` + `agents.history` |
-| `packages` + `packages.history` | `pipelines` + `pipelines.history` |
+| `packages` + `packages.history` | `workflows` + `workflows.history` |
 | `langchain` + `langchain.history` | `llmconfigs` + `llmconfigs.history` |
 | `behaviorsets` + `behaviorsets.history` | `rulesets` + `rulesets.history` |
 | `httpcalls` + `httpcalls.history` | `apicalls` + `apicalls.history` |
@@ -466,7 +475,7 @@ Add to `MigrationManager.startMigrationIfFirstTimeRun()`:
 private void startV6RenameMigration() {
     Map<String, String> renames = Map.of(
         "bots", "agents",
-        "packages", "pipelines",
+        "packages", "workflows",
         "langchain", "llmconfigs",
         "behaviorsets", "rulesets",
         "httpcalls", "apicalls",
@@ -492,7 +501,7 @@ private void startV6RenameMigration() {
 ```java
 Map<String, String> URI_PREFIX_MAP = Map.of(
     "eddi://ai.labs.bot/botstore/bots/", "eddi://ai.labs.agent/agentstore/agents/",
-    "eddi://ai.labs.package/packagestore/packages/", "eddi://ai.labs.pipeline/pipelinestore/pipelines/",
+    "eddi://ai.labs.package/packagestore/packages/", "eddi://ai.labs.workflow/workflowstore/workflows/",
     "eddi://ai.labs.langchain/langchainstore/langchains/", "eddi://ai.labs.llm/llmstore/llmconfigs/",
     "eddi://ai.labs.behavior/behaviorstore/behaviorsets/", "eddi://ai.labs.rules/rulestore/rulesets/",
     "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/", "eddi://ai.labs.apicalls/apicallstore/apicalls/",
@@ -517,12 +526,12 @@ eddi.migration.v6-rename.enabled=true  # default true; set false to skip
 
 | Layer | Old Value | New Value | Strategy |
 |---|---|---|---|
-| **JSON fields** | `"packages"` in AgentConfig | `"pipelines"` | `@JsonAlias("packages")` |
+| **JSON fields** | `"packages"` in AgentConfig | `"workflows"` | `@JsonAlias("packages")` |
 | **JSON enum** | `"unrestricted"`, `"restricted"` | `"production"` | Custom `@JsonCreator` on `Environment` enum |
 | **REST paths** | `/botstore/bots`, etc. | `/agentstore/agents`, etc. | `LegacyPathRewriteFilter` `ContainerRequestFilter` |
 | **REST env segment** | `/unrestricted/`, `/restricted/` | `/production/` | Same `LegacyPathRewriteFilter` |
 | **eddi:// URIs** | `eddi://ai.labs.bot/...` | `eddi://ai.labs.agent/...` | `MigrationManager` URI rewrite on startup |
-| **Mongo collections** | `bots`, `packages`, etc. | `agents`, `pipelines`, etc. | `MigrationManager` `renameCollection()` |
+| **Mongo collections** | `bots`, `packages`, etc. | `agents`, `workflows`, etc. | `MigrationManager` `renameCollection()` |
 | **Mongo environment fields** | `"unrestricted"`, `"restricted"` | `"production"` | `MigrationManager` field rewrite |
 | **MCP tool names** | `setup_bot`, etc. | `setup_agent`, etc. | Rename in code; no aliasing needed (MCP tools are server-defined) |
 | **MCP resource types** | `"langchain"`, `"behavior"`, `"httpcalls"` | `"llm"`, `"rules"`, `"apicalls"` | Accept old values via alias map in MCP tool handlers |
@@ -539,7 +548,7 @@ eddi.migration.v6-rename.enabled=true  # default true; set false to skip
 | `02. Behavior Rules` | `02. Rules` |
 | `03. LangChains` | `03. LLM` |
 | `04. HTTP Calls` | `04. API Calls` |
-| `06. Packages` | `06. Pipelines` |
+| `06. Packages` | `06. Workflows` |
 | `07. Bots` | `07. Agents` |
 | `08. Bot Administration` | `08. Agent Administration` |
 | `09. Bot Engine` | `09. Agent Engine` |
@@ -550,7 +559,7 @@ eddi.migration.v6-rename.enabled=true  # default true; set false to skip
 
 | File | Changes |
 |---|---|
-| `docs/mcp-server.md` | All tool names, parameter names, and descriptions referencing bot/package |
+| `docs/mcp-server.md` | All tool names, parameter names, and descriptions referencing bot/package/pipeline |
 | `docs/changelog.md` | Add v6 entry documenting all renames |
 | `HANDOFF.md` | Update roadmap with v6 rename phase |
 | `install.sh` / `install.ps1` | Add upgrade detection + migration prompt |

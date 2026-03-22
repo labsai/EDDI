@@ -7,11 +7,11 @@ import java.util.logging.LogRecord;
 
 /**
  * Quarkus-native logging filter that intercepts every log record
- * in the JBoss LogManager pipeline and captures it into the
+ * in the JBoss LogManager workflow and captures it into the
  * {@link BoundedLogStore} ring buffer.
  *
  * <p>This filter always returns {@code true} (it never suppresses logs).
- * Its only purpose is to tap into the logging pipeline as a side effect,
+ * Its only purpose is to tap into the logging workflow as a side effect,
  * pushing each record to the {@link BoundedLogStore#capture(LogRecord)}
  * method for ring-buffer storage and SSE streaming.</p>
  *

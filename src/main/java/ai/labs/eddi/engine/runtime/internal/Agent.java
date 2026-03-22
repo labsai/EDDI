@@ -6,7 +6,7 @@ import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.runtime.IAgent;
-import ai.labs.eddi.engine.runtime.IExecutablePipeline;
+import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
 
@@ -20,19 +20,19 @@ import java.util.Map;
 public class Agent implements IAgent {
     private final String agentId;
     private final Integer agentVersion;
-    private final List<IExecutablePipeline> executablePipelines;
+    private final List<IExecutableWorkflow> executableWorkflows;
 
     private Deployment.Status deploymentStatus;
 
     public Agent(String agentId, Integer agentVersion) {
         this.agentId = agentId;
         this.agentVersion = agentVersion;
-        executablePipelines = new LinkedList<>();
+        executableWorkflows = new LinkedList<>();
     }
 
     @Override
-    public void addPipeline(IExecutablePipeline executablePipeline) throws IllegalAccessException {
-        executablePipelines.add(executablePipeline);
+    public void addWorkflow(IExecutableWorkflow executableWorkflow) throws IllegalAccessException {
+        executableWorkflows.add(executableWorkflow);
     }
 
     @Override
@@ -41,7 +41,7 @@ public class Agent implements IAgent {
                                            IPropertiesHandler propertiesHandler,
                                            final IConversation.IConversationOutputRenderer outputProvider)
             throws LifecycleException, IllegalAccessException {
-        Conversation conversation = new Conversation(executablePipelines,
+        Conversation conversation = new Conversation(executableWorkflows,
                 new ConversationMemory(agentId, agentVersion, userId), propertiesHandler, outputProvider);
         conversation.init(context);
         return conversation;
@@ -51,7 +51,7 @@ public class Agent implements IAgent {
     public IConversation continueConversation(final IConversationMemory conversationMemory,
                                               final IPropertiesHandler propertiesHandler,
                                               final IConversation.IConversationOutputRenderer outputProvider) throws IllegalAccessException {
-        return new Conversation(executablePipelines, conversationMemory, propertiesHandler, outputProvider);
+        return new Conversation(executableWorkflows, conversationMemory, propertiesHandler, outputProvider);
     }
 
     public String getAgentId() {

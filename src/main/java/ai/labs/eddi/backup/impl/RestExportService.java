@@ -10,8 +10,8 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IHttpCallsStore;
 import ai.labs.eddi.configs.llm.ILangChainStore;
 import ai.labs.eddi.configs.output.IOutputStore;
-import ai.labs.eddi.configs.pipelines.IPipelineStore;
-import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.dictionary.IRegularDictionaryStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -51,8 +51,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 @ApplicationScoped
 public class RestExportService extends AbstractBackupService implements IRestExportService {
     private final IDocumentDescriptorStore documentDescriptorStore;
-    private final IAgentStore AgentStore;
-    private final IPipelineStore PipelineStore;
+    private final IAgentStore agentStore;
+    private final IWorkflowStore workflowStore;
     private final IRegularDictionaryStore regularDictionaryStore;
     private final IBehaviorStore behaviorStore;
     private final IHttpCallsStore httpCallsStore;
@@ -70,8 +70,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     @Inject
     public RestExportService(IDocumentDescriptorStore documentDescriptorStore,
-                             IAgentStore AgentStore,
-                             IPipelineStore PipelineStore,
+                             IAgentStore agentStore,
+                             IWorkflowStore workflowStore,
                              IRegularDictionaryStore regularDictionaryStore,
                              IBehaviorStore behaviorStore,
                              IHttpCallsStore httpCallsStore,
@@ -83,8 +83,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                              SecretScrubber secretScrubber,
                              IScheduleStore scheduleStore) {
         this.documentDescriptorStore = documentDescriptorStore;
-        this.AgentStore = AgentStore;
-        this.PipelineStore = PipelineStore;
+        this.agentStore = agentStore;
+        this.workflowStore = workflowStore;
         this.regularDictionaryStore = regularDictionaryStore;
         this.behaviorStore = behaviorStore;
         this.httpCallsStore = httpCallsStore;
@@ -118,46 +118,46 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     @Override
     public Response exportBot(String agentId, Integer agentVersion) {
         try {
-            AgentConfiguration AgentConfiguration = AgentStore.read(agentId, agentVersion);
-            Path botPath = writeDirAndDocument(agentId, agentVersion, jsonSerialization.serialize(AgentConfiguration), tmpPath, BOT_EXT);
-            Map<IResourceId, PipelineConfiguration> PipelineConfigurations =
-                    readConfigs(PipelineStore, AgentConfiguration.getPipelines());
+            AgentConfiguration agentConfig = agentStore.read(agentId, agentVersion);
+            Path botPath = writeDirAndDocument(agentId, agentVersion, jsonSerialization.serialize(agentConfig), tmpPath, BOT_EXT);
+            Map<IResourceId, WorkflowConfiguration> workflowConfigurations =
+                    readConfigs(workflowStore, agentConfig.getWorkflows());
 
             DocumentDescriptor botDocumentDescriptor = writeDocumentDescriptor(botPath, agentId, agentVersion);
 
-            for (IResourceId resourceId : PipelineConfigurations.keySet()) {
-                PipelineConfiguration PipelineConfiguration = PipelineConfigurations.get(resourceId);
-                String PipelineConfigurationString = jsonSerialization.serialize(PipelineConfiguration);
+            for (IResourceId resourceId : workflowConfigurations.keySet()) {
+                WorkflowConfiguration workflowConfig = workflowConfigurations.get(resourceId);
+                String workflowConfigString = jsonSerialization.serialize(workflowConfig);
                 Path packagePath = writeDirAndDocument(resourceId.getId(), resourceId.getVersion(),
-                        PipelineConfigurationString, botPath, PACKAGE_EXT);
+                        workflowConfigString, botPath, PACKAGE_EXT);
                 writeDocumentDescriptor(packagePath, resourceId.getId(), resourceId.getVersion());
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(regularDictionaryStore,
-                        extractResourcesUris(PipelineConfigurationString, DICTIONARY_URI_PATTERN))), DICTIONARY_EXT);
+                        extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN))), DICTIONARY_EXT);
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(behaviorStore,
-                        extractResourcesUris(PipelineConfigurationString, BEHAVIOR_URI_PATTERN))), BEHAVIOR_EXT);
+                        extractResourcesUris(workflowConfigString, BEHAVIOR_URI_PATTERN))), BEHAVIOR_EXT);
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(httpCallsStore,
-                        extractResourcesUris(PipelineConfigurationString, HTTPCALLS_URI_PATTERN))), HTTPCALLS_EXT);
+                        extractResourcesUris(workflowConfigString, HTTPCALLS_URI_PATTERN))), HTTPCALLS_EXT);
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(langChainStore,
-                        extractResourcesUris(PipelineConfigurationString, LANGCHAIN_URI_PATTERN))), LANGCHAIN_EXT);
+                        extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN))), LANGCHAIN_EXT);
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(propertySetterStore,
-                        extractResourcesUris(PipelineConfigurationString, PROPERTY_URI_PATTERN))), PROPERTY_EXT);
+                        extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN))), PROPERTY_EXT);
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(outputStore,
-                        extractResourcesUris(PipelineConfigurationString, OUTPUT_URI_PATTERN))), OUTPUT_EXT);
+                        extractResourcesUris(workflowConfigString, OUTPUT_URI_PATTERN))), OUTPUT_EXT);
 
                 Path unusedPath = Files.createDirectories(Paths.get(tmpPath.toString(), agentId, "unused"));
 
-                writeAllVersionsOfUris(unusedPath, regularDictionaryStore, extractResourcesUris(PipelineConfigurationString, DICTIONARY_URI_PATTERN), DICTIONARY_EXT);
-                writeAllVersionsOfUris(unusedPath, behaviorStore, extractResourcesUris(PipelineConfigurationString, BEHAVIOR_URI_PATTERN), BEHAVIOR_EXT);
-                writeAllVersionsOfUris(unusedPath, httpCallsStore, extractResourcesUris(PipelineConfigurationString, HTTPCALLS_URI_PATTERN), HTTPCALLS_EXT);
-                writeAllVersionsOfUris(unusedPath, langChainStore, extractResourcesUris(PipelineConfigurationString, LANGCHAIN_URI_PATTERN), LANGCHAIN_EXT);
-                writeAllVersionsOfUris(unusedPath, propertySetterStore, extractResourcesUris(PipelineConfigurationString, PROPERTY_URI_PATTERN), PROPERTY_EXT);
-                writeAllVersionsOfUris(unusedPath, outputStore, extractResourcesUris(PipelineConfigurationString, OUTPUT_URI_PATTERN), OUTPUT_EXT);
+                writeAllVersionsOfUris(unusedPath, regularDictionaryStore, extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN), DICTIONARY_EXT);
+                writeAllVersionsOfUris(unusedPath, behaviorStore, extractResourcesUris(workflowConfigString, BEHAVIOR_URI_PATTERN), BEHAVIOR_EXT);
+                writeAllVersionsOfUris(unusedPath, httpCallsStore, extractResourcesUris(workflowConfigString, HTTPCALLS_URI_PATTERN), HTTPCALLS_EXT);
+                writeAllVersionsOfUris(unusedPath, langChainStore, extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN), LANGCHAIN_EXT);
+                writeAllVersionsOfUris(unusedPath, propertySetterStore, extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN), PROPERTY_EXT);
+                writeAllVersionsOfUris(unusedPath, outputStore, extractResourcesUris(workflowConfigString, OUTPUT_URI_PATTERN), OUTPUT_EXT);
 
             }
 
@@ -339,7 +339,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     private void exportSchedules(String agentId, Path botPath) {
         try {
-            List<ScheduleConfiguration> schedules = scheduleStore.readSchedulesByBotId(AgentId);
+            List<ScheduleConfiguration> schedules = scheduleStore.readSchedulesByBotId(agentId);
             if (schedules.isEmpty()) {
                 return;
             }

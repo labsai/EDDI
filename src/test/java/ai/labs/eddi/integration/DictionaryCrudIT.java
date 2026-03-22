@@ -28,9 +28,9 @@ public class DictionaryCrudIT extends BaseIntegrationIT {
 
     @BeforeAll
     static void loadResources() throws IOException {
-        TEST_JSON = load("regularDictionary/createRegularDictionary.json");
-        TEST_JSON2 = load("regularDictionary/updateRegularDictionary.json");
-        PATCH_JSON = load("regularDictionary/patchRegularDictionary.json");
+        TEST_JSON = load("dictionary/createDictionary.json");
+        TEST_JSON2 = load("dictionary/updateDictionary.json");
+        PATCH_JSON = load("dictionary/patchDictionary.json");
     }
 
     @Test

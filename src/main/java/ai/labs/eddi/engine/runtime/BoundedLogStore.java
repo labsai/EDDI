@@ -25,7 +25,7 @@ import java.util.function.Consumer;
  *
  * <p>Log records are captured via {@link LogCaptureFilter}, a Quarkus
  * {@code @LoggingFilter} that intercepts every log record in the
- * JBoss LogManager pipeline and pushes it to this store.</p>
+ * JBoss LogManager workflow and pushes it to this store.</p>
  *
  * @author ginccc
  * @since 6.0.0
@@ -122,7 +122,7 @@ public class BoundedLogStore {
 
     /**
      * Called by {@link LogCaptureFilter} for every log record passing through
-     * the Quarkus logging pipeline.
+     * the Quarkus logging workflow.
      *
      * @param record the JUL LogRecord (actually a JBoss ExtLogRecord at runtime)
      */

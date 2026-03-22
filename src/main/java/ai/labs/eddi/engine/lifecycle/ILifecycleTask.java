@@ -2,23 +2,23 @@ package ai.labs.eddi.engine.lifecycle;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import ai.labs.eddi.engine.lifecycle.exceptions.PipelineConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.lifecycle.exceptions.UnrecognizedExtensionException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor;
+import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 
 import java.util.Map;
 
 /**
- * Core interface for EDDI's Lifecycle Pipeline architecture.
+ * Core interface for EDDI's Lifecycle Workflow architecture.
  *
- * <p>ILifecycleTask represents a single processing step in EDDI's configurable Agent pipeline.
+ * <p>ILifecycleTask represents a single processing step in EDDI's configurable Agent workflow.
  * Each bot's behavior is defined by a sequence of lifecycle tasks that execute in order,
  * transforming the conversation memory at each step.</p>
  *
- * <h2>Lifecycle Pipeline Concept</h2>
+ * <h2>Lifecycle Workflow Concept</h2>
  * <p>Instead of hard-coded Agent logic, EDDI processes user interactions through a sequential
- * pipeline of pluggable tasks:</p>
+ * workflow of pluggable tasks:</p>
  * <pre>
  * User Input → Parser → Behavior Rules → API/LLM Calls → Output Generation → Save
  * </pre>
@@ -87,7 +87,7 @@ public interface ILifecycleTask {
     /**
      * Returns the type identifier for this lifecycle task.
      *
-     * <p>Types correspond to the stage in the lifecycle pipeline where this task executes.
+     * <p>Types correspond to the stage in the lifecycle workflow where this task executes.
      * Common types include:</p>
      * <ul>
      *   <li><code>input</code> - Raw input processing</li>
@@ -119,7 +119,7 @@ public interface ILifecycleTask {
      *
      * <p><strong>Important:</strong> Tasks must be thread-safe and stateless. All state
      * should be stored in the {@code memory} parameter, which is passed through the
-     * entire pipeline.</p>
+     * entire workflow.</p>
      *
      * <p><strong>Example:</strong></p>
      * <pre>{@code
@@ -163,7 +163,7 @@ public interface ILifecycleTask {
      * @Override
      * public Object configure(Map<String, Object> configuration,
      *                         Map<String, Object> extensions)
-     *         throws PipelineConfigurationException {
+     *         throws WorkflowConfigurationException {
      *     String uri = (String) extensions.get("uri");
      *     MyConfig config = configStore.load(uri);
      *     return config;
@@ -173,12 +173,12 @@ public interface ILifecycleTask {
      * @param configuration task-specific configuration parameters from package config
      * @param extensions extension URIs and metadata from package definition
      * @return configured component object to be passed to execute(), or null if no configuration needed
-     * @throws PipelineConfigurationException if configuration is invalid
+     * @throws WorkflowConfigurationException if configuration is invalid
      * @throws IllegalExtensionConfigurationException if extension configuration is malformed
      * @throws UnrecognizedExtensionException if the extension type is not supported
      */
     default Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws PipelineConfigurationException, IllegalExtensionConfigurationException, UnrecognizedExtensionException {
+            throws WorkflowConfigurationException, IllegalExtensionConfigurationException, UnrecognizedExtensionException {
 
         //to be overridden if needed
         return null;

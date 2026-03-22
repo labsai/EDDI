@@ -12,8 +12,8 @@ import ai.labs.eddi.configs.apicalls.model.HttpCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLangChainStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
-import ai.labs.eddi.configs.pipelines.IRestPipelineStore;
-import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
@@ -193,7 +193,7 @@ public class McpAdminTools {
     }
 
     @Tool(name = "list_packages",
-            description = "List all packages (pipeline configurations). " +
+            description = "List all packages (workflow configurations). " +
                     "Returns a JSON array of package descriptors with name, description, and IDs.")
     public String listPackages(
             @ToolArg(description = "Optional filter string to search package names") String filter,
@@ -201,7 +201,7 @@ public class McpAdminTools {
         try {
             int limitInt = limit != null ? limit : 20;
             String filterStr = filter != null ? filter : "";
-            List<DocumentDescriptor> descriptors = getRestStore(IRestPipelineStore.class)
+            List<DocumentDescriptor> descriptors = getRestStore(IRestWorkflowStore.class)
                     .readPackageDescriptors(filterStr, 0, limitInt);
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
@@ -218,17 +218,17 @@ public class McpAdminTools {
             @ToolArg(description = "Bot name (required)") String name,
             @ToolArg(description = "Bot description (optional)") String description,
             @ToolArg(description = "Comma-separated list of package URIs to include (optional, " +
-                    "format: eddi://ai.labs.package/PipelineStore/packages/ID?version=1)")
-            String pipelineUris) {
+                    "format: eddi://ai.labs.package/WorkflowStore/packages/ID?version=1)")
+            String workflowUris) {
         if (name == null || name.isBlank()) return errorJson("Bot name is required");
         try {
             var botConfig = new AgentConfiguration();
-            if (pipelineUris != null && !pipelineUris.isBlank()) {
+            if (workflowUris != null && !workflowUris.isBlank()) {
                 var uris = new ArrayList<URI>();
-                for (String uri : pipelineUris.split(",")) {
+                for (String uri : workflowUris.split(",")) {
                     uris.add(URI.create(uri.trim()));
                 }
-                botConfig.setPipelines(uris);
+                botConfig.setWorkflows(uris);
             }
 
             Response response = getRestStore(IRestAgentStore.class).createAgent(botConfig);
@@ -346,16 +346,16 @@ public class McpAdminTools {
         }
     }
 
-    @Tool(name = "read_package", description = "Read a package's full pipeline configuration. " +
+    @Tool(name = "read_package", description = "Read a package's full workflow configuration. " +
             "Returns the list of package extensions (parser, behavior, langchain, httpcalls, output, etc.) " +
-            "with their types and resource URIs. Use this to understand what's inside a bot's pipeline.")
+            "with their types and resource URIs. Use this to understand what's inside a bot's workflow.")
     public String readPackage(
             @ToolArg(description = "Package ID (required)") String packageId,
             @ToolArg(description = "Version number (default: 1)") Integer version) {
         if (packageId == null || packageId.isBlank()) return errorJson("packageId is required");
         try {
             int ver = version != null ? version : 1;
-            PipelineConfiguration config = getRestStore(IRestPipelineStore.class).readPackage(packageId, ver);
+            WorkflowConfiguration config = getRestStore(IRestWorkflowStore.class).readPackage(packageId, ver);
             if (config == null) {
                 return errorJson("Package not found: " + packageId + " version " + ver);
             }
@@ -363,7 +363,7 @@ public class McpAdminTools {
             var result = new LinkedHashMap<String, Object>();
             result.put("packageId", packageId);
             result.put("version", ver);
-            result.put("extensionCount", config.getPipelineSteps().size());
+            result.put("extensionCount", config.getWorkflowSteps().size());
             result.put("configuration", config);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
@@ -541,15 +541,15 @@ public class McpAdminTools {
             }
 
             // 2. Read Agent config
-            var AgentStore = getRestStore(IRestAgentStore.class);
-            AgentConfiguration botConfig = AgentStore.readBot(agentId, ver);
+            var localAgentStore = getRestStore(IRestAgentStore.class);
+            AgentConfiguration botConfig = localAgentStore.readBot(agentId, ver);
             if (botConfig == null) {
                 return errorJson("Bot not found: " + agentId + " version " + ver);
             }
 
             // 3. Process each package
-            var pkgStore = getRestStore(IRestPipelineStore.class);
-            List<URI> originalPackageUris = new ArrayList<>(botConfig.getPipelines());
+            var pkgStore = getRestStore(IRestWorkflowStore.class);
+            List<URI> originalPackageUris = new ArrayList<>(botConfig.getWorkflows());
             List<URI> updatedPackageUris = new ArrayList<>();
             int updatedPackageCount = 0;
 
@@ -561,7 +561,7 @@ public class McpAdminTools {
                     continue;
                 }
 
-                PipelineConfiguration pkgConfig = pkgStore.readPackage(pkgId, pkgVersion);
+                WorkflowConfiguration pkgConfig = pkgStore.readPackage(pkgId, pkgVersion);
                 if (pkgConfig == null) {
                     updatedPackageUris.add(pkgUri);
                     continue;
@@ -569,7 +569,7 @@ public class McpAdminTools {
 
                 // Replace URIs in package extensions
                 boolean packageModified = false;
-                for (var ext : pkgConfig.getPipelineSteps()) {
+                for (var ext : pkgConfig.getWorkflowSteps()) {
                     Object uriObj = ext.getConfig().get("uri");
                     if (uriObj != null) {
                         String currentUri = uriObj.toString();
@@ -607,8 +607,8 @@ public class McpAdminTools {
             // 4. Update Agent if any packages changed
             int newBotVersion = ver;
             if (updatedPackageCount > 0) {
-                botConfig.setPipelines(updatedPackageUris);
-                Response botResponse = AgentStore.updateBot(agentId, ver, botConfig);
+                botConfig.setWorkflows(updatedPackageUris);
+                Response botResponse = localAgentStore.updateBot(agentId, ver, botConfig);
                 String botLocation = botResponse.getHeaderString("Location");
                 newBotVersion = botLocation != null
                         ? extractVersionFromLocation(botLocation)
@@ -643,7 +643,7 @@ public class McpAdminTools {
         }
     }
 
-    @Tool(name = "list_bot_resources", description = "Get a complete inventory of all resources in a bot's pipeline. " +
+    @Tool(name = "list_bot_resources", description = "Get a complete inventory of all resources in a bot's workflow. " +
             "Walks Agent → packages → extensions and returns a flat summary with all resource IDs, types, and URIs. " +
             "This is the fastest way to understand a bot's full configuration before making changes.")
     public String listBotResources(
@@ -654,8 +654,8 @@ public class McpAdminTools {
             int ver = version != null ? version : 1;
 
             // Read Agent config
-            var AgentStore = getRestStore(IRestAgentStore.class);
-            AgentConfiguration botConfig = AgentStore.readBot(agentId, ver);
+            var localAgentStore = getRestStore(IRestAgentStore.class);
+            AgentConfiguration botConfig = localAgentStore.readBot(agentId, ver);
             if (botConfig == null) {
                 return errorJson("Bot not found: " + agentId + " version " + ver);
             }
@@ -673,10 +673,10 @@ public class McpAdminTools {
             }
 
             // Walk packages → extensions
-            var pkgStore = getRestStore(IRestPipelineStore.class);
+            var pkgStore = getRestStore(IRestWorkflowStore.class);
             var packages = new ArrayList<Map<String, Object>>();
 
-            for (URI pkgUri : botConfig.getPipelines()) {
+            for (URI pkgUri : botConfig.getWorkflows()) {
                 String pkgId = extractIdFromLocation(pkgUri.toString());
                 int pkgVersion = extractVersionFromLocation(pkgUri.toString());
                 if (pkgId == null) continue;
@@ -684,13 +684,13 @@ public class McpAdminTools {
                 var pkgInfo = new LinkedHashMap<String, Object>();
                 pkgInfo.put("packageId", pkgId);
                 pkgInfo.put("packageVersion", pkgVersion);
-                pkgInfo.put("pipelineUri", pkgUri.toString());
+                pkgInfo.put("workflowUri", pkgUri.toString());
 
                 try {
-                    PipelineConfiguration pkgConfig = pkgStore.readPackage(pkgId, pkgVersion);
+                    WorkflowConfiguration pkgConfig = pkgStore.readPackage(pkgId, pkgVersion);
                     if (pkgConfig != null) {
                         var extensions = new ArrayList<Map<String, Object>>();
-                        for (var ext : pkgConfig.getPipelineSteps()) {
+                        for (var ext : pkgConfig.getWorkflowSteps()) {
                             var extInfo = new LinkedHashMap<String, Object>();
                             if (ext.getType() != null) {
                                 extInfo.put("type", ext.getType().toString());
@@ -949,7 +949,7 @@ public class McpAdminTools {
 
             var schedule = new ScheduleConfiguration();
             schedule.setName(name);
-            schedule.setAgentId(AgentId);
+            schedule.setAgentId(agentId);
             schedule.setTriggerType(type);
             schedule.setCronExpression(cron);
             schedule.setHeartbeatIntervalSeconds(heartbeatIntervalSeconds);
@@ -1011,7 +1011,7 @@ public class McpAdminTools {
         try {
             List<ScheduleConfiguration> schedules;
             if (agentId != null && !agentId.isBlank()) {
-                schedules = scheduleStore.readSchedulesByBotId(AgentId);
+                schedules = scheduleStore.readSchedulesByBotId(agentId);
             } else {
                 schedules = scheduleStore.readAllSchedules(100);
             }

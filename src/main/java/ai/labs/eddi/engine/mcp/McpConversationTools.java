@@ -59,36 +59,36 @@ public class McpConversationTools {
 
     private final IConversationService conversationService;
     private final IRestAgentAdministration botAdmin;
-    private final IRestAgentStore AgentStore;
+    private final IRestAgentStore agentStore;
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IJsonSerialization jsonSerialization;
     private final BoundedLogStore boundedLogStore;
     private final IRestAuditStore auditStore;
-    private final IRestAgentTriggerStore AgentTriggerStore;
+    private final IRestAgentTriggerStore agentTriggerStore;
     private final IUserConversationStore userConversationStore;
-    private final IRestAgentEngine RestAgentEngine;
+    private final IRestAgentEngine restAgentEngine;
 
     @Inject
     public McpConversationTools(IConversationService conversationService,
             IRestAgentAdministration botAdmin,
-            IRestAgentStore AgentStore,
+            IRestAgentStore agentStore,
             IRestInterfaceFactory restInterfaceFactory,
             IJsonSerialization jsonSerialization,
             BoundedLogStore boundedLogStore,
             IRestAuditStore auditStore,
-            IRestAgentTriggerStore AgentTriggerStore,
+            IRestAgentTriggerStore agentTriggerStore,
             IUserConversationStore userConversationStore,
-            IRestAgentEngine RestAgentEngine) {
+            IRestAgentEngine restAgentEngine) {
         this.conversationService = conversationService;
         this.botAdmin = botAdmin;
-        this.AgentStore = AgentStore;
+        this.agentStore = agentStore;
         this.restInterfaceFactory = restInterfaceFactory;
         this.jsonSerialization = jsonSerialization;
         this.boundedLogStore = boundedLogStore;
         this.auditStore = auditStore;
-        this.AgentTriggerStore = AgentTriggerStore;
+        this.agentTriggerStore = agentTriggerStore;
         this.userConversationStore = userConversationStore;
-        this.RestAgentEngine = RestAgentEngine;
+        this.restAgentEngine = restAgentEngine;
     }
 
     @Tool(name = "list_bots", description = "List all deployed bots with their status, version, and name. " +
@@ -113,7 +113,7 @@ public class McpConversationTools {
         try {
             int limitInt = limit != null ? limit : 20;
             String filterStr = filter != null ? filter : "";
-            List<DocumentDescriptor> descriptors = AgentStore.readBotDescriptors(filterStr, 0, limitInt);
+            List<DocumentDescriptor> descriptors = agentStore.readBotDescriptors(filterStr, 0, limitInt);
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
             LOGGER.error("MCP list_bot_configs failed", e);
@@ -305,7 +305,7 @@ public class McpConversationTools {
         if (agentId == null || agentId.isBlank()) return errorJson("agentId is required");
         try {
             int ver = version != null ? version : 1;
-            AgentConfiguration config = AgentStore.readBot(agentId, ver);
+            AgentConfiguration config = agentStore.readBot(agentId, ver);
             if (config == null) {
                 return errorJson("Bot not found: " + agentId + " version " + ver);
             }
@@ -336,7 +336,7 @@ public class McpConversationTools {
     // ==================== Phase 8a.2: Diagnostic Tools ====================
 
     @Tool(name = "read_bot_logs", description = "Read recent server-side logs for a Agent or conversation. " +
-            "Returns pipeline execution logs, LLM provider errors, timeouts, and internal diagnostics " +
+            "Returns workflow execution logs, LLM provider errors, timeouts, and internal diagnostics " +
             "that are NOT visible in conversation memory. Essential for debugging 'why did the Agent fail?' " +
             "Filter by agentId, conversationId, and/or log level.")
     public String readBotLogs(
@@ -369,7 +369,7 @@ public class McpConversationTools {
     @Tool(name = "read_audit_trail", description = "Read the audit trail for a conversation. " +
             "Returns per-task execution records including: taskId, taskType, input/output data, " +
             "LLM details (model, prompt, tokens, cost), tool calls, actions emitted, and timing. " +
-            "This shows EXACTLY what happened at each pipeline step — essential for optimizing Agent behavior.")
+            "This shows EXACTLY what happened at each workflow step — essential for optimizing Agent behavior.")
     public String readAuditTrail(
             @ToolArg(description = "Conversation ID (required)") String conversationId,
             @ToolArg(description = "Maximum number of entries to return (default: 20)") Integer limit) {
@@ -403,7 +403,7 @@ public class McpConversationTools {
             // Build agentId -> intents mapping from triggers
             Map<String, List<String>> botIntents = new LinkedHashMap<>();
             try {
-                List<AgentTriggerConfiguration> triggers = AgentTriggerStore.readAllBotTriggers();
+                List<AgentTriggerConfiguration> triggers = agentTriggerStore.readAllBotTriggers();
                 for (var trigger : triggers) {
                     for (var deployment : trigger.getBotDeployments()) {
                         botIntents.computeIfAbsent(deployment.getAgentId(), k -> new ArrayList<>())
@@ -429,18 +429,18 @@ public class McpConversationTools {
                     if (!matches) continue;
                 }
 
-                var Agent = new LinkedHashMap<String, Object>();
-                agent.put("agentId", status.getAgentId());
-                agent.put("name", name);
-                agent.put("description", desc);
-                agent.put("version", status.getAgentVersion());
-                agent.put("status", status.getStatus().name());
-                agent.put("environment", status.getEnvironment().name());
+                var agentMap = new LinkedHashMap<String, Object>();
+                agentMap.put("agentId", status.getAgentId());
+                agentMap.put("name", name);
+                agentMap.put("description", desc);
+                agentMap.put("version", status.getAgentVersion());
+                agentMap.put("status", status.getStatus().name());
+                agentMap.put("environment", status.getEnvironment().name());
                 List<String> intents = botIntents.get(status.getAgentId());
                 if (intents != null && !intents.isEmpty()) {
-                    agent.put("intents", intents);
+                    agentMap.put("intents", intents);
                 }
-                bots.add(agent);
+                bots.add(agentMap);
             }
 
             var result = new LinkedHashMap<String, Object>();
@@ -512,7 +512,7 @@ public class McpConversationTools {
 
         if (existing != null) {
             // Check if conversation has ended
-            ConversationState state = RestAgentEngine.getConversationState(
+            ConversationState state = restAgentEngine.getConversationState(
                     existing.getEnvironment(), existing.getConversationId());
             if (!ConversationState.ENDED.equals(state)) {
                 return existing;
@@ -522,7 +522,7 @@ public class McpConversationTools {
         }
 
         // Create a new conversation from the Agent trigger
-        AgentTriggerConfiguration trigger = AgentTriggerStore.readBotTrigger(intent);
+        AgentTriggerConfiguration trigger = agentTriggerStore.readBotTrigger(intent);
         if (trigger == null || trigger.getBotDeployments().isEmpty()) {
             throw new RuntimeException("No Agent trigger configured for intent: " + intent);
         }
@@ -534,7 +534,7 @@ public class McpConversationTools {
 
         // Start a new conversation
         var initialContext = new HashMap<>(deployment.getInitialContext());
-        jakarta.ws.rs.core.Response botResponse = RestAgentEngine.startConversationWithContext(
+        jakarta.ws.rs.core.Response botResponse = restAgentEngine.startConversationWithContext(
                 usedEnv, agentId, userId, initialContext);
 
         if (botResponse.getStatus() != 201) {

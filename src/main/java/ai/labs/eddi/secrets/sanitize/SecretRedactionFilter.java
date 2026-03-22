@@ -5,7 +5,7 @@ import java.util.regex.Pattern;
 
 /**
  * Pre-compiled regex filter for redacting secrets from log messages.
- * Applied in the log capture pipeline to prevent API keys and tokens
+ * Applied in the log capture workflow to prevent API keys and tokens
  * from appearing in logs, ring buffer, and database.
  */
 public final class SecretRedactionFilter {

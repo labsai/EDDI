@@ -20,7 +20,7 @@ import java.util.Map;
  * Rewrites:
  * <ul>
  *   <li>/AgentStore/bots → /agentstore/agents</li>
- *   <li>/PipelineStore/packages → /pipelinestore/pipelines</li>
+ *   <li>/WorkflowStore/packages → /workflowstore/workflows</li>
  *   <li>/langchainstore/langchains → /llmstore/llmconfigs</li>
  *   <li>/behaviorstore/behaviorsets → /rulestore/rulesets</li>
  *   <li>/httpcallsstore/httpcalls → /apicallstore/apicalls</li>
@@ -44,7 +44,7 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
             Map.entry("/behaviorstore/behaviorsets", "/rulestore/rulesets"),
             Map.entry("/langchainstore/langchains", "/llmstore/llmconfigs"),
             Map.entry("/httpcallsstore/httpcalls", "/apicallstore/apicalls"),
-            Map.entry("/PipelineStore/packages", "/pipelinestore/pipelines"),
+            Map.entry("/WorkflowStore/packages", "/workflowstore/workflows"),
             Map.entry("/AgentStore/bots", "/agentstore/agents")
     );
 

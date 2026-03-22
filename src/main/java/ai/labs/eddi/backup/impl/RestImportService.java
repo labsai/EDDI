@@ -18,8 +18,8 @@ import ai.labs.eddi.configs.llm.IRestLangChainStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
-import ai.labs.eddi.configs.pipelines.IRestPipelineStore;
-import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
@@ -76,7 +76,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final IZipArchive zipArchive;
     private final IJsonSerialization jsonSerialization;
     private final IRestInterfaceFactory restInterfaceFactory;
-    private final IRestAgentAdministration RestAgentAdministration;
+    private final IRestAgentAdministration restAgentAdministration;
     private final IMigrationManager migrationManager;
     private final IDeploymentListener deploymentListener;
     private final IDocumentDescriptorStore documentDescriptorStore;
@@ -87,14 +87,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     public RestImportService(IZipArchive zipArchive,
                              IJsonSerialization jsonSerialization,
                              IRestInterfaceFactory restInterfaceFactory,
-                             IRestAgentAdministration RestAgentAdministration,
+                             IRestAgentAdministration restAgentAdministration,
                              IMigrationManager migrationManager,
                              IDeploymentListener deploymentListener,
                              IDocumentDescriptorStore documentDescriptorStore) {
         this.zipArchive = zipArchive;
         this.jsonSerialization = jsonSerialization;
         this.restInterfaceFactory = restInterfaceFactory;
-        this.RestAgentAdministration = RestAgentAdministration;
+        this.restAgentAdministration = restAgentAdministration;
         this.migrationManager = migrationManager;
         this.deploymentListener = deploymentListener;
         this.documentDescriptorStore = documentDescriptorStore;
@@ -119,7 +119,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                                 deploymentListener.registerAgentDeployment(agentId.getId(), agentId.getVersion());
                                         deploymentFutures.add(deploymentFuture);
 
-                                        RestAgentAdministration.deployAgent(
+                                        restAgentAdministration.deployAgent(
                                                 production, agentId.getId(), agentId.getVersion(), true, false);
 
                                         return true;
@@ -134,7 +134,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             CompletableFuture.allOf(deploymentFutures.toArray(new CompletableFuture[0])).join();
 
             log.info("Imported & Deployed Initial Bots");
-            return RestAgentAdministration.getDeploymentStatuses(production);
+            return restAgentAdministration.getDeploymentStatuses(production);
         } catch (IOException e) {
             throw sneakyThrow(e);
         }
@@ -178,10 +178,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     diffs.add(buildResourceDiff(botOriginId, "bot", agentName));
 
                     // Packages & their extensions
-                    AgentConfiguration AgentConfiguration =
+                    AgentConfiguration agentConfig =
                             jsonSerialization.deserialize(botFileString, AgentConfiguration.class);
-                    for (URI pipelineUri : AgentConfiguration.getPipelines()) {
-                        IResourceId packageResourceId = RestUtilities.extractResourceId(pipelineUri);
+                    for (URI workflowUri : agentConfig.getWorkflows()) {
+                        IResourceId packageResourceId = RestUtilities.extractResourceId(workflowUri);
                         if (packageResourceId == null) continue;
 
                         String packageId = packageResourceId.getId();
@@ -317,17 +317,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 try {
                     String botOriginId = extractIdFromBotFilename(botFilePath);
                     String botFileString = readFile(botFilePath);
-                    AgentConfiguration AgentConfiguration =
+                    AgentConfiguration agentConfig =
                             jsonSerialization.deserialize(botFileString, AgentConfiguration.class);
-                    AgentConfiguration.getPipelines().forEach(pipelineUri ->
-                            parsePackage(targetDirPath, pipelineUri, AgentConfiguration,
+                    agentConfig.getWorkflows().forEach(workflowUri ->
+                            parsePackage(targetDirPath, workflowUri, agentConfig,
                                     response, isMerge, selectedSet));
 
                     URI newBotUri;
                     if (isMerge && isSelected(selectedSet, botOriginId)) {
-                        newBotUri = createOrUpdateBot(AgentConfiguration, botOriginId);
+                        newBotUri = createOrUpdateBot(agentConfig, botOriginId);
                     } else {
-                        newBotUri = createNewBot(AgentConfiguration);
+                        newBotUri = createNewBot(agentConfig);
                     }
 
                     updateDocumentDescriptor(Paths.get(targetDirPath), buildOldBotUri(botFilePath), newBotUri);
@@ -352,10 +352,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return URI.create(IRestAgentStore.resourceURI + oldBotId + IRestAgentStore.versionQueryParam + "1");
     }
 
-    private void parsePackage(String targetDirPath, URI pipelineUri, AgentConfiguration
-            AgentConfiguration, AsyncResponse response, boolean isMerge, Set<String> selectedSet) {
+    private void parsePackage(String targetDirPath, URI workflowUri, AgentConfiguration
+            agentConfig, AsyncResponse response, boolean isMerge, Set<String> selectedSet) {
         try {
-            IResourceId packageResourceId = RestUtilities.extractResourceId(pipelineUri);
+            IResourceId packageResourceId = RestUtilities.extractResourceId(workflowUri);
             if (packageResourceId == null) {
                 return;
             }
@@ -451,9 +451,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                 // Set originId on the package's descriptor
                                 setOriginIdOnDescriptor(newPackageUri, packageId);
 
-                                updateDocumentDescriptor(packagePath, pipelineUri, newPackageUri);
-                                AgentConfiguration.setPipelines(AgentConfiguration.getPipelines().stream().
-                                        map(uri -> uri.equals(pipelineUri) ? newPackageUri : uri).
+                                updateDocumentDescriptor(packagePath, workflowUri, newPackageUri);
+                                agentConfig.setWorkflows(agentConfig.getWorkflows().stream().
+                                        map(uri -> uri.equals(workflowUri) ? newPackageUri : uri).
                                         collect(Collectors.toList()));
 
                             } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException |
@@ -556,7 +556,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return null;
     }
 
-    private URI createOrUpdateBot(AgentConfiguration AgentConfiguration, String botOriginId)
+    private URI createOrUpdateBot(AgentConfiguration agentConfiguration, String botOriginId)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
         URI existingUri = findLocalUriByOriginId(botOriginId);
         if (existingUri != null) {
@@ -564,7 +564,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             if (localResId != null) {
                 IRestAgentStore restAgentStore = getRestResourceStore(IRestAgentStore.class);
                 Response updateResponse = restAgentStore.updateBot(
-                        localResId.getId(), localResId.getVersion(), AgentConfiguration);
+                        localResId.getId(), localResId.getVersion(), agentConfiguration);
                 if (updateResponse.getStatus() == 200) {
                     // updated — new version = old version + 1
                     int newVersion = localResId.getVersion() + 1;
@@ -573,7 +573,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 }
             }
         }
-        return createNewBot(AgentConfiguration);
+        return createNewBot(agentConfiguration);
     }
 
     private URI createOrUpdatePackage(String packageFileString, String packageOriginId)
@@ -582,15 +582,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (existingUri != null) {
             IResourceId localResId = RestUtilities.extractResourceId(existingUri);
             if (localResId != null) {
-                PipelineConfiguration PipelineConfiguration =
-                        jsonSerialization.deserialize(packageFileString, PipelineConfiguration.class);
-                IRestPipelineStore restPipelineStore = getRestResourceStore(IRestPipelineStore.class);
-                Response updateResponse = restPipelineStore.updatePackage(
-                        localResId.getId(), localResId.getVersion(), PipelineConfiguration);
+                WorkflowConfiguration workflowConfig =
+                        jsonSerialization.deserialize(packageFileString, WorkflowConfiguration.class);
+                IRestWorkflowStore restWorkflowStore = getRestResourceStore(IRestWorkflowStore.class);
+                Response updateResponse = restWorkflowStore.updatePackage(
+                        localResId.getId(), localResId.getVersion(), workflowConfig);
                 if (updateResponse.getStatus() == 200) {
                     int newVersion = localResId.getVersion() + 1;
-                    return URI.create(IRestPipelineStore.resourceURI + localResId.getId() +
-                            IRestPipelineStore.versionQueryParam + newVersion);
+                    return URI.create(IRestWorkflowStore.resourceURI + localResId.getId() +
+                            IRestWorkflowStore.versionQueryParam + newVersion);
                 }
             }
         }
@@ -622,20 +622,20 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     // ==================== Resource Creation (original logic) ====================
 
-    private URI createNewBot(AgentConfiguration AgentConfiguration)
+    private URI createNewBot(AgentConfiguration agentConfiguration)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestAgentStore restPipelineStore = getRestResourceStore(IRestAgentStore.class);
-        Response botResponse = restPipelineStore.createAgent(AgentConfiguration);
+        IRestAgentStore restWorkflowStore = getRestResourceStore(IRestAgentStore.class);
+        Response botResponse = restWorkflowStore.createAgent(agentConfiguration);
         checkIfCreatedResponse(botResponse);
         return botResponse.getLocation();
     }
 
     private URI createNewPackage(String packageFileString)
             throws RestInterfaceFactory.RestInterfaceFactoryException, IOException {
-        PipelineConfiguration PipelineConfiguration =
-                jsonSerialization.deserialize(packageFileString, PipelineConfiguration.class);
-        IRestPipelineStore restPipelineStore = getRestResourceStore(IRestPipelineStore.class);
-        Response packageResponse = restPipelineStore.createPackage(PipelineConfiguration);
+        WorkflowConfiguration workflowConfig =
+                jsonSerialization.deserialize(packageFileString, WorkflowConfiguration.class);
+        IRestWorkflowStore restWorkflowStore = getRestResourceStore(IRestWorkflowStore.class);
+        Response packageResponse = restWorkflowStore.createPackage(workflowConfig);
         checkIfCreatedResponse(packageResponse);
         return packageResponse.getLocation();
     }

@@ -17,7 +17,7 @@ final class McpToolUtils {
 
     /**
      * Get a REST interface proxy via IRestInterfaceFactory.
-     * These proxies make HTTP calls that go through the full JAX-RS pipeline,
+     * These proxies make HTTP calls that go through the full JAX-RS workflow,
      * including DocumentDescriptorFilter which auto-creates descriptors.
      *
      * @param factory the REST interface factory

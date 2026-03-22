@@ -36,9 +36,9 @@ import static ai.labs.eddi.engine.model.Deployment.Environment.production;
 @ApplicationScoped
 public class RestAgentManagement implements IRestAgentManagement {
     public static final String KEY_LANG = "lang";
-    private final IRestAgentEngine RestAgentEngine;
+    private final IRestAgentEngine restAgentEngine;
     private final IUserConversationStore userConversationStore;
-    private final IRestAgentTriggerStore RestAgentManagementStore;
+    private final IRestAgentTriggerStore restAgentManagementStore;
     private final boolean checkForUserAuthentication;
 
     @Inject
@@ -47,13 +47,13 @@ public class RestAgentManagement implements IRestAgentManagement {
     private static final Logger log = Logger.getLogger(RestAgentManagement.class);
 
     @Inject
-    public RestAgentManagement(IRestAgentEngine RestAgentEngine,
+    public RestAgentManagement(IRestAgentEngine restAgentEngine,
             IUserConversationStore userConversationStore,
-            IRestAgentTriggerStore RestAgentManagementStore,
+            IRestAgentTriggerStore restAgentManagementStore,
             @ConfigProperty(name = "quarkus.oidc.tenant-enabled") boolean checkForUserAuthentication) {
-        this.RestAgentEngine = RestAgentEngine;
+        this.restAgentEngine = restAgentEngine;
         this.userConversationStore = userConversationStore;
-        this.RestAgentManagementStore = RestAgentManagementStore;
+        this.restAgentManagementStore = restAgentManagementStore;
         this.checkForUserAuthentication = checkForUserAuthentication;
     }
 
@@ -70,7 +70,7 @@ public class RestAgentManagement implements IRestAgentManagement {
 
             checkUserAuthIfApplicable(userConversation);
 
-            var memorySnapshot = RestAgentEngine.readConversation(userConversation.getEnvironment(),
+            var memorySnapshot = restAgentEngine.readConversation(userConversation.getEnvironment(),
                     userConversation.getAgentId(),
                     userConversation.getConversationId(),
                     returnDetailed,
@@ -80,7 +80,7 @@ public class RestAgentManagement implements IRestAgentManagement {
             if (!userConversationResult.isNewlyCreatedConversation() &&
                     (languageProperty != null && languageProperty.getValueString() != null &&
                             !languageProperty.getValueString().equals(language))) {
-                RestAgentEngine.rerunLastConversationStep(userConversation.getEnvironment(),
+                restAgentEngine.rerunLastConversationStep(userConversation.getEnvironment(),
                         userConversation.getAgentId(),
                         userConversation.getConversationId(),
                         language,
@@ -114,7 +114,7 @@ public class RestAgentManagement implements IRestAgentManagement {
 
             checkUserAuthIfApplicable(userConversation);
 
-            RestAgentEngine.sayWithinContext(
+            restAgentEngine.sayWithinContext(
                     userConversation.getEnvironment(),
                     userConversation.getAgentId(),
                     userConversation.getConversationId(),
@@ -163,7 +163,7 @@ public class RestAgentManagement implements IRestAgentManagement {
             var userConversation = userConversationStore.readUserConversation(intent, userId);
             if (userConversation != null) {
                 checkUserAuthIfApplicable(userConversation);
-                RestAgentEngine.endConversation(userConversation.getConversationId());
+                restAgentEngine.endConversation(userConversation.getConversationId());
             }
             return Response.ok().build();
         } catch (IResourceStore.ResourceStoreException e) {
@@ -176,7 +176,7 @@ public class RestAgentManagement implements IRestAgentManagement {
         var userConversation = getUserConversation(intent, userId);
         if (userConversation != null) {
             checkUserAuthIfApplicable(userConversation);
-            return RestAgentEngine.isUndoAvailable(
+            return restAgentEngine.isUndoAvailable(
                     userConversation.getEnvironment(),
                     userConversation.getAgentId(),
                     userConversation.getConversationId());
@@ -190,7 +190,7 @@ public class RestAgentManagement implements IRestAgentManagement {
         var userConversation = getUserConversation(intent, userId);
         if (userConversation != null) {
             checkUserAuthIfApplicable(userConversation);
-            return RestAgentEngine.undo(
+            return restAgentEngine.undo(
                     userConversation.getEnvironment(),
                     userConversation.getAgentId(),
                     userConversation.getConversationId());
@@ -204,7 +204,7 @@ public class RestAgentManagement implements IRestAgentManagement {
         var userConversation = getUserConversation(intent, userId);
         if (userConversation != null) {
             checkUserAuthIfApplicable(userConversation);
-            return RestAgentEngine.isRedoAvailable(
+            return restAgentEngine.isRedoAvailable(
                     userConversation.getEnvironment(),
                     userConversation.getAgentId(),
                     userConversation.getConversationId());
@@ -218,7 +218,7 @@ public class RestAgentManagement implements IRestAgentManagement {
         var userConversation = getUserConversation(intent, userId);
         if (userConversation != null) {
             checkUserAuthIfApplicable(userConversation);
-            return RestAgentEngine.redo(
+            return restAgentEngine.redo(
                     userConversation.getEnvironment(),
                     userConversation.getAgentId(),
                     userConversation.getConversationId());
@@ -252,7 +252,7 @@ public class RestAgentManagement implements IRestAgentManagement {
     }
 
     private boolean isConversationEnded(UserConversation userConversation) {
-        ConversationState conversationState = RestAgentEngine.getConversationState(
+        ConversationState conversationState = restAgentEngine.getConversationState(
                 userConversation.getEnvironment(), userConversation.getConversationId());
         return conversationState.equals(ConversationState.ENDED);
     }
@@ -260,12 +260,12 @@ public class RestAgentManagement implements IRestAgentManagement {
     private UserConversation createNewConversation(String intent, String userId, String language)
             throws CannotCreateConversationException {
 
-        AgentTriggerConfiguration AgentTriggerConfiguration = getBotTrigger(intent);
-        AgentDeployment AgentDeployment = getRandom(AgentTriggerConfiguration.getBotDeployments());
-        String agentId = AgentDeployment.getAgentId();
-        Map<String, Context> initialContext = AgentDeployment.getInitialContext();
+        AgentTriggerConfiguration agentTriggerConfig = getBotTrigger(intent);
+        AgentDeployment agentDeployment = getRandom(agentTriggerConfig.getBotDeployments());
+        String agentId = agentDeployment.getAgentId();
+        Map<String, Context> initialContext = agentDeployment.getInitialContext();
         initialContext.put(KEY_LANG, new Context(Context.ContextType.string, language));
-        Response botResponse = RestAgentEngine.startConversationWithContext(AgentDeployment.getEnvironment(),
+        Response botResponse = restAgentEngine.startConversationWithContext(agentDeployment.getEnvironment(),
                 agentId,
                 userId,
                 initialContext);
@@ -274,13 +274,13 @@ public class RestAgentManagement implements IRestAgentManagement {
             var locationUri = URI.create(botResponse.getHeaders().get("location").getFirst().toString());
             var resourceId = RestUtilities.extractResourceId(locationUri);
             try {
-                return createUserConversation(intent, userId, AgentDeployment, resourceId.getId());
+                return createUserConversation(intent, userId, agentDeployment, resourceId.getId());
             } catch (ResourceAlreadyExistsException e) {
                 throw new CannotCreateConversationException(
                         String.format("Cannot create conversation for agentId=%s in environment=%s (httpCode=%s), " +
                                 "Conversation already exists",
                                 agentId,
-                                AgentDeployment.getEnvironment(),
+                                agentDeployment.getEnvironment(),
                                 responseHttpCode));
             } catch (IResourceStore.ResourceStoreException e) {
                 throw sneakyThrow(e);
@@ -289,20 +289,20 @@ public class RestAgentManagement implements IRestAgentManagement {
             throw new CannotCreateConversationException(
                     String.format("Cannot create conversation for agentId=%s in environment=%s (httpCode=%s)",
                             agentId,
-                            AgentDeployment.getEnvironment(),
+                            agentDeployment.getEnvironment(),
                             responseHttpCode));
         }
     }
 
     private UserConversation createUserConversation(String intent, String userId,
-            AgentDeployment AgentDeployment, String conversationId)
+            AgentDeployment agentDeployment, String conversationId)
             throws ResourceAlreadyExistsException, IResourceStore.ResourceStoreException {
 
         UserConversation userConversation = new UserConversation(
                 intent,
                 userId,
-                AgentDeployment.getEnvironment(),
-                AgentDeployment.getAgentId(),
+                agentDeployment.getEnvironment(),
+                agentDeployment.getAgentId(),
                 conversationId);
 
         storeUserConversation(userConversation);
@@ -315,7 +315,7 @@ public class RestAgentManagement implements IRestAgentManagement {
     }
 
     private AgentTriggerConfiguration getBotTrigger(String intent) {
-        return RestAgentManagementStore.readBotTrigger(intent);
+        return restAgentManagementStore.readBotTrigger(intent);
     }
 
     private UserConversation getUserConversation(String intent, String userId) {

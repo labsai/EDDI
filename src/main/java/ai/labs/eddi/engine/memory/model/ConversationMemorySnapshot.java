@@ -78,11 +78,11 @@ public class ConversationMemorySnapshot {
             return packages != null ? packages.hashCode() : 0;
         }
 
-        public List<PackageRunSnapshot> getPipelines() {
+        public List<PackageRunSnapshot> getWorkflows() {
             return packages;
         }
 
-        public void setPipelines(List<PackageRunSnapshot> packages) {
+        public void setWorkflows(List<PackageRunSnapshot> packages) {
             this.packages = packages;
         }
 

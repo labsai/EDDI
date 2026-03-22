@@ -4,7 +4,7 @@ import java.util.List;
 
 /**
  * Central registry of well-known memory keys used across the EDDI lifecycle
- * pipeline.
+ * workflow.
  * <p>
  * Tasks should import these constants instead of declaring local string
  * constants.

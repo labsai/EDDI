@@ -78,7 +78,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         }
 
         for (var conversationStep : memorySnapshot.getConversationSteps()) {
-            for (var aPackage : conversationStep.getPipelines()) {
+            for (var aPackage : conversationStep.getWorkflows()) {
                 for (var lifecycleTask : aPackage.getLifecycleTasks()) {
                     if (lifecycleTask.getKey().startsWith(KEY_CONTEXT)) {
                         var result = lifecycleTask.getResult();

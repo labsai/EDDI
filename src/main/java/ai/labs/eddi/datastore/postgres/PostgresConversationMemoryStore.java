@@ -299,7 +299,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     @SuppressWarnings("unchecked")
     private void fixContextTypes(ConversationMemorySnapshot snapshot) {
         for (var conversationStep : snapshot.getConversationSteps()) {
-            for (var aPackage : conversationStep.getPipelines()) {
+            for (var aPackage : conversationStep.getWorkflows()) {
                 for (var lifecycleTask : aPackage.getLifecycleTasks()) {
                     if (lifecycleTask.getKey().startsWith("context")) {
                         var result = lifecycleTask.getResult();

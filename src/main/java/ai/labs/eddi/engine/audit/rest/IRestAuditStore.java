@@ -11,7 +11,7 @@ import java.util.List;
  * <p>
  * Provides query access to audit entries by conversation or agent.
  * No create/update/delete endpoints — entries are created internally
- * by the lifecycle pipeline.
+ * by the lifecycle workflow.
  *
  * @author ginccc
  * @since 6.0.0

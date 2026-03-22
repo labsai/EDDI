@@ -27,7 +27,7 @@ public interface IEventBus {
      * conversation are never processed concurrently.
      *
      * @param conversationId the unique identifier of the conversation
-     * @param callable       the task to execute (typically lifecycle pipeline execution)
+     * @param callable       the task to execute (typically lifecycle workflow execution)
      */
     void submitInOrder(String conversationId, Callable<Void> callable);
 

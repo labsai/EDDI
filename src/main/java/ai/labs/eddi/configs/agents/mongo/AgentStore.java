@@ -26,7 +26,7 @@ import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 @ApplicationScoped
 public class AgentStore extends AbstractResourceStore<AgentConfiguration> implements IAgentStore {
     public static final String PACKAGES_FIELD = "packages";
-    private static final String PACKAGE_RESOURCE_URI = "eddi://ai.labs.package/PipelineStore/packages/";
+    private static final String PACKAGE_RESOURCE_URI = "eddi://ai.labs.package/WorkflowStore/packages/";
     private static final String VERSION_QUERY_PARAM = "?version=";
 
     private final IDocumentDescriptorStore documentDescriptorStore;
@@ -39,19 +39,19 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
     }
 
     @Override
-    public IResourceStore.IResourceId create(AgentConfiguration AgentConfiguration)
+    public IResourceStore.IResourceId create(AgentConfiguration agentConfiguration)
             throws IResourceStore.ResourceStoreException {
-        RuntimeUtilities.checkCollectionNoNullElements(AgentConfiguration.getPipelines(), PACKAGES_FIELD);
-        return super.create(AgentConfiguration);
+        RuntimeUtilities.checkCollectionNoNullElements(agentConfiguration.getWorkflows(), PACKAGES_FIELD);
+        return super.create(agentConfiguration);
     }
 
     @Override
     @IResourceStore.ConfigurationUpdate
-    public Integer update(String id, Integer version, AgentConfiguration AgentConfiguration)
+    public Integer update(String id, Integer version, AgentConfiguration agentConfiguration)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException,
             IResourceStore.ResourceNotFoundException {
-        RuntimeUtilities.checkCollectionNoNullElements(AgentConfiguration.getPipelines(), PACKAGES_FIELD);
-        return super.update(id, version, AgentConfiguration);
+        RuntimeUtilities.checkCollectionNoNullElements(agentConfiguration.getWorkflows(), PACKAGES_FIELD);
+        return super.update(id, version, agentConfiguration);
     }
 
     public List<DocumentDescriptor> getBotDescriptorsContainingPackage(String packageId, Integer packageVersion,
@@ -60,14 +60,14 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
 
         List<DocumentDescriptor> ret = new LinkedList<>();
         do {
-            String pipelineUri = PACKAGE_RESOURCE_URI + packageId + VERSION_QUERY_PARAM + packageVersion;
+            String workflowUri = PACKAGE_RESOURCE_URI + packageId + VERSION_QUERY_PARAM + packageVersion;
 
             // Search in current resources
             List<IResourceStore.IResourceId> currentIds =
-                    resourceStorage.findResourceIdsContaining(PACKAGES_FIELD, pipelineUri);
+                    resourceStorage.findResourceIdsContaining(PACKAGES_FIELD, workflowUri);
             // Search in history
             List<IResourceStore.IResourceId> historyIds =
-                    resourceStorage.findHistoryResourceIdsContaining(PACKAGES_FIELD, pipelineUri);
+                    resourceStorage.findHistoryResourceIdsContaining(PACKAGES_FIELD, workflowUri);
 
             // Merge and sort
             List<IResourceStore.IResourceId> allIds = new LinkedList<>(currentIds);

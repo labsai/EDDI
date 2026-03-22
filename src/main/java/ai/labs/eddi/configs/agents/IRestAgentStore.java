@@ -43,12 +43,12 @@ public interface IRestAgentStore extends IRestVersionInfo {
         @Path("descriptors")
         @Consumes(MediaType.TEXT_PLAIN)
         @Produces(MediaType.APPLICATION_JSON)
-        @Operation(description = "Read list of Agent descriptors including a given pipelineUri.")
+        @Operation(description = "Read list of Agent descriptors including a given workflowUri.")
         List<DocumentDescriptor> readBotDescriptors(
                         @QueryParam("filter") @DefaultValue("") String filter,
                         @QueryParam("index") @DefaultValue("0") Integer index,
                         @QueryParam("limit") @DefaultValue("20") Integer limit,
-                        @Parameter(name = "body", example = "eddi://ai.labs.package/PipelineStore/packages/ID?version=VERSION") @DefaultValue("") String containingPackageUri,
+                        @Parameter(name = "body", example = "eddi://ai.labs.package/WorkflowStore/packages/ID?version=VERSION") @DefaultValue("") String containingPackageUri,
                         @QueryParam("includePreviousVersions") @DefaultValue("false") Boolean includePreviousVersions);
 
         @GET
@@ -64,7 +64,7 @@ public interface IRestAgentStore extends IRestVersionInfo {
         @Operation(description = "Update agent.")
         Response updateBot(@PathParam("id") String id,
                         @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-                        AgentConfiguration AgentConfiguration);
+                        AgentConfiguration agentConfiguration);
 
         @PUT
         @Path("/{id}/updateResourceUri")
@@ -77,7 +77,7 @@ public interface IRestAgentStore extends IRestVersionInfo {
         @POST
         @Consumes(MediaType.APPLICATION_JSON)
         @Operation(description = "Create agent.")
-        Response createAgent(AgentConfiguration AgentConfiguration);
+        Response createAgent(AgentConfiguration agentConfiguration);
 
         @POST
         @Path("/{id}")

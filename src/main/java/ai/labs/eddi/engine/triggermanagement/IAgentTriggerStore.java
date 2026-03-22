@@ -14,10 +14,10 @@ public interface IAgentTriggerStore {
     AgentTriggerConfiguration readBotTrigger(String intent)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 
-    void updateBotTrigger(String intent, AgentTriggerConfiguration AgentTriggerConfiguration)
+    void updateBotTrigger(String intent, AgentTriggerConfiguration agentTriggerConfiguration)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 
-    void createAgentTrigger(AgentTriggerConfiguration AgentTriggerConfiguration)
+    void createAgentTrigger(AgentTriggerConfiguration agentTriggerConfiguration)
             throws IResourceStore.ResourceAlreadyExistsException, IResourceStore.ResourceStoreException;
 
     void deleteBotTrigger(String intent) throws IResourceStore.ResourceStoreException;

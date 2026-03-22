@@ -49,8 +49,8 @@ import static java.time.temporal.ChronoUnit.DAYS;
 @ApplicationScoped
 public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private final IDeploymentStore deploymentStore;
-    private final IAgentFactory AgentFactory;
-    private final IAgentStore AgentStore;
+    private final IAgentFactory agentFactory;
+    private final IAgentStore agentStore;
     private final IConversationMemoryStore conversationMemoryStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IMigrationManager migrationManager;
@@ -63,8 +63,8 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
     @Inject
     public AgentDeploymentManagement(IDeploymentStore deploymentStore,
-                                   IAgentFactory AgentFactory,
-                                   IAgentStore AgentStore,
+                                   IAgentFactory agentFactory,
+                                   IAgentStore agentStore,
                                    IBotsReadiness botsReadiness,
                                    IConversationMemoryStore conversationMemoryStore,
                                    IDocumentDescriptorStore documentDescriptorStore,
@@ -73,8 +73,8 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                                    @ConfigProperty(name = "eddi.conversations.maximumLifeTimeOfIdleConversationsInDays")
                                    int maximumLifeTimeOfIdleConversationsInDays) {
         this.deploymentStore = deploymentStore;
-        this.AgentFactory = AgentFactory;
-        this.AgentStore = AgentStore;
+        this.agentFactory = agentFactory;
+        this.agentStore = agentStore;
         this.botsReadiness = botsReadiness;
         this.conversationMemoryStore = conversationMemoryStore;
         this.documentDescriptorStore = documentDescriptorStore;
@@ -111,7 +111,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                     filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo)).
                     forEach(deploymentInfo -> {
                         try {
-                            AgentFactory.deployAgent(deploymentInfo.getEnvironment(),
+                            agentFactory.deployAgent(deploymentInfo.getEnvironment(),
                                     deploymentInfo.getAgentId(),
                                     deploymentInfo.getAgentVersion(),
                                     null);
@@ -169,19 +169,19 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                                     var agentId = deploymentInfo.getAgentId();
                                     var agentVersion = deploymentInfo.getAgentVersion();
                                     try {
-                                        IResourceId latestBot;
+                                        IResourceId latestAgent;
                                         try {
-                                            latestBot = AgentStore.getCurrentResourceId(AgentId);
+                                            latestAgent = agentStore.getCurrentResourceId(agentId);
                                         } catch (ResourceNotFoundException e) {
                                             // there is no latest Agent version found, so this Agent was very likely deleted,
                                             // therefore we will treat it like an older Agent version and try to undeploy
                                             // if no longer in use
-                                            latestBot = null;
+                                            latestAgent = null;
                                         }
 
-                                        if (latestBot != null && latestBot.getVersion() <= agentVersion) {
+                                        if (latestAgent != null && latestAgent.getVersion() <= agentVersion) {
                                             // we attempt to deploy a Agent if it is the latest
-                                            AgentFactory.deployAgent(environment, agentId, agentVersion, null);
+                                            agentFactory.deployAgent(environment, agentId, agentVersion, null);
                                         } else {
                                             manageDeploymentOfOldBot(environment, agentId, agentVersion);
 
@@ -229,13 +229,13 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         if (conversationCount == 0) {
             // this old Agent version has no more active conversations connected to it,
             // so we undeploy it
-            AgentFactory.undeployAgent(environment, agentId, agentVersion);
+            agentFactory.undeployAgent(environment, agentId, agentVersion);
             deploymentStore.setDeploymentInfo(environment.toString(), agentId, agentVersion, undeployed);
             LOGGER.info(format("Successfully undeployed Agent (id: %s, version: %d)", agentId, agentVersion));
         } else {
             // not the latest bot, but still has active conversations connected to it,
             // therefore we deploy it as well to make sure we don't interrupt UX
-            AgentFactory.deployAgent(environment, agentId, agentVersion, null);
+            agentFactory.deployAgent(environment, agentId, agentVersion, null);
         }
     }
 

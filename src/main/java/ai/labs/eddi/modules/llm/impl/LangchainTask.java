@@ -1,11 +1,11 @@
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor;
+import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import ai.labs.eddi.engine.lifecycle.exceptions.PipelineConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -30,8 +30,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 
-import static ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.ConfigValue;
-import static ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.FieldType;
+import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
+import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -316,7 +316,7 @@ public class LangchainTask implements ILifecycleTask {
 
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws PipelineConfigurationException {
+            throws WorkflowConfigurationException {
 
         Object uriObj = configuration.get(KEY_URI);
         if (!isNullOrEmpty(uriObj)) {
@@ -326,11 +326,11 @@ public class LangchainTask implements ILifecycleTask {
                 return resourceClientLibrary.getResource(uri, LangChainConfiguration.class);
             } catch (ServiceException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
-                throw new PipelineConfigurationException(e.getLocalizedMessage(), e);
+                throw new WorkflowConfigurationException(e.getLocalizedMessage(), e);
             }
         }
 
-        throw new PipelineConfigurationException("No resource URI has been defined! [LangChainConfiguration]");
+        throw new WorkflowConfigurationException("No resource URI has been defined! [LangChainConfiguration]");
     }
 
     @Override

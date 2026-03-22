@@ -17,7 +17,7 @@ import java.util.List;
  * <p>
  * Provides two layers of events:
  * <ul>
- * <li><strong>task_start / task_complete</strong> — lifecycle pipeline
+ * <li><strong>task_start / task_complete</strong> — lifecycle workflow
  * progress</li>
  * <li><strong>token</strong> — LLM response tokens in real-time</li>
  * <li><strong>done</strong> — full conversation snapshot</li>
@@ -32,7 +32,7 @@ public interface IRestAgentEngineStreaming {
     @Path("/{environment}/{agentId}/{conversationId}/stream")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.SERVER_SENT_EVENTS)
-    @Operation(description = "Send user input and receive streaming SSE response with pipeline events and LLM tokens.")
+    @Operation(description = "Send user input and receive streaming SSE response with workflow events and LLM tokens.")
     void sayStreaming(@PathParam("environment") Deployment.Environment environment,
             @PathParam("agentId") String agentId,
             @PathParam("conversationId") String conversationId,

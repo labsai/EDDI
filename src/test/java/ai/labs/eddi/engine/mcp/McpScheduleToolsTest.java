@@ -2,7 +2,7 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
-import ai.labs.eddi.configs.pipelines.IRestPipelineStore;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
@@ -43,7 +43,7 @@ class McpScheduleToolsTest {
 
         var restInterfaceFactory = mock(IRestInterfaceFactory.class);
         when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(mock(IRestAgentStore.class));
-        when(restInterfaceFactory.get(IRestPipelineStore.class)).thenReturn(mock(IRestPipelineStore.class));
+        when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(mock(IRestWorkflowStore.class));
         when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(mock(IRestDocumentDescriptorStore.class));
 
         lenient().when(jsonSerialization.serialize(any())).thenAnswer(inv -> {

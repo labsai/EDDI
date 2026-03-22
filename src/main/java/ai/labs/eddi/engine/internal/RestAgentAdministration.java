@@ -38,7 +38,7 @@ import static ai.labs.eddi.engine.model.Deployment.Status.*;
  */
 @ApplicationScoped
 public class RestAgentAdministration implements IRestAgentAdministration {
-    private final IAgentFactory AgentFactory;
+    private final IAgentFactory agentFactory;
     private final IDeploymentStore deploymentStore;
     private final IConversationMemoryStore conversationMemoryStore;
     private final IRestConversationStore restConversationStore;
@@ -51,7 +51,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
     @Inject
     public RestAgentAdministration(IRuntime runtime,
-            IAgentFactory AgentFactory,
+            IAgentFactory agentFactory,
             IDeploymentStore deploymentStore,
             IConversationMemoryStore conversationMemoryStore,
             IRestConversationStore restConversationStore,
@@ -59,7 +59,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
             IDeploymentListener deploymentListener,
             IScheduleStore scheduleStore) {
         this.runtime = runtime;
-        this.AgentFactory = AgentFactory;
+        this.agentFactory = agentFactory;
         this.deploymentStore = deploymentStore;
         this.conversationMemoryStore = conversationMemoryStore;
         this.restConversationStore = restConversationStore;
@@ -121,10 +121,10 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
     private Future<Void> deploy(final Deployment.Environment environment,
             final String agentId, final Integer version, final Boolean autoDeploy) {
-        Callable<Void> deployAgent = () -> {
+        Callable<Void> deployAgentCallable = () -> {
             try {
                 if (EnumSet.of(NOT_FOUND, ERROR).contains(checkDeploymentStatus(environment, agentId, version))) {
-                    AgentFactory.deployAgent(environment, agentId, version,
+                    agentFactory.deployAgent(environment, agentId, version,
                             status -> {
                                 if (status == READY && autoDeploy) {
                                     deploymentStore.setDeploymentInfo(environment.toString(),
@@ -137,7 +137,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                         new DeploymentEvent(agentId, version, environment, READY));
 
                 // Lifecycle hook: auto-enable schedules for this bot
-                enableSchedulesForBot(AgentId);
+                enableSchedulesForBot(agentId);
 
             } catch (Exception e) {
                 handleDeploymentException(e, agentId, version, environment);
@@ -146,7 +146,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
             return null;
         };
 
-        return runtime.submitCallable(deployAgent, ThreadContext.getResources());
+        return runtime.submitCallable(deployAgentCallable, ThreadContext.getResources());
     }
 
     private void handleDeploymentException(Exception e, String agentId, Integer version,
@@ -212,14 +212,14 @@ public class RestAgentAdministration implements IRestAgentAdministration {
     }
 
     private void undeploy(Deployment.Environment environment, String agentId, Integer version) {
-        Callable<Void> undeployAgent = () -> {
+        Callable<Void> undeployAgentCallable = () -> {
             try {
-                AgentFactory.undeployAgent(environment, agentId, version);
+                agentFactory.undeployAgent(environment, agentId, version);
                 deploymentStore.setDeploymentInfo(environment.toString(),
                         agentId, version, DeploymentInfo.DeploymentStatus.undeployed);
 
                 // Lifecycle hook: auto-disable schedules for this bot
-                disableSchedulesForBot(AgentId);
+                disableSchedulesForBot(agentId);
             } catch (ServiceException e) {
                 throwError(agentId, version, e, "Error while undeploying bot! (agentId=%s , version=%s)");
             } catch (IllegalAccessException e) {
@@ -232,7 +232,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
             return null;
         };
 
-        runtime.submitCallable(undeployAgent, ThreadContext.getResources());
+        runtime.submitCallable(undeployAgentCallable, ThreadContext.getResources());
     }
 
     @Override
@@ -258,23 +258,23 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         RuntimeUtilities.checkNotNull(environment, "environment");
 
         try {
-            List<AgentDeploymentStatus> AgentDeploymentStatuses = new LinkedList<>();
-            for (IAgent latestBot : AgentFactory.getAllLatestAgents(environment)) {
-                var agentId = latestBot.getAgentId();
-                var agentVersion = latestBot.getAgentVersion();
+            List<AgentDeploymentStatus> agentDeploymentStatuses = new LinkedList<>();
+            for (IAgent latestAgent : agentFactory.getAllLatestAgents(environment)) {
+                var agentId = latestAgent.getAgentId();
+                var agentVersion = latestAgent.getAgentVersion();
                 var documentDescriptor = documentDescriptorStore.readDescriptor(agentId, agentVersion);
-                AgentDeploymentStatuses.add(new AgentDeploymentStatus(
+                agentDeploymentStatuses.add(new AgentDeploymentStatus(
                         environment,
                         agentId,
                         agentVersion,
-                        latestBot.getDeploymentStatus(),
+                        latestAgent.getDeploymentStatus(),
                         documentDescriptor));
             }
 
-            AgentDeploymentStatuses.sort(Comparator.comparing(o -> o.getDescriptor().getLastModifiedOn()));
-            Collections.reverse(AgentDeploymentStatuses);
+            agentDeploymentStatuses.sort(Comparator.comparing(o -> o.getDescriptor().getLastModifiedOn()));
+            Collections.reverse(agentDeploymentStatuses);
 
-            return AgentDeploymentStatuses;
+            return agentDeploymentStatuses;
         } catch (ServiceException | IResourceStore.ResourceStoreException
                 | IResourceStore.ResourceNotFoundException e) {
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -283,8 +283,8 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
     private Status checkDeploymentStatus(Deployment.Environment environment, String agentId, Integer version) {
         try {
-            IAgent Agent = AgentFactory.getAgent(environment, agentId, version);
-            return Agent != null ? agent.getDeploymentStatus() : NOT_FOUND;
+            IAgent agent = agentFactory.getAgent(environment, agentId, version);
+            return agent != null ? agent.getDeploymentStatus() : NOT_FOUND;
         } catch (ServiceException e) {
             return throwError(agentId, version, e, "Error while deploying bot! (agentId=%s , version=%s)");
         }
@@ -307,7 +307,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
     private void enableSchedulesForBot(String agentId) {
         try {
-            var schedules = scheduleStore.readSchedulesByBotId(AgentId);
+            var schedules = scheduleStore.readSchedulesByBotId(agentId);
             for (var schedule : schedules) {
                 if (!schedule.isEnabled()) {
                     var nextFire = schedule.getNextFire() != null
@@ -325,7 +325,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
     private void disableSchedulesForBot(String agentId) {
         try {
-            var schedules = scheduleStore.readSchedulesByBotId(AgentId);
+            var schedules = scheduleStore.readSchedulesByBotId(agentId);
             for (var schedule : schedules) {
                 if (schedule.isEnabled()) {
                     scheduleStore.setScheduleEnabled(schedule.getId(), false, null);

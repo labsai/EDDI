@@ -1,10 +1,10 @@
 package ai.labs.eddi.modules.nlp;
 
-import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor;
-import ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.ConfigValue;
+import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
+import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
-import ai.labs.eddi.engine.lifecycle.exceptions.PipelineConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.lifecycle.exceptions.UnrecognizedExtensionException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -38,7 +38,7 @@ import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static ai.labs.eddi.configs.pipelines.model.ExtensionDescriptor.FieldType.BOOLEAN;
+import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType.BOOLEAN;
 import static ai.labs.eddi.engine.memory.ContextUtilities.retrieveContextLanguageFromLongTermMemory;
 import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_PARSED;
 import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT;
@@ -208,7 +208,7 @@ public class InputParserTask implements ILifecycleTask {
 
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws PipelineConfigurationException,
+            throws WorkflowConfigurationException,
             IllegalExtensionConfigurationException,
             UnrecognizedExtensionException {
 

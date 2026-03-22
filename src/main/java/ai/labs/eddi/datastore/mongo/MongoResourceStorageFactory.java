@@ -41,7 +41,7 @@ public class MongoResourceStorageFactory implements IResourceStorageFactory {
 
     /**
      * Expose the underlying database for stores that need direct MongoDB access
-     * (e.g., AgentStore, PipelineStore with custom queries).
+     * (e.g., AgentStore, WorkflowStore with custom queries).
      * <p>
      * This method is intentionally on the concrete class, not on the interface,
      * to keep the interface DB-agnostic.

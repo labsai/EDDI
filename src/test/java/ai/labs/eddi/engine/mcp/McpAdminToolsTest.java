@@ -4,7 +4,7 @@ import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.pipelines.IRestPipelineStore;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -37,7 +37,7 @@ class McpAdminToolsTest {
 
     private IRestAgentAdministration botAdmin;
     private IRestAgentStore AgentStore;
-    private IRestPipelineStore PipelineStore;
+    private IRestWorkflowStore WorkflowStore;
     private IRestDocumentDescriptorStore descriptorStore;
     private IJsonSerialization jsonSerialization;
     private McpAdminTools tools;
@@ -46,13 +46,13 @@ class McpAdminToolsTest {
     void setUp() throws Exception {
         botAdmin = mock(IRestAgentAdministration.class);
         AgentStore = mock(IRestAgentStore.class);
-        PipelineStore = mock(IRestPipelineStore.class);
+        WorkflowStore = mock(IRestWorkflowStore.class);
         descriptorStore = mock(IRestDocumentDescriptorStore.class);
         jsonSerialization = mock(IJsonSerialization.class);
 
         var restInterfaceFactory = mock(IRestInterfaceFactory.class);
         when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(AgentStore);
-        when(restInterfaceFactory.get(IRestPipelineStore.class)).thenReturn(PipelineStore);
+        when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(WorkflowStore);
         when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
 
         var scheduleStore = mock(IScheduleStore.class);
@@ -97,7 +97,7 @@ class McpAdminToolsTest {
         String result = tools.deployAgent(AGENT_ID, 1, null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Failed to deploy bot"));
+        assertTrue(result.contains("Failed to deploy agent"));
     }
 
     // --- undeployAgent ---
@@ -157,25 +157,25 @@ class McpAdminToolsTest {
 
     @Test
     void listPackages_returnsDescriptors() throws IOException {
-        when(PipelineStore.readPackageDescriptors("", 0, 20))
+        when(WorkflowStore.readPackageDescriptors("", 0, 20))
                 .thenReturn(List.of(new DocumentDescriptor()));
         when(jsonSerialization.serialize(any())).thenReturn("[{\"name\":\"TestPkg\"}]");
 
         String result = tools.listPackages(null, null);
 
         assertNotNull(result);
-        verify(PipelineStore).readPackageDescriptors("", 0, 20);
+        verify(WorkflowStore).readPackageDescriptors("", 0, 20);
     }
 
     @Test
     void listPackages_withFilterAndLimit() throws IOException {
-        when(PipelineStore.readPackageDescriptors("greetings", 0, 10))
+        when(WorkflowStore.readPackageDescriptors("greetings", 0, 10))
                 .thenReturn(Collections.emptyList());
         when(jsonSerialization.serialize(any())).thenReturn("[]");
 
         tools.listPackages("greetings", 10);
 
-        verify(PipelineStore).readPackageDescriptors("greetings", 0, 10);
+        verify(WorkflowStore).readPackageDescriptors("greetings", 0, 10);
     }
 
     // --- createAgent ---
@@ -213,11 +213,11 @@ class McpAdminToolsTest {
                         .build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\"}");
 
-        tools.createAgent("Bot", null, "eddi://ai.labs.package/PipelineStore/packages/pkg1?version=1");
+        tools.createAgent("Bot", null, "eddi://ai.labs.package/WorkflowStore/packages/pkg1?version=1");
 
         ArgumentCaptor<AgentConfiguration> configCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
         verify(AgentStore).createAgent(configCaptor.capture());
-        assertEquals(1, configCaptor.getValue().getPipelines().size());
+        assertEquals(1, configCaptor.getValue().getWorkflows().size());
     }
 
     @Test

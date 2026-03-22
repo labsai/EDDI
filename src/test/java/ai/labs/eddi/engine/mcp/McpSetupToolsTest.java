@@ -6,8 +6,8 @@ import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
 import ai.labs.eddi.configs.llm.IRestLangChainStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
-import ai.labs.eddi.configs.pipelines.IRestPipelineStore;
-import ai.labs.eddi.configs.pipelines.model.PipelineConfiguration;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
@@ -31,7 +31,7 @@ class McpSetupToolsTest {
     private IRestLangChainStore langchainStore;
     private IRestOutputStore outputStore;
     private IRestHttpCallsStore httpCallsStore;
-    private IRestPipelineStore PipelineStore;
+    private IRestWorkflowStore WorkflowStore;
     private IRestAgentStore AgentStore;
     private IRestDocumentDescriptorStore descriptorStore;
     private IRestAgentAdministration botAdmin;
@@ -45,7 +45,7 @@ class McpSetupToolsTest {
         langchainStore = mock(IRestLangChainStore.class);
         outputStore = mock(IRestOutputStore.class);
         httpCallsStore = mock(IRestHttpCallsStore.class);
-        PipelineStore = mock(IRestPipelineStore.class);
+        WorkflowStore = mock(IRestWorkflowStore.class);
         AgentStore = mock(IRestAgentStore.class);
         descriptorStore = mock(IRestDocumentDescriptorStore.class);
         botAdmin = mock(IRestAgentAdministration.class);
@@ -58,7 +58,7 @@ class McpSetupToolsTest {
         when(restInterfaceFactory.get(IRestLangChainStore.class)).thenReturn(langchainStore);
         when(restInterfaceFactory.get(IRestOutputStore.class)).thenReturn(outputStore);
         when(restInterfaceFactory.get(IRestHttpCallsStore.class)).thenReturn(httpCallsStore);
-        when(restInterfaceFactory.get(IRestPipelineStore.class)).thenReturn(PipelineStore);
+        when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(WorkflowStore);
         when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(AgentStore);
         when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
         when(restInterfaceFactory.get(IRestParserStore.class)).thenReturn(parserStore);
@@ -74,7 +74,7 @@ class McpSetupToolsTest {
     }
 
     @Test
-    void setupBot_fullPipeline_createsAllResources() throws Exception {
+    void setupBot_fullWorkflow_createsAllResources() throws Exception {
         // Mock all store responses with Location headers
         when(behaviorStore.createBehaviorRuleSet(any()))
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
@@ -82,8 +82,8 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
         when(outputStore.createOutputSet(any()))
                 .thenReturn(Response.created(URI.create("/outputstore/outputsets/out-1?version=1")).build());
-        when(PipelineStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(WorkflowStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any()))
                 .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
         when(botAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
@@ -101,7 +101,7 @@ class McpSetupToolsTest {
         verify(behaviorStore).createBehaviorRuleSet(any());
         verify(langchainStore).createLangChain(any());
         verify(outputStore).createOutputSet(any());
-        verify(PipelineStore).createPackage(any());
+        verify(WorkflowStore).createPackage(any());
         verify(AgentStore).createAgent(any());
         verify(botAdmin).deployAgent(Environment.production, "bot-1", 1, true, true);
 
@@ -115,8 +115,8 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(PipelineStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(WorkflowStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any()))
                 .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
@@ -135,8 +135,8 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(PipelineStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(WorkflowStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any()))
                 .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
@@ -153,8 +153,8 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(PipelineStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(WorkflowStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any()))
                 .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
         when(botAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
@@ -195,8 +195,8 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(PipelineStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(WorkflowStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any()))
                 .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
@@ -215,8 +215,8 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(PipelineStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(WorkflowStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any()))
                 .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
@@ -233,8 +233,8 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(PipelineStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(WorkflowStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any()))
                 .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
@@ -262,8 +262,8 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
         when(outputStore.createOutputSet(any()))
                 .thenReturn(Response.created(URI.create("/outputstore/outputsets/out-1?version=1")).build());
-        when(PipelineStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(WorkflowStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any()))
                 .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
@@ -271,16 +271,16 @@ class McpSetupToolsTest {
                 null, null, null, null, null, false, null);
 
         // Capture package config
-        var packageCaptor = ArgumentCaptor.forClass(PipelineConfiguration.class);
-        verify(PipelineStore).createPackage(packageCaptor.capture());
+        var packageCaptor = ArgumentCaptor.forClass(WorkflowConfiguration.class);
+        verify(WorkflowStore).createPackage(packageCaptor.capture());
 
         var pkgConfig = packageCaptor.getValue();
         // Should have 4 extensions: parser, behavior, langchain, output
-        assertEquals(4, pkgConfig.getPipelineSteps().size());
-        assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getPipelineSteps().get(0).getType());
-        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getPipelineSteps().get(1).getType());
-        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getPipelineSteps().get(2).getType());
-        assertEquals(URI.create("eddi://ai.labs.output"), pkgConfig.getPipelineSteps().get(3).getType());
+        assertEquals(4, pkgConfig.getWorkflowSteps().size());
+        assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getWorkflowSteps().get(0).getType());
+        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getWorkflowSteps().get(1).getType());
+        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getWorkflowSteps().get(2).getType());
+        assertEquals(URI.create("eddi://ai.labs.output"), pkgConfig.getWorkflowSteps().get(3).getType());
     }
 
     @Test
@@ -289,19 +289,19 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(PipelineStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(WorkflowStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any()))
                 .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
         tools.setupBot("Bot", "prompt", null, null, "key", null, null,
                 null, null, null, null, null, false, null);
 
-        var packageCaptor = ArgumentCaptor.forClass(PipelineConfiguration.class);
-        verify(PipelineStore).createPackage(packageCaptor.capture());
+        var packageCaptor = ArgumentCaptor.forClass(WorkflowConfiguration.class);
+        verify(WorkflowStore).createPackage(packageCaptor.capture());
 
         // Without intro message, should have 3 extensions: parser, behavior, langchain (no output)
-        assertEquals(3, packageCaptor.getValue().getPipelineSteps().size());
+        assertEquals(3, packageCaptor.getValue().getWorkflowSteps().size());
     }
 
     @Test
@@ -393,8 +393,8 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(PipelineStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(WorkflowStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any()))
                 .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
@@ -427,8 +427,8 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(PipelineStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(WorkflowStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any()))
                 .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
@@ -462,8 +462,8 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(PipelineStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(WorkflowStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any()))
                 .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
@@ -493,8 +493,8 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(PipelineStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(WorkflowStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any()))
                 .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
@@ -638,7 +638,7 @@ class McpSetupToolsTest {
             """;
 
     @Test
-    void createApiBot_fullPipeline_createsAllResources() throws Exception {
+    void createApiBot_fullWorkflow_createsAllResources() throws Exception {
         // Mock all store responses
         when(httpCallsStore.createHttpCalls(any()))
                 .thenReturn(Response.created(URI.create("/httpcallsstore/httpcalls/hc-1?version=1")).build())
@@ -647,8 +647,8 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(PipelineStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(WorkflowStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any()))
                 .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
         when(botAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
@@ -666,7 +666,7 @@ class McpSetupToolsTest {
         verify(parserStore).createParser(any());
         verify(behaviorStore).createBehaviorRuleSet(any());
         verify(langchainStore).createLangChain(any());
-        verify(PipelineStore).createPackage(any());
+        verify(WorkflowStore).createPackage(any());
         verify(AgentStore).createAgent(any());
         verify(botAdmin).deployAgent(Environment.production, "bot-1", 1, true, true);
 
@@ -705,24 +705,24 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1")).build());
         when(langchainStore.createLangChain(any()))
                 .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1")).build());
-        when(PipelineStore.createPackage(any()))
-                .thenReturn(Response.created(URI.create("/PipelineStore/packages/pkg-1?version=1")).build());
+        when(WorkflowStore.createPackage(any()))
+                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any()))
                 .thenReturn(Response.created(URI.create("/AgentStore/bots/bot-1?version=1")).build());
 
         tools.createApIAgent("Bot", "prompt", SIMPLE_SPEC,
                 null, null, "key", null, null, null, null, null, false, null);
 
-        var packageCaptor = ArgumentCaptor.forClass(PipelineConfiguration.class);
-        verify(PipelineStore).createPackage(packageCaptor.capture());
+        var packageCaptor = ArgumentCaptor.forClass(WorkflowConfiguration.class);
+        verify(WorkflowStore).createPackage(packageCaptor.capture());
 
         var pkgConfig = packageCaptor.getValue();
         // Should have 5 extensions: parser + behavior + 2 httpcalls groups + langchain
-        assertEquals(5, pkgConfig.getPipelineSteps().size());
-        assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getPipelineSteps().get(0).getType());
-        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getPipelineSteps().get(1).getType());
-        assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getPipelineSteps().get(2).getType());
-        assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getPipelineSteps().get(3).getType());
-        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getPipelineSteps().get(4).getType());
+        assertEquals(5, pkgConfig.getWorkflowSteps().size());
+        assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getWorkflowSteps().get(0).getType());
+        assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getWorkflowSteps().get(1).getType());
+        assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getWorkflowSteps().get(2).getType());
+        assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getWorkflowSteps().get(3).getType());
+        assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getWorkflowSteps().get(4).getType());
     }
 }

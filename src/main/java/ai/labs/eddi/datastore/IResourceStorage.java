@@ -35,9 +35,9 @@ public interface IResourceStorage<T> {
 
     /**
      * Find resource IDs where the JSON data contains the given value at the given path.
-     * Used by AgentStore/PipelineStore for "find configs containing resource" queries.
+     * Used by AgentStore/WorkflowStore for "find configs containing resource" queries.
      *
-     * @param jsonPath the JSON field/array path (e.g. "packages", "PipelineSteps.config.uri")
+     * @param jsonPath the JSON field/array path (e.g. "packages", "WorkflowSteps.config.uri")
      * @param value    the value to search for within the field
      * @return list of matching resource IDs with their current versions
      */

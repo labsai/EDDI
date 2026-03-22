@@ -20,7 +20,7 @@ public interface IAgent {
 
     Deployment.Status getDeploymentStatus();
 
-    void addPipeline(IExecutablePipeline executablePipeline) throws IllegalAccessException;
+    void addWorkflow(IExecutableWorkflow executableWorkflow) throws IllegalAccessException;
 
     IConversation startConversation(String userId, Map<String, Context> context,
                                     IPropertiesHandler propertiesHandler,

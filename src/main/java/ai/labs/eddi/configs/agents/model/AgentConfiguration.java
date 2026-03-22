@@ -1,6 +1,6 @@
 package ai.labs.eddi.configs.agents.model;
 
-
+import com.fasterxml.jackson.annotation.JsonAlias;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -13,7 +13,8 @@ import java.util.Map;
  */
 
 public class AgentConfiguration {
-    private List<URI> packages = new ArrayList<>();
+    @JsonAlias("packages")
+    private List<URI> workflows = new ArrayList<>();
     private List<ChannelConnector> channels = new ArrayList<>();
 
     public static class ChannelConnector {
@@ -38,12 +39,12 @@ public class AgentConfiguration {
     }
 
 
-    public List<URI> getPipelines() {
-        return packages;
+    public List<URI> getWorkflows() {
+        return workflows;
     }
 
-    public void setPipelines(List<URI> packages) {
-        this.packages = packages;
+    public void setWorkflows(List<URI> workflows) {
+        this.workflows = workflows;
     }
 
     public List<ChannelConnector> getChannels() {

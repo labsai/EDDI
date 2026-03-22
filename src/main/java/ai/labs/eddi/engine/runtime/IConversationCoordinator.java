@@ -88,7 +88,7 @@ public interface IConversationCoordinator extends IEventBus {
     }
 
     /**
-     * Replay a dead-letter entry (re-inject into the main processing pipeline).
+     * Replay a dead-letter entry (re-inject into the main processing workflow).
      *
      * @param entryId the dead-letter entry ID
      * @return true if the entry was found and replayed

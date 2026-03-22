@@ -7,7 +7,7 @@ import java.util.Map;
  * <p>
  * Two layers of events are supported:
  * <ul>
- * <li><strong>Pipeline step events</strong> —
+ * <li><strong>Workflow step events</strong> —
  * {@link #onTaskStart}/{@link #onTaskComplete}
  * emitted by {@code LifecycleManager} around each task execution</li>
  * <li><strong>LLM token events</strong> — {@link #onToken} emitted by
@@ -15,7 +15,7 @@ import java.util.Map;
  * </ul>
  * <p>
  * When no streaming is requested (standard {@code say} endpoint), no sink is
- * created and the pipeline operates exactly as before.
+ * created and the workflow operates exactly as before.
  */
 public interface ConversationEventSink {
 
@@ -24,7 +24,7 @@ public interface ConversationEventSink {
      *
      * @param taskId   the task identifier (e.g. "ai.labs.parser")
      * @param taskType the task type (e.g. "expressions")
-     * @param index    0-based position in the pipeline
+     * @param index    0-based position in the workflow
      */
     void onTaskStart(String taskId, String taskType, int index);
 

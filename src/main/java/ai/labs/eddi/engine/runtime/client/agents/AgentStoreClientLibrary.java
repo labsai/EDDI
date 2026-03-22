@@ -3,9 +3,9 @@ package ai.labs.eddi.engine.runtime.client.agents;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.runtime.IAgent;
-import ai.labs.eddi.engine.runtime.IExecutablePipeline;
-import ai.labs.eddi.engine.runtime.IPipelineFactory;
-import ai.labs.eddi.engine.runtime.internal.agent;
+import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
+import ai.labs.eddi.engine.runtime.IWorkflowFactory;
+import ai.labs.eddi.engine.runtime.internal.Agent;
 import ai.labs.eddi.engine.runtime.internal.AgentFactory;
 import ai.labs.eddi.engine.runtime.service.IAgentStoreService;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
@@ -22,29 +22,29 @@ import static java.lang.String.format;
  * @author ginccc
  */
 @ApplicationScoped
-public class agentStoreClientLibrary implements IAgentStoreClientLibrary {
+public class AgentStoreClientLibrary implements IAgentStoreClientLibrary {
     private final IAgentStoreService agentStoreService;
-    private final IPipelineFactory pipelineFactory;
+    private final IWorkflowFactory workflowFactory;
     private static final Logger LOGGER = Logger.getLogger(AgentFactory.class);
 
     @Inject
-    public agentStoreClientLibrary(IAgentStoreService agentStoreService,
-                                 IPipelineFactory pipelineFactory) {
+    public AgentStoreClientLibrary(IAgentStoreService agentStoreService,
+                                 IWorkflowFactory workflowFactory) {
         this.agentStoreService = agentStoreService;
-        this.pipelineFactory = pipelineFactory;
+        this.workflowFactory = workflowFactory;
     }
 
     @Override
     public IAgent getAgent(final String agentId, final Integer version) throws ServiceException, IllegalAccessException {
-        final IAgent Agent = new Agent(agentId, version);
-        final AgentConfiguration AgentConfiguration = agentStoreService.getAgentConfiguration(agentId, version);
-        for (final URI pipelineUri : AgentConfiguration.getPipelines()) {
-            IResourceId resourceId = RestUtilities.extractResourceId(pipelineUri);
+        final IAgent agent = new Agent(agentId, version);
+        final AgentConfiguration agentConfig = agentStoreService.getAgentConfiguration(agentId, version);
+        for (final URI workflowUri : agentConfig.getWorkflows()) {
+            IResourceId resourceId = RestUtilities.extractResourceId(workflowUri);
             if (resourceId != null) {
-                IExecutablePipeline thePipeline = pipelineFactory.getExecutablePipeline(resourceId.getId(), resourceId.getVersion());
-                agent.addPipeline(thePipeline);
+                IExecutableWorkflow theWorkflow = workflowFactory.getExecutableWorkflow(resourceId.getId(), resourceId.getVersion());
+                agent.addWorkflow(theWorkflow);
             } else {
-                LOGGER.warn(format("packageId should not have been null! (agentId=%s,agentVersion=%d)", agentId, version));
+                LOGGER.warn(format("workflowId should not have been null! (agentId=%s,agentVersion=%d)", agentId, version));
             }
         }
 
