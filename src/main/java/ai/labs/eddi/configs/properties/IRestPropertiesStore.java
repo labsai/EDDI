@@ -10,7 +10,7 @@ import jakarta.ws.rs.core.Response;
 
 // @Api(value = "Agent Engine -> Properties", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/propertiesstore/properties")
-@Tag(name = "03. Properties", description = "lifecycle extension for package")
+@Tag(name = "03. Properties", description = "lifecycle extension for LLM configurations")
 public interface IRestPropertiesStore {
     String resourceURI = "eddi://ai.labs.properties/propertiesstore/properties/";
 

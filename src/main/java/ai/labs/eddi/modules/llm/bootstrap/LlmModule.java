@@ -3,7 +3,7 @@ package ai.labs.eddi.modules.llm.bootstrap;
 
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
-import ai.labs.eddi.modules.llm.impl.LangchainTask;
+import ai.labs.eddi.modules.llm.impl.LlmTask;
 import ai.labs.eddi.modules.llm.impl.builder.*;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
@@ -18,7 +18,7 @@ import java.util.Map;
 
 @Startup(1000)
 @ApplicationScoped
-public class LangChainModule {
+public class LlmModule {
     private static final Logger LOGGER = Logger.getLogger("Startup");
 
     public static final String LLM_TYPE_OPENAI = "openai";
@@ -40,7 +40,7 @@ public class LangChainModule {
         return languageModelApiConnectorBuilders;
     }
 
-    public LangChainModule(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
+    public LlmModule(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
                            Instance<ILifecycleTask> lifecycleTaskInstance,
                            Instance<ILanguageModelBuilder> langModelBuilderInstance) {
 
@@ -67,7 +67,7 @@ public class LangChainModule {
         languageModelApiConnectorBuilders.put(LLM_TYPE_JLAMA, () ->
                 langModelBuilderInstance.select(JlamaLanguageModelBuilder.class).get());
 
-        lifecycleTaskProviders.put(LangchainTask.ID, () -> lifecycleTaskInstance.select(LangchainTask.class).get());
-        LOGGER.debug("Added LangChain Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
+        lifecycleTaskProviders.put(LlmTask.ID, () -> lifecycleTaskInstance.select(LlmTask.class).get());
+        LOGGER.debug("Added LLM Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 }

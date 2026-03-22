@@ -100,7 +100,7 @@ class ChatModelRegistryTest {
         @Test
         @DisplayName("getOrCreate throws for unknown type")
         void getOrCreate_unknownType_throwsException() {
-            assertThrows(ChatModelRegistry.UnsupportedLangchainTaskException.class,
+            assertThrows(ChatModelRegistry.UnsupportedLlmTaskException.class,
                     () -> registry.getOrCreate("unknown", Map.of()));
         }
 
@@ -152,7 +152,7 @@ class ChatModelRegistryTest {
         @Test
         @DisplayName("getOrCreateStreaming throws for unknown type")
         void getOrCreateStreaming_unknownType_throwsException() {
-            assertThrows(ChatModelRegistry.UnsupportedLangchainTaskException.class,
+            assertThrows(ChatModelRegistry.UnsupportedLlmTaskException.class,
                     () -> registry.getOrCreateStreaming("unknown", Map.of()));
         }
 

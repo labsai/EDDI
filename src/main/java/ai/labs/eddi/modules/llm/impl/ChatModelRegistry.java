@@ -49,7 +49,7 @@ class ChatModelRegistry {
      * Parameters are filtered to remove non-model keys before cache lookup.
      */
     ChatModel getOrCreate(String type, Map<String, String> processedParams)
-            throws UnsupportedLangchainTaskException {
+            throws UnsupportedLlmTaskException {
 
         // Extract observability params BEFORE filtering (they're removed from cache
         // key)
@@ -65,7 +65,7 @@ class ChatModelRegistry {
         }
 
         if (!languageModelApiConnectorBuilders.containsKey(type)) {
-            throw new UnsupportedLangchainTaskException(String.format("Type \"%s\" is not supported", type));
+            throw new UnsupportedLlmTaskException(String.format("Type \"%s\" is not supported", type));
         }
 
         // Resolve vault references (late-binding: after Thymeleaf, before
@@ -83,7 +83,7 @@ class ChatModelRegistry {
      * Returns {@code null} if the builder does not support streaming.
      */
     StreamingChatModel getOrCreateStreaming(String type, Map<String, String> processedParams)
-            throws UnsupportedLangchainTaskException {
+            throws UnsupportedLlmTaskException {
 
         var filteredParams = filterParams(processedParams);
         var cacheKey = new ModelCacheKey(type, filteredParams);
@@ -93,7 +93,7 @@ class ChatModelRegistry {
         }
 
         if (!languageModelApiConnectorBuilders.containsKey(type)) {
-            throw new UnsupportedLangchainTaskException(String.format("Type \"%s\" is not supported", type));
+            throw new UnsupportedLlmTaskException(String.format("Type \"%s\" is not supported", type));
         }
 
         try {
@@ -141,8 +141,8 @@ class ChatModelRegistry {
     /**
      * Thrown when a requested model type has no registered builder.
      */
-    public static class UnsupportedLangchainTaskException extends Exception {
-        public UnsupportedLangchainTaskException(String message) {
+    public static class UnsupportedLlmTaskException extends Exception {
+        public UnsupportedLlmTaskException(String message) {
             super(message);
         }
     }

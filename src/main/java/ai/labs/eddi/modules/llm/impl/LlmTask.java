@@ -12,8 +12,8 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration.Task;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.llm.tools.EddiToolBridge;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -49,7 +49,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * </ul>
  */
 @ApplicationScoped
-public class LangchainTask implements ILifecycleTask {
+public class LlmTask implements ILifecycleTask {
     public static final String ID = "ai.labs.langchain";
 
     private static final String KEY_URI = "uri";
@@ -78,10 +78,10 @@ public class LangchainTask implements ILifecycleTask {
     private final StreamingLegacyChatExecutor streamingLegacyChatExecutor;
     private final AgentOrchestrator agentOrchestrator;
 
-    private static final Logger LOGGER = Logger.getLogger(LangchainTask.class);
+    private static final Logger LOGGER = Logger.getLogger(LlmTask.class);
 
     @Inject
-    public LangchainTask(IResourceClientLibrary resourceClientLibrary,
+    public LlmTask(IResourceClientLibrary resourceClientLibrary,
             IDataFactory dataFactory,
             IMemoryItemConverter memoryItemConverter,
             ITemplatingEngine templatingEngine,
@@ -129,7 +129,7 @@ public class LangchainTask implements ILifecycleTask {
 
     @Override
     public void execute(IConversationMemory memory, Object component) throws LifecycleException {
-        final var langChainConfig = (LangChainConfiguration) component;
+        final var llmConfig = (LlmConfiguration) component;
 
         try {
             IWritableConversationStep currentStep = memory.getCurrentStep();
@@ -144,14 +144,14 @@ public class LangchainTask implements ILifecycleTask {
                 return;
             }
 
-            for (var task : langChainConfig.tasks()) {
+            for (var task : llmConfig.tasks()) {
                 if (task.getActions().contains(MATCH_ALL_OPERATOR) ||
                         task.getActions().stream().anyMatch(actions::contains)) {
                     executeTask(memory, task, currentStep, templateDataObjects);
                 }
             }
 
-        } catch (ITemplatingEngine.TemplateEngineException | ChatModelRegistry.UnsupportedLangchainTaskException
+        } catch (ITemplatingEngine.TemplateEngineException | ChatModelRegistry.UnsupportedLlmTaskException
                 | IOException | LifecycleException e) {
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
@@ -163,7 +163,7 @@ public class LangchainTask implements ILifecycleTask {
     private void executeTask(IConversationMemory memory, Task task,
             IWritableConversationStep currentStep,
             Map<String, Object> templateDataObjects)
-            throws ITemplatingEngine.TemplateEngineException, ChatModelRegistry.UnsupportedLangchainTaskException,
+            throws ITemplatingEngine.TemplateEngineException, ChatModelRegistry.UnsupportedLlmTaskException,
             IOException, LifecycleException {
 
         var processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects);
@@ -324,14 +324,14 @@ public class LangchainTask implements ILifecycleTask {
             URI uri = URI.create(uriObj.toString());
 
             try {
-                return resourceClientLibrary.getResource(uri, LangChainConfiguration.class);
+                return resourceClientLibrary.getResource(uri, LlmConfiguration.class);
             } catch (ServiceException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
                 throw new WorkflowConfigurationException(e.getLocalizedMessage(), e);
             }
         }
 
-        throw new WorkflowConfigurationException("No resource URI has been defined! [LangChainConfiguration]");
+        throw new WorkflowConfigurationException("No resource URI has been defined! [LlmConfiguration]");
     }
 
     @Override

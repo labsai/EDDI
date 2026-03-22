@@ -49,13 +49,13 @@ public final class MemoryKeys {
 
     // ---- Langchain ----
 
-    /** LLM response text. Written by LangchainTask. */
+    /** LLM response text. Written by LlmTask. */
     public static final MemoryKey<String> LANGCHAIN = MemoryKey.ofPublic("langchain");
 
-    /** System message for the LLM. Written by LangchainTask. */
+    /** System message for the LLM. Written by LlmTask. */
     public static final MemoryKey<String> SYSTEM_MESSAGE = MemoryKey.of("systemMessage");
 
-    /** Prompt sent to the LLM. Written by LangchainTask. */
+    /** Prompt sent to the LLM. Written by LlmTask. */
     public static final MemoryKey<String> PROMPT = MemoryKey.of("prompt");
 
     // ---- Output ----

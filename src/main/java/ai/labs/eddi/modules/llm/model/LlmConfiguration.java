@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Unified configuration for LangchainTask supporting agenth legacy and
+ * Unified configuration for LlmTask supporting agenth legacy and
  * declarative agent modes.
  *
  * <p><strong>Legacy Mode (Backward Compatible):</strong></p>
@@ -44,7 +44,7 @@ import java.util.Map;
  * }
  * }</pre>
  */
-public record LangChainConfiguration(List<Task> tasks) {
+public record LlmConfiguration(List<Task> tasks) {
 
     /**
      * Task configuration supporting agenth simple chat and advanced agent features.

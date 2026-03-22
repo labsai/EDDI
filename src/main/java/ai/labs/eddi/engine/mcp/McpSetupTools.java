@@ -17,7 +17,7 @@ import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
 import ai.labs.eddi.configs.patch.PatchInstruction;
-import ai.labs.eddi.configs.llm.IRestLangChainStore;
+import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
@@ -26,7 +26,7 @@ import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import io.quarkiverse.mcp.server.Tool;
@@ -140,12 +140,12 @@ public class McpSetupTools {
             patchDescriptor(behaviorId, behaviorVersion, name);
 
             // --- Step 3: Create LangChain Configuration ---
-            var langchainConfig = createLangchainConfig(
+            var llmConfig = createLlmConfig(
                     params.providerType, params.modelId, apiKey, systemPrompt,
                     toolsEnabled, builtInToolsWhitelist, baseUrl, promptResponseJson,
                     quickReplies, sentiment, mcpServers);
-            Response langchainResponse = getRestStore(IRestLangChainStore.class).createLangChain(langchainConfig);
-            String langchainLocation = langchainResponse.getHeaderString("Location");
+            Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
+            String langchainLocation = llmResponse.getHeaderString("Location");
             String langchainId = extractIdFromLocation(langchainLocation);
             int langchainVersion = extractVersionFromLocation(langchainLocation);
             createdResources.put("langchainLocation", langchainLocation);
@@ -256,13 +256,13 @@ public class McpSetupTools {
      * Uses provider-specific parameter key names (e.g., Ollama uses 'model' not
      * 'modelName').
      */
-    LangChainConfiguration createLangchainConfig(String modelType, String modelId,
+    LlmConfiguration createLlmConfig(String modelType, String modelId,
             String apiKey, String systemPrompt,
             boolean enableTooling, String toolsWhitelist,
             String baseUrl, String promptResponseJson,
             boolean quickReplies, boolean sentiment,
             String mcpServers) {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setActions(List.of("send_message"));
         task.setId(modelType);
         task.setType(modelType);
@@ -343,11 +343,11 @@ public class McpSetupTools {
 
         // MCP servers — external tool providers
         if (mcpServers != null && !mcpServers.isBlank()) {
-            var mcpConfigs = new ArrayList<LangChainConfiguration.McpServerConfig>();
+            var mcpConfigs = new ArrayList<LlmConfiguration.McpServerConfig>();
             for (String serverUrl : mcpServers.split(",")) {
                 String trimmed = serverUrl.trim();
                 if (!trimmed.isEmpty()) {
-                    var mcpConfig = new LangChainConfiguration.McpServerConfig();
+                    var mcpConfig = new LlmConfiguration.McpServerConfig();
                     mcpConfig.setUrl(trimmed);
                     mcpConfigs.add(mcpConfig);
                 }
@@ -362,7 +362,7 @@ public class McpSetupTools {
             task.setPostResponse(buildPostResponse(quickReplies, sentiment));
         }
 
-        return new LangChainConfiguration(List.of(task));
+        return new LlmConfiguration(List.of(task));
     }
 
     /**
@@ -462,7 +462,7 @@ public class McpSetupTools {
 
         // LangChain
         var langchain = new WorkflowConfiguration.WorkflowStep();
-        langchain.setType(URI.create("eddi://ai.labs.langchain"));
+        langchain.setType(URI.create("eddi://ai.labs.llm"));
         langchain.setConfig(Map.of("uri", langchainLocation));
         extensions.add(langchain);
 
@@ -571,11 +571,11 @@ public class McpSetupTools {
             boolean quickReplies = enableQuickReplies != null && enableQuickReplies;
             boolean sentiment = enableSentimentAnalysis != null && enableSentimentAnalysis;
             String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
-            var langchainConfig = createLangchainConfig(
+            var llmConfig = createLlmConfig(
                     params.providerType, params.modelId, apiKey, enrichedPrompt, false, null, null, promptResponseJson,
                     quickReplies, sentiment, null);
-            Response langchainResponse = getRestStore(IRestLangChainStore.class).createLangChain(langchainConfig);
-            String langchainLocation = langchainResponse.getHeaderString("Location");
+            Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
+            String langchainLocation = llmResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);
             patchDescriptor(extractIdFromLocation(langchainLocation),
                     extractVersionFromLocation(langchainLocation), name);

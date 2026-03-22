@@ -1,13 +1,13 @@
 package ai.labs.eddi.configs.llm.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
-import ai.labs.eddi.configs.llm.ILangChainStore;
-import ai.labs.eddi.configs.llm.IRestLangChainStore;
+import ai.labs.eddi.configs.llm.ILlmStore;
+import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -20,15 +20,15 @@ import java.util.List;
  * @author ginccc
  */
 @ApplicationScoped
-public class RestLangChainStore implements IRestLangChainStore {
-    private final ILangChainStore httpCallsStore;
+public class RestLlmStore implements IRestLlmStore {
+    private final ILlmStore httpCallsStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
-    private final RestVersionInfo<LangChainConfiguration> restVersionInfo;
+    private final RestVersionInfo<LlmConfiguration> restVersionInfo;
 
 
 
     @Inject
-    public RestLangChainStore(ILangChainStore httpCallsStore,
+    public RestLlmStore(ILlmStore httpCallsStore,
             IDocumentDescriptorStore documentDescriptorStore,
             IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, httpCallsStore, documentDescriptorStore);
@@ -39,42 +39,42 @@ public class RestLangChainStore implements IRestLangChainStore {
     @Override
     public Response readJsonSchema() {
         try {
-            return Response.ok(jsonSchemaCreator.generateSchema(LangChainConfiguration.class)).build();
+            return Response.ok(jsonSchemaCreator.generateSchema(LlmConfiguration.class)).build();
         } catch (Exception e) {
             throw sneakyThrow(e);
         }
     }
 
     @Override
-    public List<DocumentDescriptor> readLangChainDescriptors(String filter, Integer index, Integer limit) {
+    public List<DocumentDescriptor> readLlmDescriptors(String filter, Integer index, Integer limit) {
         return restVersionInfo.readDescriptors("ai.labs.langchain", filter, index, limit);
     }
 
     @Override
-    public LangChainConfiguration readLangChain(String id, Integer version) {
+    public LlmConfiguration readLlm(String id, Integer version) {
         return restVersionInfo.read(id, version);
     }
 
     @Override
-    public Response updateLangChain(String id, Integer version, LangChainConfiguration langChainConfiguration) {
-        return restVersionInfo.update(id, version, langChainConfiguration);
+    public Response updateLlm(String id, Integer version, LlmConfiguration llmConfiguration) {
+        return restVersionInfo.update(id, version, llmConfiguration);
     }
 
     @Override
-    public Response createLangChain(LangChainConfiguration langChainConfiguration) {
-        return restVersionInfo.create(langChainConfiguration);
+    public Response createLlm(LlmConfiguration llmConfiguration) {
+        return restVersionInfo.create(llmConfiguration);
     }
 
     @Override
-    public Response deleteLangChain(String id, Integer version, Boolean permanent) {
+    public Response deleteLlm(String id, Integer version, Boolean permanent) {
         return restVersionInfo.delete(id, version, permanent);
     }
 
     @Override
-    public Response duplicateLangChain(String id, Integer version) {
+    public Response duplicateLlm(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
-        LangChainConfiguration langChainConfiguration = restVersionInfo.read(id, version);
-        return restVersionInfo.create(langChainConfiguration);
+        LlmConfiguration llmConfiguration = restVersionInfo.read(id, version);
+        return restVersionInfo.create(llmConfiguration);
     }
 
     @Override

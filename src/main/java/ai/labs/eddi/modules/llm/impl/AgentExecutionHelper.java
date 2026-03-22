@@ -1,7 +1,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import org.jboss.logging.Logger;
@@ -21,12 +21,12 @@ class AgentExecutionHelper {
      */
     static <T> T executeWithRetry(
             Callable<T> action,
-            LangChainConfiguration.Task task,
+            LlmConfiguration.Task task,
             String actionDescription) throws LifecycleException {
 
-        LangChainConfiguration.RetryConfiguration retryConfig = task.getRetry();
+        LlmConfiguration.RetryConfiguration retryConfig = task.getRetry();
         if (retryConfig == null) {
-            retryConfig = new LangChainConfiguration.RetryConfiguration();
+            retryConfig = new LlmConfiguration.RetryConfiguration();
         }
 
         int maxAttempts = retryConfig.getMaxAttempts() != null ? retryConfig.getMaxAttempts() : 3;
@@ -85,7 +85,7 @@ class AgentExecutionHelper {
     static ChatResponse executeChatWithRetry(
             ChatModel chatModel,
             java.util.List<dev.langchain4j.data.message.ChatMessage> messages,
-            LangChainConfiguration.Task task) throws LifecycleException {
+            LlmConfiguration.Task task) throws LifecycleException {
 
         return executeWithRetry(
                 () -> chatModel.chat(messages),

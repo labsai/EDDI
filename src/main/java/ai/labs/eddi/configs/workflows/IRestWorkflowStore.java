@@ -90,7 +90,7 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
         @Path("/{id}")
         @Operation(summary = "Delete package", description = "Delete a workflow configuration. When cascade=true, also deletes extension "
                         + "resources referenced by this package: behavior sets, HTTP calls, output sets, "
-                        + "langchains, property setters, and parser dictionaries. "
+                        + "LLM configs, property setters, and parser dictionaries. "
                         + "Shared resources (used by other packages) are skipped. "
                         + "Partial failures are logged but do not prevent the workflow from being deleted.")
         @APIResponse(responseCode = "200", description = "Workflow deleted successfully.")

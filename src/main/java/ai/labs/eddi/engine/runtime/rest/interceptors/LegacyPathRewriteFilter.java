@@ -46,7 +46,8 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
             Map.entry("/langchainstore/langchains", "/llmstore/llmconfigs"),
             Map.entry("/httpcallsstore/httpcalls", "/apicallstore/apicalls"),
             Map.entry("/WorkflowStore/packages", "/workflowstore/workflows"),
-            Map.entry("/AgentStore/agents", "/agentstore/agents"));
+            Map.entry("/AgentStore/agents", "/agentstore/agents"),
+            Map.entry("/langchain/tools", "/llm/tools"));
 
     @Override
     public void filter(ContainerRequestContext requestContext) {

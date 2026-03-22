@@ -2,7 +2,7 @@ package ai.labs.eddi.engine.runtime.client.configuration;
 
 import ai.labs.eddi.configs.rules.IRestBehaviorStore;
 import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
-import ai.labs.eddi.configs.llm.IRestLangChainStore;
+import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
@@ -30,7 +30,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
     private final IRestRegularDictionaryStore restRegularDictionaryStore;
     private final IRestBehaviorStore restBehaviorStore;
     private final IRestHttpCallsStore restHttpCallsStore;
-    private final IRestLangChainStore restLangChainStore;
+    private final IRestLlmStore restLlmStore;
     private final IRestOutputStore restOutputStore;
     private final IRestPropertySetterStore restPropertySetterStore;
     private Map<String, IResourceService> restInterfaces;
@@ -42,14 +42,14 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
                                  IRestRegularDictionaryStore restRegularDictionaryStore,
                                  IRestBehaviorStore restBehaviorStore,
                                  IRestHttpCallsStore restHttpCallsStore,
-                                 IRestLangChainStore restLangChainStore,
+                                 IRestLlmStore restLlmStore,
                                  IRestOutputStore restOutputStore,
                                  IRestPropertySetterStore restPropertySetterStore) {
         this.restParserStore = restParserStore;
         this.restRegularDictionaryStore = restRegularDictionaryStore;
         this.restBehaviorStore = restBehaviorStore;
         this.restHttpCallsStore = restHttpCallsStore;
-        this.restLangChainStore = restLangChainStore;
+        this.restLlmStore = restLlmStore;
         this.restOutputStore = restOutputStore;
         this.restPropertySetterStore = restPropertySetterStore;
 
@@ -130,17 +130,17 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         restInterfaces.put("ai.labs.langchain", new IResourceService() {
             @Override
             public Object read(String id, Integer version) {
-                return restLangChainStore.readLangChain(id, version);
+                return restLlmStore.readLlm(id, version);
             }
 
             @Override
             public Response duplicate(String id, Integer version) {
-                return restLangChainStore.duplicateLangChain(id, version);
+                return restLlmStore.duplicateLlm(id, version);
             }
 
             @Override
             public Response delete(String id, Integer version, boolean permanent) {
-                return restLangChainStore.deleteLangChain(id, version, permanent);
+                return restLlmStore.deleteLlm(id, version, permanent);
             }
         });
 

@@ -25,7 +25,7 @@ import java.util.Map;
  * REST API for tool execution history, metrics, and management.
  * Phase 4: Exposes tool call history and metrics to clients.
  */
-@Path("/langchain/tools")
+@Path("/llm/tools")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class RestToolHistory {

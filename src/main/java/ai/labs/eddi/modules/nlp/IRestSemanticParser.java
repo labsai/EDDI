@@ -15,7 +15,7 @@ import jakarta.ws.rs.core.MediaType;
  */
 
 @Path("/parser")
-@Tag(name = "12. Standalone NLP", description = "lifecycle extension for package")
+@Tag(name = "12. Standalone NLP", description = "lifecycle extension for LLM configurations")
 public interface IRestSemanticParser {
 
     @Parameter(name = "parserId", example = "507f1f77bcf86cd799439011", required = true)

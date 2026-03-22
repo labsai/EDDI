@@ -90,13 +90,13 @@ public class EddiChatMemoryStore implements ChatMemoryStore {
      * This method is called by langchain4j after agent execution, but EDDI persists
      * messages through the normal lifecycle flow, not through this method.
      *
-     * We implement this as a no-op because EDDI's LangchainTask will handle
+     * We implement this as a no-op because EDDI's LlmTask will handle
      * storing the final agent response in the conversation memory.
      */
     @Override
     public void updateMessages(Object memoryId, List<ChatMessage> messages) {
         // No-op: EDDI manages memory persistence through the lifecycle
-        // The LangchainTask will store the agent's response in IConversationMemory
+        // The LlmTask will store the agent's response in IConversationMemory
         LOGGER.trace("updateMessages called for conversation " + memoryId +
                      " (handled by EDDI lifecycle, not persisted here)");
     }

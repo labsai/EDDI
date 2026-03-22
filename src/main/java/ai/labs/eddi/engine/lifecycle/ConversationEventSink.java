@@ -11,7 +11,7 @@ import java.util.Map;
  * {@link #onTaskStart}/{@link #onTaskComplete}
  * emitted by {@code LifecycleManager} around each task execution</li>
  * <li><strong>LLM token events</strong> — {@link #onToken} emitted by
- * {@code LangchainTask} during streaming chat completion</li>
+ * {@code LlmTask} during streaming chat completion</li>
  * </ul>
  * <p>
  * When no streaming is requested (standard {@code say} endpoint), no sink is

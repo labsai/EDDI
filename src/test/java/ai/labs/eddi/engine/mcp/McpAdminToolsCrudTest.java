@@ -9,7 +9,7 @@ import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
 import ai.labs.eddi.configs.apicalls.model.HttpCallsConfiguration;
-import ai.labs.eddi.configs.llm.IRestLangChainStore;
+import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -24,7 +24,7 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -58,7 +58,7 @@ class McpAdminToolsCrudTest {
     private IRestWorkflowStore WorkflowStore;
     private IRestDocumentDescriptorStore descriptorStore;
     private IRestBehaviorStore behaviorStore;
-    private IRestLangChainStore langChainStore;
+    private IRestLlmStore llmStore;
     private IRestHttpCallsStore httpCallsStore;
     private IRestOutputStore outputStore;
     private IRestPropertySetterStore propertySetterStore;
@@ -77,7 +77,7 @@ class McpAdminToolsCrudTest {
         WorkflowStore = mock(IRestWorkflowStore.class);
         descriptorStore = mock(IRestDocumentDescriptorStore.class);
         behaviorStore = mock(IRestBehaviorStore.class);
-        langChainStore = mock(IRestLangChainStore.class);
+        llmStore = mock(IRestLlmStore.class);
         httpCallsStore = mock(IRestHttpCallsStore.class);
         outputStore = mock(IRestOutputStore.class);
         propertySetterStore = mock(IRestPropertySetterStore.class);
@@ -90,7 +90,7 @@ class McpAdminToolsCrudTest {
         when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(WorkflowStore);
         when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
         when(restInterfaceFactory.get(IRestBehaviorStore.class)).thenReturn(behaviorStore);
-        when(restInterfaceFactory.get(IRestLangChainStore.class)).thenReturn(langChainStore);
+        when(restInterfaceFactory.get(IRestLlmStore.class)).thenReturn(llmStore);
         when(restInterfaceFactory.get(IRestHttpCallsStore.class)).thenReturn(httpCallsStore);
         when(restInterfaceFactory.get(IRestOutputStore.class)).thenReturn(outputStore);
         when(restInterfaceFactory.get(IRestPropertySetterStore.class)).thenReturn(propertySetterStore);
@@ -109,18 +109,18 @@ class McpAdminToolsCrudTest {
 
     @Test
     void updateResource_langchain_success() throws IOException {
-        var config = new LangChainConfiguration(List.of());
-        when(jsonSerialization.deserialize("{\"tasks\":[]}", LangChainConfiguration.class)).thenReturn(config);
-        when(langChainStore.updateLangChain(RESOURCE_ID, 1, config))
+        var config = new LlmConfiguration(List.of());
+        when(jsonSerialization.deserialize("{\"tasks\":[]}", LlmConfiguration.class)).thenReturn(config);
+        when(llmStore.updateLlm(RESOURCE_ID, 1, config))
                 .thenReturn(Response.ok().header("Location",
-                        "/langchainstore/langchains/" + RESOURCE_ID + "?version=2").build());
+                        "/llmstore/llmconfigs/" + RESOURCE_ID + "?version=2").build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"updated\",\"newVersion\":2}");
 
         String result = tools.updateResource("langchain", RESOURCE_ID, 1, "{\"tasks\":[]}");
 
         assertNotNull(result);
         assertTrue(result.contains("updated"));
-        verify(langChainStore).updateLangChain(RESOURCE_ID, 1, config);
+        verify(llmStore).updateLlm(RESOURCE_ID, 1, config);
     }
 
     @Test
@@ -268,9 +268,9 @@ class McpAdminToolsCrudTest {
 
         // Set up package with one extension containing the old URI
         var ext = new WorkflowConfiguration.WorkflowStep();
-        ext.setType(URI.create("eddi://ai.labs.langchain"));
+        ext.setType(URI.create("eddi://ai.labs.llm"));
         var configMap = new HashMap<String, Object>();
-        configMap.put("uri", "eddi://ai.labs.langchain/langchainstore/langchains/lc1?version=1");
+        configMap.put("uri", "eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=1");
         ext.setConfig(configMap);
         var pkgConfig = new WorkflowConfiguration();
         pkgConfig.setWorkflowSteps(new ArrayList<>(List.of(ext)));
@@ -285,11 +285,11 @@ class McpAdminToolsCrudTest {
                         "/AgentStore/agents/" + AGENT_ID + "?version=2").build());
 
         // Parse mappings JSON
-        String mappingsJson = "[{\"oldUri\":\"eddi://ai.labs.langchain/langchainstore/langchains/lc1?version=1\"," +
-                "\"newUri\":\"eddi://ai.labs.langchain/langchainstore/langchains/lc1?version=2\"}]";
+        String mappingsJson = "[{\"oldUri\":\"eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=1\"," +
+                "\"newUri\":\"eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=2\"}]";
         List<Map<String, String>> mappings = List.of(Map.of(
-                "oldUri", "eddi://ai.labs.langchain/langchainstore/langchains/lc1?version=1",
-                "newUri", "eddi://ai.labs.langchain/langchainstore/langchains/lc1?version=2"));
+                "oldUri", "eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=1",
+                "newUri", "eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=2"));
         when(jsonSerialization.deserialize(mappingsJson, List.class)).thenReturn(mappings);
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"updatedWorkflows\":1}");
 
@@ -309,9 +309,9 @@ class McpAdminToolsCrudTest {
         when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
         var ext = new WorkflowConfiguration.WorkflowStep();
-        ext.setType(URI.create("eddi://ai.labs.langchain"));
+        ext.setType(URI.create("eddi://ai.labs.llm"));
         var configMap = new HashMap<String, Object>();
-        configMap.put("uri", "eddi://ai.labs.langchain/langchainstore/langchains/lc1?version=1");
+        configMap.put("uri", "eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=1");
         ext.setConfig(configMap);
         var pkgConfig = new WorkflowConfiguration();
         pkgConfig.setWorkflowSteps(new ArrayList<>(List.of(ext)));
@@ -418,8 +418,8 @@ class McpAdminToolsCrudTest {
 
         // Workflow with 2 extensions
         var ext1 = new WorkflowConfiguration.WorkflowStep();
-        ext1.setType(URI.create("eddi://ai.labs.langchain"));
-        ext1.setConfig(Map.of("uri", "eddi://ai.labs.langchain/langchainstore/langchains/lc1?version=1"));
+        ext1.setType(URI.create("eddi://ai.labs.llm"));
+        ext1.setConfig(Map.of("uri", "eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=1"));
         var ext2 = new WorkflowConfiguration.WorkflowStep();
         ext2.setType(URI.create("eddi://ai.labs.behavior"));
         ext2.setConfig(Map.of("uri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/b1?version=1"));

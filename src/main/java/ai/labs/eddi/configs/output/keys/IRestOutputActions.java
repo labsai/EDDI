@@ -11,7 +11,7 @@ import java.util.List;
  */
 // @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3) Output", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/outputstore/actions")
-@Tag(name = "05. Output", description = "lifecycle extension for package")
+@Tag(name = "05. Output", description = "lifecycle extension for LLM configurations")
 public interface IRestOutputActions {
     @GET
     @Produces(MediaType.APPLICATION_JSON)

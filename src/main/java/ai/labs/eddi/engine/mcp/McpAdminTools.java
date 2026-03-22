@@ -9,7 +9,7 @@ import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
 import ai.labs.eddi.configs.apicalls.model.HttpCallsConfiguration;
-import ai.labs.eddi.configs.llm.IRestLangChainStore;
+import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -29,7 +29,7 @@ import ai.labs.eddi.engine.runtime.internal.CronDescriber;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
@@ -403,7 +403,7 @@ public class McpAdminTools {
     private Object readResourceByType(String type, String id, int version) {
         return switch (type) {
             case "behavior" -> getRestStore(IRestBehaviorStore.class).readBehaviorRuleSet(id, version);
-            case "langchain" -> getRestStore(IRestLangChainStore.class).readLangChain(id, version);
+            case "langchain" -> getRestStore(IRestLlmStore.class).readLlm(id, version);
             case "httpcalls" -> getRestStore(IRestHttpCallsStore.class).readHttpCalls(id, version);
             case "output" -> getRestStore(IRestOutputStore.class).readOutputSet(id, version, "", "", 0, 0);
             case "propertysetter" -> getRestStore(IRestPropertySetterStore.class).readPropertySetter(id, version);
@@ -747,9 +747,9 @@ public class McpAdminTools {
             case "behavior" -> getRestStore(IRestBehaviorStore.class)
                     .updateBehaviorRuleSet(id, version,
                             jsonSerialization.deserialize(configJson, BehaviorConfiguration.class));
-            case "langchain" -> getRestStore(IRestLangChainStore.class)
-                    .updateLangChain(id, version,
-                            jsonSerialization.deserialize(configJson, LangChainConfiguration.class));
+            case "langchain" -> getRestStore(IRestLlmStore.class)
+                    .updateLlm(id, version,
+                            jsonSerialization.deserialize(configJson, LlmConfiguration.class));
             case "httpcalls" -> getRestStore(IRestHttpCallsStore.class)
                     .updateHttpCalls(id, version,
                             jsonSerialization.deserialize(configJson, HttpCallsConfiguration.class));
@@ -774,8 +774,8 @@ public class McpAdminTools {
         return switch (type) {
             case "behavior" -> getRestStore(IRestBehaviorStore.class)
                     .createBehaviorRuleSet(jsonSerialization.deserialize(configJson, BehaviorConfiguration.class));
-            case "langchain" -> getRestStore(IRestLangChainStore.class)
-                    .createLangChain(jsonSerialization.deserialize(configJson, LangChainConfiguration.class));
+            case "langchain" -> getRestStore(IRestLlmStore.class)
+                    .createLlm(jsonSerialization.deserialize(configJson, LlmConfiguration.class));
             case "httpcalls" -> getRestStore(IRestHttpCallsStore.class)
                     .createHttpCalls(jsonSerialization.deserialize(configJson, HttpCallsConfiguration.class));
             case "output" -> getRestStore(IRestOutputStore.class)
@@ -796,7 +796,7 @@ public class McpAdminTools {
     private Response deleteResourceByType(String type, String id, int version, boolean permanent) {
         return switch (type) {
             case "behavior" -> getRestStore(IRestBehaviorStore.class).deleteBehaviorRuleSet(id, version, permanent);
-            case "langchain" -> getRestStore(IRestLangChainStore.class).deleteLangChain(id, version, permanent);
+            case "langchain" -> getRestStore(IRestLlmStore.class).deleteLlm(id, version, permanent);
             case "httpcalls" -> getRestStore(IRestHttpCallsStore.class).deleteHttpCalls(id, version, permanent);
             case "output" -> getRestStore(IRestOutputStore.class).deleteOutputSet(id, version, permanent);
             case "propertysetter" ->

@@ -13,7 +13,7 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.EddiToolBridge;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
@@ -58,7 +58,7 @@ class LlmTaskTest {
         @Mock
         private ITemplatingEngine templatingEngine;
 
-        private LangchainTask langChainTask;
+        private LlmTask langChainTask;
 
         private static final String TEST_MESSAGE_FROM_LLM = "Message from LLM";
 
@@ -92,7 +92,7 @@ class LlmTaskTest {
                 var secretResolver = mock(SecretResolver.class);
                 when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
 
-                langChainTask = new LangchainTask(
+                langChainTask = new LlmTask(
                                 resourceClientLibrary,
                                 dataFactory,
                                 memoryItemConverter,
@@ -159,14 +159,14 @@ class LlmTaskTest {
                 when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
                 when(actionData.getResult()).thenReturn(List.of("action1"));
 
-                var task = new LangChainConfiguration.Task();
+                var task = new LlmConfiguration.Task();
                 task.setActions(List.of("action1"));
                 task.setId("taskId");
                 task.setType("openai");
                 task.setDescription("description");
                 task.setParameters(parameters);
 
-                var langChainConfig = new LangChainConfiguration(List.of(task));
+                var llmConfig = new LlmConfiguration(List.of(task));
 
                 IData outputData = mock(IData.class);
                 when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
@@ -187,7 +187,7 @@ class LlmTaskTest {
                 when(templatingEngine.processTemplate(eq(convertToObject), anyMap())).thenReturn(convertToObject);
 
                 // Test
-                langChainTask.execute(memory, langChainConfig);
+                langChainTask.execute(memory, llmConfig);
 
                 // Assert
                 // Verify that the templating engine was called
@@ -198,7 +198,7 @@ class LlmTaskTest {
 
                 // Verify that the conversation output string was updated
                 verify(currentStep, times(timesAddOutputList))
-                                .addConversationOutputList(eq(LangchainTask.MEMORY_OUTPUT_IDENTIFIER),
+                                .addConversationOutputList(eq(LlmTask.MEMORY_OUTPUT_IDENTIFIER),
                                                 eq(expectedOutput));
         }
 
@@ -218,7 +218,7 @@ class LlmTaskTest {
                 when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
                 when(actionData.getResult()).thenReturn(List.of("agent_action"));
 
-                var task = new LangChainConfiguration.Task();
+                var task = new LlmConfiguration.Task();
                 task.setActions(List.of("agent_action"));
                 task.setId("agentTask");
                 task.setType("openai");
@@ -227,7 +227,7 @@ class LlmTaskTest {
                 task.setBuiltInToolsWhitelist(List.of("calculator"));
                 task.setParameters(Map.of("systemMessage", "Agent System Message"));
 
-                var langChainConfig = new LangChainConfiguration(List.of(task));
+                var llmConfig = new LlmConfiguration(List.of(task));
 
                 IData outputData = mock(IData.class);
                 when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
@@ -247,7 +247,7 @@ class LlmTaskTest {
                 // (wrapping NPE)
                 // depending on whether the CDI class initializer has already been attempted.
                 assertThrows(Throwable.class, () -> {
-                        langChainTask.execute(memory, langChainConfig);
+                        langChainTask.execute(memory, llmConfig);
                 }, "Expected exception due to missing Quarkus CDI context when using Agent Mode");
 
                 // Verify that templating was called for system message (happens before the NPE)
@@ -261,16 +261,16 @@ class LlmTaskTest {
                 Map<String, Object> configuration = new HashMap<>();
                 configuration.put("uri", uriValue);
 
-                var task = new LangChainConfiguration.Task();
+                var task = new LlmConfiguration.Task();
                 task.setActions(List.of("action1", "action2"));
                 task.setId("taskId");
                 task.setType("taskType");
                 task.setDescription("A task description");
                 task.setParameters(Map.of("key", "value"));
 
-                LangChainConfiguration expectedConfig = new LangChainConfiguration(List.of(task));
+                LlmConfiguration expectedConfig = new LlmConfiguration(List.of(task));
 
-                when(resourceClientLibrary.getResource(any(URI.class), eq(LangChainConfiguration.class)))
+                when(resourceClientLibrary.getResource(any(URI.class), eq(LlmConfiguration.class)))
                                 .thenReturn(expectedConfig);
 
                 // Test
@@ -278,9 +278,9 @@ class LlmTaskTest {
 
                 // Assert
                 assertNotNull(result, "Configuration result should not be null.");
-                assertInstanceOf(LangChainConfiguration.class, result,
-                                "Result should be an instance of LangChainConfiguration.");
-                LangChainConfiguration configResult = (LangChainConfiguration) result;
+                assertInstanceOf(LlmConfiguration.class, result,
+                                "Result should be an instance of LlmConfiguration.");
+                LlmConfiguration configResult = (LlmConfiguration) result;
                 assertEquals(expectedConfig.tasks().size(), configResult.tasks().size(), "Task sizes should match.");
                 assertEquals(expectedConfig.tasks().getFirst().getId(), configResult.tasks().getFirst().getId(),
                                 "Task IDs should match.");
@@ -293,7 +293,7 @@ class LlmTaskTest {
                 assertNotNull(descriptor, "The returned ExtensionDescriptor should not be null.");
 
                 // Assuming ID and Display Name are known and static for the LangChainTask
-                assertEquals(LangchainTask.ID, descriptor.getType(), "The ID should match the expected value.");
+                assertEquals(LlmTask.ID, descriptor.getType(), "The ID should match the expected value.");
                 assertEquals("Lang Chain", descriptor.getDisplayName(), "The display name should match 'Lang Chain'.");
 
                 assertFalse(descriptor.getConfigs().isEmpty(), "Expected configs to be defined.");
@@ -329,7 +329,7 @@ class LlmTaskTest {
                         when(actionData.getResult()).thenReturn(List.of("chat"));
 
                         // Legacy configuration - no tools, no agent mode flags
-                        var task = new LangChainConfiguration.Task();
+                        var task = new LlmConfiguration.Task();
                         task.setActions(List.of("chat"));
                         task.setId("legacyChat");
                         task.setType("openai");
@@ -339,18 +339,18 @@ class LlmTaskTest {
                                         "addToOutput", "true"));
                         // Note: enableBuiltInTools defaults to false, tools is null
 
-                        var langChainConfig = new LangChainConfiguration(List.of(task));
+                        var llmConfig = new LlmConfiguration(List.of(task));
 
                         IData outputData = mock(IData.class);
                         when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
                         when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
 
                         // Execute
-                        langChainTask.execute(memory, langChainConfig);
+                        langChainTask.execute(memory, llmConfig);
 
                         // Assert - should execute in legacy mode and store output
                         verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-                        verify(currentStep).addConversationOutputList(eq(LangchainTask.MEMORY_OUTPUT_IDENTIFIER),
+                        verify(currentStep).addConversationOutputList(eq(LlmTask.MEMORY_OUTPUT_IDENTIFIER),
                                         anyList());
                 }
 
@@ -371,7 +371,7 @@ class LlmTaskTest {
                         when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
                         when(actionData.getResult()).thenReturn(List.of("chat"));
 
-                        var task = new LangChainConfiguration.Task();
+                        var task = new LlmConfiguration.Task();
                         task.setActions(List.of("chat"));
                         task.setId("noToolsChat");
                         task.setType("openai");
@@ -380,14 +380,14 @@ class LlmTaskTest {
                                         "systemMessage", "You are helpful",
                                         "apiKey", "test-key"));
 
-                        var langChainConfig = new LangChainConfiguration(List.of(task));
+                        var llmConfig = new LlmConfiguration(List.of(task));
 
                         IData outputData = mock(IData.class);
                         when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
                         when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
 
                         // Execute - should NOT throw NPE because we're in legacy mode
-                        assertDoesNotThrow(() -> langChainTask.execute(memory, langChainConfig));
+                        assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
                 }
         }
 
@@ -413,19 +413,19 @@ class LlmTaskTest {
                         when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
                         when(actionData.getResult()).thenReturn(List.of("specific_action"));
 
-                        var task = new LangChainConfiguration.Task();
+                        var task = new LlmConfiguration.Task();
                         task.setActions(List.of("specific_action"));
                         task.setId("test");
                         task.setType("openai");
                         task.setParameters(Map.of("apiKey", "key"));
 
-                        var langChainConfig = new LangChainConfiguration(List.of(task));
+                        var llmConfig = new LlmConfiguration(List.of(task));
 
                         IData outputData = mock(IData.class);
                         when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
                         when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
 
-                        langChainTask.execute(memory, langChainConfig);
+                        langChainTask.execute(memory, llmConfig);
 
                         verify(currentStep, atLeastOnce()).storeData(any(IData.class));
                 }
@@ -448,19 +448,19 @@ class LlmTaskTest {
                         when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
                         when(actionData.getResult()).thenReturn(List.of("any_random_action"));
 
-                        var task = new LangChainConfiguration.Task();
+                        var task = new LlmConfiguration.Task();
                         task.setActions(List.of("*")); // Wildcard - matches all
                         task.setId("test");
                         task.setType("openai");
                         task.setParameters(Map.of("apiKey", "key"));
 
-                        var langChainConfig = new LangChainConfiguration(List.of(task));
+                        var llmConfig = new LlmConfiguration(List.of(task));
 
                         IData outputData = mock(IData.class);
                         when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
                         when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
 
-                        langChainTask.execute(memory, langChainConfig);
+                        langChainTask.execute(memory, llmConfig);
 
                         verify(currentStep, atLeastOnce()).storeData(any(IData.class));
                 }
@@ -479,15 +479,15 @@ class LlmTaskTest {
                         when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
                         when(actionData.getResult()).thenReturn(List.of("different_action"));
 
-                        var task = new LangChainConfiguration.Task();
+                        var task = new LlmConfiguration.Task();
                         task.setActions(List.of("specific_action")); // Does not match
                         task.setId("test");
                         task.setType("openai");
                         task.setParameters(Map.of("apiKey", "key"));
 
-                        var langChainConfig = new LangChainConfiguration(List.of(task));
+                        var llmConfig = new LlmConfiguration(List.of(task));
 
-                        langChainTask.execute(memory, langChainConfig);
+                        langChainTask.execute(memory, llmConfig);
 
                         // Should never store data because action didn't match
                         verify(currentStep, never()).storeData(any(IData.class));
@@ -507,15 +507,15 @@ class LlmTaskTest {
                         when(memory.getCurrentStep()).thenReturn(currentStep);
                         when(currentStep.getLatestData("actions")).thenReturn(null);
 
-                        var task = new LangChainConfiguration.Task();
+                        var task = new LlmConfiguration.Task();
                         task.setActions(List.of("action"));
                         task.setType("openai");
                         task.setParameters(Map.of("apiKey", "key"));
 
-                        var langChainConfig = new LangChainConfiguration(List.of(task));
+                        var llmConfig = new LlmConfiguration(List.of(task));
 
                         // Should not throw, should return early
-                        assertDoesNotThrow(() -> langChainTask.execute(memory, langChainConfig));
+                        assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
                         verify(currentStep, never()).storeData(any(IData.class));
                 }
 
@@ -531,15 +531,15 @@ class LlmTaskTest {
                         when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
                         when(actionData.getResult()).thenReturn(null);
 
-                        var task = new LangChainConfiguration.Task();
+                        var task = new LlmConfiguration.Task();
                         task.setActions(List.of("action"));
                         task.setType("openai");
                         task.setParameters(Map.of("apiKey", "key"));
 
-                        var langChainConfig = new LangChainConfiguration(List.of(task));
+                        var llmConfig = new LlmConfiguration(List.of(task));
 
                         // Should not throw, should return early
-                        assertDoesNotThrow(() -> langChainTask.execute(memory, langChainConfig));
+                        assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
                         verify(currentStep, never()).storeData(any(IData.class));
                 }
 
@@ -562,17 +562,17 @@ class LlmTaskTest {
                         when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
                         when(actionData.getResult()).thenReturn(List.of("action"));
 
-                        var task = new LangChainConfiguration.Task();
+                        var task = new LlmConfiguration.Task();
                         task.setActions(List.of("action"));
                         task.setId("test");
                         task.setType("unsupported_model"); // Not registered
                         task.setParameters(Map.of("apiKey", "key"));
 
-                        var langChainConfig = new LangChainConfiguration(List.of(task));
+                        var llmConfig = new LlmConfiguration(List.of(task));
 
                         when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
 
-                        assertThrows(LifecycleException.class, () -> langChainTask.execute(memory, langChainConfig));
+                        assertThrows(LifecycleException.class, () -> langChainTask.execute(memory, llmConfig));
                 }
 
                 @Test
@@ -591,7 +591,7 @@ class LlmTaskTest {
                         Map<String, Object> configuration = new HashMap<>();
                         configuration.put("uri", "http://example.com/config");
 
-                        when(resourceClientLibrary.getResource(any(URI.class), eq(LangChainConfiguration.class)))
+                        when(resourceClientLibrary.getResource(any(URI.class), eq(LlmConfiguration.class)))
                                         .thenThrow(new ServiceException("Connection failed"));
 
                         assertThrows(WorkflowConfigurationException.class,
@@ -638,7 +638,7 @@ class LlmTaskTest {
                         when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
                         when(actionData.getResult()).thenReturn(List.of("action1"));
 
-                        var task = new LangChainConfiguration.Task();
+                        var task = new LlmConfiguration.Task();
                         task.setActions(List.of("action1"));
                         task.setId("taskId");
                         task.setType("openai");
@@ -648,7 +648,7 @@ class LlmTaskTest {
                                         "apiKey", "<key>",
                                         "logSizeLimit", "10"));
 
-                        var langChainConfig = new LangChainConfiguration(List.of(task));
+                        var llmConfig = new LlmConfiguration(List.of(task));
 
                         IData outputData = mock(IData.class);
                         when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
@@ -656,7 +656,7 @@ class LlmTaskTest {
                                         .thenAnswer(i -> i.getArgument(0));
 
                         // Test
-                        langChainTask.execute(memory, langChainConfig);
+                        langChainTask.execute(memory, llmConfig);
 
                         // Assert: task executed, response stored in memory
                         verify(currentStep, atLeastOnce()).storeData(any(IData.class));
@@ -682,7 +682,7 @@ class LlmTaskTest {
                         when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
                         when(actionData.getResult()).thenReturn(List.of("action1"));
 
-                        var task = new LangChainConfiguration.Task();
+                        var task = new LlmConfiguration.Task();
                         task.setActions(List.of("action1"));
                         task.setId("taskId");
                         task.setType("openai");
@@ -692,7 +692,7 @@ class LlmTaskTest {
                                         "apiKey", "<key>",
                                         "logSizeLimit", "10"));
 
-                        var langChainConfig = new LangChainConfiguration(List.of(task));
+                        var llmConfig = new LlmConfiguration(List.of(task));
 
                         IData outputData = mock(IData.class);
                         when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
@@ -701,7 +701,7 @@ class LlmTaskTest {
 
                         // Test — the openai mock builder doesn't support buildStreaming,
                         // so it falls back to sync + emits as single chunk
-                        langChainTask.execute(memory, langChainConfig);
+                        langChainTask.execute(memory, llmConfig);
 
                         // Assert: event sink received the response as a single token
                         verify(eventSink, atLeastOnce()).onToken(anyString());
@@ -731,7 +731,7 @@ class LlmTaskTest {
                         when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
                         when(actionData.getResult()).thenReturn(List.of("action1"));
 
-                        var task = new LangChainConfiguration.Task();
+                        var task = new LlmConfiguration.Task();
                         task.setActions(List.of("action1"));
                         task.setId("taskId");
                         task.setType("openai");
@@ -739,14 +739,14 @@ class LlmTaskTest {
                                         "systemMessage", "be helpful",
                                         "apiKey", "<key>"));
 
-                        var langChainConfig = new LangChainConfiguration(List.of(task));
+                        var llmConfig = new LlmConfiguration(List.of(task));
 
                         IData outputData = mock(IData.class);
                         when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
                         when(templatingEngine.processTemplate(anyString(), anyMap()))
                                         .thenAnswer(i -> i.getArgument(0));
 
-                        langChainTask.execute(memory, langChainConfig);
+                        langChainTask.execute(memory, llmConfig);
 
                         // Verify audit keys are written: langchain data (1) + compiled_prompt + model_response + model_name (3) = 4
                         verify(currentStep, times(4)).storeData(any(IData.class));
@@ -776,7 +776,7 @@ class LlmTaskTest {
                         when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
                         when(actionData.getResult()).thenReturn(List.of("action1"));
 
-                        var task = new LangChainConfiguration.Task();
+                        var task = new LlmConfiguration.Task();
                         task.setActions(List.of("action1"));
                         task.setId("taskId");
                         task.setType("openai");
@@ -784,14 +784,14 @@ class LlmTaskTest {
                                         "systemMessage", "be helpful",
                                         "apiKey", "<key>"));
 
-                        var langChainConfig = new LangChainConfiguration(List.of(task));
+                        var llmConfig = new LlmConfiguration(List.of(task));
 
                         IData outputData = mock(IData.class);
                         when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
                         when(templatingEngine.processTemplate(anyString(), anyMap()))
                                         .thenAnswer(i -> i.getArgument(0));
 
-                        langChainTask.execute(memory, langChainConfig);
+                        langChainTask.execute(memory, llmConfig);
 
                         // Only langchain data stored, no audit keys
                         verify(currentStep, times(1)).storeData(any(IData.class));

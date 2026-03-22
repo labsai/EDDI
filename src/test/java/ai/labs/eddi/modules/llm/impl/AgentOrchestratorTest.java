@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.EddiToolBridge;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
@@ -52,7 +52,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("collectEnabledTools should return empty list when tools disabled")
     void testCollectEnabledTools_Disabled() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(false);
 
         List<Object> tools = orchestrator.collectEnabledTools(task);
@@ -63,7 +63,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("collectEnabledTools should return empty list when enableBuiltInTools is null")
     void testCollectEnabledTools_NullEnableBuiltInTools() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(null);
 
         List<Object> tools = orchestrator.collectEnabledTools(task);
@@ -74,7 +74,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("collectEnabledTools should return all tools when enabled without whitelist")
     void testCollectEnabledTools_AllToolsEnabled() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
         task.setBuiltInToolsWhitelist(null);
 
@@ -94,7 +94,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("collectEnabledTools should return all tools when whitelist is empty")
     void testCollectEnabledTools_EmptyWhitelist() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
         task.setBuiltInToolsWhitelist(List.of());
 
@@ -106,7 +106,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("collectEnabledTools should filter by whitelist")
     void testCollectEnabledTools_WithWhitelist() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
         task.setBuiltInToolsWhitelist(List.of("calculator", "datetime"));
 
@@ -122,7 +122,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("collectEnabledTools should handle single tool in whitelist")
     void testCollectEnabledTools_SingleToolWhitelist() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
         task.setBuiltInToolsWhitelist(List.of("weather"));
 
@@ -135,7 +135,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("collectEnabledTools should handle all tools in whitelist")
     void testCollectEnabledTools_AllToolsInWhitelist() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
         task.setBuiltInToolsWhitelist(List.of(
                 "calculator", "datetime", "websearch", "dataformatter",
@@ -149,7 +149,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("collectEnabledTools should ignore unknown tools in whitelist")
     void testCollectEnabledTools_UnknownToolInWhitelist() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
         task.setBuiltInToolsWhitelist(List.of("calculator", "unknown_tool", "weather"));
 
@@ -165,7 +165,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("isAgentMode should return false when no tools configured")
     void testIsAgentMode_False() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(false);
         task.setTools(null);
 
@@ -175,7 +175,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("isAgentMode should return true when builtin tools enabled")
     void testIsAgentMode_TrueWithBuiltInTools() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
 
         assertTrue(task.isAgentMode());
@@ -184,7 +184,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("isAgentMode should return true when custom tools configured")
     void testIsAgentMode_TrueWithCustomTools() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(false);
         task.setTools(List.of("eddi://ai.labs.httpcalls/weather?version=1"));
 
@@ -194,7 +194,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("isAgentMode should return false when tools list is empty")
     void testIsAgentMode_FalseWithEmptyToolsList() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(false);
         task.setTools(List.of());
 
@@ -204,10 +204,10 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("isAgentMode should return true when mcpServers configured")
     void testIsAgentMode_TrueWithMcpServers() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(false);
         task.setTools(null);
-        var mcpServer = new LangChainConfiguration.McpServerConfig();
+        var mcpServer = new LlmConfiguration.McpServerConfig();
         mcpServer.setUrl("http://localhost:8080/mcp");
         mcpServer.setName("test-server");
         task.setMcpServers(List.of(mcpServer));
@@ -218,7 +218,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("isAgentMode should return false when mcpServers list is empty")
     void testIsAgentMode_FalseWithEmptyMcpServers() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(false);
         task.setTools(null);
         task.setMcpServers(List.of());
@@ -231,7 +231,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("McpServerConfig should have sensible defaults")
     void testMcpServerConfig_Defaults() {
-        var config = new LangChainConfiguration.McpServerConfig();
+        var config = new LlmConfiguration.McpServerConfig();
         assertEquals("http", config.getTransport());
         assertEquals(30000L, config.getTimeoutMs());
         assertNull(config.getUrl());
@@ -242,7 +242,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("McpServerConfig should store all fields")
     void testMcpServerConfig_AllFields() {
-        var config = new LangChainConfiguration.McpServerConfig();
+        var config = new LlmConfiguration.McpServerConfig();
         config.setUrl("http://localhost:8080/mcp");
         config.setName("my-server");
         config.setTransport("sse");
@@ -261,7 +261,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("getSystemMessage should return null when parameters is null")
     void testGetSystemMessage_NullParameters() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setParameters(null);
 
         assertNull(task.getSystemMessage());
@@ -270,7 +270,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("getSystemMessage should return null when systemMessage not in parameters")
     void testGetSystemMessage_NoSystemMessage() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setParameters(java.util.Map.of("otherKey", "value"));
 
         assertNull(task.getSystemMessage());
@@ -279,7 +279,7 @@ class AgentOrchestratorTest {
     @Test
     @DisplayName("getSystemMessage should return systemMessage from parameters")
     void testGetSystemMessage_ReturnsSystemMessage() {
-        var task = new LangChainConfiguration.Task();
+        var task = new LlmConfiguration.Task();
         task.setParameters(java.util.Map.of("systemMessage", "You are a helpful assistant"));
 
         assertEquals("You are a helpful assistant", task.getSystemMessage());

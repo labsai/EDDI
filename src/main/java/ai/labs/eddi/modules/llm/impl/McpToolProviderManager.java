@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration.McpServerConfig;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.mcp.McpToolProvider;

@@ -1,7 +1,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -78,7 +78,7 @@ class LegacyChatExecutorTest {
                 }
             };
             var task = createTask();
-            var retryConfig = new LangChainConfiguration.RetryConfiguration();
+            var retryConfig = new LlmConfiguration.RetryConfiguration();
             retryConfig.setMaxAttempts(1);
             task.setRetry(retryConfig);
 
@@ -144,13 +144,13 @@ class LegacyChatExecutorTest {
         };
     }
 
-    private LangChainConfiguration.Task createTask() {
-        var task = new LangChainConfiguration.Task();
+    private LlmConfiguration.Task createTask() {
+        var task = new LlmConfiguration.Task();
         task.setId("testTask");
         task.setType("openai");
         task.setActions(List.of("action1"));
         task.setParameters(Map.of("apiKey", "test-key"));
-        var retryConfig = new LangChainConfiguration.RetryConfiguration();
+        var retryConfig = new LlmConfiguration.RetryConfiguration();
         retryConfig.setMaxAttempts(2);
         retryConfig.setBackoffDelayMs(10L);
         task.setRetry(retryConfig);

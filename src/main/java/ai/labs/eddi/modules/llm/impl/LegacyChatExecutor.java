@@ -1,7 +1,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import org.jboss.logging.Logger;
@@ -37,7 +37,7 @@ class LegacyChatExecutor {
      * @param task      task configuration (for retry settings)
      * @return result containing response text and metadata
      */
-    ChatResult execute(ChatModel chatModel, List<ChatMessage> messages, LangChainConfiguration.Task task)
+    ChatResult execute(ChatModel chatModel, List<ChatMessage> messages, LlmConfiguration.Task task)
             throws LifecycleException {
 
         LOGGER.debug("Executing without tools (legacy mode)");

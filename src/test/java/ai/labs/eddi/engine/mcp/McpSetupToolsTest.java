@@ -4,7 +4,7 @@ import ai.labs.eddi.configs.rules.IRestBehaviorStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
-import ai.labs.eddi.configs.llm.IRestLangChainStore;
+import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
@@ -13,7 +13,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,7 +28,7 @@ import static org.mockito.Mockito.*;
 class McpSetupToolsTest {
 
         private IRestBehaviorStore behaviorStore;
-        private IRestLangChainStore langchainStore;
+        private IRestLlmStore langchainStore;
         private IRestOutputStore outputStore;
         private IRestHttpCallsStore httpCallsStore;
         private IRestWorkflowStore WorkflowStore;
@@ -42,7 +42,7 @@ class McpSetupToolsTest {
         @BeforeEach
         void setUp() throws Exception {
                 behaviorStore = mock(IRestBehaviorStore.class);
-                langchainStore = mock(IRestLangChainStore.class);
+                langchainStore = mock(IRestLlmStore.class);
                 outputStore = mock(IRestOutputStore.class);
                 httpCallsStore = mock(IRestHttpCallsStore.class);
                 WorkflowStore = mock(IRestWorkflowStore.class);
@@ -55,7 +55,7 @@ class McpSetupToolsTest {
                 // Wire store mocks through IRestInterfaceFactory
                 var restInterfaceFactory = mock(IRestInterfaceFactory.class);
                 when(restInterfaceFactory.get(IRestBehaviorStore.class)).thenReturn(behaviorStore);
-                when(restInterfaceFactory.get(IRestLangChainStore.class)).thenReturn(langchainStore);
+                when(restInterfaceFactory.get(IRestLlmStore.class)).thenReturn(langchainStore);
                 when(restInterfaceFactory.get(IRestOutputStore.class)).thenReturn(outputStore);
                 when(restInterfaceFactory.get(IRestHttpCallsStore.class)).thenReturn(httpCallsStore);
                 when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(WorkflowStore);
@@ -80,8 +80,8 @@ class McpSetupToolsTest {
                 when(behaviorStore.createBehaviorRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
                                                 .build());
-                when(langchainStore.createLangChain(any()))
-                                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1"))
+                when(langchainStore.createLlm(any()))
+                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(outputStore.createOutputSet(any()))
                                 .thenReturn(Response.created(URI.create("/outputstore/outputsets/out-1?version=1"))
@@ -105,7 +105,7 @@ class McpSetupToolsTest {
                 // Verify all resources created in order
                 verify(parserStore).createParser(any());
                 verify(behaviorStore).createBehaviorRuleSet(any());
-                verify(langchainStore).createLangChain(any());
+                verify(langchainStore).createLlm(any());
                 verify(outputStore).createOutputSet(any());
                 verify(WorkflowStore).createWorkflow(any());
                 verify(AgentStore).createAgent(any());
@@ -121,8 +121,8 @@ class McpSetupToolsTest {
                 when(behaviorStore.createBehaviorRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
                                                 .build());
-                when(langchainStore.createLangChain(any()))
-                                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1"))
+                when(langchainStore.createLlm(any()))
+                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
@@ -146,8 +146,8 @@ class McpSetupToolsTest {
                 when(behaviorStore.createBehaviorRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
                                                 .build());
-                when(langchainStore.createLangChain(any()))
-                                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1"))
+                when(langchainStore.createLlm(any()))
+                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
@@ -168,8 +168,8 @@ class McpSetupToolsTest {
                 when(behaviorStore.createBehaviorRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
                                                 .build());
-                when(langchainStore.createLangChain(any()))
-                                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1"))
+                when(langchainStore.createLlm(any()))
+                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
@@ -217,8 +217,8 @@ class McpSetupToolsTest {
                 when(behaviorStore.createBehaviorRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
                                                 .build());
-                when(langchainStore.createLangChain(any()))
-                                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1"))
+                when(langchainStore.createLlm(any()))
+                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
@@ -233,7 +233,7 @@ class McpSetupToolsTest {
 
                 assertNotNull(result);
                 assertFalse(result.contains("\"error\""), "Ollama setup should succeed without API key");
-                verify(langchainStore).createLangChain(any());
+                verify(langchainStore).createLlm(any());
         }
 
         @Test
@@ -241,8 +241,8 @@ class McpSetupToolsTest {
                 when(behaviorStore.createBehaviorRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
                                                 .build());
-                when(langchainStore.createLangChain(any()))
-                                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1"))
+                when(langchainStore.createLlm(any()))
+                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
@@ -263,8 +263,8 @@ class McpSetupToolsTest {
                 when(behaviorStore.createBehaviorRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
                                                 .build());
-                when(langchainStore.createLangChain(any()))
-                                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1"))
+                when(langchainStore.createLlm(any()))
+                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
@@ -277,8 +277,8 @@ class McpSetupToolsTest {
                                 "sk-ant-key", null, null, null, null, null, null, null, false, null);
 
                 // Capture the langchain config
-                var langchainCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
-                verify(langchainStore).createLangChain(langchainCaptor.capture());
+                var langchainCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
+                verify(langchainStore).createLlm(langchainCaptor.capture());
 
                 var config = langchainCaptor.getValue();
                 assertEquals(1, config.tasks().size());
@@ -294,8 +294,8 @@ class McpSetupToolsTest {
                 when(behaviorStore.createBehaviorRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
                                                 .build());
-                when(langchainStore.createLangChain(any()))
-                                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1"))
+                when(langchainStore.createLlm(any()))
+                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(outputStore.createOutputSet(any()))
                                 .thenReturn(Response.created(URI.create("/outputstore/outputsets/out-1?version=1"))
@@ -319,7 +319,7 @@ class McpSetupToolsTest {
                 assertEquals(4, pkgConfig.getWorkflowSteps().size());
                 assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getWorkflowSteps().get(0).getType());
                 assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getWorkflowSteps().get(1).getType());
-                assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getWorkflowSteps().get(2).getType());
+                assertEquals(URI.create("eddi://ai.labs.llm"), pkgConfig.getWorkflowSteps().get(2).getType());
                 assertEquals(URI.create("eddi://ai.labs.output"), pkgConfig.getWorkflowSteps().get(3).getType());
         }
 
@@ -328,8 +328,8 @@ class McpSetupToolsTest {
                 when(behaviorStore.createBehaviorRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
                                                 .build());
-                when(langchainStore.createLangChain(any()))
-                                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1"))
+                when(langchainStore.createLlm(any()))
+                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
@@ -366,8 +366,8 @@ class McpSetupToolsTest {
         }
 
         @Test
-        void createLangchainConfig_withTooling_setsToolFields() {
-                var config = tools.createLangchainConfig(
+        void createLlmConfig_withTooling_setsToolFields() {
+                var config = tools.createLlmConfig(
                                 "anthropic", "claude-sonnet-4-6", "key", "You are helpful",
                                 true, "calculator,websearch", null, null, false, false, null);
 
@@ -377,8 +377,8 @@ class McpSetupToolsTest {
         }
 
         @Test
-        void createLangchainConfig_ollama_usesModelParam() {
-                var config = tools.createLangchainConfig(
+        void createLlmConfig_ollama_usesModelParam() {
+                var config = tools.createLlmConfig(
                                 "ollama", "llama3.2:1b", null, "prompt",
                                 false, null, "http://host.docker.internal:11434", null, false, false, null);
 
@@ -391,8 +391,8 @@ class McpSetupToolsTest {
         }
 
         @Test
-        void createLangchainConfig_jlama_usesAuthToken() {
-                var config = tools.createLangchainConfig(
+        void createLlmConfig_jlama_usesAuthToken() {
+                var config = tools.createLlmConfig(
                                 "jlama", "tinyllama", "my-token", "prompt",
                                 false, null, null, null, false, false, null);
 
@@ -404,9 +404,9 @@ class McpSetupToolsTest {
         }
 
         @Test
-        void createLangchainConfig_withJsonFormat_setsPostResponse() {
+        void createLlmConfig_withJsonFormat_setsPostResponse() {
                 String jsonPrompt = McpSetupTools.buildPromptResponseJson(true, true);
-                var config = tools.createLangchainConfig(
+                var config = tools.createLlmConfig(
                                 "openai", "gpt-4o", "key", "prompt",
                                 false, null, null, jsonPrompt, true, true, null);
 
@@ -420,8 +420,8 @@ class McpSetupToolsTest {
         }
 
         @Test
-        void createLangchainConfig_withoutJsonFormat_noPostResponse() {
-                var config = tools.createLangchainConfig(
+        void createLlmConfig_withoutJsonFormat_noPostResponse() {
+                var config = tools.createLlmConfig(
                                 "anthropic", "claude-sonnet-4-6", "key", "prompt",
                                 false, null, null, null, false, false, null);
 
@@ -437,8 +437,8 @@ class McpSetupToolsTest {
                 when(behaviorStore.createBehaviorRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
                                                 .build());
-                when(langchainStore.createLangChain(any()))
-                                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1"))
+                when(langchainStore.createLlm(any()))
+                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
@@ -450,8 +450,8 @@ class McpSetupToolsTest {
                 tools.setupAgent("QR Agent", "You are helpful", "openai", "gpt-4o",
                                 "sk-test", null, null, null, null, true, null, null, false, null);
 
-                var lcCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
-                verify(langchainStore).createLangChain(lcCaptor.capture());
+                var lcCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
+                verify(langchainStore).createLlm(lcCaptor.capture());
                 var task = lcCaptor.getValue().tasks().get(0);
                 var params = task.getParameters();
 
@@ -475,8 +475,8 @@ class McpSetupToolsTest {
                 when(behaviorStore.createBehaviorRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
                                                 .build());
-                when(langchainStore.createLangChain(any()))
-                                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1"))
+                when(langchainStore.createLlm(any()))
+                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
@@ -488,8 +488,8 @@ class McpSetupToolsTest {
                 tools.setupAgent("Sentiment Agent", "You are helpful", "gemini", "gemini-2.0-flash",
                                 "key", null, null, null, null, null, true, null, false, null);
 
-                var lcCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
-                verify(langchainStore).createLangChain(lcCaptor.capture());
+                var lcCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
+                verify(langchainStore).createLlm(lcCaptor.capture());
                 var task = lcCaptor.getValue().tasks().get(0);
                 var params = task.getParameters();
 
@@ -514,8 +514,8 @@ class McpSetupToolsTest {
                 when(behaviorStore.createBehaviorRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
                                                 .build());
-                when(langchainStore.createLangChain(any()))
-                                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1"))
+                when(langchainStore.createLlm(any()))
+                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
@@ -527,8 +527,8 @@ class McpSetupToolsTest {
                 tools.setupAgent("Full Agent", "You are helpful", "openai", "gpt-4o",
                                 "sk-test", null, null, null, null, true, true, null, false, null);
 
-                var lcCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
-                verify(langchainStore).createLangChain(lcCaptor.capture());
+                var lcCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
+                verify(langchainStore).createLlm(lcCaptor.capture());
                 var task = lcCaptor.getValue().tasks().get(0);
                 var params = task.getParameters();
 
@@ -549,8 +549,8 @@ class McpSetupToolsTest {
                 when(behaviorStore.createBehaviorRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
                                                 .build());
-                when(langchainStore.createLangChain(any()))
-                                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1"))
+                when(langchainStore.createLlm(any()))
+                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
@@ -562,8 +562,8 @@ class McpSetupToolsTest {
                 tools.setupAgent("Anthropic Agent", "You are helpful", "anthropic", "claude-sonnet-4-6",
                                 "sk-test", null, null, null, null, true, null, null, false, null);
 
-                var lcCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
-                verify(langchainStore).createLangChain(lcCaptor.capture());
+                var lcCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
+                verify(langchainStore).createLlm(lcCaptor.capture());
                 var params = lcCaptor.getValue().tasks().get(0).getParameters();
 
                 // Anthropic doesn't support responseFormat but should still have the prompt
@@ -710,8 +710,8 @@ class McpSetupToolsTest {
                 when(behaviorStore.createBehaviorRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
                                                 .build());
-                when(langchainStore.createLangChain(any()))
-                                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1"))
+                when(langchainStore.createLlm(any()))
+                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
@@ -733,14 +733,14 @@ class McpSetupToolsTest {
                 verify(httpCallsStore, times(2)).createHttpCalls(any());
                 verify(parserStore).createParser(any());
                 verify(behaviorStore).createBehaviorRuleSet(any());
-                verify(langchainStore).createLangChain(any());
+                verify(langchainStore).createLlm(any());
                 verify(WorkflowStore).createWorkflow(any());
                 verify(AgentStore).createAgent(any());
                 verify(agentAdmin).deployAgent(Environment.production, "agent-1", 1, true, true);
 
                 // Verify the system prompt was enriched with API summary
-                var lcCaptor = ArgumentCaptor.forClass(LangChainConfiguration.class);
-                verify(langchainStore).createLangChain(lcCaptor.capture());
+                var lcCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
+                verify(langchainStore).createLlm(lcCaptor.capture());
                 String systemMessage = lcCaptor.getValue().tasks().get(0).getParameters().get("systemMessage");
                 assertTrue(systemMessage.startsWith("You are an API assistant"),
                                 "System prompt should keep the original text");
@@ -774,8 +774,8 @@ class McpSetupToolsTest {
                 when(behaviorStore.createBehaviorRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
                                                 .build());
-                when(langchainStore.createLangChain(any()))
-                                .thenReturn(Response.created(URI.create("/langchainstore/langchains/lc-1?version=1"))
+                when(langchainStore.createLlm(any()))
+                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
@@ -797,6 +797,6 @@ class McpSetupToolsTest {
                 assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getWorkflowSteps().get(1).getType());
                 assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getWorkflowSteps().get(2).getType());
                 assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getWorkflowSteps().get(3).getType());
-                assertEquals(URI.create("eddi://ai.labs.langchain"), pkgConfig.getWorkflowSteps().get(4).getType());
+                assertEquals(URI.create("eddi://ai.labs.llm"), pkgConfig.getWorkflowSteps().get(4).getType());
         }
 }

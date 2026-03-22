@@ -2,8 +2,8 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration.McpServerConfig;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.EddiToolBridge;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
@@ -98,7 +98,7 @@ class AgentOrchestrator {
     ExecutionResult executeIfToolsEnabled(ChatModel chatModel,
             String systemMessage,
             List<ChatMessage> chatMessages,
-            LangChainConfiguration.Task task,
+            LlmConfiguration.Task task,
             IConversationMemory memory) throws LifecycleException {
 
         // Collect enabled built-in tools
@@ -153,7 +153,7 @@ class AgentOrchestrator {
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage,
             List<ChatMessage> chatMessages, List<Object> tools,
             McpToolProviderManager.McpToolsResult mcpTools,
-            LangChainConfiguration.Task task, IConversationMemory memory)
+            LlmConfiguration.Task task, IConversationMemory memory)
             throws LifecycleException {
 
         // Build tool specifications and executors from built-in tool objects
@@ -289,7 +289,7 @@ class AgentOrchestrator {
     /**
      * Collects enabled built-in tools based on task configuration.
      */
-    List<Object> collectEnabledTools(LangChainConfiguration.Task task) {
+    List<Object> collectEnabledTools(LlmConfiguration.Task task) {
         List<Object> tools = new ArrayList<>();
 
         if (task.getEnableBuiltInTools() == null || !task.getEnableBuiltInTools()) {

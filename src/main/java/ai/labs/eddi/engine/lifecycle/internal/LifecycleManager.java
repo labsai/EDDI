@@ -310,7 +310,7 @@ public class LifecycleManager implements ILifecycleManager {
                 input.isEmpty() ? null : input,
                 output.isEmpty() ? null : output,
                 llmDetail,
-                null, // toolCalls — set by LangchainTask in memory
+                null, // toolCalls — set by LlmTask in memory
                 actions,
                 0.0, // cost — set by ToolCostTracker integration
                 Instant.now(),

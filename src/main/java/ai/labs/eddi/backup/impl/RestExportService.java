@@ -8,7 +8,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IHttpCallsStore;
-import ai.labs.eddi.configs.llm.ILangChainStore;
+import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
@@ -56,7 +56,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private final IRegularDictionaryStore regularDictionaryStore;
     private final IBehaviorStore behaviorStore;
     private final IHttpCallsStore httpCallsStore;
-    private final ILangChainStore langChainStore;
+    private final ILlmStore llmStore;
     private final IPropertySetterStore propertySetterStore;
     private final IOutputStore outputStore;
     private final IJsonSerialization jsonSerialization;
@@ -75,7 +75,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             IRegularDictionaryStore regularDictionaryStore,
             IBehaviorStore behaviorStore,
             IHttpCallsStore httpCallsStore,
-            ILangChainStore langChainStore,
+            ILlmStore llmStore,
             IPropertySetterStore propertySetterStore,
             IOutputStore outputStore,
             IJsonSerialization jsonSerialization,
@@ -88,7 +88,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         this.regularDictionaryStore = regularDictionaryStore;
         this.behaviorStore = behaviorStore;
         this.httpCallsStore = httpCallsStore;
-        this.langChainStore = langChainStore;
+        this.llmStore = llmStore;
         this.propertySetterStore = propertySetterStore;
         this.outputStore = outputStore;
         this.jsonSerialization = jsonSerialization;
@@ -143,8 +143,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(httpCallsStore,
                         extractResourcesUris(workflowConfigString, HTTPCALLS_URI_PATTERN))), HTTPCALLS_EXT);
 
-                writeConfigs(packagePath, convertConfigsToString(readConfigs(langChainStore,
-                        extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN))), LANGCHAIN_EXT);
+                writeConfigs(packagePath, convertConfigsToString(readConfigs(llmStore,
+                        extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN))), LLM_EXT);
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(propertySetterStore,
                         extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN))), PROPERTY_EXT);
@@ -160,8 +160,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                         extractResourcesUris(workflowConfigString, BEHAVIOR_URI_PATTERN), BEHAVIOR_EXT);
                 writeAllVersionsOfUris(unusedPath, httpCallsStore,
                         extractResourcesUris(workflowConfigString, HTTPCALLS_URI_PATTERN), HTTPCALLS_EXT);
-                writeAllVersionsOfUris(unusedPath, langChainStore,
-                        extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN), LANGCHAIN_EXT);
+                writeAllVersionsOfUris(unusedPath, llmStore,
+                        extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN), LLM_EXT);
                 writeAllVersionsOfUris(unusedPath, propertySetterStore,
                         extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN), PROPERTY_EXT);
                 writeAllVersionsOfUris(unusedPath, outputStore,

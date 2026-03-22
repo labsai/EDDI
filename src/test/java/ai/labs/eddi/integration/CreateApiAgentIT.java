@@ -279,7 +279,7 @@ public class CreateApiAgentIT {
     Response response = given()
         .contentType(ContentType.JSON)
         .body(LANGCHAIN_CONFIG)
-        .post("/langchainstore/langchains");
+        .post("/llmstore/llmconfigs");
 
     response.then().assertThat().statusCode(201);
     langchainLocation = response.getHeader("location");
@@ -287,7 +287,7 @@ public class CreateApiAgentIT {
     // Verify enriched prompt includes API summary
     ResourceId res = extractResourceId(langchainLocation);
     given()
-        .get("/langchainstore/langchains/" + res.id() + "?version=" + res.version())
+        .get("/llmstore/llmconfigs/" + res.id() + "?version=" + res.version())
         .then().assertThat()
         .statusCode(200)
         .body("tasks[0].parameters.systemMessage",
@@ -307,7 +307,7 @@ public class CreateApiAgentIT {
             { "type": "eddi://ai.labs.behavior", "config": { "uri": "%s" } },
             { "type": "eddi://ai.labs.httpcalls", "config": { "uri": "%s" } },
             { "type": "eddi://ai.labs.httpcalls", "config": { "uri": "%s" } },
-            { "type": "eddi://ai.labs.langchain", "config": { "uri": "%s" } }
+            { "type": "eddi://ai.labs.llm", "config": { "uri": "%s" } }
           ]
         }
         """, behaviorLocation, httpCallsUsersLocation, httpCallsOrdersLocation, langchainLocation);
@@ -338,7 +338,7 @@ public class CreateApiAgentIT {
         .body("WorkflowSteps[1].type", equalTo("eddi://ai.labs.behavior"))
         .body("WorkflowSteps[2].type", equalTo("eddi://ai.labs.httpcalls"))
         .body("WorkflowSteps[3].type", equalTo("eddi://ai.labs.httpcalls"))
-        .body("WorkflowSteps[4].type", equalTo("eddi://ai.labs.langchain"));
+        .body("WorkflowSteps[4].type", equalTo("eddi://ai.labs.llm"));
   }
 
   // ==================== Step 5: Create Agent ====================

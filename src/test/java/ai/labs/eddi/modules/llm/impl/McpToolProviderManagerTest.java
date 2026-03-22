@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration.McpServerConfig;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;

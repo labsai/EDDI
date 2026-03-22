@@ -19,7 +19,7 @@ import java.util.List;
 // @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (0)
 // PropertySetter", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/propertysetterstore/propertysetters")
-@Tag(name = "03. Properties", description = "lifecycle extension for package")
+@Tag(name = "03. Properties", description = "lifecycle extension for LLM configurations")
 public interface IRestPropertySetterStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.property";
     String resourceURI = resourceBaseType + "/propertysetterstore/propertysetters/";

@@ -14,7 +14,7 @@ import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
 import ai.labs.eddi.configs.apicalls.model.HttpCallsConfiguration;
-import ai.labs.eddi.configs.llm.IRestLangChainStore;
+import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
@@ -33,7 +33,7 @@ import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
-import ai.labs.eddi.modules.llm.model.LangChainConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -219,7 +219,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         addDiffsForType(diffs, packageFileString, DICTIONARY_URI_PATTERN, DICTIONARY_EXT, packageDir);
         addDiffsForType(diffs, packageFileString, BEHAVIOR_URI_PATTERN, BEHAVIOR_EXT, packageDir);
         addDiffsForType(diffs, packageFileString, HTTPCALLS_URI_PATTERN, HTTPCALLS_EXT, packageDir);
-        addDiffsForType(diffs, packageFileString, LANGCHAIN_URI_PATTERN, LANGCHAIN_EXT, packageDir);
+        addDiffsForType(diffs, packageFileString, LANGCHAIN_URI_PATTERN, LLM_EXT, packageDir);
         addDiffsForType(diffs, packageFileString, PROPERTY_URI_PATTERN, PROPERTY_EXT, packageDir);
         addDiffsForType(diffs, packageFileString, OUTPUT_URI_PATTERN, OUTPUT_EXT, packageDir);
     }
@@ -414,9 +414,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         List<URI> langchainUris = extractResourcesUris(packageFileString, LANGCHAIN_URI_PATTERN);
                         List<URI> newLangchainUris = createOrUpdateResources(
                                 readResources(langchainUris, packagePath,
-                                        LANGCHAIN_EXT, LangChainConfiguration.class),
+                                        LLM_EXT, LlmConfiguration.class),
                                 langchainUris, isMerge, selectedSet,
-                                this::createNewLangchain, this::updateLangchain);
+                                this::createNewLlm, this::updateLangchain);
 
                         updateDocumentDescriptor(packagePath, langchainUris, newLangchainUris);
                         packageFileString = replaceURIs(packageFileString, langchainUris, newLangchainUris);
@@ -673,13 +673,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }).toList();
     }
 
-    private List<URI> createNewLangchain(List<LangChainConfiguration> langChainConfigurations)
+    private List<URI> createNewLlm(List<LlmConfiguration> llmConfigurations)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestLangChainStore restLangChainStore = getRestResourceStore(IRestLangChainStore.class);
-        return langChainConfigurations.stream().map(langChainConfiguration -> {
-            Response langchainResponse = restLangChainStore.createLangChain(langChainConfiguration);
-            checkIfCreatedResponse(langchainResponse);
-            return langchainResponse.getLocation();
+        IRestLlmStore restLlmStore = getRestResourceStore(IRestLlmStore.class);
+        return llmConfigurations.stream().map(llmConfiguration -> {
+            Response llmResponse = restLlmStore.createLlm(llmConfiguration);
+            checkIfCreatedResponse(llmResponse);
+            return llmResponse.getLocation();
         }).toList();
     }
 
@@ -745,15 +745,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return createResp.getLocation();
     }
 
-    private URI updateLangchain(LangChainConfiguration config, String localId, Integer localVersion)
+    private URI updateLangchain(LlmConfiguration config, String localId, Integer localVersion)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestLangChainStore store = getRestResourceStore(IRestLangChainStore.class);
-        Response response = store.updateLangChain(localId, localVersion, config);
+        IRestLlmStore store = getRestResourceStore(IRestLlmStore.class);
+        Response response = store.updateLlm(localId, localVersion, config);
         if (response.getStatus() == 200) {
-            return URI.create(IRestLangChainStore.resourceURI + localId +
-                    IRestLangChainStore.versionQueryParam + (localVersion + 1));
+            return URI.create(IRestLlmStore.resourceURI + localId +
+                    IRestLlmStore.versionQueryParam + (localVersion + 1));
         }
-        Response createResp = store.createLangChain(config);
+        Response createResp = store.createLlm(config);
         checkIfCreatedResponse(createResp);
         return createResp.getLocation();
     }
