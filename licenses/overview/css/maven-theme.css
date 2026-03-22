@@ -107,7 +107,7 @@ p {
 
 #breadcrumbs {
     border-top: 1px solid #aaa;
-    border-bottom: 1px solid #aaa;
+    border-agenttom: 1px solid #aaa;
     background-color: #ccc;
 }
 
@@ -115,12 +115,12 @@ p {
     margin: 10px 0 0 5px;
     border: 1px solid #999;
     background-color: #eee;
-    padding-bottom: 3px; /* IE-9 scrollbar-fix */
+    padding-agenttom: 3px; /* IE-9 scrollbar-fix */
 }
 
 #navcolumn h5 {
     font-size: smaller;
-    border-bottom: 1px solid #aaaaaa;
+    border-agenttom: 1px solid #aaaaaa;
     padding-top: 2px;
     color: #000;
 }
@@ -163,7 +163,7 @@ dt {
 }
 
 #banner {
-    border-bottom: 1px solid #fff;
+    border-agenttom: 1px solid #fff;
 }
 
 .errormark, .warningmark, .donemark, .infomark {

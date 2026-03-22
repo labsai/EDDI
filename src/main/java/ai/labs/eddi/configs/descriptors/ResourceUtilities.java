@@ -40,9 +40,9 @@ public class ResourceUtilities {
     }
 
     public static void createDocumentDescriptorForDuplicate(IDocumentDescriptorStore documentDescriptorStore,
-                                                            String oldId,
-                                                            Integer oldVersion,
-                                                            URI newResourceLocation)
+            String oldId,
+            Integer oldVersion,
+            URI newResourceLocation)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         var oldDescriptor = documentDescriptorStore.readDescriptor(oldId, oldVersion);
@@ -78,11 +78,12 @@ public class ResourceUtilities {
         return descriptor;
     }
 
-    public static ConversationDescriptor createConversationDescriptorDocument(URI resource, URI botResourceURI, String userId) {
+    public static ConversationDescriptor createConversationDescriptorDocument(URI resource, URI agentResourceURI,
+            String userId) {
         ConversationDescriptor conversationDescriptor = new ConversationDescriptor();
         conversationDescriptor.setResource(resource);
         conversationDescriptor.setUserId(userId);
-        conversationDescriptor.setBotResource(botResourceURI);
+        conversationDescriptor.setAgentResource(agentResourceURI);
         Date createdOn = new Date(System.currentTimeMillis());
         conversationDescriptor.setCreatedOn(createdOn);
         conversationDescriptor.setLastModifiedOn(createdOn);

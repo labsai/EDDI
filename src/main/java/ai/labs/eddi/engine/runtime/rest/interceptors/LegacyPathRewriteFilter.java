@@ -19,14 +19,15 @@ import java.util.Map;
  * <p>
  * Rewrites:
  * <ul>
- *   <li>/AgentStore/bots → /agentstore/agents</li>
- *   <li>/WorkflowStore/packages → /workflowstore/workflows</li>
- *   <li>/langchainstore/langchains → /llmstore/llmconfigs</li>
- *   <li>/behaviorstore/behaviorsets → /rulestore/rulesets</li>
- *   <li>/httpcallsstore/httpcalls → /apicallstore/apicalls</li>
- *   <li>/regulardictionarystore/regulardictionaries → /dictionarystore/dictionaries</li>
- *   <li>/AgentTriggerStore/bottriggers → /triggerstore/triggers</li>
- *   <li>/{unrestricted|restricted}/ → /production/</li>
+ * <li>/AgentStore/agents → /agentstore/agents</li>
+ * <li>/WorkflowStore/packages → /workflowstore/workflows</li>
+ * <li>/langchainstore/langchains → /llmstore/llmconfigs</li>
+ * <li>/behaviorstore/behaviorsets → /rulestore/rulesets</li>
+ * <li>/httpcallsstore/httpcalls → /apicallstore/apicalls</li>
+ * <li>/regulardictionarystore/regulardictionaries →
+ * /dictionarystore/dictionaries</li>
+ * <li>/AgentTriggerStore/agenttriggers → /triggerstore/triggers</li>
+ * <li>/{unrestricted|restricted}/ → /production/</li>
  * </ul>
  */
 @PreMatching
@@ -40,13 +41,12 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
      */
     private static final Map<String, String> PATH_REWRITES = Map.ofEntries(
             Map.entry("/regulardictionarystore/regulardictionaries", "/dictionarystore/dictionaries"),
-            Map.entry("/AgentTriggerStore/bottriggers", "/triggerstore/triggers"),
+            Map.entry("/AgentTriggerStore/agenttriggers", "/triggerstore/triggers"),
             Map.entry("/behaviorstore/behaviorsets", "/rulestore/rulesets"),
             Map.entry("/langchainstore/langchains", "/llmstore/llmconfigs"),
             Map.entry("/httpcallsstore/httpcalls", "/apicallstore/apicalls"),
             Map.entry("/WorkflowStore/packages", "/workflowstore/workflows"),
-            Map.entry("/AgentStore/bots", "/agentstore/agents")
-    );
+            Map.entry("/AgentStore/agents", "/agentstore/agents"));
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
@@ -59,8 +59,7 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
                     requestContext.getUriInfo().getBaseUri(),
                     UriBuilder.fromPath(rewritten)
                             .replaceQuery(requestContext.getUriInfo().getRequestUri().getRawQuery())
-                            .build()
-            );
+                            .build());
         }
     }
 
@@ -75,11 +74,12 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
             }
         }
 
-        // Rewrite environment segments: /unrestricted/ → /production/, /restricted/ → /production/
+        // Rewrite environment segments: /unrestricted/ → /production/, /restricted/ →
+        // /production/
         result = result.replace("/unrestricted/", "/production/");
         result = result.replace("/restricted/", "/production/");
 
-        // Handle trailing paths without slash (e.g., /bots/unrestricted)
+        // Handle trailing paths without slash (e.g., /agents/unrestricted)
         if (result.endsWith("/unrestricted")) {
             result = result.substring(0, result.length() - "/unrestricted".length()) + "/production";
         }

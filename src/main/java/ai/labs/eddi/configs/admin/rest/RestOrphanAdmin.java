@@ -25,12 +25,15 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 /**
  * Implementation of the orphan detection and cleanup endpoint.
  *
- * <p>Algorithm:</p>
+ * <p>
+ * Algorithm:
+ * </p>
  * <ol>
- *   <li>Enumerate all bots → collect referenced package URIs</li>
- *   <li>Enumerate all packages → collect referenced extension resource URIs</li>
- *   <li>For each store type, enumerate all resources via document descriptors</li>
- *   <li>Any resource whose URI is NOT in the referenced set = orphan</li>
+ * <li>Enumerate all agents → collect referenced package URIs</li>
+ * <li>Enumerate all packages → collect referenced extension resource URIs</li>
+ * <li>For each store type, enumerate all resources via document
+ * descriptors</li>
+ * <li>Any resource whose URI is NOT in the referenced set = orphan</li>
  * </ol>
  *
  * @author ginccc
@@ -42,18 +45,20 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
     private static final Logger log = Logger.getLogger(RestOrphanAdmin.class);
 
     /**
-     * Store types to scan for orphans. Each entry is {descriptorType, descriptorTypeLabel}.
-     * The descriptor type is used to query IDocumentDescriptorStore.readDescriptors().
+     * Store types to scan for orphans. Each entry is {descriptorType,
+     * descriptorTypeLabel}.
+     * The descriptor type is used to query
+     * IDocumentDescriptorStore.readDescriptors().
      */
     private static final String[][] SCANNABLE_STORE_TYPES = {
-            {"ai.labs.package", "Package"},
-            {"ai.labs.behavior", "Behavior Set"},
-            {"ai.labs.httpcalls", "HTTP Calls"},
-            {"ai.labs.output", "Output Set"},
-            {"ai.labs.langchain", "LangChain"},
-            {"ai.labs.property", "Property Setter"},
-            {"ai.labs.regulardictionary", "Regular Dictionary"},
-            {"ai.labs.parser", "Parser"},
+            { "ai.labs.package", "Workflow" },
+            { "ai.labs.behavior", "Behavior Set" },
+            { "ai.labs.httpcalls", "HTTP Calls" },
+            { "ai.labs.output", "Output Set" },
+            { "ai.labs.langchain", "LangChain" },
+            { "ai.labs.property", "Property Setter" },
+            { "ai.labs.regulardictionary", "Regular Dictionary" },
+            { "ai.labs.parser", "Parser" },
     };
 
     private static final int BATCH_SIZE = 200;
@@ -65,9 +70,9 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
 
     @Inject
     public RestOrphanAdmin(IAgentStore agentStore,
-                           IWorkflowStore workflowStore,
-                           IDocumentDescriptorStore documentDescriptorStore,
-                           IResourceClientLibrary resourceClientLibrary) {
+            IWorkflowStore workflowStore,
+            IDocumentDescriptorStore documentDescriptorStore,
+            IResourceClientLibrary resourceClientLibrary) {
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
         this.documentDescriptorStore = documentDescriptorStore;
@@ -119,8 +124,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                                 resourceUri,
                                 type,
                                 descriptor.getName() != null ? descriptor.getName() : "(unnamed)",
-                                descriptor.isDeleted()
-                        ));
+                                descriptor.isDeleted()));
                     }
                 }
             } catch (Exception e) {
@@ -133,30 +137,32 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
     }
 
     /**
-     * Build the complete set of all URIs that are referenced by at least one Agent or package.
+     * Build the complete set of all URIs that are referenced by at least one Agent
+     * or package.
      */
     private Set<String> buildReferencedUrisSet() {
         Set<String> referencedUris = new HashSet<>();
 
         try {
-            // Step 1a: Get all bots and collect their package URIs
-            List<DocumentDescriptor> botDescriptors = readAllDescriptors("ai.labs.bot", false);
-            for (DocumentDescriptor botDescriptor : botDescriptors) {
+            // Step 1a: Get all agents and collect their package URIs
+            List<DocumentDescriptor> agentDescriptors = readAllDescriptors("ai.labs.agent", false);
+            for (DocumentDescriptor agentDescriptor : agentDescriptors) {
                 try {
-                    var resourceId = RestUtilities.extractResourceId(botDescriptor.getResource());
-                    if (resourceId == null || resourceId.getId() == null) continue;
+                    var resourceId = RestUtilities.extractResourceId(agentDescriptor.getResource());
+                    if (resourceId == null || resourceId.getId() == null)
+                        continue;
 
-                    AgentConfiguration botConfig = agentStore.read(
+                    AgentConfiguration agentConfig = agentStore.read(
                             resourceId.getId(), resourceId.getVersion());
-                    if (botConfig.getWorkflows() != null) {
-                        for (URI workflowUri : botConfig.getWorkflows()) {
+                    if (agentConfig.getWorkflows() != null) {
+                        for (URI workflowUri : agentConfig.getWorkflows()) {
                             referencedUris.add(workflowUri.toString());
                         }
                     }
                 } catch (IResourceStore.ResourceNotFoundException e) {
                     // Agent descriptor exists but resource doesn't — skip
                 } catch (Exception e) {
-                    log.debugf("Error reading Agent %s: %s", botDescriptor.getResource(), e.getMessage());
+                    log.debugf("Error reading Agent %s: %s", agentDescriptor.getResource(), e.getMessage());
                 }
             }
 
@@ -165,13 +171,14 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
             for (DocumentDescriptor pkgDescriptor : packageDescriptors) {
                 try {
                     var resourceId = RestUtilities.extractResourceId(pkgDescriptor.getResource());
-                    if (resourceId == null || resourceId.getId() == null) continue;
+                    if (resourceId == null || resourceId.getId() == null)
+                        continue;
 
                     WorkflowConfiguration pkgConfig = workflowStore.read(
                             resourceId.getId(), resourceId.getVersion());
                     collectExtensionUris(pkgConfig, referencedUris);
                 } catch (IResourceStore.ResourceNotFoundException e) {
-                    // Package descriptor exists but resource doesn't — skip
+                    // Workflow descriptor exists but resource doesn't — skip
                 } catch (Exception e) {
                     log.debugf("Error reading package %s: %s", pkgDescriptor.getResource(), e.getMessage());
                 }
@@ -185,8 +192,8 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
     }
 
     /**
-     * Extract all extension resource URIs from a package configuration.
-     * Follows the same traversal as RestWorkflowStore.deletePackageCascade().
+     * Extract all extension resource URIs from a workflow configuration.
+     * Follows the same traversal as RestWorkflowStore.deleteWorkflowCascade().
      */
     private void collectExtensionUris(WorkflowConfiguration pkgConfig, Set<String> referencedUris) {
         for (WorkflowStep ext : pkgConfig.getWorkflowSteps()) {

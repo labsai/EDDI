@@ -10,11 +10,11 @@
 
 ## 1. Repo Separation
 
-| Repo | Contents | Rationale |
-|---|---|---|
-| **`quarkiverse/quarkus-eddi`** | `quarkus-eddi-client` (REST) + `quarkus-eddi-mcp-client` (MCP) | Quarkiverse standard for Quarkus extensions; published to Maven Central |
-| **`labsai/eddi-helm`** | Helm chart + Kustomize overlays | Separate lifecycle from the Java SDK; published to GHCR + ArtifactHub; used by ops teams who don't touch Java |
-| **`labsai/EDDI`** | Sync pipeline (GitHub Actions that trigger on release) | The source of truth for OpenAPI spec + Docker image versions |
+| Repo                           | Contents                                                       | Rationale                                                                                                     |
+| ------------------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| **`quarkiverse/quarkus-eddi`** | `quarkus-eddi-client` (REST) + `quarkus-eddi-mcp-client` (MCP) | Quarkiverse standard for Quarkus extensions; published to Maven Central                                       |
+| **`labsai/eddi-helm`**         | Helm chart + Kustomize overlays                                | Separate lifecycle from the Java SDK; published to GHCR + ArtifactHub; used by ops teams who don't touch Java |
+| **`labsai/EDDI`**              | Sync pipeline (GitHub Actions that trigger on release)         | The source of truth for OpenAPI spec + Docker image versions                                                  |
 
 > [!IMPORTANT]
 > The Helm chart and the Quarkus extensions have completely different consumers (ops vs. devs), different release cadences (infrastructure vs. library), and different CI requirements. Keeping them in the same repo adds coupling without benefit.
@@ -145,40 +145,41 @@ These are used throughout the SDK wherever EDDI accepts provider or environment 
 
 The `EddiClient` facade groups EDDI's ~30 REST endpoints into domain-specific sub-clients:
 
-| Sub-Client | EDDI REST Endpoints | Key Operations |
-|---|---|---|
-| `agents()` | `/agentstore/agents/**` | CRUD, deploy, undeploy, cascade delete |
-| `conversations()` | `/agents/{env}/**` | create, say, read, end, undo/redo |
-| `workflows()` | `/workflowstore/workflows/**` | CRUD, read extensions |
-| `rules()` | `/rulestore/rulesets/**` | CRUD |
-| `llm()` | `/llmstore/llmconfigs/**` | CRUD |
-| `apiCalls()` | `/apicallstore/apicalls/**` | CRUD |
-| `dictionaries()` | `/dictionarystore/dictionaries/**` | CRUD |
-| `output()` | `/outputstore/**` | CRUD |
-| `audit()` | `/auditstore/**` | read by conversation/agent |
-| `secrets()` | `/secretstore/**` | store, delete, list, metadata |
-| `schedules()` | `/schedulerstore/**` | CRUD, fire now, retry |
-| `coordinator()` | `/administration/coordinator/**` | status, dead-letters |
-| `exports()` | `/backup/**` | export ZIP, import ZIP |
+| Sub-Client        | EDDI REST Endpoints                | Key Operations                         |
+| ----------------- | ---------------------------------- | -------------------------------------- |
+| `agents()`        | `/agentstore/agents/**`            | CRUD, deploy, undeploy, cascade delete |
+| `conversations()` | `/agents/{env}/**`                 | create, say, read, end, undo/redo      |
+| `workflows()`     | `/workflowstore/workflows/**`      | CRUD, read extensions                  |
+| `rules()`         | `/rulestore/rulesets/**`           | CRUD                                   |
+| `llm()`           | `/llmstore/llmconfigs/**`          | CRUD                                   |
+| `apiCalls()`      | `/apicallstore/apicalls/**`        | CRUD                                   |
+| `dictionaries()`  | `/dictionarystore/dictionaries/**` | CRUD                                   |
+| `output()`        | `/outputstore/**`                  | CRUD                                   |
+| `audit()`         | `/auditstore/**`                   | read by conversation/agent             |
+| `secrets()`       | `/secretstore/**`                  | store, delete, list, metadata          |
+| `schedules()`     | `/schedulerstore/**`               | CRUD, fire now, retry                  |
+| `coordinator()`   | `/administration/coordinator/**`   | status, dead-letters                   |
+| `exports()`       | `/backup/**`                       | export ZIP, import ZIP                 |
 
 #### Config Properties
 
-| Property | Type | Default | Description |
-|---|---|---|---|
-| `quarkus.eddi.url` | `String` | — | **Required.** Base URL of the EDDI instance |
-| `quarkus.eddi.api-key` | `Optional<String>` | — | Bearer token for auth-enabled instances |
-| `quarkus.eddi.environment` | `Environment` | `PRODUCTION` | Default environment for operations |
-| `quarkus.eddi.connect-timeout` | `Duration` | `5s` | HTTP connect timeout |
-| `quarkus.eddi.read-timeout` | `Duration` | `30s` | HTTP read timeout |
-| `quarkus.eddi.retry.max-retries` | `int` | `3` | Max retries on transient failures (5xx) |
-| `quarkus.eddi.retry.delay` | `Duration` | `500ms` | Base delay between retries |
-| `quarkus.eddi.health.enabled` | `boolean` | `true` | Register EDDI readiness health check |
-| `quarkus.eddi.devservices.enabled` | `boolean` | `true` | Auto-start EDDI + MongoDB in dev/test |
-| `quarkus.eddi.devservices.image-name` | `String` | `labsai/eddi:${version}` | Docker image for DevServices |
+| Property                              | Type               | Default                  | Description                                 |
+| ------------------------------------- | ------------------ | ------------------------ | ------------------------------------------- |
+| `quarkus.eddi.url`                    | `String`           | —                        | **Required.** Base URL of the EDDI instance |
+| `quarkus.eddi.api-key`                | `Optional<String>` | —                        | Bearer token for auth-enabled instances     |
+| `quarkus.eddi.environment`            | `Environment`      | `PRODUCTION`             | Default environment for operations          |
+| `quarkus.eddi.connect-timeout`        | `Duration`         | `5s`                     | HTTP connect timeout                        |
+| `quarkus.eddi.read-timeout`           | `Duration`         | `30s`                    | HTTP read timeout                           |
+| `quarkus.eddi.retry.max-retries`      | `int`              | `3`                      | Max retries on transient failures (5xx)     |
+| `quarkus.eddi.retry.delay`            | `Duration`         | `500ms`                  | Base delay between retries                  |
+| `quarkus.eddi.health.enabled`         | `boolean`          | `true`                   | Register EDDI readiness health check        |
+| `quarkus.eddi.devservices.enabled`    | `boolean`          | `true`                   | Auto-start EDDI + MongoDB in dev/test       |
+| `quarkus.eddi.devservices.image-name` | `String`           | `labsai/eddi:${version}` | Docker image for DevServices                |
 
 #### DevServices
 
 When `quarkus.eddi.devservices.enabled=true` (default in dev/test profiles), the deployment module:
+
 1. Starts a **MongoDB container** (Testcontainers)
 2. Starts an **EDDI container** (`labsai/eddi:${version}`) connected to that MongoDB
 3. Auto-configures `quarkus.eddi.url` to point at the started instance
@@ -229,12 +230,12 @@ var response = mcp.conversations().chatManaged("support", "user-123", "Help!");
 
 #### Tool Wrapper Classes
 
-| Wrapper | MCP Tools (v6 names) |
-|---|---|
-| `AgentTools` | `setup_agent`, `create_api_agent`, `create_agent`, `get_agent`, `update_agent`, `delete_agent`, `deploy_agent`, `undeploy_agent`, `get_deployment_status` |
+| Wrapper             | MCP Tools (v6 names)                                                                                                                                           |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AgentTools`        | `setup_agent`, `create_api_agent`, `create_agent`, `get_agent`, `update_agent`, `delete_agent`, `deploy_agent`, `undeploy_agent`, `get_deployment_status`      |
 | `ConversationTools` | `chat_with_agent`, `chat_managed`, `create_conversation`, `talk_to_agent`, `read_conversation`, `read_conversation_log`, `read_audit_trail`, `read_agent_logs` |
-| `DiscoveryTools` | `list_agents`, `list_agent_configs`, `discover_agents`, `list_agent_triggers`, trigger CRUD, `list_conversations`, `list_workflows` |
-| `ResourceTools` | `read_workflow`, `read_resource`, `create_resource`, `update_resource`, `delete_resource`, `apply_agent_changes`, `list_agent_resources` |
+| `DiscoveryTools`    | `list_agents`, `list_agent_configs`, `discover_agents`, `list_agent_triggers`, trigger CRUD, `list_conversations`, `list_workflows`                            |
+| `ResourceTools`     | `read_workflow`, `read_resource`, `create_resource`, `update_resource`, `delete_resource`, `apply_agent_changes`, `list_agent_resources`                       |
 
 The MCP client connects to `{eddi.url}/mcp` via Streamable HTTP transport (`langchain4j-mcp`).
 
@@ -268,25 +269,25 @@ labsai/eddi-helm/
 │       └── production/                   # HPA, NATS, Keycloak, monitoring
 ├── .github/workflows/
 │   ├── lint.yml                          # helm lint + helm template on PR
-│   └── release.yml                      # Package + push to GHCR + ArtifactHub
+│   └── release.yml                      # Workflow + push to GHCR + ArtifactHub
 └── README.md
 ```
 
 ### 3.2 Helm Chart — `values.yaml` Key Sections
 
-| Section | Controls |
-|---|---|
-| `eddi.image` | Repository (`labsai/eddi`), tag, pull policy, pull secrets |
-| `eddi.replicas` | Static count + HPA min/max/targetCPU |
-| `eddi.resources` | CPU/memory requests and limits |
-| `eddi.env` | All EDDI config as env vars (DB URLs, secrets master key, feature flags) |
+| Section          | Controls                                                                   |
+| ---------------- | -------------------------------------------------------------------------- |
+| `eddi.image`     | Repository (`labsai/eddi`), tag, pull policy, pull secrets                 |
+| `eddi.replicas`  | Static count + HPA min/max/targetCPU                                       |
+| `eddi.resources` | CPU/memory requests and limits                                             |
+| `eddi.env`       | All EDDI config as env vars (DB URLs, secrets master key, feature flags)   |
 | `eddi.datastore` | `mongodb` (default) or `postgres` — controls which DB subchart is deployed |
-| `mongodb` | Toggle + Bitnami MongoDB subchart values, or external `existingSecret` |
-| `postgresql` | Toggle + Bitnami PostgreSQL subchart values, or external connection |
-| `nats` | Optional NATS JetStream for async processing |
-| `keycloak` | Optional Keycloak for OIDC (`quarkus.oidc.*` config) |
-| `ingress` | Class, TLS, hosts, annotations |
-| `monitoring` | Prometheus `ServiceMonitor` + optional Grafana dashboard ConfigMap |
+| `mongodb`        | Toggle + Bitnami MongoDB subchart values, or external `existingSecret`     |
+| `postgresql`     | Toggle + Bitnami PostgreSQL subchart values, or external connection        |
+| `nats`           | Optional NATS JetStream for async processing                               |
+| `keycloak`       | Optional Keycloak for OIDC (`quarkus.oidc.*` config)                       |
+| `ingress`        | Class, TLS, hosts, annotations                                             |
+| `monitoring`     | Prometheus `ServiceMonitor` + optional Grafana dashboard ConfigMap         |
 
 ### 3.3 Install Example
 
@@ -348,7 +349,7 @@ graph LR
 graph LR
     A["labsai/EDDI<br/>release tag v6.x.y"] -->|GitHub Action| B["Update Chart.yaml<br/>appVersion: 6.x.y"]
     B --> C["Open PR on<br/>labsai/eddi-helm"]
-    C -->|helm lint passes| D["Merge → Package<br/>push to GHCR"]
+    C -->|helm lint passes| D["Merge → Workflow<br/>push to GHCR"]
 ```
 
 ### 5.3 Workflow in `labsai/EDDI`: `.github/workflows/sync-sdk.yml`
@@ -401,24 +402,28 @@ jobs:
 ## 6. Enterprise-Readiness Checklist
 
 ### Security
+
 - [ ] API key never logged (redacted in health check, redacted in debug logs)
 - [ ] TLS configuration support (`quarkus.eddi.tls.*`)
 - [ ] mTLS support for Kubernetes service mesh environments
 - [ ] Vault reference passthrough (`${vault:key}`) in API key property
 
 ### Testing
+
 - [ ] Unit tests: `EddiClient` facade (~30), `EddiMcpClient` wrappers (~20)
 - [ ] Integration tests: Testcontainers EDDI (~15), SSE streaming (~5), DevServices (~3)
 - [ ] Native image: `@QuarkusIntegrationTest` with `-Dnative`
 - [ ] Helm: `helm lint`, `helm template` rendering, `ct lint` (chart-testing)
 
 ### Documentation
+
 - [ ] Antora docs site (Quarkiverse standard, 7+ pages)
 - [ ] Getting Started: from zero to working SDK in 5 minutes
 - [ ] Configuration reference (auto-generated from `@ConfigMapping`)
 - [ ] Migration guide for each major version
 
 ### Compatibility
+
 - [ ] Quarkus 3.33 LTS + latest
 - [ ] EDDI with MongoDB backend
 - [ ] EDDI with PostgreSQL backend
@@ -429,14 +434,14 @@ jobs:
 
 ## 7. Phased Effort Estimate
 
-| Phase | What | Where | SP | Dependencies |
-|---|---|---|---|---|
-| **A** | Scaffolding + OpenAPI codegen + `EddiClient` facade + health + unit tests | `quarkiverse/quarkus-eddi` | 16 | EDDI v6 GA |
-| **B** | SSE streaming + DevServices + native image verification | `quarkiverse/quarkus-eddi` | 8 | Phase A |
-| **C** | `EddiMcpClient` + typed tool wrappers + tests | `quarkiverse/quarkus-eddi` | 5 | Phase A |
-| **D** | Helm chart + Kustomize overlays + lint CI | `labsai/eddi-helm` | 7 | Independent |
-| **E** | Sync pipeline + Antora docs + observability polish | All 3 repos | 8 | All phases |
-| | **Total** | | **44 SP** | |
+| Phase | What                                                                      | Where                      | SP        | Dependencies |
+| ----- | ------------------------------------------------------------------------- | -------------------------- | --------- | ------------ |
+| **A** | Scaffolding + OpenAPI codegen + `EddiClient` facade + health + unit tests | `quarkiverse/quarkus-eddi` | 16        | EDDI v6 GA   |
+| **B** | SSE streaming + DevServices + native image verification                   | `quarkiverse/quarkus-eddi` | 8         | Phase A      |
+| **C** | `EddiMcpClient` + typed tool wrappers + tests                             | `quarkiverse/quarkus-eddi` | 5         | Phase A      |
+| **D** | Helm chart + Kustomize overlays + lint CI                                 | `labsai/eddi-helm`         | 7         | Independent  |
+| **E** | Sync pipeline + Antora docs + observability polish                        | All 3 repos                | 8         | All phases   |
+|       | **Total**                                                                 |                            | **44 SP** |              |
 
 > [!TIP]
 > **Phase D (Helm) can start immediately** — it has no dependency on v6 GA or the Java SDK. It only needs the existing Docker image.
@@ -460,7 +465,7 @@ jobs:
     <version>6.0.0</version>
 </dependency>
 
-<!-- BOM (manages both) -->
+<!-- BOM (manages agenth) -->
 <dependency>
     <groupId>io.quarkiverse.eddi</groupId>
     <artifactId>quarkus-eddi-bom</artifactId>
@@ -471,6 +476,7 @@ jobs:
 ```
 
 Helm:
+
 ```bash
 helm install eddi oci://ghcr.io/labsai/charts/eddi --version 1.0.0
 ```

@@ -121,7 +121,7 @@ For the behavior rules, you have three possibilities (ordered by recommendation)
 }
 ```
 
-## ...say something based on what the bot previously said?&#x20;
+## ...say something based on what the agent previously said?&#x20;
 
 (Think of a form-like behavior, asking a couple of questions and sending these results somewhere.)
 
@@ -153,7 +153,5 @@ For the behavior rules, you have three possibilities (ordered by recommendation)
   ]
 }
 ```
-
-
 
 Have a question that is not covered? Drop us an email at contact@labs.ai, we are happy to enhance our documentation!

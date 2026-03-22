@@ -29,8 +29,8 @@ public class RestAuditStore implements IRestAuditStore {
     }
 
     @Override
-    public List<AuditEntry> getAuditTrailByBot(String agentId, Integer agentVersion, int skip, int limit) {
-        return auditStore.getEntriesByBot(agentId, agentVersion, skip, limit);
+    public List<AuditEntry> getAuditTrailByAgent(String agentId, Integer agentVersion, int skip, int limit) {
+        return auditStore.getEntriesByAgent(agentId, agentVersion, skip, limit);
     }
 
     @Override

@@ -2,11 +2,11 @@
 
 ## Supported Versions
 
-| Version | Supported          |
-|---------|--------------------|
-| 6.0.x   | ✅ Active development |
+| Version | Supported              |
+| ------- | ---------------------- |
+| 6.0.x   | ✅ Active development  |
 | 5.6.x   | 🔒 Security fixes only |
-| < 5.6   | ❌ End of life |
+| < 5.6   | ❌ End of life         |
 
 ## Reporting a Vulnerability
 
@@ -25,12 +25,12 @@ Instead, please report them privately via email:
 
 ### Response Timeline
 
-| Stage | Timeline |
-|-------|----------|
-| **Acknowledgment** | Within 48 hours |
-| **Initial triage** | Within 7 days |
-| **Status update** | Every 14 days until resolved |
-| **Fix release** | Depends on severity (critical: ASAP, high: 30 days, medium: 90 days) |
+| Stage              | Timeline                                                             |
+| ------------------ | -------------------------------------------------------------------- |
+| **Acknowledgment** | Within 48 hours                                                      |
+| **Initial triage** | Within 7 days                                                        |
+| **Status update**  | Every 14 days until resolved                                         |
+| **Fix release**    | Depends on severity (critical: ASAP, high: 30 days, medium: 90 days) |
 
 ## Disclosure Policy
 
@@ -59,7 +59,7 @@ We will credit you in the security advisory unless you prefer to remain anonymou
 
 - Third-party LLM API vulnerabilities (OpenAI, Anthropic, etc.)
 - User configuration errors (e.g., running without authentication)
-- Vulnerabilities in dependencies (report upstream; we monitor via Dependabot)
+- Vulnerabilities in dependencies (report upstream; we monitor via Dependaagent)
 - Social engineering attacks
 - Denial of service via expected API usage
 

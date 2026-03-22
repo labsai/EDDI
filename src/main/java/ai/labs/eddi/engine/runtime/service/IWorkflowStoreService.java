@@ -7,7 +7,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
  * @author ginccc
  */
 public interface IWorkflowStoreService {
-    WorkflowConfiguration getKnowledgePackage(String packageId, Integer packageVersion) throws ServiceException;
+    WorkflowConfiguration getKnowledgeWorkflow(String workflowId, Integer packageVersion) throws ServiceException;
 
-    DocumentDescriptor getPackageDocumentDescriptor(String packageId, Integer packageVersion) throws ServiceException;
+    DocumentDescriptor getWorkflowDocumentDescriptor(String workflowId, Integer packageVersion) throws ServiceException;
 }

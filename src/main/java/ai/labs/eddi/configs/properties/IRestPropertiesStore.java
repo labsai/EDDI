@@ -8,7 +8,7 @@ import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
-// @Api(value = "Bot Engine -> Properties", authorizations = {@Authorization(value = "eddi_auth")})
+// @Api(value = "Agent Engine -> Properties", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/propertiesstore/properties")
 @Tag(name = "03. Properties", description = "lifecycle extension for package")
 public interface IRestPropertiesStore {

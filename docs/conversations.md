@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Conversations** are the primary interaction mechanism in EDDI. Each conversation represents a stateful dialog session between a user and a bot, maintaining complete history, context, and state throughout the interaction.
+**Conversations** are the primary interaction mechanism in EDDI. Each conversation represents a stateful dialog session between a user and a agent, maintaining complete history, context, and state throughout the interaction.
 
 ### Key Concepts
 
@@ -15,42 +15,44 @@
 ### How Conversations Work in EDDI
 
 When you create a conversation:
+
 1. EDDI creates a new `IConversationMemory` object
 2. Assigns a unique conversation ID
-3. Links it to a specific bot and user
+3. Links it to a specific agent and user
 4. Initializes the first conversation step
 5. Returns the conversation ID for subsequent interactions
 
 Each message sent to a conversation:
+
 1. Loads the conversation memory from MongoDB/cache
-2. Executes the bot's lifecycle pipeline
+2. Executes the agent's lifecycle pipeline
 3. Updates the conversation memory with results
 4. Saves the updated memory
-5. Returns the bot's response
+5. Returns the agent's response
 
 > **Time Travel Feature**: EDDI has a powerful feature for conversations—the ability to go back in time using the `/undo` and `/redo` API endpoints!
 
 ## Working with Conversations
 
-In this section we will explain how to **send/receive messages** from a Chatbot. The first step is creating a `conversation`. Once you have the `conversation` `Id`, you can **send** messages via **`POST`** requests and **receive** responses via **`GET`** requests, while having the capacity to send context information through the body of the **POST** request.
+In this section we will explain how to **send/receive messages** from a Chatagent. The first step is creating a `conversation`. Once you have the `conversation` `Id`, you can **send** messages via **`POST`** requests and **receive** responses via **`GET`** requests, while having the capacity to send context information through the body of the **POST** request.
 
 ## Creating/initiating a conversation :
 
-### &#x20;Create a Conversation with a Chatbot REST API Endpoint
+### &#x20;Create a Conversation with a Chatagent REST API Endpoint
 
 | Element           | Tags                                                                                             |
 | ----------------- | ------------------------------------------------------------------------------------------------ |
 | **HTTP Method**   | `POST`                                                                                           |
-| **API endpoint**  | `/bots/{environment}/{botId}`                                                                    |
+| **API endpoint**  | `/agents/{environment}/{agentId}`                                                                |
 | **{environment}** | (`Path` **parameter**):`String` Deployment environment (e.g: `restricted`,`unrestricted`,`test`) |
-| {**botId**}       | (`Path` **parameter**):`String Id` of the bot that you wish to **start conversation with**.      |
+| {**agentId**}     | (`Path` **parameter**):`String Id` of the agent that you wish to **start conversation with**.    |
 
 ### Response Model
 
 ```javascript
 {
-  "botId": "string",
-  "botVersion": Integer,
+  "agentId": "string",
+  "agentVersion": Integer,
   "userId": "string",
   "environment": "string",
   "conversationState": "string",
@@ -88,10 +90,10 @@ In this section we will explain how to **send/receive messages** from a Chatbot.
 
 | Element                        | Tags                                                                                                                                                                                                                                                                               |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **botId**                      | (`String`) The id of the bot that sent the reply.                                                                                                                                                                                                                                  |
-| botVersion                     | (`integer`) The version of the bot that sent the reply.                                                                                                                                                                                                                            |
-| userId                         | (`String`) The id of the user who interacted with the bot.                                                                                                                                                                                                                         |
-| environment                    | (`String`) the name of the environment where the bot is deployed                                                                                                                                                                                                                   |
+| **agentId**                    | (`String`) The id of the agent that sent the reply.                                                                                                                                                                                                                                |
+| agentVersion                   | (`integer`) The version of the agent that sent the reply.                                                                                                                                                                                                                          |
+| userId                         | (`String`) The id of the user who interacted with the agent.                                                                                                                                                                                                                       |
+| environment                    | (`String`) the name of the environment where the agent is deployed                                                                                                                                                                                                                 |
 | conversationState              | <p>(<code>String</code>) The state of the current conversation, could be:</p><p><code>READY</code>, </p><p><code>IN_PROGRESS</code>, </p><p><code>ENDED</code>, </p><p><code>EXECUTION_INTERRUPTED</code>, </p><p><code>ERROR</code></p>                                           |
 | redoCount                      | (`integer`) if undo has been performed, this number indicates how many times redo can be done (=times undo has been triggered)                                                                                                                                                     |
 | conversationOutputs            | (`Array`: <`conversationOutput`>) Array of `conversationOutput`                                                                                                                                                                                                                    |
@@ -101,7 +103,7 @@ In this section we will explain how to **send/receive messages** from a Chatbot.
 | conversationOutput.actions     | (`Array`: <`String`>) an array of the `actions` involved in the creation of this reply (output).                                                                                                                                                                                   |
 | conversationOutput.httpCalls   | (`Array`: <`JsonObject`>) an array of the `httpCalls` objects involved in the creation of this reply (output).                                                                                                                                                                     |
 | conversationOutput.properties  | (`Array`: <`JsonObject`>) the list of available properties in the current conversation.                                                                                                                                                                                            |
-| conversationOutput.output      | (`String`) The final bot's output                                                                                                                                                                                                                                                  |
+| conversationOutput.output      | (`String`) The final agent's output                                                                                                                                                                                                                                                |
 | conversationProperties         | (`Array`: <>) Array of `conversationProperty`, <`nameOfProperty`> is a dynamic value that represents the name of the property                                                                                                                                                      |
 | \<nameOfProperty>.name         | (`String`) name of the property.                                                                                                                                                                                                                                                   |
 | \<nameOfProperty>.value        | (`String`\|`JsonObject`) value of the property.                                                                                                                                                                                                                                    |
@@ -117,8 +119,8 @@ In this section we will explain how to **send/receive messages** from a Chatbot.
 
 ```javascript
 {
-  "botId": "5bf5418c46e0fb000b7636d0",
-  "botVersion": 10,
+  "agentId": "5bf5418c46e0fb000b7636d0",
+  "agentVersion": 10,
   "userId": "anonymous-zj1p1GDtM5",
   "environment": "unrestricted",
   "conversationState": "READY",
@@ -258,13 +260,13 @@ In this section we will explain how to **send/receive messages** from a Chatbot.
 }
 ```
 
-The `conversationId` will be provided through the **`location`** **HTTP Header** of the response,  you will use that later to submit messages to the Chatbot to maintain a conversation.
+The `conversationId` will be provided through the **`location`** **HTTP Header** of the response, you will use that later to submit messages to the Chatagent to maintain a conversation.
 
 ### Example _:_
 
 _Request URL:_
 
-`http://localhost:7070/bots/unrestricted/5ad2ab182de29719b44a792a`
+`http://localhost:7070/agents/unrestricted/5ad2ab182de29719b44a792a`
 
 _Response Body_
 
@@ -293,14 +295,14 @@ _Response Headers_
 
 ### Send a message
 
-### Send message in a conversation with a Chatbot REST API Endpoint
+### Send message in a conversation with a Chatagent REST API Endpoint
 
 | Element               | Tags                                                                                                                                                                                                                                                                   |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | HTTP Method           | `POST`                                                                                                                                                                                                                                                                 |
-| API endpoint          | `/bots/{environment}/{botId}/{conversationId}`                                                                                                                                                                                                                         |
+| API endpoint          | `/agents/{environment}/{agentId}/{conversationId}`                                                                                                                                                                                                                     |
 | {environment}         | (`Path` **parameter**):`String` Deployment environment (e.g: `restricted`,`unrestricted`,`test`)                                                                                                                                                                       |
-| botId                 | (`Path` **parameter**):`String Id` of the bot that you wish to **continue a conversation with.**                                                                                                                                                                       |
+| agentId               | (`Path` **parameter**):`String Id` of the agent that you wish to **continue a conversation with.**                                                                                                                                                                     |
 | conversationId        | (`Path` **parameter**): `String Id` of the **conversation** that you wish to **send** the message to.                                                                                                                                                                  |
 | returnDetailed        | (`Query` **parameter**):`Boolean` - **Default** : `false`                                                                                                                                                                                                              |
 | returnCurrentStepOnly | (`Query` **parameter**):`Boolean` - **Default** : `true`                                                                                                                                                                                                               |
@@ -310,7 +312,7 @@ _Response Headers_
 
 _Request URL_
 
-`http://localhost:7070/bots/restricted/5aaf90e29f7dd421ac3c7dd4/5add1fe8a081a228a0588d1c?returnDetailed=false&returnCurrentStepOnly=true`
+`http://localhost:7070/agents/restricted/5aaf90e29f7dd421ac3c7dd4/5add1fe8a081a228a0588d1c?returnDetailed=false&returnCurrentStepOnly=true`
 
 _Request Body_
 
@@ -329,8 +331,8 @@ Response Body
 
 ```javascript
 {
-  "botId": "5aaf90e29f7dd421ac3c7dd4",
-  "botVersion": 1,
+  "agentId": "5aaf90e29f7dd421ac3c7dd4",
+  "agentVersion": 1,
   "environment": "restricted",
   "conversationState": "READY",
   "redoCacheSize": 0,
@@ -363,14 +365,14 @@ Response Headers
 
 ### Receive a message
 
-### Receive message in a conversation with a Chatbot REST API Endpoint
+### Receive message in a conversation with a Chatagent REST API Endpoint
 
 | Element          | Tags                                                                                                         |
 | ---------------- | ------------------------------------------------------------------------------------------------------------ |
 | HTTP Method      | `GET`                                                                                                        |
-| API endpoint     | `/bots/{environment}/{botId}/{conversationId}`                                                               |
+| API endpoint     | `/agents/{environment}/{agentId}/{conversationId}`                                                           |
 | {environment}    | (`Path` **parameter**):`String` Deployment environment (e.g: `restricted,unrestricted,test`)                 |
-| {botId}          | (`Path` **parameter**):`String Id` of the bot that you wish to **continue a conversation** **with**.         |
+| {agentId}        | (`Path` **parameter**):`String Id` of the agent that you wish to **continue a conversation** **with**.       |
 | {conversationId} | (`Path` **parameter**): `String Id` of the **conversation** that you wish to **receive** a the message from. |
 | returnDetailed   | (`Query` **parameter**):`Boolean` - **Default** : `false`                                                    |
 |                  |                                                                                                              |
@@ -379,14 +381,14 @@ Response Headers
 
 _Request URL:_
 
-`http://localhost:7070/bots/unrestricted/5aaf90e29f7dd421ac3c7dd4/5add1fe8a081a228a0588d1c?returnDetailed=false`
+`http://localhost:7070/agents/unrestricted/5aaf90e29f7dd421ac3c7dd4/5add1fe8a081a228a0588d1c?returnDetailed=false`
 
 _Response Body_
 
 ```javascript
 {
-  "botId": "5aaf90e29f7dd421ac3c7dd4",
-  "botVersion": 1,
+  "agentId": "5aaf90e29f7dd421ac3c7dd4",
+  "agentVersion": 1,
   "environment": "restricted",
   "conversationState": "READY",
   "redoCacheSize": 0,
@@ -455,14 +457,16 @@ Response Headers
 ## Time Travel: Undo and Redo
 
 One of EDDI's most powerful features is the ability to **go back in time** within a conversation. The undo/redo functionality allows you to step backward and forward through conversation history, perfect for:
+
 - **User Correction**: User made a mistake and wants to retry
 - **Testing**: Developers testing different conversation paths
-- **Debugging**: Analyzing bot behavior at specific steps
+- **Debugging**: Analyzing agent behavior at specific steps
 - **User Experience**: Allowing users to explore different options
 
 ### How It Works
 
 EDDI maintains a **redo cache** of undone conversation steps. When you undo a step, it's moved to this cache. You can then either:
+
 - Continue the conversation (clears redo cache)
 - Redo the step (restores it from cache)
 
@@ -478,33 +482,36 @@ Step 1 → Step 2 → Step 3 (current)
 
 #### Check if Undo is Available
 
-| Element | Value |
-|---------|-------|
-| HTTP Method | `GET` |
-| API Endpoint | `/bots/{environment}/{botId}/undo/{conversationId}` |
-| Response | `true` if undo is available, `false` otherwise |
+| Element      | Value                                                   |
+| ------------ | ------------------------------------------------------- |
+| HTTP Method  | `GET`                                                   |
+| API Endpoint | `/agents/{environment}/{agentId}/undo/{conversationId}` |
+| Response     | `true` if undo is available, `false` otherwise          |
 
 **Example:**
+
 ```bash
-curl -X GET "http://localhost:7070/bots/unrestricted/BOT_ID/undo/CONV_ID"
+curl -X GET "http://localhost:7070/agents/unrestricted/AGENT_ID/undo/CONV_ID"
 ```
 
 **Response:**
+
 ```json
 true
 ```
 
 #### Perform Undo
 
-| Element | Value |
-|---------|-------|
-| HTTP Method | `POST` |
-| API Endpoint | `/bots/{environment}/{botId}/undo/{conversationId}` |
-| Response | HTTP 200 (no content) |
+| Element      | Value                                                   |
+| ------------ | ------------------------------------------------------- |
+| HTTP Method  | `POST`                                                  |
+| API Endpoint | `/agents/{environment}/{agentId}/undo/{conversationId}` |
+| Response     | HTTP 200 (no content)                                   |
 
 **Example:**
+
 ```bash
-curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/undo/CONV_ID"
+curl -X POST "http://localhost:7070/agents/unrestricted/AGENT_ID/undo/CONV_ID"
 ```
 
 **Response:** HTTP 200 (No Content)
@@ -515,33 +522,36 @@ curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/undo/CONV_ID"
 
 #### Check if Redo is Available
 
-| Element | Value |
-|---------|-------|
-| HTTP Method | `GET` |
-| API Endpoint | `/bots/{environment}/{botId}/redo/{conversationId}` |
-| Response | `true` if redo is available, `false` otherwise |
+| Element      | Value                                                   |
+| ------------ | ------------------------------------------------------- |
+| HTTP Method  | `GET`                                                   |
+| API Endpoint | `/agents/{environment}/{agentId}/redo/{conversationId}` |
+| Response     | `true` if redo is available, `false` otherwise          |
 
 **Example:**
+
 ```bash
-curl -X GET "http://localhost:7070/bots/unrestricted/BOT_ID/redo/CONV_ID"
+curl -X GET "http://localhost:7070/agents/unrestricted/AGENT_ID/redo/CONV_ID"
 ```
 
 **Response:**
+
 ```json
 true
 ```
 
 #### Perform Redo
 
-| Element | Value |
-|---------|-------|
-| HTTP Method | `POST` |
-| API Endpoint | `/bots/{environment}/{botId}/redo/{conversationId}` |
-| Response | HTTP 200 (no content) |
+| Element      | Value                                                   |
+| ------------ | ------------------------------------------------------- |
+| HTTP Method  | `POST`                                                  |
+| API Endpoint | `/agents/{environment}/{agentId}/redo/{conversationId}` |
+| Response     | HTTP 200 (no content)                                   |
 
 **Example:**
+
 ```bash
-curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/redo/CONV_ID"
+curl -X POST "http://localhost:7070/agents/unrestricted/AGENT_ID/redo/CONV_ID"
 ```
 
 **Response:** HTTP 200 (No Content)
@@ -552,33 +562,33 @@ curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/redo/CONV_ID"
 
 ```bash
 # 1. Start conversation
-curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID" -d '{}'
+curl -X POST "http://localhost:7070/agents/unrestricted/AGENT_ID" -d '{}'
 # Returns: {"conversationId": "CONV_ID"}
 
 # 2. Send message
-curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/CONV_ID" \
+curl -X POST "http://localhost:7070/agents/unrestricted/AGENT_ID/CONV_ID" \
   -H "Content-Type: application/json" \
   -d '{"input": "Hello"}'
-# Bot responds: "Hi! How can I help?"
+# Agent responds: "Hi! How can I help?"
 
 # 3. Send another message
-curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/CONV_ID" \
+curl -X POST "http://localhost:7070/agents/unrestricted/AGENT_ID/CONV_ID" \
   -H "Content-Type: application/json" \
   -d '{"input": "Book a flight"}'
-# Bot responds: "Where would you like to go?"
+# Agent responds: "Where would you like to go?"
 
 # 4. Oops, user meant hotel not flight! Undo last step
-curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/undo/CONV_ID"
+curl -X POST "http://localhost:7070/agents/unrestricted/AGENT_ID/undo/CONV_ID"
 # Now back to: "Hi! How can I help?"
 
 # 5. Try again with correct input
-curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/CONV_ID" \
+curl -X POST "http://localhost:7070/agents/unrestricted/AGENT_ID/CONV_ID" \
   -H "Content-Type: application/json" \
   -d '{"input": "Book a hotel"}'
-# Bot responds: "Which city?"
+# Agent responds: "Which city?"
 
 # 6. Wait, maybe flight was right. Check if redo is available
-curl -X GET "http://localhost:7070/bots/unrestricted/BOT_ID/redo/CONV_ID"
+curl -X GET "http://localhost:7070/agents/unrestricted/AGENT_ID/redo/CONV_ID"
 # Returns: false (because we sent a new message, clearing redo cache)
 ```
 
@@ -593,7 +603,7 @@ Step 1 → Step 2 → Step 3
 After undo:
 Step 1 → Step 2 | [Step 3 cached]
          ↓ can redo
-         
+
 After new message:
 Step 1 → Step 2 → Step 4
          ↓ redo cache cleared (Step 3 lost)
@@ -618,22 +628,25 @@ The conversation response includes `redoCacheSize` field:
 ### Use Cases
 
 **1. User Correction**
+
 ```
 User: "Book me a table at 7pm"
-Bot: "For how many people?"
+Agent: "For how many people?"
 User: "Wait, I meant 8pm"
 → Undo and retry
 ```
 
 **2. Exploring Options**
+
 ```
 User: "Show me flights to Paris"
-Bot: [Shows flights]
+Agent: [Shows flights]
 User: "Actually, let me see hotels instead"
 → Undo and try different path
 ```
 
-**3. Testing Bot Behavior**
+**3. Testing Agent Behavior**
+
 ```
 Developer tests:
 1. Input A → Response X
@@ -660,16 +673,16 @@ Developer tests:
 
 ## Related API Endpoints
 
-- `POST /bots/{environment}/{botId}` - Start conversation
-- `POST /bots/{environment}/{botId}/{conversationId}` - Send message
-- `GET /bots/{environment}/{botId}/{conversationId}` - Get conversation state
-- `POST /bots/{environment}/{botId}/undo/{conversationId}` - Undo last step
-- `POST /bots/{environment}/{botId}/redo/{conversationId}` - Redo last step
-- `GET /bots/{environment}/{botId}/undo/{conversationId}` - Check undo availability
-- `GET /bots/{environment}/{botId}/redo/{conversationId}` - Check redo availability
+- `POST /agents/{environment}/{agentId}` - Start conversation
+- `POST /agents/{environment}/{agentId}/{conversationId}` - Send message
+- `GET /agents/{environment}/{agentId}/{conversationId}` - Get conversation state
+- `POST /agents/{environment}/{agentId}/undo/{conversationId}` - Undo last step
+- `POST /agents/{environment}/{agentId}/redo/{conversationId}` - Redo last step
+- `GET /agents/{environment}/{agentId}/undo/{conversationId}` - Check undo availability
+- `GET /agents/{environment}/{agentId}/redo/{conversationId}` - Check redo availability
 
-## Sample Bot
+## Sample Agent
 
-{% file src=".gitbook/assets/weather_bot_v2.zip" %}
-Weather-bot-v2.zip
+{% file src=".gitbook/assets/weather_agent_v2.zip" %}
+Weather-agent-v2.zip
 {% endfile %}

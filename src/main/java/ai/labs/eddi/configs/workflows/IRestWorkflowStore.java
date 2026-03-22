@@ -17,10 +17,10 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (3) Packages", authorizations =
+// @Api(value = "Configurations -> (3) Workflows", authorizations =
 // {@Authorization(value = "eddi_auth")})
 @Path("/WorkflowStore/packages")
-@Tag(name = "06. Packages", description = "packages for bots")
+@Tag(name = "06. Workflows", description = "packages for agents")
 public interface IRestWorkflowStore extends IRestVersionInfo {
         String resourceURI = "eddi://ai.labs.package/WorkflowStore/packages/";
 
@@ -35,7 +35,7 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
         @Path("descriptors")
         @Produces(MediaType.APPLICATION_JSON)
         @Operation(description = "Read list of package descriptors.")
-        List<DocumentDescriptor> readPackageDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
+        List<DocumentDescriptor> readWorkflowDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
                         @QueryParam("index") @DefaultValue("0") Integer index,
                         @QueryParam("limit") @DefaultValue("20") Integer limit);
 
@@ -44,7 +44,7 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
         @Consumes(MediaType.TEXT_PLAIN)
         @Produces(MediaType.APPLICATION_JSON)
         @Operation(description = "Read list of package descriptors including a given resourceUri.")
-        List<DocumentDescriptor> readPackageDescriptors(
+        List<DocumentDescriptor> readWorkflowDescriptors(
                         @QueryParam("filter") @DefaultValue("") String filter,
                         @QueryParam("index") @DefaultValue("0") Integer index,
                         @QueryParam("limit") @DefaultValue("20") Integer limit,
@@ -55,14 +55,14 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
         @Path("/{id}")
         @Produces(MediaType.APPLICATION_JSON)
         @Operation(description = "Read package.")
-        WorkflowConfiguration readPackage(@PathParam("id") String id,
+        WorkflowConfiguration readWorkflow(@PathParam("id") String id,
                         @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
 
         @PUT
         @Path("/{id}")
         @Consumes(MediaType.APPLICATION_JSON)
         @Operation(description = "Update package.")
-        Response updatePackage(@PathParam("id") String id,
+        Response updateWorkflow(@PathParam("id") String id,
                         @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
                         WorkflowConfiguration workflowConfiguration);
 
@@ -70,42 +70,36 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
         @Path("/{id}/updateResourceUri")
         @Consumes(MediaType.TEXT_PLAIN)
         @Operation(description = "Update references to other resources within this package resource.")
-        Response updateResourceInPackage(@PathParam("id") String id,
+        Response updateResourceInWorkflow(@PathParam("id") String id,
                         @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
                         URI resourceURI);
 
         @POST
         @Consumes(MediaType.APPLICATION_JSON)
         @Operation(description = "Create package.")
-        Response createPackage(WorkflowConfiguration workflowConfiguration);
+        Response createWorkflow(WorkflowConfiguration workflowConfiguration);
 
         @POST
         @Path("/{id}")
         @Operation(description = "Duplicate this package.")
-        Response duplicatePackage(@PathParam("id") String id,
+        Response duplicateWorkflow(@PathParam("id") String id,
                         @QueryParam("version") Integer version,
                         @QueryParam("deepCopy") @DefaultValue("false") Boolean deepCopy);
 
         @DELETE
         @Path("/{id}")
-        @Operation(
-                summary = "Delete package",
-                description = "Delete a package configuration. When cascade=true, also deletes extension "
+        @Operation(summary = "Delete package", description = "Delete a workflow configuration. When cascade=true, also deletes extension "
                         + "resources referenced by this package: behavior sets, HTTP calls, output sets, "
                         + "langchains, property setters, and parser dictionaries. "
                         + "Shared resources (used by other packages) are skipped. "
-                        + "Partial failures are logged but do not prevent the package from being deleted.")
-        @APIResponse(responseCode = "200", description = "Package deleted successfully.")
-        @APIResponse(responseCode = "404", description = "Package not found.")
-        Response deletePackage(@PathParam("id") String id,
-                        @Parameter(name = "version", required = true, example = "1",
-                                description = "Version of the package to delete.")
-                        @QueryParam("version") Integer version,
+                        + "Partial failures are logged but do not prevent the workflow from being deleted.")
+        @APIResponse(responseCode = "200", description = "Workflow deleted successfully.")
+        @APIResponse(responseCode = "404", description = "Workflow not found.")
+        Response deleteWorkflow(@PathParam("id") String id,
+                        @Parameter(name = "version", required = true, example = "1", description = "Version of the workflow to delete.") @QueryParam("version") Integer version,
                         @Parameter(description = "If true, permanently remove from database. "
-                                + "If false (default), soft-delete only.")
-                        @QueryParam("permanent") @DefaultValue("false") Boolean permanent,
+                                        + "If false (default), soft-delete only.") @QueryParam("permanent") @DefaultValue("false") Boolean permanent,
                         @Parameter(description = "If true, also delete all extension resources "
-                                + "referenced by this package (behavior, httpcalls, output, langchain, "
-                                + "propertysetter, parser dictionaries).")
-                        @QueryParam("cascade") @DefaultValue("false") Boolean cascade);
+                                        + "referenced by this package (behavior, httpcalls, output, langchain, "
+                                        + "propertysetter, parser dictionaries).") @QueryParam("cascade") @DefaultValue("false") Boolean cascade);
 }

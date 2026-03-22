@@ -94,7 +94,7 @@ public class ApiContractIT extends BaseIntegrationIT {
         @Test
         @DisplayName("conversation log should have correct structure")
         void conversationLog_hasCorrectStructure() throws Exception {
-                ResourceId agentId = createAndDeployBot();
+                ResourceId agentId = createAndDeployAgent();
                 ResourceId convId = createConversation(agentId.id(), "contractTestUser");
 
                 sendUserInput(agentId.id(), convId.id(), "hello", false, false);
@@ -116,7 +116,7 @@ public class ApiContractIT extends BaseIntegrationIT {
         @Test
         @DisplayName("detailed conversation log should include conversationOutputs")
         void detailedConversationLog_hasOutputs() throws Exception {
-                ResourceId agentId = createAndDeployBot();
+                ResourceId agentId = createAndDeployAgent();
                 ResourceId convId = createConversation(agentId.id(), "contractTestUser2");
 
                 Response response = sendUserInput(agentId.id(), convId.id(), "hello", true, false);
@@ -129,9 +129,9 @@ public class ApiContractIT extends BaseIntegrationIT {
         }
 
         @Test
-        @DisplayName("bot store should return descriptors list")
-        void botStore_listDescriptors() {
-                given().get("/AgentStore/bots/descriptors")
+        @DisplayName("agent store should return descriptors list")
+        void agentStore_listDescriptors() {
+                given().get("/AgentStore/agents/descriptors")
                                 .then().assertThat()
                                 .statusCode(200)
                                 .contentType(ContentType.JSON);
@@ -157,7 +157,7 @@ public class ApiContractIT extends BaseIntegrationIT {
 
         // ==================== Helpers ====================
 
-        private ResourceId createAndDeployBot() throws Exception {
+        private ResourceId createAndDeployAgent() throws Exception {
                 String dictionary = load("agentengine/dictionary.json");
                 String behavior = load("agentengine/rules.json");
                 String output = load("agentengine/output.json");
@@ -188,12 +188,12 @@ public class ApiContractIT extends BaseIntegrationIT {
                                                 }""",
                                 locationDictionary, locationBehavior, locationOutput);
 
-                String locationPackage = createResource(packageBody, "/WorkflowStore/packages");
-                String botBody = String.format("""
-                                {"packages": ["%s"]}""", locationPackage);
-                String botLocation = createResource(botBody, "/AgentStore/bots");
+                String locationWorkflow = createResource(packageBody, "/WorkflowStore/packages");
+                String agentBody = String.format("""
+                                {"packages": ["%s"]}""", locationWorkflow);
+                String agentLocation = createResource(agentBody, "/AgentStore/agents");
 
-                ResourceId agentId = extractResourceId(botLocation);
+                ResourceId agentId = extractResourceId(agentLocation);
                 deployAgent(agentId.id(), agentId.version());
                 return agentId;
         }

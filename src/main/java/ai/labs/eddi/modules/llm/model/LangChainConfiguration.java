@@ -7,46 +7,47 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Unified configuration for LangchainTask supporting both legacy and declarative agent modes.
+ * Unified configuration for LangchainTask supporting agenth legacy and
+ * declarative agent modes.
  *
  * <p><strong>Legacy Mode (Backward Compatible):</strong></p>
  * <pre>{@code
  * {
- *   "tasks": [
- *     {
- *       "actions": ["help"],
- *       "type": "openai",
- *       "parameters": {
- *         "systemMessage": "You are helpful",
- *         "addToOutput": "true"
- *       }
- *     }
- *   ]
+ * "tasks": [
+ * {
+ * "actions": ["help"],
+ * "type": "openai",
+ * "parameters": {
+ * "systemMessage": "You are helpful",
+ * "addToOutput": "true"
+ * }
+ * }
+ * ]
  * }
  * }</pre>
  *
  * <p><strong>Declarative Agent Mode (Enhanced):</strong></p>
  * <pre>{@code
  * {
- *   "tasks": [
- *     {
- *       "actions": ["help"],
- *       "type": "openai",
- *       "parameters": {
- *         "systemMessage": "You are helpful"
- *       },
- *       "enableBuiltInTools": true,
- *       "tools": ["eddi://ai.labs.httpcalls/weather?version=1"],
- *       "maxBudgetPerConversation": 1.0
- *     }
- *   ]
+ * "tasks": [
+ * {
+ * "actions": ["help"],
+ * "type": "openai",
+ * "parameters": {
+ * "systemMessage": "You are helpful"
+ * },
+ * "enableBuiltInTools": true,
+ * "tools": ["eddi://ai.labs.httpcalls/weather?version=1"],
+ * "maxBudgetPerConversation": 1.0
+ * }
+ * ]
  * }
  * }</pre>
  */
 public record LangChainConfiguration(List<Task> tasks) {
 
     /**
-     * Task configuration supporting both simple chat and advanced agent features.
+     * Task configuration supporting agenth simple chat and advanced agent features.
      * The task automatically switches to agent mode when tools are configured.
      */
     public static class Task {
@@ -105,7 +106,7 @@ public record LangChainConfiguration(List<Task> tasks) {
         /**
          * Whitelist of specific built-in tools to enable.
          * Options: "calculator", "datetime", "websearch", "dataformatter",
-         *          "webscraper", "textsummarizer", "pdfreader", "weather"
+         * "webscraper", "textsummarizer", "pdfreader", "weather"
          */
         private List<String> builtInToolsWhitelist;
 
@@ -160,8 +161,8 @@ public record LangChainConfiguration(List<Task> tasks) {
          */
         public boolean isAgentMode() {
             return (tools != null && !tools.isEmpty()) ||
-                   (enableBuiltInTools != null && enableBuiltInTools) ||
-                   (mcpServers != null && !mcpServers.isEmpty());
+                    (enableBuiltInTools != null && enableBuiltInTools) ||
+                    (mcpServers != null && !mcpServers.isEmpty());
         }
 
         /**

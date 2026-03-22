@@ -27,28 +27,28 @@ private final Map<String, BlockingQueue<Callable<Void>>> conversationQueues = ne
 
 ---
 
-#### `BotFactory` — In-Memory Bot Registry
+#### `AgentFactory` — In-Memory Agent Registry
 
-[BotFactory.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/engine/runtime/internal/BotFactory.java)
+[AgentFactory.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/engine/runtime/internal/AgentFactory.java)
 
 ```java
-// Current: In-memory map of deployed bots per environment
-private final Map<Deployment.Environment, ConcurrentHashMap<BotId, IBot>> environments;
+// Current: In-memory map of deployed agents per environment
+private final Map<Deployment.Environment, ConcurrentHashMap<AgentId, IAgent>> environments;
 ```
 
 **Problems:**
 
-- **No cross-instance sync**: If instance A deploys a bot, instance B doesn't know about it
-- **Cold-start penalty**: All bots must be re-deployed after every restart
+- **No cross-instance sync**: If instance A deploys a agent, instance B doesn't know about it
+- **Cold-start penalty**: All agents must be re-deployed after every restart
 - ~~**No hot-swap**~~: ✅ _Already handled_ — Multiple versions run in parallel. New conversations start with the newest version, allowing graceful transitions for breaking changes within ongoing conversations.
 
 **v6 Proposal:** Deployment state is already persistent (auto-deploy on startup works). Remaining gap: **cross-instance sync** — use pub/sub (via message queue) to broadcast deployment events when scaling horizontally.
 
 ---
 
-#### `RestBotEngine` — 668-Line God-Class
+#### `RestAgentEngine` — 668-Line God-Class
 
-[RestBotEngine.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/engine/internal/RestBotEngine.java) — 35 methods mixing REST endpoints, service logic, metrics, caching, and conversation orchestration.
+[RestAgentEngine.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/engine/internal/RestAgentEngine.java) — 35 methods mixing REST endpoints, service logic, metrics, caching, and conversation orchestration.
 
 **Problems:**
 
@@ -76,7 +76,7 @@ The pipeline is strictly sequential: `Parser → BehaviorRules → HttpCalls →
 - **No parallel task execution**: Can't run HttpCalls and LangChain simultaneously when they're independent
 - **No conditional branching**: Can't skip tasks based on conditions (only STOP_CONVERSATION exists)
 - **No task retry/circuit-breaker**: If an LLM call fails, the entire pipeline fails
-- **No task timeout**: A stuck LLM call blocks the conversation indefinitely (only bot-level 60s timeout)
+- **No task timeout**: A stuck LLM call blocks the conversation indefinitely (only agent-level 60s timeout)
 - **No task priority/ordering hints**: Tasks execute in insertion order only
 
 **v6 Proposal:** Introduce a DAG (Directed Acyclic Graph) execution model:
@@ -178,9 +178,9 @@ The current caching layer uses Infinispan Embedded with 4 custom classes (`Cache
 
 ## Part 2: MCP (Model Context Protocol) Integration
 
-### 2.1 EDDI as MCP Server — Exposing Bots as Tools/Resources
+### 2.1 EDDI as MCP Server — Exposing Agents as Tools/Resources
 
-EDDI should expose its capabilities via MCP, making every bot addressable as an MCP tool:
+EDDI should expose its capabilities via MCP, making every agent addressable as an MCP tool:
 
 ```
 MCP Client (IDE, Claude Desktop, etc.)
@@ -188,21 +188,21 @@ MCP Client (IDE, Claude Desktop, etc.)
        ▼ (MCP Protocol - JSON-RPC 2.0)
    EDDI MCP Server
        │
-       ├── Tool: "talk_to_bot" (botId, message) → response
-       ├── Tool: "create_conversation" (botId, environment) → conversationId
-       ├── Tool: "list_bots" () → [{id, name, status}]
-       ├── Resource: "bot://botId/config" → bot configuration JSON
+       ├── Tool: "talk_to_agent" (agentId, message) → response
+       ├── Tool: "create_conversation" (agentId, environment) → conversationId
+       ├── Tool: "list_agents" () → [{id, name, status}]
+       ├── Resource: "agent://agentId/config" → agent configuration JSON
        └── Resource: "conversation://convId/memory" → conversation state
 ```
 
-**Implementation:** Use the [MCP Java SDK](https://github.com/modelcontextprotocol/java-sdk) to build an `McpServer` that wraps the existing `ConversationService` (after extracting it from `RestBotEngine`). Support both Stdio transport (for IDE plugins) and SSE transport (for web clients).
+**Implementation:** Use the [MCP Java SDK](https://github.com/modelcontextprotocol/java-sdk) to build an `McpServer` that wraps the existing `ConversationService` (after extracting it from `RestAgentEngine`). Support agenth Stdio transport (for IDE plugins) and SSE transport (for web clients).
 
-### 2.2 Bots Consuming MCP — Using External Tools via MCP
+### 2.2 Agents Consuming MCP — Using External Tools via MCP
 
-EDDI bots should be able to discover and invoke tools from external MCP servers:
+EDDI agents should be able to discover and invoke tools from external MCP servers:
 
 ```
-EDDI Bot
+EDDI Agent
   ├── Built-in Tools (Calculator, WebSearch, etc.)
   ├── HTTP Call Tools (configured httpcalls)
   └── MCP Tools (discovered from external MCP servers)
@@ -226,20 +226,20 @@ EDDI Bot
 }
 ```
 
-### 2.3 Bot-to-Bot Communication via MCP
+### 2.3 Agent-to-Agent Communication via MCP
 
-One EDDI bot talking to another EDDI bot as a tool:
+One EDDI agent talking to another EDDI agent as a tool:
 
 ```
-User → Bot A (orchestrator)
-           ├── MCP Call → Bot B (specialist: customer data)
-           ├── MCP Call → Bot C (specialist: billing)
+User → Agent A (orchestrator)
+           ├── MCP Call → Agent B (specialist: customer data)
+           ├── MCP Call → Agent C (specialist: billing)
            └── Combines results → Response to User
 ```
 
 ---
 
-## Part 3: Multi-Bot Orchestration
+## Part 3: Multi-Agent Orchestration
 
 ### 3.1 Parallel Model Execution
 
@@ -300,7 +300,7 @@ Round 1:
 Round 2 (each reads others' Round 1 output):
   ├── Architecture Expert → "Acknowledging DevOps concerns, I suggest..."
   ├── DevOps Expert → "Architecture Expert makes a good point about..."
-  └── Business Expert → "Given both perspectives, the ROI calculation..."
+  └── Business Expert → "Given agenth perspectives, the ROI calculation..."
 
 Final: Moderator Agent → Synthesized consensus opinion
 ```
@@ -317,14 +317,14 @@ Final: Moderator Agent → Synthesized consensus opinion
 
 ## Part 4: OpenClaw-Inspired Features
 
-| OpenClaw Feature                  | EDDI v6 Adaptation                                                                                                                                                                                         |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Persistent Memory**             | Long-term user memory beyond conversation (user preferences, past interactions, learned facts). Store in dedicated MongoDB collection or vector DB. Make accessible to all bots for that user.             |
-| **Heartbeat / Proactive Actions** | Scheduled bot actions (daily summaries, reminders, check-ins). Use Quarkus `@Scheduled` to trigger bots periodically. Configure per-bot: `"heartbeat": { "cron": "0 9 * * *", "action": "daily_summary" }` |
-| **Self-Improving Skills**         | Bots that learn from interactions: track which tool calls succeed/fail, adjust prompts based on user feedback, accumulate FAQ from conversations.                                                          |
-| **Multi-Channel Messaging**       | Beyond HTTP — WhatsApp, Telegram, Slack, Discord adapters. EDDI acts as the routing hub. Each channel adapter translates to/from EDDI's conversation API.                                                  |
-| **Plugin Architecture**           | Formalize the `ILifecycleTask` plugin system: auto-discovery of tasks from JARs, plugin marketplace in Manager UI, versioned plugin dependencies.                                                          |
-| **ReAct Loop**                    | Already partially implemented in `AgentExecutionHelper.executeWithTools()`. Enhance with: step-by-step reasoning trace, configurable max iterations, observation/reflection steps.                         |
+| OpenClaw Feature                  | EDDI v6 Adaptation                                                                                                                                                                                               |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Persistent Memory**             | Long-term user memory beyond conversation (user preferences, past interactions, learned facts). Store in dedicated MongoDB collection or vector DB. Make accessible to all agents for that user.                 |
+| **Heartbeat / Proactive Actions** | Scheduled agent actions (daily summaries, reminders, check-ins). Use Quarkus `@Scheduled` to trigger agents periodically. Configure per-agent: `"heartbeat": { "cron": "0 9 * * *", "action": "daily_summary" }` |
+| **Self-Improving Skills**         | Agents that learn from interactions: track which tool calls succeed/fail, adjust prompts based on user feedback, accumulate FAQ from conversations.                                                              |
+| **Multi-Channel Messaging**       | Beyond HTTP — WhatsApp, Telegram, Slack, Discord adapters. EDDI acts as the routing hub. Each channel adapter translates to/from EDDI's conversation API.                                                        |
+| **Plugin Architecture**           | Formalize the `ILifecycleTask` plugin system: auto-discovery of tasks from JARs, plugin marketplace in Manager UI, versioned plugin dependencies.                                                                |
+| **ReAct Loop**                    | Already partially implemented in `AgentExecutionHelper.executeWithTools()`. Enhance with: step-by-step reasoning trace, configurable max iterations, observation/reflection steps.                               |
 
 ---
 
@@ -371,7 +371,7 @@ Client → REST API → Message Queue (Kafka/RabbitMQ) → Worker Instances → 
 
 ### Current: MongoDB Only
 
-- Configuration storage (bots, packages, extensions)
+- Configuration storage (agents, packages, extensions)
 - Conversation memory (full history)
 - Conversation descriptors
 - Migration logs
@@ -379,20 +379,20 @@ Client → REST API → Message Queue (Kafka/RabbitMQ) → Worker Instances → 
 
 ### Problems
 
-- **No relational integrity**: Bot → Package → Extension relationships are maintained by application code, not DB constraints
+- **No relational integrity**: Agent → Workflow → Extension relationships are maintained by application code, not DB constraints
 - **Schema evolution**: 25KB `MigrationManager.java` suggests frequent painful migrations
 - **Query limitations**: Aggregation on conversation analytics is cumbersome in MongoDB
-- **Scaling**: Single database for both config (read-heavy) and conversations (write-heavy)
+- **Scaling**: Single database for agenth config (read-heavy) and conversations (write-heavy)
 
 ### v6 Proposed Database Architecture
 
-| Data Type                             | Database                                                | Rationale                                                                                                                    |
-| ------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| **Bot configs, packages, extensions** | **PostgreSQL** (via Quarkus Hibernate/Panache)          | Relational data with versioning, referential integrity, transactional config updates, JSON/JSONB columns for flexible config |
-| **Conversation memory**               | **MongoDB** (keep)                                      | Document-oriented, flexible schema, good for nested conversation steps                                                       |
-| **Long-term user memory**             | **PostgreSQL** or **Vector DB** (Qdrant/pgvector)       | Structured user preferences + vector search for semantic memory                                                              |
-| **Cache**                             | **Redis**                                               | Distributed cache, session state, pub/sub for cross-instance events                                                          |
-| **Analytics**                         | **ClickHouse** or PostgreSQL with TimescaleDB extension | Time-series conversation metrics, model usage, costs                                                                         |
+| Data Type                               | Database                                                | Rationale                                                                                                                    |
+| --------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **Agent configs, packages, extensions** | **PostgreSQL** (via Quarkus Hibernate/Panache)          | Relational data with versioning, referential integrity, transactional config updates, JSON/JSONB columns for flexible config |
+| **Conversation memory**                 | **MongoDB** (keep)                                      | Document-oriented, flexible schema, good for nested conversation steps                                                       |
+| **Long-term user memory**               | **PostgreSQL** or **Vector DB** (Qdrant/pgvector)       | Structured user preferences + vector search for semantic memory                                                              |
+| **Cache**                               | **Redis**                                               | Distributed cache, session state, pub/sub for cross-instance events                                                          |
+| **Analytics**                           | **ClickHouse** or PostgreSQL with TimescaleDB extension | Time-series conversation metrics, model usage, costs                                                                         |
 
 > [!IMPORTANT]
 > This is the most significant breaking change. Consider a phased approach: start by adding PostgreSQL for new features (analytics, user memory, MCP registry) while keeping MongoDB for existing data.
@@ -403,13 +403,13 @@ Client → REST API → Message Queue (Kafka/RabbitMQ) → Worker Instances → 
 
 ### Current UX Problems (Beyond Tech Stack)
 
-1. **Dashboard is just a bot list** — No status overview, no metrics, no recent activity, no at-a-glance health
-2. **Configuration editing = raw JSON** — Users must understand the JSON schema to configure bots. No visual guidance, no validation feedback.
+1. **Dashboard is just a agent list** — No status overview, no metrics, no recent activity, no at-a-glance health
+2. **Configuration editing = raw JSON** — Users must understand the JSON schema to configure agents. No visual guidance, no validation feedback.
 3. **Modal-heavy workflow** — 61 modal component files (`ModalComponent/`). Every action opens a modal. Modals stack. Context is lost.
 4. **No visual flow** — The lifecycle pipeline is invisible. Users can't see how Parser → Rules → LLM → Output connects.
 5. **No conversation debugger** — Can't step through a conversation to see what each task did, what data was in memory.
-6. **Package management is opaque** — A "Package" is a list of URI references to extensions. There's no visual representation of what a package contains or does.
-7. **No onboarding** — New users face a blank slate with no guidance on how to create their first bot.
+6. **Workflow management is opaque** — A "Workflow" is a list of URI references to extensions. There's no visual representation of what a package contains or does.
+7. **No onboarding** — New users face a blank slate with no guidance on how to create their first agent.
 
 ### v6 UX Vision
 
@@ -420,15 +420,15 @@ Client → REST API → Message Queue (Kafka/RabbitMQ) → Worker Instances → 
 │  EDDI Dashboard                                          │
 ├────────────┬────────────┬────────────┬───────────────────┤
 │ Active     │ Convs      │ Avg        │ Total             │
-│ Bots: 12   │ Today: 847 │ Resp: 1.2s │ Cost: $12.40      │
+│ Agents: 12   │ Today: 847 │ Resp: 1.2s │ Cost: $12.40      │
 ├────────────┴────────────┴────────────┴───────────────────┤
-│ Recent Activity                    │ Bot Health          │
-│ • Bot "Support" v3 deployed  2m    │ ● Support    OK     │
+│ Recent Activity                    │ Agent Health          │
+│ • Agent "Support" v3 deployed  2m    │ ● Support    OK     │
 │ • 23 new conversations     15m     │ ● Sales      OK     │
 │ • Error spike on "FAQ"     30m     │ ● FAQ        ⚠️     │
-│ • Bot "Sales" config updated 1h   │ ● Billing    OK     │
+│ • Agent "Sales" config updated 1h   │ ● Billing    OK     │
 ├────────────────────────────────────┴────────────────────┤
-│ Your Bots                           [+ Create Bot]       │
+│ Your Agents                           [+ Create Agent]       │
 │ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐    │
 │ │ Support  │ │ Sales    │ │ FAQ      │ │ Billing  │    │
 │ │ v3 ● UP  │ │ v2 ● UP  │ │ v1 ⚠️   │ │ v1 ● UP  │    │
@@ -455,7 +455,7 @@ Instead of modals with raw JSON, use structured forms with:
 - Auto-complete for template variables (`[[${memory.current.input}]]`)
 - Live validation with clear error messages
 - Side-by-side JSON view for power users
-- Preview panel showing how the bot would respond
+- Preview panel showing how the agent would respond
 
 #### Conversation Debugger (Improve Existing)
 
@@ -473,7 +473,7 @@ Step 1: User "What's the weather in NYC?"
   └── Output: [text: "The weather in NYC is sunny at 72°F"]
 ```
 
-#### Guided Bot Creation Wizard
+#### Guided Agent Creation Wizard
 
 Step-by-step wizard for new users:
 
@@ -492,24 +492,24 @@ Step-by-step wizard for new users:
 
 ### Completed Phases (v6.0-alpha through v6.0-beta)
 
-| Phase | Description | SP | Status |
-|-------|------------|-----|--------|
-| 0 | **Security Quick Wins** — CORS, PathNavigator | 6 | ✅ |
-| 1 | **Backend Foundation** — ConversationService, LangchainTask decomp, typed memory, config consolidation | 20 | ✅ |
-| 2 | **Testing Infrastructure** — 48 ITs, unit test gaps, API contracts | 14 | ✅ |
-| 3 | **Manager UI Rewrite** — React 19/Vite/Tailwind, all editors, MSW, i18n, Keycloak | 36 | ✅ |
-| 4 | **Hardening** — E2E Playwright, integration tests, JSON Schema, production build | 18 | ✅ |
-| 5 | **NATS JetStream** — event bus abstraction, adapter, coordinator dashboard | 16 | ✅ |
-| 6 | **PostgreSQL / DB-Agnostic** — repository abstraction, PG adapter, sync driver, 48 PG ITs | 26 | ✅ |
-| 6C | **Infinispan → Caffeine** — 2 files rewritten, 4 POM deps removed, Caffeine via quarkus-cache | 2 | ✅ |
+| Phase | Description                                                                                            | SP  | Status |
+| ----- | ------------------------------------------------------------------------------------------------------ | --- | ------ |
+| 0     | **Security Quick Wins** — CORS, PathNavigator                                                          | 6   | ✅     |
+| 1     | **Backend Foundation** — ConversationService, LangchainTask decomp, typed memory, config consolidation | 20  | ✅     |
+| 2     | **Testing Infrastructure** — 48 ITs, unit test gaps, API contracts                                     | 14  | ✅     |
+| 3     | **Manager UI Rewrite** — React 19/Vite/Tailwind, all editors, MSW, i18n, Keycloak                      | 36  | ✅     |
+| 4     | **Hardening** — E2E Playwright, integration tests, JSON Schema, production build                       | 18  | ✅     |
+| 5     | **NATS JetStream** — event bus abstraction, adapter, coordinator dashboard                             | 16  | ✅     |
+| 6     | **PostgreSQL / DB-Agnostic** — repository abstraction, PG adapter, sync driver, 48 PG ITs              | 26  | ✅     |
+| 6C    | **Infinispan → Caffeine** — 2 files rewritten, 4 POM deps removed, Caffeine via quarkus-cache          | 2   | ✅     |
 
 ### Quick Wins (before Phase 7)
 
-| Item | Description | SP | Status |
-|------|------------|-----|--------|
-| 6E | **quarkus-langchain4j → langchain4j Core** — Remove `io.quarkiverse.langchain4j` dependency, use `dev.langchain4j` core modules only (3 files, POM cleanup) | 2 | ✅ |
-| 6D | **Lombok Removal** — Delombok 114 files, explicit getters/setters, JBoss Logger, POM cleanup | 5 | ✅ |
-| — | **Quarkus 3.33 LTS Upgrade** — waiting for GA (~March 25, 2026). 3.32.3 blocked by Java 25 `ALL-UNNAMED` issue | 2 | ⏳ |
+| Item | Description                                                                                                                                                 | SP  | Status |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --- | ------ |
+| 6E   | **quarkus-langchain4j → langchain4j Core** — Remove `io.quarkiverse.langchain4j` dependency, use `dev.langchain4j` core modules only (3 files, POM cleanup) | 2   | ✅     |
+| 6D   | **Lombok Removal** — Delombok 114 files, explicit getters/setters, JBoss Logger, POM cleanup                                                                | 5   | ✅     |
+| —    | **Quarkus 3.33 LTS Upgrade** — waiting for GA (~March 25, 2026). 3.32.3 blocked by Java 25 `ALL-UNNAMED` issue                                              | 2   | ⏳     |
 
 #### Phase 6E Detail: quarkus-langchain4j → langchain4j Core
 
@@ -519,23 +519,23 @@ Step-by-step wizard for new users:
 
 **Current usage** — only 3 of 7 builders use quarkiverse classes:
 
-| Builder | Current (quarkiverse) | Target (core) |
-|---------|----------------------|---------------|
+| Builder                            | Current (quarkiverse)                                                                | Target (core)                                            |
+| ---------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------- |
 | `VertexGeminiLanguageModelBuilder` | `io.quarkiverse.langchain4j.vertexai.runtime.gemini.VertexAiGeminiChatLanguageModel` | `dev.langchain4j.model.vertexai.VertexAiGeminiChatModel` |
-| `HuggingFaceLanguageModelBuilder` | `io.quarkiverse.langchain4j.huggingface.QuarkusHuggingFaceChatModel` | `dev.langchain4j.model.huggingface.HuggingFaceChatModel` |
-| `JlamaLanguageModelBuilder` | `io.quarkiverse.langchain4j.jlama.JlamaChatModel` | `dev.langchain4j.model.jlama.JlamaChatModel` |
+| `HuggingFaceLanguageModelBuilder`  | `io.quarkiverse.langchain4j.huggingface.QuarkusHuggingFaceChatModel`                 | `dev.langchain4j.model.huggingface.HuggingFaceChatModel` |
+| `JlamaLanguageModelBuilder`        | `io.quarkiverse.langchain4j.jlama.JlamaChatModel`                                    | `dev.langchain4j.model.jlama.JlamaChatModel`             |
 
 **POM changes:**
 
-| POM Dependency | Action |
-|---|---|
-| `quarkus-langchain4j-openai` | **Remove** — `OpenAILanguageModelBuilder` already uses `dev.langchain4j.model.openai.OpenAiChatModel` |
-| `quarkus-langchain4j-anthropic` | **Remove** — `AnthropicLanguageModelBuilder` already uses `dev.langchain4j.model.anthropic.AnthropicChatModel` |
-| `quarkus-langchain4j-ollama` | **Remove** — `OllamaLanguageModelBuilder` already uses `dev.langchain4j.model.ollama.OllamaChatModel` |
-| `quarkus-langchain4j-vertex-ai-gemini` | **Replace** → `dev.langchain4j:langchain4j-vertex-ai-gemini:${langchain4j-libs.version}` |
-| `quarkus-langchain4j-hugging-face` | **Replace** → `dev.langchain4j:langchain4j-hugging-face:${langchain4j-libs.version}` |
-| `quarkus-langchain4j-jlama` | **Replace** → `dev.langchain4j:langchain4j-jlama:${langchain4j-libs.version}` |
-| `<quarkus.langchain4j.version>` property | **Remove** entirely |
+| POM Dependency                           | Action                                                                                                         |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `quarkus-langchain4j-openai`             | **Remove** — `OpenAILanguageModelBuilder` already uses `dev.langchain4j.model.openai.OpenAiChatModel`          |
+| `quarkus-langchain4j-anthropic`          | **Remove** — `AnthropicLanguageModelBuilder` already uses `dev.langchain4j.model.anthropic.AnthropicChatModel` |
+| `quarkus-langchain4j-ollama`             | **Remove** — `OllamaLanguageModelBuilder` already uses `dev.langchain4j.model.ollama.OllamaChatModel`          |
+| `quarkus-langchain4j-vertex-ai-gemini`   | **Replace** → `dev.langchain4j:langchain4j-vertex-ai-gemini:${langchain4j-libs.version}`                       |
+| `quarkus-langchain4j-hugging-face`       | **Replace** → `dev.langchain4j:langchain4j-hugging-face:${langchain4j-libs.version}`                           |
+| `quarkus-langchain4j-jlama`              | **Replace** → `dev.langchain4j:langchain4j-jlama:${langchain4j-libs.version}`                                  |
+| `<quarkus.langchain4j.version>` property | **Remove** entirely                                                                                            |
 
 **Note on HuggingFace**: `QuarkusHuggingFaceChatModel.builder()` uses `Optional`/`OptionalInt`/`OptionalDouble` wrappers for `topK`, `topP`, `doSample`, `repetitionPenalty`. Core `HuggingFaceChatModel` likely uses plain primitives — verify API.
 
@@ -547,138 +547,138 @@ Step-by-step wizard for new users:
 
 > Remove production blockers. Low complexity, no dependencies, maximum enterprise unlock.
 
-| # | Item | SP | Status |
-|---|------|----|--------|
-| 33 | **Secrets Vault** — `${vault:key}` references resolved at runtime, export sanitization scrubs plaintext keys | 5 | ✅ |
-| 33b | **Chat UI password field + Manager vault integration** | 2 | |
-| 34 | **Immutable Audit Ledger** — write-once append-only trail of compiled prompts, tool calls, responses, costs (EU AI Act) | 5 | ✅ |
-| 34b | **Tenant Quota Stub** — per-tenant API rate limits, usage metering counters, configurable resource caps (SaaS foundation) | 2 | ✅ |
+| #   | Item                                                                                                                      | SP  | Status |
+| --- | ------------------------------------------------------------------------------------------------------------------------- | --- | ------ |
+| 33  | **Secrets Vault** — `${vault:key}` references resolved at runtime, export sanitization scrubs plaintext keys              | 5   | ✅     |
+| 33b | **Chat UI password field + Manager vault integration**                                                                    | 2   |        |
+| 34  | **Immutable Audit Ledger** — write-once append-only trail of compiled prompts, tool calls, responses, costs (EU AI Act)   | 5   | ✅     |
+| 34b | **Tenant Quota Stub** — per-tenant API rate limits, usage metering counters, configurable resource caps (SaaS foundation) | 2   | ✅     |
 
 ### Phase 8a: MCP Servers (v6.0-beta3, 8 SP) ✅
 
 > EDDI's integration story. The broadest MCP scope of any JVM platform.
 > **Leverage:** Core langchain4j `@Tool` annotations for MCP tool definitions. MCP server/client support available in core langchain4j.
 
-| # | Item | SP | Status |
-|---|------|----|--------|
-| 35 | **MCP Server: Bot Conversations** — 11 tools (talk_to_bot, chat_with_bot, list_bots, etc.) | 5 | ✅ |
-| 36 | **MCP Server: EDDI Admin API** — 13 tools (manage bots/packages/deploy/config via MCP) | 3 | ✅ |
-| 8a.2 | **MCP Resource CRUD + Batch Cascade** — 5 tools (update/create/delete resource, apply_bot_changes, list_bot_resources) | 3 | ✅ |
-| 8a.3 | **Bot Discovery & Managed Conversations** — 6 tools (discover_bots, chat_managed, trigger CRUD) | 3 | ✅ |
-| 37 | **MCP Resources: EDDI Documentation** — docs as MCP resources | 2 | ✅ |
+| #    | Item                                                                                                                       | SP  | Status |
+| ---- | -------------------------------------------------------------------------------------------------------------------------- | --- | ------ |
+| 35   | **MCP Server: Agent Conversations** — 11 tools (talk_to_agent, chat_with_agent, list_agents, etc.)                         | 5   | ✅     |
+| 36   | **MCP Server: EDDI Admin API** — 13 tools (manage agents/packages/deploy/config via MCP)                                   | 3   | ✅     |
+| 8a.2 | **MCP Resource CRUD + Batch Cascade** — 5 tools (update/create/delete resource, apply_agent_changes, list_agent_resources) | 3   | ✅     |
+| 8a.3 | **Agent Discovery & Managed Conversations** — 6 tools (discover_agents, chat_managed, trigger CRUD)                        | 3   | ✅     |
+| 37   | **MCP Resources: EDDI Documentation** — docs as MCP resources                                                              | 2   | ✅     |
 
 ### Phase 8b: MCP Client (5 SP) ✅
 
-> Bots consume external MCP servers as tool providers. Uses `langchain4j-mcp` + `StreamableHttpMcpTransport`.
+> Agents consume external MCP servers as tool providers. Uses `langchain4j-mcp` + `StreamableHttpMcpTransport`.
 
-| # | Item | SP | Status |
-|---|------|----|--------|
-| 38 | **MCP Client** — bots consume external MCP tools via McpToolProviderManager, connection caching, vault-ref support | 5 | ✅ |
+| #   | Item                                                                                                                 | SP  | Status |
+| --- | -------------------------------------------------------------------------------------------------------------------- | --- | ------ |
+| 38  | **MCP Client** — agents consume external MCP tools via McpToolProviderManager, connection caching, vault-ref support | 5   | ✅     |
 
 ### Phase 8c: RAG Foundation (3 SP)
 
-> Basic RAG task. "EDDI bots can access any knowledge base."
+> Basic RAG task. "EDDI agents can access any knowledge base."
 > **Leverage:** Core `langchain4j` `EmbeddingStore` + `EmbeddingModel` + `ContentRetriever` interfaces for vector store abstraction.
 
-| # | Item | SP | Priority |
-|---|------|----|----------|
-| 38b | **RAG Lifecycle Task** — new `ILifecycleTask` for vector store retrieval. Config-driven: embedding model, store type, chunk strategy, top-K. Uses langchain4j `EmbeddingStore`/`EmbeddingModel` abstractions for provider-agnostic vector search | 3 | 🟡 High |
+| #   | Item                                                                                                                                                                                                                                             | SP  | Priority |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --- | -------- |
+| 38b | **RAG Lifecycle Task** — new `ILifecycleTask` for vector store retrieval. Config-driven: embedding model, store type, chunk strategy, top-K. Uses langchain4j `EmbeddingStore`/`EmbeddingModel` abstractions for provider-agnostic vector search | 3   | 🟡 High  |
 
 ### Phase 9: DAG Pipeline + Governance (v6.0-rc1, 10 SP)
 
-> Enable parallel execution. Foundation for multi-bot.
+> Enable parallel execution. Foundation for multi-agent.
 > **Leverage:** langchain4j's `AiServices` for structured output parsing in DAG node results.
 
-| # | Item | SP | Priority |
-|---|------|----|----------|
-| 39 | **3-Tier State Architecture (CQRS)** — partition memory into Execution Token / Transient Context / Telemetry Ledger | 5 | 🟡 High |
-| 40 | **DAG Pipeline Execution** — parallel tasks, per-task circuit breakers, execution hash dedup, budget-aware branches | 5 | 🟡 High |
-| 40b | **OpenTelemetry Tracing** — distributed trace context through pipeline steps, MCP calls, and LLM invocations. Essential for debugging multi-step agent flows | — | 🟡 High |
+| #   | Item                                                                                                                                                         | SP  | Priority |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --- | -------- |
+| 39  | **3-Tier State Architecture (CQRS)** — partition memory into Execution Token / Transient Context / Telemetry Ledger                                          | 5   | 🟡 High  |
+| 40  | **DAG Pipeline Execution** — parallel tasks, per-task circuit breakers, execution hash dedup, budget-aware branches                                          | 5   | 🟡 High  |
+| 40b | **OpenTelemetry Tracing** — distributed trace context through pipeline steps, MCP calls, and LLM invocations. Essential for debugging multi-step agent flows | —   | 🟡 High  |
 
 > [!NOTE]
 > **OpenTelemetry** is bundled with DAG because that's when request tracing across parallel tasks becomes essential. Quarkus has built-in OTel support (`quarkus-opentelemetry`). The 30+ existing Micrometer metrics continue to work alongside OTel traces.
 
 ### Phase 9b: HITL Framework (5 SP)
 
-| # | Item | SP | Priority |
-|---|------|----|----------|
-| 41 | **HITL Framework** — pause/resume/approve for STATE_CHANGING MCP tools, budget thresholds, human escalation | 3 | 🟡 High |
-| 42 | **Workspace AI Operator** — system bot with admin API access | 2 | 🟠 Medium |
+| #   | Item                                                                                                        | SP  | Priority  |
+| --- | ----------------------------------------------------------------------------------------------------------- | --- | --------- |
+| 41  | **HITL Framework** — pause/resume/approve for STATE_CHANGING MCP tools, budget thresholds, human escalation | 3   | 🟡 High   |
+| 42  | **Workspace AI Operator** — system agent with admin API access                                              | 2   | 🟠 Medium |
 
-### Phase 10a: Multi-Bot Orchestration (8 SP)
+### Phase 10a: Multi-Agent Orchestration (8 SP)
 
 > The differentiating features. Depend on DAG (Phase 9).
-> **Leverage:** langchain4j's `ChatMemory` and `TokenWindowChatMemory` for cross-bot conversation context passing.
+> **Leverage:** langchain4j's `ChatMemory` and `TokenWindowChatMemory` for cross-agent conversation context passing.
 
-| # | Item | SP | Priority |
-|---|------|----|----------|
-| 43 | **Bot-to-bot routing** — orchestrator bot pattern, cascading conversation context | 5 | 🟡 High |
-| 44 | **Cascading model routing** — small→better fallback, consensus modes | 3 | 🟡 High |
+| #   | Item                                                                                    | SP  | Priority |
+| --- | --------------------------------------------------------------------------------------- | --- | -------- |
+| 43  | **Agent-to-agent routing** — orchestrator agent pattern, cascading conversation context | 5   | 🟡 High  |
+| 44  | **Cascading model routing** — small→better fallback, consensus modes                    | 3   | 🟡 High  |
 
 ### Phase 10b: Advanced RAG + Debate (8 SP)
 
 > Builds on the basic RAG task from Phase 8c. Adds provenance, multi-tenant isolation, and debate patterns.
 > **Leverage:** langchain4j `ContentRetriever`, `QueryTransformer`, `QueryRouter` for advanced retrieval strategies.
 
-| # | Item | SP | Priority |
-|---|------|----|----------|
-| 45 | **Advanced RAG** — document ingestion pipeline, chunk provenance tracking, tenant-level RLS on vector store, re-ranking | 5 | 🟡 High |
-| 46 | **Group-of-Experts / Debate Pattern** — multi-round specialist bots with moderator synthesis | 3 | 🟠 Medium |
+| #   | Item                                                                                                                    | SP  | Priority  |
+| --- | ----------------------------------------------------------------------------------------------------------------------- | --- | --------- |
+| 45  | **Advanced RAG** — document ingestion pipeline, chunk provenance tracking, tenant-level RLS on vector store, re-ranking | 5   | 🟡 High   |
+| 46  | **Group-of-Experts / Debate Pattern** — multi-round specialist agents with moderator synthesis                          | 3   | 🟠 Medium |
 
 ### Phase 11a: Persistent Memory + Heartbeat (8 SP)
 
 > User-facing intelligence features.
 > **Leverage:** langchain4j `ChatMemoryStore` interface for persistent memory backend abstraction.
 
-| # | Item | SP | Priority |
-|---|------|----|----------|
-| 47 | **Persistent User Memory** — cross-conversation, cross-bot user knowledge store | 5 | 🟡 High |
-| 48 | **Heartbeat / Scheduled Triggers** — cluster-safe via NATS exactly-once, bot self-scheduling via tool | 3 | 🟡 High |
+| #   | Item                                                                                                    | SP  | Priority |
+| --- | ------------------------------------------------------------------------------------------------------- | --- | -------- |
+| 47  | **Persistent User Memory** — cross-conversation, cross-agent user knowledge store                       | 5   | 🟡 High  |
+| 48  | **Heartbeat / Scheduled Triggers** — cluster-safe via NATS exactly-once, agent self-scheduling via tool | 3   | 🟡 High  |
 
 ### Phase 11b: Multi-Channel Adapters (5 SP)
 
-| # | Item | SP | Priority |
-|---|------|----|----------|
-| 49 | **Multi-Channel Adapters** — WhatsApp/Telegram/Slack (separate services) | 5 | 🟠 Medium |
+| #   | Item                                                                     | SP  | Priority  |
+| --- | ------------------------------------------------------------------------ | --- | --------- |
+| 49  | **Multi-Channel Adapters** — WhatsApp/Telegram/Slack (separate services) | 5   | 🟠 Medium |
 
 ### Phase 12: CI/CD — GitHub Actions Migration (8 SP)
 
 > CircleCI currently handles builds. This migrates to GitHub Actions for unified ecosystem.
 
-| # | Item | SP | Priority |
-|---|------|----|----------|
-| 50 | **GitHub Actions: EDDI** — compile, test, Docker build, integration tests, push | 3 | 🟠 Medium |
-| 51 | **GitHub Actions: Manager + Chat-UI + Website** — build, test, deploy | 5 | 🟠 Medium |
+| #   | Item                                                                            | SP  | Priority  |
+| --- | ------------------------------------------------------------------------------- | --- | --------- |
+| 50  | **GitHub Actions: EDDI** — compile, test, Docker build, integration tests, push | 3   | 🟠 Medium |
+| 51  | **GitHub Actions: Manager + Chat-UI + Website** — build, test, deploy           | 5   | 🟠 Medium |
 
 ### Phase 13a: Time-Traveling Debugger (5 SP)
 
 > Depends on Audit Ledger (Phase 7).
 
-| # | Item | SP | Priority |
-|---|------|----|----------|
-| 52 | **Time-Traveling Debugger** — step-through replay from audit ledger, compiled prompt viewer, memory diffs | 5 | 🟡 High |
+| #   | Item                                                                                                      | SP  | Priority |
+| --- | --------------------------------------------------------------------------------------------------------- | --- | -------- |
+| 52  | **Time-Traveling Debugger** — step-through replay from audit ledger, compiled prompt viewer, memory diffs | 5   | 🟡 High  |
 
 ### Phase 13b: Visual Pipeline Builder + Taint Tracking (8 SP)
 
-| # | Item | SP | Priority |
-|---|------|----|----------|
-| 53 | **Visual Pipeline Builder** — Linear/Block Hybrid editor, side-sheet inspectors | 5 | 🟠 Medium |
-| 54 | **Visual Taint Tracking** — green/yellow/red data provenance indicators | 3 | 🟠 Medium |
+| #   | Item                                                                            | SP  | Priority  |
+| --- | ------------------------------------------------------------------------------- | --- | --------- |
+| 53  | **Visual Pipeline Builder** — Linear/Block Hybrid editor, side-sheet inspectors | 5   | 🟠 Medium |
+| 54  | **Visual Taint Tracking** — green/yellow/red data provenance indicators         | 3   | 🟠 Medium |
 
 ### Phase 14a: Website — Astro Setup (5 SP)
 
-| # | Item | SP | Priority |
-|---|------|----|----------|
-| 55 | Scaffold Astro + Tailwind + i18n | 2 | 🟠 Medium |
-| 56 | Dark/light + RTL | 3 | 🟠 Medium |
+| #   | Item                             | SP  | Priority  |
+| --- | -------------------------------- | --- | --------- |
+| 55  | Scaffold Astro + Tailwind + i18n | 2   | 🟠 Medium |
+| 56  | Dark/light + RTL                 | 3   | 🟠 Medium |
 
 ### Phase 14b: Website — Content + Deployment (9 SP) [LAST]
 
-| # | Item | SP | Priority |
-|---|------|----|----------|
-| 57 | Migrate content into components | 3 | 🟠 Medium |
-| 58 | Documentation pages (Content Collections) | 5 | 🟠 Medium |
-| 59 | GitHub Actions deployment | 1 | 🟠 Medium |
+| #   | Item                                      | SP  | Priority  |
+| --- | ----------------------------------------- | --- | --------- |
+| 57  | Migrate content into components           | 3   | 🟠 Medium |
+| 58  | Documentation pages (Content Collections) | 5   | 🟠 Medium |
+| 59  | GitHub Actions deployment                 | 1   | 🟠 Medium |
 
 ### Phase 15: EDDI SDK Ecosystem (44 SP, post-GA)
 
@@ -686,47 +686,48 @@ Step-by-step wizard for new users:
 >
 > Three repos: `quarkiverse/quarkus-eddi` (REST + MCP client SDKs), `labsai/eddi-helm` (Helm chart + Kustomize), sync pipeline in `labsai/EDDI`.
 
-| Phase | What | Where | SP | Dependencies |
-|---|---|---|---|---|
-| **15A** | Scaffolding + OpenAPI codegen + `EddiClient` facade + health + unit tests | `quarkiverse/quarkus-eddi` | 16 | v6 GA |
-| **15B** | SSE streaming + DevServices + native image verification | `quarkiverse/quarkus-eddi` | 8 | 15A |
-| **15C** | `EddiMcpClient` + typed tool wrappers + tests | `quarkiverse/quarkus-eddi` | 5 | 15A |
-| **15D** | Helm chart + Kustomize overlays + lint CI | `labsai/eddi-helm` | 7 | Independent |
-| **15E** | Sync pipeline + Antora docs + observability polish | All 3 repos | 8 | All phases |
+| Phase   | What                                                                      | Where                      | SP  | Dependencies |
+| ------- | ------------------------------------------------------------------------- | -------------------------- | --- | ------------ |
+| **15A** | Scaffolding + OpenAPI codegen + `EddiClient` facade + health + unit tests | `quarkiverse/quarkus-eddi` | 16  | v6 GA        |
+| **15B** | SSE streaming + DevServices + native image verification                   | `quarkiverse/quarkus-eddi` | 8   | 15A          |
+| **15C** | `EddiMcpClient` + typed tool wrappers + tests                             | `quarkiverse/quarkus-eddi` | 5   | 15A          |
+| **15D** | Helm chart + Kustomize overlays + lint CI                                 | `labsai/eddi-helm`         | 7   | Independent  |
+| **15E** | Sync pipeline + Antora docs + observability polish                        | All 3 repos                | 8   | All phases   |
 
 > [!TIP]
 > **Phase 15D (Helm chart) can start immediately** — it has no dependency on v6 GA or the Java SDK. It only needs the existing Docker image.
 
 ### Future: Deployment Coordination Enhancement
 
-> Replace the current 10-second `@Scheduled` DB polling for bot deployments with NATS pub/sub deployment events for instant cross-instance coordination.
+> Replace the current 10-second `@Scheduled` DB polling for agent deployments with NATS pub/sub deployment events for instant cross-instance coordination.
 
 ### Implementation Note: langchain4j / quarkus-langchain4j Leverage
 
 > [!IMPORTANT]
 > **Maximize reuse of langchain4j and quarkus-langchain4j** across all phases. EDDI already uses langchain4j for model building, tool execution, and streaming. Future phases should:
+>
 > - Use `EmbeddingStore`/`EmbeddingModel` interfaces for RAG (not custom vector clients)
 > - Use `quarkus-langchain4j` MCP support for MCP server/client where it fits EDDI's config-driven model
 > - Use `ChatMemoryStore` for persistent memory
 > - Use `ContentRetriever`/`QueryTransformer` for advanced RAG strategies
-> - Keep EDDI's `ILifecycleTask` as the orchestration layer that *wraps* langchain4j components — don't bypass the pipeline
+> - Keep EDDI's `ILifecycleTask` as the orchestration layer that _wraps_ langchain4j components — don't bypass the pipeline
 
 ---
 
 ## Resolved Decisions (User Confirmed)
 
-| #   | Question                            | Decision                                                                                                                                                      | Notes                                                           |
-| --- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| 1   | MCP scope                           | **Opt-in per bot**                                                                                                                                            | Security-first: bots not exposed without explicit configuration |
-| 2   | Multi-bot orchestration granularity | **Per-action within behavior rules** and/or per-package                                                                                                       | More flexible than per-bot only                                 |
-| 3   | Queue technology                    | **Start with NATS JetStream** (lightweight, cloud-native), RabbitMQ as fallback                                                                               | Research done — see business_logic_analysis.md Section 5        |
-| 4   | PostgreSQL migration                | **DB-agnostic architecture** (Abstract Repository pattern) — admin chooses DB via config. Implement PostgreSQL as primary new backend, keep MongoDB supported | User prefers full migration or admin choice                     |
-| 5   | Manager rewrite                     | Decision pending — but critical security upgrades needed immediately (keycloak-js, tslint removal)                                                            |                                                                 |
-| 6   | NLP module/expressions              | **Option C: Hybrid** — keep parser for guided flows, add LLM-based intent for agents, simplify syntax for new users                                           | User confirmed after deep-dive                                  |
-| 7   | Persistent memory                   | Decision pending                                                                                                                                              | Both per-user and per-user-per-bot valid                        |
-| 8   | Multi-channel                       | **Separate services** for each channel adapter                                                                                                                | User preference                                                 |
-| 9   | Self-improvement                    | Decision pending                                                                                                                                              |                                                                 |
-| 10  | Bot Father                          | Decision pending                                                                                                                                              |                                                                 |
+| #   | Question                              | Decision                                                                                                                                                      | Notes                                                             |
+| --- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| 1   | MCP scope                             | **Opt-in per agent**                                                                                                                                          | Security-first: agents not exposed without explicit configuration |
+| 2   | Multi-agent orchestration granularity | **Per-action within behavior rules** and/or per-package                                                                                                       | More flexible than per-agent only                                 |
+| 3   | Queue technology                      | **Start with NATS JetStream** (lightweight, cloud-native), RabbitMQ as fallback                                                                               | Research done — see business_logic_analysis.md Section 5          |
+| 4   | PostgreSQL migration                  | **DB-agnostic architecture** (Abstract Repository pattern) — admin chooses DB via config. Implement PostgreSQL as primary new backend, keep MongoDB supported | User prefers full migration or admin choice                       |
+| 5   | Manager rewrite                       | Decision pending — but critical security upgrades needed immediately (keycloak-js, tslint removal)                                                            |                                                                   |
+| 6   | NLP module/expressions                | **Option C: Hybrid** — keep parser for guided flows, add LLM-based intent for agents, simplify syntax for new users                                           | User confirmed after deep-dive                                    |
+| 7   | Persistent memory                     | Decision pending                                                                                                                                              | Agenth per-user and per-user-per-agent valid                      |
+| 8   | Multi-channel                         | **Separate services** for each channel adapter                                                                                                                | User preference                                                   |
+| 9   | Self-improvement                      | Decision pending                                                                                                                                              |                                                                   |
+| 10  | Agent Father                          | Decision pending                                                                                                                                              |                                                                   |
 
 ---
 
@@ -740,19 +741,19 @@ c:\dev\git\eddi-chat-ui\            ← Chat widget (React 18, CRA)
 c:\dev\git\eddi-website\            ← Marketing website
 ```
 
-### Backend Package Layout
+### Backend Workflow Layout
 
 ```
 src/main/java/ai/labs/eddi/
 ├── configs/             ← Configuration stores (13 resource types)
 │   ├── behavior/        ← IBehaviorStore, BehaviorStore, RestBehaviorStore
-│   ├── bots/            ← Bot config CRUD
+│   ├── agents/            ← Agent config CRUD
 │   ├── deployment/      ← Deployment state management
 │   ├── http/            ← HttpCalls config CRUD
 │   ├── langchain/       ← LangChain config CRUD
 │   ├── migration/       ← MigrationManager (505 lines, MongoDB-coupled)
 │   ├── output/          ← Output template CRUD
-│   ├── packages/        ← Package config + ExtensionDescriptor
+│   ├── packages/        ← Workflow config + ExtensionDescriptor
 │   ├── parser/          ← Parser config CRUD
 │   └── properties/      ← Properties CRUD
 ├── datastore/           ← Database abstraction layer
@@ -763,10 +764,10 @@ src/main/java/ai/labs/eddi/
 │       └── MongoResourceStorage.java      ← MongoDB implementation (305 lines, SOLE coupling)
 ├── engine/              ← Core runtime engine
 │   ├── caching/         ← 4 Infinispan cache files (CacheFactory, CacheImpl, ICache, ICacheFactory)
-│   ├── internal/        ← RestBotEngine.java (668 lines, 35 methods — THE god class)
+│   ├── internal/        ← RestAgentEngine.java (668 lines, 35 methods — THE god class)
 │   ├── lifecycle/       ← ILifecycleTask (207 lines), LifecycleManager (266 lines)
 │   ├── memory/          ← IConversationMemory, ConversationMemoryStore (221 lines)
-│   └── runtime/         ← ConversationCoordinator (187 lines), BotFactory, IRuntime
+│   └── runtime/         ← ConversationCoordinator (187 lines), AgentFactory, IRuntime
 └── modules/             ← Feature modules (lifecycle tasks + tools)
     ├── behavior/        ← BehaviorRulesEvaluationTask + conditions (inputmatcher, actionmatcher, etc.)
     ├── httpcalls/       ← HttpCallsTask
@@ -886,9 +887,9 @@ currentStep.storeData(data);
 
 ## Appendix F: Concrete Implementation Notes per Roadmap Item
 
-### Item 1: Extract `ConversationService` from `RestBotEngine`
+### Item 1: Extract `ConversationService` from `RestAgentEngine`
 
-**Current state**: [RestBotEngine.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/engine/internal/RestBotEngine.java) — 668 lines, 35 methods.
+**Current state**: [RestAgentEngine.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/engine/internal/RestAgentEngine.java) — 668 lines, 35 methods.
 
 **Methods to extract** (by target service):
 
@@ -899,10 +900,10 @@ currentStep.storeData(data);
 | `ConversationStateCache`         | `getConversationState`, `cacheConversationState`, `setConversationState`                                                                                                                                                                                                                                                     | L274-641             |
 | `ConversationController` (stays) | All `@Path`/`@POST`/`@GET` annotated REST endpoints as thin wrappers delegating to `ConversationService`                                                                                                                                                                                                                     | all REST annotations |
 
-**Dependencies of `RestBotEngine`** (to be injected into service):
+**Dependencies of `RestAgentEngine`** (to be injected into service):
 
 ```java
-@Inject: IBotFactory, IConversationCoordinator, IRuntime, IConversationSetup,
+@Inject: IAgentFactory, IConversationCoordinator, IRuntime, IConversationSetup,
          IConversationMemoryStore, IPropertiesStore, IDocumentDescriptorStore,
          ICacheFactory, MeterRegistry
 ```
@@ -958,7 +959,7 @@ void store(IHistoryResource<T> history);
 Integer getCurrentVersion(String id);
 ```
 
-**Migration challenge**: `ConversationMemoryStore` does NOT use `IResourceStorage` — it directly accesses MongoDB. It has 12 methods including `loadActiveConversationMemorySnapshot(botId, botVersion)` with complex filters and `getActiveConversationCount()` with aggregation.
+**Migration challenge**: `ConversationMemoryStore` does NOT use `IResourceStorage` — it directly accesses MongoDB. It has 12 methods including `loadActiveConversationMemorySnapshot(agentId, agentVersion)` with complex filters and `getActiveConversationCount()` with aggregation.
 
 ---
 
@@ -966,14 +967,14 @@ Integer getCurrentVersion(String id);
 
 ### 🔴 REMOVE (Dead Weight)
 
-| Component                              | Files                                                                    | Why Remove                                                                                                                            | Impact                                                                |
-| -------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| **`PhoneticCorrection`**               | `PhoneticCorrection.java`, `PhoneticCorrectionProvider.java`             | Soundex/DoubleMetaphone: English-only, pre-LLM fuzzy matching. No production bots likely use this. LLMs handle misspellings natively. | Low — remove from `SemanticParserModule.produceCorrectionsProvider()` |
-| **`MergedTermsCorrection`**            | `MergedTermsCorrection.java`, `MergedTermsCorrectionProvider.java`       | "usair" → "us air" splitting. Extremely niche, only useful for very specific dictionary-based bots.                                   | Low                                                                   |
-| **`OrdinalNumbersDictionary`**         | `OrdinalNumbersDictionary.java`, `OrdinalNumbersDictionaryProvider.java` | Converts "first"→1, "second"→2. Rarely used. LLMs understand ordinals natively.                                                       | Low                                                                   |
-| **`TimeExpressionDictionary`**         | `TimeExpressionDictionary.java`, `TimeExpressionDictionaryProvider.java` | Regex-based time parsing. LLMs + `DateTimeTool` handle this better.                                                                   | Low                                                                   |
-| **`recompose` library** (Manager)      | Used in `App.tsx`, potentially others                                    | Deprecated since 2018. Replace with React hooks.                                                                                      | Medium — needs refactoring of every `compose()` usage                 |
-| **Dual `.jsx`/`.tsx` files** (Manager) | `CreateNewConfig2Modal.jsx` + `.tsx` etc.                                | Confusion about which is authoritative. Remove the `.jsx` versions.                                                                   | Low                                                                   |
+| Component                              | Files                                                                    | Why Remove                                                                                                                              | Impact                                                                |
+| -------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| **`PhoneticCorrection`**               | `PhoneticCorrection.java`, `PhoneticCorrectionProvider.java`             | Soundex/DoubleMetaphone: English-only, pre-LLM fuzzy matching. No production agents likely use this. LLMs handle misspellings natively. | Low — remove from `SemanticParserModule.produceCorrectionsProvider()` |
+| **`MergedTermsCorrection`**            | `MergedTermsCorrection.java`, `MergedTermsCorrectionProvider.java`       | "usair" → "us air" splitting. Extremely niche, only useful for very specific dictionary-based agents.                                   | Low                                                                   |
+| **`OrdinalNumbersDictionary`**         | `OrdinalNumbersDictionary.java`, `OrdinalNumbersDictionaryProvider.java` | Converts "first"→1, "second"→2. Rarely used. LLMs understand ordinals natively.                                                         | Low                                                                   |
+| **`TimeExpressionDictionary`**         | `TimeExpressionDictionary.java`, `TimeExpressionDictionaryProvider.java` | Regex-based time parsing. LLMs + `DateTimeTool` handle this better.                                                                     | Low                                                                   |
+| **`recompose` library** (Manager)      | Used in `App.tsx`, potentially others                                    | Deprecated since 2018. Replace with React hooks.                                                                                        | Medium — needs refactoring of every `compose()` usage                 |
+| **Dual `.jsx`/`.tsx` files** (Manager) | `CreateNewConfig2Modal.jsx` + `.tsx` etc.                                | Confusion about which is authoritative. Remove the `.jsx` versions.                                                                     | Low                                                                   |
 
 ### 🟡 DEPRECATE (Keep but Mark as Legacy)
 
@@ -983,13 +984,13 @@ Integer getCurrentVersion(String id);
 | **`ExpressionProvider.parseExpressions()`** | 1 file, 141 lines               | Hand-rolled Prolog parser. Fragile, no validation.                                                          | In v6: wrap behind JSON-based config (Hybrid approach). Still callable for power users. Mark old syntax as `legacy`. |
 | **Manual expression strings in configs**    | All behavior.json, output.json  | `"expressions": "greeting(hello)"` — confusing Prolog syntax                                                | Provide JSON-based alternative: `{"intent": "greeting", "entities": {"message": "hello"}}`                           |
 | **`SizeMatcher`** behavior condition        | 1 file                          | No test coverage (only untested condition of 6). Checks list sizes — niche use.                             | Keep but don't invest in improvements.                                                                               |
-| **`InputMatcher`** string-based matching    | 1 file                          | Uses `Collections.indexOfSubList` on expression strings — fragile, order-dependent                          | Deprecate in favor of LLM-based intent matching for agent bots. Keep for Bot Father / guided flows.                  |
+| **`InputMatcher`** string-based matching    | 1 file                          | Uses `Collections.indexOfSubList` on expression strings — fragile, order-dependent                          | Deprecate in favor of LLM-based intent matching for agent agents. Keep for Agent Father / guided flows.              |
 
 ### ✅ KEEP (Core Value)
 
 | Component                                                                                            | Why Keep                                                                                                                           |
 | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| **`RegularDictionary`**                                                                              | Foundation of the entire guided-flow / quickReply system. Bot Father depends on it.                                                |
+| **`RegularDictionary`**                                                                              | Foundation of the entire guided-flow / quickReply system. Agent Father depends on it.                                              |
 | **`IntegerDictionary` / `DecimalDictionary`**                                                        | Useful for structured data capture (amounts, quantities). Lightweight.                                                             |
 | **`EmailDictionary`**                                                                                | Validates email format — simple, useful.                                                                                           |
 | **`PunctuationDictionary` + `PunctuationNormalizer`**                                                | Essential pre-processing for any text input.                                                                                       |
@@ -1019,34 +1020,34 @@ Integer getCurrentVersion(String id);
 
 #### Unit Tests (46 files in `EDDI/src/test/`)
 
-| Category                      | Test Files                                                                                                                                                                                                                  | Coverage Level                                     |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| **Tools** (8/8)               | `CalculatorToolTest`, `DataFormatterToolTest`, `DateTimeToolTest`, `PdfReaderToolTest`, `TextSummarizerToolTest`, `WeatherToolTest`, `WebScraperToolTest`, `WebSearchToolTest`                                              | ✅ Excellent                                       |
-| **Tool infrastructure** (4/5) | `EddiToolBridgeTest`, `ToolCostTrackerTest`, `ToolRateLimiterTest`, `UrlValidationUtilsTest`                                                                                                                                | ✅ Very good (missing `ToolCacheServiceTest`)      |
-| **Behavior matchers** (5/6)   | `ActionMatcherTest`, `BaseMatcherTest`, `ContextMatcherTest`, `DynamicValueMatcherTest`, `InputMatcherTest`                                                                                                                 | ✅ Good (missing `SizeMatcherTest`)                |
-| **NLP/Parser** (8 files)      | `InputParserTest`, `DictionaryUtilitiesTest`, `TemporaryDictionaryParserTest`, `IExpressionProviderTest`, `DamerauLevenshteinCorrectionTest`, `ContractedWordNormalizerTest`, `PunctuationNormalizerTest`, `TestDictionary` | ✅ Good for parser core                            |
-| **NLP matches** (3)           | `IterationCounterTest`, `MatchMatrixTest`, `PermutationTest`                                                                                                                                                                | ✅ Good                                            |
-| **Output** (3)                | `OutputItemContainerGenerationTaskTest`, `OutputSerializationTest`, `OutputItemContainerGenerationTest`                                                                                                                     | 🟡 Partial                                         |
-| **Templating** (4)            | `OutputTemplateTaskTest`, `TemplatingEngineTest`, `EncoderWrapperTest`, `UUIDWrapperTest`                                                                                                                                   | ✅ Good                                            |
-| **Properties** (2)            | `PropertySetterTaskTest`, `PropertySetterTest`                                                                                                                                                                              | ✅ Good                                            |
-| **Langchain** (2)             | `LangchainTaskTest`, `AgentExecutionHelperTest`                                                                                                                                                                             | 🟡 Basic (no LLM mock)                             |
-| **HttpCalls** (1)             | `HttpCallExecutorTest`                                                                                                                                                                                                      | 🟡 Executor only, not the task                     |
-| **Engine** (3)                | `ConversationCoordinatorTest`, `ConversationMemoryTest`, `ConversationStepTest`                                                                                                                                             | 🟡 Partial (no LifecycleManager, no RestBotEngine) |
-| **Other** (2)                 | `CallbackMatcherTest`, `ResultManipulatorTest`                                                                                                                                                                              | 🟢                                                 |
+| Category                      | Test Files                                                                                                                                                                                                                  | Coverage Level                                       |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| **Tools** (8/8)               | `CalculatorToolTest`, `DataFormatterToolTest`, `DateTimeToolTest`, `PdfReaderToolTest`, `TextSummarizerToolTest`, `WeatherToolTest`, `WebScraperToolTest`, `WebSearchToolTest`                                              | ✅ Excellent                                         |
+| **Tool infrastructure** (4/5) | `EddiToolBridgeTest`, `ToolCostTrackerTest`, `ToolRateLimiterTest`, `UrlValidationUtilsTest`                                                                                                                                | ✅ Very good (missing `ToolCacheServiceTest`)        |
+| **Behavior matchers** (5/6)   | `ActionMatcherTest`, `BaseMatcherTest`, `ContextMatcherTest`, `DynamicValueMatcherTest`, `InputMatcherTest`                                                                                                                 | ✅ Good (missing `SizeMatcherTest`)                  |
+| **NLP/Parser** (8 files)      | `InputParserTest`, `DictionaryUtilitiesTest`, `TemporaryDictionaryParserTest`, `IExpressionProviderTest`, `DamerauLevenshteinCorrectionTest`, `ContractedWordNormalizerTest`, `PunctuationNormalizerTest`, `TestDictionary` | ✅ Good for parser core                              |
+| **NLP matches** (3)           | `IterationCounterTest`, `MatchMatrixTest`, `PermutationTest`                                                                                                                                                                | ✅ Good                                              |
+| **Output** (3)                | `OutputItemContainerGenerationTaskTest`, `OutputSerializationTest`, `OutputItemContainerGenerationTest`                                                                                                                     | 🟡 Partial                                           |
+| **Templating** (4)            | `OutputTemplateTaskTest`, `TemplatingEngineTest`, `EncoderWrapperTest`, `UUIDWrapperTest`                                                                                                                                   | ✅ Good                                              |
+| **Properties** (2)            | `PropertySetterTaskTest`, `PropertySetterTest`                                                                                                                                                                              | ✅ Good                                              |
+| **Langchain** (2)             | `LangchainTaskTest`, `AgentExecutionHelperTest`                                                                                                                                                                             | 🟡 Basic (no LLM mock)                               |
+| **HttpCalls** (1)             | `HttpCallExecutorTest`                                                                                                                                                                                                      | 🟡 Executor only, not the task                       |
+| **Engine** (3)                | `ConversationCoordinatorTest`, `ConversationMemoryTest`, `ConversationStepTest`                                                                                                                                             | 🟡 Partial (no LifecycleManager, no RestAgentEngine) |
+| **Other** (2)                 | `CallbackMatcherTest`, `ResultManipulatorTest`                                                                                                                                                                              | 🟢                                                   |
 
 > [!IMPORTANT]
 > All 46 tests are pure JUnit 5 + Mockito. **Zero `@QuarkusTest` annotations** — no tests exercise the real DI container. This means DI wiring bugs are only caught at runtime.
 
 #### Integration Tests (6 classes in `EDDI-integration-tests/` repo)
 
-| Test Class                  | File                                                                                                                                                 | Lines | Test Methods     | What It Tests                                                                                                                                                                                                                                                 |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RestBotEngineTest`         | [RestBotEngineTest.java](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestBotEngineTest.java)                 | 514   | 18               | Full conversation lifecycle: welcome message, word/phrase input, quickReplies, string/expression/object context injection, output templating, quickReply templating, property extraction, property-in-context, conversation ended state, multi-bot deployment |
-| `RestSemanticParserTest`    | [RestSemanticParserTest.java](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestSemanticParserTest.java)       | 127   | 4+setup+teardown | Parser standalone: word→expression, phrase→expression, spelling correction (DamerauLevenshtein), regex matching                                                                                                                                               |
-| `RestBehaviorTest`          | [RestBehaviorTest.java](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestBehaviorTest.java)                   | 56    | 4 (CRUD)         | Behavior config CRUD + versioning                                                                                                                                                                                                                             |
-| `RestOutputTest`            | [RestOutputTest.java](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestOutputTest.java)                       | 62    | 5 (CRUD+PATCH)   | Output config CRUD + patch + versioning                                                                                                                                                                                                                       |
-| `RestRegularDictionaryTest` | [RestRegularDictionaryTest.java](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestRegularDictionaryTest.java) | 73    | 5 (CRUD+PATCH)   | Dictionary config CRUD + patch + versioning                                                                                                                                                                                                                   |
-| `RestUseCaseTest`           | [RestUseCaseTest.java](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestUseCaseTest.java)                     | 116   | 2                | Weather bot ZIP import → multi-turn conversation → cross-conversation long-term memory; managed bot endpoint                                                                                                                                                  |
+| Test Class                  | File                                                                                                                                                 | Lines | Test Methods     | What It Tests                                                                                                                                                                                                                                                   |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RestAgentEngineTest`       | [RestAgentEngineTest.java](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestAgentEngineTest.java)             | 514   | 18               | Full conversation lifecycle: welcome message, word/phrase input, quickReplies, string/expression/object context injection, output templating, quickReply templating, property extraction, property-in-context, conversation ended state, multi-agent deployment |
+| `RestSemanticParserTest`    | [RestSemanticParserTest.java](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestSemanticParserTest.java)       | 127   | 4+setup+teardown | Parser standalone: word→expression, phrase→expression, spelling correction (DamerauLevenshtein), regex matching                                                                                                                                                 |
+| `RestBehaviorTest`          | [RestBehaviorTest.java](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestBehaviorTest.java)                   | 56    | 4 (CRUD)         | Behavior config CRUD + versioning                                                                                                                                                                                                                               |
+| `RestOutputTest`            | [RestOutputTest.java](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestOutputTest.java)                       | 62    | 5 (CRUD+PATCH)   | Output config CRUD + patch + versioning                                                                                                                                                                                                                         |
+| `RestRegularDictionaryTest` | [RestRegularDictionaryTest.java](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestRegularDictionaryTest.java) | 73    | 5 (CRUD+PATCH)   | Dictionary config CRUD + patch + versioning                                                                                                                                                                                                                     |
+| `RestUseCaseTest`           | [RestUseCaseTest.java](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestUseCaseTest.java)                     | 116   | 2                | Weather agent ZIP import → multi-turn conversation → cross-conversation long-term memory; managed agent endpoint                                                                                                                                                |
 
 #### Reusable Base Classes (Excellent patterns to keep)
 
@@ -1057,14 +1058,14 @@ Integer getCurrentVersion(String id);
 - `assertUpdate(body, path, resourceUri)` — PUT + assert 200 + verify version increment
 - `assertPatch(body, path, resourceUri)` — PATCH + assert 200 + verify version increment
 - `assertDelete(path)` — DELETE + verify 404 on re-read
-- `deployBot(id, version)` — POST deploy + poll status until READY (with STOP/ERROR handling)
-- `sendUserInput(resourceId, conversationId, input, detailed, currentStepOnly)` — POST to `/bots/unrestricted/`
-- `createConversation(botId, userId)` — POST to create + extract conversation ID
+- `deployAgent(id, version)` — POST deploy + poll status until READY (with STOP/ERROR handling)
+- `sendUserInput(resourceId, conversationId, input, detailed, currentStepOnly)` — POST to `/agents/unrestricted/`
+- `createConversation(agentId, userId)` — POST to create + extract conversation ID
 
-**[`BotEngineSetup`](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/BotEngineSetup.java)** (123 lines) — Programmatic bot assembly:
+**[`AgentEngineSetup`](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/AgentEngineSetup.java)** (123 lines) — Programmatic agent assembly:
 
 ```
-setupBot(dictionaryPath, behaviorPath, outputPath)
+setupAgent(dictionaryPath, behaviorPath, outputPath)
   → load JSON fixtures from test resources
   → createResource(dictionary)  → REST POST /regulardictionarystore/
   → createResource(behavior)    → REST POST /behaviorstore/
@@ -1073,34 +1074,34 @@ setupBot(dictionaryPath, behaviorPath, outputPath)
                                  + RegularDictionary (URI) + levenshtein correction (distance=2)
                                  + mergedTerms correction + behavior + output + template + property
   → createResource(package)     → REST POST /packagestore/
-  → create bot with package URI → REST POST /botstore/
-  → return bot URI
+  → create agent with package URI → REST POST /agentstore/
+  → return agent URI
 ```
 
 #### JSON Fixture Catalog (31 files in `src/test/resources/tests/`)
 
-| Directory            | Files                                                                                                                 | Purpose                                                                   |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `botengine/`         | `regularDictionary.json`, `regularDictionary2.json`, `behavior.json`, `behavior2.json`, `output.json`, `output2.json` | Full bot configs for conversation lifecycle tests                         |
-| `behavior/`          | `createBehavior.json`, `updateBehavior.json`                                                                          | CRUD test data for behavior rules                                         |
-| `output/`            | `createOutput.json`, `updateOutput.json`, `patchOutput.json`                                                          | CRUD + PATCH test data for output configs                                 |
-| `regularDictionary/` | `createRegularDictionary.json`, `updateRegularDictionary.json`, `patchRegularDictionary.json`                         | CRUD + PATCH test data for dictionaries                                   |
-| `parser/`            | `simpleRegularDictionary.json`, `parserConfiguration.json`                                                            | Parser standalone test config                                             |
-| `useCases/`          | `weather_bot_v1.zip`, `botdeployment.json`, + 9 descriptor/config files                                               | End-to-end weather bot with httpCalls, properties, and managed bot config |
+| Directory            | Files                                                                                                                 | Purpose                                                                       |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `agentengine/`       | `regularDictionary.json`, `regularDictionary2.json`, `behavior.json`, `behavior2.json`, `output.json`, `output2.json` | Full agent configs for conversation lifecycle tests                           |
+| `behavior/`          | `createBehavior.json`, `updateBehavior.json`                                                                          | CRUD test data for behavior rules                                             |
+| `output/`            | `createOutput.json`, `updateOutput.json`, `patchOutput.json`                                                          | CRUD + PATCH test data for output configs                                     |
+| `regularDictionary/` | `createRegularDictionary.json`, `updateRegularDictionary.json`, `patchRegularDictionary.json`                         | CRUD + PATCH test data for dictionaries                                       |
+| `parser/`            | `simpleRegularDictionary.json`, `parserConfiguration.json`                                                            | Parser standalone test config                                                 |
+| `useCases/`          | `weather_agent_v1.zip`, `agentdeployment.json`, + 9 descriptor/config files                                           | End-to-end weather agent with httpCalls, properties, and managed agent config |
 
 > [!TIP]
-> **All 31 fixture files are directly reusable in v6.** They represent real bot configurations with working expression syntax, behavior rules, and output templates. Copy to `EDDI/src/test/resources/integration/fixtures/`.
+> **All 31 fixture files are directly reusable in v6.** They represent real agent configurations with working expression syntax, behavior rules, and output templates. Copy to `EDDI/src/test/resources/integration/fixtures/`.
 
 #### Current Integration Test Dependencies (Outdated!)
 
-| Dependency     | Current Version   | Latest Stable                          | Action                                        |
-| -------------- | ----------------- | -------------------------------------- | --------------------------------------------- |
-| TestNG         | **6.14.3** (2018) | 7.10+                                  | ❌ **Replace with JUnit 5** (Quarkus native)  |
-| RestAssured    | **3.3.0** (2018)  | 5.4+                                   | ⬆️ Upgrade (already a Quarkus dependency)     |
-| Jackson        | **2.9.9** (2019)  | 2.17+                                  | ⬆️ Use Quarkus-managed version                |
+| Dependency     | Current Version        | Latest Stable                          | Action                                        |
+| -------------- | ---------------------- | -------------------------------------- | --------------------------------------------- |
+| TestNG         | **6.14.3** (2018)      | 7.10+                                  | ❌ **Replace with JUnit 5** (Quarkus native)  |
+| RestAssured    | **3.3.0** (2018)       | 5.4+                                   | ⬆️ Upgrade (already a Quarkus dependency)     |
+| Jackson        | **2.9.9** (2019)       | 2.17+                                  | ⬆️ Use Quarkus-managed version                |
 | Lombok         | **removed** (Phase 6D) | —                                      | ✅ Removed — explicit getters/setters         |
-| Log4j          | **2.12.0** (2019) | ⚠️ **SECURITY RISK** (CVE-2021-44228!) | ❌ **Remove** — use JBoss Logging via Quarkus |
-| Maven Compiler | Java **11**       | Java **21**                            | ⬆️ Match EDDI main project                    |
+| Log4j          | **2.12.0** (2019)      | ⚠️ **SECURITY RISK** (CVE-2021-44228!) | ❌ **Remove** — use JBoss Logging via Quarkus |
+| Maven Compiler | Java **11**            | Java **21**                            | ⬆️ Match EDDI main project                    |
 
 ---
 
@@ -1116,7 +1117,7 @@ setupBot(dictionaryPath, behaviorPath, outputPath)
  Tools & Utils      │ ✅ 8/8   │          │          │           │
  Behavior Matchers  │ ✅ 5/6   │          │          │           │
  NLP Parser         │ ✅ 5+    │          │          │           │
- Lifecycle Tasks    │ 🟡 2/7  │ 🔴 0/7  │ ✅ via bot│           │
+ Lifecycle Tasks    │ 🟡 2/7  │ 🔴 0/7  │ ✅ via agent│           │
  REST Endpoints     │ 🔴 0    │ 🔴 0    │ ✅ 6     │           │
  Stores/DB          │ 🔴 0    │ 🔴 0    │ 🟡 CRUD  │           │
  LLM/Agent          │ 🔴 0    │ 🔴 0    │ 🔴 0     │           │
@@ -1224,13 +1225,13 @@ class BehaviorStoreComponentTest {
 | ------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `BehaviorStoreComponentTest.java`           | CRUD + versioning with real MongoDB                                           | Validates store changes after refactoring                                    |
 | `ConversationMemoryStoreComponentTest.java` | Memory persistence, `loadActiveConversationMemorySnapshot`, state transitions | Critical path — this store does NOT use `IResourceStorage`                   |
-| `RestBotEngineComponentTest.java`           | Full endpoint with real DI — catches wiring issues                            | The 668-line god class: need to verify DI survives decomposition             |
+| `RestAgentEngineComponentTest.java`         | Full endpoint with real DI — catches wiring issues                            | The 668-line god class: need to verify DI survives decomposition             |
 | `LifecycleManagerComponentTest.java`        | Full pipeline with real task instances + real component cache                 | Validates task ordering survives refactoring                                 |
 | `ConfigMigrationComponentTest.java`         | `MigrationManager` with test data                                             | 505-line file with MongoDB-coupled code — needs coverage before DB migration |
 
 #### Layer 3: Integration Tests (Migrated from separate repo)
 
-**Goal**: Full EDDI application + MongoDB + test bot scenarios. **Move into main repo** so AI agents have single-command test execution.
+**Goal**: Full EDDI application + MongoDB + test agent scenarios. **Move into main repo** so AI agents have single-command test execution.
 
 ```bash
 # AI agent runs this after significant changes
@@ -1248,33 +1249,33 @@ class BehaviorStoreComponentTest {
 | 4    | Replace `dependsOnMethods` chains → `@TestMethodOrder(OrderAnnotation.class)` + `@Order(n)`              | 30 min |
 | 5    | Replace `super.setup()` manual `RestAssured.baseURI/port` → `@QuarkusIntegrationTest` auto-configuration | 20 min |
 | 6    | Update pom.xml: remove separate repo dependencies, add `quarkus-junit5`                                  | 10 min |
-| 7    | Verify all 18 `RestBotEngineTest` methods pass with `@QuarkusIntegrationTest`                            | 1 hour |
+| 7    | Verify all 18 `RestAgentEngineTest` methods pass with `@QuarkusIntegrationTest`                          | 1 hour |
 
 **What to reuse directly**:
 
-| Existing Class              | Reuse Strategy                                                                                                                                                    |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BaseCRUDOperations`        | **Keep 100%** — rename to `IntegrationTestBase`. All CRUD helpers, `deployBot()` polling, `sendUserInput()`, `createConversation()` are excellent and well-tested |
-| `BotEngineSetup`            | **Keep 100%** — rename to `BotBuilder`. Programmatic bot assembly pattern is perfect for test fixtures                                                            |
-| `RestBotEngineTest`         | **Keep 100%** — all 18 test methods are valid. Add `@QuarkusIntegrationTest` annotation                                                                           |
-| `RestSemanticParserTest`    | **Keep 100%** — parser standalone tests with spelling correction                                                                                                  |
-| `RestBehaviorTest`          | **Keep 100%** — CRUD validation                                                                                                                                   |
-| `RestOutputTest`            | **Keep 100%** — CRUD + PATCH validation                                                                                                                           |
-| `RestRegularDictionaryTest` | **Keep 100%** — CRUD + PATCH validation                                                                                                                           |
-| `RestUseCaseTest`           | **Keep 100%** — weather bot e2e + managed bot endpoint                                                                                                            |
-| `JsonSerialization`         | **Keep** — Jackson helper for test data                                                                                                                           |
-| All 31 JSON fixtures        | **Keep** — copy to `src/test/resources/integration/fixtures/`                                                                                                     |
+| Existing Class              | Reuse Strategy                                                                                                                                                      |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BaseCRUDOperations`        | **Keep 100%** — rename to `IntegrationTestBase`. All CRUD helpers, `deployAgent()` polling, `sendUserInput()`, `createConversation()` are excellent and well-tested |
+| `AgentEngineSetup`          | **Keep 100%** — rename to `AgentBuilder`. Programmatic agent assembly pattern is perfect for test fixtures                                                          |
+| `RestAgentEngineTest`       | **Keep 100%** — all 18 test methods are valid. Add `@QuarkusIntegrationTest` annotation                                                                             |
+| `RestSemanticParserTest`    | **Keep 100%** — parser standalone tests with spelling correction                                                                                                    |
+| `RestBehaviorTest`          | **Keep 100%** — CRUD validation                                                                                                                                     |
+| `RestOutputTest`            | **Keep 100%** — CRUD + PATCH validation                                                                                                                             |
+| `RestRegularDictionaryTest` | **Keep 100%** — CRUD + PATCH validation                                                                                                                             |
+| `RestUseCaseTest`           | **Keep 100%** — weather agent e2e + managed agent endpoint                                                                                                          |
+| `JsonSerialization`         | **Keep** — Jackson helper for test data                                                                                                                             |
+| All 31 JSON fixtures        | **Keep** — copy to `src/test/resources/integration/fixtures/`                                                                                                       |
 
 **New integration tests to add**:
 
-| Test                                  | What It Tests                                                  | Fixture Needed                                                                            |
-| ------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `LangchainIntegrationTest.java`       | Bot with LLM config → send message → get LLM response          | New: `langchain-bot/` fixture + WireMock or `langchain4j-mock` for fake LLM               |
-| `HttpCallsIntegrationTest.java`       | Bot with httpCalls → trigger API → store response in memory    | Reuse `useCases/weather_bot_v1.zip` (already has httpCalls!) + WireMock for target server |
-| `ConcurrentConversationTest.java`     | 10 parallel conversations → all complete without data leaking  | Reuse existing `BotEngineSetup.setupBot()` + `ExecutorService.invokeAll()`                |
-| `BotVersioningIntegrationTest.java`   | Deploy v1 → start conv → deploy v2 → new conv on v2, old on v1 | Two versions of behavior/output fixtures                                                  |
-| `BotFatherWizardTest.java`            | Init bot-father via `/backup/import` → run wizard conversation | New: bot-father ZIP fixture                                                               |
-| `StoreVersioningIntegrationTest.java` | Create → update → read v1 → read v2 → delete → 404             | Reuse existing CRUD fixtures                                                              |
+| Test                                  | What It Tests                                                    | Fixture Needed                                                                              |
+| ------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `LangchainIntegrationTest.java`       | Agent with LLM config → send message → get LLM response          | New: `langchain-agent/` fixture + WireMock or `langchain4j-mock` for fake LLM               |
+| `HttpCallsIntegrationTest.java`       | Agent with httpCalls → trigger API → store response in memory    | Reuse `useCases/weather_agent_v1.zip` (already has httpCalls!) + WireMock for target server |
+| `ConcurrentConversationTest.java`     | 10 parallel conversations → all complete without data leaking    | Reuse existing `AgentEngineSetup.setupAgent()` + `ExecutorService.invokeAll()`              |
+| `AgentVersioningIntegrationTest.java` | Deploy v1 → start conv → deploy v2 → new conv on v2, old on v1   | Two versions of behavior/output fixtures                                                    |
+| `AgentFatherWizardTest.java`          | Init agent-father via `/backup/import` → run wizard conversation | New: agent-father ZIP fixture                                                               |
+| `StoreVersioningIntegrationTest.java` | Create → update → read v1 → read v2 → delete → 404               | Reuse existing CRUD fixtures                                                                |
 
 #### Layer 4: Contract Tests (API Stability for AI Agents)
 
@@ -1292,22 +1293,22 @@ class BehaviorStoreComponentTest {
 class ApiContractTest extends IntegrationTestBase {
 
     @Test void conversationResponseMatchesSchema() {
-        // Setup bot + conversation using BotBuilder
-        Response res = sendUserInput(botId, convId, "hello", true, false);
+        // Setup agent + conversation using AgentBuilder
+        Response res = sendUserInput(agentId, convId, "hello", true, false);
         res.then()
             .assertThat()
             .body(matchesJsonSchemaInClasspath("schemas/conversation-response.json"));
     }
 
-    @Test void botListResponseMatchesSchema() { ... }
+    @Test void agentListResponseMatchesSchema() { ... }
     @Test void packageResponseMatchesSchema() { ... }
 }
 ```
 
 **JSON Schema files to create** (in `src/test/resources/schemas/`):
 
-- `conversation-response.json` — validates `/bots/unrestricted/{botId}/{convId}` response
-- `bot-config.json` — validates `/botstore/bots/{id}` response
+- `conversation-response.json` — validates `/agents/unrestricted/{agentId}/{convId}` response
+- `agent-config.json` — validates `/agentstore/agents/{id}` response
 - `package-config.json` — validates `/packagestore/packages/{id}` response
 - `behavior-config.json` — validates `/behaviorstore/behaviorsets/{id}` response
 - `output-config.json` — validates `/outputstore/outputsets/{id}` response
@@ -1336,7 +1337,7 @@ AI Agent makes code change
 | **Deterministic**        | Mock LLMs (WireMock), random seeds                       | Flaky tests cause infinite debugging loops            |
 | **Self-contained**       | Testcontainers for DB, no manual Docker                  | AI agents can't run `docker-compose up`               |
 | **Descriptive failures** | `shouldEmitGreetActionWhenInputMatchesGreeting()`        | AI agents parse test names to understand failures     |
-| **Fixture bots**         | JSON files in `src/test/resources/integration/fixtures/` | Reuse existing 31 fixtures + add new ones             |
+| **Fixture agents**       | JSON files in `src/test/resources/integration/fixtures/` | Reuse existing 31 fixtures + add new ones             |
 | **Single command**       | `./mvnw verify` runs all layers                          | AI agents shouldn't need to know which -P flag        |
 | **Test-per-feature**     | Each new ILifecycleTask must include unit test           | Convention enforced in GEMINI.md Section 5            |
 
@@ -1361,7 +1362,7 @@ AI Agent makes code change
 | `modules/behavior/`        | ~60%          | 90%+      | Add `SizeMatcherTest`, `BehaviorRulesEvaluationTaskTest`               |
 | `modules/nlp/`             | ~40%          | 70%+      | Parser is tested; need `InputParserTask` test with full mock pipeline  |
 | `modules/httpcalls/`       | ~30%          | 80%+      | Have executor test; need task test                                     |
-| `engine/`                  | ~20%          | 80%+      | Need `LifecycleManager`, `RestBotEngine` component tests               |
+| `engine/`                  | ~20%          | 80%+      | Need `LifecycleManager`, `RestAgentEngine` component tests             |
 | `configs/` (stores)        | **0%**        | 60%+      | Need `@QuarkusTest` with Testcontainers for every store                |
 | `datastore/`               | **0%**        | 80%+      | Critical: need `MongoResourceStorage`, `HistorizedResourceStore` tests |
 | **Overall**                | **~25%** est. | **70%+**  | Priority: stores → engine → tasks                                      |
@@ -1378,7 +1379,7 @@ AI Agent makes code change
 | **OGNL**      | 3.3.4         | 4 files (explicit) + **Thymeleaf internally** | 6 explicit + all `${}` expressions | Deep object nav + Thymeleaf's expression engine                                                       |
 
 > [!WARNING]
-> **OGNL 3.3.4 is affected by [CVE-2025-53192](https://github.com/thymeleaf/thymeleaf/issues/1051).** Thymeleaf uses OGNL internally for all `${}` expression evaluation (unless using Spring/SpEL). This means **every Thymeleaf template in EDDI is evaluated through OGNL 3.3.4**. However, Thymeleaf 3.1.3 (latest) AND 3.1.4-SNAPSHOT both **pin** `<ognl.version>3.3.4</ognl.version>` — upgrading OGNL independently would break Thymeleaf due to API changes in OGNL 3.4.x. [thymeleaf#1058](https://github.com/thymeleaf/thymeleaf/issues/1058) tracks this.
+> **OGNL 3.3.4 is affected by [CVE-2025-53192](https://github.com/thymeleaf/thymeleaf/issues/1051).** Thymeleaf uses OGNL internally for all `${}` expression evaluation (unless using Spring/SpEL). This means **every Thymeleaf template in EDDI is evaluated through OGNL 3.3.4**. However, Thymeleaf 3.1.3 (latest) AND 3.1.4-SNAPSHOT agenth **pin** `<ognl.version>3.3.4</ognl.version>` — upgrading OGNL independently would break Thymeleaf due to API changes in OGNL 3.4.x. [thymeleaf#1058](https://github.com/thymeleaf/thymeleaf/issues/1058) tracks this.
 
 **Two separate OGNL concerns:**
 
@@ -1457,14 +1458,14 @@ Problems:
 
 ### I.5 Recommendation
 
-| Component                              | Action                              | Rationale                                                                                                                                                                                                                                                                                  |
-| -------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Thymeleaf** (`ITemplatingEngine`)    | ✅ **KEEP**                         | Well-abstracted interface. `${...}` syntax is intuitive. Custom dialects add value. Best-in-class for text templating in Java.                                                                                                                                                             |
-| **Thymeleaf custom dialects**          | ✅ **KEEP**                         | UUID, JSON, Encoder are useful utilities.                                                                                                                                                                                                                                                  |
-| **OGNL (Thymeleaf internal)**          | ⚠️ **BLOCKED on Thymeleaf**         | Thymeleaf 3.1.3 AND 3.1.4-SNAPSHOT both pin `<ognl.version>3.3.4</ognl.version>`. OGNL 3.4.x changed API. [thymeleaf#1058](https://github.com/thymeleaf/thymeleaf/issues/1058) is open, "needs triage". Cannot upgrade independently. Thymeleaf 3.1's restricted mode partially mitigates. |
-| **OGNL (6 explicit call sites)**       | 🔴 **REPLACE** with `PathNavigator` | These bypass Thymeleaf's restricted mode. Only 6 calls = easy migration.                                                                                                                                                                                                                   |
-| **`PrePostUtils.buildListFromJson()`** | 🟡 **REFACTOR**                     | Replace Thymeleaf `th:each` JSON building with Java Stream API + Jackson. Keep the same abstract contract.                                                                                                                                                                                 |
-| **`pom.xml` OGNL dependency**          | ⚠️ **Monitor thymeleaf#1058**       | Can't upgrade to 3.4.x without Thymeleaf support. Keep at 3.3.4 until Thymeleaf releases a fix. Restricted mode mitigates risk.                                                                                                                                                            |
+| Component                              | Action                              | Rationale                                                                                                                                                                                                                                                                                    |
+| -------------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Thymeleaf** (`ITemplatingEngine`)    | ✅ **KEEP**                         | Well-abstracted interface. `${...}` syntax is intuitive. Custom dialects add value. Best-in-class for text templating in Java.                                                                                                                                                               |
+| **Thymeleaf custom dialects**          | ✅ **KEEP**                         | UUID, JSON, Encoder are useful utilities.                                                                                                                                                                                                                                                    |
+| **OGNL (Thymeleaf internal)**          | ⚠️ **BLOCKED on Thymeleaf**         | Thymeleaf 3.1.3 AND 3.1.4-SNAPSHOT agenth pin `<ognl.version>3.3.4</ognl.version>`. OGNL 3.4.x changed API. [thymeleaf#1058](https://github.com/thymeleaf/thymeleaf/issues/1058) is open, "needs triage". Cannot upgrade independently. Thymeleaf 3.1's restricted mode partially mitigates. |
+| **OGNL (6 explicit call sites)**       | 🔴 **REPLACE** with `PathNavigator` | These bypass Thymeleaf's restricted mode. Only 6 calls = easy migration.                                                                                                                                                                                                                     |
+| **`PrePostUtils.buildListFromJson()`** | 🟡 **REFACTOR**                     | Replace Thymeleaf `th:each` JSON building with Java Stream API + Jackson. Keep the same abstract contract.                                                                                                                                                                                   |
+| **`pom.xml` OGNL dependency**          | ⚠️ **Monitor thymeleaf#1058**       | Can't upgrade to 3.4.x without Thymeleaf support. Keep at 3.3.4 until Thymeleaf releases a fix. Restricted mode mitigates risk.                                                                                                                                                              |
 
 #### Alternative Template Engines Considered
 
@@ -1513,34 +1514,34 @@ This keeps Thymeleaf for `${variable}` substitution within each item (its streng
 
 ### I.6 Migration Effort
 
-| Change                                       | Files Affected              | Effort     | Priority                                      |
-| -------------------------------------------- | --------------------------- | ---------- | --------------------------------------------- |
-| Create `PathNavigator` utility               | New file + 4 existing files | 3-4 hours  | 🔴 High (removes explicit OGNL security risk) |
-| Refactor `PrePostUtils.buildListFromJson()`  | 1 file (316 lines)          | 4-6 hours  | 🟡 Medium                                     |
-| Monitor thymeleaf#1058 for OGNL 3.4.x update | pom.xml (when available)    | —          | ⚠️ Watch — update as soon as Thymeleaf adopts |
-| Document Thymeleaf syntax for bot developers | New docs page               | 2 hours    | 🟢 Nice to have                               |
-| **Total**                                    | **~6 files**                | **~1 day** |                                               |
+| Change                                         | Files Affected              | Effort     | Priority                                      |
+| ---------------------------------------------- | --------------------------- | ---------- | --------------------------------------------- |
+| Create `PathNavigator` utility                 | New file + 4 existing files | 3-4 hours  | 🔴 High (removes explicit OGNL security risk) |
+| Refactor `PrePostUtils.buildListFromJson()`    | 1 file (316 lines)          | 4-6 hours  | 🟡 Medium                                     |
+| Monitor thymeleaf#1058 for OGNL 3.4.x update   | pom.xml (when available)    | —          | ⚠️ Watch — update as soon as Thymeleaf adopts |
+| Document Thymeleaf syntax for agent developers | New docs page               | 2 hours    | 🟢 Nice to have                               |
+| **Total**                                      | **~6 files**                | **~1 day** |                                               |
 
 ---
 
 ## Appendix J: Manager UI/UX Audit
 
-> Full audit based on: browser screenshots of all main screens, user's video walkthrough of Bot Father v4 interaction + conversation debugger, and code-level review of key React components.
+> Full audit based on: browser screenshots of all main screens, user's video walkthrough of Agent Father v4 interaction + conversation debugger, and code-level review of key React components.
 
 ### J.1 Technology Stack Assessment
 
-| Layer            | Current                    | Status        | Notes                                                                                             |
-| ---------------- | -------------------------- | ------------- | ------------------------------------------------------------------------------------------------- |
-| **Framework**    | React 18                   | ✅ Current    | Solid foundation                                                                                  |
-| **State mgmt**   | Redux + Redux-Saga         | ⚠️ Heavy      | Works but verbose; no Redux Toolkit                                                               |
-| **UI library**   | Material-UI **v4**         | 🔴 EOL        | v4 deprecated since Sep 2021; see J.1a for alternatives                                           |
-| **Styling**      | `makeStyles` (JSS)         | 🔴 Deprecated | Removed in MUI v5; must migrate regardless of framework choice                                    |
-| **HOC patterns** | `recompose`                | 🔴 Abandoned  | Library unmaintained since 2019; used in `BotConversationView`, `ConversationStep`, `PackageView` |
-| **Build**        | Webpack 5 + TypeScript 5.4 | ✅ OK         | Consider Vite for faster DX if doing full rewrite                                                 |
-| **Linting**      | `tslint`                   | 🔴 Deprecated | Replaced by ESLint + `@typescript-eslint` years ago                                               |
-| **Icons**        | `@fortawesome`             | ✅ OK         | Large bundle but functional; Lucide is lighter                                                    |
-| **JSON viewer**  | `react-json-view`          | ✅ Good       | Monokai theme, collapsible — works well for debugging                                             |
-| **Auth**         | Keycloak / Basic Auth      | ⚠️ Bypassed   | `AuthenticationSelectors.ts` hardcodes `authenticated: true`                                      |
+| Layer            | Current                    | Status        | Notes                                                                                                |
+| ---------------- | -------------------------- | ------------- | ---------------------------------------------------------------------------------------------------- |
+| **Framework**    | React 18                   | ✅ Current    | Solid foundation                                                                                     |
+| **State mgmt**   | Redux + Redux-Saga         | ⚠️ Heavy      | Works but verbose; no Redux Toolkit                                                                  |
+| **UI library**   | Material-UI **v4**         | 🔴 EOL        | v4 deprecated since Sep 2021; see J.1a for alternatives                                              |
+| **Styling**      | `makeStyles` (JSS)         | 🔴 Deprecated | Removed in MUI v5; must migrate regardless of framework choice                                       |
+| **HOC patterns** | `recompose`                | 🔴 Abandoned  | Library unmaintained since 2019; used in `AgentConversationView`, `ConversationStep`, `WorkflowView` |
+| **Build**        | Webpack 5 + TypeScript 5.4 | ✅ OK         | Consider Vite for faster DX if doing full rewrite                                                    |
+| **Linting**      | `tslint`                   | 🔴 Deprecated | Replaced by ESLint + `@typescript-eslint` years ago                                                  |
+| **Icons**        | `@fortawesome`             | ✅ OK         | Large bundle but functional; Lucide is lighter                                                       |
+| **JSON viewer**  | `react-json-view`          | ✅ Good       | Monokai theme, collapsible — works well for debugging                                                |
+| **Auth**         | Keycloak / Basic Auth      | ⚠️ Bypassed   | `AuthenticationSelectors.ts` hardcodes `authenticated: true`                                         |
 
 #### J.1a — UI Framework Alternatives for 2026 (Full Rewrite Scenario)
 
@@ -1610,57 +1611,57 @@ This is a critical factor — whichever framework we choose, AI models (includin
 
 ### J.2 Screens Inventory & UX Analysis
 
-#### J.2.1 Bots Tab (Landing Page)
+#### J.2.1 Agents Tab (Landing Page)
 
-![Bots tab showing cards for Bob Marley 2, Bot Father (x2), Bob Marley](C:/Users/GregorJarisch/.gemini/antigravity/brain/68b55151-08c1-4c05-b729-a6b6870a3294/manager_bots_tab.png)
+![Agents tab showing cards for Bob Marley 2, Agent Father (x2), Bob Marley](C:/Users/GregorJarisch/.gemini/antigravity/brain/68b55151-08c1-4c05-b729-a6b6870a3294/manager_agents_tab.png)
 
 **What works:**
 
-- Card-based layout with clear bot name, version badge (V1), and last-modified date
+- Card-based layout with clear agent name, version badge (V1), and last-modified date
 - Action buttons (Open Chat / Undeploy / Deploy) have good color coding: teal for primary, pink/red for destructive
-- Search field ("Find bot") is well-positioned
-- Sub-packages listed inside cards give quick visibility into bot composition
+- Search field ("Find agent") is well-positioned
+- Sub-packages listed inside cards give quick visibility into agent composition
 
 **Issues:**
 
-- 🔴 **Duplicate Bot Father entries**: Two identical "Bot Father V1" cards appear — different deployments of the same bot show as separate cards with no way to distinguish them. Need environment/instance labels.
-- 🟡 **No status indicator**: No visual health indicator (green/red dot) on each card showing bot health
+- 🔴 **Duplicate Agent Father entries**: Two identical "Agent Father V1" cards appear — different deployments of the same agent show as separate cards with no way to distinguish them. Need environment/instance labels.
+- 🟡 **No status indicator**: No visual health indicator (green/red dot) on each card showing agent health
 - 🟡 **Truncated package names**: "Create Connector…", "Create OpenAI Co…" — names get cut off without tooltips
 - 🟢 **"Logout" button** is prominent (yellow) but has no corresponding user identity display — who am I logged in as?
 
-#### J.2.2 Bot Detail View
+#### J.2.2 Agent Detail View
 
-![Bot Father detail view with description, packages, and action buttons](C:/Users/GregorJarisch/.gemini/antigravity/brain/68b55151-08c1-4c05-b729-a6b6870a3294/manager_bot_father_detail_1772731250704.png)
+![Agent Father detail view with description, packages, and action buttons](C:/Users/GregorJarisch/.gemini/antigravity/brain/68b55151-08c1-4c05-b729-a6b6870a3294/manager_agent_father_detail_1772731250704.png)
 
 **What works:**
 
-- Clear header: Bot name, version dropdown (V01), description text
-- Action toolbar: Rename, Show logs, Export bot, Edit JSON, Open Chat, Undeploy — comprehensive set
-- Package list shows sub-packages with their resource types (parser, behavior, property, output, httpcalls)
+- Clear header: Agent name, version dropdown (V01), description text
+- Action toolbar: Rename, Show logs, Export agent, Edit JSON, Open Chat, Undeploy — comprehensive set
+- Workflow list shows sub-packages with their resource types (parser, behavior, property, output, httpcalls)
 - Version dropdown for each package
 - "View package" link drills into package detail
 
 **Issues:**
 
 - 🔴 **Resource URIs as labels**: Cards show `eddi://ai.labs.parser`, `eddi://ai.labs.behavior` — these are technical internal URIs, not user-friendly labels. Should show "Input Parser", "Behavior Rules" etc.
-- 🟡 **9 packages displayed vertically**: Bot Father v4 has 9 packages (Create Connector Bot, Create OpenAI Connector Bot, Create Hugging Face Connector Bot, Create Anthropic Connector Bot, Create Gemini Connector Bot, Create Gemini Vertex Connector Bot, Create Ollama Connector Bot, Create jLama Connector Bot, Templating). Long vertical scroll needed.
+- 🟡 **9 packages displayed vertically**: Agent Father v4 has 9 packages (Create Connector Agent, Create OpenAI Connector Agent, Create Hugging Face Connector Agent, Create Anthropic Connector Agent, Create Gemini Connector Agent, Create Gemini Vertex Connector Agent, Create Ollama Connector Agent, Create jLama Connector Agent, Templating). Long vertical scroll needed.
 - 🟡 **Dense action bar**: 6 buttons in the header row can overwhelm — consider grouping secondary actions (Export, Edit JSON) into a dropdown
 
 #### J.2.3 Conversations Tab
 
-![Conversations list showing bot name, step size, environment, state, last message, created date](C:/Users/GregorJarisch/.gemini/antigravity/brain/68b55151-08c1-4c05-b729-a6b6870a3294/manager_conversations_tab_1772731203355.png)
+![Conversations list showing agent name, step size, environment, state, last message, created date](C:/Users/GregorJarisch/.gemini/antigravity/brain/68b55151-08c1-4c05-b729-a6b6870a3294/manager_conversations_tab_1772731203355.png)
 
 **What works:**
 
-- Table format with clear columns: Bot name, Step size, Environment, Conversation state, Last message, Created on
+- Table format with clear columns: Agent name, Step size, Environment, Conversation state, Last message, Created on
 - Color-coded state badges: READY (green implied), ERROR (visible)
 - Relative timestamps ("3 months ago", "9 months ago") alongside absolute dates
-- Various bot names visible: Bob Marley 2, Bot Father, Test Buddy, Station F Guide, Gemini Test, Carl Jung, Magic Learner Bot — shows real usage
+- Various agent names visible: Bob Marley 2, Agent Father, Test Buddy, Station F Guide, Gemini Test, Carl Jung, Magic Learner Agent — shows real usage
 
 **Issues:**
 
 - 🔴 **No pagination controls visible**: 20+ rows shown; large-scale deployments would be unusable. Only "Find conversation" search exists.
-- 🟡 **Missing bot names**: Some rows at bottom only show "V1" badge with no bot name — data integrity issue
+- 🟡 **Missing agent names**: Some rows at agenttom only show "V1" badge with no agent name — data integrity issue
 - 🟡 **"Refresh" button** (green, right side) but no auto-refresh / polling for live conversations
 - 🟢 **Environment column** shows "unrestricted" for all — works but could use friendlier label
 
@@ -1672,42 +1673,42 @@ This is the **most powerful screen** in the Manager. Clicking a conversation row
 
 - **Step timeline**: Vertical timeline showing conversation turns with arrows indicating direction
 - **Execution time per step**: Each step shows precise timing (e.g., "6 ms", "11 ms") with color coding — green (<500ms), yellow (500-999ms), orange (1-2s), red (>2s)
-- **Action badges**: Small tags showing which behavior rule actions fired (e.g., `greeting`, `create_bot_openai`)
+- **Action badges**: Small tags showing which behavior rule actions fired (e.g., `greeting`, `create_agent_openai`)
 - **Expandable detail**: Click a step to reveal two collapsible sections:
   - **Conversation Output**: Full JSON payload (output text, quick replies, actions) using `react-json-view` with Monokai theme
   - **Conversation Step**: Internal engine state (all facts, rule matches, memory data objects)
-- **Properties panel**: Shows stateful properties accumulated during conversation (like `botName: "Tom"`)
+- **Properties panel**: Shows stateful properties accumulated during conversation (like `agentName: "Tom"`)
 - **Conversation/Raw JSON toggle**: Switch between the step-based debugger and the raw JSON view
 - **End Conversation button**: Allows manually ending an active conversation
 
 **Issues:**
 
 - 🟡 **No search within steps**: For long conversations, no way to jump to a specific step or search for text
-- 🟡 **"Conversation Output" vs "Conversation Step"** naming is confusing — could be "Bot Response" vs "Engine Internals"
+- 🟡 **"Conversation Output" vs "Conversation Step"** naming is confusing — could be "Agent Response" vs "Engine Internals"
 - 🟢 **No export**: Can't export a conversation log for sharing or analysis
 
 #### J.2.5 Chat Side Panel
 
-![Chat panel with Bot Father greeting and quick reply buttons](C:/Users/GregorJarisch/.gemini/antigravity/brain/68b55151-08c1-4c05-b729-a6b6870a3294/manager_chat_response_1772731308941.png)
+![Chat panel with Agent Father greeting and quick reply buttons](C:/Users/GregorJarisch/.gemini/antigravity/brain/68b55151-08c1-4c05-b729-a6b6870a3294/manager_chat_response_1772731308941.png)
 
 **What works:**
 
 - **Right-side sliding panel** that overlays the current view — doesn't navigate away from context
-- **Bot Father greeting**: "Hello there! I'm the Bot Father, and I'm here to help you create bots that connect to (LLM powered) APIs."
+- **Agent Father greeting**: "Hello there! I'm the Agent Father, and I'm here to help you create agents that connect to (LLM powered) APIs."
 - **Quick reply buttons**: Styled gold/amber buttons ("Let's get started, shall we?")
-- **User messages**: Distinct styling (gold background, right-aligned) vs bot messages (left-aligned, darker)
+- **User messages**: Distinct styling (gold background, right-aligned) vs agent messages (left-aligned, darker)
 - **Free-text input**: "Type your response..." field appears when no quick replies are offered
-- **Loading animation**: SVG spinner during bot processing
+- **Loading animation**: SVG spinner during agent processing
 - **Restart and animation controls**: Via chat options menu
 
 **Issues:**
 
-- 🔴 **"Bot not loaded" transient state**: Shows briefly before the bot initializes — should show a cleaner loading state
+- 🔴 **"Agent not loaded" transient state**: Shows briefly before the agent initializes — should show a cleaner loading state
 - 🟡 **No conversation history persistence**: Closing/reopening chat starts a new conversation
 - 🟡 **Panel width**: Fixed, can't be resized. On narrow viewports this would eat too much screen
 - 🟡 **Quick reply buttons**: No hover effect or pressed state animation
 
-#### J.2.6 Package Detail / Config Editor (from video walkthrough)
+#### J.2.6 Workflow Detail / Config Editor (from video walkthrough)
 
 **What works (observed in video):**
 
@@ -1717,7 +1718,7 @@ This is the **most powerful screen** in the Manager. Clicking a conversation row
 - **Next Config / Prev Config**: Sequential navigation through multiple configs within a package
 - **Save & Run**: One-click save and redeploy — excellent workflow for iterating
 - **Plugin ordering**: Can reorder plugins (affects execution order)
-- **"Used in bots" section**: Shows which bots reference this package
+- **"Used in agents" section**: Shows which agents reference this package
 
 **Issues:**
 
@@ -1781,7 +1782,7 @@ This is the **most powerful screen** in the Manager. Clicking a conversation row
 
 | #   | Issue                                                                                           | Impact                                                                                            | AI Complexity                                    |
 | --- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| 1   | **Fix `env.json` default URL** — use relative path or `window.location.origin`                  | Eliminates "could not load bots" on fresh installs                                                | 🟢 Trivial                                       |
+| 1   | **Fix `env.json` default URL** — use relative path or `window.location.origin`                  | Eliminates "could not load agents" on fresh installs                                              | 🟢 Trivial                                       |
 | 2   | **Replace `recompose`** HOCs with React hooks                                                   | Library dead since 2019; blocks React 18 features                                                 | 🟡 Moderate (3+ components, mechanical refactor) |
 | 3   | **Migrate `tslint` → ESLint**                                                                   | `tslint` deprecated since 2019; no security updates                                               | 🟡 Moderate (config migration + fix lint errors) |
 | 4   | **Mobile-first responsive design** — all screens must work equally well on phone/tablet/desktop | Core requirement, not an afterthought. Tailwind's `sm:`/`md:`/`lg:` breakpoints make this natural | ⚫ Architectural (baked into every screen)       |
@@ -1790,17 +1791,17 @@ This is the **most powerful screen** in the Manager. Clicking a conversation row
 
 #### 🟡 Phase 2 — Core UX (Must-do for a great product)
 
-| #   | Issue                                                                               | Impact                                                 | AI Complexity                                           |
-| --- | ----------------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------- |
-| 7   | **Dark/Light mode toggle**                                                          | Reduces eye strain; professional expectation           | 🟡 Moderate (Tailwind dark: variant + toggle component) |
-| 8   | **i18n framework** (react-i18next) + RTL/LTR support                                | Opens EDDI to global markets                           | 🔴 Complex (translation files + RTL layout adjustments) |
-| 9   | **Pagination + sorting** on Conversations and Bots lists                            | Unusable at scale without it                           | 🟡 Moderate (backend already supports skip/limit)       |
-| 10  | **Deduplicate bot entries** — group by name, show versions/environments as sub-rows | Eliminates confusion from duplicate "Bot Father" cards | 🟡 Moderate (groupBy logic + UI redesign)               |
-| 11  | **Replace `eddi://` URIs** with human-readable display names everywhere             | Reduces cognitive load across the entire UI            | 🟡 Moderate (lookup + display layer)                    |
-| 12  | **Fix auth bypass** — remove hardcoded `true` in `AuthenticationSelectors.ts`       | Currently auth is completely non-functional            | 🔴 Complex (Keycloak integration + token flow)          |
-| 13  | **Conversation export** (JSON/CSV/clipboard)                                        | Enables offline analysis, sharing, and LLM fine-tuning | 🟡 Moderate (data already available, just needs UI)     |
-| 14  | **Bot health indicators** on cards (green/yellow/red dot)                           | At-a-glance monitoring without drilling in             | 🟢 Trivial (deployment status API already exists)       |
-| 15  | **Search within conversation steps** + jump-to-step                                 | Essential debugging aid for long conversations         | 🟡 Moderate (filter + scroll-to logic)                  |
+| #   | Issue                                                                                 | Impact                                                   | AI Complexity                                           |
+| --- | ------------------------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------- |
+| 7   | **Dark/Light mode toggle**                                                            | Reduces eye strain; professional expectation             | 🟡 Moderate (Tailwind dark: variant + toggle component) |
+| 8   | **i18n framework** (react-i18next) + RTL/LTR support                                  | Opens EDDI to global markets                             | 🔴 Complex (translation files + RTL layout adjustments) |
+| 9   | **Pagination + sorting** on Conversations and Agents lists                            | Unusable at scale without it                             | 🟡 Moderate (backend already supports skip/limit)       |
+| 10  | **Deduplicate agent entries** — group by name, show versions/environments as sub-rows | Eliminates confusion from duplicate "Agent Father" cards | 🟡 Moderate (groupBy logic + UI redesign)               |
+| 11  | **Replace `eddi://` URIs** with human-readable display names everywhere               | Reduces cognitive load across the entire UI              | 🟡 Moderate (lookup + display layer)                    |
+| 12  | **Fix auth bypass** — remove hardcoded `true` in `AuthenticationSelectors.ts`         | Currently auth is completely non-functional              | 🔴 Complex (Keycloak integration + token flow)          |
+| 13  | **Conversation export** (JSON/CSV/clipboard)                                          | Enables offline analysis, sharing, and LLM fine-tuning   | 🟡 Moderate (data already available, just needs UI)     |
+| 14  | **Agent health indicators** on cards (green/yellow/red dot)                           | At-a-glance monitoring without drilling in               | 🟢 Trivial (deployment status API already exists)       |
+| 15  | **Search within conversation steps** + jump-to-step                                   | Essential debugging aid for long conversations           | 🟡 Moderate (filter + scroll-to logic)                  |
 
 #### 🟢 Phase 3 — Polish & Power Features (Makes it exceptional)
 
@@ -1811,11 +1812,11 @@ This is the **most powerful screen** in the Manager. Clicking a conversation row
 | 18     | **Diff view in config editor** — shows what changed vs saved version                  | Confidence before saving; prevents accidental overwrites | 🟡 Moderate (diff library + side-by-side UI)         |
 | 19     | **Undo/Redo** in config editor (Ctrl+Z stack)                                         | Standard editor expectation                              | 🟡 Moderate (state history stack)                    |
 | 20     | **Keyboard shortcuts** (Ctrl+S to save, Ctrl+Enter to Save & Run, Esc to close modal) | Power user efficiency                                    | 🟢 Trivial (event listeners + existing handlers)     |
-| 21     | **Bot import/export buttons** in Manager (not just Swagger)                           | Makes import/export accessible to all users              | 🟡 Moderate (REST endpoints exist, just needs UI)    |
+| 21     | **Agent import/export buttons** in Manager (not just Swagger)                         | Makes import/export accessible to all users              | 🟡 Moderate (REST endpoints exist, just needs UI)    |
 | 22     | **First-use onboarding tour** — highlight key features on first visit                 | Reduces learning curve for new users                     | 🟡 Moderate (tour library + step definitions)        |
 | 23     | **Config version history** — show change log for each resource                        | Auditability and rollback capability                     | 🔴 Complex (requires backend version diff support)   |
 | ~~24~~ | ~~Responsive layout~~ — **moved to Phase 1 (#4)** as a core requirement               | —                                                        | —                                                    |
-| 25     | **Notification toasts with undo** — "Bot deployed" [Undo] instead of just alert       | Reduces accidental actions                               | 🟢 Trivial (toast component + undo callback)         |
+| 25     | **Notification toasts with undo** — "Agent deployed" [Undo] instead of just alert     | Reduces accidental actions                               | 🟢 Trivial (toast component + undo callback)         |
 | 26     | **Manager Tests tab** — show internal test cases, run them, see diffs (see K.1)       | Makes testing accessible to non-API users                | 🔴 Complex (new screen + test runner integration)    |
 
 ### J.5 Code Quality Observations
@@ -1826,13 +1827,13 @@ This is the **most powerful screen** in the Manager. Clicking a conversation row
 - Redux-Saga for async flows is well-organized
 - `ConversationHelper` utility centralizes data extraction logic
 - Color-coded execution times in debugger (`getTimeColor()` < 500ms/1s/2s thresholds)
-- Chat supports both quick replies and free-text input seamlessly
+- Chat supports agenth quick replies and free-text input seamlessly
 
 **Technical debt:**
 
 - `recompose` usage in 3+ components (`compose`, `pure`, `setDisplayName`) — should be plain hooks
 - `connect()` HOCs everywhere — modern Redux would use `useSelector`/`useDispatch` (already started in `Chat.tsx`)
-- Mixed patterns: `Chat.tsx` uses hooks (modern), `BotConversationView.tsx` uses `recompose` + `connect` (legacy)
+- Mixed patterns: `Chat.tsx` uses hooks (modern), `AgentConversationView.tsx` uses `recompose` + `connect` (legacy)
 - `moment.js` still used (large bundle) — could be `date-fns` or `dayjs`
 - `ClipLoader` from `react-spinners` for loading — inconsistent with Material UI's built-in `CircularProgress`
 
@@ -1844,7 +1845,7 @@ This is the **most powerful screen** in the Manager. Clicking a conversation row
 
 ---
 
-## Appendix K: Internal Bot Testing, Backup/Migration & Integration Tests
+## Appendix K: Internal Agent Testing, Backup/Migration & Integration Tests
 
 ### K.1 Internal Snapshot Regression Testing
 
@@ -1856,7 +1857,7 @@ This is the **most powerful screen** in the Manager. Clicking a conversation row
 graph LR
     A[TestCase] -->|"stores"| B[expected: ConversationMemorySnapshot]
     A -->|"stores"| C[actual: ConversationMemorySnapshot]
-    D[TestCaseRuntime] -->|"deploy to 'test' env"| E[Bot]
+    D[TestCaseRuntime] -->|"deploy to 'test' env"| E[Agent]
     D -->|"replay user inputs"| F[New Conversation]
     D -->|"compare"| G{expected == actual?}
     G -->|"yes"| H[SUCCESS]
@@ -1865,20 +1866,20 @@ graph LR
 
 #### Key Files
 
-| File                                                                                                                   | Role                                                                                                       |
-| ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| [TestCase.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/testing/model/TestCase.java)                        | Model: `botId`, `botVersion`, `expected`/`actual` `ConversationMemorySnapshot`, `TestCaseState`, `lastRun` |
-| [TestCaseState.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/testing/model/TestCaseState.java)              | Enum: `IN_PROGRESS`, `SUCCESS`, `FAILED`, `ERROR`                                                          |
-| [TestCaseRuntime.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/testing/internal/impl/TestCaseRuntime.java)  | Core engine: deploys bot, replays inputs, compares snapshots                                               |
-| [IRestTestCaseRuntime.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/testing/rest/IRestTestCaseRuntime.java) | REST: `POST /testcases/run/{id}`, `GET /testcases/run/{id}`                                                |
-| [IRestTestCaseStore.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/testing/rest/IRestTestCaseStore.java)     | REST: Full CRUD for test cases with pagination                                                             |
-| [TestCaseStore.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/testing/internal/TestCaseStore.java)           | MongoDB persistence                                                                                        |
+| File                                                                                                                   | Role                                                                                                           |
+| ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| [TestCase.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/testing/model/TestCase.java)                        | Model: `agentId`, `agentVersion`, `expected`/`actual` `ConversationMemorySnapshot`, `TestCaseState`, `lastRun` |
+| [TestCaseState.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/testing/model/TestCaseState.java)              | Enum: `IN_PROGRESS`, `SUCCESS`, `FAILED`, `ERROR`                                                              |
+| [TestCaseRuntime.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/testing/internal/impl/TestCaseRuntime.java)  | Core engine: deploys agent, replays inputs, compares snapshots                                                 |
+| [IRestTestCaseRuntime.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/testing/rest/IRestTestCaseRuntime.java) | REST: `POST /testcases/run/{id}`, `GET /testcases/run/{id}`                                                    |
+| [IRestTestCaseStore.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/testing/rest/IRestTestCaseStore.java)     | REST: Full CRUD for test cases with pagination                                                                 |
+| [TestCaseStore.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/testing/internal/TestCaseStore.java)           | MongoDB persistence                                                                                            |
 
 #### How It Works
 
 1. **Record**: Create a test case from an existing conversation → stores `expected` snapshot
 2. **Run** (`POST /testcases/run/{id}`):
-   - Deploys bot to `test` environment if not already deployed
+   - Deploys agent to `test` environment if not already deployed
    - Starts a fresh conversation
    - Replays each user input from `expected.conversationSteps` (skipping step 0, which is the initial greeting)
    - Polls `getConversationState()` between each input (1s sleep loop)
@@ -1894,7 +1895,7 @@ graph LR
 | Uses `test` environment (isolated from `unrestricted`) | `Thread.sleep(1000)` polling — not reactive, wastes resources         |
 | Async execution via `IRuntime.submitCallable()`        | Duplicated `MockAsyncResponse` (also in `RestImportService`)          |
 | REST API allows automation                             | No UI in Manager — must use Swagger/curl                              |
-| Supports auto-deploy of undeployed bots                | No diff output — just SUCCESS/FAILED, no indication of _what_ differs |
+| Supports auto-deploy of undeployed agents              | No diff output — just SUCCESS/FAILED, no indication of _what_ differs |
 
 #### Recommendation: Remove & Replace
 
@@ -1921,7 +1922,7 @@ graph LR
 | -------- | ------------------------- | ------------------------------------- |
 | Effort   | 1-2 hours                 | 2-3 days                              |
 | Risk     | None — code is unused     | Medium — new test infra needs testing |
-| Value    | Reduces dead code         | Enables bot developers to self-test   |
+| Value    | Reduces dead code         | Enables agent developers to self-test |
 | Coverage | Rely on integration tests | Adds in-process regression            |
 
 **Recommendation: Option A for now**, with a potential future Option B as a Manager feature ("Tests" tab) if there's user demand. The integration tests (K.3) already provide E2E coverage.
@@ -1930,14 +1931,14 @@ graph LR
 
 ### K.2 Backup Import/Export System
 
-> `ai.labs.eddi.backup` — ZIP-based bot portability with URI remapping and schema migration.
+> `ai.labs.eddi.backup` — ZIP-based agent portability with URI remapping and schema migration.
 
 #### Flow: Export → Import
 
 ```
-EXPORT: POST /backup/export/{botId}?botVersion=N
-  → Collects bot.json + all package configs + all resource configs
-  → Bundles as ZIP with directory structure: botId/version/resources
+EXPORT: POST /backup/export/{agentId}?agentVersion=N
+  → Collects agent.json + all package configs + all resource configs
+  → Bundles as ZIP with directory structure: agentId/version/resources
   → Returns downloadable ZIP
 
 IMPORT: POST /backup/import (body: ZIP)
@@ -1949,31 +1950,31 @@ IMPORT: POST /backup/import (body: ZIP)
      4. Updates DocumentDescriptor (preserves name/description)
      5. Replaces old eddi:// URIs with new URIs in package config
   → Creates new package with remapped URIs
-  → Creates new bot pointing to new package
+  → Creates new agent pointing to new package
 
-INITIAL BOTS: POST /backup/import/initialBots
-  → Reads /initial-bots/available_bots.txt (classpath)
+INITIAL AGENTS: POST /backup/import/initialAgents
+  → Reads /initial-agents/available_agents.txt (classpath)
   → Imports each listed ZIP
   → Deploys each to 'unrestricted' environment
   → Waits for all deployments via CompletableFuture
 ```
 
-#### The Bot Update Problem (user feedback)
+#### The Agent Update Problem (user feedback)
 
 The import always creates **new resources** with **new IDs**. This means:
 
 - ✅ Fresh installs: Works perfectly
-- ❌ Updating an existing bot: Creates a duplicate. The old bot remains untouched.
+- ❌ Updating an existing agent: Creates a duplicate. The old agent remains untouched.
 - ❌ No merge/diff: Can't selectively update one package while keeping customizations in another
 
-**This is why duplicate "Bot Father" entries appear in the Manager.**
+**This is why duplicate "Agent Father" entries appear in the Manager.**
 
-#### Recommendations for Bot Versioning/Updates
+#### Recommendations for Agent Versioning/Updates
 
 | #   | Improvement                                                                                          | Impact                       | Effort    |
 | --- | ---------------------------------------------------------------------------------------------------- | ---------------------------- | --------- |
 | 1   | **Import with "update" mode** — match by display name + type, update existing rather than create new | Solves the duplicate problem | 1-2 days  |
-| 2   | **Bot diff tool** — compare two bot versions showing config changes                                  | Enables informed updates     | 1 day     |
+| 2   | **Agent diff tool** — compare two agent versions showing config changes                              | Enables informed updates     | 1 day     |
 | 3   | **Manager UI for import/export** — currently Swagger-only                                            | Accessibility                | 4-6 hours |
 
 ---
@@ -1986,8 +1987,8 @@ The import always creates **new resources** with **new IDs**. This means:
 
 | Test Class                                                                                                                                      | What It Tests                                                                                                                                        | Test Count |
 | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| [RestBotEngineTest](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestBotEngineTest.java)                 | Full conversation lifecycle: welcome messages, word/phrase input, quick replies, context handling, templating, property extraction, conversation end | ~18 tests  |
-| [RestUseCaseTest](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestUseCaseTest.java)                     | End-to-end: weather bot import + deploy + conversation + memory + bot management                                                                     | 2 tests    |
+| [RestAgentEngineTest](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestAgentEngineTest.java)             | Full conversation lifecycle: welcome messages, word/phrase input, quick replies, context handling, templating, property extraction, conversation end | ~18 tests  |
+| [RestUseCaseTest](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestUseCaseTest.java)                     | End-to-end: weather agent import + deploy + conversation + memory + agent management                                                                 | 2 tests    |
 | [RestBehaviorTest](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestBehaviorTest.java)                   | Behavior rule CRUD + validation                                                                                                                      | —          |
 | [RestRegularDictionaryTest](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestRegularDictionaryTest.java) | Dictionary config CRUD                                                                                                                               | —          |
 | [RestOutputTest](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/RestOutputTest.java)                       | Output set CRUD                                                                                                                                      | —          |
@@ -1997,13 +1998,13 @@ The import always creates **new resources** with **new IDs**. This means:
 
 ```java
 // All tests extend BaseCRUDOperations which provides:
-// - deployBot(), createConversation(), sendUserInput()
+// - deployAgent(), createConversation(), sendUserInput()
 // - Helper methods for REST interaction with EDDI
-// Uses @BeforeTest to import bots from ZIP, deploy them
+// Uses @BeforeTest to import agents from ZIP, deploy them
 
-// Example: Weather bot E2E test
+// Example: Weather agent E2E test
 @Test
-public void weatherBot() {
+public void weatherAgent() {
     createConversation(...);
     sendUserInput("weather");  // → triggers ask_for_city action
     sendUserInput("Vienna");   // → triggers current_weather_in_city
@@ -2015,12 +2016,12 @@ public void weatherBot() {
 
 #### Assessment
 
-| ✅ Strengths                                                | ⚠️ Issues                                                |
-| ----------------------------------------------------------- | -------------------------------------------------------- |
-| Tests the full HTTP REST API — truly end-to-end             | Requires running EDDI instance (Docker or local)         |
-| Validates conversation memory, actions, properties, outputs | TestNG (not JUnit 5) — inconsistent with Quarkus testing |
-| Uses actual bot ZIPs — tests the import/deploy pipeline too | Separate repo = easy to forget / not run in CI           |
-| Covers edge cases: context, quick replies, long-term memory | No coverage for Langchain/agent-mode features            |
+| ✅ Strengths                                                  | ⚠️ Issues                                                |
+| ------------------------------------------------------------- | -------------------------------------------------------- |
+| Tests the full HTTP REST API — truly end-to-end               | Requires running EDDI instance (Docker or local)         |
+| Validates conversation memory, actions, properties, outputs   | TestNG (not JUnit 5) — inconsistent with Quarkus testing |
+| Uses actual agent ZIPs — tests the import/deploy pipeline too | Separate repo = easy to forget / not run in CI           |
+| Covers edge cases: context, quick replies, long-term memory   | No coverage for Langchain/agent-mode features            |
 
 #### Recommendations
 
@@ -2098,7 +2099,7 @@ public void weatherBot() {
 /docs/               → Documentation hub
 /docs/getting-started → Quick start guide
 /docs/api/           → REST API reference
-/docs/configuration/ → Bot configuration guide
+/docs/configuration/ → Agent configuration guide
 /blog/               → Release notes, tutorials, case studies
 /privacy/            → Privacy policy
 /imprint/            → Legal imprint
@@ -2126,7 +2127,7 @@ Each page available in all configured languages: `/en/`, `/de/`, `/ar/`, etc.
 
 ### M.1 Chat UI Widget (eddi-chat-ui) — ✅ Decision Made
 
-**Keep standalone** (serves EDDI's single-bot chat endpoint), but **extract a shared `ChatCore` component** for reuse between Chat UI and Manager's built-in chat panel.
+**Keep standalone** (serves EDDI's single-agent chat endpoint), but **extract a shared `ChatCore` component** for reuse between Chat UI and Manager's built-in chat panel.
 
 | Issue                                  | Impact                     | Recommendation                           |
 | -------------------------------------- | -------------------------- | ---------------------------------------- |
@@ -2146,7 +2147,7 @@ Each page available in all configured languages: `/en/`, `/de/`, `/ar/`, etc.
 ├── types.ts             # Message, QuickReply interfaces
 └── hooks/
     ├── useConversation.ts  # Start, send, restart logic
-    └── useScrollToBottom.ts
+    └── useScrollToAgenttom.ts
 ```
 
 - Chat UI imports and renders standalone
@@ -2164,7 +2165,7 @@ checkout → restore cache → compile → unit tests → package + Docker build
 | ----------------- | ---------------------------------------------------------------------- |
 | Compile           | `./mvnw clean compile`                                                 |
 | Unit tests        | `./mvnw test`                                                          |
-| Package + Docker  | `./mvnw package -DskipTests` with multi-tag: `5.6.0-b$BUILD`, `latest` |
+| Workflow + Docker | `./mvnw package -DskipTests` with multi-tag: `5.6.0-b$BUILD`, `latest` |
 | Integration tests | `./integration-tests.sh` (starts container, verifies)                  |
 | Push              | Docker Hub `labsai/eddi:*` (only on `main` branch)                     |
 | Infra             | `cimg/openjdk:21.0`, `large` resource class, Maven `.m2` cache         |
@@ -2213,16 +2214,16 @@ checkout → restore cache → compile → unit tests → package + Docker build
 
 EDDI has a `docs/` directory with **40 markdown files** covering:
 
-| Category            | Files                                                                                                               | Coverage                                     |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| **Architecture**    | `architecture.md`, `conversation-memory.md`, `extensions.md`, `tasks.md`                                            | System design, memory model, lifecycle tasks |
-| **Bot Development** | `behavior-rules.md`, `httpcalls.md`, `output-configuration.md`, `output-templating.md`, `langchain.md`              | How to write bot configs                     |
-| **Bot Father**      | `bot-father-deep-dive.md`, `bot-father-conversation-flow.md`, `bot-father-langchain-tools-guide.md`, etc. (6 files) | Bot Father internals and guides              |
-| **Getting Started** | `getting-started.md`, `developer-quickstart.md`, `creating-your-first-chatbot/` (3 files)                           | Onboarding                                   |
-| **Operations**      | `docker.md`, `security.md`, `metrics.md`, `deployment-management-of-chatbots.md`, `redhat-openshift.md`             | Deployment & ops                             |
-| **Reference**       | `semantic-parser.md`, `passing-context-information.md`, `managed-bots.md`, `import-export-a-chatbot.md`             | Specific features                            |
-| **Git**             | `git-commit-guide.md`, `git-support.md`                                                                             | Commit conventions                           |
-| **API**             | Swagger/OpenAPI at `/q/swagger-ui`                                                                                  | Auto-generated from JAX-RS                   |
+| Category              | Files                                                                                                                     | Coverage                                     |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| **Architecture**      | `architecture.md`, `conversation-memory.md`, `extensions.md`, `tasks.md`                                                  | System design, memory model, lifecycle tasks |
+| **Agent Development** | `behavior-rules.md`, `httpcalls.md`, `output-configuration.md`, `output-templating.md`, `langchain.md`                    | How to write agent configs                   |
+| **Agent Father**      | `agent-father-deep-dive.md`, `agent-father-conversation-flow.md`, `agent-father-langchain-tools-guide.md`, etc. (6 files) | Agent Father internals and guides            |
+| **Getting Started**   | `getting-started.md`, `developer-quickstart.md`, `creating-your-first-chatagent/` (3 files)                               | Onboarding                                   |
+| **Operations**        | `docker.md`, `security.md`, `metrics.md`, `deployment-management-of-chatagents.md`, `redhat-openshift.md`                 | Deployment & ops                             |
+| **Reference**         | `semantic-parser.md`, `passing-context-information.md`, `managed-agents.md`, `import-export-a-chatagent.md`               | Specific features                            |
+| **Git**               | `git-commit-guide.md`, `git-support.md`                                                                                   | Commit conventions                           |
+| **API**               | Swagger/OpenAPI at `/q/swagger-ui`                                                                                        | Auto-generated from JAX-RS                   |
 
 **Current publishing:** Docs are published via a third-party tool at **[docs.labs.ai](https://docs.labs.ai)**, based on the markdown files in this repo. The website upgrade (Appendix L) could pull them into Astro Content Collections at `eddi.labs.ai/docs/` for a unified experience, or continue using the existing docs.labs.ai setup.
 
@@ -2230,18 +2231,18 @@ EDDI has a `docs/` directory with **40 markdown files** covering:
 
 `docs/security.md` (195 lines) documents comprehensive security:
 
-| Area                        | Status          | Details                                                                                |
-| --------------------------- | --------------- | -------------------------------------------------------------------------------------- |
-| **SSRF protection**         | ✅ Excellent    | `UrlValidationUtils` blocks private IPs, cloud metadata, non-HTTP schemes              |
-| **Code injection**          | ✅ Excellent    | `SafeMathParser` (recursive-descent) replaces `ScriptEngine`                           |
-| **Rate limiting**           | ✅ Built-in     | Token-bucket per tool, configurable per-tool limits                                    |
-| **Cost tracking**           | ✅ Built-in     | Budget caps per conversation, eviction at 10K entries                                  |
-| **Conversation isolation**  | ✅ Built-in     | `ConversationCoordinator` serializes same-conversation messages                        |
-| **Content-Type validation** | ✅              | Strict `equals` check prevents JSON-patch bypass                                       |
-| **CORS**                    | ⚠️ **Open**     | `quarkus.http.cors.enabled=true` but **no `origins` restriction** — allows any domain  |
-| **Health checks**           | ✅ **Working**  | `/q/health` returns `UP` with 2 custom checks: "Bots are ready" + "MongoDB connection" |
-| **API authentication**      | ⚠️ **Bypassed** | Manager hardcodes `authenticated: true`; Keycloak integration exists but disabled      |
-| **Secrets in configs**      | ⚠️              | API keys stored in `langchain.json` configs in MongoDB — should use env vars or vault  |
+| Area                        | Status          | Details                                                                                  |
+| --------------------------- | --------------- | ---------------------------------------------------------------------------------------- |
+| **SSRF protection**         | ✅ Excellent    | `UrlValidationUtils` blocks private IPs, cloud metadata, non-HTTP schemes                |
+| **Code injection**          | ✅ Excellent    | `SafeMathParser` (recursive-descent) replaces `ScriptEngine`                             |
+| **Rate limiting**           | ✅ Built-in     | Token-bucket per tool, configurable per-tool limits                                      |
+| **Cost tracking**           | ✅ Built-in     | Budget caps per conversation, eviction at 10K entries                                    |
+| **Conversation isolation**  | ✅ Built-in     | `ConversationCoordinator` serializes same-conversation messages                          |
+| **Content-Type validation** | ✅              | Strict `equals` check prevents JSON-patch bypass                                         |
+| **CORS**                    | ⚠️ **Open**     | `quarkus.http.cors.enabled=true` but **no `origins` restriction** — allows any domain    |
+| **Health checks**           | ✅ **Working**  | `/q/health` returns `UP` with 2 custom checks: "Agents are ready" + "MongoDB connection" |
+| **API authentication**      | ⚠️ **Bypassed** | Manager hardcodes `authenticated: true`; Keycloak integration exists but disabled        |
+| **Secrets in configs**      | ⚠️              | API keys stored in `langchain.json` configs in MongoDB — should use env vars or vault    |
 
 ### M.6 Monitoring & Observability — ✅ Excellent
 
@@ -2254,7 +2255,7 @@ EDDI has a `docs/` directory with **40 markdown files** covering:
 | **Grafana dashboard**      | ✅     | Published at [grafana.com/dashboards/11179](https://grafana.com/grafana/dashboards/11179)                                                |
 | **Alert rules**            | ✅     | Sample Prometheus alerts (ToolSystemDown, BudgetExceeded, HighFailureRate, CacheDegraded)                                                |
 | **REST metric endpoints**  | ✅     | `/langchain/tools/cache/stats`, `/langchain/tools/costs`, `/langchain/tools/history/{id}`                                                |
-| **Health endpoint**        | ✅     | `/q/health` returns `UP` with custom checks (MongoDB connection + Bots ready)                                                            |
+| **Health endpoint**        | ✅     | `/q/health` returns `UP` with custom checks (MongoDB connection + Agents ready)                                                          |
 | **Kubernetes integration** | ✅     | Liveness/Readiness endpoints documented at docs.labs.ai                                                                                  |
 | **Structured logging**     | ❌     | Not reviewed — should use JSON for cloud log aggregation                                                                                 |
 
@@ -2262,25 +2263,25 @@ EDDI has a `docs/` directory with **40 markdown files** covering:
 
 EDDI already has resource versioning at the data layer — every resource (dictionary, behavior, output, httpcalls, langchain, etc.) is versioned with an incrementing version number. This enables:
 
-- **Config reuse across bots**: The same behavior config (v3) can be shared by multiple bots
-- **Controlled updating**: A bot pins to a specific version; updating the config creates a new version without breaking other bots
+- **Config reuse across agents**: The same behavior config (v3) can be shared by multiple agents
+- **Controlled updating**: A agent pins to a specific version; updating the config creates a new version without breaking other agents
 - **Schema migrations**: `IMigrationManager` handles data schema evolution during import
 
 **Current gaps:**
 
-| Area                    | Status       | Gap                                                                            |
-| ----------------------- | ------------ | ------------------------------------------------------------------------------ |
-| **Resource versioning** | ✅ Works     | Versions auto-increment on save                                                |
-| **Config sharing**      | ✅ Works     | Bots reference configs by URI + version                                        |
-| **Update propagation**  | ⚠️ Manual    | `UpdateBotsModal` and `UpdatePackagesModal` exist but require manual selection |
-| **Version diff**        | ❌ Missing   | No way to compare v2 vs v3 of a config                                         |
-| **"Used by" indicator** | ✅ Exists    | `PackagesUsingPlugin.tsx` shows which packages use a given resource            |
-| **REST API prefix**     | ⚠️ No `/v1/` | Not needed — EDDI is self-hosted, clients are Manager + Chat UI                |
+| Area                    | Status       | Gap                                                                               |
+| ----------------------- | ------------ | --------------------------------------------------------------------------------- |
+| **Resource versioning** | ✅ Works     | Versions auto-increment on save                                                   |
+| **Config sharing**      | ✅ Works     | Agents reference configs by URI + version                                         |
+| **Update propagation**  | ⚠️ Manual    | `UpdateAgentsModal` and `UpdateWorkflowsModal` exist but require manual selection |
+| **Version diff**        | ❌ Missing   | No way to compare v2 vs v3 of a config                                            |
+| **"Used by" indicator** | ✅ Exists    | `WorkflowsUsingPlugin.tsx` shows which packages use a given resource              |
+| **REST API prefix**     | ⚠️ No `/v1/` | Not needed — EDDI is self-hosted, clients are Manager + Chat UI                   |
 
 **Recommendations:**
 
 - Add version comparison UI (diff v2 vs v3)
-- Add "Update all bots to latest" bulk action for shared configs
+- Add "Update all agents to latest" bulk action for shared configs
 - Skip REST API versioning — unnecessary when all clients are first-party
 
 ### M.8 Summary: Depth Coverage Map (Updated)
@@ -2312,7 +2313,7 @@ Use **trunk-based development** with short-lived feature branches:
 
 ```
 main ──────────────────────────────────────────────────────▶
-  └── feat/manager-shadcn-bots-page ──(PR)──┘
+  └── feat/manager-shadcn-agents-page ──(PR)──┘
   └── feat/manager-shadcn-chat-panel ──(PR)──┘
   └── fix/env-json-relative-url ──(PR)──┘
   └── chore/tslint-to-eslint ──(PR)──┘
@@ -2331,10 +2332,10 @@ main ─────────────────────────
 Follow the existing `git-commit-guide.md` pattern (conventional commits):
 
 ```
-feat(manager): add dark mode toggle to Bots page
-fix(chat-ui): fix scroll-to-bottom on mobile Safari
+feat(manager): add dark mode toggle to Agents page
+fix(chat-ui): fix scroll-to-agenttom on mobile Safari
 chore(manager): migrate tslint to eslint
-refactor(manager): replace recompose HOC with hooks in BotConversationView
+refactor(manager): replace recompose HOC with hooks in AgentConversationView
 docs(website): add getting-started page in German
 ci(eddi): add GitHub Actions build workflow
 ```
@@ -2380,8 +2381,8 @@ Phase 1: Foundation (can be done in parallel)
 
 Phase 2: Core screens (sequential, each is one PR)
 ├── 2a. Layout shell (sidebar nav, responsive, dark/light toggle)
-├── 2b. Bots page (card grid with health indicators, dedup)
-├── 2c. Bot detail page (packages, config editor)
+├── 2b. Agents page (card grid with health indicators, dedup)
+├── 2c. Agent detail page (packages, config editor)
 ├── 2d. Chat panel (shared @eddi/chat-core)
 ├── 2e. Conversations page (pagination, search, export)
 └── 2f. Resources pages (dictionaries, behaviors, outputs, etc.)
@@ -2422,9 +2423,9 @@ Issues discovered during real-backend integration testing (2026-03-09). These ar
 
 #### N.7.1 Duplicate POST Returns 200 Instead of 201
 
-**Current**: `POST /botstore/bots/{id}?version={v}&deepCopy=false` returns `200`  
+**Current**: `POST /agentstore/agents/{id}?version={v}&deepCopy=false` returns `200`  
 **Expected**: `201 Created` with `Location` header (it already includes the location)  
-**Files**: `RestBotStore.java`, `RestPackageStore.java` — any store with duplicate/copy endpoints  
+**Files**: `RestAgentStore.java`, `RestWorkflowStore.java` — any store with duplicate/copy endpoints  
 **Fix**: Change response status to `201`
 
 #### N.7.2 DELETE Inconsistency Across Stores
@@ -2438,14 +2439,14 @@ Issues discovered during real-backend integration testing (2026-03-09). These ar
 
 - Default: soft-delete (current majority behavior)
 - Add `?permanent=true` query param for hard-delete (cascading cleanup of all versions)
-- Soft-delete of resources should cascade to check if any bot/package still references them
+- Soft-delete of resources should cascade to check if any agent/package still references them
 - Standardize so LangChain store uses the same soft-delete pattern
 
 #### N.7.3 Deployment Status Returns Plain Text
 
-**Current**: `GET /administration/{env}/deploymentstatus/{botId}?version={v}` returns plain text body: `READY`, `NOT_FOUND`, `IN_PROGRESS`, etc.  
+**Current**: `GET /administration/{env}/deploymentstatus/{agentId}?version={v}` returns plain text body: `READY`, `NOT_FOUND`, `IN_PROGRESS`, etc.  
 **Expected**: JSON: `{"status": "READY"}` or `{"status": "NOT_FOUND"}`  
-**Files**: `RestBotAdministration.java`  
+**Files**: `RestAgentAdministration.java`  
 **Fix**: Wrap in JSON object, set `Content-Type: application/json`
 
 #### N.7.4 Health Endpoint Returns HTML on Dev-Services Failure

@@ -7,5 +7,5 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
  * @author ginccc
  */
 public interface IWorkflowStoreClientLibrary {
-    IExecutableWorkflow getExecutableWorkflow(String packageId, Integer packageVersion) throws ServiceException;
+    IExecutableWorkflow getExecutableWorkflow(String workflowId, Integer packageVersion) throws ServiceException;
 }

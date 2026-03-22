@@ -22,8 +22,10 @@ import static org.mockito.Mockito.*;
 /**
  * Unit tests for {@link NatsConversationCoordinator}.
  *
- * <p>Tests verify local ordering, retry/dead-letter logic, and metrics
- * without requiring a running NATS server. JetStream interactions are mocked.</p>
+ * <p>
+ * Tests verify local ordering, retry/dead-letter logic, and metrics
+ * without requiring a running NATS server. JetStream interactions are mocked.
+ * </p>
  */
 class NatsConversationCoordinatorTest {
 
@@ -63,7 +65,8 @@ class NatsConversationCoordinatorTest {
         when(metricsInstance.isResolvable()).thenReturn(true);
         when(metricsInstance.get()).thenReturn(natsMetrics);
 
-        // Create coordinator with mocked dependencies (skip start() since that needs real NATS)
+        // Create coordinator with mocked dependencies (skip start() since that needs
+        // real NATS)
         coordinator = new NatsConversationCoordinator(
                 runtime,
                 metricsInstance,
@@ -71,8 +74,7 @@ class NatsConversationCoordinatorTest {
                 "EDDI_CONVERSATIONS",
                 "EDDI_DEAD_LETTERS",
                 3,
-                60
-        );
+                60);
 
         // Inject the mocked JetStream via reflection
         var jetStreamField = NatsConversationCoordinator.class.getDeclaredField("jetStream");
@@ -96,12 +98,18 @@ class NatsConversationCoordinatorTest {
     @Test
     void shouldEnqueueMultipleTasksInOrder() throws Exception {
         AtomicInteger counter = new AtomicInteger(0);
-        Callable<Void> task1 = () -> { counter.incrementAndGet(); return null; };
-        Callable<Void> task2 = () -> { counter.incrementAndGet(); return null; };
+        Callable<Void> task1 = () -> {
+            counter.incrementAndGet();
+            return null;
+        };
+        Callable<Void> task2 = () -> {
+            counter.incrementAndGet();
+            return null;
+        };
 
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor =
-                ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor
+                .forClass(IRuntime.IFinishedExecution.class);
 
         // Submit two tasks for the same conversation
         coordinator.submitInOrder("conv-1", task1);
@@ -125,7 +133,7 @@ class NatsConversationCoordinatorTest {
         coordinator.submitInOrder("conv-A", taskA);
         coordinator.submitInOrder("conv-B", taskB);
 
-        // Both submitted immediately (different conversations)
+        // Agenth submitted immediately (different conversations)
         verify(runtime).submitCallable(eq(taskA), any(), isNull());
         verify(runtime).submitCallable(eq(taskB), any(), isNull());
 
@@ -150,12 +158,14 @@ class NatsConversationCoordinatorTest {
 
     @Test
     void shouldProcessNextTaskAfterFailure() throws Exception {
-        Callable<Void> task1 = () -> { throw new RuntimeException("boom"); };
+        Callable<Void> task1 = () -> {
+            throw new RuntimeException("boom");
+        };
         Callable<Void> task2 = () -> null;
 
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor =
-                ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor
+                .forClass(IRuntime.IFinishedExecution.class);
 
         coordinator.submitInOrder("conv-1", task1);
         coordinator.submitInOrder("conv-1", task2);
@@ -203,10 +213,12 @@ class NatsConversationCoordinatorTest {
     @Test
     @SuppressWarnings("unchecked")
     void shouldRetryTaskBeforeDeadLettering() throws Exception {
-        Callable<Void> failingTask = () -> { throw new RuntimeException("fail"); };
+        Callable<Void> failingTask = () -> {
+            throw new RuntimeException("fail");
+        };
 
-        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor =
-                ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor
+                .forClass(IRuntime.IFinishedExecution.class);
 
         coordinator.submitInOrder("conv-retry", failingTask);
 
@@ -228,10 +240,12 @@ class NatsConversationCoordinatorTest {
     @Test
     @SuppressWarnings("unchecked")
     void shouldDeadLetterAfterMaxRetries() throws Exception {
-        Callable<Void> failingTask = () -> { throw new RuntimeException("persistent failure"); };
+        Callable<Void> failingTask = () -> {
+            throw new RuntimeException("persistent failure");
+        };
 
-        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor =
-                ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor
+                .forClass(IRuntime.IFinishedExecution.class);
 
         coordinator.submitInOrder("conv-dl", failingTask);
 
@@ -262,8 +276,8 @@ class NatsConversationCoordinatorTest {
     void shouldIncrementConsumeMetricsOnCompletion() throws Exception {
         Callable<Void> task = () -> null;
 
-        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor =
-                ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor
+                .forClass(IRuntime.IFinishedExecution.class);
 
         coordinator.submitInOrder("conv-consume", task);
         verify(runtime).submitCallable(eq(task), callbackCaptor.capture(), isNull());

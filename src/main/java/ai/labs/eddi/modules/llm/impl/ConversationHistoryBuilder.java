@@ -23,23 +23,23 @@ class ConversationHistoryBuilder {
     /**
      * Build the full list of ChatMessages for an LLM call.
      *
-     * @param memory                 conversation memory to read history from
-     * @param systemMessage          system message (may be null/empty)
-     * @param prompt                 optional prompt to replace last user message
-     *                               (may be null/empty)
-     * @param logSizeLimit           conversation history limit (-1 = unlimited)
-     * @param includeFirstBotMessage whether to include the initial Agent greeting
+     * @param memory                   conversation memory to read history from
+     * @param systemMessage            system message (may be null/empty)
+     * @param prompt                   optional prompt to replace last user message
+     *                                 (may be null/empty)
+     * @param logSizeLimit             conversation history limit (-1 = unlimited)
+     * @param includeFirstAgentMessage whether to include the initial Agent greeting
      * @return ordered list of ChatMessages (system → history → user/prompt)
      */
     List<ChatMessage> buildMessages(IConversationMemory memory,
             String systemMessage,
             String prompt,
             int logSizeLimit,
-            boolean includeFirstBotMessage) {
+            boolean includeFirstAgentMessage) {
 
         // Generate conversation history from memory
         var chatMessages = new ArrayList<>(
-                new ConversationLogGenerator(memory).generate(logSizeLimit, includeFirstBotMessage)
+                new ConversationLogGenerator(memory).generate(logSizeLimit, includeFirstAgentMessage)
                         .getMessages()
                         .stream()
                         .map(this::convertMessage)

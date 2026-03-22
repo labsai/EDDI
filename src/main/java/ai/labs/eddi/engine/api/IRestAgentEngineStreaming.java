@@ -24,8 +24,8 @@ import java.util.List;
  * <li><strong>error</strong> — error during processing</li>
  * </ul>
  */
-@Path("/bots")
-@Tag(name = "09. Talk to Bots", description = "Communicate with bots")
+@Path("/agents")
+@Tag(name = "09. Talk to Agents", description = "Communicate with agents")
 public interface IRestAgentEngineStreaming {
 
     @POST

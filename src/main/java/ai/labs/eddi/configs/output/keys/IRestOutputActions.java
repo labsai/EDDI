@@ -15,7 +15,7 @@ import java.util.List;
 public interface IRestOutputActions {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    List<String> readOutputActions(@QueryParam("packageId") String packageId,
+    List<String> readOutputActions(@QueryParam("workflowId") String workflowId,
                                    @QueryParam("packageVersion") Integer packageVersion,
                                    @QueryParam("filter") @DefaultValue("") String filter,
                                    @QueryParam("limit") @DefaultValue("20") Integer limit);

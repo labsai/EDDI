@@ -3,7 +3,7 @@ package ai.labs.eddi.modules.llm.rest;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
-import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.PackageRunSnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
 import ai.labs.eddi.modules.llm.model.ToolExecutionTrace;
 import ai.labs.eddi.modules.llm.model.ToolExecutionTrace.ToolCall;
@@ -50,12 +50,13 @@ public class RestToolHistory {
     @Path("/history/{conversationId}")
     public Response getToolHistory(@PathParam("conversationId") String conversationId) {
         try {
-            ConversationMemorySnapshot snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            ConversationMemorySnapshot snapshot = conversationMemoryStore
+                    .loadConversationMemorySnapshot(conversationId);
             ToolExecutionTrace trace = new ToolExecutionTrace();
             List<ToolCall> toolCalls = new ArrayList<>();
 
             for (ConversationStepSnapshot step : snapshot.getConversationSteps()) {
-                for (PackageRunSnapshot packageRun : step.getWorkflows()) {
+                for (WorkflowRunSnapshot packageRun : step.getWorkflows()) {
                     for (ResultSnapshot data : packageRun.getLifecycleTasks()) {
                         if (data.getKey() != null && data.getKey().startsWith("langchain:trace:")) {
                             Object result = data.getResult();
@@ -76,7 +77,7 @@ public class RestToolHistory {
                     }
                 }
             }
-            
+
             trace.setToolCalls(toolCalls);
             // Calculate totals
             trace.setTotalExecutionTimeMs(toolCalls.stream().mapToLong(ToolCall::getExecutionTimeMs).sum());
@@ -140,8 +141,8 @@ public class RestToolHistory {
         } catch (Exception e) {
             LOGGER.error("Error fetching cache stats", e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                .entity(Map.of("error", e.getMessage()))
-                .build();
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
         }
     }
 
@@ -155,20 +156,19 @@ public class RestToolHistory {
             long ttlSeconds = cacheService.getConfiguredTTL(toolName);
 
             Map<String, Object> response = Map.of(
-                "toolName", toolName,
-                "ttlSeconds", ttlSeconds,
-                "ttlMinutes", ttlSeconds / 60,
-                "ttlHours", ttlSeconds / 3600,
-                "description", getSmartTTLDescription(ttlSeconds)
-            );
+                    "toolName", toolName,
+                    "ttlSeconds", ttlSeconds,
+                    "ttlMinutes", ttlSeconds / 60,
+                    "ttlHours", ttlSeconds / 3600,
+                    "description", getSmartTTLDescription(ttlSeconds));
 
             return Response.ok(response).build();
 
         } catch (Exception e) {
             LOGGER.error("Error fetching tool TTL", e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                .entity(Map.of("error", e.getMessage()))
-                .build();
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
         }
     }
 
@@ -200,8 +200,8 @@ public class RestToolHistory {
         } catch (Exception e) {
             LOGGER.error("Error clearing cache", e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                .entity(Map.of("error", e.getMessage()))
-                .build();
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
         }
     }
 
@@ -215,19 +215,18 @@ public class RestToolHistory {
             ToolRateLimiter.RateLimitInfo info = rateLimiter.getInfo(toolName);
 
             Map<String, Object> response = Map.of(
-                "tool", toolName,
-                "limit", info.limit,
-                "remaining", info.remaining,
-                "resetTimeMs", info.resetTimeMs
-            );
+                    "tool", toolName,
+                    "limit", info.limit,
+                    "remaining", info.remaining,
+                    "resetTimeMs", info.resetTimeMs);
 
             return Response.ok(response).build();
 
         } catch (Exception e) {
             LOGGER.error("Error fetching rate limit info", e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                .entity(Map.of("error", e.getMessage()))
-                .build();
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
         }
     }
 
@@ -244,8 +243,8 @@ public class RestToolHistory {
         } catch (Exception e) {
             LOGGER.error("Error resetting rate limit", e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                .entity(Map.of("error", e.getMessage()))
-                .build();
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
         }
     }
 
@@ -259,17 +258,16 @@ public class RestToolHistory {
             String summary = costTracker.getCostSummary();
 
             Map<String, Object> response = Map.of(
-                "totalCost", costTracker.getTotalCost(),
-                "summary", summary
-            );
+                    "totalCost", costTracker.getTotalCost(),
+                    "summary", summary);
 
             return Response.ok(response).build();
 
         } catch (Exception e) {
             LOGGER.error("Error fetching cost summary", e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                .entity(Map.of("error", e.getMessage()))
-                .build();
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
         }
     }
 
@@ -280,29 +278,27 @@ public class RestToolHistory {
     @Path("/costs/conversation/{conversationId}")
     public Response getConversationCosts(@PathParam("conversationId") String conversationId) {
         try {
-            ToolCostTracker.ConversationCostMetrics metrics =
-                costTracker.getConversationCosts(conversationId);
+            ToolCostTracker.ConversationCostMetrics metrics = costTracker.getConversationCosts(conversationId);
 
             if (metrics == null) {
                 return Response.status(Response.Status.NOT_FOUND)
-                    .entity(Map.of("error", "No cost data found for conversation"))
-                    .build();
+                        .entity(Map.of("error", "No cost data found for conversation"))
+                        .build();
             }
 
             Map<String, Object> response = Map.of(
-                "conversationId", conversationId,
-                "totalCost", metrics.getTotalCost(),
-                "toolCallCount", metrics.getToolCallCount(),
-                "toolUsage", metrics.getToolUsage()
-            );
+                    "conversationId", conversationId,
+                    "totalCost", metrics.getTotalCost(),
+                    "toolCallCount", metrics.getToolCallCount(),
+                    "toolUsage", metrics.getToolUsage());
 
             return Response.ok(response).build();
 
         } catch (Exception e) {
             LOGGER.error("Error fetching conversation costs", e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                .entity(Map.of("error", e.getMessage()))
-                .build();
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
         }
     }
 
@@ -317,24 +313,23 @@ public class RestToolHistory {
 
             if (metrics == null) {
                 return Response.status(Response.Status.NOT_FOUND)
-                    .entity(Map.of("error", "No cost data found for tool"))
-                    .build();
+                        .entity(Map.of("error", "No cost data found for tool"))
+                        .build();
             }
 
             Map<String, Object> response = Map.of(
-                "toolName", toolName,
-                "totalCost", metrics.getTotalCost(),
-                "callCount", metrics.getCallCount(),
-                "averageCost", metrics.getAverageCost()
-            );
+                    "toolName", toolName,
+                    "totalCost", metrics.getTotalCost(),
+                    "callCount", metrics.getCallCount(),
+                    "averageCost", metrics.getAverageCost());
 
             return Response.ok(response).build();
 
         } catch (Exception e) {
             LOGGER.error("Error fetching tool costs", e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                .entity(Map.of("error", e.getMessage()))
-                .build();
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
         }
     }
 
@@ -351,9 +346,8 @@ public class RestToolHistory {
         } catch (Exception e) {
             LOGGER.error("Error resetting costs", e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                .entity(Map.of("error", e.getMessage()))
-                .build();
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
         }
     }
 }
-

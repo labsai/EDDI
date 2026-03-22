@@ -26,13 +26,13 @@ public interface IConversationService {
     /**
      * Start a new conversation with the latest ready Agent version.
      *
-     * @throws BotNotReadyException      if no version of the Agent is deployed
+     * @throws AgentNotReadyException    if no version of the Agent is deployed
      * @throws ResourceStoreException    on persistence failures
      * @throws ResourceNotFoundException if referenced resources are not found
      */
     ConversationResult startConversation(Environment environment, String agentId,
             String userId, Map<String, Context> context)
-            throws BotNotReadyException, ResourceStoreException, ResourceNotFoundException;
+            throws AgentNotReadyException, ResourceStoreException, ResourceNotFoundException;
 
     /**
      * End a conversation by setting its state to ENDED.
@@ -50,7 +50,7 @@ public interface IConversationService {
     /**
      * Read a conversation memory snapshot.
      *
-     * @throws BotMismatchException      if the conversationId does not belong to
+     * @throws AgentMismatchException    if the conversationId does not belong to
      *                                   the given agentId
      * @throws ResourceStoreException    on persistence failures
      * @throws ResourceNotFoundException if the conversation is not found
@@ -60,7 +60,7 @@ public interface IConversationService {
             Boolean returnDetailed,
             Boolean returnCurrentStepOnly,
             List<String> returningFields)
-            throws BotMismatchException, ResourceStoreException, ResourceNotFoundException;
+            throws AgentMismatchException, ResourceStoreException, ResourceNotFoundException;
 
     /**
      * Read conversation log in text or structured format.
@@ -78,8 +78,9 @@ public interface IConversationService {
      * Process a user input (say) or rerun the last step.
      * Results are delivered via the responseHandler callback.
      *
-     * @throws BotMismatchException       if agentId doesn't match the conversation's
-     *                                    bot
+     * @throws AgentMismatchException     if agentId doesn't match the
+     *                                    conversation's
+     *                                    agent
      * @throws ConversationEndedException if the conversation has already ended
      * @throws ResourceNotFoundException  if the conversation is not found
      */
@@ -125,7 +126,7 @@ public interface IConversationService {
      * @return true if undo was performed, false if not available
      */
     boolean undo(Environment environment, String agentId, String conversationId)
-            throws ResourceStoreException, ResourceNotFoundException, BotMismatchException;
+            throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException;
 
     Boolean isRedoAvailable(Environment environment, String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException;
@@ -134,12 +135,12 @@ public interface IConversationService {
      * @return true if redo was performed, false if not available
      */
     boolean redo(Environment environment, String agentId, String conversationId)
-            throws ResourceStoreException, ResourceNotFoundException, BotMismatchException;
+            throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException;
 
     // --- Domain exceptions (no JAX-RS dependency) ---
 
-    class BotNotReadyException extends Exception {
-        public BotNotReadyException(String message) {
+    class AgentNotReadyException extends Exception {
+        public AgentNotReadyException(String message) {
             super(message);
         }
     }
@@ -150,8 +151,8 @@ public interface IConversationService {
         }
     }
 
-    class BotMismatchException extends Exception {
-        public BotMismatchException(String message) {
+    class AgentMismatchException extends Exception {
+        public AgentMismatchException(String message) {
             super(message);
         }
     }

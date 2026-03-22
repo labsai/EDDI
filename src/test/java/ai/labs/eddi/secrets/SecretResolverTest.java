@@ -39,10 +39,10 @@ class SecretResolverTest {
     @Test
     void resolveValue_vaultRef_resolvesToPlaintext()
             throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
-        var ref = new SecretReference("default", "bot1", "openaiKey");
+        var ref = new SecretReference("default", "agent1", "openaiKey");
         when(secretProvider.resolve(ref)).thenReturn("sk-actual-secret-key");
 
-        String input = "Bearer ${eddivault:default/bot1/openaiKey}";
+        String input = "Bearer ${eddivault:default/agent1/openaiKey}";
         String result = resolver.resolveValue(input);
 
         assertEquals("Bearer sk-actual-secret-key", result);
@@ -66,7 +66,7 @@ class SecretResolverTest {
         when(secretProvider.resolve(any(SecretReference.class)))
                 .thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
 
-        String input = "Bearer ${eddivault:default/bot1/missing}";
+        String input = "Bearer ${eddivault:default/agent1/missing}";
         String result = resolver.resolveValue(input);
 
         // When secret is not found, the reference should remain as-is
@@ -80,7 +80,7 @@ class SecretResolverTest {
         SecretResolver passthroughResolver = new SecretResolver(unavailable, 5, 100);
         passthroughResolver.init();
 
-        String input = "Bearer ${eddivault:default/bot1/key}";
+        String input = "Bearer ${eddivault:default/agent1/key}";
         assertEquals(input, passthroughResolver.resolveValue(input));
     }
 }

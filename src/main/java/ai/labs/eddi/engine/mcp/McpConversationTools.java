@@ -42,7 +42,7 @@ import java.util.concurrent.TimeUnit;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
 
 /**
- * MCP tools for conversing with EDDI bots.
+ * MCP tools for conversing with EDDI agents.
  * Exposes Agent listing, conversation management, and messaging
  * as MCP-compliant tools via the Quarkus MCP Server extension.
  *
@@ -58,7 +58,7 @@ public class McpConversationTools {
     private static final int CONVERSATION_TIMEOUT_SECONDS = 60;
 
     private final IConversationService conversationService;
-    private final IRestAgentAdministration botAdmin;
+    private final IRestAgentAdministration agentAdmin;
     private final IRestAgentStore agentStore;
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IJsonSerialization jsonSerialization;
@@ -70,7 +70,7 @@ public class McpConversationTools {
 
     @Inject
     public McpConversationTools(IConversationService conversationService,
-            IRestAgentAdministration botAdmin,
+            IRestAgentAdministration agentAdmin,
             IRestAgentStore agentStore,
             IRestInterfaceFactory restInterfaceFactory,
             IJsonSerialization jsonSerialization,
@@ -80,7 +80,7 @@ public class McpConversationTools {
             IUserConversationStore userConversationStore,
             IRestAgentEngine restAgentEngine) {
         this.conversationService = conversationService;
-        this.botAdmin = botAdmin;
+        this.agentAdmin = agentAdmin;
         this.agentStore = agentStore;
         this.restInterfaceFactory = restInterfaceFactory;
         this.jsonSerialization = jsonSerialization;
@@ -91,43 +91,45 @@ public class McpConversationTools {
         this.restAgentEngine = restAgentEngine;
     }
 
-    @Tool(name = "list_bots", description = "List all deployed bots with their status, version, and name. " +
+    @Tool(name = "list_agents", description = "List all deployed agents with their status, version, and name. " +
             "Returns a JSON array of Agent deployment statuses.")
-    public String listBots(
+    public String listAgents(
             @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
         try {
             var env = parseEnvironment(environment);
-            List<AgentDeploymentStatus> statuses = botAdmin.getDeploymentStatuses(env);
+            List<AgentDeploymentStatus> statuses = agentAdmin.getDeploymentStatuses(env);
             return jsonSerialization.serialize(statuses);
         } catch (Exception e) {
-            LOGGER.error("MCP list_bots failed", e);
-            return errorJson("Failed to list bots: " + e.getMessage());
+            LOGGER.error("MCP list_agents failed", e);
+            return errorJson("Failed to list agents: " + e.getMessage());
         }
     }
 
-    @Tool(name = "list_bot_configs", description = "List all Agent configurations (including those not yet deployed). " +
+    @Tool(name = "list_agent_configs", description = "List all Agent configurations (including those not yet deployed). "
+            +
             "Returns a JSON array of Agent descriptors with name, description, and IDs.")
-    public String listBotConfigs(
+    public String listAgentConfigs(
             @ToolArg(description = "Optional filter string to search Agent names") String filter,
             @ToolArg(description = "Maximum number of results (default 20)") Integer limit) {
         try {
             int limitInt = limit != null ? limit : 20;
             String filterStr = filter != null ? filter : "";
-            List<DocumentDescriptor> descriptors = agentStore.readBotDescriptors(filterStr, 0, limitInt);
+            List<DocumentDescriptor> descriptors = agentStore.readAgentDescriptors(filterStr, 0, limitInt);
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
-            LOGGER.error("MCP list_bot_configs failed", e);
+            LOGGER.error("MCP list_agent_configs failed", e);
             return errorJson("Failed to list Agent configs: " + e.getMessage());
         }
     }
 
     @Tool(name = "create_conversation", description = "Start a new conversation with a deployed agent. " +
-            "Returns the conversationId which you need for subsequent talk_to_bot calls. " +
-            "Tip: Use chat_with_bot instead if you want to send a message immediately.")
+            "Returns the conversationId which you need for subsequent talk_to_agent calls. " +
+            "Tip: Use chat_with_agent instead if you want to send a message immediately.")
     public String createConversation(
-            @ToolArg(description = "Bot ID (required)") String agentId,
+            @ToolArg(description = "Agent ID (required)") String agentId,
             @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
-        if (agentId == null || agentId.isBlank()) return errorJson("agentId is required");
+        if (agentId == null || agentId.isBlank())
+            return errorJson("agentId is required");
         try {
             var env = parseEnvironment(environment);
             ConversationResult result = conversationService.startConversation(
@@ -144,42 +146,47 @@ public class McpConversationTools {
     }
 
     @Blocking
-    @Tool(name = "talk_to_bot", description = "Send a message to a Agent in an existing conversation and get the bot's response. "
+    @Tool(name = "talk_to_agent", description = "Send a message to a Agent in an existing conversation and get the agent's response. "
             +
             "You must first call create_conversation to get a conversationId, " +
-            "or use chat_with_bot for a single-call alternative.")
-    public String talkToBot(
-            @ToolArg(description = "Bot ID (required)") String agentId,
+            "or use chat_with_agent for a single-call alternative.")
+    public String talkToAgent(
+            @ToolArg(description = "Agent ID (required)") String agentId,
             @ToolArg(description = "Conversation ID from create_conversation (required)") String conversationId,
             @ToolArg(description = "The user message to send to the Agent (required)") String message,
             @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
-        if (agentId == null || agentId.isBlank()) return errorJson("agentId is required");
-        if (conversationId == null || conversationId.isBlank()) return errorJson("conversationId is required");
-        if (message == null || message.isBlank()) return errorJson("message is required");
+        if (agentId == null || agentId.isBlank())
+            return errorJson("agentId is required");
+        if (conversationId == null || conversationId.isBlank())
+            return errorJson("conversationId is required");
+        if (message == null || message.isBlank())
+            return errorJson("message is required");
         try {
             var env = parseEnvironment(environment);
             var snapshot = sendMessageAndWait(env, agentId, conversationId, message);
             var result = buildConversationResponse(snapshot, null);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
-            LOGGER.error("MCP talk_to_bot failed for Agent " + agentId + " conversation " + conversationId, e);
-            return errorJson("Failed to talk to bot: " + e.getMessage());
+            LOGGER.error("MCP talk_to_agent failed for Agent " + agentId + " conversation " + conversationId, e);
+            return errorJson("Failed to talk to agent: " + e.getMessage());
         }
     }
 
     @Blocking
-    @Tool(name = "chat_with_bot", description = "Send a message to a bot, automatically creating a new conversation if needed. "
+    @Tool(name = "chat_with_agent", description = "Send a message to an agent, automatically creating a new conversation if needed. "
             +
             "This is the simplest way to interact with a Agent — combines create_conversation + " +
-            "talk_to_bot into a single call. Returns the Agent response and conversationId " +
+            "talk_to_agent into a single call. Returns the Agent response and conversationId " +
             "for follow-up messages.")
-    public String chatWithBot(
-            @ToolArg(description = "Bot ID (required)") String agentId,
+    public String chatWithAgent(
+            @ToolArg(description = "Agent ID (required)") String agentId,
             @ToolArg(description = "The user message to send to the Agent (required)") String message,
             @ToolArg(description = "Conversation ID to continue (optional — creates new if omitted)") String conversationId,
             @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
-        if (agentId == null || agentId.isBlank()) return errorJson("agentId is required");
-        if (message == null || message.isBlank()) return errorJson("message is required");
+        if (agentId == null || agentId.isBlank())
+            return errorJson("agentId is required");
+        if (message == null || message.isBlank())
+            return errorJson("message is required");
         try {
             var env = parseEnvironment(environment);
 
@@ -201,8 +208,8 @@ public class McpConversationTools {
             result.putFirst("conversationId", convId);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
-            LOGGER.error("MCP chat_with_bot failed for Agent " + agentId, e);
-            return errorJson("Failed to chat with bot: " + e.getMessage());
+            LOGGER.error("MCP chat_with_agent failed for Agent " + agentId, e);
+            return errorJson("Failed to chat with agent: " + e.getMessage());
         }
     }
 
@@ -210,7 +217,7 @@ public class McpConversationTools {
             "Returns the conversation memory snapshot. Use returningFields to limit " +
             "output size, or use read_conversation_log for a human-readable summary.")
     public String readConversation(
-            @ToolArg(description = "Bot ID (required)") String agentId,
+            @ToolArg(description = "Agent ID (required)") String agentId,
             @ToolArg(description = "Conversation ID (required)") String conversationId,
             @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment,
             @ToolArg(description = "Return only the current (latest) step? (default: true)") Boolean currentStepOnly,
@@ -256,11 +263,12 @@ public class McpConversationTools {
             "Returns conversation descriptors with IDs, creation time, and state. " +
             "Useful for finding conversation IDs without knowing them beforehand.")
     public String listConversations(
-            @ToolArg(description = "Bot ID (required)") String agentId,
-            @ToolArg(description = "Bot version (default: latest)") Integer agentVersion,
+            @ToolArg(description = "Agent ID (required)") String agentId,
+            @ToolArg(description = "Agent version (default: latest)") Integer agentVersion,
             @ToolArg(description = "Filter by state: 'READY', 'IN_PROGRESS', 'ENDED', 'ERROR' (default: all)") String conversationState,
             @ToolArg(description = "Maximum number of results (default: 20, max: 100)") Integer limit) {
-        if (agentId == null || agentId.isBlank()) return errorJson("agentId is required");
+        if (agentId == null || agentId.isBlank())
+            return errorJson("agentId is required");
         try {
             int limitInt = Math.min(limit != null ? limit : 20, 100);
             int ver = agentVersion != null ? agentVersion : 0;
@@ -297,17 +305,19 @@ public class McpConversationTools {
         }
     }
 
-    @Tool(name = "get_bot", description = "Get a bot's full configuration including its packages, name, and description. " +
+    @Tool(name = "get_agent", description = "Get an agent's full configuration including its packages, name, and description. "
+            +
             "Returns the AgentConfiguration JSON with all package references.")
     public String getAgent(
-            @ToolArg(description = "Bot ID (required)") String agentId,
+            @ToolArg(description = "Agent ID (required)") String agentId,
             @ToolArg(description = "Version number (default: latest)") Integer version) {
-        if (agentId == null || agentId.isBlank()) return errorJson("agentId is required");
+        if (agentId == null || agentId.isBlank())
+            return errorJson("agentId is required");
         try {
             int ver = version != null ? version : 1;
-            AgentConfiguration config = agentStore.readBot(agentId, ver);
+            AgentConfiguration config = agentStore.readAgent(agentId, ver);
             if (config == null) {
-                return errorJson("Bot not found: " + agentId + " version " + ver);
+                return errorJson("Agent not found: " + agentId + " version " + ver);
             }
 
             // Read descriptor for name/description (direct by ID, not N+1)
@@ -328,40 +338,43 @@ public class McpConversationTools {
             result.put("configuration", config);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
-            LOGGER.error("MCP get_bot failed for Agent " + agentId, e);
-            return errorJson("Failed to get bot: " + e.getMessage());
+            LOGGER.error("MCP get_agent failed for Agent " + agentId, e);
+            return errorJson("Failed to get agent: " + e.getMessage());
         }
     }
 
     // ==================== Phase 8a.2: Diagnostic Tools ====================
 
-    @Tool(name = "read_bot_logs", description = "Read recent server-side logs for a Agent or conversation. " +
+    @Tool(name = "read_agent_logs", description = "Read recent server-side logs for a Agent or conversation. " +
             "Returns workflow execution logs, LLM provider errors, timeouts, and internal diagnostics " +
             "that are NOT visible in conversation memory. Essential for debugging 'why did the Agent fail?' " +
             "Filter by agentId, conversationId, and/or log level.")
-    public String readBotLogs(
+    public String readAgentLogs(
             @ToolArg(description = "Filter by Agent ID (optional)") String agentId,
             @ToolArg(description = "Filter by conversation ID (optional)") String conversationId,
             @ToolArg(description = "Filter by log level: 'ERROR', 'WARN', 'INFO', 'DEBUG' (optional)") String level,
             @ToolArg(description = "Maximum number of log entries to return (default: 50)") Integer limit) {
         try {
             int limitInt = limit != null ? limit : 50;
-            String botFilter = (agentId != null && !agentId.isBlank()) ? agentId : null;
+            String agentFilter = (agentId != null && !agentId.isBlank()) ? agentId : null;
             String convFilter = (conversationId != null && !conversationId.isBlank()) ? conversationId : null;
             String levelFilter = (level != null && !level.isBlank()) ? level.toUpperCase() : null;
 
-            List<LogEntry> entries = boundedLogStore.getEntries(botFilter, convFilter, levelFilter, limitInt);
+            List<LogEntry> entries = boundedLogStore.getEntries(agentFilter, convFilter, levelFilter, limitInt);
 
             var result = new LinkedHashMap<String, Object>();
             result.put("count", entries.size());
             result.put("limit", limitInt);
-            if (botFilter != null) result.put("agentId", botFilter);
-            if (convFilter != null) result.put("conversationId", convFilter);
-            if (levelFilter != null) result.put("level", levelFilter);
+            if (agentFilter != null)
+                result.put("agentId", agentFilter);
+            if (convFilter != null)
+                result.put("conversationId", convFilter);
+            if (levelFilter != null)
+                result.put("level", levelFilter);
             result.put("entries", entries);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
-            LOGGER.error("MCP read_bot_logs failed", e);
+            LOGGER.error("MCP read_agent_logs failed", e);
             return errorJson("Failed to read Agent logs: " + e.getMessage());
         }
     }
@@ -373,7 +386,8 @@ public class McpConversationTools {
     public String readAuditTrail(
             @ToolArg(description = "Conversation ID (required)") String conversationId,
             @ToolArg(description = "Maximum number of entries to return (default: 20)") Integer limit) {
-        if (conversationId == null || conversationId.isBlank()) return errorJson("conversationId is required");
+        if (conversationId == null || conversationId.isBlank())
+            return errorJson("conversationId is required");
         try {
             int limitInt = limit != null ? limit : 20;
             List<AuditEntry> entries = auditStore.getAuditTrail(conversationId, 0, limitInt);
@@ -389,24 +403,24 @@ public class McpConversationTools {
         }
     }
 
-    @Tool(name = "discover_bots", description = "Discover deployed bots with their capabilities. " +
-            "Returns an enriched list of deployed bots, cross-referenced with intent mappings " +
+    @Tool(name = "discover_agents", description = "Discover deployed agents with their capabilities. " +
+            "Returns an enriched list of deployed agents, cross-referenced with intent mappings " +
             "from Agent triggers. Each Agent entry includes: agentId, name, description, version, status, " +
-            "and any intents it serves. This is the best way to find bots by purpose.")
-    public String discoverBots(
+            "and any intents it serves. This is the best way to find agents by purpose.")
+    public String discoverAgents(
             @ToolArg(description = "Optional filter string to search Agent names") String filter,
             @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
         try {
             var env = parseEnvironment(environment);
-            List<AgentDeploymentStatus> statuses = botAdmin.getDeploymentStatuses(env);
+            List<AgentDeploymentStatus> statuses = agentAdmin.getDeploymentStatuses(env);
 
             // Build agentId -> intents mapping from triggers
-            Map<String, List<String>> botIntents = new LinkedHashMap<>();
+            Map<String, List<String>> agentIntents = new LinkedHashMap<>();
             try {
-                List<AgentTriggerConfiguration> triggers = agentTriggerStore.readAllBotTriggers();
+                List<AgentTriggerConfiguration> triggers = agentTriggerStore.readAllAgentTriggers();
                 for (var trigger : triggers) {
-                    for (var deployment : trigger.getBotDeployments()) {
-                        botIntents.computeIfAbsent(deployment.getAgentId(), k -> new ArrayList<>())
+                    for (var deployment : trigger.getAgentDeployments()) {
+                        agentIntents.computeIfAbsent(deployment.getAgentId(), k -> new ArrayList<>())
                                 .add(trigger.getIntent());
                     }
                 }
@@ -415,9 +429,10 @@ public class McpConversationTools {
             }
 
             // Build enriched results
-            var bots = new ArrayList<Map<String, Object>>();
+            var agents = new ArrayList<Map<String, Object>>();
             for (var status : statuses) {
-                if (status.getDescriptor() != null && status.getDescriptor().isDeleted()) continue;
+                if (status.getDescriptor() != null && status.getDescriptor().isDeleted())
+                    continue;
 
                 String name = status.getDescriptor() != null ? status.getDescriptor().getName() : "";
                 String desc = status.getDescriptor() != null ? status.getDescriptor().getDescription() : "";
@@ -426,7 +441,8 @@ public class McpConversationTools {
                 if (filter != null && !filter.isBlank()) {
                     boolean matches = (name != null && name.toLowerCase().contains(filter.toLowerCase())) ||
                             (desc != null && desc.toLowerCase().contains(filter.toLowerCase()));
-                    if (!matches) continue;
+                    if (!matches)
+                        continue;
                 }
 
                 var agentMap = new LinkedHashMap<String, Object>();
@@ -436,37 +452,40 @@ public class McpConversationTools {
                 agentMap.put("version", status.getAgentVersion());
                 agentMap.put("status", status.getStatus().name());
                 agentMap.put("environment", status.getEnvironment().name());
-                List<String> intents = botIntents.get(status.getAgentId());
+                List<String> intents = agentIntents.get(status.getAgentId());
                 if (intents != null && !intents.isEmpty()) {
                     agentMap.put("intents", intents);
                 }
-                bots.add(agentMap);
+                agents.add(agentMap);
             }
 
             var result = new LinkedHashMap<String, Object>();
-            result.put("count", bots.size());
-            result.put("bots", bots);
+            result.put("count", agents.size());
+            result.put("agents", agents);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
-            LOGGER.error("MCP discover_bots failed", e);
-            return errorJson("Failed to discover bots: " + e.getMessage());
+            LOGGER.error("MCP discover_agents failed", e);
+            return errorJson("Failed to discover agents: " + e.getMessage());
         }
     }
 
     @Tool(name = "chat_managed", description = "Send a message to a Agent using intent-based managed conversations. " +
-            "Unlike chat_with_bot (which requires a agentId and creates multiple conversations), this " +
+            "Unlike chat_with_agent (which requires a agentId and creates multiple conversations), this " +
             "tool uses an 'intent' to find the right Agent and maintains exactly ONE conversation " +
             "per intent+userId — like a single chat window. The conversation is auto-created on " +
             "first message and reused on subsequent calls. Requires a Agent trigger to be configured " +
-            "for the intent (see list_bot_triggers / create_bot_trigger).")
+            "for the intent (see list_agent_triggers / create_agent_trigger).")
     public String chatManaged(
             @ToolArg(description = "Intent that maps to a Agent trigger (required). E.g. 'customer_support'") String intent,
             @ToolArg(description = "User ID for conversation management (required)") String userId,
             @ToolArg(description = "The user message to send (required)") String message,
             @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
-        if (intent == null || intent.isBlank()) return errorJson("intent is required");
-        if (userId == null || userId.isBlank()) return errorJson("userId is required");
-        if (message == null || message.isBlank()) return errorJson("message is required");
+        if (intent == null || intent.isBlank())
+            return errorJson("intent is required");
+        if (userId == null || userId.isBlank())
+            return errorJson("userId is required");
+        if (message == null || message.isBlank())
+            return errorJson("message is required");
 
         try {
             var env = parseEnvironment(environment);
@@ -491,7 +510,7 @@ public class McpConversationTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.errorv("MCP chat_managed failed for intent={0}, userId={1}: {2}", intent, userId, e.getMessage());
-            return errorJson("Failed to chat via managed bot: " + e.getMessage());
+            return errorJson("Failed to chat via managed agent: " + e.getMessage());
         }
     }
 
@@ -522,27 +541,27 @@ public class McpConversationTools {
         }
 
         // Create a new conversation from the Agent trigger
-        AgentTriggerConfiguration trigger = agentTriggerStore.readBotTrigger(intent);
-        if (trigger == null || trigger.getBotDeployments().isEmpty()) {
+        AgentTriggerConfiguration trigger = agentTriggerStore.readAgentTrigger(intent);
+        if (trigger == null || trigger.getAgentDeployments().isEmpty()) {
             throw new RuntimeException("No Agent trigger configured for intent: " + intent);
         }
 
         // Pick first deployment
-        AgentDeployment deployment = trigger.getBotDeployments().getFirst();
+        AgentDeployment deployment = trigger.getAgentDeployments().getFirst();
         String agentId = deployment.getAgentId();
         var usedEnv = deployment.getEnvironment() != null ? deployment.getEnvironment() : env;
 
         // Start a new conversation
         var initialContext = new HashMap<>(deployment.getInitialContext());
-        jakarta.ws.rs.core.Response botResponse = restAgentEngine.startConversationWithContext(
+        jakarta.ws.rs.core.Response agentResponse = restAgentEngine.startConversationWithContext(
                 usedEnv, agentId, userId, initialContext);
 
-        if (botResponse.getStatus() != 201) {
+        if (agentResponse.getStatus() != 201) {
             throw new RuntimeException("Failed to create conversation for intent=" + intent +
-                    ", agentId=" + agentId + ", status=" + botResponse.getStatus());
+                    ", agentId=" + agentId + ", status=" + agentResponse.getStatus());
         }
 
-        var locationUri = URI.create(botResponse.getHeaders().get("location").getFirst().toString());
+        var locationUri = URI.create(agentResponse.getHeaders().get("location").getFirst().toString());
         var resourceId = RestUtilities.extractResourceId(locationUri);
         String conversationId = resourceId.getId();
 
@@ -575,7 +594,7 @@ public class McpConversationTools {
                         responseFuture.complete(snapshot);
                     } else {
                         responseFuture.completeExceptionally(
-                                new RuntimeException("Bot returned null response"));
+                                new RuntimeException("Agent returned null response"));
                     }
                 });
 
@@ -584,7 +603,7 @@ public class McpConversationTools {
 
     /**
      * Build an AI-agent-friendly response from a conversation snapshot.
-     * Extracts top-level fields: botResponse (text), quickReplies, actions,
+     * Extracts top-level fields: agentResponse (text), quickReplies, actions,
      * conversationState — so AI agents don't need to dig into the raw snapshot.
      */
     private LinkedHashMap<String, Object> buildConversationResponse(
@@ -607,9 +626,9 @@ public class McpConversationTools {
                     }
                 }
                 if (!texts.isEmpty()) {
-                    result.put("botResponse", String.join(" ", texts));
+                    result.put("agentResponse", String.join(" ", texts));
                     if (texts.size() > 1) {
-                        result.put("botResponseParts", texts);
+                        result.put("agentResponseParts", texts);
                     }
                 }
             }

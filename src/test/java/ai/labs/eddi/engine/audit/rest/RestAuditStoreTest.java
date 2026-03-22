@@ -14,7 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
 
 /**
- * Unit tests for {@link RestAuditStore} — verifies correct delegation to {@link IAuditStore}.
+ * Unit tests for {@link RestAuditStore} — verifies correct delegation to
+ * {@link IAuditStore}.
  */
 class RestAuditStoreTest {
 
@@ -23,7 +24,7 @@ class RestAuditStoreTest {
 
     private AuditEntry sampleEntry() {
         return new AuditEntry(
-                "id-1", "conv-1", "bot-1", 1, "user-1", "production",
+                "id-1", "conv-1", "agent-1", 1, "user-1", "production",
                 0, "task-1", "test-type", 0, 42L,
                 Map.of("userInput", "hello"), Map.of("output", List.of("world")),
                 null, null, List.of("greet"), 0.0, Instant.now(), "hmac-abc");
@@ -48,26 +49,26 @@ class RestAuditStoreTest {
     }
 
     @Test
-    @DisplayName("getAuditTrailByBot delegates to auditStore.getEntriesByBot")
-    void getAuditTrailByBot_delegatesToStore() {
+    @DisplayName("getAuditTrailByAgent delegates to auditStore.getEntriesByAgent")
+    void getAuditTrailByAgent_delegatesToStore() {
         var expected = List.of(sampleEntry());
-        when(auditStore.getEntriesByBot("bot-1", 1, 0, 100)).thenReturn(expected);
+        when(auditStore.getEntriesByAgent("agent-1", 1, 0, 100)).thenReturn(expected);
 
-        var result = restAuditStore.getAuditTrailByBot("bot-1", 1, 0, 100);
+        var result = restAuditStore.getAuditTrailByAgent("agent-1", 1, 0, 100);
 
         assertEquals(expected, result);
-        verify(auditStore).getEntriesByBot("bot-1", 1, 0, 100);
+        verify(auditStore).getEntriesByAgent("agent-1", 1, 0, 100);
     }
 
     @Test
-    @DisplayName("getAuditTrailByBot with null version delegates correctly")
-    void getAuditTrailByBot_nullVersion_delegatesToStore() {
-        when(auditStore.getEntriesByBot("bot-1", null, 0, 100)).thenReturn(List.of());
+    @DisplayName("getAuditTrailByAgent with null version delegates correctly")
+    void getAuditTrailByAgent_nullVersion_delegatesToStore() {
+        when(auditStore.getEntriesByAgent("agent-1", null, 0, 100)).thenReturn(List.of());
 
-        var result = restAuditStore.getAuditTrailByBot("bot-1", null, 0, 100);
+        var result = restAuditStore.getAuditTrailByAgent("agent-1", null, 0, 100);
 
         assertEquals(0, result.size());
-        verify(auditStore).getEntriesByBot("bot-1", null, 0, 100);
+        verify(auditStore).getEntriesByAgent("agent-1", null, 0, 100);
     }
 
     @Test

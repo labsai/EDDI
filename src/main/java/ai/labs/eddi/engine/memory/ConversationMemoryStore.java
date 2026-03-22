@@ -27,7 +27,8 @@ import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
  * <p>
  * Annotated {@code @DefaultBean} so that future database backends
  * (e.g., PostgreSQL) can provide an alternative implementation
- * activated via {@code @LookupIfProperty(name = "eddi.datastore.type", stringValue = "postgres")}.
+ * activated via
+ * {@code @LookupIfProperty(name = "eddi.datastore.type", stringValue = "postgres")}.
  *
  * @author ginccc
  */
@@ -39,8 +40,8 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     private static final String KEY_CONTEXT = "context";
     private static final String KEY_TYPE = "type";
     private static final String KEY_VALUE = "value";
-    private static final String KEY_BOT_ID = "agentId";
-    private static final String KEY_BOT_VERSION = "agentVersion";
+    private static final String KEY_AGENT_ID = "agentId";
+    private static final String KEY_AGENT_VERSION = "agentVersion";
     private static final String KEY_CONVERSATION_STATE = "conversationState";
     private final MongoCollection<Document> conversationCollectionDocument;
     private final MongoCollection<ConversationMemorySnapshot> conversationCollectionObject;
@@ -48,10 +49,11 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     @Inject
     public ConversationMemoryStore(MongoDatabase database) {
         this.conversationCollectionDocument = database.getCollection(CONVERSATION_COLLECTION, Document.class);
-        this.conversationCollectionObject = database.getCollection(CONVERSATION_COLLECTION, ConversationMemorySnapshot.class);
+        this.conversationCollectionObject = database.getCollection(CONVERSATION_COLLECTION,
+                ConversationMemorySnapshot.class);
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_CONVERSATION_STATE));
-        conversationCollectionDocument.createIndex(Indexes.ascending(KEY_BOT_ID));
-        conversationCollectionDocument.createIndex(Indexes.ascending(KEY_BOT_VERSION));
+        conversationCollectionDocument.createIndex(Indexes.ascending(KEY_AGENT_ID));
+        conversationCollectionDocument.createIndex(Indexes.ascending(KEY_AGENT_VERSION));
     }
 
     @Override
@@ -78,8 +80,8 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         }
 
         for (var conversationStep : memorySnapshot.getConversationSteps()) {
-            for (var aPackage : conversationStep.getWorkflows()) {
-                for (var lifecycleTask : aPackage.getLifecycleTasks()) {
+            for (var aWorkflow : conversationStep.getWorkflows()) {
+                for (var lifecycleTask : aWorkflow.getLifecycleTasks()) {
                     if (lifecycleTask.getKey().startsWith(KEY_CONTEXT)) {
                         var result = lifecycleTask.getResult();
                         if (result instanceof LinkedHashMap<?, ?>) {
@@ -105,8 +107,8 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             ArrayList<ConversationMemorySnapshot> retRet = new ArrayList<>();
 
             Document query = new Document();
-            query.put(KEY_BOT_ID, agentId);
-            query.put(KEY_BOT_VERSION, agentVersion);
+            query.put(KEY_AGENT_ID, agentId);
+            query.put(KEY_AGENT_VERSION, agentVersion);
             query.put(KEY_CONVERSATION_STATE, new Document("$ne", ENDED.toString()));
 
             conversationCollectionObject.find(query).forEach(retRet::add);
@@ -118,8 +120,8 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public void setConversationState(String conversationId, ConversationState conversationState) {
-        var updateConversationStateField =
-                new Document("$set", new Document(KEY_CONVERSATION_STATE, conversationState.name()));
+        var updateConversationStateField = new Document("$set",
+                new Document(KEY_CONVERSATION_STATE, conversationState.name()));
 
         conversationCollectionDocument.updateOne(
                 new Document(OBJECT_ID, new ObjectId(conversationId)), updateConversationStateField);
@@ -134,9 +136,8 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     @Override
     public ConversationState getConversationState(String conversationId) {
         Document conversationMemoryDocument = conversationCollectionDocument.find(
-                        new Document(OBJECT_ID, new ObjectId(conversationId))).
-                projection(new Document(KEY_CONVERSATION_STATE, 1).append(OBJECT_ID, 0)).
-                first();
+                new Document(OBJECT_ID, new ObjectId(conversationId)))
+                .projection(new Document(KEY_CONVERSATION_STATE, 1).append(OBJECT_ID, 0)).first();
         if (conversationMemoryDocument == null) {
             return null;
         }
@@ -148,7 +149,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public Long getActiveConversationCount(String agentId, Integer agentVersion) {
-        Bson query = Filters.and(Filters.eq(KEY_BOT_ID, agentId), Filters.eq(KEY_BOT_VERSION, agentVersion),
+        Bson query = Filters.and(Filters.eq(KEY_AGENT_ID, agentId), Filters.eq(KEY_AGENT_VERSION, agentVersion),
                 Filters.not(new Document(KEY_CONVERSATION_STATE, ENDED.toString())));
         return conversationCollectionDocument.countDocuments(query);
     }
@@ -198,12 +199,12 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public void delete(String id, Integer version) {
-        //todo implement
+        // todo implement
     }
 
     @Override
     public void deleteAllPermanently(String id) {
-        //todo implement
+        // todo implement
     }
 
     @Override

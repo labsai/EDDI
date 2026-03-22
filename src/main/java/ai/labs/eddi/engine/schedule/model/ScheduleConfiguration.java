@@ -53,7 +53,7 @@ public class ScheduleConfiguration {
     private String timeZone;         // IANA, e.g. "Europe/Vienna" (default: "UTC")
 
     // -- Trigger --
-    private String message;          // message text sent to the bot
+    private String message;          // message text sent to the agent
     private String userId;           // user identity (default: "system:scheduler")
     private String conversationStrategy; // "new" | "persistent"
     private String persistentConversationId; // used when strategy = "persistent"

@@ -1,76 +1,83 @@
-# The Bot Father: A Deep Dive
+# The Agent Father: A Deep Dive
 
 **Version: ≥5.5.x**
 
 ## Overview
 
-The **Bot Father** is EDDI's meta-bot—a bot that creates other bots. It's the perfect example of EDDI's architecture in action, demonstrating how conversation flow, behavior rules, property extraction, and HTTP calls work together to build sophisticated workflows.
+The **Agent Father** is EDDI's meta-agent—a agent that creates other agents. It's the perfect example of EDDI's architecture in action, demonstrating how conversation flow, behavior rules, property extraction, and HTTP calls work together to build sophisticated workflows.
 
-More importantly, it shows EDDI's unique capability: **the same architecture that powers simple chatbots can orchestrate complex, multi-step processes**, even self-modifying the system itself.
+More importantly, it shows EDDI's unique capability: **the same architecture that powers simple chatagents can orchestrate complex, multi-step processes**, even self-modifying the system itself.
 
-## What Makes Bot Father Special?
+## What Makes Agent Father Special?
 
 ### It's Not Special Code
-Bot Father is **not** a special feature or custom module. It's a **regular EDDI bot** built using the standard components:
+
+Agent Father is **not** a special feature or custom module. It's a **regular EDDI agent** built using the standard components:
+
 - Behavior Rules (to control conversation flow)
 - Property Extraction (to gather user input)
 - HTTP Calls (to invoke EDDI's own API)
 - Output Templates (to guide users)
 
 ### It Demonstrates Self-Modification
-Bot Father uses EDDI's REST API to create new bots, packages, dictionaries, and configurations. This is possible because EDDI's API is designed to be **programmable**—you can automate bot creation just like any other API integration.
+
+Agent Father uses EDDI's REST API to create new agents, packages, dictionaries, and configurations. This is possible because EDDI's API is designed to be **programmable**—you can automate agent creation just like any other API integration.
 
 ### It's a Conversational Wizard
-Instead of requiring users to understand JSON configurations or API calls, Bot Father provides a **conversational interface** that:
+
+Instead of requiring users to understand JSON configurations or API calls, Agent Father provides a **conversational interface** that:
+
 1. Asks questions in natural language
 2. Validates and stores answers
-3. Builds complete bot configurations
-4. Creates the bot via API
-5. Returns the bot ID for deployment
+3. Builds complete agent configurations
+4. Creates the agent via API
+5. Returns the agent ID for deployment
 
-## Architecture of Bot Father
+## Architecture of Agent Father
 
-### Bot Composition
+### Agent Composition
 
-Bot Father is composed of multiple packages:
+Agent Father is composed of multiple packages:
 
 ```
-Bot Father (.bot.json)
-  ├─ Package 1: Core Conversation Flow
+Agent Father (.agent.json)
+  ├─ Workflow 1: Core Conversation Flow
   │   ├─ Behavior Rules: Question sequencing
   │   ├─ Output Templates: Questions and responses
   │   └─ Properties: Store user answers
   │
-  ├─ Package 2: Bot Creation Logic
+  ├─ Workflow 2: Agent Creation Logic
   │   ├─ Behavior Rules: Trigger API calls when data is ready
-  │   ├─ HTTP Calls: POST to /botstore/bots
-  │   └─ Properties: Extract bot ID from response
+  │   ├─ HTTP Calls: POST to /agentstore/agents
+  │   └─ Properties: Extract agent ID from response
   │
-  ├─ Package 3: Package Creation Logic
+  ├─ Workflow 3: Workflow Creation Logic
   │   ├─ HTTP Calls: POST to /packagestore/packages
   │   └─ Properties: Store package references
   │
-  ├─ Package 4: Dictionary Creation Logic
+  ├─ Workflow 4: Dictionary Creation Logic
   │   └─ HTTP Calls: POST to /regulardictionarystore/regulardictionaries
   │
-  └─ Package 5: LangChain Configuration
+  └─ Workflow 5: LangChain Configuration
       └─ HTTP Calls: POST to /langchainstore/langchains
 ```
 
 ## Step-by-Step Flow
 
-Let's walk through how Bot Father creates a new bot:
+Let's walk through how Agent Father creates a new agent:
 
 ### Step 1: Conversation Start
 
-**User**: Starts conversation with Bot Father
+**User**: Starts conversation with Agent Father
 
-**Bot Father**: (via Output Template)
+**Agent Father**: (via Output Template)
+
 ```
-"Welcome! I'll help you create a new bot. What would you like to call your bot?"
+"Welcome! I'll help you create a new agent. What would you like to call your agent?"
 ```
 
 **Behavior Rule**:
+
 ```json
 {
   "name": "Greeting",
@@ -86,48 +93,53 @@ Let's walk through how Bot Father creates a new bot:
   "actions": ["greet_user"]
 }
 ```
-*(Triggers only on first step)*
 
-### Step 2: Capture Bot Name
+_(Triggers only on first step)_
 
-**User**: "My Weather Bot"
+### Step 2: Capture Agent Name
+
+**User**: "My Weather Agent"
 
 **Property Setter**: (from property extension)
+
 ```json
 {
-  "name": "botName",
+  "name": "agentName",
   "valueExtraction": "input",
   "scope": "conversation"
 }
 ```
 
-**Result**: Stores "My Weather Bot" in conversation memory:
+**Result**: Stores "My Weather Agent" in conversation memory:
+
 ```java
-memory.getConversationProperties().put("context.botName", "My Weather Bot");
+memory.getConversationProperties().put("context.agentName", "My Weather Agent");
 ```
 
-**Bot Father**: "Great! What should your bot do? Describe its purpose."
+**Agent Father**: "Great! What should your agent do? Describe its purpose."
 
-### Step 3: Capture Bot Description
+### Step 3: Capture Agent Description
 
 **User**: "It should tell users the current weather"
 
 **Property Setter**:
+
 ```json
 {
-  "name": "botDescription",
+  "name": "agentDescription",
   "valueExtraction": "input",
   "scope": "conversation"
 }
 ```
 
-**Bot Father**: "Which AI provider would you like to use? (OpenAI, Claude, Gemini, or None)"
+**Agent Father**: "Which AI provider would you like to use? (OpenAI, Claude, Gemini, or None)"
 
 ### Step 4: Capture LLM Choice
 
 **User**: "OpenAI"
 
 **Property Setter**:
+
 ```json
 {
   "name": "llmProvider",
@@ -136,13 +148,14 @@ memory.getConversationProperties().put("context.botName", "My Weather Bot");
 }
 ```
 
-**Bot Father**: "Please provide your OpenAI API key."
+**Agent Father**: "Please provide your OpenAI API key."
 
 ### Step 5: Capture API Key
 
 **User**: "sk-..."
 
 **Property Setter**:
+
 ```json
 {
   "name": "apiKey",
@@ -151,25 +164,25 @@ memory.getConversationProperties().put("context.botName", "My Weather Bot");
 }
 ```
 
-### Step 6: Trigger Bot Creation
+### Step 6: Trigger Agent Creation
 
 Now all required data is collected. A Behavior Rule monitors the memory:
 
 ```json
 {
-  "name": "Create Bot When Ready",
+  "name": "Create Agent When Ready",
   "conditions": [
     {
       "type": "contextmatcher",
       "configs": {
-        "contextKey": "botName",
+        "contextKey": "agentName",
         "contextType": "string"
       }
     },
     {
       "type": "contextmatcher",
       "configs": {
-        "contextKey": "botDescription",
+        "contextKey": "agentDescription",
         "contextType": "string"
       }
     },
@@ -188,31 +201,32 @@ Now all required data is collected. A Behavior Rule monitors the memory:
       }
     }
   ],
-  "actions": ["httpcall(create-bot)"]
+  "actions": ["httpcall(create-agent)"]
 }
 ```
 
-**Explanation**: 
+**Explanation**:
+
 - This rule checks if all required data exists in memory
-- When all conditions are met, it triggers the `httpcall(create-bot)` action
+- When all conditions are met, it triggers the `httpcall(create-agent)` action
 - This demonstrates **conditional API execution** based on conversation state
 
-### Step 7: Execute HTTP Call to Create Bot
+### Step 7: Execute HTTP Call to Create Agent
 
-The `create-bot` HTTP call is defined in an HTTP Calls extension:
+The `create-agent` HTTP call is defined in an HTTP Calls extension:
 
 ```json
 {
   "targetServerUrl": "http://localhost:7070",
   "httpCalls": [
     {
-      "name": "create-bot",
+      "name": "create-agent",
       "saveResponse": true,
-      "responseObjectName": "newBotResponse",
-      "actions": ["httpcall(create-bot)"],
+      "responseObjectName": "newAgentResponse",
+      "actions": ["httpcall(create-agent)"],
       "request": {
         "method": "POST",
-        "path": "/botstore/bots",
+        "path": "/agentstore/agents",
         "headers": {
           "Content-Type": "application/json"
         },
@@ -221,8 +235,8 @@ The `create-bot` HTTP call is defined in an HTTP Calls extension:
       "postResponse": {
         "propertyInstructions": [
           {
-            "name": "newBotId",
-            "fromObjectPath": "newBotResponse.id",
+            "name": "newAgentId",
+            "fromObjectPath": "newAgentResponse.id",
             "scope": "conversation"
           }
         ]
@@ -233,9 +247,10 @@ The `create-bot` HTTP call is defined in an HTTP Calls extension:
 ```
 
 **What Happens**:
-1. **Request**: POST to `http://localhost:7070/botstore/bots`
-2. **Body**: Empty bot configuration (packages added later)
-3. **Response**: 
+
+1. **Request**: POST to `http://localhost:7070/agentstore/agents`
+2. **Body**: Empty agent configuration (packages added later)
+3. **Response**:
    ```json
    {
      "id": "673f1a2b4c5d6e7f8a9b0c1d",
@@ -243,9 +258,9 @@ The `create-bot` HTTP call is defined in an HTTP Calls extension:
      "packages": []
    }
    ```
-4. **Property Extraction**: Saves bot ID to `context.newBotId`
+4. **Property Extraction**: Saves agent ID to `context.newAgentId`
 
-### Step 8: Create Package with LangChain Configuration
+### Step 8: Create Workflow with LangChain Configuration
 
 Another HTTP call creates a package:
 
@@ -261,7 +276,7 @@ Another HTTP call creates a package:
   "postResponse": {
     "propertyInstructions": [
       {
-        "name": "packageId",
+        "name": "workflowId",
         "fromObjectPath": "packageResponse.id",
         "scope": "conversation"
       }
@@ -279,39 +294,40 @@ Another HTTP call creates a package:
   "request": {
     "method": "POST",
     "path": "/langchainstore/langchains",
-    "body": "{\"tasks\": [{\"actions\": [\"send_message\"], \"type\": \"[[${context.llmProvider.toLowerCase()}]]\", \"parameters\": {\"apiKey\": \"[[${context.apiKey}]]\", \"modelName\": \"gpt-4o\", \"systemMessage\": \"[[${context.botDescription}]]\", \"addToOutput\": \"true\"}}]}"
+    "body": "{\"tasks\": [{\"actions\": [\"send_message\"], \"type\": \"[[${context.llmProvider.toLowerCase()}]]\", \"parameters\": {\"apiKey\": \"[[${context.apiKey}]]\", \"modelName\": \"gpt-4o\", \"systemMessage\": \"[[${context.agentDescription}]]\", \"addToOutput\": \"true\"}}]}"
   }
 }
 ```
 
 **Note**: The body uses **Thymeleaf templating** to inject conversation memory values:
+
 - `${context.llmProvider}` → "openai"
 - `${context.apiKey}` → "sk-..."
-- `${context.botDescription}` → "It should tell users the current weather"
+- `${context.agentDescription}` → "It should tell users the current weather"
 
-### Step 10: Link Package to Bot
+### Step 10: Link Workflow to Agent
 
 ```json
 {
-  "name": "update-bot-with-package",
-  "actions": ["httpcall(update-bot)"],
+  "name": "update-agent-with-package",
+  "actions": ["httpcall(update-agent)"],
   "request": {
     "method": "PUT",
-    "path": "/botstore/bots/[[${context.newBotId}]]",
-    "body": "{\"packages\": [\"eddi://ai.labs.package/packagestore/packages/[[${context.packageId}]]?version=1\"]}"
+    "path": "/agentstore/agents/[[${context.newAgentId}]]",
+    "body": "{\"packages\": [\"eddi://ai.labs.package/packagestore/packages/[[${context.workflowId}]]?version=1\"]}"
   }
 }
 ```
 
-### Step 11: Deploy Bot
+### Step 11: Deploy Agent
 
 ```json
 {
-  "name": "deploy-bot",
-  "actions": ["httpcall(deploy-bot)"],
+  "name": "deploy-agent",
+  "actions": ["httpcall(deploy-agent)"],
   "request": {
     "method": "POST",
-    "path": "/administration/unrestricted/deploy/[[${context.newBotId}]]",
+    "path": "/administration/unrestricted/deploy/[[${context.newAgentId}]]",
     "queryParams": {
       "version": "1"
     }
@@ -321,19 +337,21 @@ Another HTTP call creates a package:
 
 ### Step 12: Confirmation
 
-**Bot Father**: (via Output Template)
+**Agent Father**: (via Output Template)
+
 ```
-"Your bot has been created successfully! 
-Bot ID: [[${context.newBotId}]]
-You can start chatting with it at: 
-http://localhost:7070/chat/unrestricted/[[${context.newBotId}]]"
+"Your agent has been created successfully!
+Agent ID: [[${context.newAgentId}]]
+You can start chatting with it at:
+http://localhost:7070/chat/unrestricted/[[${context.newAgentId}]]"
 ```
 
 ## Key Architectural Insights
 
 ### 1. Conversation-Driven Workflows
 
-Bot Father demonstrates that EDDI can orchestrate **any** multi-step process, not just conversations:
+Agent Father demonstrates that EDDI can orchestrate **any** multi-step process, not just conversations:
+
 - Data collection (via conversation)
 - Validation (via behavior rules)
 - API orchestration (via HTTP calls)
@@ -341,9 +359,10 @@ Bot Father demonstrates that EDDI can orchestrate **any** multi-step process, no
 
 ### 2. Conditional Execution
 
-The behavior rule that triggers bot creation shows **conditional API execution**:
+The behavior rule that triggers agent creation shows **conditional API execution**:
+
 ```
-IF (all required data collected) THEN (create bot)
+IF (all required data collected) THEN (create agent)
 ```
 
 This is more sophisticated than simple API proxies—it's **business logic orchestration**.
@@ -351,6 +370,7 @@ This is more sophisticated than simple API proxies—it's **business logic orche
 ### 3. Memory as State Machine
 
 Conversation memory acts as a **state machine**:
+
 - Initial state: No data collected
 - Transition: User provides information → Property setters update state
 - Trigger: All data present → Behavior rule fires
@@ -359,10 +379,11 @@ Conversation memory acts as a **state machine**:
 ### 4. Template-Based Configuration
 
 HTTP call bodies use Thymeleaf templates, allowing **dynamic configuration**:
+
 ```json
 {
   "apiKey": "[[${context.apiKey}]]",
-  "systemMessage": "[[${context.botDescription}]]"
+  "systemMessage": "[[${context.agentDescription}]]"
 }
 ```
 
@@ -370,26 +391,29 @@ This means the same HTTP call definition can create different configurations bas
 
 ### 5. Self-Modification
 
-Bot Father calls EDDI's own API, demonstrating:
-- **Programmable infrastructure**: Bots can modify the system
+Agent Father calls EDDI's own API, demonstrating:
+
+- **Programmable infrastructure**: Agents can modify the system
 - **API-first design**: Everything is accessible via REST
-- **Composability**: Bots are data, not code—they can be created programmatically
+- **Composability**: Agents are data, not code—they can be created programmatically
 
 ## Real-World Applications
 
-The Bot Father pattern can be applied to many scenarios:
+The Agent Father pattern can be applied to many scenarios:
 
 ### 1. Customer Onboarding Wizard
+
 ```
-Bot collects: Name, email, company, preferences
+Agent collects: Name, email, company, preferences
 → Creates CRM record via API
 → Sends welcome email via SendGrid API
 → Creates Slack channel via Slack API
 ```
 
 ### 2. Order Processing System
+
 ```
-Bot collects: Product, quantity, shipping address
+Agent collects: Product, quantity, shipping address
 → Validates inventory via ERP API
 → Processes payment via Stripe API
 → Creates shipping label via FedEx API
@@ -397,25 +421,27 @@ Bot collects: Product, quantity, shipping address
 ```
 
 ### 3. Support Ticket Creation
+
 ```
-Bot collects: Issue description, severity, attachments
+Agent collects: Issue description, severity, attachments
 → Creates Jira ticket via Jira API
 → Notifies team via Slack API
 → Sends confirmation email via SendGrid API
 ```
 
-### 4. Dynamic Bot Configuration
+### 4. Dynamic Agent Configuration
+
 ```
-Bot collects: Customer requirements, industry, use case
+Agent collects: Customer requirements, industry, use case
 → Selects appropriate LLM (OpenAI for creative, Claude for analytical)
 → Configures behavior rules based on industry
 → Sets up integrations based on use case
-→ Deploys customized bot
+→ Deploys customized agent
 ```
 
 ## Code Deep Dive
 
-Let's look at the actual Java components that make Bot Father work:
+Let's look at the actual Java components that make Agent Father work:
 
 ### Behavior Rules Task (executes rules)
 
@@ -425,11 +451,11 @@ public class BehaviorRulesTask implements ILifecycleTask {
     public void execute(IConversationMemory memory, Object component) {
         // Load behavior rules from component
         BehaviorConfiguration config = (BehaviorConfiguration) component;
-        
+
         // Evaluate each rule
         for (BehaviorRule rule : config.getBehaviorRules()) {
             boolean allConditionsMet = evaluateConditions(rule.getConditions(), memory);
-            
+
             if (allConditionsMet) {
                 // Store actions in memory for next task
                 memory.getCurrentStep().storeData(
@@ -449,19 +475,19 @@ public class HttpCallsTask implements ILifecycleTask {
     @Override
     public void execute(IConversationMemory memory, Object component) {
         HttpCallsConfiguration config = (HttpCallsConfiguration) component;
-        
+
         // Get actions from previous task (behavior rules)
         List<String> actions = memory.getCurrentStep()
             .getLatestData("actions").getResult();
-        
+
         for (HttpCallDefinition httpCall : config.getHttpCalls()) {
             if (actions.contains("httpcall(" + httpCall.getName() + ")")) {
                 // Execute HTTP call
                 String url = config.getTargetServerUrl() + httpCall.getRequest().getPath();
                 String body = applyTemplate(httpCall.getRequest().getBody(), memory);
-                
+
                 Response response = httpClient.post(url, body);
-                
+
                 // Store response in memory
                 if (httpCall.isSaveResponse()) {
                     memory.getCurrentStep().storeData(
@@ -471,7 +497,7 @@ public class HttpCallsTask implements ILifecycleTask {
                         )
                     );
                 }
-                
+
                 // Extract properties from response
                 for (PropertyInstruction instruction : httpCall.getPostResponse().getPropertyInstructions()) {
                     Object value = extractFromJsonPath(response.getBody(), instruction.getFromObjectPath());
@@ -493,13 +519,13 @@ public class PropertyExtractorTask implements ILifecycleTask {
     @Override
     public void execute(IConversationMemory memory, Object component) {
         PropertyConfiguration config = (PropertyConfiguration) component;
-        
+
         for (PropertyInstruction instruction : config.getInstructions()) {
             if (instruction.getValueExtraction().equals("input")) {
                 // Extract from user input
                 String input = memory.getCurrentStep()
                     .getLatestData("input").getResult();
-                
+
                 // Store in appropriate scope
                 if (instruction.getScope().equals("conversation")) {
                     memory.getConversationProperties().put(
@@ -515,9 +541,10 @@ public class PropertyExtractorTask implements ILifecycleTask {
 
 ## Configuration Files
 
-### Bot Father Bot Configuration
+### Agent Father Agent Configuration
 
-**File**: `botfather.bot.json`
+**File**: `agentfather.agent.json`
+
 ```json
 {
   "packages": [
@@ -530,9 +557,10 @@ public class PropertyExtractorTask implements ILifecycleTask {
 }
 ```
 
-### Package Configuration Example
+### Workflow Configuration Example
 
 **File**: `package-conversation-flow.package.json`
+
 ```json
 {
   "packageExtensions": [
@@ -563,27 +591,28 @@ public class PropertyExtractorTask implements ILifecycleTask {
 
 ### Behavior Rules Example
 
-**File**: `behavior-bot-creation.behavior.json`
+**File**: `behavior-agent-creation.behavior.json`
+
 ```json
 {
   "behaviorGroups": [
     {
-      "name": "Bot Creation",
+      "name": "Agent Creation",
       "behaviorRules": [
         {
-          "name": "Create Bot When Ready",
+          "name": "Create Agent When Ready",
           "conditions": [
             {
               "type": "contextmatcher",
               "configs": {
-                "contextKey": "botName",
+                "contextKey": "agentName",
                 "contextType": "string"
               }
             },
             {
               "type": "contextmatcher",
               "configs": {
-                "contextKey": "botDescription",
+                "contextKey": "agentDescription",
                 "contextType": "string"
               }
             },
@@ -602,10 +631,7 @@ public class PropertyExtractorTask implements ILifecycleTask {
               }
             }
           ],
-          "actions": [
-            "httpcall(create-bot)",
-            "show_success_message"
-          ]
+          "actions": ["httpcall(create-agent)", "show_success_message"]
         }
       ]
     }
@@ -613,85 +639,92 @@ public class PropertyExtractorTask implements ILifecycleTask {
 }
 ```
 
-## Testing Bot Father
+## Testing Agent Father
 
 ### Using the REST API
 
 ```bash
-# 1. Start conversation with Bot Father
-curl -X POST "http://localhost:7070/bots/unrestricted/botfather" \
+# 1. Start conversation with Agent Father
+curl -X POST "http://localhost:7070/agents/unrestricted/agentfather" \
   -H "Content-Type: application/json" \
-  -d '{"input": "I want to create a bot"}'
+  -d '{"input": "I want to create a agent"}'
 
 # Response includes conversationId
 # {
 #   "conversationId": "conv-123",
 #   "conversationState": "READY",
 #   "conversationOutputs": [
-#     {"output": ["Welcome! What would you like to call your bot?"]}
+#     {"output": ["Welcome! What would you like to call your agent?"]}
 #   ]
 # }
 
-# 2. Provide bot name
-curl -X POST "http://localhost:7070/bots/unrestricted/botfather/conv-123" \
+# 2. Provide agent name
+curl -X POST "http://localhost:7070/agents/unrestricted/agentfather/conv-123" \
   -H "Content-Type: application/json" \
-  -d '{"input": "Weather Bot"}'
+  -d '{"input": "Weather Agent"}'
 
 # 3. Provide description
-curl -X POST "http://localhost:7070/bots/unrestricted/botfather/conv-123" \
+curl -X POST "http://localhost:7070/agents/unrestricted/agentfather/conv-123" \
   -H "Content-Type: application/json" \
   -d '{"input": "Tells users the current weather"}'
 
 # 4. Provide LLM choice
-curl -X POST "http://localhost:7070/bots/unrestricted/botfather/conv-123" \
+curl -X POST "http://localhost:7070/agents/unrestricted/agentfather/conv-123" \
   -H "Content-Type: application/json" \
   -d '{"input": "OpenAI"}'
 
 # 5. Provide API key
-curl -X POST "http://localhost:7070/bots/unrestricted/botfather/conv-123" \
+curl -X POST "http://localhost:7070/agents/unrestricted/agentfather/conv-123" \
   -H "Content-Type: application/json" \
   -d '{"input": "sk-..."}'
 
-# Bot Father will create the bot and return the bot ID
+# Agent Father will create the agent and return the agent ID
 ```
 
-## Lessons from Bot Father
+## Lessons from Agent Father
 
 ### 1. Configuration Over Code
-Bot Father proves that complex workflows can be **configured**, not coded. No Java needed—just JSON.
+
+Agent Father proves that complex workflows can be **configured**, not coded. No Java needed—just JSON.
 
 ### 2. Composability is Powerful
+
 By combining simple components (rules, HTTP calls, templates), you can build sophisticated systems.
 
 ### 3. Conversations Are Workflows
+
 Any multi-step process can be modeled as a conversation, making it user-friendly and intuitive.
 
 ### 4. EDDI is Infrastructure
-EDDI isn't just for chatbots—it's infrastructure for **orchestrating any API-driven workflow** with conversational interfaces.
+
+EDDI isn't just for chatagents—it's infrastructure for **orchestrating any API-driven workflow** with conversational interfaces.
 
 ### 5. Self-Modification is Safe
-Because bots are data (JSON), creating/modifying them via API is safe and version-controlled.
+
+Because agents are data (JSON), creating/modifying them via API is safe and version-controlled.
 
 ## Summary
 
-The Bot Father demonstrates EDDI's core philosophy:
+The Agent Father demonstrates EDDI's core philosophy:
 
 > **Sophisticated AI orchestration should be configuration, not code.**
 
 By combining:
+
 - **Behavior Rules** (decision logic)
 - **Property Extraction** (state management)
 - **HTTP Calls** (API orchestration)
 - **Output Templates** (user interaction)
 
 You can build systems that:
+
 - Guide users through complex processes
 - Collect and validate data conversationally
 - Orchestrate multiple API calls conditionally
 - Generate dynamic configurations
 - Self-modify and adapt
 
-This is the power of EDDI's architecture—and Bot Father is the proof.
+This is the power of EDDI's architecture—and Agent Father is the proof.
 
 ## Related Documentation
 
@@ -700,4 +733,3 @@ This is the power of EDDI's architecture—and Bot Father is the proof.
 - [Behavior Rules](behavior-rules.md) - Conditional logic
 - [HTTP Calls](httpcalls.md) - API integration
 - [Output Templating](output-templating.md) - Dynamic responses
-

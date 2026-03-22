@@ -2,11 +2,11 @@
 
 ## Overview
 
-**HttpCalls** enable EDDI bots to integrate with external REST APIs, making EDDI a powerful orchestration layer that can combine conversational AI with traditional backend services. This is how bots can fetch real-time data, authenticate users, store information in external systems, or trigger business workflows.
+**HttpCalls** enable EDDI agents to integrate with external REST APIs, making EDDI a powerful orchestration layer that can combine conversational AI with traditional backend services. This is how agents can fetch real-time data, authenticate users, store information in external systems, or trigger business workflows.
 
 ### Role in the Lifecycle
 
-HttpCalls are lifecycle tasks that execute during the bot's processing pipeline:
+HttpCalls are lifecycle tasks that execute during the agent's processing pipeline:
 
 ```
 User Input → Parser → Behavior Rules → HttpCalls → Output Generation
@@ -22,7 +22,7 @@ Typically, Behavior Rules decide **when** to make an API call by triggering an a
 - **Business workflows**: Processing payments, sending notifications, triggering events
 - **Multi-step APIs**: First call gets auth token, second call uses it to access protected resources
 - **Analytics**: Sending conversation data to external analytics platforms
-- **Self-modification**: The "Bot Father" bot uses HttpCalls to create other bots via EDDI's own API
+- **Self-modification**: The "Agent Father" agent uses HttpCalls to create other agents via EDDI's own API
 
 ### Key Features
 
@@ -38,7 +38,7 @@ Typically, Behavior Rules decide **when** to make an API call by triggering an a
 
 In this article we will talk about EDDI's **`httpCalls`** **feature** (calling other `JSON` APIs).
 
-The **`httpCalls`** feature allows a **Chatbot** to consume **3rd** party APIs and use the `JSON` response in another **`httpCall`** (for **authentication** or requesting a token for instance) or directly print the results in Chatbot's `Output,` this means, for example, you can call a weather API and use the `JSON` response in your Chatbot's output if the user asks about today's weather or the week's forecast!
+The **`httpCalls`** feature allows a **Chatagent** to consume **3rd** party APIs and use the `JSON` response in another **`httpCall`** (for **authentication** or requesting a token for instance) or directly print the results in Chatagent's `Output,` this means, for example, you can call a weather API and use the `JSON` response in your Chatagent's output if the user asks about today's weather or the week's forecast!
 
 We will emphasize the `httpCall` model and go through an example step by step, you can also download the example in **Postman** collection format and run the steps.
 
@@ -125,10 +125,10 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
 | httpCall.request.method                                                     | (`String`) `HTTP` Method of the `httpCall` (e.g `GET`,`POST`,etc...)                                                                                                                                                             |
 | httpCall.request.contentType                                                | (`String`) value of the `contentType HTTP header` of the `httpCall`                                                                                                                                                              |
 | httpCall.request.body                                                       | (`String`) an escaped `JSON` object that goes in the `HTTP Request` body if needed.                                                                                                                                              |
-| httpCall.postResponse.qrBuildInstructions[].pathToTargetArray              | (`String`) path to the array in your `JSON` **response data.**                                                                                                                                                                   |
-| httpCall.postResponse.qrBuildInstructions[].iterationObjectName            | (`String`) a variable name that will point to the `TargetArray.`                                                                                                                                                                 |
-| httpCall.postResponse.qrBuildInstructions[].quickReplyValue                | (`String`) `thymeleaf expression` to use as a `quickReply` value.                                                                                                                                                                |
-| httpCall.postResponse.qrBuildInstructions[].quickReplyExpressions          | (`String`) `expression` to retrieve a property from `iterationObjectName`.                                                                                                                                                       |
+| httpCall.postResponse.qrBuildInstructions[].pathToTargetArray               | (`String`) path to the array in your `JSON` **response data.**                                                                                                                                                                   |
+| httpCall.postResponse.qrBuildInstructions[].iterationObjectName             | (`String`) a variable name that will point to the `TargetArray.`                                                                                                                                                                 |
+| httpCall.postResponse.qrBuildInstructions[].quickReplyValue                 | (`String`) `thymeleaf expression` to use as a `quickReply` value.                                                                                                                                                                |
+| httpCall.postResponse.qrBuildInstructions[].quickReplyExpressions           | (`String`) `expression` to retrieve a property from `iterationObjectName`.                                                                                                                                                       |
 | httpCall.postResponse.propertyInstructions.name                             | (`String`) name of property to be used in templating                                                                                                                                                                             |
 | httpCall.postResponse.propertyInstructions.value                            | (`String`) a static value can be set here if `fromObjectPath` is not defined.                                                                                                                                                    |
 | httpCall.postResponse.propertyInstructions.scope                            | <p>(<code>String</code>) Can be either : </p><p><code>step</code> used for only for one user interaction </p><p><code>conversation</code> for entire conversation and </p><p><code>longTerm</code> for between conversations</p> |
@@ -153,7 +153,7 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
 
 ```javascript
 {
-  "targetServerUrl": "https://api.bot-metrics.com/v1/messages",
+  "targetServerUrl": "https://api.agent-metrics.com/v1/messages",
   "httpCalls": [
     {
       "name": "sendUserMessageToAnalytics",
@@ -172,7 +172,7 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
       }
     },
     {
-      "name": "sendBotMessageToAnalytics",
+      "name": "sendAgentMessageToAnalytics",
       "actions": [
         "send_output_to_analytics"
       ],
@@ -235,13 +235,13 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
 
 ## Step by step example
 
-We will do a step by step example from scratch (**Chatbot** creation to a simple conversation that uses `httpCall`)
+We will do a step by step example from scratch (**Chatagent** creation to a simple conversation that uses `httpCall`)
 
 For the sake of simplicity we will use a free weather API to fetch weather of cities by their names ([api.openweathermap.org](http://api.openweathermap.org/)).
 
 ### 1 - Create regularDictionnary
 
-> More about regular dictionaries can be found [here](creating-your-first-chatbot/#1-creating-a-regular-dictionary).
+> More about regular dictionaries can be found [here](creating-your-first-chatagent/#1-creating-a-regular-dictionary).
 
 _Request URL_
 
@@ -501,12 +501,12 @@ _Response Headers_
 
 ### 5 - Creating the package
 
-> More about packages can be found [here](creating-your-first-chatbot/#4-creating-the-package).
+> More about packages can be found [here](creating-your-first-chatagent/#4-creating-the-package).
 >
-> Important Package note
+> Important Workflow note
 >
-> * `ai.labs.httpcalls` & `ai.labs.output` must come after `ai.labs.behavior` in order of the package definition
-> * `ai.labs.templating` has to be after `ai.labs.output`
+> - `ai.labs.httpcalls` & `ai.labs.output` must come after `ai.labs.behavior` in order of the package definition
+> - `ai.labs.templating` has to be after `ai.labs.output`
 
 _Request URL_
 
@@ -617,11 +617,11 @@ Response Headers
 }
 ```
 
-### 6 - Creating the bot
+### 6 - Creating the agent
 
 _Request URL_
 
-`POST` `http://localhost:7070/botstore/bots`
+`POST` `http://localhost:7070/agentstore/agents`
 
 _Request Body_
 
@@ -650,18 +650,18 @@ _Response Headers_
   "date": "Sun, 13 May 2018 21:18:16 GMT",
   "access-control-allow-headers": "authorization, Content-Type",
   "content-length": "0",
-  "location": "eddi://ai.labs.bot/botstore/bots/5af8ab98ba31c023bcb9ef32?version=1",
+  "location": "eddi://ai.labs.agent/agentstore/agents/5af8ab98ba31c023bcb9ef32?version=1",
   "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
   "access-control-expose-headers": "location",
   "content-type": null
 }
 ```
 
-### 7 - Deploy the bot
+### 7 - Deploy the agent
 
 _Request URL_
 
-`POST` `http://localhost:7070/administration/restricted/deploy/**<bot_id>**?version=1&autoDeploy=true`
+`POST` `http://localhost:7070/administration/restricted/deploy/**<agent_id>**?version=1&autoDeploy=true`
 
 _Response Body_
 
@@ -689,7 +689,7 @@ _Response Headers_
 
 _Request URL_
 
-`POST` `http://localhost:7070/bots/**<env>**/**<bot_id>**`
+`POST` `http://localhost:7070/agents/**<env>**/**<agent_id>**`
 
 _Response Body_
 
@@ -718,7 +718,7 @@ _Response Headers_
 
 _Request URL_
 
-`POST` `http://localhost:7070/bots/<env>/<bot_id>/<conversation_id>?returnDetailed=false&returnCurrentStepOnly=true`
+`POST` `http://localhost:7070/agents/<env>/<agent_id>/<conversation_id>?returnDetailed=false&returnCurrentStepOnly=true`
 
 _Request Body_
 
@@ -732,8 +732,8 @@ _Response Body_
 
 ```javascript
 {
-  "botId": "5af8b075ba31c023bcb9ef3b",
-  "botVersion": 1,
+  "agentId": "5af8b075ba31c023bcb9ef3b",
+  "agentVersion": 1,
   "environment": "unrestricted",
   "conversationState": "READY",
   "redoCacheSize": 0,
@@ -783,14 +783,14 @@ _Response Headers_
 
 _Request URL_
 
-`POST` `http://localhost:7070/bots/<env>/<bot_id>/<conversation_id>?returnDetailed=false&returnCurrentStepOnly=true`
+`POST` `http://localhost:7070/agents/<env>/<agent_id>/<conversation_id>?returnDetailed=false&returnCurrentStepOnly=true`
 
 _Request Body_
 
 ```javascript
 {
-  "botId": "5af8b075ba31c023bcb9ef3b",
-  "botVersion": 1,
+  "agentId": "5af8b075ba31c023bcb9ef3b",
+  "agentVersion": 1,
   "environment": "unrestricted",
   "conversationState": "READY",
   "redoCacheSize": 0,
@@ -840,7 +840,6 @@ _Response Headers_
 
 If you would like to run the full example through postman, you can download and import the collection below.
 
-{% file src=".gitbook/assets/EDDI - Weather bot.postman_collection.json" %}
-EDDI - Weather bot.postman\_collection.json
+{% file src=".gitbook/assets/EDDI - Weather agent.postman_collection.json" %}
+EDDI - Weather agent.postman_collection.json
 {% endfile %}
-

@@ -46,7 +46,7 @@ public class ConversationLogGenerator {
         return generate(logSize, true);
     }
 
-    public ConversationLog generate(int logSize, boolean includeFirstBotMessage) {
+    public ConversationLog generate(int logSize, boolean includeFirstAgentMessage) {
         if (conversationMemory == null && memorySnapshot == null) {
             throw new IllegalStateException("ConversationMemory was null. " +
                     "You need to either set IConversationMemory or ConversationMemorySnapshot");
@@ -54,8 +54,8 @@ public class ConversationLogGenerator {
 
         var conversationLog = new ConversationLog();
         if (logSize != 0) {
-            var conversationOutputs = conversationMemory != null ?
-                    conversationMemory.getConversationOutputs() : memorySnapshot.getConversationOutputs();
+            var conversationOutputs = conversationMemory != null ? conversationMemory.getConversationOutputs()
+                    : memorySnapshot.getConversationOutputs();
 
             var startIndex = 0;
             if (logSize > 0) {
@@ -123,7 +123,7 @@ public class ConversationLogGenerator {
                 }
             }
 
-            if (!includeFirstBotMessage && !conversationLog.getMessages().isEmpty()) {
+            if (!includeFirstAgentMessage && !conversationLog.getMessages().isEmpty()) {
                 conversationLog.getMessages().removeFirst();
             }
         }

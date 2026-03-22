@@ -62,12 +62,12 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     }
 
     @Override
-    public List<DocumentDescriptor> readPackageDescriptors(String filter, Integer index, Integer limit) {
+    public List<DocumentDescriptor> readWorkflowDescriptors(String filter, Integer index, Integer limit) {
         return restVersionInfo.readDescriptors("ai.labs.package", filter, index, limit);
     }
 
     @Override
-    public List<DocumentDescriptor> readPackageDescriptors(String filter,
+    public List<DocumentDescriptor> readWorkflowDescriptors(String filter,
             Integer index,
             Integer limit,
             String containingResourceUri,
@@ -78,7 +78,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         }
 
         try {
-            return workflowStore.getPackageDescriptorsContainingResource(
+            return workflowStore.getWorkflowDescriptorsContainingResource(
                     containingResourceUri,
                     includePreviousVersions);
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
@@ -87,22 +87,22 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     }
 
     @Override
-    public WorkflowConfiguration readPackage(String id, Integer version) {
+    public WorkflowConfiguration readWorkflow(String id, Integer version) {
         return restVersionInfo.read(id, version);
     }
 
     @Override
-    public Response updatePackage(String id, Integer version, WorkflowConfiguration workflowConfiguration) {
+    public Response updateWorkflow(String id, Integer version, WorkflowConfiguration workflowConfiguration) {
         return restVersionInfo.update(id, version, workflowConfiguration);
     }
 
     @Override
-    public Response updateResourceInPackage(String id, Integer version, URI resourceURI) {
+    public Response updateResourceInWorkflow(String id, Integer version, URI resourceURI) {
         String resourceURIString = resourceURI.toString();
         String resourceURIWithoutVersion = resourceURIString.substring(0, resourceURIString.lastIndexOf("?"));
 
         boolean updated = false;
-        WorkflowConfiguration workflowConfig = readPackage(id, version);
+        WorkflowConfiguration workflowConfig = readWorkflow(id, version);
         for (WorkflowStep workflowStep : workflowConfig.getWorkflowSteps()) {
             Map<String, Object> packageConfig = workflowStep.getConfig();
             if (updateResourceURI(resourceURI, resourceURIWithoutVersion, packageConfig)) {
@@ -126,7 +126,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         }
 
         if (updated) {
-            return updatePackage(id, version, workflowConfig);
+            return updateWorkflow(id, version, workflowConfig);
         } else {
             URI uri = RestUtilities.createURI(RestWorkflowStore.resourceURI, id, versionQueryParam, version);
             return Response.status(BAD_REQUEST).entity(uri).type(MediaType.TEXT_PLAIN).build();
@@ -147,12 +147,12 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     }
 
     @Override
-    public Response createPackage(WorkflowConfiguration workflowConfiguration) {
+    public Response createWorkflow(WorkflowConfiguration workflowConfiguration) {
         return restVersionInfo.create(workflowConfiguration);
     }
 
     @Override
-    public Response deletePackage(String id, Integer version, Boolean permanent, Boolean cascade) {
+    public Response deleteWorkflow(String id, Integer version, Boolean permanent, Boolean cascade) {
         if (cascade) {
             try {
                 WorkflowConfiguration workflowConfig = workflowStore.read(id, version);
@@ -173,7 +173,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
                     }
                 }
             } catch (IResourceStore.ResourceNotFoundException e) {
-                log.warnf("Package %s (v%d) not found for cascade — deleting package only", id, version);
+                log.warnf("Workflow %s (v%d) not found for cascade — deleting package only", id, version);
             } catch (IResourceStore.ResourceStoreException e) {
                 log.warnf("Error reading package %s for cascade: %s", id, e.getMessage());
             }
@@ -187,7 +187,8 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         if (!isNullOrEmpty(dictionaries)) {
             for (var dictionary : dictionaries) {
                 var dictType = dictionary.get("type");
-                if (dictType != null && "ai.labs.parser.dictionaries.regular".equals(URI.create(dictType.toString()).getHost())) {
+                if (dictType != null
+                        && "ai.labs.parser.dictionaries.regular".equals(URI.create(dictType.toString()).getHost())) {
                     var config = (Map<String, Object>) dictionary.get("config");
                     if (!isNullOrEmpty(config)) {
                         Object dictionaryUriObj = config.get(KEY_URI);
@@ -203,12 +204,12 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     private void deleteResourceSafely(URI resourceUri, boolean permanent) {
         try {
             // Check if this resource is referenced by other packages
-            var referencingPackages = workflowStore.getPackageDescriptorsContainingResource(
+            var referencingWorkflows = workflowStore.getWorkflowDescriptorsContainingResource(
                     resourceUri.toString(), false);
-            if (referencingPackages.size() > 1) {
+            if (referencingWorkflows.size() > 1) {
                 log.infof("Skipping cascade-delete of resource %s — " +
                         "still referenced by %d other package(s)", resourceUri,
-                        referencingPackages.size() - 1);
+                        referencingWorkflows.size() - 1);
                 return;
             }
 
@@ -220,7 +221,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     }
 
     @Override
-    public Response duplicatePackage(String id, Integer version, Boolean deepCopy) {
+    public Response duplicateWorkflow(String id, Integer version, Boolean deepCopy) {
         restVersionInfo.validateParameters(id, version);
         try {
             WorkflowConfiguration workflowConfig = workflowStore.read(id, version);
@@ -242,11 +243,11 @@ public class RestWorkflowStore implements IRestWorkflowStore {
                 }
             }
 
-            Response createPackageResponse = restVersionInfo.create(workflowConfig);
+            Response createWorkflowResponse = restVersionInfo.create(workflowConfig);
             createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version,
-                    createPackageResponse.getLocation());
+                    createWorkflowResponse.getLocation());
 
-            return createPackageResponse;
+            return createWorkflowResponse;
         } catch (Exception e) {
             throw sneakyThrow(e);
         }

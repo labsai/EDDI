@@ -49,13 +49,13 @@ public class SimpleConversationMemorySnapshot {
         private String key;
         private Object value;
         private Date timestamp;
-        private String originPackageId;
+        private String originWorkflowId;
 
-        public ConversationStepData(String key, Object value, Date timestamp, String originPackageId) {
+        public ConversationStepData(String key, Object value, Date timestamp, String originWorkflowId) {
             this.key = key;
             this.value = value;
             this.timestamp = timestamp;
-            this.originPackageId = originPackageId;
+            this.originWorkflowId = originWorkflowId;
         }
 
         public String getKey() {
@@ -82,12 +82,12 @@ public class SimpleConversationMemorySnapshot {
             this.timestamp = timestamp;
         }
 
-        public String getOriginPackageId() {
-            return originPackageId;
+        public String getOriginWorkflowId() {
+            return originWorkflowId;
         }
 
-        public void setOriginPackageId(String originPackageId) {
-            this.originPackageId = originPackageId;
+        public void setOriginWorkflowId(String originWorkflowId) {
+            this.originWorkflowId = originWorkflowId;
         }
     }
 

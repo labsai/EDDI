@@ -15,9 +15,9 @@ public interface IData<T> {
 
     Date getTimestamp();
 
-    String getOriginPackageId();
+    String getOriginWorkflowId();
 
-    void setOriginPackageId(String packageId);
+    void setOriginWorkflowId(String workflowId);
 
     /**
      * Whether or not this data will be send to the client

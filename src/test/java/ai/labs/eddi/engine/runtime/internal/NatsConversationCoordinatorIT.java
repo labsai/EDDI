@@ -18,18 +18,22 @@ import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Integration test for {@link NatsConversationCoordinator} using Testcontainers.
+ * Integration test for {@link NatsConversationCoordinator} using
+ * Testcontainers.
  *
- * <p>Spins up a real NATS 2.10 server with JetStream enabled to verify:
+ * <p>
+ * Spins up a real NATS 2.10 server with JetStream enabled to verify:
  * <ul>
- *   <li>Sequential task execution per conversation</li>
- *   <li>Concurrent execution across conversations</li>
- *   <li>Dead-letter routing after max retries</li>
- *   <li>Dead-letter message payload verification</li>
+ * <li>Sequential task execution per conversation</li>
+ * <li>Concurrent execution across conversations</li>
+ * <li>Dead-letter routing after max retries</li>
+ * <li>Dead-letter message payload verification</li>
  * </ul>
  *
- * <p>Runs via maven-failsafe-plugin ({@code mvn verify -DskipITs=false}).
- * Requires Docker running.</p>
+ * <p>
+ * Runs via maven-failsafe-plugin ({@code mvn verify -DskipITs=false}).
+ * Requires Docker running.
+ * </p>
  *
  * @author ginccc
  * @since 6.0.0
@@ -65,8 +69,7 @@ class NatsConversationCoordinatorIT {
                 "EDDI_IT_CONVERSATIONS",
                 "EDDI_IT_DEAD_LETTERS",
                 3, // maxRetries
-                60
-        );
+                60);
 
         // Start coordinator (connects to NATS, creates streams)
         coordinator.start();
@@ -109,28 +112,28 @@ class NatsConversationCoordinatorIT {
     @Test
     @DisplayName("should execute tasks concurrently for different conversations")
     void concurrentConversations() throws Exception {
-        CountDownLatch bothStarted = new CountDownLatch(2);
-        CountDownLatch bothDone = new CountDownLatch(2);
+        CountDownLatch agenthStarted = new CountDownLatch(2);
+        CountDownLatch agenthDone = new CountDownLatch(2);
         List<String> startOrder = Collections.synchronizedList(new ArrayList<>());
 
         coordinator.submitInOrder("conv-A", () -> {
             startOrder.add("A");
-            bothStarted.countDown();
-            bothStarted.await(5, TimeUnit.SECONDS); // wait for B to also start
-            bothDone.countDown();
+            agenthStarted.countDown();
+            agenthStarted.await(5, TimeUnit.SECONDS); // wait for B to also start
+            agenthDone.countDown();
             return null;
         });
 
         coordinator.submitInOrder("conv-B", () -> {
             startOrder.add("B");
-            bothStarted.countDown();
-            bothStarted.await(5, TimeUnit.SECONDS); // wait for A to also start
-            bothDone.countDown();
+            agenthStarted.countDown();
+            agenthStarted.await(5, TimeUnit.SECONDS); // wait for A to also start
+            agenthDone.countDown();
             return null;
         });
 
-        assertTrue(bothDone.await(10, TimeUnit.SECONDS), "Both conversations should complete");
-        assertEquals(2, startOrder.size(), "Both tasks should have started");
+        assertTrue(agenthDone.await(10, TimeUnit.SECONDS), "Agenth conversations should complete");
+        assertEquals(2, startOrder.size(), "Agenth tasks should have started");
     }
 
     @Test
@@ -207,26 +210,35 @@ class NatsConversationCoordinatorIT {
     // ==================== Test Runtime ====================
 
     /**
-     * Simple IRuntime implementation for integration tests that uses a real thread pool.
+     * Simple IRuntime implementation for integration tests that uses a real thread
+     * pool.
      */
     private static class TestRuntime implements IRuntime {
         private final ExecutorService executor = Executors.newFixedThreadPool(4);
         private final ScheduledExecutorService scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
 
         @Override
-        public void init() {}
+        public void init() {
+        }
 
         @Override
-        public String getVersion() { return "test"; }
+        public String getVersion() {
+            return "test";
+        }
 
         @Override
-        public ExecutorService getExecutorService() { return executor; }
+        public ExecutorService getExecutorService() {
+            return executor;
+        }
 
         @Override
-        public ScheduledExecutorService getScheduledExecutorService() { return scheduledExecutor; }
+        public ScheduledExecutorService getScheduledExecutorService() {
+            return scheduledExecutor;
+        }
 
         @Override
-        public void logVersion() {}
+        public void logVersion() {
+        }
 
         @Override
         public <T> Future<T> submitCallable(Callable<T> callable, java.util.Map<Object, Object> threadBindings) {
@@ -235,7 +247,7 @@ class NatsConversationCoordinatorIT {
 
         @Override
         public <T> Future<T> submitCallable(Callable<T> callable, IFinishedExecution<T> callback,
-                                             java.util.Map<Object, Object> threadBindings) {
+                java.util.Map<Object, Object> threadBindings) {
             return executor.submit(() -> {
                 try {
                     T result = callable.call();

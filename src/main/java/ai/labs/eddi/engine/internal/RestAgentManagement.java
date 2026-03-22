@@ -260,18 +260,18 @@ public class RestAgentManagement implements IRestAgentManagement {
     private UserConversation createNewConversation(String intent, String userId, String language)
             throws CannotCreateConversationException {
 
-        AgentTriggerConfiguration agentTriggerConfig = getBotTrigger(intent);
-        AgentDeployment agentDeployment = getRandom(agentTriggerConfig.getBotDeployments());
+        AgentTriggerConfiguration agentTriggerConfig = getAgentTrigger(intent);
+        AgentDeployment agentDeployment = getRandom(agentTriggerConfig.getAgentDeployments());
         String agentId = agentDeployment.getAgentId();
         Map<String, Context> initialContext = agentDeployment.getInitialContext();
         initialContext.put(KEY_LANG, new Context(Context.ContextType.string, language));
-        Response botResponse = restAgentEngine.startConversationWithContext(agentDeployment.getEnvironment(),
+        Response agentResponse = restAgentEngine.startConversationWithContext(agentDeployment.getEnvironment(),
                 agentId,
                 userId,
                 initialContext);
-        int responseHttpCode = botResponse.getStatus();
+        int responseHttpCode = agentResponse.getStatus();
         if (responseHttpCode == 201) {
-            var locationUri = URI.create(botResponse.getHeaders().get("location").getFirst().toString());
+            var locationUri = URI.create(agentResponse.getHeaders().get("location").getFirst().toString());
             var resourceId = RestUtilities.extractResourceId(locationUri);
             try {
                 return createUserConversation(intent, userId, agentDeployment, resourceId.getId());
@@ -314,8 +314,8 @@ public class RestAgentManagement implements IRestAgentManagement {
         return agentDeployments.get(new Random().nextInt(agentDeployments.size()));
     }
 
-    private AgentTriggerConfiguration getBotTrigger(String intent) {
-        return restAgentManagementStore.readBotTrigger(intent);
+    private AgentTriggerConfiguration getAgentTrigger(String intent) {
+        return restAgentManagementStore.readAgentTrigger(intent);
     }
 
     private UserConversation getUserConversation(String intent, String userId) {

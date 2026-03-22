@@ -46,11 +46,10 @@ public class RestTenantQuota implements IRestTenantQuota {
         var storedQuota = new TenantQuota(
                 tenantId,
                 quota.maxConversationsPerDay(),
-                quota.maxBotsPerTenant(),
+                quota.maxAgentsPerTenant(),
                 quota.maxApiCallsPerMinute(),
                 quota.maxMonthlyCostUsd(),
-                quota.enabled()
-        );
+                quota.enabled());
         quotaStore.setQuota(storedQuota);
         return Response.ok(storedQuota).build();
     }

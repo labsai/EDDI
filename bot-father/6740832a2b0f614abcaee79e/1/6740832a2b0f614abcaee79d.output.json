@@ -5,7 +5,7 @@
     "outputs" : [ {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "Hello there! I'm the Bot Father, and I'm here to help you create bots that connect to (LLM powered) APIs.",
+        "text" : "Hello there! I'm the Agent Father, and I'm here to help you create agents that connect to (LLM powered) APIs.",
         "delay" : 0
       } ]
     }, {
@@ -17,35 +17,35 @@
     } ],
     "quickReplies" : [ {
       "value" : "Let's get started!",
-      "expressions" : "ask_for_bot_name"
+      "expressions" : "ask_for_agent_name"
     }, {
       "value" : "Not now",
       "expressions" : "exit_conversation, CONVERSATION_END"
     } ]
   }, {
-    "action" : "ask_for_bot_name",
+    "action" : "ask_for_agent_name",
     "timesOccurred" : 0,
     "outputs" : [ {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "Fantastic! To begin, please provide a name for your LLM connector bot.",
+        "text" : "Fantastic! To begin, please provide a name for your LLM connector agent.",
         "delay" : 0
       } ]
     } ],
     "quickReplies" : [ ]
   }, {
-    "action" : "ask_for_bot_prompt",
+    "action" : "ask_for_agent_prompt",
     "timesOccurred" : 0,
     "outputs" : [ {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "Great choice! Now, let's define the (system) prompt for your \"[[${properties.botName}]]\" connector bot",
+        "text" : "Great choice! Now, let's define the (system) prompt for your \"[[${properties.agentName}]]\" connector agent",
         "delay" : 0
       } ]
     } ],
     "quickReplies" : [ ]
   }, {
-    "action" : "ask_for_bot_intro",
+    "action" : "ask_for_agent_intro",
     "timesOccurred" : 0,
     "outputs" : [ {
       "valueAlternatives" : [ {
@@ -56,7 +56,7 @@
     }, {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "Now, please provide an intro message for your connector bot to set the tone for the conversation.",
+        "text" : "Now, please provide an intro message for your connector agent to set the tone for the conversation.",
         "delay" : 0
       } ]
     } ],
@@ -73,31 +73,31 @@
     }, {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : " Which LLM API would you like to use for your bot?",
+        "text" : " Which LLM API would you like to use for your agent?",
         "delay" : 0
       } ]
     } ],
     "quickReplies" : [ {
       "value" : "OpenAI",
-      "expressions" : "create_openai_bot"
+      "expressions" : "create_openai_agent"
     }, {
       "value" : "Hugging Face",
-      "expressions" : "create_huggingface_bot"
+      "expressions" : "create_huggingface_agent"
     }, {
       "value" : "Anthropic",
-      "expressions" : "create_anthropic_bot"
+      "expressions" : "create_anthropic_agent"
     }, {
       "value" : "Gemini",
-      "expressions" : "create_gemini_bot"
+      "expressions" : "create_gemini_agent"
     }, {
       "value" : "Gemini Vertex",
-      "expressions" : "create_gemini_vertex_bot"
+      "expressions" : "create_gemini_vertex_agent"
     }, {
       "value" : "Ollama",
-      "expressions" : "create_ollama_bot"
+      "expressions" : "create_ollama_agent"
     }, {
       "value" : "Jlama",
-      "expressions" : "create_jlama_bot"
+      "expressions" : "create_jlama_agent"
     } ]
   } ]
 }

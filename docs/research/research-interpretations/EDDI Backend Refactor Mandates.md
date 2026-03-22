@@ -16,8 +16,8 @@ Here is an analysis of the core research conclusions, translated into **concrete
 
 **Recommendations for EDDI:**
 
-* **Virtual Thread Offloading:** This is your silver bullet. When your NATS/RabbitMQ consumer receives a message, it must do nothing but acknowledge the pull. Immediately hand off the actual LifecycleManager.execute() pipeline to a Java 21 Virtual Thread (using the Quarkus @RunOnVirtualThread annotation). This guarantees the primary messaging heartbeat thread is *never* blocked by a slow LLM response or a heavy InputParserTask dictionary lookup.  
-* **State-First Idempotent Retries:** Competitors lose data when they hit an LLM rate limit (HTTP 429\) because the state is held in volatile memory. Before LangchainTask makes a network call to OpenAI/Anthropic, the pre-execution ConversationStep must be saved to MongoDB. If a 429 occurs, explicitly NACK (negative acknowledge) the message to the dead-letter queue (DLQ) with a backoff header. The Virtual Thread dies cleanly, and the worker can process other conversations while waiting.
+- **Virtual Thread Offloading:** This is your silver bullet. When your NATS/RabbitMQ consumer receives a message, it must do nothing but acknowledge the pull. Immediately hand off the actual LifecycleManager.execute() pipeline to a Java 21 Virtual Thread (using the Quarkus @RunOnVirtualThread annotation). This guarantees the primary messaging heartbeat thread is _never_ blocked by a slow LLM response or a heavy InputParserTask dictionary lookup.
+- **State-First Idempotent Retries:** Competitors lose data when they hit an LLM rate limit (HTTP 429\) because the state is held in volatile memory. Before LangchainTask makes a network call to OpenAI/Anthropic, the pre-execution ConversationStep must be saved to MongoDB. If a 429 occurs, explicitly NACK (negative acknowledge) the message to the dead-letter queue (DLQ) with a backoff header. The Virtual Thread dies cleanly, and the worker can process other conversations while waiting.
 
 ### **2\. DAG Parallelism: Preventing Serialization Panics**
 
@@ -27,8 +27,8 @@ Here is an analysis of the core research conclusions, translated into **concrete
 
 **Recommendations for EDDI:**
 
-* **The Memory Schism (Serializable vs. Transient):** You must strictly partition EDDI's memory. IConversationMemory must *strictly* contain serializable DTOs (Strings, Lists, and your new MemoryKey\<T\> records). Any active infrastructure object (MongoDB clients, HTTP connections, temporary processing buffers) must live in a separate transient @RequestScoped CDI context that is marked @JsonIgnore and is *never* serialized to MongoDB or NATS.  
-* **Pessimistic Reducers for Parallelism:** When executing the "Group of Experts" debate pattern, do *not* let 3 parallel LangchainTasks call currentStep.storeData() at the same time. They must return their outputs to the LifecycleManager, which waits at a CompletableFuture.allOf() barrier. Then, a deterministic **Java Reducer function** safely merges the 3 outputs into the main memory atomically before moving to the next DAG node.
+- **The Memory Schism (Serializable vs. Transient):** You must strictly partition EDDI's memory. IConversationMemory must _strictly_ contain serializable DTOs (Strings, Lists, and your new MemoryKey\<T\> records). Any active infrastructure object (MongoDB clients, HTTP connections, temporary processing buffers) must live in a separate transient @RequestScoped CDI context that is marked @JsonIgnore and is _never_ serialized to MongoDB or NATS.
+- **Pessimistic Reducers for Parallelism:** When executing the "Group of Experts" debate pattern, do _not_ let 3 parallel LangchainTasks call currentStep.storeData() at the same time. They must return their outputs to the LifecycleManager, which waits at a CompletableFuture.allOf() barrier. Then, a deterministic **Java Reducer function** safely merges the 3 outputs into the main memory atomically before moving to the next DAG node.
 
 ### **3\. Multi-Agent Orchestration: Slaying the Infinite Loop**
 
@@ -38,8 +38,8 @@ Here is an analysis of the core research conclusions, translated into **concrete
 
 **Recommendations for EDDI:**
 
-* **The "Execution Hash" Circuit Breaker:** Inside AgentOrchestrator, implement a global execution hash and a hard max\_iterations counter. Hash the \[tool\_name \+ arguments\]. If an agent attempts to call the exact same tool with the exact same hallucinated arguments 3 times, the circuit breaker must explicitly throw a ToolExecutionLoopException and halt the DAG branch, preventing token drain.  
-* **Out-of-Band Error Handling:** Never pollute the ChatMessage history with internal framework stack traces or fake "User" roles. If an HttpCallsTask fails, map that failure to an explicit error\_action string in EDDI’s pipeline, or ensure it is passed back to the LLM strictly as a tool\_message role (via LangChain4j), preserving the mathematically clean API contract required by OpenAI/Anthropic.
+- **The "Execution Hash" Circuit Breaker:** Inside AgentOrchestrator, implement a global execution hash and a hard max_iterations counter. Hash the \[tool_name \+ arguments\]. If an agent attempts to call the exact same tool with the exact same hallucinated arguments 3 times, the circuit breaker must explicitly throw a ToolExecutionLoopException and halt the DAG branch, preventing token drain.
+- **Out-of-Band Error Handling:** Never pollute the ChatMessage history with internal framework stack traces or fake "User" roles. If an HttpCallsTask fails, map that failure to an explicit error_action string in EDDI’s pipeline, or ensure it is passed back to the LLM strictly as a tool_message role (via LangChain4j), preserving the mathematically clean API contract required by OpenAI/Anthropic.
 
 ### **4\. MCP Security: Zero-Trust & Anti-Sampling Guardrails**
 
@@ -49,9 +49,9 @@ Here is an analysis of the core research conclusions, translated into **concrete
 
 **Recommendations for EDDI:**
 
-* **The Anti-Sampling API Gateway:** If EDDI acts as an MCP Client (connecting to external tools), you must build a strict API gateway for reverse-sampling requests. The external MCP server must be assigned a strict token budget. If the external server requests LLM reasoning via sampling, EDDI must intercept, audit, and rate-limit it via your existing ToolRateLimiter.  
-* **Tenant-Scoped Tool Manifests:** Never pass upstream user tokens directly to downstream MCP tools implicitly. When EDDI acts as an MCP Server, it must evaluate a defined Role/Permission manifest tied to the specific botId before allowing an external client to execute an EDDI agent.  
-* **Strict TTLs for Sessions:** Scan the EDDI codebase for ConcurrentHashMap usages (e.g., ChatModelRegistry). Back any transient session maps with Redis (via Quarkus Cache) or Caffeine Cache with a strict Time-To-Live (TTL). Never use boundless native Maps for session storage to permanently avoid OpenClaw's OOM memory leak vulnerability.
+- **The Anti-Sampling API Gateway:** If EDDI acts as an MCP Client (connecting to external tools), you must build a strict API gateway for reverse-sampling requests. The external MCP server must be assigned a strict token budget. If the external server requests LLM reasoning via sampling, EDDI must intercept, audit, and rate-limit it via your existing ToolRateLimiter.
+- **Tenant-Scoped Tool Manifests:** Never pass upstream user tokens directly to downstream MCP tools implicitly. When EDDI acts as an MCP Server, it must evaluate a defined Role/Permission manifest tied to the specific agentId before allowing an external client to execute an EDDI agent.
+- **Strict TTLs for Sessions:** Scan the EDDI codebase for ConcurrentHashMap usages (e.g., ChatModelRegistry). Back any transient session maps with Redis (via Quarkus Cache) or Caffeine Cache with a strict Time-To-Live (TTL). Never use boundless native Maps for session storage to permanently avoid OpenClaw's OOM memory leak vulnerability.
 
 ### ---
 
@@ -59,16 +59,16 @@ Here is an analysis of the core research conclusions, translated into **concrete
 
 To implement these architectural safeguards seamlessly with your AI coding assistants, prioritize your roadmap as follows:
 
-1. **Phase 1: The Memory Partition (Immediate)**  
-   * Audit the new MemoryKey\<T\> implementation. Ensure absolutely no complex Java objects (streams, connections, runtimes) can be written to IConversationMemory.  
-   * Introduce a @RequestScoped Transient Context for unpicklable objects.  
-   * Replace all unbounded ConcurrentHashMap instances with Caffeine caches.  
-2. **Phase 2: The Queue & Threading Architecture (Beating n8n Zombies)**  
-   * Implement the Quarkus Reactive Messaging (NATS JetStream / RabbitMQ) layer.  
-   * Apply @RunOnVirtualThread to all NATS consumer endpoints to guarantee non-blocking task orchestration.  
-3. **Phase 3: The Parallel DAG Orchestrator & Reducers**  
-   * Refactor LifecycleManager.java from a sequential for loop to an asynchronous DAG executor.  
-   * Implement the CompletableFuture barrier and explicit Reducer interfaces for safely handling parallel ILifecycleTask merging.  
-4. **Phase 4: Agent Defenses & MCP Sandbox**  
-   * Add the Re-entrance Hash Counter and Circuit Breaker to AgentOrchestrator.  
-   * Sandbox the MCP client integration with rate limiters explicitly blocking unbounded sampling requests.
+1. **Phase 1: The Memory Partition (Immediate)**
+   - Audit the new MemoryKey\<T\> implementation. Ensure absolutely no complex Java objects (streams, connections, runtimes) can be written to IConversationMemory.
+   - Introduce a @RequestScoped Transient Context for unpicklable objects.
+   - Replace all unbounded ConcurrentHashMap instances with Caffeine caches.
+2. **Phase 2: The Queue & Threading Architecture (Beating n8n Zombies)**
+   - Implement the Quarkus Reactive Messaging (NATS JetStream / RabbitMQ) layer.
+   - Apply @RunOnVirtualThread to all NATS consumer endpoints to guarantee non-blocking task orchestration.
+3. **Phase 3: The Parallel DAG Orchestrator & Reducers**
+   - Refactor LifecycleManager.java from a sequential for loop to an asynchronous DAG executor.
+   - Implement the CompletableFuture barrier and explicit Reducer interfaces for safely handling parallel ILifecycleTask merging.
+4. **Phase 4: Agent Defenses & MCP Sandbox**
+   - Add the Re-entrance Hash Counter and Circuit Breaker to AgentOrchestrator.
+   - Sandbox the MCP client integration with rate limiters explicitly blocking unbounded sampling requests.

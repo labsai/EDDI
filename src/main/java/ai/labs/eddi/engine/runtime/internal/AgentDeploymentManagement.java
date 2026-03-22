@@ -10,7 +10,7 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
-import ai.labs.eddi.engine.runtime.internal.readiness.IBotsReadiness;
+import ai.labs.eddi.engine.runtime.internal.readiness.IAgentsReadiness;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
@@ -54,7 +54,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private final IConversationMemoryStore conversationMemoryStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IMigrationManager migrationManager;
-    private final IBotsReadiness botsReadiness;
+    private final IAgentsReadiness agentsReadiness;
     private final IRuntime runtime;
     private final int maximumLifeTimeOfIdleConversationsInDays;
     private Instant lastDeploymentCheck = null;
@@ -63,19 +63,18 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
     @Inject
     public AgentDeploymentManagement(IDeploymentStore deploymentStore,
-                                   IAgentFactory agentFactory,
-                                   IAgentStore agentStore,
-                                   IBotsReadiness botsReadiness,
-                                   IConversationMemoryStore conversationMemoryStore,
-                                   IDocumentDescriptorStore documentDescriptorStore,
-                                   IMigrationManager migrationManager,
-                                   IRuntime runtime,
-                                   @ConfigProperty(name = "eddi.conversations.maximumLifeTimeOfIdleConversationsInDays")
-                                   int maximumLifeTimeOfIdleConversationsInDays) {
+            IAgentFactory agentFactory,
+            IAgentStore agentStore,
+            IAgentsReadiness agentsReadiness,
+            IConversationMemoryStore conversationMemoryStore,
+            IDocumentDescriptorStore documentDescriptorStore,
+            IMigrationManager migrationManager,
+            IRuntime runtime,
+            @ConfigProperty(name = "eddi.conversations.maximumLifeTimeOfIdleConversationsInDays") int maximumLifeTimeOfIdleConversationsInDays) {
         this.deploymentStore = deploymentStore;
         this.agentFactory = agentFactory;
         this.agentStore = agentStore;
-        this.botsReadiness = botsReadiness;
+        this.agentsReadiness = agentsReadiness;
         this.conversationMemoryStore = conversationMemoryStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.migrationManager = migrationManager;
@@ -85,31 +84,31 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
     void onStart(@Observes StartupEvent ev) {
         runtime.getScheduledExecutorService().schedule(() -> {
-            autoDeployBots();
+            autoDeployAgents();
 
             return null;
         }, 1000, TimeUnit.MILLISECONDS);
     }
 
     @Override
-    public void autoDeployBots() {
-        LOGGER.info("Starting deployment of bots...");
+    public void autoDeployAgents() {
+        LOGGER.info("Starting deployment of agents...");
 
         migrationManager.startMigrationIfFirstTimeRun(() -> {
             checkDeployments();
-            botsReadiness.setBotsReadiness(true);
+            agentsReadiness.setAgentsReadiness(true);
         });
 
-        LOGGER.info("Finished deployment of bots.");
+        LOGGER.info("Finished deployment of agents.");
         LOGGER.info("E.D.D.I is ready!");
     }
 
     @Scheduled(every = "10s", delay = 10)
     public void checkDeployments() {
         try {
-            deploymentStore.readDeploymentInfos(deployed).stream().
-                    filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo)).
-                    forEach(deploymentInfo -> {
+            deploymentStore.readDeploymentInfos(deployed).stream()
+                    .filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo))
+                    .forEach(deploymentInfo -> {
                         try {
                             agentFactory.deployAgent(deploymentInfo.getEnvironment(),
                                     deploymentInfo.getAgentId(),
@@ -132,7 +131,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                             // If the root cause is a missing resource, auto-clean the stale record
                             if (isCausedByResourceNotFound(e)) {
                                 LOGGER.warn(format(
-                                        "Bot config not found for id=%s version=%d — marking deployment as undeployed",
+                                        "Agent config not found for id=%s version=%d — marking deployment as undeployed",
                                         deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion()));
                                 deploymentStore.setDeploymentInfo(
                                         deploymentInfo.getEnvironment().toString(),
@@ -149,71 +148,69 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
     private boolean isCausedByResourceNotFound(Throwable t) {
         while (t != null) {
-            if (t instanceof ResourceNotFoundException) return true;
+            if (t instanceof ResourceNotFoundException)
+                return true;
             t = t.getCause();
         }
         return false;
     }
 
     @Scheduled(every = "24h", delay = 300)
-    public void manageBotDeployments() {
+    public void manageAgentDeployments() {
         try {
             var oneHourAgo = Instant.now().minus(1, ChronoUnit.HOURS);
             if (lastDeploymentCheck == null || lastDeploymentCheck.isBefore(oneHourAgo)) {
                 lastDeploymentCheck = Instant.now();
-                var postUndeloymentAttempts =
-                        deploymentStore.readDeploymentInfos(deployed).stream().
-                                map(deploymentInfo -> {
-                                    var environmentName = deploymentInfo.getEnvironment().toString();
-                                    var environment = Environment.valueOf(environmentName);
-                                    var agentId = deploymentInfo.getAgentId();
-                                    var agentVersion = deploymentInfo.getAgentVersion();
-                                    try {
-                                        IResourceId latestAgent;
-                                        try {
-                                            latestAgent = agentStore.getCurrentResourceId(agentId);
-                                        } catch (ResourceNotFoundException e) {
-                                            // there is no latest Agent version found, so this Agent was very likely deleted,
-                                            // therefore we will treat it like an older Agent version and try to undeploy
-                                            // if no longer in use
-                                            latestAgent = null;
-                                        }
+                var postUndeloymentAttempts = deploymentStore.readDeploymentInfos(deployed).stream()
+                        .map(deploymentInfo -> {
+                            var environmentName = deploymentInfo.getEnvironment().toString();
+                            var environment = Environment.valueOf(environmentName);
+                            var agentId = deploymentInfo.getAgentId();
+                            var agentVersion = deploymentInfo.getAgentVersion();
+                            try {
+                                IResourceId latestAgent;
+                                try {
+                                    latestAgent = agentStore.getCurrentResourceId(agentId);
+                                } catch (ResourceNotFoundException e) {
+                                    // there is no latest Agent version found, so this Agent was very likely
+                                    // deleted,
+                                    // therefore we will treat it like an older Agent version and try to undeploy
+                                    // if no longer in use
+                                    latestAgent = null;
+                                }
 
-                                        if (latestAgent != null && latestAgent.getVersion() <= agentVersion) {
-                                            // we attempt to deploy a Agent if it is the latest
-                                            agentFactory.deployAgent(environment, agentId, agentVersion, null);
-                                        } else {
-                                            manageDeploymentOfOldBot(environment, agentId, agentVersion);
-
-                                            return (UndeploymentExecutor) () -> {
-                                                try {
-                                                    // attempt to undeploy Agent if this Agent version is no longer in use
-                                                    endOldConversationsWithOldBots(agentId, agentVersion);
-
-                                                    manageDeploymentOfOldBot(environment, agentId, agentVersion);
-                                                } catch (ResourceStoreException |
-                                                         ResourceNotFoundException |
-                                                         ServiceException |
-                                                         IllegalAccessException e) {
-                                                    LOGGER.error(e.getLocalizedMessage(), e);
-                                                }
-                                            };
-                                        }
-                                    } catch (ServiceException | IllegalAccessException |
-                                             IllegalArgumentException e) {
-                                        var message =
-                                                "Error while deployment management of Agent " +
-                                                        "(environment=%s, agentId=%s, version=%s)!\n";
-
-                                        LOGGER.error(format(message, environment, agentId, agentVersion));
-                                        LOGGER.error(e.getLocalizedMessage(), e);
-                                    }
+                                if (latestAgent != null && latestAgent.getVersion() <= agentVersion) {
+                                    // we attempt to deploy a Agent if it is the latest
+                                    agentFactory.deployAgent(environment, agentId, agentVersion, null);
+                                } else {
+                                    manageDeploymentOfOldAgent(environment, agentId, agentVersion);
 
                                     return (UndeploymentExecutor) () -> {
-                                    };
-                                }).toList();
+                                        try {
+                                            // attempt to undeploy Agent if this Agent version is no longer in use
+                                            endOldConversationsWithOldAgents(agentId, agentVersion);
 
-                // run all undeploy attempts of old bots after all current bots have been deployed and see
+                                            manageDeploymentOfOldAgent(environment, agentId, agentVersion);
+                                        } catch (ResourceStoreException | ResourceNotFoundException | ServiceException
+                                                | IllegalAccessException e) {
+                                            LOGGER.error(e.getLocalizedMessage(), e);
+                                        }
+                                    };
+                                }
+                            } catch (ServiceException | IllegalAccessException | IllegalArgumentException e) {
+                                var message = "Error while deployment management of Agent " +
+                                        "(environment=%s, agentId=%s, version=%s)!\n";
+
+                                LOGGER.error(format(message, environment, agentId, agentVersion));
+                                LOGGER.error(e.getLocalizedMessage(), e);
+                            }
+
+                            return (UndeploymentExecutor) () -> {
+                            };
+                        }).toList();
+
+                // run all undeploy attempts of old agents after all current agents have been
+                // deployed and see
                 // if we can undeploy Agent version if we end old conversations
                 postUndeloymentAttempts.forEach(UndeploymentExecutor::attemptUndeploy);
             }
@@ -222,7 +219,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
     }
 
-    private void manageDeploymentOfOldBot(Environment environment, String agentId, Integer agentVersion)
+    private void manageDeploymentOfOldAgent(Environment environment, String agentId, Integer agentVersion)
             throws ServiceException, IllegalAccessException {
 
         var conversationCount = conversationMemoryStore.getActiveConversationCount(agentId, agentVersion);
@@ -233,28 +230,28 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             deploymentStore.setDeploymentInfo(environment.toString(), agentId, agentVersion, undeployed);
             LOGGER.info(format("Successfully undeployed Agent (id: %s, version: %d)", agentId, agentVersion));
         } else {
-            // not the latest bot, but still has active conversations connected to it,
+            // not the latest agent, but still has active conversations connected to it,
             // therefore we deploy it as well to make sure we don't interrupt UX
             agentFactory.deployAgent(environment, agentId, agentVersion, null);
         }
     }
 
-    private void endOldConversationsWithOldBots(String agentId, Integer agentVersion)
+    private void endOldConversationsWithOldAgents(String agentId, Integer agentVersion)
             throws ResourceStoreException, ResourceNotFoundException {
 
-        var conversationMemorySnapshots =
-                conversationMemoryStore.loadActiveConversationMemorySnapshot(agentId, agentVersion);
+        var conversationMemorySnapshots = conversationMemoryStore.loadActiveConversationMemorySnapshot(agentId,
+                agentVersion);
 
         for (var conversationMemory : conversationMemorySnapshots) {
-            var documentDescriptor =
-                    documentDescriptorStore.readDescriptor(
-                            conversationMemory.getAgentId(), conversationMemory.getAgentVersion());
+            var documentDescriptor = documentDescriptorStore.readDescriptor(
+                    conversationMemory.getAgentId(), conversationMemory.getAgentVersion());
 
             var timeOfLastInteractionInConversation = documentDescriptor.getLastModifiedOn();
 
-            var isOlderThanMaximumAmountOfDays =
-                    isOlderThanDays(Instant.ofEpochMilli(timeOfLastInteractionInConversation.getTime()).
-                            atZone(ZoneId.systemDefault()).toLocalDate(), maximumLifeTimeOfIdleConversationsInDays);
+            var isOlderThanMaximumAmountOfDays = isOlderThanDays(
+                    Instant.ofEpochMilli(timeOfLastInteractionInConversation.getTime()).atZone(ZoneId.systemDefault())
+                            .toLocalDate(),
+                    maximumLifeTimeOfIdleConversationsInDays);
 
             if (isOlderThanMaximumAmountOfDays) {
                 String conversationId = conversationMemory.getId();

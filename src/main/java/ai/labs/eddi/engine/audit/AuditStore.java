@@ -15,7 +15,8 @@ import java.util.*;
  * MongoDB implementation of {@link IAuditStore}.
  * <p>
  * Uses a dedicated {@code audit_ledger} collection with insert-only semantics.
- * No {@code updateOne()}, {@code replaceOne()}, or {@code deleteOne()} operations
+ * No {@code updateOne()}, {@code replaceOne()}, or {@code deleteOne()}
+ * operations
  * are ever called — this enforces the write-once contract.
  * <p>
  * Annotated {@code @DefaultBean} so PostgreSQL can provide an alternative.
@@ -32,8 +33,8 @@ public class AuditStore implements IAuditStore {
     // Document field names
     private static final String F_ID = "_id";
     private static final String F_CONVERSATION_ID = "conversationId";
-    private static final String F_BOT_ID = "agentId";
-    private static final String F_BOT_VERSION = "agentVersion";
+    private static final String F_AGENT_ID = "agentId";
+    private static final String F_AGENT_VERSION = "agentVersion";
     private static final String F_USER_ID = "userId";
     private static final String F_ENVIRONMENT = "environment";
     private static final String F_STEP_INDEX = "stepIndex";
@@ -58,7 +59,7 @@ public class AuditStore implements IAuditStore {
 
         // Create indexes for efficient querying
         collection.createIndex(Indexes.ascending(F_CONVERSATION_ID));
-        collection.createIndex(Indexes.ascending(F_BOT_ID, F_BOT_VERSION));
+        collection.createIndex(Indexes.ascending(F_AGENT_ID, F_AGENT_VERSION));
         collection.createIndex(Indexes.descending(F_TIMESTAMP));
     }
 
@@ -69,7 +70,8 @@ public class AuditStore implements IAuditStore {
 
     @Override
     public void appendBatch(List<AuditEntry> entries) {
-        if (entries == null || entries.isEmpty()) return;
+        if (entries == null || entries.isEmpty())
+            return;
 
         List<Document> documents = new ArrayList<>(entries.size());
         for (AuditEntry entry : entries) {
@@ -86,10 +88,10 @@ public class AuditStore implements IAuditStore {
     }
 
     @Override
-    public List<AuditEntry> getEntriesByBot(String agentId, Integer agentVersion, int skip, int limit) {
-        Document filter = new Document(F_BOT_ID, agentId);
+    public List<AuditEntry> getEntriesByAgent(String agentId, Integer agentVersion, int skip, int limit) {
+        Document filter = new Document(F_AGENT_ID, agentId);
         if (agentVersion != null) {
-            filter.append(F_BOT_VERSION, agentVersion);
+            filter.append(F_AGENT_VERSION, agentVersion);
         }
         return query(filter, skip, limit);
     }
@@ -106,8 +108,10 @@ public class AuditStore implements IAuditStore {
         var iterable = collection.find(filter)
                 .sort(new Document(F_TIMESTAMP, -1));
 
-        if (skip > 0) iterable.skip(skip);
-        if (limit > 0) iterable.limit(limit);
+        if (skip > 0)
+            iterable.skip(skip);
+        if (limit > 0)
+            iterable.limit(limit);
 
         for (Document doc : iterable) {
             result.add(fromDocument(doc));
@@ -119,8 +123,8 @@ public class AuditStore implements IAuditStore {
         Document doc = new Document();
         doc.put(F_ID, entry.id());
         doc.put(F_CONVERSATION_ID, entry.conversationId());
-        doc.put(F_BOT_ID, entry.agentId());
-        doc.put(F_BOT_VERSION, entry.agentVersion());
+        doc.put(F_AGENT_ID, entry.agentId());
+        doc.put(F_AGENT_VERSION, entry.agentVersion());
         doc.put(F_USER_ID, entry.userId());
         doc.put(F_ENVIRONMENT, entry.environment());
         doc.put(F_STEP_INDEX, entry.stepIndex());
@@ -128,14 +132,21 @@ public class AuditStore implements IAuditStore {
         doc.put(F_TASK_TYPE, entry.taskType());
         doc.put(F_TASK_INDEX, entry.taskIndex());
         doc.put(F_DURATION_MS, entry.durationMs());
-        if (entry.input() != null) doc.put(F_INPUT, new Document(entry.input()));
-        if (entry.output() != null) doc.put(F_OUTPUT, new Document(entry.output()));
-        if (entry.llmDetail() != null) doc.put(F_LLM_DETAIL, new Document(entry.llmDetail()));
-        if (entry.toolCalls() != null) doc.put(F_TOOL_CALLS, new Document(entry.toolCalls()));
-        if (entry.actions() != null) doc.put(F_ACTIONS, entry.actions());
+        if (entry.input() != null)
+            doc.put(F_INPUT, new Document(entry.input()));
+        if (entry.output() != null)
+            doc.put(F_OUTPUT, new Document(entry.output()));
+        if (entry.llmDetail() != null)
+            doc.put(F_LLM_DETAIL, new Document(entry.llmDetail()));
+        if (entry.toolCalls() != null)
+            doc.put(F_TOOL_CALLS, new Document(entry.toolCalls()));
+        if (entry.actions() != null)
+            doc.put(F_ACTIONS, entry.actions());
         doc.put(F_COST, entry.cost());
-        if (entry.timestamp() != null) doc.put(F_TIMESTAMP, Date.from(entry.timestamp()));
-        if (entry.hmac() != null) doc.put(F_HMAC, entry.hmac());
+        if (entry.timestamp() != null)
+            doc.put(F_TIMESTAMP, Date.from(entry.timestamp()));
+        if (entry.hmac() != null)
+            doc.put(F_HMAC, entry.hmac());
         return doc;
     }
 
@@ -143,8 +154,8 @@ public class AuditStore implements IAuditStore {
         return new AuditEntry(
                 doc.getString(F_ID),
                 doc.getString(F_CONVERSATION_ID),
-                doc.getString(F_BOT_ID),
-                doc.getInteger(F_BOT_VERSION),
+                doc.getString(F_AGENT_ID),
+                doc.getInteger(F_AGENT_VERSION),
                 doc.getString(F_USER_ID),
                 doc.getString(F_ENVIRONMENT),
                 doc.getInteger(F_STEP_INDEX, 0),
@@ -159,7 +170,6 @@ public class AuditStore implements IAuditStore {
                 doc.getList(F_ACTIONS, String.class),
                 doc.getDouble(F_COST) != null ? doc.getDouble(F_COST) : 0.0,
                 doc.getDate(F_TIMESTAMP) != null ? doc.getDate(F_TIMESTAMP).toInstant() : null,
-                doc.getString(F_HMAC)
-        );
+                doc.getString(F_HMAC));
     }
 }

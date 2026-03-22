@@ -1,7 +1,7 @@
 {
 	"variables": [],
 	"info": {
-		"name": "Creating and chatting with abot",
+		"name": "Creating and chatting with aagent",
 		"_postman_id": "aba0dda2-2856-0357-9a03-b4d5f785d17f",
 		"description": "",
 		"schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json"
@@ -243,7 +243,7 @@
 			"response": []
 		},
 		{
-			"name": "5 - Creating bot",
+			"name": "5 - Creating agent",
 			"event": [
 				{
 					"listen": "test",
@@ -276,7 +276,7 @@
 							"var m = p.exec(location_header);\r",
 							"if (m !== null)\r",
 							"{\r",
-							"    postman.setEnvironmentVariable(\"bot_id\", m[15]+m[16]);\r",
+							"    postman.setEnvironmentVariable(\"agent_id\", m[15]+m[16]);\r",
 							"}\r",
 							""
 						]
@@ -284,7 +284,7 @@
 				}
 			],
 			"request": {
-				"url": "{{host}}/botstore/bots",
+				"url": "{{host}}/agentstore/agents",
 				"method": "POST",
 				"header": [
 					{
@@ -302,10 +302,10 @@
 			"response": []
 		},
 		{
-			"name": "6 - Deploy the bot",
+			"name": "6 - Deploy the agent",
 			"request": {
 				"url": {
-					"raw": "{{host}}/administration/unrestricted/deploy/{{bot_id}}?version=1",
+					"raw": "{{host}}/administration/unrestricted/deploy/{{agent_id}}?version=1",
 					"host": [
 						"{{host}}"
 					],
@@ -313,7 +313,7 @@
 						"administration",
 						"unrestricted",
 						"deploy",
-						"{{bot_id}}"
+						"{{agent_id}}"
 					],
 					"query": [
 						{
@@ -375,7 +375,7 @@
 				}
 			],
 			"request": {
-				"url": "{{host}}/bots/unrestricted/{{bot_id}}",
+				"url": "{{host}}/agents/unrestricted/{{agent_id}}",
 				"method": "POST",
 				"header": [],
 				"body": {
@@ -387,17 +387,17 @@
 			"response": []
 		},
 		{
-			"name": "8 - Say Hello to the bot",
+			"name": "8 - Say Hello to the agent",
 			"request": {
 				"url": {
-					"raw": "{{host}}/bots/unrestricted/{{bot_id}}/{{conversation_id}}?returnDetailed=false&returnCurrentStepOnly=true",
+					"raw": "{{host}}/agents/unrestricted/{{agent_id}}/{{conversation_id}}?returnDetailed=false&returnCurrentStepOnly=true",
 					"host": [
 						"{{host}}"
 					],
 					"path": [
-						"bots",
+						"agents",
 						"unrestricted",
-						"{{bot_id}}",
+						"{{agent_id}}",
 						"{{conversation_id}}"
 					],
 					"query": [

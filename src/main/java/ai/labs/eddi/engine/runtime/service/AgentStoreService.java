@@ -23,7 +23,7 @@ public class AgentStoreService implements IAgentStoreService {
     @Override
     public AgentConfiguration getAgentConfiguration(String agentId, Integer version) throws ServiceException {
         try {
-            return restAgentStore.readBot(agentId, version);
+            return restAgentStore.readAgent(agentId, version);
         } catch (Exception e) {
             throw new ServiceException(e.getLocalizedMessage(), e);
         }

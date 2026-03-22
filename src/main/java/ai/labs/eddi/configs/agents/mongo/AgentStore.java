@@ -25,8 +25,8 @@ import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
  */
 @ApplicationScoped
 public class AgentStore extends AbstractResourceStore<AgentConfiguration> implements IAgentStore {
-    public static final String PACKAGES_FIELD = "packages";
-    private static final String PACKAGE_RESOURCE_URI = "eddi://ai.labs.package/WorkflowStore/packages/";
+    public static final String WORKFLOWS_FIELD = "packages";
+    private static final String WORKFLOW_RESOURCE_URI = "eddi://ai.labs.package/WorkflowStore/packages/";
     private static final String VERSION_QUERY_PARAM = "?version=";
 
     private final IDocumentDescriptorStore documentDescriptorStore;
@@ -34,14 +34,14 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
     @Inject
     public AgentStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder,
             DocumentDescriptorStore documentDescriptorStore) {
-        super(storageFactory, "bots", documentBuilder, AgentConfiguration.class, PACKAGES_FIELD);
+        super(storageFactory, "agents", documentBuilder, AgentConfiguration.class, WORKFLOWS_FIELD);
         this.documentDescriptorStore = documentDescriptorStore;
     }
 
     @Override
     public IResourceStore.IResourceId create(AgentConfiguration agentConfiguration)
             throws IResourceStore.ResourceStoreException {
-        RuntimeUtilities.checkCollectionNoNullElements(agentConfiguration.getWorkflows(), PACKAGES_FIELD);
+        RuntimeUtilities.checkCollectionNoNullElements(agentConfiguration.getWorkflows(), WORKFLOWS_FIELD);
         return super.create(agentConfiguration);
     }
 
@@ -50,31 +50,30 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
     public Integer update(String id, Integer version, AgentConfiguration agentConfiguration)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException,
             IResourceStore.ResourceNotFoundException {
-        RuntimeUtilities.checkCollectionNoNullElements(agentConfiguration.getWorkflows(), PACKAGES_FIELD);
+        RuntimeUtilities.checkCollectionNoNullElements(agentConfiguration.getWorkflows(), WORKFLOWS_FIELD);
         return super.update(id, version, agentConfiguration);
     }
 
-    public List<DocumentDescriptor> getBotDescriptorsContainingPackage(String packageId, Integer packageVersion,
+    public List<DocumentDescriptor> getAgentDescriptorsContainingWorkflow(String workflowId, Integer packageVersion,
             boolean includePreviousVersions)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
 
         List<DocumentDescriptor> ret = new LinkedList<>();
         do {
-            String workflowUri = PACKAGE_RESOURCE_URI + packageId + VERSION_QUERY_PARAM + packageVersion;
+            String workflowUri = WORKFLOW_RESOURCE_URI + workflowId + VERSION_QUERY_PARAM + packageVersion;
 
             // Search in current resources
-            List<IResourceStore.IResourceId> currentIds =
-                    resourceStorage.findResourceIdsContaining(PACKAGES_FIELD, workflowUri);
+            List<IResourceStore.IResourceId> currentIds = resourceStorage.findResourceIdsContaining(WORKFLOWS_FIELD,
+                    workflowUri);
             // Search in history
-            List<IResourceStore.IResourceId> historyIds =
-                    resourceStorage.findHistoryResourceIdsContaining(PACKAGES_FIELD, workflowUri);
+            List<IResourceStore.IResourceId> historyIds = resourceStorage
+                    .findHistoryResourceIdsContaining(WORKFLOWS_FIELD, workflowUri);
 
             // Merge and sort
             List<IResourceStore.IResourceId> allIds = new LinkedList<>(currentIds);
             allIds.addAll(historyIds);
-            Comparator<IResourceStore.IResourceId> comparator =
-                    Comparator.comparing(IResourceStore.IResourceId::getId)
-                            .thenComparingInt(IResourceStore.IResourceId::getVersion).reversed();
+            Comparator<IResourceStore.IResourceId> comparator = Comparator.comparing(IResourceStore.IResourceId::getId)
+                    .thenComparingInt(IResourceStore.IResourceId::getVersion).reversed();
             allIds = allIds.stream().sorted(comparator).collect(Collectors.toList());
 
             for (IResourceStore.IResourceId agentId : allIds) {
@@ -89,8 +88,8 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
                 }
 
                 try {
-                    var botDescriptor = documentDescriptorStore.readDescriptor(agentId.getId(), agentId.getVersion());
-                    ret.add(botDescriptor);
+                    var agentDescriptor = documentDescriptorStore.readDescriptor(agentId.getId(), agentId.getVersion());
+                    ret.add(agentDescriptor);
                 } catch (ResourceNotFoundException e) {
                     // skip, as this resource is not available anymore due to deletion
                 }

@@ -2,21 +2,24 @@
 
 ## Overview
 
-**Output Templating** is one of EDDI's most powerful features—it allows you to create **dynamic, data-driven responses** that pull information from conversation memory, API responses, or context data. Instead of static text, your bot can generate personalized, contextual replies.
+**Output Templating** is one of EDDI's most powerful features—it allows you to create **dynamic, data-driven responses** that pull information from conversation memory, API responses, or context data. Instead of static text, your agent can generate personalized, contextual replies.
 
 ### Why Output Templating Matters
 
 Without templating:
+
 ```
 "The weather is available"
 ```
 
 With templating:
+
 ```
 "The weather in [[${context.city}]] is [[${memory.current.httpCalls.weatherData.condition}]] with [[${memory.current.httpCalls.weatherData.temperature}]]°F"
 ```
 
 Result:
+
 ```
 "The weather in Paris is sunny with 75°F"
 ```
@@ -36,6 +39,7 @@ The **output templating** is evaluated by the **Thymeleaf templating engine**, w
 ### What You Can Access
 
 In templates, you have access to:
+
 - **`memory.current.*`** - Current step data (input, httpCalls, properties)
 - **`memory.previous.*`** - Previous step data
 - **`context.*`** - Context passed from your application
@@ -48,7 +52,7 @@ One of the coolest features of **EDDI** is it will allow you dynamically templat
 
 ## Enabling the feature:
 
-Basically while creating the bot you must include `eddi://ai.labs.output` to one of the `packages` that will be part of the bot.
+Basically while creating the agent you must include `eddi://ai.labs.output` to one of the `packages` that will be part of the agent.
 
 > **Important:** The templating feature will not work if it is included before `eddi://ai.labs.output` extension, **it must be included after**.
 
@@ -80,13 +84,13 @@ In addition to the built-in Thymeleaf `#strings`, `#numbers`, etc., EDDI provide
 
 ### `#uuidUtils` — ID & URI Utilities
 
-| Method | Description |
-|--------|-------------|
-| `#uuidUtils.generateUUID()` | Generates a random UUID string |
-| `#uuidUtils.extractId(locationUri)` | Extracts the resource ID from an EDDI location URI |
+| Method                                   | Description                                           |
+| ---------------------------------------- | ----------------------------------------------------- |
+| `#uuidUtils.generateUUID()`              | Generates a random UUID string                        |
+| `#uuidUtils.extractId(locationUri)`      | Extracts the resource ID from an EDDI location URI    |
 | `#uuidUtils.extractVersion(locationUri)` | Extracts the version number from an EDDI location URI |
 
-**`extractId` and `extractVersion`** work with both MongoDB ObjectIds (24-char hex) and PostgreSQL UUIDs (36-char with dashes):
+**`extractId` and `extractVersion`** work with agenth MongoDB ObjectIds (24-char hex) and PostgreSQL UUIDs (36-char with dashes):
 
 ```
 // Input: "http://localhost:7070/behaviorstore/behaviorsets/6740832a2b0f614abcaee7ab?version=1"
@@ -102,12 +106,11 @@ In addition to the built-in Thymeleaf `#strings`, `#numbers`, etc., EDDI provide
 
 ### Other Custom Dialects
 
-| Dialect | Expression Object | Purpose |
-|---------|-------------------|---------|
-| `JsonDialect` | `#json` | JSON manipulation utilities |
-| `EncoderDialect` | `#encoder` | Text encoding utilities |
+| Dialect          | Expression Object | Purpose                     |
+| ---------------- | ----------------- | --------------------------- |
+| `JsonDialect`    | `#json`           | JSON manipulation utilities |
+| `EncoderDialect` | `#encoder`        | Text encoding utilities     |
 
 ## _**Additional Information :**_
 
 [Thymeleaf documentation.](https://www.thymeleaf.org/)
-

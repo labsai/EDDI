@@ -7,7 +7,7 @@
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
-          "actions" : "create_anthropic_bot",
+          "actions" : "create_anthropic_agent",
           "occurrence" : "currentStep"
         }
       } ]
@@ -399,7 +399,7 @@
       } ]
     }, {
       "name" : "Set conversation history limit 10 and ask for confirmation",
-      "actions" : [ "set_history_10", "ask_for_bot_creation_confirmation_for_anthropic" ],
+      "actions" : [ "set_history_10", "ask_for_agent_creation_confirmation_for_anthropic" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
@@ -415,7 +415,7 @@
       } ]
     }, {
       "name" : "Set conversation history limit 20 and ask for confirmation",
-      "actions" : [ "set_history_20", "ask_for_bot_creation_confirmation_for_anthropic" ],
+      "actions" : [ "set_history_20", "ask_for_agent_creation_confirmation_for_anthropic" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
@@ -431,7 +431,7 @@
       } ]
     }, {
       "name" : "Set conversation history limit unlimited and ask for confirmation",
-      "actions" : [ "set_history_unlimited", "ask_for_bot_creation_confirmation_for_anthropic" ],
+      "actions" : [ "set_history_unlimited", "ask_for_agent_creation_confirmation_for_anthropic" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
@@ -447,7 +447,7 @@
       } ]
     }, {
       "name" : "Set conversation history limit and ask for confirmation",
-      "actions" : [ "set_conversation_history_limit", "ask_for_bot_creation_confirmation_for_anthropic" ],
+      "actions" : [ "set_conversation_history_limit", "ask_for_agent_creation_confirmation_for_anthropic" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
@@ -471,12 +471,12 @@
         }
       } ]
     }, {
-      "name" : "Create bot",
-      "actions" : [ "create_properties_for_anthropic", "create_behavior_rules_for_anthropic", "create_langchain_anthropic", "create_output_for_anthropic", "create_package_for_anthropic", "create_bot_for_anthropic", "deploy_bot_for_anthropic", "CONVERSATION_END" ],
+      "name" : "Create agent",
+      "actions" : [ "create_properties_for_anthropic", "create_behavior_rules_for_anthropic", "create_langchain_anthropic", "create_output_for_anthropic", "create_package_for_anthropic", "create_agent_for_anthropic", "deploy_agent_for_anthropic", "CONVERSATION_END" ],
       "conditions" : [ {
         "type" : "inputmatcher",
         "configs" : {
-          "expressions" : "orchestrate_create_bot_for_anthropic"
+          "expressions" : "orchestrate_create_agent_for_anthropic"
         }
       } ]
     } ]

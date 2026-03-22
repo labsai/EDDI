@@ -156,7 +156,7 @@
             <artifactId>langchain4j-jlama</artifactId>
             <version>${langchain4j-beta.version}</version>
         </dependency>
-        <!-- Phase 8b: MCP Client — bots consume external MCP tools -->
+        <!-- Phase 8b: MCP Client — agents consume external MCP tools -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-mcp</artifactId>
@@ -304,7 +304,7 @@
             <artifactId>quarkus-mcp-server-http</artifactId>
             <version>${quarkus-mcp-server.version}</version>
         </dependency>
-        <!-- Phase 8a+: OpenAPI spec parser for create_api_bot MCP tool -->
+        <!-- Phase 8a+: OpenAPI spec parser for create_api_agent MCP tool -->
         <dependency>
             <groupId>io.swagger.parser.v3</groupId>
             <artifactId>swagger-parser</artifactId>

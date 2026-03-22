@@ -2,26 +2,26 @@
 
 ## Git support
 
-As part of **EDDI**'s features, **Git** is supported, this means you can `init`, `commit`, `push` and `pull` a **Chatbot** to a **Git** repository.
+As part of **EDDI**'s features, **Git** is supported, this means you can `init`, `commit`, `push` and `pull` a **Chatagent** to a **Git** repository.
 
-## git`init` a Chatbot:
+## git`init` a Chatagent:
 
-Exporting a bot is a fairly simple process, send a **`POST`** request to the following API endpoint and you will receive the location of the exported zip file on the response headers, specifically the **`location` header.**
+Exporting a agent is a fairly simple process, send a **`POST`** request to the following API endpoint and you will receive the location of the exported zip file on the response headers, specifically the **`location` header.**
 
-### Export Chatbot REST API Endpoint
+### Export Chatagent REST API Endpoint
 
-| Element      | Value                                                              |
-| ------------ | ------------------------------------------------------------------ |
-| Http Method  | `POST`                                                             |
-| API endpoint | `/backup/export/{botId}?botVersion={botVersion}`                   |
-| {botId}      | (`Path parameter`):`String` id of the bot that you wish to export. |
-| {botVersion} | (`Path parameter`):`Integer` version of the bot.                   |
+| Element        | Value                                                                |
+| -------------- | -------------------------------------------------------------------- |
+| Http Method    | `POST`                                                               |
+| API endpoint   | `/backup/export/{agentId}?agentVersion={agentVersion}`               |
+| {agentId}      | (`Path parameter`):`String` id of the agent that you wish to export. |
+| {agentVersion} | (`Path parameter`):`Integer` version of the agent.                   |
 
 ### **Example:**
 
 _Request URL:_
 
-`http://localhost:7070/backup/export/5aaf90e29f7dd421ac3c7dd4?botVersion=1`
+`http://localhost:7070/backup/export/5aaf90e29f7dd421ac3c7dd4?agentVersion=1`
 
 _Response Body:_ `no content` _Response Code:_ `200` _Response Headers:_
 
@@ -37,11 +37,11 @@ _Response Body:_ `no content` _Response Code:_ `200` _Response Headers:_
 }
 ```
 
-## Importing a bot :
+## Importing a agent :
 
-Same process as exporting; send a `POST` request to the following API endpoint , you will receive the id of the imported bot on the response headers.
+Same process as exporting; send a `POST` request to the following API endpoint , you will receive the id of the imported agent on the response headers.
 
-### Import Chatbot REST API Endpoint
+### Import Chatagent REST API Endpoint
 
 | Element                  | Value                  |
 | ------------------------ | ---------------------- |
@@ -52,10 +52,10 @@ Same process as exporting; send a `POST` request to the following API endpoint ,
 
 ### **Example**_**:**_
 
-For the sake of simplifying things you can use [Postman](https://www.getpostman.com/) to upload the zip file of the exported bot just don't forget to add the **http header** of content type : _**`application/zip`****.**_
+For the sake of simplifying things you can use [Postman](https://www.getpostman.com/) to upload the zip file of the exported agent just don't forget to add the **http header** of content type : _**`application/zip`\*\***.\*\*_
 
 Take a look at the image below to understand how you can upload the zip file in Postman:
 
-![](<.gitbook/assets/postman\_upload\_bin (1).png>)
+![](<.gitbook/assets/postman_upload_bin (1).png>)
 
-> **Important:** The bot will not be deployed after import you will have to deploy it yourself by using the corresponding api endpoint, please refer to [Deploying a bot](deployment-management-of-chatbots.md).
+> **Important:** The agent will not be deployed after import you will have to deploy it yourself by using the corresponding api endpoint, please refer to [Deploying a agent](deployment-management-of-chatagents.md).

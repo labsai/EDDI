@@ -3,21 +3,21 @@
   "behaviorGroups" : [ {
     "behaviorRules" : [ {
       "name" : "Ask for Prompt",
-      "actions" : [ "ask_for_bot_prompt" ],
+      "actions" : [ "ask_for_agent_prompt" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
-          "actions" : "ask_for_bot_name",
+          "actions" : "ask_for_agent_name",
           "occurrence" : "lastStep"
         }
       } ]
     }, {
       "name" : "Ask for intro",
-      "actions" : [ "ask_for_bot_intro" ],
+      "actions" : [ "ask_for_agent_intro" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
-          "actions" : "ask_for_bot_prompt",
+          "actions" : "ask_for_agent_prompt",
           "occurrence" : "lastStep"
         }
       } ]
@@ -27,7 +27,7 @@
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
-          "actions" : "ask_for_bot_intro",
+          "actions" : "ask_for_agent_intro",
           "occurrence" : "lastStep"
         }
       } ]

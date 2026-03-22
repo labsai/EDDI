@@ -42,7 +42,7 @@ body {
 .swagger-ui .info {
     background-color: black;
     padding: 50px;
-    border-bottom: 5px solid white;
+    border-agenttom: 5px solid white;
     color: white;
 }
 
@@ -84,7 +84,7 @@ body {
     color: white;
     text-transform: uppercase;
     letter-spacing: .1em;
-    border-bottom: 1px solid #D4BE7D;
+    border-agenttom: 1px solid #D4BE7D;
 }
 
 .swagger-ui .opblock-tag small {

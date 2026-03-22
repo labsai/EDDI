@@ -14,7 +14,7 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     private Map<String, IData<?>> store;
     private final ConversationOutput conversationOutput;
     int conversationStepNumber;
-    private String currentPackageId;
+    private String currentWorkflowId;
 
     ConversationStep(ConversationOutput conversationOutput) {
         store = new LinkedHashMap<>();
@@ -44,7 +44,7 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
 
     @Override
     public void storeData(IData<?> data) {
-        data.setOriginPackageId(this.currentPackageId);
+        data.setOriginWorkflowId(this.currentWorkflowId);
         store.put(data.getKey(), data);
     }
 
@@ -61,8 +61,8 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     }
 
     @Override
-    public void setCurrentPackageId(String packageId) {
-        this.currentPackageId = packageId;
+    public void setCurrentWorkflowId(String workflowId) {
+        this.currentWorkflowId = workflowId;
     }
 
     public void resetConversationOutput(String rootKey) {

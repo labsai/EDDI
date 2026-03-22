@@ -136,8 +136,8 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                 deploymentListener.onDeploymentEvent(
                         new DeploymentEvent(agentId, version, environment, READY));
 
-                // Lifecycle hook: auto-enable schedules for this bot
-                enableSchedulesForBot(agentId);
+                // Lifecycle hook: auto-enable schedules for this agent
+                enableSchedulesForAgent(agentId);
 
             } catch (Exception e) {
                 handleDeploymentException(e, agentId, version, environment);
@@ -155,7 +155,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
         if (e instanceof ServiceException) {
             throwError(agentId, version, (ServiceException) e,
-                    "Error while deploying bot! (agentId=%s , version=%s)");
+                    "Error while deploying agent! (agentId=%s , version=%s)");
         } else if (e instanceof IllegalAccessException) {
             throwErrorForbidden(agentId, version, (IllegalAccessException) e);
         } else {
@@ -165,7 +165,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
     @Override
     public Response undeployAgent(Deployment.Environment environment, String agentId, Integer version,
-            Boolean endAllActiveConversations, Boolean undeployThisAndAllPreviousBotVersions) {
+            Boolean endAllActiveConversations, Boolean undeployThisAndAllPreviousAgentVersions) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(agentId, "agentId");
         RuntimeUtilities.checkNotNull(version, "version");
@@ -185,9 +185,10 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                 }
 
                 undeploy(environment, agentId, version);
-                log.info(String.format("Successfully undeployed Agent (agentId=%s, agentVersion=%s, environment=%s)", agentId,
+                log.info(String.format("Successfully undeployed Agent (agentId=%s, agentVersion=%s, environment=%s)",
+                        agentId,
                         version, environment));
-            } while (undeployThisAndAllPreviousBotVersions && version-- > 1);
+            } while (undeployThisAndAllPreviousAgentVersions && version-- > 1);
 
             return Response.accepted().build();
         } catch (Exception e) {
@@ -198,7 +199,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
     private static String getConflictExplanations(String agentId, Integer version, Long activeConversationCount) {
         var message = """
-                %s active (thus not ENDED) conversation(s) going on with this bot!\
+                %s active (thus not ENDED) conversation(s) going on with this agent!\
 
                 Check GET /conversationstore/conversations/active/%s?agentVersion=%s \
                 to see active conversations and end conversations with \
@@ -218,10 +219,10 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                 deploymentStore.setDeploymentInfo(environment.toString(),
                         agentId, version, DeploymentInfo.DeploymentStatus.undeployed);
 
-                // Lifecycle hook: auto-disable schedules for this bot
-                disableSchedulesForBot(agentId);
+                // Lifecycle hook: auto-disable schedules for this agent
+                disableSchedulesForAgent(agentId);
             } catch (ServiceException e) {
-                throwError(agentId, version, e, "Error while undeploying bot! (agentId=%s , version=%s)");
+                throwError(agentId, version, e, "Error while undeploying agent! (agentId=%s , version=%s)");
             } catch (IllegalAccessException e) {
                 return throwErrorForbidden(agentId, version, e);
             } catch (Exception e) {
@@ -286,7 +287,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
             IAgent agent = agentFactory.getAgent(environment, agentId, version);
             return agent != null ? agent.getDeploymentStatus() : NOT_FOUND;
         } catch (ServiceException e) {
-            return throwError(agentId, version, e, "Error while deploying bot! (agentId=%s , version=%s)");
+            return throwError(agentId, version, e, "Error while deploying agent! (agentId=%s , version=%s)");
         }
     }
 
@@ -297,7 +298,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
     }
 
     private Void throwErrorForbidden(String agentId, Integer version, IllegalAccessException e) {
-        String message = "Bot deployment is currently in progress! (agentId=%s , version=%s)";
+        String message = "Agent deployment is currently in progress! (agentId=%s , version=%s)";
         message = String.format(message, agentId, version);
         log.error(message, e);
         throw new WebApplicationException(new Throwable(message), Response.Status.FORBIDDEN.getStatusCode());
@@ -305,9 +306,9 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
     // --- Schedule Lifecycle Hooks ---
 
-    private void enableSchedulesForBot(String agentId) {
+    private void enableSchedulesForAgent(String agentId) {
         try {
-            var schedules = scheduleStore.readSchedulesByBotId(agentId);
+            var schedules = scheduleStore.readSchedulesByAgentId(agentId);
             for (var schedule : schedules) {
                 if (!schedule.isEnabled()) {
                     var nextFire = schedule.getNextFire() != null
@@ -323,9 +324,9 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         }
     }
 
-    private void disableSchedulesForBot(String agentId) {
+    private void disableSchedulesForAgent(String agentId) {
         try {
-            var schedules = scheduleStore.readSchedulesByBotId(agentId);
+            var schedules = scheduleStore.readSchedulesByAgentId(agentId);
             for (var schedule : schedules) {
                 if (schedule.isEnabled()) {
                     scheduleStore.setScheduleEnabled(schedule.getId(), false, null);

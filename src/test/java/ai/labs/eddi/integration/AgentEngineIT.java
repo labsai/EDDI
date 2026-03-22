@@ -15,7 +15,7 @@ import static org.hamcrest.Matchers.*;
  * Ported from {@code RestAgentEngineTest} in EDDI-integration-tests.
  * Uses Quarkus DevServices for MongoDB (requires Docker).
  * <p>
- * Deploys two bots with different config, then tests:
+ * Deploys two agents with different config, then tests:
  * <ul>
  * <li>Welcome message on conversation start</li>
  * <li>Word and phrase input recognition</li>
@@ -34,35 +34,35 @@ public class AgentEngineIT extends BaseIntegrationIT {
 
         private static final String TEST_USER_ID = "testUser";
 
-        private static ResourceId botResourceId;
-        private static ResourceId bot2ResourceId;
-        private static boolean botsDeployed = false;
+        private static ResourceId agentResourceId;
+        private static ResourceId agent2ResourceId;
+        private static boolean agentsDeployed = false;
 
         private ResourceId conversationResourceId;
 
         @BeforeEach
         void setUp() throws Exception {
-                if (!botsDeployed) {
-                        botResourceId = setupAndDeployBot(
+                if (!agentsDeployed) {
+                        agentResourceId = setupAndDeployAgent(
                                         "agentengine/dictionary.json",
                                         "agentengine/rules.json",
                                         "agentengine/output.json");
-                        bot2ResourceId = setupAndDeployBot(
+                        agent2ResourceId = setupAndDeployAgent(
                                         "agentengine/dictionary2.json",
                                         "agentengine/rules2.json",
                                         "agentengine/output2.json");
-                        botsDeployed = true;
+                        agentsDeployed = true;
                 }
-                conversationResourceId = createConversation(botResourceId.id(), TEST_USER_ID);
+                conversationResourceId = createConversation(agentResourceId.id(), TEST_USER_ID);
         }
 
         @AfterAll
         static void cleanup() {
-                if (botResourceId != null) {
-                        undeployBotQuietly(botResourceId.id(), botResourceId.version());
+                if (agentResourceId != null) {
+                        undeployAgentQuietly(agentResourceId.id(), agentResourceId.version());
                 }
-                if (bot2ResourceId != null) {
-                        undeployBotQuietly(bot2ResourceId.id(), bot2ResourceId.version());
+                if (agent2ResourceId != null) {
+                        undeployAgentQuietly(agent2ResourceId.id(), agent2ResourceId.version());
                 }
         }
 
@@ -72,12 +72,12 @@ public class AgentEngineIT extends BaseIntegrationIT {
         @DisplayName("should return welcome message on conversation start")
         void checkWelcomeMessage() throws Exception {
                 Thread.sleep(1000); // wait for async welcome processing
-                Response response = getConversationLog(botResourceId.id(), conversationResourceId.id(), false);
+                Response response = getConversationLog(agentResourceId.id(), conversationResourceId.id(), false);
 
                 response.then().assertThat()
                                 .statusCode(200)
-                                .body("agentId", equalTo(botResourceId.id()))
-                                .body("agentVersion", equalTo(botResourceId.version()))
+                                .body("agentId", equalTo(agentResourceId.id()))
+                                .body("agentVersion", equalTo(agentResourceId.version()))
                                 .body("conversationSteps", hasSize(1))
                                 .body("conversationSteps[0].conversationStep[0].key", equalTo("actions"))
                                 .body("conversationSteps[0].conversationStep[0].value[1]", equalTo("welcome"))
@@ -95,7 +95,7 @@ public class AgentEngineIT extends BaseIntegrationIT {
         @Test
         @DisplayName("should process word input and return simple conversation log")
         void checkWordInputSimpleConversationLog() {
-                Response response = sendUserInput(botResourceId.id(), conversationResourceId.id(), "hello", false,
+                Response response = sendUserInput(agentResourceId.id(), conversationResourceId.id(), "hello", false,
                                 false);
 
                 response.then().assertThat()
@@ -115,7 +115,7 @@ public class AgentEngineIT extends BaseIntegrationIT {
         @Test
         @DisplayName("should return only current step when returnCurrentStepOnly=true")
         void checkWordInputCurrentStepOnly() {
-                Response response = sendUserInput(botResourceId.id(), conversationResourceId.id(), "hello", false,
+                Response response = sendUserInput(agentResourceId.id(), conversationResourceId.id(), "hello", false,
                                 true);
 
                 response.then().assertThat()
@@ -128,8 +128,8 @@ public class AgentEngineIT extends BaseIntegrationIT {
         @Test
         @DisplayName("should handle repeated greeting with different output")
         void checkSecondTimeWordInput() {
-                sendUserInput(botResourceId.id(), conversationResourceId.id(), "hello", false, false);
-                Response response = sendUserInput(botResourceId.id(), conversationResourceId.id(), "hello", false,
+                sendUserInput(agentResourceId.id(), conversationResourceId.id(), "hello", false, false);
+                Response response = sendUserInput(agentResourceId.id(), conversationResourceId.id(), "hello", false,
                                 false);
 
                 response.then().assertThat()
@@ -144,13 +144,13 @@ public class AgentEngineIT extends BaseIntegrationIT {
 
         @Test
         @DisplayName("should route to second deployed Agent correctly")
-        void checkSecondBotDeployed() {
-                ResourceId convId2 = createConversation(bot2ResourceId.id(), TEST_USER_ID);
-                Response response = sendUserInput(bot2ResourceId.id(), convId2.id(), "hi", true, false);
+        void checkSecondAgentDeployed() {
+                ResourceId convId2 = createConversation(agent2ResourceId.id(), TEST_USER_ID);
+                Response response = sendUserInput(agent2ResourceId.id(), convId2.id(), "hi", true, false);
 
                 response.then().assertThat()
                                 .statusCode(200)
-                                .body("agentId", equalTo(bot2ResourceId.id()))
+                                .body("agentId", equalTo(agent2ResourceId.id()))
                                 .body("conversationSteps", hasSize(2))
                                 .body("conversationSteps[1].conversationStep[0].value", equalTo("hi"));
         }
@@ -160,7 +160,7 @@ public class AgentEngineIT extends BaseIntegrationIT {
         @Test
         @DisplayName("should return quick replies for question input")
         void checkQuickReplyConversationLog() {
-                Response response = sendUserInput(botResourceId.id(), conversationResourceId.id(), "question", false,
+                Response response = sendUserInput(agentResourceId.id(), conversationResourceId.id(), "question", false,
                                 false);
 
                 response.then().assertThat()
@@ -179,7 +179,7 @@ public class AgentEngineIT extends BaseIntegrationIT {
         void testStringContextSendWithInput() {
                 String body = """
                                 {"input":"hello","context":{"someContextKeyString":{"type":"string","value":"someContextValue"}}}""";
-                Response response = sendJsonInput(botResourceId.id(), conversationResourceId.id(), body, true);
+                Response response = sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
 
                 response.then().assertThat()
                                 .statusCode(200)
@@ -195,7 +195,7 @@ public class AgentEngineIT extends BaseIntegrationIT {
         void testExpressionContextSendWithInput() {
                 String body = """
                                 {"input":"hello","context":{"someContextKeyExpressions":{"type":"expressions","value":"expression(someValue), expression2(someOtherValue)"}}}""";
-                Response response = sendJsonInput(botResourceId.id(), conversationResourceId.id(), body, true);
+                Response response = sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
 
                 response.then().assertThat()
                                 .statusCode(200)
@@ -213,7 +213,7 @@ public class AgentEngineIT extends BaseIntegrationIT {
         void testTemplatingOfOutput() {
                 String body = """
                                 {"input":"hello","context":{"userInfo":{"type":"object","value":{"username":"John"}}}}""";
-                Response response = sendJsonInput(botResourceId.id(), conversationResourceId.id(), body, true);
+                Response response = sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
 
                 response.then().assertThat()
                                 .statusCode(200)
@@ -230,7 +230,7 @@ public class AgentEngineIT extends BaseIntegrationIT {
         void testPropertyExtraction() {
                 String body = """
                                 {"input":"property","context":{}}""";
-                Response response = sendJsonInput(botResourceId.id(), conversationResourceId.id(), body, true);
+                Response response = sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
 
                 response.then().assertThat()
                                 .statusCode(200)
@@ -246,9 +246,9 @@ public class AgentEngineIT extends BaseIntegrationIT {
         void testConversationEnded() throws Exception {
                 String body = """
                                 {"input":"bye","context":{"userInfo":{"type":"object","value":{"username":"John"}}}}""";
-                sendJsonInput(botResourceId.id(), conversationResourceId.id(), body, true);
+                sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
                 Thread.sleep(100);
-                Response response = sendJsonInput(botResourceId.id(), conversationResourceId.id(), body, true);
+                Response response = sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
 
                 response.then().assertThat()
                                 .statusCode(410)
@@ -257,7 +257,7 @@ public class AgentEngineIT extends BaseIntegrationIT {
 
         // ==================== Helpers ====================
 
-        private ResourceId setupAndDeployBot(String dictionaryPath, String behaviorPath, String outputPath)
+        private ResourceId setupAndDeployAgent(String dictionaryPath, String behaviorPath, String outputPath)
                         throws Exception {
                 String dictionary = load(dictionaryPath);
                 String behavior = load(behaviorPath);
@@ -300,16 +300,16 @@ public class AgentEngineIT extends BaseIntegrationIT {
                                                 }""",
                                 locationDictionary, locationBehavior, locationOutput);
 
-                String locationPackage = createAgentResource(packageBody, "/WorkflowStore/packages");
+                String locationWorkflow = createAgentResource(packageBody, "/WorkflowStore/packages");
 
-                // Create bot
-                String botBody = String.format("""
-                                {"packages": ["%s"]}""", locationPackage);
-                String botLocation = createAgentResource(botBody, "/AgentStore/bots");
+                // Create agent
+                String agentBody = String.format("""
+                                {"packages": ["%s"]}""", locationWorkflow);
+                String agentLocation = createAgentResource(agentBody, "/AgentStore/agents");
 
-                ResourceId agentId = extractResourceId(botLocation);
+                ResourceId agentId = extractResourceId(agentLocation);
 
-                // Deploy the bot
+                // Deploy the agent
                 deployAgent(agentId.id(), agentId.version());
 
                 return agentId;
@@ -336,10 +336,10 @@ public class AgentEngineIT extends BaseIntegrationIT {
                         if ("READY".equals(status))
                                 return;
                         if ("ERROR".equals(status))
-                                throw new RuntimeException("Bot deployment failed");
+                                throw new RuntimeException("Agent deployment failed");
                         Thread.sleep(500);
                 }
-                throw new RuntimeException("Bot deployment timed out");
+                throw new RuntimeException("Agent deployment timed out");
         }
 
         private Response sendJsonInput(String agentId, String conversationId, String jsonBody, boolean returnDetailed) {
@@ -347,7 +347,7 @@ public class AgentEngineIT extends BaseIntegrationIT {
                                 .contentType(ContentType.JSON)
                                 .body(jsonBody)
                                 .post(String.format(
-                                                "bots/production/%s/%s?returnDetailed=%s&returnCurrentStepOnly=%s",
+                                                "agents/production/%s/%s?returnDetailed=%s&returnCurrentStepOnly=%s",
                                                 agentId, conversationId, returnDetailed, false));
         }
 }

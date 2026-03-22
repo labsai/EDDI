@@ -23,7 +23,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * Executes the Lifecycle Workflow - EDDI's core processing engine.
  *
  * <p>
- * The LifecycleManager is responsible for executing a bot's configured sequence
+ * The LifecycleManager is responsible for executing an agent's configured
+ * sequence
  * of
  * {@link ILifecycleTask} components, passing conversation state through each
  * task in order.
@@ -61,7 +62,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * from a specific type</li>
  * <li><strong>Component-Based</strong>: Each task has an associated component
  * (config/resource)
- * loaded from the package</li>
+ * loaded from the workflow</li>
  * </ul>
  *
  * <h2>Example Flow</h2>
@@ -103,14 +104,14 @@ public class LifecycleManager implements ILifecycleManager {
     private final IComponentCache componentCache;
 
     /**
-     * Identifier of the package this lifecycle manager belongs to.
+     * Identifier of the workflow this lifecycle manager belongs to.
      * Used for component cache lookups.
      */
-    private final IResourceStore.IResourceId packageId;
+    private final IResourceStore.IResourceId workflowId;
 
-    public LifecycleManager(IComponentCache componentCache, IResourceStore.IResourceId packageId) {
+    public LifecycleManager(IComponentCache componentCache, IResourceStore.IResourceId workflowId) {
         this.componentCache = componentCache;
-        this.packageId = packageId;
+        this.workflowId = workflowId;
 
         lifecycleTasks = new LinkedList<>();
     }
@@ -191,10 +192,10 @@ public class LifecycleManager implements ILifecycleManager {
 
             try {
                 // Retrieve task's component from cache
-                // Component contains task-specific configuration loaded during bot
+                // Component contains task-specific configuration loaded during agent
                 // initialization
                 var components = componentCache.getComponentMap(task.getId());
-                var componentKey = createComponentKey(packageId.getId(), packageId.getVersion(), index);
+                var componentKey = createComponentKey(workflowId.getId(), workflowId.getVersion(), index);
                 var component = components.getOrDefault(componentKey, null);
 
                 // Emit task_start event if streaming
@@ -252,8 +253,8 @@ public class LifecycleManager implements ILifecycleManager {
      * Maps memory data into input/output/llmDetail/toolCalls fields.
      */
     private AuditEntry buildAuditEntry(IConversationMemory memory, ILifecycleTask task,
-                                       int taskIndex, long durationMs,
-                                       Map<String, Object> summary) {
+            int taskIndex, long durationMs,
+            Map<String, Object> summary) {
         var currentStep = memory.getCurrentStep();
         int stepIndex = memory.size() - 1; // 0-based
 
@@ -278,17 +279,21 @@ public class LifecycleManager implements ILifecycleManager {
             llmDetail = new LinkedHashMap<>();
             llmDetail.put("compiledPrompt", promptData.getResult());
             IData<String> responseData = currentStep.getLatestData("audit:model_response");
-            if (responseData != null) llmDetail.put("modelResponse", responseData.getResult());
+            if (responseData != null)
+                llmDetail.put("modelResponse", responseData.getResult());
             IData<String> modelData = currentStep.getLatestData("audit:model_name");
-            if (modelData != null) llmDetail.put("modelName", modelData.getResult());
+            if (modelData != null)
+                llmDetail.put("modelName", modelData.getResult());
             IData<Map<String, Object>> tokenData = currentStep.getLatestData("audit:token_usage");
-            if (tokenData != null) llmDetail.put("tokenUsage", tokenData.getResult());
+            if (tokenData != null)
+                llmDetail.put("tokenUsage", tokenData.getResult());
         }
 
         // Actions
         @SuppressWarnings("unchecked")
         List<String> actions = summary.containsKey("actions")
-                ? (List<String>) summary.get("actions") : null;
+                ? (List<String>) summary.get("actions")
+                : null;
 
         return new AuditEntry(
                 UUID.randomUUID().toString(),
@@ -309,7 +314,7 @@ public class LifecycleManager implements ILifecycleManager {
                 actions,
                 0.0, // cost — set by ToolCostTracker integration
                 Instant.now(),
-                null  // HMAC computed by AuditLedgerService
+                null // HMAC computed by AuditLedgerService
         );
     }
 
@@ -382,7 +387,7 @@ public class LifecycleManager implements ILifecycleManager {
      * <p>
      * Tasks are executed in the order they are added. This method is typically
      * called
-     * during Agent initialization, when the bot's package configuration is being
+     * during Agent initialization, when the agent's package configuration is being
      * loaded.
      * </p>
      *

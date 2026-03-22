@@ -68,7 +68,7 @@
       },
       "method" : "patch",
       "contentType" : "application/json",
-      "body" : "{\"operation\":\"SET\",\"document\":{\"name\":\"[[${properties.botName}]]\",\"description\":\"\"}}"
+      "body" : "{\"operation\":\"SET\",\"document\":{\"name\":\"[[${properties.agentName}]]\",\"description\":\"\"}}"
     }
   }, {
     "name" : "Create jlama connection",
@@ -138,7 +138,7 @@
       },
       "method" : "patch",
       "contentType" : "application/json",
-      "body" : "{\"operation\":\"SET\",\"document\":{\"name\":\"[[${properties.botName}]]\",\"description\":\"\"}}"
+      "body" : "{\"operation\":\"SET\",\"document\":{\"name\":\"[[${properties.agentName}]]\",\"description\":\"\"}}"
     }
   }, {
     "name" : "Create output",
@@ -208,7 +208,7 @@
       },
       "method" : "patch",
       "contentType" : "application/json",
-      "body" : "{\"operation\":\"SET\",\"document\":{\"name\":\"[[${properties.botName}]]\",\"description\":\"\"}}"
+      "body" : "{\"operation\":\"SET\",\"document\":{\"name\":\"[[${properties.agentName}]]\",\"description\":\"\"}}"
     }
   }, {
     "name" : "Create package",
@@ -250,7 +250,7 @@
     "isBatchCalls" : false,
     "preRequest" : {
       "propertyInstructions" : [ {
-        "name" : "packageId",
+        "name" : "workflowId",
         "valueString" : "[[${#uuidUtils.extractId(properties.packageLocation)}]]",
         "scope" : "conversation",
         "fromObjectPath" : "",
@@ -271,25 +271,25 @@
       "delayBeforeExecutingInMillis" : 0
     },
     "request" : {
-      "path" : "/descriptorstore/descriptors/[[${properties.packageId}]]",
+      "path" : "/descriptorstore/descriptors/[[${properties.workflowId}]]",
       "headers" : { },
       "queryParams" : {
         "version" : "[[${properties.packageVersion}]]"
       },
       "method" : "patch",
       "contentType" : "application/json",
-      "body" : "{\"operation\":\"SET\",\"document\":{\"name\":\"[[${properties.botName}]]\",\"description\":\"jlama powered Package\"}}"
+      "body" : "{\"operation\":\"SET\",\"document\":{\"name\":\"[[${properties.agentName}]]\",\"description\":\"jlama powered Workflow\"}}"
     }
   }, {
-    "name" : "Create bot",
-    "actions" : [ "create_bot_for_jlama" ],
+    "name" : "Create agent",
+    "actions" : [ "create_agent_for_jlama" ],
     "saveResponse" : true,
     "responseObjectName" : "EDDIResponse",
     "responseHeaderObjectName" : "EDDIResponseHeader",
     "fireAndForget" : false,
     "isBatchCalls" : false,
     "request" : {
-      "path" : "/botstore/bots",
+      "path" : "/agentstore/agents",
       "headers" : { },
       "queryParams" : { },
       "method" : "post",
@@ -298,7 +298,7 @@
     },
     "postResponse" : {
       "propertyInstructions" : [ {
-        "name" : "botLocation",
+        "name" : "agentLocation",
         "scope" : "conversation",
         "fromObjectPath" : "EDDIResponseHeader.Location",
         "toObjectPath" : "",
@@ -313,15 +313,15 @@
       }
     }
   }, {
-    "name" : "Create name for bot",
-    "actions" : [ "create_bot_for_jlama" ],
+    "name" : "Create name for agent",
+    "actions" : [ "create_agent_for_jlama" ],
     "saveResponse" : false,
     "fireAndForget" : false,
     "isBatchCalls" : false,
     "preRequest" : {
       "propertyInstructions" : [ {
-        "name" : "botId",
-        "valueString" : "[[${#uuidUtils.extractId(properties.botLocation)}]]",
+        "name" : "agentId",
+        "valueString" : "[[${#uuidUtils.extractId(properties.agentLocation)}]]",
         "scope" : "conversation",
         "fromObjectPath" : "",
         "toObjectPath" : "",
@@ -329,8 +329,8 @@
         "override" : true,
         "runOnValidationError" : false
       }, {
-        "name" : "botVersion",
-        "valueString" : "[[${#uuidUtils.extractVersion(properties.botLocation)}]]",
+        "name" : "agentVersion",
+        "valueString" : "[[${#uuidUtils.extractVersion(properties.agentLocation)}]]",
         "scope" : "conversation",
         "fromObjectPath" : "",
         "toObjectPath" : "",
@@ -341,18 +341,18 @@
       "delayBeforeExecutingInMillis" : 0
     },
     "request" : {
-      "path" : "/descriptorstore/descriptors/[[${properties.botId}]]",
+      "path" : "/descriptorstore/descriptors/[[${properties.agentId}]]",
       "headers" : { },
       "queryParams" : {
-        "version" : "[[${properties.botVersion}]]"
+        "version" : "[[${properties.agentVersion}]]"
       },
       "method" : "patch",
       "contentType" : "application/json",
-      "body" : "{\"operation\":\"SET\",\"document\":{\"name\":\"[[${properties.botName}]]\",\"description\":\"jlama powered Bot\"}}"
+      "body" : "{\"operation\":\"SET\",\"document\":{\"name\":\"[[${properties.agentName}]]\",\"description\":\"jlama powered Agent\"}}"
     }
   }, {
-    "name" : "Deploy bot",
-    "actions" : [ "deploy_bot_for_jlama" ],
+    "name" : "Deploy agent",
+    "actions" : [ "deploy_agent_for_jlama" ],
     "saveResponse" : true,
     "responseObjectName" : "EDDIResponse",
     "responseHeaderObjectName" : "EDDIResponseHeader",
@@ -360,8 +360,8 @@
     "isBatchCalls" : false,
     "preRequest" : {
       "propertyInstructions" : [ {
-        "name" : "botIntent",
-        "valueString" : "[[${#strings.toLowerCase(#strings.replace(properties.botName, ' ', '-'))}]]-[[${properties.botId}]]",
+        "name" : "agentIntent",
+        "valueString" : "[[${#strings.toLowerCase(#strings.replace(properties.agentName, ' ', '-'))}]]-[[${properties.agentId}]]",
         "scope" : "conversation",
         "fromObjectPath" : "",
         "toObjectPath" : "",
@@ -372,30 +372,30 @@
       "delayBeforeExecutingInMillis" : 0
     },
     "request" : {
-      "path" : "/administration/unrestricted/deploy/[[${properties.botId}]]",
+      "path" : "/administration/unrestricted/deploy/[[${properties.agentId}]]",
       "headers" : { },
       "queryParams" : {
-        "version" : "[[${properties.botVersion}]]"
+        "version" : "[[${properties.agentVersion}]]"
       },
       "method" : "post",
       "contentType" : "text/plain",
       "body" : ""
     }
   }, {
-    "name" : "Create Bot Management Config",
-    "actions" : [ "deploy_bot_for_jlama" ],
+    "name" : "Create Agent Management Config",
+    "actions" : [ "deploy_agent_for_jlama" ],
     "saveResponse" : true,
     "responseObjectName" : "EDDIResponse",
     "responseHeaderObjectName" : "EDDIResponseHeader",
     "fireAndForget" : false,
     "isBatchCalls" : false,
     "request" : {
-      "path" : "/bottriggerstore/bottriggers",
+      "path" : "/agenttriggerstore/agenttriggers",
       "headers" : { },
       "queryParams" : { },
       "method" : "post",
       "contentType" : "application/json",
-      "body" : "{\"intent\":\"[[${properties.botIntent}]]\",\"botDeployments\":[{\"environment\":\"unrestricted\",\"botId\":\"[[${properties.botId}]]\"}]}"
+      "body" : "{\"intent\":\"[[${properties.agentIntent}]]\",\"agentDeployments\":[{\"environment\":\"unrestricted\",\"agentId\":\"[[${properties.agentId}]]\"}]}"
     }
   } ]
 }

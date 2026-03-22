@@ -48,10 +48,10 @@ class RestAgentEngineTest {
         void startConversation_success() throws Exception {
             var convUri = URI.create("eddi://ai.labs.conversation/conv123?version=1");
             var result = new IConversationService.ConversationResult("conv123", convUri);
-            when(conversationService.startConversation(any(), eq("bot1"), eq("user1"), anyMap()))
+            when(conversationService.startConversation(any(), eq("agent1"), eq("user1"), anyMap()))
                     .thenReturn(result);
 
-            Response response = RestAgentEngine.startConversation(production, "bot1", "user1");
+            Response response = RestAgentEngine.startConversation(production, "agent1", "user1");
 
             assertEquals(201, response.getStatus());
             assertNotNull(response.getLocation());
@@ -59,11 +59,11 @@ class RestAgentEngineTest {
 
         @Test
         @DisplayName("should return 404 when Agent is not ready")
-        void startConversation_botNotReady() throws Exception {
-            when(conversationService.startConversation(any(), eq("bot1"), eq("user1"), anyMap()))
-                    .thenThrow(new BotNotReadyException("Bot not deployed"));
+        void startConversation_agentNotReady() throws Exception {
+            when(conversationService.startConversation(any(), eq("agent1"), eq("user1"), anyMap()))
+                    .thenThrow(new AgentNotReadyException("Agent not deployed"));
 
-            Response response = RestAgentEngine.startConversation(production, "bot1", "user1");
+            Response response = RestAgentEngine.startConversation(production, "agent1", "user1");
 
             assertEquals(404, response.getStatus());
         }
@@ -71,11 +71,11 @@ class RestAgentEngineTest {
         @Test
         @DisplayName("should throw InternalServerError on ResourceStoreException")
         void startConversation_storeError() throws Exception {
-            when(conversationService.startConversation(any(), eq("bot1"), eq("user1"), anyMap()))
+            when(conversationService.startConversation(any(), eq("agent1"), eq("user1"), anyMap()))
                     .thenThrow(new ResourceStoreException("DB error"));
 
             assertThrows(InternalServerErrorException.class,
-                    () -> RestAgentEngine.startConversation(production, "bot1", "user1"));
+                    () -> RestAgentEngine.startConversation(production, "agent1", "user1"));
         }
     }
 
@@ -106,12 +106,12 @@ class RestAgentEngineTest {
         void readConversation_success() throws Exception {
             var snapshot = new SimpleConversationMemorySnapshot();
             when(conversationService.readConversation(
-                    eq(production), eq("bot1"), eq("conv1"),
+                    eq(production), eq("agent1"), eq("conv1"),
                     eq(true), eq(false), isNull()))
                     .thenReturn(snapshot);
 
             SimpleConversationMemorySnapshot result = RestAgentEngine.readConversation(
-                    production, "bot1", "conv1", true, false, null);
+                    production, "agent1", "conv1", true, false, null);
 
             assertNotNull(result);
             assertSame(snapshot, result);
@@ -129,12 +129,12 @@ class RestAgentEngineTest {
         void say_delegatesToService() throws Exception {
             AsyncResponse asyncResponse = mock(AsyncResponse.class);
 
-            RestAgentEngine.say(production, "bot1", "conv1",
+            RestAgentEngine.say(production, "agent1", "conv1",
                     false, false, null, "Hello", asyncResponse);
 
             verify(asyncResponse).setTimeout(60, java.util.concurrent.TimeUnit.SECONDS);
             verify(conversationService).say(
-                    eq(production), eq("bot1"), eq("conv1"),
+                    eq(production), eq("agent1"), eq("conv1"),
                     eq(false), eq(false), isNull(),
                     any(InputData.class), eq(false), any());
         }
@@ -149,7 +149,7 @@ class RestAgentEngineTest {
                             any(), any(), any(), any(), any(), any(),
                             any(), anyBoolean(), any());
 
-            RestAgentEngine.say(production, "bot1", "conv1",
+            RestAgentEngine.say(production, "agent1", "conv1",
                     false, false, null, "Hello", asyncResponse);
 
             // Capture the argument passed to resume
@@ -161,16 +161,16 @@ class RestAgentEngineTest {
         }
 
         @Test
-        @DisplayName("should resume with 409 on BotMismatchException")
-        void say_botMismatch() throws Exception {
+        @DisplayName("should resume with 409 on AgentMismatchException")
+        void say_agentMismatch() throws Exception {
             AsyncResponse asyncResponse = mock(AsyncResponse.class);
 
-            doThrow(new BotMismatchException("wrong bot"))
+            doThrow(new AgentMismatchException("wrong agent"))
                     .when(conversationService).say(
                             any(), any(), any(), any(), any(), any(),
                             any(), anyBoolean(), any());
 
-            RestAgentEngine.say(production, "bot1", "conv1",
+            RestAgentEngine.say(production, "agent1", "conv1",
                     false, false, null, "Hello", asyncResponse);
 
             ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
@@ -190,18 +190,18 @@ class RestAgentEngineTest {
         @Test
         @DisplayName("isUndoAvailable should delegate to service")
         void isUndoAvailable() throws Exception {
-            when(conversationService.isUndoAvailable(production, "bot1", "conv1"))
+            when(conversationService.isUndoAvailable(production, "agent1", "conv1"))
                     .thenReturn(true);
 
-            assertTrue(RestAgentEngine.isUndoAvailable(production, "bot1", "conv1"));
+            assertTrue(RestAgentEngine.isUndoAvailable(production, "agent1", "conv1"));
         }
 
         @Test
         @DisplayName("undo should return 200 when successful")
         void undo_success() throws Exception {
-            when(conversationService.undo(production, "bot1", "conv1")).thenReturn(true);
+            when(conversationService.undo(production, "agent1", "conv1")).thenReturn(true);
 
-            Response response = RestAgentEngine.undo(production, "bot1", "conv1");
+            Response response = RestAgentEngine.undo(production, "agent1", "conv1");
 
             assertEquals(200, response.getStatus());
         }
@@ -209,9 +209,9 @@ class RestAgentEngineTest {
         @Test
         @DisplayName("undo should return 409 when undo not available")
         void undo_notAvailable() throws Exception {
-            when(conversationService.undo(production, "bot1", "conv1")).thenReturn(false);
+            when(conversationService.undo(production, "agent1", "conv1")).thenReturn(false);
 
-            Response response = RestAgentEngine.undo(production, "bot1", "conv1");
+            Response response = RestAgentEngine.undo(production, "agent1", "conv1");
 
             assertEquals(409, response.getStatus());
         }
@@ -219,9 +219,9 @@ class RestAgentEngineTest {
         @Test
         @DisplayName("redo should return 200 when successful")
         void redo_success() throws Exception {
-            when(conversationService.redo(production, "bot1", "conv1")).thenReturn(true);
+            when(conversationService.redo(production, "agent1", "conv1")).thenReturn(true);
 
-            Response response = RestAgentEngine.redo(production, "bot1", "conv1");
+            Response response = RestAgentEngine.redo(production, "agent1", "conv1");
 
             assertEquals(200, response.getStatus());
         }
@@ -229,10 +229,10 @@ class RestAgentEngineTest {
         @Test
         @DisplayName("isRedoAvailable should delegate to service")
         void isRedoAvailable() throws Exception {
-            when(conversationService.isRedoAvailable(production, "bot1", "conv1"))
+            when(conversationService.isRedoAvailable(production, "agent1", "conv1"))
                     .thenReturn(false);
 
-            assertFalse(RestAgentEngine.isRedoAvailable(production, "bot1", "conv1"));
+            assertFalse(RestAgentEngine.isRedoAvailable(production, "agent1", "conv1"));
         }
     }
 

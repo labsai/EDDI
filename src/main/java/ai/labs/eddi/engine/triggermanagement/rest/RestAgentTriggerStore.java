@@ -10,7 +10,6 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
-
 import java.util.List;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -21,35 +20,33 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 @ApplicationScoped
 public class RestAgentTriggerStore implements IRestAgentTriggerStore {
-    private static final String CACHE_NAME = "botTriggers";
+    private static final String CACHE_NAME = "agentTriggers";
     private final IAgentTriggerStore agentTriggerStore;
-    private final ICache<String, AgentTriggerConfiguration> botTriggersCache;
-
-
+    private final ICache<String, AgentTriggerConfiguration> agentTriggersCache;
 
     @Inject
     public RestAgentTriggerStore(IAgentTriggerStore agentTriggerStore,
             ICacheFactory cacheFactory) {
         this.agentTriggerStore = agentTriggerStore;
-        botTriggersCache = cacheFactory.getCache(CACHE_NAME);
+        agentTriggersCache = cacheFactory.getCache(CACHE_NAME);
     }
 
     @Override
-    public List<AgentTriggerConfiguration> readAllBotTriggers() {
+    public List<AgentTriggerConfiguration> readAllAgentTriggers() {
         try {
-            return agentTriggerStore.readAllBotTriggers();
+            return agentTriggerStore.readAllAgentTriggers();
         } catch (IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
     }
 
     @Override
-    public AgentTriggerConfiguration readBotTrigger(String intent) {
+    public AgentTriggerConfiguration readAgentTrigger(String intent) {
         try {
-            AgentTriggerConfiguration agentTriggerConfiguration = botTriggersCache.get(intent);
+            AgentTriggerConfiguration agentTriggerConfiguration = agentTriggersCache.get(intent);
             if (agentTriggerConfiguration == null) {
-                agentTriggerConfiguration = agentTriggerStore.readBotTrigger(intent);
-                botTriggersCache.put(intent, agentTriggerConfiguration);
+                agentTriggerConfiguration = agentTriggerStore.readAgentTrigger(intent);
+                agentTriggersCache.put(intent, agentTriggerConfiguration);
             }
 
             return agentTriggerConfiguration;
@@ -59,10 +56,10 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
     }
 
     @Override
-    public Response updateBotTrigger(String intent, AgentTriggerConfiguration agentTriggerConfiguration) {
+    public Response updateAgentTrigger(String intent, AgentTriggerConfiguration agentTriggerConfiguration) {
         try {
-            agentTriggerStore.updateBotTrigger(intent, agentTriggerConfiguration);
-            botTriggersCache.put(intent, agentTriggerConfiguration);
+            agentTriggerStore.updateAgentTrigger(intent, agentTriggerConfiguration);
+            agentTriggersCache.put(intent, agentTriggerConfiguration);
             return Response.ok().build();
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
@@ -73,7 +70,7 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
     public Response createAgentTrigger(AgentTriggerConfiguration agentTriggerConfiguration) {
         try {
             agentTriggerStore.createAgentTrigger(agentTriggerConfiguration);
-            botTriggersCache.put(agentTriggerConfiguration.getIntent(), agentTriggerConfiguration);
+            agentTriggersCache.put(agentTriggerConfiguration.getIntent(), agentTriggerConfiguration);
             return Response.ok().build();
         } catch (IResourceStore.ResourceAlreadyExistsException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
@@ -81,10 +78,10 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
     }
 
     @Override
-    public Response deleteBotTrigger(String intent) {
+    public Response deleteAgentTrigger(String intent) {
         try {
-            agentTriggerStore.deleteBotTrigger(intent);
-            botTriggersCache.remove(intent);
+            agentTriggerStore.deleteAgentTrigger(intent);
+            agentTriggersCache.remove(intent);
             return Response.ok().build();
         } catch (IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);

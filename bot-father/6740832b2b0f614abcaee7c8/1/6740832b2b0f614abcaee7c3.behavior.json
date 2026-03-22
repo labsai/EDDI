@@ -7,7 +7,7 @@
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
-          "actions" : "create_jlama_bot",
+          "actions" : "create_jlama_agent",
           "occurrence" : "currentStep"
         }
       } ]
@@ -249,7 +249,7 @@
       } ]
     }, {
       "name" : "Set history limit 10",
-      "actions" : [ "set_history_10", "ask_for_bot_creation_confirmation_for_jlama" ],
+      "actions" : [ "set_history_10", "ask_for_agent_creation_confirmation_for_jlama" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
@@ -265,7 +265,7 @@
       } ]
     }, {
       "name" : "Set history limit 20",
-      "actions" : [ "set_history_20", "ask_for_bot_creation_confirmation_for_jlama" ],
+      "actions" : [ "set_history_20", "ask_for_agent_creation_confirmation_for_jlama" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
@@ -281,7 +281,7 @@
       } ]
     }, {
       "name" : "Set history limit unlimited",
-      "actions" : [ "set_history_unlimited", "ask_for_bot_creation_confirmation_for_jlama" ],
+      "actions" : [ "set_history_unlimited", "ask_for_agent_creation_confirmation_for_jlama" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
@@ -297,7 +297,7 @@
       } ]
     }, {
       "name" : "Set custom history limit",
-      "actions" : [ "set_conversation_history_limit", "ask_for_bot_creation_confirmation_for_jlama" ],
+      "actions" : [ "set_conversation_history_limit", "ask_for_agent_creation_confirmation_for_jlama" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
@@ -321,12 +321,12 @@
         }
       } ]
     }, {
-      "name" : "Confirm and create bot",
-      "actions" : [ "create_properties_for_jlama", "create_behavior_rules_for_jlama", "create_langchain_jlama", "create_output_for_jlama", "create_package_for_jlama", "create_bot_for_jlama", "deploy_bot_for_jlama", "CONVERSATION_END" ],
+      "name" : "Confirm and create agent",
+      "actions" : [ "create_properties_for_jlama", "create_behavior_rules_for_jlama", "create_langchain_jlama", "create_output_for_jlama", "create_package_for_jlama", "create_agent_for_jlama", "deploy_agent_for_jlama", "CONVERSATION_END" ],
       "conditions" : [ {
         "type" : "inputmatcher",
         "configs" : {
-          "expressions" : "orchestrate_create_bot_for_jlama"
+          "expressions" : "orchestrate_create_agent_for_jlama"
         }
       } ]
     } ]

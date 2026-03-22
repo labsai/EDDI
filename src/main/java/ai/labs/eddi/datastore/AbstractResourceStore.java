@@ -5,9 +5,11 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 /**
  * Generic, database-agnostic base class for configuration stores.
  * <p>
- * Encapsulates the shared constructor pattern ({@link IResourceStorageFactory} to
+ * Encapsulates the shared constructor pattern ({@link IResourceStorageFactory}
+ * to
  * {@link IResourceStorage} to {@link HistorizedResourceStore})
- * and the 7 CRUD delegation methods that are identical across all configuration stores.
+ * and the 7 CRUD delegation methods that are identical across all configuration
+ * stores.
  * <p>
  * Subclasses only need to provide the collection name, document type, and any
  * domain-specific methods (e.g., readActions, filtering, custom queries).
@@ -29,22 +31,24 @@ public abstract class AbstractResourceStore<T> implements IResourceStore<T> {
     }
 
     /**
-     * Standard constructor - creates storage via factory, wraps in HistorizedResourceStore.
+     * Standard constructor - creates storage via factory, wraps in
+     * HistorizedResourceStore.
      * Used by most stores (LangChain, Parser, PropertySetter, HttpCalls, Behavior,
-     * Output, RegularDictionary, Bot, Package).
+     * Output, RegularDictionary, Agent, Workflow).
      */
     protected AbstractResourceStore(IResourceStorageFactory storageFactory,
-                                    String collectionName,
-                                    IDocumentBuilder documentBuilder,
-                                    Class<T> documentType,
-                                    String... indexes) {
+            String collectionName,
+            IDocumentBuilder documentBuilder,
+            Class<T> documentType,
+            String... indexes) {
         this.resourceStorage = storageFactory.create(
                 collectionName, documentBuilder, documentType, indexes);
         this.resourceStore = new HistorizedResourceStore<>(resourceStorage);
     }
 
     /**
-     * Constructor for subclasses that build custom HistorizedResourceStore instances.
+     * Constructor for subclasses that build custom HistorizedResourceStore
+     * instances.
      */
     protected AbstractResourceStore(HistorizedResourceStore<T> resourceStore) {
         this.resourceStore = resourceStore;

@@ -4,7 +4,7 @@ package ai.labs.eddi.engine.runtime;
  * @author ginccc
  */
 public interface IAgentDeploymentManagement {
-    void autoDeployBots() throws AutoDeploymentException;
+    void autoDeployAgents() throws AutoDeploymentException;
 
     class AutoDeploymentException extends Exception {
         public AutoDeploymentException(String message, Throwable cause) {

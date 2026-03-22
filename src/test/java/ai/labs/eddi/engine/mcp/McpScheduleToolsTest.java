@@ -44,7 +44,8 @@ class McpScheduleToolsTest {
         var restInterfaceFactory = mock(IRestInterfaceFactory.class);
         when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(mock(IRestAgentStore.class));
         when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(mock(IRestWorkflowStore.class));
-        when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(mock(IRestDocumentDescriptorStore.class));
+        when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class))
+                .thenReturn(mock(IRestDocumentDescriptorStore.class));
 
         lenient().when(jsonSerialization.serialize(any())).thenAnswer(inv -> {
             // Simple serialization for assertions
@@ -62,7 +63,7 @@ class McpScheduleToolsTest {
     void createSchedule_cron_success() throws Exception {
         when(scheduleStore.createSchedule(any())).thenReturn("sched-1");
 
-        String result = tools.createSchedule("bot-1", "CRON", "0 9 * * *", null,
+        String result = tools.createSchedule("agent-1", "CRON", "0 9 * * *", null,
                 "Good morning", "Morning greeting", "UTC", "new", null, "production");
 
         assertTrue(result.contains("schedule_created"));
@@ -73,15 +74,13 @@ class McpScheduleToolsTest {
     void createSchedule_heartbeat_success() throws Exception {
         when(scheduleStore.createSchedule(any())).thenReturn("hb-1");
 
-        String result = tools.createSchedule("bot-1", "HEARTBEAT", null, 300L,
+        String result = tools.createSchedule("agent-1", "HEARTBEAT", null, 300L,
                 null, "Health check", "UTC", null, null, "production");
 
         assertTrue(result.contains("schedule_created"));
-        verify(scheduleStore).createSchedule(argThat(s ->
-                s.getTriggerType() == TriggerType.HEARTBEAT
-                        && "persistent".equals(s.getConversationStrategy())
-                        && "heartbeat".equals(s.getMessage())
-        ));
+        verify(scheduleStore).createSchedule(argThat(s -> s.getTriggerType() == TriggerType.HEARTBEAT
+                && "persistent".equals(s.getConversationStrategy())
+                && "heartbeat".equals(s.getMessage())));
     }
 
     @Test
@@ -89,17 +88,15 @@ class McpScheduleToolsTest {
         when(scheduleStore.createSchedule(any())).thenReturn("hb-2");
 
         // triggerType is null, but heartbeatIntervalSeconds is set → infer HEARTBEAT
-        String result = tools.createSchedule("bot-1", null, null, 600L,
+        String result = tools.createSchedule("agent-1", null, null, 600L,
                 null, "Auto-inferred heartbeat", "UTC", null, null, null);
 
         assertTrue(result.contains("schedule_created"));
-        verify(scheduleStore).createSchedule(argThat(s ->
-                s.getTriggerType() == TriggerType.HEARTBEAT
-        ));
+        verify(scheduleStore).createSchedule(argThat(s -> s.getTriggerType() == TriggerType.HEARTBEAT));
     }
 
     @Test
-    void createSchedule_missingBotId_error() {
+    void createSchedule_missingAgentId_error() {
         String result = tools.createSchedule(null, "CRON", "0 9 * * *", null,
                 "Hello", "Test", "UTC", "new", null, null);
 
@@ -109,7 +106,7 @@ class McpScheduleToolsTest {
 
     @Test
     void createSchedule_missingName_error() {
-        String result = tools.createSchedule("bot-1", "CRON", "0 9 * * *", null,
+        String result = tools.createSchedule("agent-1", "CRON", "0 9 * * *", null,
                 "Hello", null, "UTC", "new", null, null);
 
         assertTrue(result.contains("error"));
@@ -118,7 +115,7 @@ class McpScheduleToolsTest {
 
     @Test
     void createSchedule_cronWithoutMessage_error() {
-        String result = tools.createSchedule("bot-1", "CRON", "0 9 * * *", null,
+        String result = tools.createSchedule("agent-1", "CRON", "0 9 * * *", null,
                 null, "No msg", "UTC", "new", null, null);
 
         assertTrue(result.contains("error"));
@@ -127,7 +124,7 @@ class McpScheduleToolsTest {
 
     @Test
     void createSchedule_heartbeatWithoutInterval_error() {
-        String result = tools.createSchedule("bot-1", "HEARTBEAT", null, null,
+        String result = tools.createSchedule("agent-1", "HEARTBEAT", null, null,
                 null, "No interval", "UTC", null, null, null);
 
         assertTrue(result.contains("error"));
@@ -136,7 +133,7 @@ class McpScheduleToolsTest {
 
     @Test
     void createSchedule_invalidCron_error() {
-        String result = tools.createSchedule("bot-1", "CRON", "bad cron", null,
+        String result = tools.createSchedule("agent-1", "CRON", "bad cron", null,
                 "Hello", "Bad cron", "UTC", "new", null, null);
 
         assertTrue(result.contains("error"));
@@ -147,12 +144,10 @@ class McpScheduleToolsTest {
     void createSchedule_customUserId() throws Exception {
         when(scheduleStore.createSchedule(any())).thenReturn("sched-uid");
 
-        tools.createSchedule("bot-1", "CRON", "0 9 * * *", null,
+        tools.createSchedule("agent-1", "CRON", "0 9 * * *", null,
                 "Hello", "Custom user", "UTC", "new", "admin@company.com", null);
 
-        verify(scheduleStore).createSchedule(argThat(s ->
-                "admin@company.com".equals(s.getUserId())
-        ));
+        verify(scheduleStore).createSchedule(argThat(s -> "admin@company.com".equals(s.getUserId())));
     }
 
     // --- listSchedules ---
@@ -167,12 +162,12 @@ class McpScheduleToolsTest {
     }
 
     @Test
-    void listSchedules_withBotId_callsReadByBot() throws Exception {
-        when(scheduleStore.readSchedulesByBotId("bot-1")).thenReturn(List.of());
+    void listSchedules_withAgentId_callsReadByAgent() throws Exception {
+        when(scheduleStore.readSchedulesByAgentId("agent-1")).thenReturn(List.of());
 
-        tools.listSchedules("bot-1");
+        tools.listSchedules("agent-1");
 
-        verify(scheduleStore).readSchedulesByBotId("bot-1");
+        verify(scheduleStore).readSchedulesByAgentId("agent-1");
         verify(scheduleStore, never()).readAllSchedules(anyInt());
     }
 
@@ -247,7 +242,7 @@ class McpScheduleToolsTest {
         s.setId(id);
         s.setName("Test Schedule");
         s.setTriggerType(TriggerType.CRON);
-        s.setAgentId("bot-1");
+        s.setAgentId("agent-1");
         s.setCronExpression("0 9 * * *");
         s.setMessage("Hello");
         s.setEnvironment("production");
@@ -261,7 +256,6 @@ class McpScheduleToolsTest {
                 "log-1", scheduleId, "fire-1",
                 Instant.now(), Instant.now(), Instant.now(),
                 FireStatus.COMPLETED.name(), "test-instance", "conv-1",
-                null, 1, 0.0
-        );
+                null, 1, 0.0);
     }
 }

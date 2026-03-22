@@ -5,7 +5,7 @@ package ai.labs.eddi.secrets.model;
  * Parsed from the {@code ${eddivault:tenantId/agentId/keyName}} syntax.
  *
  * @param tenantId the tenant namespace (default: "default" for single-tenant)
- * @param agentId    the Agent identifier
+ * @param agentId  the Agent identifier
  * @param keyName  the secret key name
  */
 public record SecretReference(String tenantId, String agentId, String keyName) {
@@ -18,9 +18,11 @@ public record SecretReference(String tenantId, String agentId, String keyName) {
     /**
      * Parse a vault reference string into a SecretReference.
      *
-     * @param reference the full reference string, e.g. "${eddivault:default/myBot/openaiKey}"
+     * @param reference the full reference string, e.g.
+     *                  "${eddivault:default/myAgent/openaiKey}"
      * @return the parsed SecretReference
-     * @throws IllegalArgumentException if the string doesn't match the expected format
+     * @throws IllegalArgumentException if the string doesn't match the expected
+     *                                  format
      */
     public static SecretReference parse(String reference) {
         var matcher = java.util.regex.Pattern.compile(VAULT_PATTERN).matcher(reference);

@@ -80,19 +80,19 @@ public class RestConversationStore implements IRestConversationStore {
 
                 for (var conversationDescriptor : conversationDescriptors) {
                     URI resourceUri = conversationDescriptor.getResource();
-                    var botResourceId = extractResourceId(resourceUri);
-                    if (botResourceId == null) {
-                        log.warn(format("botResourceId was null, this should never happen. (%s)", resourceUri));
+                    var agentResourceId = extractResourceId(resourceUri);
+                    if (agentResourceId == null) {
+                        log.warn(format("agentResourceId was null, this should never happen. (%s)", resourceUri));
                         continue;
                     }
 
-                    populateDataToDescriptor(conversationDescriptor, botResourceId);
+                    populateDataToDescriptor(conversationDescriptor, agentResourceId);
 
-                    if (!isNullOrEmpty(agentId) && !agentId.equals(botResourceId.getId())) {
+                    if (!isNullOrEmpty(agentId) && !agentId.equals(agentResourceId.getId())) {
                         continue;
                     }
 
-                    if (!isNullOrEmpty(agentVersion) && !agentVersion.equals(botResourceId.getVersion())) {
+                    if (!isNullOrEmpty(agentVersion) && !agentVersion.equals(agentResourceId.getVersion())) {
                         continue;
                     }
 
@@ -249,7 +249,8 @@ public class RestConversationStore implements IRestConversationStore {
         List<ConversationMemorySnapshot> conversationMemorySnapshots;
         List<ConversationStatus> conversationStatuses = new LinkedList<>();
 
-        conversationMemorySnapshots = conversationMemoryStore.loadActiveConversationMemorySnapshot(agentId, agentVersion);
+        conversationMemorySnapshots = conversationMemoryStore.loadActiveConversationMemorySnapshot(agentId,
+                agentVersion);
         for (var snapshot : conversationMemorySnapshots) {
             ConversationStatus conversationStatus = new ConversationStatus();
             String conversationId = snapshot.getId();

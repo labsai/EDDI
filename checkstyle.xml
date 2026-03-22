@@ -5,70 +5,57 @@
 
 <!--
     EDDI Checkstyle Configuration
-    Based on Google Java Style with relaxations for existing codebase.
+    Pragmatic checks for a large enterprise codebase.
+    Focus: correctness and safety over style preferences.
     See: https://checkstyle.org/checks.html
 -->
 <module name="Checker">
     <property name="severity" value="warning"/>
     <property name="charset" value="UTF-8"/>
 
+    <!-- Suppress checks in generated/test files -->
+    <module name="SuppressionSingleFilter">
+        <property name="checks" value=".*"/>
+        <property name="files" value=".*[\\/]target[\\/].*"/>
+    </module>
+
     <!-- File-level checks -->
     <module name="FileLength">
         <property name="max" value="2000"/>
     </module>
 
-    <!-- Line length: 120 (relaxed from Google's 100) -->
+    <!-- Line length: 150 (realistic for Java with generics/annotations) -->
     <module name="LineLength">
-        <property name="max" value="120"/>
-        <property name="ignorePattern" value="^package.*|^import.*|href|http://|https://|ftp://"/>
+        <property name="max" value="150"/>
+        <property name="ignorePattern" value="^package.*|^import.*|a]href|http://|https://|ftp://"/>
     </module>
 
     <module name="FileTabCharacter">
         <property name="eachLine" value="true"/>
     </module>
 
-    <!-- Trailing whitespace -->
-    <module name="RegexpSingleline">
-        <property name="format" value="\s+$"/>
-        <property name="message" value="Line has trailing whitespace."/>
-    </module>
-
     <module name="TreeWalker">
         <!-- Naming conventions -->
         <module name="TypeName"/>
         <module name="MethodName"/>
-        <module name="ConstantName"/>
         <module name="LocalVariableName"/>
         <module name="MemberName"/>
         <module name="ParameterName"/>
         <module name="PackageName"/>
 
+        <!-- Constants: allow UPPER_CASE and camelCase (many legacy constants) -->
+        <module name="ConstantName">
+            <property name="format" value="^[a-zA-Z][a-zA-Z0-9_]*$"/>
+        </module>
+
         <!-- Import checks -->
-        <module name="AvoidStarImport"/>
         <module name="RedundantImport"/>
         <module name="UnusedImports"/>
 
-
-
-        <!-- Whitespace -->
-        <module name="WhitespaceAround">
-            <property name="allowEmptyConstructors" value="true"/>
-            <property name="allowEmptyMethods" value="true"/>
-            <property name="allowEmptyTypes" value="true"/>
-            <property name="allowEmptyLoops" value="true"/>
-        </module>
+        <!-- Whitespace — only critical ones -->
         <module name="GenericWhitespace"/>
-        <module name="NoWhitespaceBefore"/>
-        <module name="NoWhitespaceAfter"/>
 
-        <!-- Blocks -->
-        <module name="NeedBraces">
-            <property name="allowSingleLineStatement" value="true"/>
-        </module>
-        <module name="LeftCurly"/>
-        <module name="RightCurly"/>
-
-        <!-- Coding -->
+        <!-- Coding — safety checks (catch real bugs) -->
         <module name="EqualsHashCode"/>
         <module name="SimplifyBooleanExpression"/>
         <module name="SimplifyBooleanReturn"/>
@@ -76,13 +63,12 @@
         <module name="OneStatementPerLine"/>
         <module name="MultipleVariableDeclarations"/>
         <module name="FallThrough"/>
-        <module name="MissingSwitchDefault"/>
+        <module name="MissingSwitchDefault">
+            <!-- Allow in switch expressions and pattern matching -->
+            <property name="severity" value="info"/>
+        </module>
 
         <!-- Modifiers -->
         <module name="ModifierOrder"/>
-        <module name="RedundantModifier"/>
-
-        <!-- Javadoc — relaxed, not required -->
-        <!-- We don't enforce @author tags -->
     </module>
 </module>

@@ -47,7 +47,7 @@ body:
         - LLM Integration (LangChain)
         - MCP Server
         - REST API
-        - Bot Manager UI
+        - Agent Manager UI
         - Chat UI
         - Documentation
         - DevOps / Docker / Kubernetes

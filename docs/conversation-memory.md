@@ -10,8 +10,8 @@
 
 Think of Conversation Memory as a **living document** that captures everything about a conversation:
 
-- **Who**: User ID and bot ID
-- **What**: All messages exchanged (both user inputs and bot outputs)
+- **Who**: User ID and agent ID
+- **What**: All messages exchanged (agenth user inputs and agent outputs)
 - **When**: Timestamp of each interaction
 - **Context**: Data passed from external systems (user profile, session info, etc.)
 - **State**: Current processing stage (READY, IN_PROGRESS, ENDED, etc.)
@@ -25,16 +25,17 @@ Think of Conversation Memory as a **living document** that captures everything a
 A conversation is divided into **steps**, where each step represents one complete interaction cycle:
 
 ```
-Step 1: User says "Hello" → Bot responds "Hi, how can I help?"
-Step 2: User says "What's the weather?" → Bot responds "The weather is sunny, 75°F"
+Step 1: User says "Hello" → Agent responds "Hi, how can I help?"
+Step 2: User says "What's the weather?" → Agent responds "The weather is sunny, 75°F"
 Step 3: ...
 ```
 
 Each step contains:
+
 - **Input**: What the user said
 - **Actions**: Actions triggered by behavior rules
 - **Data**: Results from lifecycle tasks (parsed expressions, API responses, LLM outputs)
-- **Output**: Bot's response
+- **Output**: Agent's response
 
 ### 2. Current Step vs Previous Steps
 
@@ -50,11 +51,11 @@ IConversationStepStack getPreviousSteps();    // All completed steps (history)
 
 EDDI supports different scopes for storing data:
 
-| Scope | Lifetime | Use Case |
-|-------|----------|----------|
-| `step` | Single interaction | Temporary data needed only for this response |
-| `conversation` | Entire conversation | User preferences, extracted entities (persists across steps) |
-| `longTerm` | Across conversations | User profile data that should persist between sessions |
+| Scope          | Lifetime             | Use Case                                                     |
+| -------------- | -------------------- | ------------------------------------------------------------ |
+| `step`         | Single interaction   | Temporary data needed only for this response                 |
+| `conversation` | Entire conversation  | User preferences, extracted entities (persists across steps) |
+| `longTerm`     | Across conversations | User profile data that should persist between sessions       |
 
 ### 4. Undo/Redo Support
 
@@ -68,9 +69,10 @@ boolean isRedoAvailable(); // Check if redo is possible
 ```
 
 This enables scenarios like:
+
 - User makes a mistake and wants to go back
 - Testing different conversation paths
-- Debugging bot behavior
+- Debugging agent behavior
 
 ## Conversation Memory Structure
 
@@ -80,26 +82,26 @@ This enables scenarios like:
 public interface IConversationMemory {
     // Identity
     String getConversationId();
-    String getBotId();
-    Integer getBotVersion();
+    String getAgentId();
+    Integer getAgentVersion();
     String getUserId();
-    
+
     // State
     ConversationState getConversationState();
     void setConversationState(ConversationState state);
-    
+
     // Steps
     IWritableConversationStep getCurrentStep();
     IConversationStepStack getPreviousSteps();
     IConversationStepStack getAllSteps();
     int size();  // Total number of steps
-    
+
     // Properties
     IConversationProperties getConversationProperties();
-    
+
     // Output
     List<ConversationOutput> getConversationOutputs();
-    
+
     // History management
     void undoLastStep();
     void redoLastStep();
@@ -111,7 +113,7 @@ public interface IConversationMemory {
 
 ```java
 public enum ConversationState {
-    READY,           // Bot is ready to process next input
+    READY,           // Agent is ready to process next input
     IN_PROGRESS,     // Currently processing a message
     EXECUTION_INTERRUPTED,  // Processing was interrupted
     ERROR,           // An error occurred
@@ -128,10 +130,10 @@ Each lifecycle task follows this pattern:
 public void execute(IConversationMemory memory, Object component) {
     // 1. Read from memory
     String userInput = memory.getCurrentStep().getLatestData("input").getResult();
-    
+
     // 2. Perform task logic
     String processed = process(userInput);
-    
+
     // 3. Write results back to memory
     IData<String> data = dataFactory.createData("output", processed);
     memory.getCurrentStep().storeData(data);
@@ -142,7 +144,7 @@ public void execute(IConversationMemory memory, Object component) {
 
 ```java
 // Reads conversation memory to check conditions
-IData<List<String>> expressionsData = 
+IData<List<String>> expressionsData =
     memory.getCurrentStep().getLatestData("expressions");
 
 // If conditions match, stores actions in memory
@@ -240,6 +242,7 @@ Request → Check Cache → If Miss: Load from MongoDB → Execute Lifecycle →
 ```
 
 EDDI uses **Infinispan** for distributed caching:
+
 - Fast retrieval of frequently accessed conversations
 - Reduced MongoDB load
 - Supports horizontal scaling across multiple EDDI instances
@@ -249,8 +252,8 @@ EDDI uses **Infinispan** for distributed caching:
 ```javascript
 {
   "_id": "conversationId",
-  "botId": "bot-123",
-  "botVersion": 1,
+  "agentId": "agent-123",
+  "agentVersion": 1,
   "userId": "user-456",
   "conversationState": "READY",
   "conversationSteps": [
@@ -313,8 +316,8 @@ When calling LLMs, you can control how much history is sent:
 {
   "parameters": {
     "sendConversation": "true",
-    "includeFirstBotMessage": "true",
-    "logSizeLimit": "10"  // Only last 10 messages
+    "includeFirstAgentMessage": "true",
+    "logSizeLimit": "10" // Only last 10 messages
   }
 }
 ```
@@ -325,7 +328,7 @@ Pass data from your application via context instead of hardcoding:
 
 ```javascript
 // API Request
-POST /bots/prod/mybot/conversation123
+POST /agents/prod/myagent/conversation123
 {
   "input": "What's my order status?",
   "context": {
@@ -335,7 +338,8 @@ POST /bots/prod/mybot/conversation123
 }
 ```
 
-Then access in bot logic:
+Then access in agent logic:
+
 ```
 ${memory.current.context.userId}
 ```
@@ -345,8 +349,9 @@ ${memory.current.context.userId}
 Let's trace how memory flows through a complete conversation step:
 
 ### 1. User Request
+
 ```json
-POST /bots/prod/weatherbot/conv-123
+POST /agents/prod/weatheragent/conv-123
 {
   "input": "What's the weather in Paris?",
   "context": {
@@ -356,6 +361,7 @@ POST /bots/prod/weatherbot/conv-123
 ```
 
 ### 2. Memory Initialization
+
 ```java
 IConversationMemory memory = loadOrCreateMemory("conv-123");
 memory.getCurrentStep().storeData(
@@ -367,6 +373,7 @@ memory.getConversationProperties().put(
 ```
 
 ### 3. Parser Task Execution
+
 ```java
 // Reads input
 String input = memory.getCurrentStep().getLatestData("input").getResult();
@@ -382,6 +389,7 @@ memory.getCurrentStep().storeData(
 ```
 
 ### 4. Behavior Rules Execution
+
 ```java
 // Reads expressions
 List<String> expressions = memory.getCurrentStep()
@@ -396,6 +404,7 @@ if (matchesRule(expressions, "entity(weather)")) {
 ```
 
 ### 5. HTTP Call Execution
+
 ```java
 // Reads action
 List<String> actions = memory.getCurrentStep()
@@ -404,10 +413,10 @@ List<String> actions = memory.getCurrentStep()
 if (actions.contains("fetch_weather")) {
     // Extract location from expressions
     String location = extractLocation(expressions);  // "paris"
-    
+
     // Make API call
     JsonObject weather = weatherApi.get(location);
-    
+
     // Store response
     memory.getCurrentStep().storeData(
         dataFactory.createData("weatherData", weather)
@@ -416,6 +425,7 @@ if (actions.contains("fetch_weather")) {
 ```
 
 ### 6. Output Generation
+
 ```java
 // Reads weather data
 JsonObject weather = memory.getCurrentStep()
@@ -435,6 +445,7 @@ memory.getCurrentStep().storeData(
 ```
 
 ### 7. Memory Persistence
+
 ```java
 // Save to MongoDB
 conversationMemoryStore.save(memory);
@@ -444,6 +455,7 @@ cache.put("conv-123", memory.getConversationState());
 ```
 
 ### 8. Response to User
+
 ```json
 {
   "conversationState": "READY",
@@ -497,4 +509,3 @@ for (IConversationStep step : previousSteps) {
 - [Output Templating](output-templating.md) - Accessing memory in outputs
 - [HTTP Calls](httpcalls.md) - Storing API responses in memory
 - [LangChain Integration](langchain.md) - Using conversation history with LLMs
-

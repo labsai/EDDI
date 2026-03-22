@@ -56,7 +56,7 @@ class RestTenantQuotaTest {
 
         TenantQuota stored = quotaStore.getQuota(TENANT_ID);
         assertEquals(100, stored.maxConversationsPerDay());
-        assertEquals(10, stored.maxBotsPerTenant());
+        assertEquals(10, stored.maxAgentsPerTenant());
         assertEquals(50, stored.maxApiCallsPerMinute());
         assertEquals(500.0, stored.maxMonthlyCostUsd());
         assertTrue(stored.enabled());

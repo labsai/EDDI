@@ -32,7 +32,7 @@ import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
 
 @ApplicationScoped
 public class RestAgentStore implements IRestAgentStore {
-    private static final String PACKAGE_URI = IRestWorkflowStore.resourceURI;
+    private static final String WORKFLOW_URI = IRestWorkflowStore.resourceURI;
     private final IAgentStore agentStore;
     private final IRestWorkflowStore restWorkflowStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
@@ -66,21 +66,21 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     @Override
-    public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.bot", filter, index, limit);
+    public List<DocumentDescriptor> readAgentDescriptors(String filter, Integer index, Integer limit) {
+        return restVersionInfo.readDescriptors("ai.labs.agent", filter, index, limit);
     }
 
     @Override
-    public List<DocumentDescriptor> readBotDescriptors(String filter, Integer index, Integer limit,
-            String containingPackageUri, Boolean includePreviousVersions) {
+    public List<DocumentDescriptor> readAgentDescriptors(String filter, Integer index, Integer limit,
+            String containingWorkflowUri, Boolean includePreviousVersions) {
 
-        IResourceId validatedResourceId = validateUri(containingPackageUri);
-        if (validatedResourceId == null || !containingPackageUri.startsWith(PACKAGE_URI)) {
-            return createMalFormattedResourceUriException(containingPackageUri);
+        IResourceId validatedResourceId = validateUri(containingWorkflowUri);
+        if (validatedResourceId == null || !containingWorkflowUri.startsWith(WORKFLOW_URI)) {
+            return createMalFormattedResourceUriException(containingWorkflowUri);
         }
 
         try {
-            return agentStore.getBotDescriptorsContainingPackage(
+            return agentStore.getAgentDescriptorsContainingWorkflow(
                     validatedResourceId.getId(), validatedResourceId.getVersion(), includePreviousVersions);
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
@@ -88,22 +88,22 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     @Override
-    public AgentConfiguration readBot(String id, Integer version) {
+    public AgentConfiguration readAgent(String id, Integer version) {
         return restVersionInfo.read(id, version);
     }
 
     @Override
-    public Response updateBot(String id, Integer version, AgentConfiguration agentConfiguration) {
+    public Response updateAgent(String id, Integer version, AgentConfiguration agentConfiguration) {
         return restVersionInfo.update(id, version, agentConfiguration);
     }
 
     @Override
-    public Response updateResourceInBot(String id, Integer version, URI resourceURI) {
+    public Response updateResourceInAgent(String id, Integer version, URI resourceURI) {
         String resourceURIString = resourceURI.toString();
         String resourceURIWithoutVersion = resourceURIString.substring(0, resourceURIString.lastIndexOf("?"));
 
         boolean updated = false;
-        AgentConfiguration agentConfig = readBot(id, version);
+        AgentConfiguration agentConfig = readAgent(id, version);
         List<URI> packages = agentConfig.getWorkflows();
         for (int index = 0; index < packages.size(); index++) {
             URI workflowUri = packages.get(index);
@@ -114,7 +114,7 @@ public class RestAgentStore implements IRestAgentStore {
         }
 
         if (updated) {
-            return updateBot(id, version, agentConfig);
+            return updateAgent(id, version, agentConfig);
         } else {
             URI uri = RestUtilities.createURI(RestWorkflowStore.resourceURI, id, versionQueryParam, version);
             return Response.status(BAD_REQUEST).entity(uri).type(MediaType.TEXT_PLAIN).build();
@@ -127,7 +127,7 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     @Override
-    public Response duplicateBot(String id, Integer version, Boolean deepCopy) {
+    public Response duplicateAgent(String id, Integer version, Boolean deepCopy) {
         restVersionInfo.validateParameters(id, version);
         try {
             AgentConfiguration agentConfig = agentStore.read(id, version);
@@ -136,7 +136,7 @@ public class RestAgentStore implements IRestAgentStore {
                 for (int i = 0; i < packages.size(); i++) {
                     URI workflowUri = packages.get(i);
                     IResourceId resourceId = RestUtilities.extractResourceId(workflowUri);
-                    Response duplicateResourceResponse = restWorkflowStore.duplicatePackage(resourceId.getId(),
+                    Response duplicateResourceResponse = restWorkflowStore.duplicateWorkflow(resourceId.getId(),
                             resourceId.getVersion(), true);
                     URI newResourceLocation = duplicateResourceResponse.getLocation();
                     packages.set(i, newResourceLocation);
@@ -144,7 +144,8 @@ public class RestAgentStore implements IRestAgentStore {
             }
 
             Response createAgentResponse = restVersionInfo.create(agentConfig);
-            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createAgentResponse.getLocation());
+            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version,
+                    createAgentResponse.getLocation());
 
             return createAgentResponse;
         } catch (Exception e) {
@@ -153,11 +154,11 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     @Override
-    public Response deleteBot(String id, Integer version, Boolean permanent, Boolean cascade) {
+    public Response deleteAgent(String id, Integer version, Boolean permanent, Boolean cascade) {
         if (cascade) {
             // Cascade-delete all schedules for this Agent first
             try {
-                int deletedSchedules = scheduleStore.deleteSchedulesByBotId(id);
+                int deletedSchedules = scheduleStore.deleteSchedulesByAgentId(id);
                 if (deletedSchedules > 0) {
                     log.infof("Cascade-deleted %d schedule(s) for Agent %s", deletedSchedules, id);
                 }
@@ -170,18 +171,18 @@ public class RestAgentStore implements IRestAgentStore {
                 for (URI workflowUri : agentConfig.getWorkflows()) {
                     IResourceId resourceId = RestUtilities.extractResourceId(workflowUri);
                     try {
-                        // Check if this package is referenced by other bots
-                        var referencingBots = agentStore.getBotDescriptorsContainingPackage(
+                        // Check if this package is referenced by other agents
+                        var referencingAgents = agentStore.getAgentDescriptorsContainingWorkflow(
                                 resourceId.getId(), resourceId.getVersion(), false);
-                        if (referencingBots.size() > 1) {
+                        if (referencingAgents.size() > 1) {
                             log.infof("Skipping cascade-delete of package %s (v%d) — " +
-                                            "still referenced by %d other bot(s)",
+                                    "still referenced by %d other agent(s)",
                                     resourceId.getId(), resourceId.getVersion(),
-                                    referencingBots.size() - 1);
+                                    referencingAgents.size() - 1);
                             continue;
                         }
 
-                        restWorkflowStore.deletePackage(
+                        restWorkflowStore.deleteWorkflow(
                                 resourceId.getId(), resourceId.getVersion(), permanent, true);
                         log.infof("Cascade-deleted package %s (v%d) for Agent %s",
                                 resourceId.getId(), resourceId.getVersion(), id);
@@ -191,7 +192,7 @@ public class RestAgentStore implements IRestAgentStore {
                     }
                 }
             } catch (IResourceStore.ResourceNotFoundException e) {
-                log.warnf("Bot %s (v%d) not found for cascade — deleting Agent only", id, version);
+                log.warnf("Agent %s (v%d) not found for cascade — deleting Agent only", id, version);
             } catch (IResourceStore.ResourceStoreException e) {
                 log.warnf("Error reading Agent %s for cascade: %s", id, e.getMessage());
             }

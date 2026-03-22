@@ -1,21 +1,21 @@
-# Bot Father - New Conversation Flow Diagram
+# Agent Father - New Conversation Flow Diagram
 
 ## Updated Conversation Flow (v3.0.1 with LangChain Tools)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    USER STARTS BOT CREATION                     │
-│              (e.g., "Create an OpenAI bot")                     │
+│                    USER STARTS AGENT CREATION                     │
+│              (e.g., "Create an OpenAI agent")                     │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│  Step 1: Bot Name                                               │
-│  ❓ "What would you like to name your bot?"                    │
-│  💬 User: "My Assistant Bot"                                   │
+│  Step 1: Agent Name                                               │
+│  ❓ "What would you like to name your agent?"                    │
+│  💬 User: "My Assistant Agent"                                   │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│  Step 2: Bot Intro Message                                      │
+│  Step 2: Agent Intro Message                                      │
 │  ❓ "What should be the intro message?"                        │
 │  💬 User: "Hello! I'm your AI assistant."                     │
 └─────────────────────────────────────────────────────────────────┘
@@ -91,27 +91,27 @@
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │  Step 11: Confirmation                                          │
-│  ❓ "Continue with creating this connector bot?"               │
+│  ❓ "Continue with creating this connector agent?"               │
 │                                                                 │
-│  🔘 Create the bot!                                            │
+│  🔘 Create the agent!                                            │
 │  🔘 Cancel this                                                │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│                    BOT CREATION PROCESS                         │
+│                    AGENT CREATION PROCESS                         │
 │  • Create behavior rules                                        │
 │  • Create langchain config (with new params) 🆕                 │
 │  • Create output set                                            │
 │  • Create package                                               │
-│  • Create bot                                                   │
-│  • Deploy bot                                                   │
+│  • Create agent                                                   │
+│  • Deploy agent                                                   │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │                     ✅ SUCCESS MESSAGE                          │
-│  "It's all done! Your bot was successfully created!"            │
-│  • Link to chat with bot                                        │
-│  • Link to managed bot API                                      │
+│  "It's all done! Your agent was successfully created!"            │
+│  • Link to chat with agent                                        │
+│  • Link to managed agent API                                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -120,35 +120,40 @@
 ## Quick Reply Options Summary
 
 ### Step 8: Enable Built-in Tools
-| Button | Value | Description |
-|--------|-------|-------------|
-| Yes, enable tools | `true` | Enables AI agent mode with tools |
-| No, just simple chat | `false` | Standard chat mode only |
+
+| Button               | Value   | Description                      |
+| -------------------- | ------- | -------------------------------- |
+| Yes, enable tools    | `true`  | Enables AI agent mode with tools |
+| No, just simple chat | `false` | Standard chat mode only          |
 
 ### Step 9a: Tools Whitelist (Conditional)
-| Button | Value | Result |
-|--------|-------|--------|
-| Enable all tools | `[]` | All 8 tools available |
-| Calculator & Web Search | `["calculator","websearch"]` | Only 2 tools |
-| Calculator, Web, DateTime | `["calculator","websearch","datetime"]` | Only 3 tools |
+
+| Button                    | Value                                   | Result                |
+| ------------------------- | --------------------------------------- | --------------------- |
+| Enable all tools          | `[]`                                    | All 8 tools available |
+| Calculator & Web Search   | `["calculator","websearch"]`            | Only 2 tools          |
+| Calculator, Web, DateTime | `["calculator","websearch","datetime"]` | Only 3 tools          |
 
 **Manual Entry Example:**
+
 ```json
 ["calculator", "websearch", "datetime", "weather"]
 ```
 
 ### Step 10: Conversation History Limit
-| Button | Value | Context Size |
-|--------|-------|--------------|
-| 10 turns (recommended) | `10` | Last 10 conversation exchanges |
-| 20 turns | `20` | Last 20 conversation exchanges |
-| Unlimited | `-1` | All conversation history |
+
+| Button                 | Value | Context Size                   |
+| ---------------------- | ----- | ------------------------------ |
+| 10 turns (recommended) | `10`  | Last 10 conversation exchanges |
+| 20 turns               | `20`  | Last 20 conversation exchanges |
+| Unlimited              | `-1`  | All conversation history       |
 
 ---
 
 ## Conditional Flow Logic
 
 ### Tools Whitelist Decision
+
 ```
 if (enableBuiltInTools === "true") {
     → Show "ask_for_tools_whitelist"
@@ -160,18 +165,21 @@ if (enableBuiltInTools === "true") {
 ```
 
 ### Implementation in Behavior Rules
+
 ```json
 {
   "name": "Ask for tools whitelist",
   "actions": ["ask_for_tools_whitelist"],
-  "conditions": [{
-    "type": "dynamicvaluematcher",
-    "configs": {
-      "valuePath": "properties.enableBuiltInTools",
-      "valueOperator": "equals",
-      "value": "true"
+  "conditions": [
+    {
+      "type": "dynamicvaluematcher",
+      "configs": {
+        "valuePath": "properties.enableBuiltInTools",
+        "valueOperator": "equals",
+        "value": "true"
+      }
     }
-  }]
+  ]
 }
 ```
 
@@ -179,33 +187,36 @@ if (enableBuiltInTools === "true") {
 
 ## Generated Configuration Example
 
-After completing all steps, Bot Father generates this langchain configuration:
+After completing all steps, Agent Father generates this langchain configuration:
 
 ```json
 {
-  "tasks": [{
-    "actions": ["send_message"],
-    "id": "openai",
-    "type": "openai",
-    "description": "Integration with OpenAI API",
-    "parameters": {
-      "systemMessage": "You are a helpful assistant",
-      "addToOutput": "true",
-      "apiKey": "sk-...",
-      "modelName": "gpt-4o",
-      "timeout": "15000",
-      "temperature": "0.7",
-      "logRequests": "true",
-      "logResponses": "true"
-    },
-    "enableBuiltInTools": true,              // 🆕 NEW
-    "builtInToolsWhitelist": [               // 🆕 NEW
-      "calculator",
-      "websearch",
-      "datetime"
-    ],
-    "conversationHistoryLimit": 10          // 🆕 NEW
-  }]
+  "tasks": [
+    {
+      "actions": ["send_message"],
+      "id": "openai",
+      "type": "openai",
+      "description": "Integration with OpenAI API",
+      "parameters": {
+        "systemMessage": "You are a helpful assistant",
+        "addToOutput": "true",
+        "apiKey": "sk-...",
+        "modelName": "gpt-4o",
+        "timeout": "15000",
+        "temperature": "0.7",
+        "logRequests": "true",
+        "logResponses": "true"
+      },
+      "enableBuiltInTools": true, // 🆕 NEW
+      "builtInToolsWhitelist": [
+        // 🆕 NEW
+        "calculator",
+        "websearch",
+        "datetime"
+      ],
+      "conversationHistoryLimit": 10 // 🆕 NEW
+    }
+  ]
 }
 ```
 
@@ -215,24 +226,25 @@ After completing all steps, Bot Father generates this langchain configuration:
 
 ### Properties Set During Flow
 
-| Step | Property | Source | Scope |
-|------|----------|--------|-------|
-| 1 | `botName` | User input | conversation |
-| 2 | `intro` | User input | conversation |
-| 3 | `prompt` | User input | conversation |
-| 4 | `apiKey` | User input | conversation |
-| 5 | `modelName` | User input | conversation |
-| 6 | `temperature` | User input | conversation |
-| 7 | `timeout` | User input | conversation |
-| 8 🆕 | `enableBuiltInTools` | Quick reply / input | conversation |
-| 9 🆕 | `builtInToolsWhitelist` | Quick reply / input / default | conversation |
-| 10 🆕 | `conversationHistoryLimit` | Quick reply / input | conversation |
+| Step  | Property                   | Source                        | Scope        |
+| ----- | -------------------------- | ----------------------------- | ------------ |
+| 1     | `agentName`                | User input                    | conversation |
+| 2     | `intro`                    | User input                    | conversation |
+| 3     | `prompt`                   | User input                    | conversation |
+| 4     | `apiKey`                   | User input                    | conversation |
+| 5     | `modelName`                | User input                    | conversation |
+| 6     | `temperature`              | User input                    | conversation |
+| 7     | `timeout`                  | User input                    | conversation |
+| 8 🆕  | `enableBuiltInTools`       | Quick reply / input           | conversation |
+| 9 🆕  | `builtInToolsWhitelist`    | Quick reply / input / default | conversation |
+| 10 🆕 | `conversationHistoryLimit` | Quick reply / input           | conversation |
 
 ---
 
 ## Error Handling & Validation
 
 ### User Input Validation
+
 - **API Key:** No validation (passed as-is)
 - **Model Name:** No validation (provider-specific)
 - **Temperature:** Expected numeric string (0.0-1.0)
@@ -242,25 +254,27 @@ After completing all steps, Bot Father generates this langchain configuration:
 - **conversationHistoryLimit:** Must be numeric (-1, 0, or positive)
 
 ### Quick Replies Ensure Valid Input
+
 All critical fields have quick reply buttons to ensure valid values.
 
 ---
 
 ## User Experience Timeline
 
-| Phase | Steps | Duration | User Effort |
-|-------|-------|----------|-------------|
-| Basic Config | 1-7 | ~2 min | Standard |
-| Tools Config 🆕 | 8-10 | +30 sec | Low (quick replies) |
-| Confirmation | 11 | ~10 sec | One click |
-| Creation | Auto | ~5 sec | None (automated) |
-| **Total** | **11 steps** | **~3 min** | **Minimal** |
+| Phase           | Steps        | Duration   | User Effort         |
+| --------------- | ------------ | ---------- | ------------------- |
+| Basic Config    | 1-7          | ~2 min     | Standard            |
+| Tools Config 🆕 | 8-10         | +30 sec    | Low (quick replies) |
+| Confirmation    | 11           | ~10 sec    | One click           |
+| Creation        | Auto         | ~5 sec     | None (automated)    |
+| **Total**       | **11 steps** | **~3 min** | **Minimal**         |
 
 ---
 
 ## Comparison: Before vs After
 
 ### Before (v3.0.0)
+
 - **Steps:** 8
 - **Questions:** 7
 - **Tools Support:** ❌
@@ -268,6 +282,7 @@ All critical fields have quick reply buttons to ensure valid values.
 - **Agent Mode:** ❌
 
 ### After (v3.0.1) 🆕
+
 - **Steps:** 11
 - **Questions:** 10
 - **Tools Support:** ✅ (8 tools available)
@@ -279,4 +294,3 @@ All critical fields have quick reply buttons to ensure valid values.
 **Flow Version:** 3.0.1  
 **Last Updated:** 2025  
 **Applies to:** All 7 LLM providers
-

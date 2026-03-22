@@ -74,7 +74,7 @@ public class ConversationService implements IConversationService {
     private final IContextLogger contextLogger;
     private final AuditLedgerService auditLedgerService;
     private final TenantQuotaService tenantQuotaService;
-    private final int botTimeout;
+    private final int agentTimeout;
     private final IConversationSetup conversationSetup;
     private final ICache<String, ConversationState> conversationStateCache;
 
@@ -109,7 +109,7 @@ public class ConversationService implements IConversationService {
             AuditLedgerService auditLedgerService,
             TenantQuotaService tenantQuotaService,
             MeterRegistry meterRegistry,
-            @ConfigProperty(name = "systemRuntime.botTimeoutInSeconds") int botTimeout) {
+            @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.agentFactory = agentFactory;
         this.conversationMemoryStore = conversationMemoryStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
@@ -121,7 +121,7 @@ public class ConversationService implements IConversationService {
         this.contextLogger = contextLogger;
         this.auditLedgerService = auditLedgerService;
         this.tenantQuotaService = tenantQuotaService;
-        this.botTimeout = botTimeout;
+        this.agentTimeout = agentTimeout;
         this.processingConversationReferences = new ArrayList<>();
 
         this.timerConversationStart = meterRegistry.timer("eddi_conversation_start_duration");
@@ -145,7 +145,7 @@ public class ConversationService implements IConversationService {
     @Override
     public ConversationResult startConversation(Environment environment, String agentId,
             String userId, Map<String, Context> context)
-            throws BotNotReadyException, ResourceStoreException, ResourceNotFoundException {
+            throws AgentNotReadyException, ResourceStoreException, ResourceNotFoundException {
 
         long startTime = System.nanoTime();
         checkNotNull(environment, "environment");
@@ -165,7 +165,7 @@ public class ConversationService implements IConversationService {
             if (latestAgent == null) {
                 String message = "No version of agent (agentId=%s) ready for interaction (environment=%s)!";
                 message = String.format(message, agentId, environment);
-                throw new BotNotReadyException(message);
+                throw new AgentNotReadyException(message);
             }
 
             userId = conversationSetup.computeAnonymousUserIdIfEmpty(userId, context.get(USER_ID));
@@ -178,10 +178,11 @@ public class ConversationService implements IConversationService {
             tenantQuotaService.recordConversationStart();
             var conversationUri = createURI(RESOURCE_URI, conversationId);
 
-            conversationSetup.createConversationDescriptor(agentId, latestAgent, userId, conversationId, conversationUri);
+            conversationSetup.createConversationDescriptor(agentId, latestAgent, userId, conversationId,
+                    conversationUri);
 
             return new ConversationResult(conversationId, conversationUri);
-        } catch (BotNotReadyException e) {
+        } catch (AgentNotReadyException e) {
             throw e;
         } catch (ServiceException | InstantiationException | LifecycleException | IllegalAccessException e) {
             contextLogger.setLoggingContext(contextLogger.createLoggingContext(environment, agentId, null, userId));
@@ -225,7 +226,7 @@ public class ConversationService implements IConversationService {
             Boolean returnDetailed,
             Boolean returnCurrentStepOnly,
             List<String> returningFields)
-            throws BotMismatchException, ResourceStoreException, ResourceNotFoundException {
+            throws AgentMismatchException, ResourceStoreException, ResourceNotFoundException {
 
         long startTime = System.nanoTime();
         validateParams(environment, agentId, conversationId);
@@ -241,8 +242,9 @@ public class ConversationService implements IConversationService {
             if (!agentId.equals(conversationMemorySnapshot.getAgentId())) {
                 String message = "conversationId: '%s' does not belong to Agent with conversationId: '%s'. " +
                         "(provided agentId='%s', agentId in ConversationMemory='%s')";
-                message = String.format(message, conversationId, agentId, agentId, conversationMemorySnapshot.getAgentId());
-                throw new BotMismatchException(message);
+                message = String.format(message, conversationId, agentId, agentId,
+                        conversationMemorySnapshot.getAgentId());
+                throw new AgentMismatchException(message);
             }
 
             return convertSimpleConversationMemorySnapshot(
@@ -298,21 +300,21 @@ public class ConversationService implements IConversationService {
             if (!agentId.equals(conversationMemory.getAgentId())) {
                 String message = "Supplied agentId (%s) is incompatible with conversationId (%s)";
                 message = String.format(message, agentId, conversationId);
-                throw new BotMismatchException(message);
+                throw new AgentMismatchException(message);
             }
 
             IAgent agent = getAgent(environment, agentId, agentVersion);
             if (agent == null) {
                 String msg = "Agent not deployed (environment=%s, conversationId=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
-                throw new BotNotReadyException(msg);
+                throw new AgentNotReadyException(msg);
             }
 
             // Set the audit collector on memory (if auditing is enabled)
             if (auditLedgerService.isEnabled()) {
                 String envName = environment.toString();
-                conversationMemory.setAuditCollector(entry ->
-                        auditLedgerService.submit(entry.withEnvironment(envName)));
+                conversationMemory
+                        .setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
             }
 
             final IConversation conversation = agent.continueConversation(conversationMemory,
@@ -364,7 +366,7 @@ public class ConversationService implements IConversationService {
                     loggingContext, executeConversation);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
-        } catch (BotMismatchException | BotNotReadyException | ConversationEndedException e) {
+        } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
             processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
             throw e;
         } catch (Exception e) {
@@ -401,14 +403,14 @@ public class ConversationService implements IConversationService {
             if (!agentId.equals(conversationMemory.getAgentId())) {
                 String message = "Supplied agentId (%s) is incompatible with conversationId (%s)";
                 message = String.format(message, agentId, conversationId);
-                throw new BotMismatchException(message);
+                throw new AgentMismatchException(message);
             }
 
             IAgent agent = getAgent(environment, agentId, agentVersion);
             if (agent == null) {
                 String msg = "Agent not deployed (environment=%s, conversationId=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
-                throw new BotNotReadyException(msg);
+                throw new AgentNotReadyException(msg);
             }
 
             // Create event sink that delegates to the streaming handler
@@ -446,8 +448,8 @@ public class ConversationService implements IConversationService {
             // Set the audit collector on memory (if auditing is enabled)
             if (auditLedgerService.isEnabled()) {
                 String envName = environment.toString();
-                conversationMemory.setAuditCollector(entry ->
-                        auditLedgerService.submit(entry.withEnvironment(envName)));
+                conversationMemory
+                        .setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
             }
 
             final IConversation conversation = agent.continueConversation(conversationMemory,
@@ -487,7 +489,7 @@ public class ConversationService implements IConversationService {
                     loggingContext, executeConversation);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
-        } catch (BotMismatchException | BotNotReadyException | ConversationEndedException e) {
+        } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
             processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
             throw e;
         } catch (Exception e) {
@@ -508,7 +510,7 @@ public class ConversationService implements IConversationService {
 
     @Override
     public boolean undo(Environment environment, String agentId, String conversationId)
-            throws ResourceStoreException, ResourceNotFoundException, BotMismatchException {
+            throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException {
 
         validateParams(environment, agentId, conversationId);
         long startTime = System.nanoTime();
@@ -538,7 +540,7 @@ public class ConversationService implements IConversationService {
 
     @Override
     public boolean redo(Environment environment, String agentId, String conversationId)
-            throws ResourceStoreException, ResourceNotFoundException, BotMismatchException {
+            throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException {
 
         validateParams(environment, agentId, conversationId);
         long startTime = System.nanoTime();
@@ -639,10 +641,10 @@ public class ConversationService implements IConversationService {
             String conversationId,
             Future<Void> future) {
         try {
-            future.get(botTimeout, TimeUnit.SECONDS);
+            future.get(agentTimeout, TimeUnit.SECONDS);
         } catch (TimeoutException | InterruptedException e) {
             setConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
-            String errorMessage = "Execution of Packages interrupted or timed out.";
+            String errorMessage = "Execution of Workflows interrupted or timed out.";
             contextLogger.setLoggingContext(loggingContext);
             LOGGER.error(errorMessage, e);
             future.cancel(true);
@@ -660,12 +662,12 @@ public class ConversationService implements IConversationService {
     }
 
     private IConversationMemory loadAndValidateConversationMemory(String agentId, String conversationId)
-            throws ResourceStoreException, ResourceNotFoundException, BotMismatchException {
+            throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException {
         var conversationMemory = loadConversationMemory(conversationId);
         checkConversationMemoryNotNull(conversationMemory, conversationId);
 
         if (!agentId.equals(conversationMemory.getAgentId())) {
-            throw new BotMismatchException("Supplied agentId is incompatible to conversationId");
+            throw new AgentMismatchException("Supplied agentId is incompatible to conversationId");
         }
 
         return conversationMemory;

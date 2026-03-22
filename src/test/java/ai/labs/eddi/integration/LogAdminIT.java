@@ -12,7 +12,8 @@ import static org.hamcrest.Matchers.*;
  * Integration tests for the Log Administration REST endpoints.
  * <p>
  * Tests {@code /administration/logs}, {@code /administration/logs/history},
- * {@code /administration/logs/instance}, and {@code /administration/logs/stream}.
+ * {@code /administration/logs/instance}, and
+ * {@code /administration/logs/stream}.
  * <p>
  * The BoundedLogStore registers a JUL handler on startup, so by the time
  * these tests run there will already be log entries in the ring buffer
@@ -87,9 +88,9 @@ public class LogAdminIT {
     @Test
     @Order(5)
     @DisplayName("GET /administration/logs with nonexistent agentId should return empty or filtered list")
-    void getRecentLogs_filtersByBotId() {
+    void getRecentLogs_filtersByAgentId() {
         given()
-                .queryParam("agentId", "nonexistent-bot")
+                .queryParam("agentId", "nonexistent-agent")
                 .get(BASE)
                 .then().assertThat()
                 .statusCode(200)
@@ -116,7 +117,7 @@ public class LogAdminIT {
     @DisplayName("GET /administration/logs/history with filters should return filtered results")
     void getHistoryLogs_acceptsFilters() {
         given()
-                .queryParam("agentId", "nonexistent-bot")
+                .queryParam("agentId", "nonexistent-agent")
                 .queryParam("limit", 10)
                 .queryParam("skip", 0)
                 .get(BASE + "/history")
@@ -132,7 +133,8 @@ public class LogAdminIT {
     @Order(8)
     @DisplayName("GET /administration/logs/stream should accept connection and return SSE content type")
     void streamLogs_returnsSseContentType() throws Exception {
-        // SSE is a long-lived connection — RestAssured blocks. Use raw HTTP with timeout.
+        // SSE is a long-lived connection — RestAssured blocks. Use raw HTTP with
+        // timeout.
         var url = java.net.URI.create("http://localhost:8081" + BASE + "/stream").toURL();
         var conn = (java.net.HttpURLConnection) url.openConnection();
         conn.setReadTimeout(3000); // 3 second timeout

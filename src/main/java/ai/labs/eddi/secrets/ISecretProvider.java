@@ -11,9 +11,9 @@ import java.util.List;
  * <p>
  * All implementations MUST ensure:
  * <ul>
- *   <li>Plaintext values exist only in volatile JVM memory</li>
- *   <li>Namespace isolation: tenant/bot scoping is enforced</li>
- *   <li>Thread safety for concurrent access</li>
+ * <li>Plaintext values exist only in volatile JVM memory</li>
+ * <li>Namespace isolation: tenant/agent scoping is enforced</li>
+ * <li>Thread safety for concurrent access</li>
  * </ul>
  */
 public interface ISecretProvider {
@@ -30,9 +30,10 @@ public interface ISecretProvider {
     String resolve(SecretReference reference) throws SecretNotFoundException, SecretProviderException;
 
     /**
-     * Store a new secret. If a secret with the same reference already exists, it is overwritten.
+     * Store a new secret. If a secret with the same reference already exists, it is
+     * overwritten.
      *
-     * @param reference the secret reference (tenant/bot/keyName)
+     * @param reference the secret reference (tenant/agent/keyName)
      * @param plaintext the plaintext value to encrypt and store
      * @throws SecretProviderException if storage fails
      */
@@ -62,7 +63,7 @@ public interface ISecretProvider {
      * List all secret keys for a given tenant and Agent namespace.
      *
      * @param tenantId the tenant identifier
-     * @param agentId    the Agent identifier
+     * @param agentId  the Agent identifier
      * @return list of metadata for all secrets in the namespace
      * @throws SecretProviderException if the operation fails
      */

@@ -10,5 +10,7 @@ import java.util.List;
  * @author ginccc
  */
 public interface IWorkflowStore extends IResourceStore<WorkflowConfiguration> {
-    List<DocumentDescriptor> getPackageDescriptorsContainingResource(String resourceURI, boolean includePreviousVersions) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+    List<DocumentDescriptor> getWorkflowDescriptorsContainingResource(String resourceURI,
+            boolean includePreviousVersions)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 }

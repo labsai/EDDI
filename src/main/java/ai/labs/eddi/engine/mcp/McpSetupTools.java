@@ -43,7 +43,8 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
 
 /**
  * MCP composite tool for setting up a fully working Agent in a single call.
- * Codifies the Agent Father's 12-step workflow as a programmatic Java operation.
+ * Codifies the Agent Father's 12-step workflow as a programmatic Java
+ * operation.
  *
  * @author ginccc
  */
@@ -53,26 +54,26 @@ public class McpSetupTools {
     private static final Logger LOGGER = Logger.getLogger(McpSetupTools.class);
 
     private final IRestInterfaceFactory restInterfaceFactory;
-    private final IRestAgentAdministration botAdmin;
+    private final IRestAgentAdministration agentAdmin;
     private final IJsonSerialization jsonSerialization;
 
     @Inject
     public McpSetupTools(IRestInterfaceFactory restInterfaceFactory,
-            IRestAgentAdministration botAdmin,
+            IRestAgentAdministration agentAdmin,
             IJsonSerialization jsonSerialization) {
         this.restInterfaceFactory = restInterfaceFactory;
-        this.botAdmin = botAdmin;
+        this.agentAdmin = agentAdmin;
         this.jsonSerialization = jsonSerialization;
     }
 
-    @Tool(name = "setup_bot", description = "Create a fully working, deployed Agent in a single call. " +
+    @Tool(name = "setup_agent", description = "Create a fully working, deployed Agent in a single call. " +
             "This creates all necessary resources (behavior rules, LLM connection, " +
             "output set, package, agent), names them, and optionally deploys the agent. " +
             "This is the fastest way to get a new Agent running — equivalent to the Agent Father workflow.")
-    public String setupBot(
-            @ToolArg(description = "Bot name (required)") String name,
+    public String setupAgent(
+            @ToolArg(description = "Agent name (required)") String name,
             @ToolArg(description = "System prompt / role for the LLM (required). " +
-                    "Describes the bot's personality and purpose.") String systemPrompt,
+                    "Describes the agent's personality and purpose.") String systemPrompt,
             @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', 'gemini', " +
                     "'gemini-vertex', 'huggingface', 'ollama', or 'jlama'") String provider,
             @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default), 'gpt-5.4', " +
@@ -101,7 +102,7 @@ public class McpSetupTools {
         try {
             // Validate required params
             if (name == null || name.isBlank()) {
-                return errorJson("Bot name is required");
+                return errorJson("Agent name is required");
             }
             if (systemPrompt == null || systemPrompt.isBlank()) {
                 return errorJson("System prompt is required");
@@ -162,23 +163,24 @@ public class McpSetupTools {
                 patchDescriptor(outputId, outputVersion, name);
             }
 
-            // --- Step 5: Create Package ---
-            var packageConfig = createPackageConfig(parserLocation, behaviorLocation, null, langchainLocation, outputLocation);
-            Response packageResponse = getRestStore(IRestWorkflowStore.class).createPackage(packageConfig);
+            // --- Step 5: Create Workflow ---
+            var packageConfig = createWorkflowConfig(parserLocation, behaviorLocation, null, langchainLocation,
+                    outputLocation);
+            Response packageResponse = getRestStore(IRestWorkflowStore.class).createWorkflow(packageConfig);
             String packageLocation = packageResponse.getHeaderString("Location");
-            String packageId = extractIdFromLocation(packageLocation);
+            String workflowId = extractIdFromLocation(packageLocation);
             int packageVersion = extractVersionFromLocation(packageLocation);
             createdResources.put("packageLocation", packageLocation);
-            patchDescriptor(packageId, packageVersion, name);
+            patchDescriptor(workflowId, packageVersion, name);
 
             // --- Step 6: Create Agent ---
-            var botConfig = new AgentConfiguration();
-            botConfig.setWorkflows(List.of(URI.create(packageLocation)));
-            Response botResponse = getRestStore(IRestAgentStore.class).createAgent(botConfig);
-            String botLocation = botResponse.getHeaderString("Location");
-            String agentId = extractIdFromLocation(botLocation);
-            int agentVersion = extractVersionFromLocation(botLocation);
-            createdResources.put("botLocation", botLocation);
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setWorkflows(List.of(URI.create(packageLocation)));
+            Response agentResponse = getRestStore(IRestAgentStore.class).createAgent(agentConfig);
+            String agentLocation = agentResponse.getHeaderString("Location");
+            String agentId = extractIdFromLocation(agentLocation);
+            int agentVersion = extractVersionFromLocation(agentLocation);
+            createdResources.put("agentLocation", agentLocation);
             patchDescriptor(agentId, agentVersion, name);
 
             // --- Step 7: Deploy (synchronous wait for completion) ---
@@ -195,15 +197,17 @@ public class McpSetupTools {
             result.put("model", params.modelId);
             if (quickReplies || sentiment) {
                 result.put("responseFormat", "json");
-                if (quickReplies) result.put("quickRepliesEnabled", true);
-                if (sentiment) result.put("sentimentAnalysisEnabled", true);
+                if (quickReplies)
+                    result.put("quickRepliesEnabled", true);
+                if (sentiment)
+                    result.put("sentimentAnalysisEnabled", true);
             }
             result.put("resources", createdResources);
             return jsonSerialization.serialize(result);
 
         } catch (Exception e) {
-            LOGGER.error("MCP setup_bot failed", e);
-            return errorJson("Failed to set up bot: " + e.getMessage());
+            LOGGER.error("MCP setup_agent failed", e);
+            return errorJson("Failed to set up agent: " + e.getMessage());
         }
     }
 
@@ -218,8 +222,7 @@ public class McpSetupTools {
         var config = new ParserConfiguration();
         config.setExtensions(Map.of(
                 "dictionaries", List.of(),
-                "corrections", List.of()
-        ));
+                "corrections", List.of()));
         return config;
     }
 
@@ -265,7 +268,8 @@ public class McpSetupTools {
         task.setType(modelType);
         task.setDescription("LLM integration via " + modelType);
 
-        // Build effective system message: user prompt + optional JSON format instruction
+        // Build effective system message: user prompt + optional JSON format
+        // instruction
         String effectiveSystemPrompt = systemPrompt;
         if (promptResponseJson != null) {
             effectiveSystemPrompt = systemPrompt + "\n\n" + promptResponseJson;
@@ -273,15 +277,18 @@ public class McpSetupTools {
 
         var params = new LinkedHashMap<String, String>();
         params.put("systemMessage", effectiveSystemPrompt);
-        // When JSON format is active, postResponse extracts the clean text — don't also output raw JSON
-        // The raw LLM response is still stored in memory as langchain:{type}:{id} for debugging
+        // When JSON format is active, postResponse extracts the clean text — don't also
+        // output raw JSON
+        // The raw LLM response is still stored in memory as langchain:{type}:{id} for
+        // debugging
         params.put("addToOutput", promptResponseJson == null ? "true" : "false");
         params.put("timeout", "60000");
         params.put("temperature", "0.3");
         params.put("logRequests", "true");
         params.put("logResponses", "true");
 
-        // When JSON response format is active, store as named object for postResponse extraction
+        // When JSON response format is active, store as named object for postResponse
+        // extraction
         if (promptResponseJson != null) {
             params.put("convertToObject", "true");
             task.setResponseObjectName("aiOutput");
@@ -359,7 +366,8 @@ public class McpSetupTools {
     }
 
     /**
-     * Build the postResponse that extracts structured data from the LLM JSON output:
+     * Build the postResponse that extracts structured data from the LLM JSON
+     * output:
      * 1. propertyInstructions: parse aiOutput JSON string into aiOutputObject
      * 2. outputBuildInstructions: extract htmlResponseText as text output to chat
      * 3. qrBuildInstructions: iterate quickReplies array into QR buttons
@@ -369,8 +377,10 @@ public class McpSetupTools {
         var postResponse = new PostResponse();
 
         // The langchain task with convertToObject=true already puts the deserialized
-        // JSON response as a Map under templateDataObjects["aiOutput"] (the responseObjectName).
-        // We can reference aiOutput fields directly in templates — no propertyInstructions needed.
+        // JSON response as a Map under templateDataObjects["aiOutput"] (the
+        // responseObjectName).
+        // We can reference aiOutput fields directly in templates — no
+        // propertyInstructions needed.
 
         // Step 1: Extract htmlResponseText as the text output shown to the user
         var outputInstruction = new OutputBuildingInstruction();
@@ -414,11 +424,12 @@ public class McpSetupTools {
     }
 
     /**
-     * Create package with parser + behavior + [httpcalls...] + langchain [+ output] workflow.
+     * Create package with parser + behavior + [httpcalls...] + langchain [+ output]
+     * workflow.
      * The parser MUST be first in the workflow — it produces NLU expressions
      * that the behavior rules' inputmatcher condition needs.
      */
-    WorkflowConfiguration createPackageConfig(String parserLocation,
+    WorkflowConfiguration createWorkflowConfig(String parserLocation,
             String behaviorLocation,
             List<String> httpCallsLocations,
             String langchainLocation,
@@ -468,13 +479,13 @@ public class McpSetupTools {
         return config;
     }
 
-    @Tool(name = "create_api_bot", description = "Create a Agent that can call any REST API described by an OpenAPI specification. "
+    @Tool(name = "create_api_agent", description = "Create a Agent that can call any REST API described by an OpenAPI specification. "
             +
             "Parses the OpenAPI spec, generates HttpCalls configurations (grouped by API tag), " +
             "and creates a fully deployed Agent with LLM-powered API interaction. " +
             "The LLM can then call the API endpoints as tools through EDDI's controlled workflow.")
     public String createApIAgent(
-            @ToolArg(description = "Bot name (required)") String name,
+            @ToolArg(description = "Agent name (required)") String name,
             @ToolArg(description = "System prompt / role for the LLM (required). " +
                     "Should describe the API and how the Agent should use it.") String systemPrompt,
             @ToolArg(description = "OpenAPI 3.0/3.1 specification as JSON/YAML string or URL (required)") String openApiSpec,
@@ -495,7 +506,7 @@ public class McpSetupTools {
         try {
             // Validate required params
             if (name == null || name.isBlank()) {
-                return errorJson("Bot name is required");
+                return errorJson("Agent name is required");
             }
             if (systemPrompt == null || systemPrompt.isBlank()) {
                 return errorJson("System prompt is required");
@@ -569,23 +580,23 @@ public class McpSetupTools {
             patchDescriptor(extractIdFromLocation(langchainLocation),
                     extractVersionFromLocation(langchainLocation), name);
 
-            // --- Step 6: Create Package (with httpcalls in workflow) ---
-            var packageConfig = createPackageConfig(
+            // --- Step 6: Create Workflow (with httpcalls in workflow) ---
+            var packageConfig = createWorkflowConfig(
                     parserLocation, behaviorLocation, httpCallsLocations, langchainLocation, null);
-            Response packageResponse = getRestStore(IRestWorkflowStore.class).createPackage(packageConfig);
+            Response packageResponse = getRestStore(IRestWorkflowStore.class).createWorkflow(packageConfig);
             String packageLocation = packageResponse.getHeaderString("Location");
             createdResources.put("packageLocation", packageLocation);
             patchDescriptor(extractIdFromLocation(packageLocation),
                     extractVersionFromLocation(packageLocation), name);
 
             // --- Step 7: Create Agent ---
-            var botConfig = new AgentConfiguration();
-            botConfig.setWorkflows(List.of(URI.create(packageLocation)));
-            Response botResponse = getRestStore(IRestAgentStore.class).createAgent(botConfig);
-            String botLocation = botResponse.getHeaderString("Location");
-            String agentId = extractIdFromLocation(botLocation);
-            int agentVersion = extractVersionFromLocation(botLocation);
-            createdResources.put("botLocation", botLocation);
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setWorkflows(List.of(URI.create(packageLocation)));
+            Response agentResponse = getRestStore(IRestAgentStore.class).createAgent(agentConfig);
+            String agentLocation = agentResponse.getHeaderString("Location");
+            String agentId = extractIdFromLocation(agentLocation);
+            int agentVersion = extractVersionFromLocation(agentLocation);
+            createdResources.put("agentLocation", agentLocation);
             patchDescriptor(agentId, agentVersion, name);
 
             // --- Step 8: Deploy (synchronous wait for completion) ---
@@ -595,7 +606,7 @@ public class McpSetupTools {
             }
 
             var result = new LinkedHashMap<String, Object>();
-            result.put("action", "api_bot_created");
+            result.put("action", "api_agent_created");
             result.put("agentId", agentId != null ? agentId : "unknown");
             result.put("agentName", name);
             result.put("provider", params.providerType);
@@ -606,8 +617,8 @@ public class McpSetupTools {
             return jsonSerialization.serialize(result);
 
         } catch (Exception e) {
-            LOGGER.error("MCP create_api_bot failed", e);
-            return errorJson("Failed to create API bot: " + e.getMessage());
+            LOGGER.error("MCP create_api_agent failed", e);
+            return errorJson("Failed to create API agent: " + e.getMessage());
         }
     }
 
@@ -629,13 +640,14 @@ public class McpSetupTools {
 
     /**
      * Deploy a Agent using the REST endpoint with waitForCompletion=true.
-     * The endpoint waits up to 30s for deployment to complete and returns the actual status.
+     * The endpoint waits up to 30s for deployment to complete and returns the
+     * actual status.
      */
     private Map<String, Object> deployAndWait(Deployment.Environment env, String agentId, int agentVersion) {
         var result = new LinkedHashMap<String, Object>();
         result.put("environment", env.name());
         try {
-            Response response = botAdmin.deployAgent(env, agentId, agentVersion, true, true);
+            Response response = agentAdmin.deployAgent(env, agentId, agentVersion, true, true);
             int httpStatus = response.getStatus();
 
             if (httpStatus == 200) {
@@ -644,14 +656,15 @@ public class McpSetupTools {
                     @SuppressWarnings("unchecked")
                     var body = (java.util.Map<String, Object>) response.getEntity();
                     String deployStatus = body != null && body.containsKey("status")
-                            ? body.get("status").toString() : "UNKNOWN";
+                            ? body.get("status").toString()
+                            : "UNKNOWN";
                     result.put("deployed", "READY".equals(deployStatus));
                     result.put("deploymentStatus", deployStatus);
                     if (body != null && body.containsKey("error")) {
                         result.put("deployError", body.get("error").toString());
                     }
                     if (!"READY".equals(deployStatus)) {
-                        String warning = "Bot created but deployment status is " + deployStatus +
+                        String warning = "Agent created but deployment status is " + deployStatus +
                                 ". Check Agent configuration and credentials.";
                         if (body != null && body.containsKey("error")) {
                             warning += " Error: " + body.get("error");
@@ -692,7 +705,8 @@ public class McpSetupTools {
     }
 
     /**
-     * Check if the provider supports the builder-level responseFormat=json parameter.
+     * Check if the provider supports the builder-level responseFormat=json
+     * parameter.
      * Providers that support this will enforce JSON output at the API level,
      * making structured responses more reliable (especially with smaller models).
      */
@@ -704,9 +718,11 @@ public class McpSetupTools {
      * Build the promptResponseJson format instruction for the LLM.
      * Returns null if neither feature is enabled.
      *
-     * <p>This follows the same pattern as the Gnowbe learner bot:
+     * <p>
+     * This follows the same pattern as the Gnowbe learner agent:
      * the instruction tells the LLM to respond with a single valid JSON object
-     * containing the main text reply and optional structured data.</p>
+     * containing the main text reply and optional structured data.
+     * </p>
      *
      * @param quickReplies include quick reply button suggestions
      * @param sentiment    include sentiment analysis fields
@@ -725,9 +741,9 @@ public class McpSetupTools {
         if (quickReplies) {
             schema.put("quickReplies", List.of(
                     "short, button-like suggestions for how the user might want to respond next: " +
-                    "Provide 2-4 concise quick reply buttons that are relevant to your latest answer " +
-                    "and any recent user input. They should prompt fast responses or encourage deeper " +
-                    "exploration (e.g., 'Yes, I agree', 'Tell me more')"));
+                            "Provide 2-4 concise quick reply buttons that are relevant to your latest answer " +
+                            "and any recent user input. They should prompt fast responses or encourage deeper " +
+                            "exploration (e.g., 'Yes, I agree', 'Tell me more')"));
         }
 
         if (sentiment) {
@@ -738,7 +754,8 @@ public class McpSetupTools {
             sentimentObj.put("intent", "String - e.g., 'complaint', 'question', 'feedback', 'feature_request'");
             sentimentObj.put("urgency", "String - 'low', 'medium', or 'high'");
             sentimentObj.put("confidence", "Float - 0.0 to 1.0, how confident you are in the sentiment assessment");
-            sentimentObj.put("topicTags", List.of("String - e.g., 'billing', 'shipping', 'product_quality', 'account'"));
+            sentimentObj.put("topicTags",
+                    List.of("String - e.g., 'billing', 'shipping', 'product_quality', 'account'"));
             sentimentObj.put("userFeedback", "String - direct user feedback if present; otherwise empty");
             schema.put("sentiment", sentimentObj);
         }
@@ -756,7 +773,8 @@ public class McpSetupTools {
 
     /**
      * Patch a resource descriptor with the Agent name.
-     * Descriptors are auto-created by DocumentDescriptorFilter when using REST HTTP proxies.
+     * Descriptors are auto-created by DocumentDescriptorFilter when using REST HTTP
+     * proxies.
      */
     private void patchDescriptor(String id, int version, String name) {
         if (id == null)

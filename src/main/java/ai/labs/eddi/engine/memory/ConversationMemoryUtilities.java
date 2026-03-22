@@ -4,7 +4,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
-import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.PackageRunSnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.Data;
@@ -69,7 +69,7 @@ public class ConversationMemoryUtilities {
         var conversationStepSnapshot = new ConversationStepSnapshot();
 
         if (!conversationStep.isEmpty()) {
-            var packageRunSnapshot = new PackageRunSnapshot();
+            var packageRunSnapshot = new WorkflowRunSnapshot();
             conversationStepSnapshot.getWorkflows().add(packageRunSnapshot);
             for (var data : conversationStep.getAllElements()) {
                 var resultSnapshot = new ResultSnapshot(
@@ -77,7 +77,7 @@ public class ConversationMemoryUtilities {
                         data.getResult(),
                         data.getPossibleResults(),
                         data.getTimestamp(),
-                        data.getOriginPackageId(),
+                        data.getOriginWorkflowId(),
                         data.isPublic());
                 packageRunSnapshot.getLifecycleTasks().add(resultSnapshot);
             }
@@ -187,7 +187,7 @@ public class ConversationMemoryUtilities {
                                         key,
                                         result,
                                         resultSnapshot.getTimestamp(),
-                                        resultSnapshot.getOriginPackageId()));
+                                        resultSnapshot.getOriginWorkflowId()));
 
                     } else {
                         continue;

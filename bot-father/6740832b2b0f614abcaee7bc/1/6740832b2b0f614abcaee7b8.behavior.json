@@ -3,16 +3,16 @@
   "behaviorGroups" : [ {
     "behaviorRules" : [ {
       "name" : "",
-      "actions" : [ "confirm_bot_creation_for_gemini_vertex", "CONVERSATION_END" ],
+      "actions" : [ "confirm_agent_creation_for_gemini_vertex", "CONVERSATION_END" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
-          "actions" : "deploy_bot_for_gemini_vertex"
+          "actions" : "deploy_agent_for_gemini_vertex"
         }
       }, {
         "type" : "dynamicvaluematcher",
         "configs" : {
-          "valuePath" : "properties.botLocation"
+          "valuePath" : "properties.agentLocation"
         }
       } ]
     } ]

@@ -9,15 +9,15 @@ import jakarta.ws.rs.core.Response;
  * @author ginccc
  */
 @Path("/backup/export")
-@Tag(name = "10. Backup Bots", description = "Import & Export Bots as Zip Files")
+@Tag(name = "10. Backup Agents", description = "Import & Export Agents as Zip Files")
 public interface IRestExportService {
     @GET
     @Produces("application/zip")
-    @Path("{botFilename}")
-    Response getBotZipArchive(@PathParam("botFilename") String botFilename);
+    @Path("{agentFilename}")
+    Response getAgentZipArchive(@PathParam("agentFilename") String agentFilename);
 
     @POST
     @Path("{agentId}")
-    Response exportBot(@PathParam("agentId") String agentId,
-                       @QueryParam("agentVersion") @DefaultValue("1") Integer agentVersion);
+    Response exportAgent(@PathParam("agentId") String agentId,
+            @QueryParam("agentVersion") @DefaultValue("1") Integer agentVersion);
 }

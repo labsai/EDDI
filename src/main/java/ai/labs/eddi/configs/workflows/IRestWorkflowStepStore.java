@@ -10,9 +10,10 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (3) Packages", authorizations = {@Authorization(value = "eddi_auth")})
+// @Api(value = "Configurations -> (3) Workflows", authorizations =
+// {@Authorization(value = "eddi_auth")})
 @Path("/extensionstore/extensions")
-@Tag(name = "06. Packages", description = "packages for bots")
+@Tag(name = "06. Workflows", description = "packages for agents")
 public interface IRestWorkflowStepStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)

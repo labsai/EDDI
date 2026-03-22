@@ -11,11 +11,11 @@
 - [x] `PathNavigator` replaces all 5 explicit `Ognl.getValue()`/`Ognl.setValue()` calls
 - [x] 27 new PathNavigator tests, all 499 tests pass
 
-### Phase 1, Item 1: Extract `ConversationService` from `RestBotEngine` ✅ (commit `7dd1488e`)
+### Phase 1, Item 1: Extract `ConversationService` from `RestAgentEngine` ✅ (commit `7dd1488e`)
 
 - [x] Created `IConversationService` interface with domain exceptions (no JAX-RS deps)
 - [x] Created `ConversationService` implementation with all business logic (~565 lines)
-- [x] Refactored `RestBotEngine` from 668 to ~230 lines (thin REST adapter)
+- [x] Refactored `RestAgentEngine` from 668 to ~230 lines (thin REST adapter)
 - [x] 16 new unit tests for `ConversationService`
 - [x] All 515 tests pass (0 failures, 0 errors, 4 skipped)
 
@@ -23,7 +23,7 @@
 
 - `src/main/java/ai/labs/eddi/engine/IConversationService.java`
 - `src/main/java/ai/labs/eddi/engine/internal/ConversationService.java`
-- `src/main/java/ai/labs/eddi/engine/internal/RestBotEngine.java`
+- `src/main/java/ai/labs/eddi/engine/internal/RestAgentEngine.java`
 - `src/test/java/ai/labs/eddi/engine/internal/ConversationServiceTest.java`
 
 ### Phase 1, Item 2: Typed Memory Accessors ✅
@@ -45,7 +45,7 @@
 ### Phase 1, Item 3: Consolidate Configuration Stores ✅ (commit `201c5f99`)
 
 - [x] Created `AbstractMongoResourceStore<T>` — generic base class with two constructors and 7 shared CRUD methods
-- [x] Refactored 8 stores to extend base class: `LangChainStore`, `ParserStore`, `PropertySetterStore`, `HttpCallsStore`, `BehaviorStore`, `OutputStore`, `RegularDictionaryStore`, `BotStore`, `PackageStore`
+- [x] Refactored 8 stores to extend base class: `LangChainStore`, `ParserStore`, `PropertySetterStore`, `HttpCallsStore`, `BehaviorStore`, `OutputStore`, `RegularDictionaryStore`, `AgentStore`, `WorkflowStore`
 - [x] ~350 lines of duplicated delegation code eliminated
 - [x] 7 new tests in `AbstractMongoResourceStoreTest`
 - [x] All 540 tests pass (0 failures, 0 errors, 4 skipped)
@@ -77,7 +77,7 @@
 - [x] `LifecycleManager` emits step events around each `task.execute()` call
 - [x] `StreamingLegacyChatExecutor` bridges langchain4j async streaming with sync lifecycle (CountDownLatch)
 - [x] `LangchainTask` detects streaming via `memory.getEventSink()`, delegates to streaming or sync path
-- [x] `POST /bots/{env}/{botId}/{convId}/stream` SSE endpoint (`RestBotEngineStreaming`)
+- [x] `POST /agents/{env}/{agentId}/{convId}/stream` SSE endpoint (`RestAgentEngineStreaming`)
 - [x] `ConversationService.sayStreaming()` with event sink adapter
 - [x] 22 new tests across 5 test files
 - [x] All ~562 tests pass (0 failures, 0 errors, 4 skipped)
@@ -86,8 +86,8 @@
 
 - `src/main/java/ai/labs/eddi/engine/lifecycle/ConversationEventSink.java`
 - `src/main/java/ai/labs/eddi/modules/langchain/impl/StreamingLegacyChatExecutor.java`
-- `src/main/java/ai/labs/eddi/engine/IRestBotEngineStreaming.java`
-- `src/main/java/ai/labs/eddi/engine/internal/RestBotEngineStreaming.java`
+- `src/main/java/ai/labs/eddi/engine/IRestAgentEngineStreaming.java`
+- `src/main/java/ai/labs/eddi/engine/internal/RestAgentEngineStreaming.java`
 - `src/test/java/ai/labs/eddi/modules/langchain/impl/StreamingLegacyChatExecutorTest.java`
 - `src/test/java/ai/labs/eddi/modules/langchain/impl/ChatModelRegistryTest.java`
 - `src/test/java/ai/labs/eddi/engine/lifecycle/internal/LifecycleManagerStreamingTest.java`
@@ -116,16 +116,16 @@
 - [x] Migrated all integration tests from `EDDI-integration-tests` repo into main EDDI repo
 - [x] Created `BaseIntegrationIT` with shared helpers (resource creation, deployment, cleanup)
 - [x] Created `IntegrationTestProfile` with DevServices MongoDB (Testcontainers)
-- [x] `BotEngineIT` (11 tests): welcome, input, context, output, undo/redo, templating, property
-- [x] `BotDeploymentComponentIT` (4 tests): deploy, undeploy, status transitions
+- [x] `AgentEngineIT` (11 tests): welcome, input, context, output, undo/redo, templating, property
+- [x] `AgentDeploymentComponentIT` (4 tests): deploy, undeploy, status transitions
 - [x] `ConversationServiceComponentIT` (7 tests): lifecycle, undo/redo, concurrent conversations
-- [x] `ApiContractIT` (10 tests): CRUD contracts for behavior, dictionary, output, package, bot stores
-- [x] `BotUseCaseIT` (2 tests): weather bot import + managed bot API
+- [x] `ApiContractIT` (10 tests): CRUD contracts for behavior, dictionary, output, package, agent stores
+- [x] `AgentUseCaseIT` (2 tests): weather agent import + managed agent API
 - [x] CRUD ITs: `BehaviorCrudIT` (4), `DictionaryCrudIT` (5), `OutputCrudIT` (5)
-- [x] Unit test gaps: `BotFactoryTest`, `BehaviorRulesEvaluationTaskTest`, `RestBotEngineTest`,
+- [x] Unit test gaps: `AgentFactoryTest`, `BehaviorRulesEvaluationTaskTest`, `RestAgentEngineTest`,
       `ConversationHistoryBuilderTest`, `LegacyChatExecutorTest`
 - [x] Fixed `RestInterfaceFactory` port hardcoded to 7070 → now `@ConfigProperty` injected
-- [x] Weather bot analysis: **confirmed v6.0 compatible** (no backwards compat issue, no migration needed)
+- [x] Weather agent analysis: **confirmed v6.0 compatible** (no backwards compat issue, no migration needed)
 - [x] All 48 integration tests + 620 unit tests = 668 tests pass
 
 > **Note:** `EDDI-integration-tests` repo is now fully superseded. All tests migrated into main repo.
@@ -139,16 +139,16 @@
 
 **Key files:**
 
-- `IRestBotAdministration.java`, `RestBotAdministration.java` — deployment status JSON
+- `IRestAgentAdministration.java`, `RestAgentAdministration.java` — deployment status JSON
 - `RestVersionInfo.java` — `delete(id, version, permanent)` overload
 - All 8 `IRest*Store` interfaces and `Rest*Store` implementations — `?permanent` param
 - All integration tests updated for JSON deployment status
 
-### Chat UI Vite Build + Bot Father Enhancements ✅
+### Chat UI Vite Build + Agent Father Enhancements ✅
 
 - [x] Deployed new Vite chat-ui production build to `META-INF/resources/` (replaces old CRA build)
 - [x] `chat.html` updated for new Vite bundle entry points
-- [x] Bot Father OpenAI flow: added timeout, built-in tools (whitelist), and conversation history limit steps
+- [x] Agent Father OpenAI flow: added timeout, built-in tools (whitelist), and conversation history limit steps
 - [x] `OpenAILanguageModelBuilder`: migrated to `JdkHttpClient.builder()`
 - [x] `GeminiLanguageModelBuilder`, `OllamaLanguageModelBuilder`: also migrated to JDK HttpClient
 
@@ -251,8 +251,8 @@
 - [x] Created `PostgresResourceStorageFactory` — `@LookupIfProperty(eddi.datastore.type=postgres)`
 - [x] Created `PostgresHealthCheck` — readiness check at `/q/health/ready`
 - [x] Migrated 7 stores from `AbstractMongoResourceStore` → `AbstractResourceStore` + `IResourceStorageFactory`:
-  `LangChainStore`, `ParserStore`, `PropertySetterStore`, `HttpCallsStore`, `BehaviorStore`, `OutputStore`, `RegularDictionaryStore`
-- [x] `BotStore`/`PackageStore` now also migrated to `AbstractResourceStore` + `IResourceStorageFactory`
+      `LangChainStore`, `ParserStore`, `PropertySetterStore`, `HttpCallsStore`, `BehaviorStore`, `OutputStore`, `RegularDictionaryStore`
+- [x] `AgentStore`/`WorkflowStore` now also migrated to `AbstractResourceStore` + `IResourceStorageFactory`
 - [x] Added PostgreSQL datasource config to `application.properties` (inactive by default)
 - [x] Created `docker-compose.postgres.yml` for local development
 - [x] 15 new tests: `PostgresResourceStorageTest` (12), `PostgresResourceStorageFactoryTest` (3)
@@ -280,15 +280,15 @@
 - [x] Added `findResourceIdsContaining()`, `findHistoryResourceIdsContaining()`, `findResources()` to `IResourceStorage`
 - [x] Implemented in `MongoResourceStorage` (MongoDB `$in`, regex, pagination)
 - [x] Implemented in `PostgresResourceStorage` (JSONB `@>`, `~`, SQL pagination)
-- [x] `BotStore` migrated from `AbstractMongoResourceStore` → `AbstractResourceStore` + `IResourceStorageFactory`
-- [x] `PackageStore` — same migration pattern, removed inner MongoDB classes
+- [x] `AgentStore` migrated from `AbstractMongoResourceStore` → `AbstractResourceStore` + `IResourceStorageFactory`
+- [x] `WorkflowStore` — same migration pattern, removed inner MongoDB classes
 - [x] Created `IDeploymentStorage` interface (DB-agnostic)
 - [x] Created `MongoDeploymentStorage` (`@DefaultBean`) — extracted MongoDB logic from DeploymentStore
 - [x] Created `PostgresDeploymentStorage` (`@LookupIfProperty`) — JDBC with `INSERT...ON CONFLICT`, dedicated `deployments` table
 - [x] `DeploymentStore` — refactored to thin delegate to `IDeploymentStorage`
 - [x] Created DB-agnostic `DescriptorStore` in `datastore` package (uses `IResourceStorageFactory` + `IResourceStorage.findResources()`)
 - [x] Updated `DocumentDescriptorStore`, `ConversationDescriptorStore`, `TestCaseDescriptorStore` to use `IResourceStorageFactory`
-- [x] Created `PostgresConversationMemoryStore` — JSONB storage with indexed columns (bot_id, bot_version, conversation_state)
+- [x] Created `PostgresConversationMemoryStore` — JSONB storage with indexed columns (agent_id, agent_version, conversation_state)
 - [x] All 701 tests pass (0 failures, 0 errors, 4 skipped). `mvnw verify` succeeds.
 
 **Key files (new):**
@@ -301,7 +301,7 @@
 
 **Key files (modified):**
 
-- `BotStore.java`, `PackageStore.java` — extends `AbstractResourceStore`
+- `AgentStore.java`, `WorkflowStore.java` — extends `AbstractResourceStore`
 - `DeploymentStore.java` — thin delegate to `IDeploymentStorage`
 - `DocumentDescriptorStore.java`, `ConversationDescriptorStore.java`, `TestCaseDescriptorStore.java` — use `IResourceStorageFactory`
 - `IResourceStorage.java`, `MongoResourceStorage.java`, `PostgresResourceStorage.java` — new query methods
@@ -318,18 +318,18 @@
 - [x] Created `PostgresIntegrationTestProfile` with `eddi.datastore.type=postgres` + Testcontainers DevServices
 - [x] Created 8 PostgreSQL IT subclasses — all 48/48 tests pass, full parity with MongoDB:
   - `PostgresBehaviorCrudIT` (4/4), `PostgresOutputCrudIT` (5/5), `PostgresDictionaryCrudIT` (5/5)
-  - `PostgresBotEngineIT` (11/11), `PostgresBotDeploymentComponentIT` (4/4)
+  - `PostgresAgentEngineIT` (11/11), `PostgresAgentDeploymentComponentIT` (4/4)
   - `PostgresConversationServiceComponentIT` (7/7), `PostgresApiContractIT` (10/10)
-  - `PostgresBotUseCaseIT` (2/2)
+  - `PostgresAgentUseCaseIT` (2/2)
 - [x] Fixed `RestUtilities.isValidId()` — added `-` for UUID dashes (`e5c68a0b`)
 - [x] Fixed `DocumentDescriptorFilter` — added `isResourceIdValid()` guard on PUT/PATCH (`e5c68a0b`)
 - [x] Added `#uuidUtils.extractId()` + `extractVersion()` to `UUIDWrapper` — DB-agnostic URI parsing (`7fb79bfa`)
-- [x] Updated all 7 Bot Father httpcalls JSONs (70 replacements) + re-zipped `Bot+Father-4.0.0.zip`
+- [x] Updated all 7 Agent Father httpcalls JSONs (70 replacements) + re-zipped `Agent+Father-4.0.0.zip`
 - [x] Added 12 unit tests in `UUIDWrapperTest`
 - [x] Documented `#uuidUtils` in `docs/output-templating.md`
 - [x] Fixed `PostgresIntegrationTestProfile` — added `quarkus.http.port=8082` for `RestInterfaceFactory` (`0eda70d9`)
 - [x] Fixed `PostgresApiContractIT` — overrode `readNonExistent_returns404` with UUID-formatted ID (`0eda70d9`)
-- [x] Fixed `BotUseCaseIT.useBotManagement` — stale trigger cleanup + status assertions (`e77b6f23`)
+- [x] Fixed `AgentUseCaseIT.useAgentManagement` — stale trigger cleanup + status assertions (`e77b6f23`)
 - [x] All 96 integration tests pass (48 MongoDB + 48 PostgreSQL)
 
 **Key files:**
@@ -337,26 +337,26 @@
 - `src/main/java/ai/labs/eddi/utils/RestUtilities.java` — `isValidId()` UUID fix
 - `src/main/java/ai/labs/eddi/engine/runtime/rest/interceptors/DocumentDescriptorFilter.java` — `isResourceIdValid` guard
 - `src/main/java/ai/labs/eddi/modules/templating/impl/dialects/uuid/UUIDWrapper.java` — `extractId/extractVersion`
-- `src/main/resources/initial-bots/Bot+Father-4.0.0.zip` — re-zipped with updated httpcalls
+- `src/main/resources/initial-agents/Agent+Father-4.0.0.zip` — re-zipped with updated httpcalls
 - `src/test/java/ai/labs/eddi/integration/PostgresIntegrationTestProfile.java` — PG test profile
 - `src/test/java/ai/labs/eddi/integration/postgres/` — 8 PG IT subclasses
-- `src/test/java/ai/labs/eddi/integration/BotUseCaseIT.java` — stale trigger cleanup
+- `src/test/java/ai/labs/eddi/integration/AgentUseCaseIT.java` — stale trigger cleanup
 - `docs/output-templating.md` — `#uuidUtils` documentation
 
-### Bot Lifecycle API: Cascade Delete + Orphan Detection ✅
+### Agent Lifecycle API: Cascade Delete + Orphan Detection ✅
 
-- [x] Added `?cascade=true` to `DELETE /botstore/bots/{id}` and `DELETE /packagestore/packages/{id}`
-- [x] Cascade walks bot → packages → extensions and deletes all children
-- [x] **Shared-resource safety**: checks references before deleting — skips packages used by other bots, extensions used by other packages
+- [x] Added `?cascade=true` to `DELETE /agentstore/agents/{id}` and `DELETE /packagestore/packages/{id}`
+- [x] Cascade walks agent → packages → extensions and deletes all children
+- [x] **Shared-resource safety**: checks references before deleting — skips packages used by other agents, extensions used by other packages
 - [x] Added `IResourceClientLibrary.deleteResource(URI, permanent)` for cascade use
 - [x] New admin endpoint: `GET/DELETE /administration/orphans`
   - GET: scans all 8 store types for unreferenced resources (dry-run report)
   - DELETE: permanently purges all orphans
-  - Algorithm: enumerate bots → packages → extensions → compare against all descriptors per store
-- [x] DTOs: `OrphanInfo`, `OrphanReport`; interfaces: `IRestOrphanAdmin`, `IRestBotStore`, `IRestPackageStore` updated
+  - Algorithm: enumerate agents → packages → extensions → compare against all descriptors per store
+- [x] DTOs: `OrphanInfo`, `OrphanReport`; interfaces: `IRestOrphanAdmin`, `IRestAgentStore`, `IRestWorkflowStore` updated
 - [x] Enriched OpenAPI annotations with `@Operation`, `@Parameter`, `@APIResponse` descriptions
-- [x] Documentation: deletion + orphan sections in `docs/deployment-management-of-chatbots.md`
-- [x] Tests: `RestBotStoreTest` (6/6), `RestPackageStoreTest` (7/7), `RestOrphanAdminTest` (4/4) — 17 new tests total
+- [x] Documentation: deletion + orphan sections in `docs/deployment-management-of-chatagents.md`
+- [x] Tests: `RestAgentStoreTest` (6/6), `RestWorkflowStoreTest` (7/7), `RestOrphanAdminTest` (4/4) — 17 new tests total
 - [x] Full test suite passes
 
 **Key files (new):**
@@ -366,15 +366,15 @@
 - `src/main/java/ai/labs/eddi/configs/admin/IRestOrphanAdmin.java`
 - `src/main/java/ai/labs/eddi/configs/admin/rest/RestOrphanAdmin.java`
 - `src/test/java/ai/labs/eddi/configs/admin/rest/RestOrphanAdminTest.java`
-- `src/test/java/ai/labs/eddi/configs/bots/rest/RestBotStoreTest.java`
-- `src/test/java/ai/labs/eddi/configs/packages/rest/RestPackageStoreTest.java`
+- `src/test/java/ai/labs/eddi/configs/agents/rest/RestAgentStoreTest.java`
+- `src/test/java/ai/labs/eddi/configs/packages/rest/RestWorkflowStoreTest.java`
 
 **Key files (modified):**
 
-- `IRestBotStore.java`, `RestBotStore.java` — cascade + shared-resource check
-- `IRestPackageStore.java`, `RestPackageStore.java` — cascade + shared-resource check
+- `IRestAgentStore.java`, `RestAgentStore.java` — cascade + shared-resource check
+- `IRestWorkflowStore.java`, `RestWorkflowStore.java` — cascade + shared-resource check
 - `IResourceClientLibrary.java`, `ResourceClientLibrary.java` — `deleteResource` method
-- `docs/deployment-management-of-chatbots.md` — deletion + orphan docs
+- `docs/deployment-management-of-chatagents.md` — deletion + orphan docs
 
 ### Phase 6C: Infinispan → Caffeine ✅
 
@@ -385,7 +385,7 @@
 - [x] Deleted `infinispan-embedded.xml` config
 - [x] Cleaned `application.properties` (removed 2 Infinispan config lines)
 - [x] Updated `ToolCacheService` Javadoc + log message
-- [x] Verified: multi-instance bot deployment does NOT use Infinispan (uses DB-backed `IDeploymentStore` + `@Scheduled` polling)
+- [x] Verified: multi-instance agent deployment does NOT use Infinispan (uses DB-backed `IDeploymentStore` + `@Scheduled` polling)
 - [x] 729 unit tests pass (0 failures, 0 errors, 4 skipped)
 
 **Key files:**
@@ -464,8 +464,8 @@
 - [x] Created `AuditLedgerService` — async batch writer with re-queue retry (3 attempts), secret scrubbing, HMAC signing
 - [x] Created `IAuditEntryCollector` — functional interface decoupling `LifecycleManager` from storage
 - [x] Integrated into `LifecycleManager` — `buildAuditEntry()` emits audit entry per task completion
-- [x] Integrated into `ConversationService` — both `say` and `sayStreaming` paths set audit collector with environment enrichment
-- [x] Created `IRestAuditStore` / `RestAuditStore` — read-only REST API (`/auditstore/{conversationId}`, `/auditstore/bot/{botId}`)
+- [x] Integrated into `ConversationService` — agenth `say` and `sayStreaming` paths set audit collector with environment enrichment
+- [x] Created `IRestAuditStore` / `RestAuditStore` — read-only REST API (`/auditstore/{conversationId}`, `/auditstore/agent/{agentId}`)
 - [x] Added `AuditEntry.withEnvironment()` — environment enrichment at the ConversationService layer
 - [x] Secret redaction via `SecretRedactionFilter.redact()` — recurses into nested maps and lists
 - [x] HMAC determinism — `buildCanonicalString()` sorts map keys via `TreeMap`
@@ -502,10 +502,10 @@
 
 Two trigger types on a shared engine:
 
-| Trigger | Config | Default Strategy | Next Fire Logic |
-|---------|--------|-----------------|-----------------|
-| **CRON** | `cronExpression` (5-field) | `new` (fresh conversation per fire) | Recomputed from cron |
-| **HEARTBEAT** | `heartbeatIntervalSeconds` | `persistent` (single conversation) | `now + interval` (drift-proof) |
+| Trigger       | Config                     | Default Strategy                    | Next Fire Logic                |
+| ------------- | -------------------------- | ----------------------------------- | ------------------------------ |
+| **CRON**      | `cronExpression` (5-field) | `new` (fresh conversation per fire) | Recomputed from cron           |
+| **HEARTBEAT** | `heartbeatIntervalSeconds` | `persistent` (single conversation)  | `now + interval` (drift-proof) |
 
 **Exactly-once execution:** Atomic CAS via MongoDB `findOneAndUpdate` with `PENDING` + `nextRetryAt ≤ now` guards. Dead-lettering after configurable `maxRetries` with exponential backoff (`base × multiplier^failCount`).
 
@@ -535,20 +535,18 @@ eddi.schedule.backoff-multiplier=4
 eddi.schedule.min-interval-seconds=60
 ```
 
-**Bot ↔ Schedule Lifecycle Hooks:**
+**Agent ↔ Schedule Lifecycle Hooks:**
 
-| Bot Event | Schedule Effect | Where |
-|-----------|----------------|-------|
-| **Deploy** | Auto-enable all disabled schedules for botId | `RestBotAdministration.enableSchedulesForBot()` |
-| **Undeploy** | Auto-disable all enabled schedules for botId | `RestBotAdministration.disableSchedulesForBot()` |
-| **Delete (cascade)** | Delete all schedules for botId (before package cascade) | `RestBotStore.deleteBot()` → `scheduleStore.deleteSchedulesByBotId()` |
-| **Export** | Include schedules as `{id}.schedule.json` in export ZIP | `RestExportService.exportSchedules()` |
+| Agent Event          | Schedule Effect                                           | Where                                                                       |
+| -------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **Deploy**           | Auto-enable all disabled schedules for agentId            | `RestAgentAdministration.enableSchedulesForAgent()`                         |
+| **Undeploy**         | Auto-disable all enabled schedules for agentId            | `RestAgentAdministration.disableSchedulesForAgent()`                        |
+| **Delete (cascade)** | Delete all schedules for agentId (before package cascade) | `RestAgentStore.deleteAgent()` → `scheduleStore.deleteSchedulesByAgentId()` |
+| **Export**           | Include schedules as `{id}.schedule.json` in export ZIP   | `RestExportService.exportSchedules()`                                       |
 
-All hooks are **non-fatal** — if schedule operations fail, the primary bot operation still succeeds (logged as warning).
+All hooks are **non-fatal** — if schedule operations fail, the primary agent operation still succeeds (logged as warning).
 
 **EDDI Manager:** No schedule UI yet. Backend REST API + MCP tools are the only interfaces.
-
-
 
 ## Next Up
 
@@ -568,24 +566,24 @@ All hooks are **non-fatal** — if schedule operations fail, the primary bot ope
 ### Phase 8a: MCP Servers ✅ (commits `1553b40e`, `b9a9c5e1`, latest)
 
 - [x] `quarkus-mcp-server-http` v1.10.2 dependency
-- [x] `McpConversationTools` — 7 tools (list_bots, list_bot_configs, create_conversation, talk_to_bot, **chat_with_bot**, read_conversation, read_conversation_log)
-- [x] `McpAdminTools` — 6 tools (deploy_bot, undeploy_bot, get_deployment_status, list_packages, create_bot, delete_bot)
-- [x] `McpSetupTools` — **setup_bot** composite tool: creates full bot (behavior → langchain → output → package → bot → deploy) in a single MCP call
-- [x] `McpSetupTools` — **create_api_bot** composite tool: OpenAPI spec → grouped HttpCalls → behavior → langchain → package → bot → deploy
+- [x] `McpConversationTools` — 7 tools (list_agents, list_agent_configs, create_conversation, talk_to_agent, **chat_with_agent**, read_conversation, read_conversation_log)
+- [x] `McpAdminTools` — 6 tools (deploy_agent, undeploy_agent, get_deployment_status, list_packages, create_agent, delete_agent)
+- [x] `McpSetupTools` — **setup_agent** composite tool: creates full agent (behavior → langchain → output → package → agent → deploy) in a single MCP call
+- [x] `McpSetupTools` — **create_api_agent** composite tool: OpenAPI spec → grouped HttpCalls → behavior → langchain → package → agent → deploy
 - [x] `McpApiToolBuilder` — OpenAPI 3.0/3.1 parser: tag-based grouping, endpoint filtering, path/query param → Thymeleaf conversion, body templates, deprecated op skipping
 - [x] `McpToolUtils` — shared helpers, RFC 8259 JSON escaping, `extractIdFromLocation`/`extractVersionFromLocation`
 - [x] `swagger-parser` v2.1.39 dependency
 - [x] Default model: `anthropic`/`claude-sonnet-4-6` (was `openai`/`gpt-4o`)
 - [x] 75 unit tests (18 McpToolUtils + 16 Conversation + 16 Admin + 17 Setup + 19 ApiToolBuilder) — Code review: 5 fixes applied
-- [x] `CreateApiBotIT` — 10 ordered REST API tests (standalone, not @QuarkusTest due to MCP extension limitation)
+- [x] `CreateApiAgentIT` — 10 ordered REST API tests (standalone, not @QuarkusTest due to MCP extension limitation)
 - [x] Streamable HTTP transport at `/mcp`
 - [x] `docs/mcp-server.md` with Claude Desktop config + setup tools reference
 - [x] Code review fixes: `@Blocking`, error callback, typed params, `resolveParams()` extraction, static Pattern, prompt enrichment ArgumentCaptor test
 - [x] **MCP Improvements** (2026-03-18):
-  - AI-agent-friendly responses: `buildConversationResponse()` extracts `botResponse`, `quickReplies`, `actions`, `conversationState` as top-level fields
-  - Ollama/jlama support: all 7 providers in `setup_bot`, `baseUrl` param, `isLocalLlmProvider()` skips apiKey validation, provider-specific param mapping
+  - AI-agent-friendly responses: `buildConversationResponse()` extracts `agentResponse`, `quickReplies`, `actions`, `conversationState` as top-level fields
+  - Ollama/jlama support: all 7 providers in `setup_agent`, `baseUrl` param, `isLocalLlmProvider()` skips apiKey validation, provider-specific param mapping
   - Deploy verification: `deployAndWait()` polls deployment status for 5s, reports actual status + warning on failure
-  - `OllamaLanguageModelBuilder` — added `baseUrl` support to both `build()` and `buildStreaming()`
+  - `OllamaLanguageModelBuilder` — added `baseUrl` support to agenth `build()` and `buildStreaming()`
   - `docker-compose.yml` — added `host.docker.internal:host-gateway` for Docker-hosted Ollama
   - 38 MCP tests pass (16 McpConversationToolsTest + 22 McpSetupToolsTest)
 
@@ -597,19 +595,19 @@ All hooks are **non-fatal** — if schedule operations fail, the primary bot ope
 - `src/main/java/ai/labs/eddi/engine/mcp/McpApiToolBuilder.java`
 - `src/main/java/ai/labs/eddi/engine/mcp/McpToolUtils.java`
 - `src/test/java/ai/labs/eddi/engine/mcp/McpSetupToolsTest.java` (+ 3 other test files)
-- `src/test/java/ai/labs/eddi/integration/CreateApiBotIT.java`
+- `src/test/java/ai/labs/eddi/integration/CreateApiAgentIT.java`
 - `docs/mcp-server.md`
 
 ### Phase 8a (continued): MCP Code Review, Resource Tools, Docs MCP Resources ✅
 
 - [x] **Code review fixes**:
-  - Fixed `get_bot` N+1 query → direct `readDescriptor(id, ver)` call
-  - Fixed `deployBot` response → `deployed` consistently boolean (was `"pending"` string for 202)
+  - Fixed `get_agent` N+1 query → direct `readDescriptor(id, ver)` call
+  - Fixed `deployAgent` response → `deployed` consistently boolean (was `"pending"` string for 202)
   - Fixed `ConversationState` import → moved to `engine.model`
   - Fixed `McpToolFilter` missing imports (`ToolManager.ToolInfo`, `FilterContext`)
   - Deduplicated `getRestStore()` → shared in `McpToolUtils` (3 classes now delegate)
-- [x] **Simplified `update_bot`** — now only updates name/description via `patchDescriptor()` + optional redeploy. Removed package add/remove business logic (wrong abstraction level).
-- [x] **New tools**: `read_package`, `read_resource` (thin REST delegates for inspecting bot internals)
+- [x] **Simplified `update_agent`** — now only updates name/description via `patchDescriptor()` + optional redeploy. Removed package add/remove business logic (wrong abstraction level).
+- [x] **New tools**: `read_package`, `read_resource` (thin REST delegates for inspecting agent internals)
 - [x] **`McpToolFilter`** whitelist updated: 18 → 20 tools
 - [x] **`McpDocResources.java`** — NEW: exposes docs as MCP resources (`eddi://docs/index`, `eddi://docs/{name}`)
 - [x] **`Dockerfile.jvm`** — COPY docs into container, `eddi.docs.path=/deployments/docs`
@@ -623,7 +621,7 @@ All hooks are **non-fatal** — if schedule operations fail, the primary bot ope
 **Key files (modified):**
 
 - `McpConversationTools.java` — N+1 fix, ConversationState import, removed unused import
-- `McpAdminTools.java` — simplified `update_bot`, added `read_package` + `read_resource`
+- `McpAdminTools.java` — simplified `update_agent`, added `read_package` + `read_resource`
 - `McpToolUtils.java` — shared `getRestStore()`
 - `McpSetupTools.java` — delegate `getRestStore()`, removed unused import
 - `McpToolFilter.java` — whitelist 18→20, added missing imports
@@ -634,20 +632,20 @@ All hooks are **non-fatal** — if schedule operations fail, the primary bot ope
 
 - [x] ~~Phase 8a: MCP Servers~~ ✅
 - [x] ~~Phase 8a.2: MCP Resource CRUD + Batch Cascade~~ ✅
-- [x] ~~Phase 8a.3: Bot Discovery & Managed Conversations~~ ✅
+- [x] ~~Phase 8a.3: Agent Discovery & Managed Conversations~~ ✅
 - [x] ~~Phase 8b: MCP Client + RAG Foundation~~ ✅
 
 ### Phase 8a.2: MCP Resource CRUD + Batch Cascade ✅
 
 5 new MCP tools for full resource lifecycle management:
 
-| Tool | Description |
-|------|-------------|
-| `update_resource` | Update any resource config (behavior, langchain, etc.) → returns new version URI |
-| `create_resource` | Create a new resource → returns ID + URI |
-| `delete_resource` | Delete a resource (soft or permanent) |
-| `apply_bot_changes` | Batch-cascade multiple resource URI changes through package → bot in ONE pass, optional redeploy |
-| `list_bot_resources` | Walk bot → packages → extensions to get a complete resource inventory in one call |
+| Tool                   | Description                                                                                        |
+| ---------------------- | -------------------------------------------------------------------------------------------------- |
+| `update_resource`      | Update any resource config (behavior, langchain, etc.) → returns new version URI                   |
+| `create_resource`      | Create a new resource → returns ID + URI                                                           |
+| `delete_resource`      | Delete a resource (soft or permanent)                                                              |
+| `apply_agent_changes`  | Batch-cascade multiple resource URI changes through package → agent in ONE pass, optional redeploy |
+| `list_agent_resources` | Walk agent → packages → extensions to get a complete resource inventory in one call                |
 
 **Key files:**
 
@@ -656,45 +654,45 @@ All hooks are **non-fatal** — if schedule operations fail, the primary bot ope
 - `McpAdminToolsCrudTest.java` — 22 new tests
 - `docs/mcp-server.md` — updated
 
-### Phase 8a.3: Bot Discovery & Managed Conversations ✅ (commit `4ed7bce8`)
+### Phase 8a.3: Agent Discovery & Managed Conversations ✅ (commit `4ed7bce8`)
 
-6 new MCP tools for bot discovery and intent-based managed chat:
+6 new MCP tools for agent discovery and intent-based managed chat:
 
-| Tool | Description |
-|------|-------------|
-| `discover_bots` | Enriched bot list with intent cross-referencing from BotTriggerConfiguration |
-| `chat_managed` | Intent-based single-window conversations (one conv per intent+userId, auto-creates) |
-| `list_bot_triggers` | List all intent→bot mappings |
-| `create_bot_trigger` | Create intent-to-bot trigger |
-| `update_bot_trigger` | Update existing trigger |
-| `delete_bot_trigger` | Remove trigger by intent |
+| Tool                   | Description                                                                         |
+| ---------------------- | ----------------------------------------------------------------------------------- |
+| `discover_agents`      | Enriched agent list with intent cross-referencing from AgentTriggerConfiguration    |
+| `chat_managed`         | Intent-based single-window conversations (one conv per intent+userId, auto-creates) |
+| `list_agent_triggers`  | List all intent→agent mappings                                                      |
+| `create_agent_trigger` | Create intent-to-agent trigger                                                      |
+| `update_agent_trigger` | Update existing trigger                                                             |
+| `delete_agent_trigger` | Remove trigger by intent                                                            |
 
-**Key design:** Two-tier conversation model — low-level (`create_conversation` + `talk_to_bot`) for custom apps, managed (`chat_managed`) for single-window chat.
+**Key design:** Two-tier conversation model — low-level (`create_conversation` + `talk_to_agent`) for custom apps, managed (`chat_managed`) for single-window chat.
 
 **Key files:**
 
-- `McpConversationTools.java` — `discover_bots` + `chat_managed` + `getOrCreateManagedConversation` helper
+- `McpConversationTools.java` — `discover_agents` + `chat_managed` + `getOrCreateManagedConversation` helper
 - `McpAdminTools.java` — 4 trigger CRUD tools
 - `McpToolFilter.java` — whitelist 27 → 33
 - `McpConversationToolsTest.java` — 7 new tests
 - `McpAdminToolsCrudTest.java` — 7 new tests
 - `docs/mcp-server.md` — comprehensive Tool Reference section (parameter tables, response schemas, end-to-end examples)
 
-**Live test results:** All 6 tools tested against running backend — discover_bots (80 bots, filter works), triggers CRUD (create/update/delete), chat_managed (conversation auto-created, reused on follow-up).
+**Live test results:** All 6 tools tested against running backend — discover_agents (80 agents, filter works), triggers CRUD (create/update/delete), chat_managed (conversation auto-created, reused on follow-up).
 
 ### Phase 8b: MCP Client + Quarkus 3.32.4 ✅
 
-Bots can now consume external MCP servers as tool providers. Upgraded Quarkus to 3.32.4.
+Agents can now consume external MCP servers as tool providers. Upgraded Quarkus to 3.32.4.
 
-| Component | Change |
-|-----------|--------|
-| **POM** | Added `langchain4j-mcp` 1.12.2-beta22, upgraded Quarkus 3.30.8 → 3.32.4 |
+| Component                  | Change                                                                             |
+| -------------------------- | ---------------------------------------------------------------------------------- |
+| **POM**                    | Added `langchain4j-mcp` 1.12.2-beta22, upgraded Quarkus 3.30.8 → 3.32.4            |
 | **McpToolProviderManager** | NEW — `StreamableHttpMcpTransport`, connection caching, vault-ref, graceful errors |
-| **AgentOrchestrator** | MCP tools merged into tool-calling loop with budget/rate-limiting |
-| **LangChainConfiguration** | Added `mcpServers` + `McpServerConfig` (url, name, transport, apiKey, timeoutMs) |
-| **McpSetupTools** | `mcpServers` param on `setup_bot` tool |
+| **AgentOrchestrator**      | MCP tools merged into tool-calling loop with budget/rate-limiting                  |
+| **LangChainConfiguration** | Added `mcpServers` + `McpServerConfig` (url, name, transport, apiKey, timeoutMs)   |
+| **McpSetupTools**          | `mcpServers` param on `setup_agent` tool                                           |
 
-**Test results:** 1045 tests, 0 failures. `McpToolProviderManagerTest` (8 tests), updated `AgentOrchestratorTest` + `LangchainTaskTest` + `McpSetupToolsTest` (21 calls). Also fixed pre-existing `BotFactoryTest` failure.
+**Test results:** 1045 tests, 0 failures. `McpToolProviderManagerTest` (8 tests), updated `AgentOrchestratorTest` + `LangchainTaskTest` + `McpSetupToolsTest` (21 calls). Also fixed pre-existing `AgentFactoryTest` failure.
 
 **Key files:**
 
@@ -711,15 +709,15 @@ See `AGENTS.md` for the full roadmap (Phases 7–14b) and `docs/project-philosop
 
 New users can set up EDDI with `curl ... | bash` (Linux/macOS/WSL) or `iwr ... | iex` (Windows). Interactive 3-step wizard.
 
-| File | Description |
-|------|-------------|
-| `install.sh` | Bash installer: platform-aware Docker install, DB/Auth/Monitoring wizard, `eddi` CLI wrapper, Bot Father import |
-| `install.ps1` | PowerShell installer: `winget` Docker Desktop auto-install, same wizard flow |
-| `docker-compose.postgres-only.yml` | PostgreSQL-only compose (no MongoDB) |
-| `docker-compose.auth.yml` | Keycloak overlay |
-| `docker-compose.monitoring.yml` | Grafana + Prometheus overlay (placeholder) |
-| `README.md` | Quick Start section |
-| `docs/getting-started.md` | Option 0 — one-command install |
+| File                               | Description                                                                                                       |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `install.sh`                       | Bash installer: platform-aware Docker install, DB/Auth/Monitoring wizard, `eddi` CLI wrapper, Agent Father import |
+| `install.ps1`                      | PowerShell installer: `winget` Docker Desktop auto-install, same wizard flow                                      |
+| `docker-compose.postgres-only.yml` | PostgreSQL-only compose (no MongoDB)                                                                              |
+| `docker-compose.auth.yml`          | Keycloak overlay                                                                                                  |
+| `docker-compose.monitoring.yml`    | Grafana + Prometheus overlay (placeholder)                                                                        |
+| `README.md`                        | Quick Start section                                                                                               |
+| `docs/getting-started.md`          | Option 0 — one-command install                                                                                    |
 
 **Edge cases handled:** Idempotent re-runs, CTRL+C cleanup, piped stdin (`curl|bash`), disk space warning, input validation, macOS `wc -l` whitespace, Docker auto-install (Linux/Windows).
 

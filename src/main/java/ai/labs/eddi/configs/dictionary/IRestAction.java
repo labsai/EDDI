@@ -15,7 +15,7 @@ public interface IRestAction {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read expressions.")
-    List<String> readActions(@QueryParam("packageId") String packageId,
+    List<String> readActions(@QueryParam("workflowId") String workflowId,
                              @QueryParam("packageVersion") Integer packageVersion,
                              @QueryParam("filter") @DefaultValue("") String filter,
                              @QueryParam("limit") @DefaultValue("20") Integer limit);

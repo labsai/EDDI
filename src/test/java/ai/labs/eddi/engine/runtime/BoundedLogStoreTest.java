@@ -35,8 +35,7 @@ class BoundedLogStoreTest {
     private LogEntry createEntry(String level, String agentId, String conversationId, String message) {
         return new LogEntry(
                 System.currentTimeMillis(), level, "test.Logger", message,
-                "production", agentId, 1, conversationId, "user-1", "test-host-abcd"
-        );
+                "production", agentId, 1, conversationId, "user-1", "test-host-abcd");
     }
 
     // ==================== Ring Buffer ====================
@@ -46,8 +45,8 @@ class BoundedLogStoreTest {
 
         @Test
         void shouldStoreAndRetrieveEntries() {
-            store.publish(createEntry("INFO", "bot-1", "conv-1", "Hello"));
-            store.publish(createEntry("WARN", "bot-1", "conv-1", "Warning"));
+            store.publish(createEntry("INFO", "agent-1", "conv-1", "Hello"));
+            store.publish(createEntry("WARN", "agent-1", "conv-1", "Warning"));
 
             List<LogEntry> entries = store.getEntries(null, null, null, 10);
 
@@ -106,15 +105,15 @@ class BoundedLogStoreTest {
     class Filtering {
 
         @Test
-        void shouldFilterByBotId() {
-            store.publish(createEntry("INFO", "bot-a", null, "from A"));
-            store.publish(createEntry("INFO", "bot-b", null, "from B"));
-            store.publish(createEntry("INFO", "bot-a", null, "from A again"));
+        void shouldFilterByAgentId() {
+            store.publish(createEntry("INFO", "agent-a", null, "from A"));
+            store.publish(createEntry("INFO", "agent-b", null, "from B"));
+            store.publish(createEntry("INFO", "agent-a", null, "from A again"));
 
-            List<LogEntry> entries = store.getEntries("bot-a", null, null, 10);
+            List<LogEntry> entries = store.getEntries("agent-a", null, null, 10);
 
             assertEquals(2, entries.size());
-            assertTrue(entries.stream().allMatch(e -> "bot-a".equals(e.agentId())));
+            assertTrue(entries.stream().allMatch(e -> "agent-a".equals(e.agentId())));
         }
 
         @Test
@@ -143,11 +142,11 @@ class BoundedLogStoreTest {
 
         @Test
         void shouldCombineFilters() {
-            store.publish(createEntry("INFO", "bot-a", "conv-1", "match"));
-            store.publish(createEntry("WARN", "bot-a", "conv-1", "no-level-match"));
-            store.publish(createEntry("INFO", "bot-b", "conv-1", "no-bot-match"));
+            store.publish(createEntry("INFO", "agent-a", "conv-1", "match"));
+            store.publish(createEntry("WARN", "agent-a", "conv-1", "no-level-match"));
+            store.publish(createEntry("INFO", "agent-b", "conv-1", "no-agent-match"));
 
-            List<LogEntry> entries = store.getEntries("bot-a", "conv-1", "INFO", 10);
+            List<LogEntry> entries = store.getEntries("agent-a", "conv-1", "INFO", 10);
 
             assertEquals(1, entries.size());
             assertEquals("match", entries.get(0).message());
@@ -196,9 +195,7 @@ class BoundedLogStoreTest {
             });
 
             // Should not throw
-            assertDoesNotThrow(() ->
-                    store.publish(createEntry("INFO", null, null, "test"))
-            );
+            assertDoesNotThrow(() -> store.publish(createEntry("INFO", null, null, "test")));
             assertEquals(1, store.getBufferSize());
         }
     }

@@ -41,11 +41,11 @@ import static org.mockito.Mockito.*;
  */
 class McpConversationToolsTest {
 
-    private static final String AGENT_ID = "test-bot-id";
+    private static final String AGENT_ID = "test-agent-id";
     private static final String CONV_ID = "test-conv-id";
 
     private IConversationService conversationService;
-    private IRestAgentAdministration botAdmin;
+    private IRestAgentAdministration agentAdmin;
     private IRestAgentStore AgentStore;
     private IJsonSerialization jsonSerialization;
     private BoundedLogStore boundedLogStore;
@@ -58,7 +58,7 @@ class McpConversationToolsTest {
     @BeforeEach
     void setUp() throws IOException {
         conversationService = mock(IConversationService.class);
-        botAdmin = mock(IRestAgentAdministration.class);
+        agentAdmin = mock(IRestAgentAdministration.class);
         AgentStore = mock(IRestAgentStore.class);
         jsonSerialization = mock(IJsonSerialization.class);
         var restInterfaceFactory = mock(IRestInterfaceFactory.class);
@@ -69,74 +69,74 @@ class McpConversationToolsTest {
         RestAgentEngine = mock(IRestAgentEngine.class);
         // Default: lenient serialize returns empty JSON
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        tools = new McpConversationTools(conversationService, botAdmin, AgentStore,
+        tools = new McpConversationTools(conversationService, agentAdmin, AgentStore,
                 restInterfaceFactory, jsonSerialization, boundedLogStore, auditStore,
                 AgentTriggerStore, userConversationStore, RestAgentEngine);
     }
 
-    // --- listBots ---
+    // --- listAgents ---
 
     @Test
-    void listBots_returnsDeployedBots() throws IOException {
+    void listAgents_returnsDeployedAgents() throws IOException {
         var status = new AgentDeploymentStatus();
         status.setAgentId(AGENT_ID);
-        when(botAdmin.getDeploymentStatuses(Environment.production))
+        when(agentAdmin.getDeploymentStatuses(Environment.production))
                 .thenReturn(List.of(status));
-        when(jsonSerialization.serialize(any())).thenReturn("[{\"agentId\":\"test-bot-id\"}]");
+        when(jsonSerialization.serialize(any())).thenReturn("[{\"agentId\":\"test-agent-id\"}]");
 
-        String result = tools.listBots("production");
+        String result = tools.listAgents("production");
 
         assertNotNull(result);
-        assertTrue(result.contains("test-bot-id"));
-        verify(botAdmin).getDeploymentStatuses(Environment.production);
+        assertTrue(result.contains("test-agent-id"));
+        verify(agentAdmin).getDeploymentStatuses(Environment.production);
     }
 
     @Test
-    void listBots_defaultsToUnrestricted() throws IOException {
-        when(botAdmin.getDeploymentStatuses(Environment.production))
+    void listAgents_defaultsToUnrestricted() throws IOException {
+        when(agentAdmin.getDeploymentStatuses(Environment.production))
                 .thenReturn(Collections.emptyList());
         when(jsonSerialization.serialize(any())).thenReturn("[]");
 
-        tools.listBots(null);
+        tools.listAgents(null);
 
-        verify(botAdmin).getDeploymentStatuses(Environment.production);
+        verify(agentAdmin).getDeploymentStatuses(Environment.production);
     }
 
     @Test
-    void listBots_handlesException() {
-        when(botAdmin.getDeploymentStatuses(any()))
+    void listAgents_handlesException() {
+        when(agentAdmin.getDeploymentStatuses(any()))
                 .thenThrow(new RuntimeException("Service down"));
 
-        String result = tools.listBots("production");
+        String result = tools.listAgents("production");
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("Service down"));
     }
 
-    // --- listBotConfigs ---
+    // --- listAgentConfigs ---
 
     @Test
-    void listBotConfigs_returnsDescriptors() throws IOException {
+    void listAgentConfigs_returnsDescriptors() throws IOException {
         var descriptor = new DocumentDescriptor();
-        when(AgentStore.readBotDescriptors("", 0, 20))
+        when(AgentStore.readAgentDescriptors("", 0, 20))
                 .thenReturn(List.of(descriptor));
-        when(jsonSerialization.serialize(any())).thenReturn("[{\"name\":\"TestBot\"}]");
+        when(jsonSerialization.serialize(any())).thenReturn("[{\"name\":\"TestAgent\"}]");
 
-        String result = tools.listBotConfigs(null, null);
+        String result = tools.listAgentConfigs(null, null);
 
         assertNotNull(result);
-        verify(AgentStore).readBotDescriptors("", 0, 20);
+        verify(AgentStore).readAgentDescriptors("", 0, 20);
     }
 
     @Test
-    void listBotConfigs_withFilterAndLimit() throws IOException {
-        when(AgentStore.readBotDescriptors("search", 0, 5))
+    void listAgentConfigs_withFilterAndLimit() throws IOException {
+        when(AgentStore.readAgentDescriptors("search", 0, 5))
                 .thenReturn(Collections.emptyList());
         when(jsonSerialization.serialize(any())).thenReturn("[]");
 
-        tools.listBotConfigs("search", 5);
+        tools.listAgentConfigs("search", 5);
 
-        verify(AgentStore).readBotDescriptors("search", 0, 5);
+        verify(AgentStore).readAgentDescriptors("search", 0, 5);
     }
 
     // --- createConversation ---
@@ -156,20 +156,20 @@ class McpConversationToolsTest {
     }
 
     @Test
-    void createConversation_botNotReady_returnsError() throws Exception {
+    void createConversation_agentNotReady_returnsError() throws Exception {
         when(conversationService.startConversation(any(), eq(AGENT_ID), isNull(), anyMap()))
-                .thenThrow(new IConversationService.BotNotReadyException("Bot not deployed"));
+                .thenThrow(new IConversationService.AgentNotReadyException("Agent not deployed"));
 
         String result = tools.createConversation(AGENT_ID, null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Bot not deployed"));
+        assertTrue(result.contains("Agent not deployed"));
     }
 
-    // --- talkToBot ---
+    // --- talkToAgent ---
 
     @Test
-    void talkToBot_sendsMessageAndReturnsResponse() throws Exception {
+    void talkToAgent_sendsMessageAndReturnsResponse() throws Exception {
         doAnswer(invocation -> {
             // ConversationResponseHandler is arg index 8 (0-indexed)
             ConversationResponseHandler handler = invocation.getArgument(8);
@@ -183,7 +183,7 @@ class McpConversationToolsTest {
         when(jsonSerialization.serialize(any(LinkedHashMap.class)))
                 .thenReturn("{\"conversationState\":\"READY\",\"response\":{\"conversationSteps\":[]}}");
 
-        String result = tools.talkToBot(AGENT_ID, CONV_ID, "Hello bot!", "production");
+        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello agent!", "production");
 
         assertNotNull(result);
         assertTrue(result.contains("conversationState"));
@@ -195,42 +195,42 @@ class McpConversationToolsTest {
                 eq(false), eq(true), eq(Collections.emptyList()),
                 inputCaptor.capture(), eq(false), any());
 
-        assertEquals("Hello bot!", inputCaptor.getValue().getInput());
+        assertEquals("Hello agent!", inputCaptor.getValue().getInput());
     }
 
     @Test
-    void talkToBot_nullSnapshot_returnsError() throws Exception {
+    void talkToAgent_nullSnapshot_returnsError() throws Exception {
         doAnswer(invocation -> {
             ConversationResponseHandler handler = invocation.getArgument(8);
-            handler.onComplete(null);  // null snapshot triggers completeExceptionally
+            handler.onComplete(null); // null snapshot triggers completeExceptionally
             return null;
         }).when(conversationService).say(
                 any(), any(), any(), anyBoolean(), anyBoolean(),
                 anyList(), any(), anyBoolean(), any(ConversationResponseHandler.class));
 
-        String result = tools.talkToBot(AGENT_ID, CONV_ID, "Hello!", null);
+        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null);
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("null response"));
     }
 
     @Test
-    void talkToBot_handlesServiceException() throws Exception {
+    void talkToAgent_handlesServiceException() throws Exception {
         doThrow(new RuntimeException("Connection lost"))
                 .when(conversationService).say(
                         any(), any(), any(), anyBoolean(), anyBoolean(),
                         anyList(), any(), anyBoolean(), any());
 
-        String result = tools.talkToBot(AGENT_ID, CONV_ID, "Hello!", null);
+        String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null);
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("Connection lost"));
     }
 
-    // --- chatWithBot (composite) ---
+    // --- chatWithAgent (composite) ---
 
     @Test
-    void chatWithBot_createsConversationAndSendsMessage() throws Exception {
+    void chatWithAgent_createsConversationAndSendsMessage() throws Exception {
         // Mock conversation creation
         when(conversationService.startConversation(
                 eq(Environment.production), eq(AGENT_ID), isNull(), anyMap()))
@@ -249,7 +249,7 @@ class McpConversationToolsTest {
         when(jsonSerialization.serialize(any(Map.class)))
                 .thenReturn("{\"conversationId\":\"test-conv-id\",\"response\":{}}");
 
-        String result = tools.chatWithBot(AGENT_ID, "Hello!", null, "production");
+        String result = tools.chatWithAgent(AGENT_ID, "Hello!", null, "production");
 
         assertNotNull(result);
         assertTrue(result.contains("test-conv-id"));
@@ -259,7 +259,7 @@ class McpConversationToolsTest {
     }
 
     @Test
-    void chatWithBot_reusesExistingConversation() throws Exception {
+    void chatWithAgent_reusesExistingConversation() throws Exception {
         doAnswer(invocation -> {
             ConversationResponseHandler handler = invocation.getArgument(8);
             handler.onComplete(new SimpleConversationMemorySnapshot());
@@ -272,7 +272,7 @@ class McpConversationToolsTest {
         when(jsonSerialization.serialize(any(Map.class)))
                 .thenReturn("{\"conversationId\":\"test-conv-id\"}");
 
-        tools.chatWithBot(AGENT_ID, "Follow-up", CONV_ID, null);
+        tools.chatWithAgent(AGENT_ID, "Follow-up", CONV_ID, null);
 
         // Should NOT create a new conversation
         verify(conversationService, never()).startConversation(any(), any(), any(), anyMap());
@@ -291,13 +291,13 @@ class McpConversationToolsTest {
                 eq(false), eq(true), eq(Collections.emptyList())))
                 .thenReturn(snapshot);
         when(jsonSerialization.serialize(snapshot))
-                .thenReturn("{\"agentId\":\"test-bot-id\"}");
+                .thenReturn("{\"agentId\":\"test-agent-id\"}");
 
         String result = tools.readConversation(AGENT_ID, CONV_ID, "production",
                 null, null, null);
 
         assertNotNull(result);
-        assertTrue(result.contains("test-bot-id"));
+        assertTrue(result.contains("test-agent-id"));
         // Verify currentStepOnly defaults to true
         verify(conversationService).readConversation(
                 any(), any(), any(), eq(false), eq(true), anyList());
@@ -337,11 +337,11 @@ class McpConversationToolsTest {
     void readConversationLog_returnsText() throws Exception {
         when(conversationService.readConversationLog(eq(CONV_ID), eq("text"), isNull()))
                 .thenReturn(new IConversationService.ConversationLogResult(
-                        "User: Hi\nBot: Hello!", "text/plain"));
+                        "User: Hi\nAgent: Hello!", "text/plain"));
 
         String result = tools.readConversationLog(CONV_ID, null);
 
-        assertEquals("User: Hi\nBot: Hello!", result);
+        assertEquals("User: Hi\nAgent: Hello!", result);
     }
 
     @Test
@@ -358,91 +358,91 @@ class McpConversationToolsTest {
     // --- input validation ---
 
     @Test
-    void talkToBot_nullBotId_returnsError() {
-        String result = tools.talkToBot(null, CONV_ID, "Hello!", null);
+    void talkToAgent_nullAgentId_returnsError() {
+        String result = tools.talkToAgent(null, CONV_ID, "Hello!", null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("agentId is required"));
     }
 
     @Test
-    void talkToBot_nullConversationId_returnsError() {
-        String result = tools.talkToBot(AGENT_ID, null, "Hello!", null);
+    void talkToAgent_nullConversationId_returnsError() {
+        String result = tools.talkToAgent(AGENT_ID, null, "Hello!", null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("conversationId is required"));
     }
 
     @Test
-    void talkToBot_nullMessage_returnsError() {
-        String result = tools.talkToBot(AGENT_ID, CONV_ID, null, null);
+    void talkToAgent_nullMessage_returnsError() {
+        String result = tools.talkToAgent(AGENT_ID, CONV_ID, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("message is required"));
     }
 
     @Test
-    void chatWithBot_nullBotId_returnsError() {
-        String result = tools.chatWithBot(null, "Hello!", null, null);
+    void chatWithAgent_nullAgentId_returnsError() {
+        String result = tools.chatWithAgent(null, "Hello!", null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("agentId is required"));
     }
 
     @Test
-    void chatWithBot_nullMessage_returnsError() {
-        String result = tools.chatWithBot(AGENT_ID, null, null, null);
+    void chatWithAgent_nullMessage_returnsError() {
+        String result = tools.chatWithAgent(AGENT_ID, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("message is required"));
     }
 
     @Test
-    void chatWithBot_conversationCreationFails_returnsError() throws Exception {
+    void chatWithAgent_conversationCreationFails_returnsError() throws Exception {
         when(conversationService.startConversation(any(), eq(AGENT_ID), isNull(), anyMap()))
-                .thenThrow(new IConversationService.BotNotReadyException("Bot not deployed"));
+                .thenThrow(new IConversationService.AgentNotReadyException("Agent not deployed"));
 
-        String result = tools.chatWithBot(AGENT_ID, "Hello!", null, null);
+        String result = tools.chatWithAgent(AGENT_ID, "Hello!", null, null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Bot not deployed"));
+        assertTrue(result.contains("Agent not deployed"));
     }
 
     @Test
-    void createConversation_nullBotId_returnsError() {
+    void createConversation_nullAgentId_returnsError() {
         String result = tools.createConversation(null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("agentId is required"));
     }
 
-    // --- readBotLogs ---
+    // --- readAgentLogs ---
 
     @Test
-    void readBotLogs_returnsFilteredEntries() throws IOException {
+    void readAgentLogs_returnsFilteredEntries() throws IOException {
         var entry = new LogEntry(System.currentTimeMillis(), "ERROR", "ai.labs.test",
                 "Something failed", null, AGENT_ID, 1, CONV_ID, null, "inst-1");
         when(boundedLogStore.getEntries(AGENT_ID, CONV_ID, "ERROR", 50))
                 .thenReturn(List.of(entry));
         when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1,\"entries\":[]}");
 
-        String result = tools.readBotLogs(AGENT_ID, CONV_ID, "ERROR", null);
+        String result = tools.readAgentLogs(AGENT_ID, CONV_ID, "ERROR", null);
 
         assertNotNull(result);
         verify(boundedLogStore).getEntries(AGENT_ID, CONV_ID, "ERROR", 50);
     }
 
     @Test
-    void readBotLogs_allNullFilters_returnsAll() throws IOException {
+    void readAgentLogs_allNullFilters_returnsAll() throws IOException {
         when(boundedLogStore.getEntries(null, null, null, 50))
                 .thenReturn(Collections.emptyList());
         when(jsonSerialization.serialize(any())).thenReturn("{\"count\":0}");
 
-        tools.readBotLogs(null, null, null, null);
+        tools.readAgentLogs(null, null, null, null);
 
         verify(boundedLogStore).getEntries(null, null, null, 50);
     }
 
     @Test
-    void readBotLogs_handlesException() {
+    void readAgentLogs_handlesException() {
         when(boundedLogStore.getEntries(any(), any(), any(), anyInt()))
                 .thenThrow(new RuntimeException("Ring buffer error"));
 
-        String result = tools.readBotLogs(AGENT_ID, null, null, 10);
+        String result = tools.readAgentLogs(AGENT_ID, null, null, 10);
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("Ring buffer error"));
@@ -474,70 +474,70 @@ class McpConversationToolsTest {
         assertTrue(result.contains("conversationId is required"));
     }
 
-    // --- discover_bots ---
+    // --- discover_agents ---
 
     @Test
-    void discoverBots_returnsEnrichedList() throws IOException {
+    void discoverAgents_returnsEnrichedList() throws IOException {
         var status = new AgentDeploymentStatus();
         status.setAgentId(AGENT_ID);
         status.setStatus(Deployment.Status.READY);
         status.setEnvironment(Environment.production);
         var descriptor = new DocumentDescriptor();
-        descriptor.setName("Test Bot");
-        descriptor.setDescription("A test bot");
+        descriptor.setName("Test Agent");
+        descriptor.setDescription("A test agent");
         status.setDescriptor(descriptor);
 
-        when(botAdmin.getDeploymentStatuses(Environment.production)).thenReturn(List.of(status));
+        when(agentAdmin.getDeploymentStatuses(Environment.production)).thenReturn(List.of(status));
 
         var trigger = new AgentTriggerConfiguration();
         trigger.setIntent("test_intent");
         var deployment = new AgentDeployment();
         deployment.setAgentId(AGENT_ID);
-        trigger.setBotDeployments(List.of(deployment));
-        when(AgentTriggerStore.readAllBotTriggers()).thenReturn(List.of(trigger));
+        trigger.setAgentDeployments(List.of(deployment));
+        when(AgentTriggerStore.readAllAgentTriggers()).thenReturn(List.of(trigger));
         when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1}");
 
-        String result = tools.discoverBots(null, "production");
+        String result = tools.discoverAgents(null, "production");
 
         assertNotNull(result);
-        verify(botAdmin).getDeploymentStatuses(Environment.production);
-        verify(AgentTriggerStore).readAllBotTriggers();
+        verify(agentAdmin).getDeploymentStatuses(Environment.production);
+        verify(AgentTriggerStore).readAllAgentTriggers();
     }
 
     @Test
-    void discoverBots_withFilter_filtersResults() throws IOException {
+    void discoverAgents_withFilter_filtersResults() throws IOException {
         var status = new AgentDeploymentStatus();
         status.setAgentId(AGENT_ID);
         status.setStatus(Deployment.Status.READY);
         status.setEnvironment(Environment.production);
         var descriptor = new DocumentDescriptor();
-        descriptor.setName("Test Bot");
+        descriptor.setName("Test Agent");
         status.setDescriptor(descriptor);
 
-        when(botAdmin.getDeploymentStatuses(Environment.production)).thenReturn(List.of(status));
-        when(AgentTriggerStore.readAllBotTriggers()).thenReturn(Collections.emptyList());
+        when(agentAdmin.getDeploymentStatuses(Environment.production)).thenReturn(List.of(status));
+        when(AgentTriggerStore.readAllAgentTriggers()).thenReturn(Collections.emptyList());
         when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1}");
 
-        String result = tools.discoverBots("Test", "production");
+        String result = tools.discoverAgents("Test", "production");
 
         assertNotNull(result);
     }
 
     @Test
-    void discoverBots_triggerReadFailure_stillReturns() throws IOException {
+    void discoverAgents_triggerReadFailure_stillReturns() throws IOException {
         var status = new AgentDeploymentStatus();
         status.setAgentId(AGENT_ID);
         status.setStatus(Deployment.Status.READY);
         status.setEnvironment(Environment.production);
         var descriptor = new DocumentDescriptor();
-        descriptor.setName("Test Bot");
+        descriptor.setName("Test Agent");
         status.setDescriptor(descriptor);
 
-        when(botAdmin.getDeploymentStatuses(Environment.production)).thenReturn(List.of(status));
-        when(AgentTriggerStore.readAllBotTriggers()).thenThrow(new RuntimeException("trigger error"));
+        when(agentAdmin.getDeploymentStatuses(Environment.production)).thenReturn(List.of(status));
+        when(AgentTriggerStore.readAllAgentTriggers()).thenThrow(new RuntimeException("trigger error"));
         when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1}");
 
-        String result = tools.discoverBots(null, "production");
+        String result = tools.discoverAgents(null, "production");
 
         // Should still return results — trigger read is non-fatal
         assertNotNull(result);
@@ -571,7 +571,7 @@ class McpConversationToolsTest {
     void chatManaged_noTriggerConfigured_returnsError() throws Exception {
         when(userConversationStore.readUserConversation("no_trigger", "user1"))
                 .thenThrow(new ai.labs.eddi.datastore.IResourceStore.ResourceStoreException("not found"));
-        when(AgentTriggerStore.readBotTrigger("no_trigger")).thenReturn(null);
+        when(AgentTriggerStore.readAgentTrigger("no_trigger")).thenReturn(null);
 
         String result = tools.chatManaged("no_trigger", "user1", "hello", "production");
 

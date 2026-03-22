@@ -28,46 +28,45 @@ public class McpToolFilter implements ToolFilter {
      */
     private static final Set<String> MCP_TOOLS = Set.of(
             // Conversation tools
-            "list_bots",
-            "list_bot_configs",
+            "list_agents",
+            "list_agent_configs",
             "create_conversation",
-            "talk_to_bot",
-            "chat_with_bot",
+            "talk_to_agent",
+            "chat_with_agent",
             "read_conversation",
             "read_conversation_log",
             "list_conversations",
-            "get_bot",
+            "get_agent",
             // Admin tools
-            "deploy_bot",
-            "undeploy_bot",
+            "deploy_agent",
+            "undeploy_agent",
             "get_deployment_status",
-            "list_packages",
-            "create_bot",
-            "delete_bot",
-            "update_bot",
-            "read_package",
+            "list_workflows",
+            "create_agent",
+            "delete_agent",
+            "update_agent",
+            "read_workflow",
             "read_resource",
             // Setup tools
-            "setup_bot",
-            "create_api_bot",
+            "setup_agent",
+            "create_api_agent",
             // Resource CRUD + Cascade (Phase 8a.2)
             "update_resource",
             "create_resource",
             "delete_resource",
-            "apply_bot_changes",
-            "list_bot_resources",
+            "apply_agent_changes",
+            "list_agent_resources",
             // Diagnostic tools (Phase 8a.2)
-            "read_bot_logs",
+            "read_agent_logs",
             "read_audit_trail",
-            // Discovery + Managed Bots (Phase 8a.3)
-            "discover_bots",
+            // Discovery + Managed Agents (Phase 8a.3)
+            "discover_agents",
             "chat_managed",
             // Agent Trigger CRUD (Phase 8a.3)
-            "list_bot_triggers",
-            "create_bot_trigger",
-            "update_bot_trigger",
-            "delete_bot_trigger"
-    );
+            "list_agent_triggers",
+            "create_agent_trigger",
+            "update_agent_trigger",
+            "delete_agent_trigger");
 
     @Override
     public boolean test(ToolInfo toolInfo, FilterContext filterContext) {

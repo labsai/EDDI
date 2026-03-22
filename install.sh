@@ -197,7 +197,7 @@ check_prerequisites() {
     fail "curl is required but not found.\n     Install: apt install curl / brew install curl"
   fi
 
-  # jq (optional but used for bot count check)
+  # jq (optional but used for agent count check)
   if ! command -v jq &>/dev/null; then
     JQ_AVAILABLE=false
   else
@@ -271,7 +271,7 @@ check_prerequisites() {
 
 # ── Detect existing state ─────────────────────────────────
 
-detect_deployed_bots() {
+detect_deployed_agents() {
   local count=0
   local response
   response=$(curl -sf "http://localhost:${EDDI_PORT}/administration/unrestricted/deploymentstatus" 2>/dev/null) || return 1
@@ -279,8 +279,8 @@ detect_deployed_bots() {
   if [[ "$JQ_AVAILABLE" == "true" ]]; then
     count=$(echo "$response" | jq 'length' 2>/dev/null) || count=0
   else
-    # Fallback: count array elements by counting "botId" occurrences
-    count=$(echo "$response" | grep -o '"botId"' | wc -l | tr -d ' ') || count=0
+    # Fallback: count array elements by counting "agentId" occurrences
+    count=$(echo "$response" | grep -o '"agentId"' | wc -l | tr -d ' ') || count=0
   fi
 
   echo "$count"
@@ -294,7 +294,7 @@ wizard_database() {
   if [[ -n "$DB_CHOICE" ]]; then return; fi
 
   step 1 "Database"
-  echo "  EDDI needs a database to store bot configs & conversations."
+  echo "  EDDI needs a database to store agent configs & conversations."
   echo ""
   echo -e "  ${BOLD}1)${RESET} MongoDB        ${DIM}document store, simple setup (default)${RESET}"
   echo -e "  ${BOLD}2)${RESET} PostgreSQL     ${DIM}relational, SQL-queryable, familiar${RESET}"
@@ -437,17 +437,17 @@ wait_for_ready() {
   exit 1
 }
 
-# ── Import initial bots ──────────────────────────────────
+# ── Import initial agents ──────────────────────────────────
 
-maybe_import_initial_bots() {
-  local bot_count
-  bot_count=$(detect_deployed_bots) || bot_count=0
+maybe_import_initial_agents() {
+  local agent_count
+  agent_count=$(detect_deployed_agents) || agent_count=0
 
-  if [[ "$bot_count" -eq 0 ]]; then
-    echo -ne "  Deploying Bot Father...  "
+  if [[ "$agent_count" -eq 0 ]]; then
+    echo -ne "  Deploying Agent Father...  "
     local status
     status=$(curl -sf -o /dev/null -w "%{http_code}" \
-      -X POST "http://localhost:${EDDI_PORT}/backup/import/initialBots" 2>/dev/null) || status="000"
+      -X POST "http://localhost:${EDDI_PORT}/backup/import/initialAgents" 2>/dev/null) || status="000"
 
     if [[ "$status" == "200" ]]; then
       echo -e "${GREEN}✅${RESET}"
@@ -455,7 +455,7 @@ maybe_import_initial_bots() {
       echo -e "${YELLOW}⚠️${RESET}  ${DIM}(HTTP ${status} — non-fatal, EDDI is still usable)${RESET}"
     fi
   else
-    info "Found ${bot_count} deployed bot(s), skipping initial import."
+    info "Found ${agent_count} deployed agent(s), skipping initial import."
   fi
 }
 
@@ -474,10 +474,10 @@ print_success() {
   fi
 
   echo ""
-  echo -e "  ${BOLD}🤖 Ready to create your first bot?${RESET}"
-  echo "     Open the dashboard and chat with Bot Father!"
+  echo -e "  ${BOLD}🤖 Ready to create your first agent?${RESET}"
+  echo "     Open the dashboard and chat with Agent Father!"
   echo "     It will guide you through choosing an AI provider,"
-  echo "     setting up API keys, and building your first bot."
+  echo "     setting up API keys, and building your first agent."
   echo ""
   echo -e "  ${DIM}┌─ Claude Desktop / Cursor ──────────────────────────┐${RESET}"
   echo -e "  ${DIM}│ Add to your MCP config:                            │${RESET}"
@@ -485,7 +485,7 @@ print_success() {
   echo -e "  ${DIM}└────────────────────────────────────────────────────┘${RESET}"
   echo ""
   echo -e "  ${BOLD}Manage EDDI:${RESET}"
-  echo "    eddi status     health + deployed bots"
+  echo "    eddi status     health + deployed agents"
   echo "    eddi logs       view container logs"
   echo "    eddi stop       stop all containers"
   echo "    eddi update     pull latest version"
@@ -547,8 +547,8 @@ case "${1:-help}" in
     echo ""
     if curl -sf "http://localhost:${EDDI_PORT}/q/health/ready" &>/dev/null; then
       echo "Health: ✅ ready"
-      BOT_COUNT=$(curl -sf "http://localhost:${EDDI_PORT}/administration/unrestricted/deploymentstatus" 2>/dev/null | grep -o '"botId"' | wc -l || echo "0")
-      echo "Deployed bots: $BOT_COUNT"
+      AGENT_COUNT=$(curl -sf "http://localhost:${EDDI_PORT}/administration/unrestricted/deploymentstatus" 2>/dev/null | grep -o '"agentId"' | wc -l || echo "0")
+      echo "Deployed agents: $AGENT_COUNT"
     else
       echo "Health: ❌ not ready"
     fi
@@ -581,7 +581,7 @@ case "${1:-help}" in
     echo "  start       Start EDDI containers"
     echo "  stop        Stop EDDI containers"
     echo "  restart     Restart EDDI containers"
-    echo "  status      Show health and bot count"
+    echo "  status      Show health and agent count"
     echo "  logs [-f]   View container logs"
     echo "  update      Pull latest images and restart"
     echo "  uninstall   Remove EDDI and all data"
@@ -635,9 +635,9 @@ main() {
   check_prerequisites
 
   if [[ "$EDDI_ALREADY_RUNNING" == "true" ]]; then
-    # EDDI is already running — skip infra, check bots
+    # EDDI is already running — skip infra, check agents
     section "EDDI Already Running"
-    maybe_import_initial_bots
+    maybe_import_initial_agents
     install_cli_wrapper
     print_success
     exit 0
@@ -655,7 +655,7 @@ main() {
   download_compose_files
   start_eddi
   wait_for_ready
-  maybe_import_initial_bots
+  maybe_import_initial_agents
 
   # Install CLI wrapper
   install_cli_wrapper

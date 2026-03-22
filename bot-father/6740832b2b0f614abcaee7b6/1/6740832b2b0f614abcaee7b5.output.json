@@ -5,7 +5,7 @@
     "outputs" : [ {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "Enter the gemini api key you would like to use for this connector bot:",
+        "text" : "Enter the gemini api key you would like to use for this connector agent:",
         "delay" : 0
       } ]
     } ],
@@ -88,7 +88,7 @@
     "outputs" : [ {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "Would you like to enable built-in tools (calculator, websearch, datetime, weather, etc.) for this bot?",
+        "text" : "Would you like to enable built-in tools (calculator, websearch, datetime, weather, etc.) for this agent?",
         "delay" : 0
       } ]
     } ],
@@ -164,7 +164,7 @@
       "expressions" : "history_unlimited"
     } ]
   }, {
-    "action" : "ask_for_bot_creation_confirmation_for_gemini",
+    "action" : "ask_for_agent_creation_confirmation_for_gemini",
     "timesOccurred" : 0,
     "outputs" : [ {
       "valueAlternatives" : [ {
@@ -175,30 +175,30 @@
     }, {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "Continue with creating this connector bot?",
+        "text" : "Continue with creating this connector agent?",
         "delay" : 0
       } ]
     } ],
     "quickReplies" : [ {
-      "value" : "Create the bot!",
-      "expressions" : "orchestrate_create_bot_for_gemini"
+      "value" : "Create the agent!",
+      "expressions" : "orchestrate_create_agent_for_gemini"
     }, {
       "value" : "Cancel this",
       "expressions" : "exit_conversation, CONVERSATION_END"
     } ]
   }, {
-    "action" : "confirm_bot_creation_for_gemini",
+    "action" : "confirm_agent_creation_for_gemini",
     "timesOccurred" : 0,
     "outputs" : [ {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "It's all done! Your bot \"[[${properties.botName}]]\" was successfully created!",
+        "text" : "It's all done! Your agent \"[[${properties.agentName}]]\" was successfully created!",
         "delay" : 0
       } ]
     }, {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "Go to the bot overview page and refresh the page to see your newly created bot!",
+        "text" : "Go to the agent overview page and refresh the page to see your newly created agent!",
         "delay" : 0
       } ]
     }, {
@@ -210,13 +210,13 @@
     }, {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "You can access it here: <a href=\"/chat/unrestricted/[(${properties.botId})]\" target=\"_blank\">Open chat with Connector Bot [(${properties.botName})]</a>",
+        "text" : "You can access it here: <a href=\"/chat/unrestricted/[(${properties.agentId})]\" target=\"_blank\">Open chat with Connector Agent [(${properties.agentName})]</a>",
         "delay" : 0
       } ]
     }, {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "Bot intent for bot management api is \"[[${properties.botIntent}]]\": <a href=\"/managedbots/[(${properties.botIntent})]/put-user-id-here\" target=\"_blank\">Open API to Bot Connector [(${properties.botName})]</a>",
+        "text" : "Agent intent for agent management api is \"[[${properties.agentIntent}]]\": <a href=\"/managedagents/[(${properties.agentIntent})]/put-user-id-here\" target=\"_blank\">Open API to Agent Connector [(${properties.agentName})]</a>",
         "delay" : 0
       } ]
     } ],

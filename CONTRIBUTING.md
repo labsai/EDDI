@@ -42,12 +42,12 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 ### Prerequisites
 
-| Tool | Version | Notes |
-|------|---------|-------|
-| **Java (JDK)** | 25 | [Eclipse Temurin](https://adoptium.net/) recommended |
-| **Maven** | 3.9+ | Bundled via `mvnw` wrapper — no install needed |
-| **MongoDB** | 6.0+ | Local instance or Docker |
-| **Docker** | Latest | For integration tests and container builds |
+| Tool           | Version | Notes                                                |
+| -------------- | ------- | ---------------------------------------------------- |
+| **Java (JDK)** | 25      | [Eclipse Temurin](https://adoptium.net/) recommended |
+| **Maven**      | 3.9+    | Bundled via `mvnw` wrapper — no install needed       |
+| **MongoDB**    | 6.0+    | Local instance or Docker                             |
+| **Docker**     | Latest  | For integration tests and container builds           |
 
 ### Getting Started
 
@@ -71,11 +71,13 @@ docker run -d --name mongodb -p 27017:27017 mongo:7
 ### IDE Setup
 
 **IntelliJ IDEA** (recommended):
+
 - Import as Maven project
 - Enable annotation processing (Settings → Build → Compiler → Annotation Processors)
 - Install the Quarkus plugin for dev mode integration
 
 **VS Code**:
+
 - Install "Extension Pack for Java" and "Quarkus" extensions
 
 ## Building & Testing
@@ -112,7 +114,7 @@ docker run -d --name mongodb -p 27017:27017 mongo:7
 
 EDDI follows a strict [project philosophy](docs/project-philosophy.md). Key points for contributors:
 
-- **Configuration is logic, Java is the engine** — bot behavior belongs in JSON, not Java code
+- **Configuration is logic, Java is the engine** — agent behavior belongs in JSON, not Java code
 - **Security as architecture** — no `eval()`, no `ScriptEngine`, no dynamic code execution
 - **Stateless tasks** — `ILifecycleTask` implementations must be stateless singletons
 - **URL validation** — all external calls must use `UrlValidationUtils.validateUrl()`
@@ -138,16 +140,16 @@ type(scope): description
 
 ### Types
 
-| Type | Use for |
-|------|---------|
-| `feat` | New feature |
-| `fix` | Bug fix |
-| `docs` | Documentation only |
-| `test` | Adding or updating tests |
+| Type       | Use for                                 |
+| ---------- | --------------------------------------- |
+| `feat`     | New feature                             |
+| `fix`      | Bug fix                                 |
+| `docs`     | Documentation only                      |
+| `test`     | Adding or updating tests                |
 | `refactor` | Code change that neither fixes nor adds |
-| `chore` | Maintenance (deps, CI, configs) |
-| `perf` | Performance improvement |
-| `security` | Security fix |
+| `chore`    | Maintenance (deps, CI, configs)         |
+| `perf`     | Performance improvement                 |
+| `security` | Security fix                            |
 
 ### Examples
 
@@ -164,6 +166,7 @@ chore(deps): bump Quarkus to 3.33.0
 ### Workflow
 
 1. **Fork** the repository and create a feature branch from `main`:
+
    ```bash
    git checkout -b feat/my-awesome-feature
    ```
@@ -173,6 +176,7 @@ chore(deps): bump Quarkus to 3.33.0
 3. **Write tests** — new features require tests; bug fixes should include a regression test
 
 4. **Run the full build** locally:
+
    ```bash
    ./mvnw clean verify -DskipITs
    ```
@@ -194,14 +198,14 @@ chore(deps): bump Quarkus to 3.33.0
 
 Every PR runs through these automated gates:
 
-| Check | What It Does | Must Pass? |
-|-------|-------------|------------|
-| **Build + Tests** | `mvnw clean verify` with Java 25 | ✅ Yes |
-| **CodeQL** | Security scanning (injection, hardcoded creds, etc.) | ✅ Yes |
-| **Dependency Review** | Blocks vulnerable or incompatibly-licensed deps | ✅ Yes |
-| **CodeRabbit** | AI code review with line-by-line feedback | Advisory |
-| **Checkstyle** | Java code style validation | ⚠️ Warnings |
-| **JaCoCo** | Code coverage report | 📊 Report only |
+| Check                 | What It Does                                         | Must Pass?     |
+| --------------------- | ---------------------------------------------------- | -------------- |
+| **Build + Tests**     | `mvnw clean verify` with Java 25                     | ✅ Yes         |
+| **CodeQL**            | Security scanning (injection, hardcoded creds, etc.) | ✅ Yes         |
+| **Dependency Review** | Blocks vulnerable or incompatibly-licensed deps      | ✅ Yes         |
+| **CodeRabbit**        | AI code review with line-by-line feedback            | Advisory       |
+| **Checkstyle**        | Java code style validation                           | ⚠️ Warnings    |
+| **JaCoCo**            | Code coverage report                                 | 📊 Report only |
 
 ## Security
 

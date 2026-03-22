@@ -7,7 +7,6 @@ import ai.labs.eddi.utils.StringUtilities;
 import java.util.LinkedList;
 import java.util.List;
 
-
 /**
  * Database-agnostic descriptor store. Uses {@link IResourceStorageFactory}
  * to obtain the underlying storage, and {@link IResourceStorage#findResources}
@@ -18,7 +17,7 @@ import java.util.List;
 public class DescriptorStore<T> implements IDescriptorStore<T> {
     private static final String FIELD_RESOURCE = "resource";
     private static final String FIELD_NAME = "name";
-    private static final String FIELD_BOT_NAME = "agentName";
+    private static final String FIELD_AGENT_NAME = "agentName";
     private static final String FIELD_DESCRIPTION = "description";
     public static final String FIELD_LAST_MODIFIED = "lastModifiedOn";
     private static final String FIELD_DELETED = "deleted";
@@ -28,7 +27,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     private final IResourceStorage<T> resourceStorage;
 
     public DescriptorStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder,
-                           Class<T> documentType) {
+            Class<T> documentType) {
         this.resourceStorage = storageFactory.create("descriptors", documentBuilder, documentType);
         this.descriptorResourceStore = new ModifiableHistorizedResourceStore<>(resourceStorage);
     }
@@ -48,7 +47,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
             filter = StringUtilities.convertToSearchString(filter);
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_USER_ID, filter));
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_NAME, filter));
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_BOT_NAME, filter));
+            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_AGENT_NAME, filter));
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_DESCRIPTION, filter));
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_RESOURCE, filter));
         }
@@ -60,14 +59,14 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         if (!queryFiltersOptional.isEmpty()) {
             IResourceFilter.QueryFilters optional = new IResourceFilter.QueryFilters(
                     IResourceFilter.QueryFilters.ConnectingType.OR, queryFiltersOptional);
-            allFilters = new IResourceFilter.QueryFilters[]{required, optional};
+            allFilters = new IResourceFilter.QueryFilters[] { required, optional };
         } else {
-            allFilters = new IResourceFilter.QueryFilters[]{required};
+            allFilters = new IResourceFilter.QueryFilters[] { required };
         }
 
         // Use the storage-level findResources for database-agnostic querying
-        List<IResourceStore.IResourceId> matchingIds =
-                resourceStorage.findResources(allFilters, FIELD_LAST_MODIFIED, skip, effectiveLimit);
+        List<IResourceStore.IResourceId> matchingIds = resourceStorage.findResources(allFilters, FIELD_LAST_MODIFIED,
+                skip, effectiveLimit);
 
         // Read each matching resource
         List<T> ret = new LinkedList<>();
@@ -133,8 +132,8 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         queryFilters.add(new IResourceFilter.QueryFilter(FIELD_DELETED, false));
         IResourceFilter.QueryFilters required = new IResourceFilter.QueryFilters(queryFilters);
 
-        List<IResourceStore.IResourceId> matchingIds =
-                resourceStorage.findResources(new IResourceFilter.QueryFilters[]{required}, FIELD_LAST_MODIFIED, 0, 10);
+        List<IResourceStore.IResourceId> matchingIds = resourceStorage
+                .findResources(new IResourceFilter.QueryFilters[] { required }, FIELD_LAST_MODIFIED, 0, 10);
 
         List<T> ret = new LinkedList<>();
         for (IResourceStore.IResourceId resourceId : matchingIds) {

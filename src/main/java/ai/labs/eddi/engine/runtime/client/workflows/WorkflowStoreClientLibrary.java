@@ -37,8 +37,8 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
 
     @Inject
     public WorkflowStoreClientLibrary(IWorkflowStoreService workflowStoreService,
-                                     IComponentCache componentCache,
-                                     @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider) {
+            IComponentCache componentCache,
+            @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider) {
         this.workflowStoreService = workflowStoreService;
         this.lifecycleExtensionsProvider = lifecycleExtensionsProvider;
 
@@ -46,29 +46,32 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
     }
 
     @Override
-    public IExecutableWorkflow getExecutableWorkflow(final String packageId, final Integer packageVersion) throws ServiceException {
+    public IExecutableWorkflow getExecutableWorkflow(final String workflowId, final Integer packageVersion)
+            throws ServiceException {
         try {
-            DocumentDescriptor packageDocumentDescriptor = workflowStoreService.getPackageDocumentDescriptor(packageId, packageVersion);
-            WorkflowConfiguration knowledgePackage = workflowStoreService.getKnowledgePackage(packageId, packageVersion);
-            return createExecutablePackage(packageDocumentDescriptor, knowledgePackage);
-        } catch (PackageInitializationException e) {
+            DocumentDescriptor packageDocumentDescriptor = workflowStoreService
+                    .getWorkflowDocumentDescriptor(workflowId, packageVersion);
+            WorkflowConfiguration knowledgeWorkflow = workflowStoreService.getKnowledgeWorkflow(workflowId,
+                    packageVersion);
+            return createExecutableWorkflow(packageDocumentDescriptor, knowledgeWorkflow);
+        } catch (WorkflowInitializationException e) {
             throw new ServiceException("Error while creating executableWorkflow!", e);
         } catch (WorkflowConfigurationException e) {
             throw new ServiceException("Error while configuring executableWorkflow!", e);
         }
     }
 
-    private IExecutableWorkflow createExecutablePackage(final DocumentDescriptor documentDescriptor,
-                                                       final WorkflowConfiguration workflowConfiguration)
-            throws PackageInitializationException, WorkflowConfigurationException {
+    private IExecutableWorkflow createExecutableWorkflow(final DocumentDescriptor documentDescriptor,
+            final WorkflowConfiguration workflowConfiguration)
+            throws WorkflowInitializationException, WorkflowConfigurationException {
 
-        final var packageId = extractResourceId(documentDescriptor.getResource());
-        final var lifecycleManager = new LifecycleManager(componentCache, packageId);
+        final var workflowId = extractResourceId(documentDescriptor.getResource());
+        final var lifecycleManager = new LifecycleManager(componentCache, workflowId);
 
         try {
             List<WorkflowConfiguration.WorkflowStep> workflowSteps = workflowConfiguration.getWorkflowSteps();
-            for (int indexInPackage = 0; indexInPackage < workflowSteps.size(); indexInPackage++) {
-                WorkflowConfiguration.WorkflowStep workflowStep = workflowSteps.get(indexInPackage);
+            for (int indexInWorkflow = 0; indexInWorkflow < workflowSteps.size(); indexInWorkflow++) {
+                WorkflowConfiguration.WorkflowStep workflowStep = workflowSteps.get(indexInWorkflow);
                 URI extensionType = workflowStep.getType();
                 if (URI_SCHEME_ID.equals(extensionType.getScheme())) {
                     String type = extensionType.getHost();
@@ -76,10 +79,9 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
                         throw new UnrecognizedExtensionException(String.format("Extension '%s' not found", type));
                     }
 
-                    var componentKey = createComponentKey(packageId.getId(), packageId.getVersion(), indexInPackage);
+                    var componentKey = createComponentKey(workflowId.getId(), workflowId.getVersion(), indexInWorkflow);
                     var lifecycleTask = lifecycleExtensionsProvider.get(type).get();
-                    var component = lifecycleTask.
-                            configure(workflowStep.getConfig(), workflowStep.getExtensions());
+                    var component = lifecycleTask.configure(workflowStep.getConfig(), workflowStep.getExtensions());
 
                     if (component != null) {
                         componentCache.put(type, componentKey, component);
@@ -88,7 +90,7 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
                 }
             }
         } catch (IllegalExtensionConfigurationException | UnrecognizedExtensionException e) {
-            throw new PackageInitializationException(e.getMessage(), e);
+            throw new WorkflowInitializationException(e.getMessage(), e);
         }
 
         return new IExecutableWorkflow() {
@@ -103,7 +105,7 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
             }
 
             @Override
-            public String getPackageId() {
+            public String getWorkflowId() {
                 return RestUtilities.extractResourceId(documentDescriptor.getResource()).getId();
             }
 
@@ -114,8 +116,8 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
         };
     }
 
-    public static class PackageInitializationException extends Exception {
-        PackageInitializationException(String message, Throwable e) {
+    public static class WorkflowInitializationException extends Exception {
+        WorkflowInitializationException(String message, Throwable e) {
             super(message, e);
         }
     }

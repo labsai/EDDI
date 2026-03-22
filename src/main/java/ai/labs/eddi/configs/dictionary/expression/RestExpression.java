@@ -36,10 +36,10 @@ public class RestExpression implements IRestExpression {
     }
 
     @Override
-    public List<String> readExpressions(String packageId, Integer packageVersion, String filter, Integer limit) {
+    public List<String> readExpressions(String workflowId, Integer packageVersion, String filter, Integer limit) {
         List<String> retExpressions = new LinkedList<>();
         try {
-            WorkflowConfiguration workflowConfig = workflowStore.read(packageId, packageVersion);
+            WorkflowConfiguration workflowConfig = workflowStore.read(workflowId, packageVersion);
             List<IResourceStore.IResourceId> resourceIds = readDictionaryResourceIds(workflowConfig);
             for (IResourceStore.IResourceId resourceId : resourceIds) {
                 List<String> expressions = regularDictionaryStore.readExpressions(resourceId.getId(), resourceId.getVersion(), filter, "asc", 0, limit);

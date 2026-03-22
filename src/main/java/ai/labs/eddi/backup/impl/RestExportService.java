@@ -70,18 +70,18 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     @Inject
     public RestExportService(IDocumentDescriptorStore documentDescriptorStore,
-                             IAgentStore agentStore,
-                             IWorkflowStore workflowStore,
-                             IRegularDictionaryStore regularDictionaryStore,
-                             IBehaviorStore behaviorStore,
-                             IHttpCallsStore httpCallsStore,
-                             ILangChainStore langChainStore,
-                             IPropertySetterStore propertySetterStore,
-                             IOutputStore outputStore,
-                             IJsonSerialization jsonSerialization,
-                             IZipArchive zipArchive,
-                             SecretScrubber secretScrubber,
-                             IScheduleStore scheduleStore) {
+            IAgentStore agentStore,
+            IWorkflowStore workflowStore,
+            IRegularDictionaryStore regularDictionaryStore,
+            IBehaviorStore behaviorStore,
+            IHttpCallsStore httpCallsStore,
+            ILangChainStore langChainStore,
+            IPropertySetterStore propertySetterStore,
+            IOutputStore outputStore,
+            IJsonSerialization jsonSerialization,
+            IZipArchive zipArchive,
+            SecretScrubber secretScrubber,
+            IScheduleStore scheduleStore) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
@@ -98,11 +98,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     }
 
     @Override
-    public Response getBotZipArchive(String botFilename) {
+    public Response getAgentZipArchive(String agentFilename) {
         try {
-            botFilename = sanitizeFileName(botFilename);
+            agentFilename = sanitizeFileName(agentFilename);
 
-            Path zipFilePath = Paths.get(tmpPath.toString(), botFilename).normalize();
+            Path zipFilePath = Paths.get(tmpPath.toString(), agentFilename).normalize();
 
             Path tmpDirPath = Paths.get(tmpPath.toString()).toAbsolutePath().normalize();
             if (!zipFilePath.startsWith(tmpDirPath)) {
@@ -116,20 +116,22 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     }
 
     @Override
-    public Response exportBot(String agentId, Integer agentVersion) {
+    public Response exportAgent(String agentId, Integer agentVersion) {
         try {
             AgentConfiguration agentConfig = agentStore.read(agentId, agentVersion);
-            Path botPath = writeDirAndDocument(agentId, agentVersion, jsonSerialization.serialize(agentConfig), tmpPath, BOT_EXT);
-            Map<IResourceId, WorkflowConfiguration> workflowConfigurations =
-                    readConfigs(workflowStore, agentConfig.getWorkflows());
+            Path agentPath = writeDirAndDocument(agentId, agentVersion, jsonSerialization.serialize(agentConfig),
+                    tmpPath,
+                    AGENT_EXT);
+            Map<IResourceId, WorkflowConfiguration> workflowConfigurations = readConfigs(workflowStore,
+                    agentConfig.getWorkflows());
 
-            DocumentDescriptor botDocumentDescriptor = writeDocumentDescriptor(botPath, agentId, agentVersion);
+            DocumentDescriptor agentDocumentDescriptor = writeDocumentDescriptor(agentPath, agentId, agentVersion);
 
             for (IResourceId resourceId : workflowConfigurations.keySet()) {
                 WorkflowConfiguration workflowConfig = workflowConfigurations.get(resourceId);
                 String workflowConfigString = jsonSerialization.serialize(workflowConfig);
                 Path packagePath = writeDirAndDocument(resourceId.getId(), resourceId.getVersion(),
-                        workflowConfigString, botPath, PACKAGE_EXT);
+                        workflowConfigString, agentPath, WORKFLOW_EXT);
                 writeDocumentDescriptor(packagePath, resourceId.getId(), resourceId.getVersion());
 
                 writeConfigs(packagePath, convertConfigsToString(readConfigs(regularDictionaryStore,
@@ -152,21 +154,27 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
                 Path unusedPath = Files.createDirectories(Paths.get(tmpPath.toString(), agentId, "unused"));
 
-                writeAllVersionsOfUris(unusedPath, regularDictionaryStore, extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN), DICTIONARY_EXT);
-                writeAllVersionsOfUris(unusedPath, behaviorStore, extractResourcesUris(workflowConfigString, BEHAVIOR_URI_PATTERN), BEHAVIOR_EXT);
-                writeAllVersionsOfUris(unusedPath, httpCallsStore, extractResourcesUris(workflowConfigString, HTTPCALLS_URI_PATTERN), HTTPCALLS_EXT);
-                writeAllVersionsOfUris(unusedPath, langChainStore, extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN), LANGCHAIN_EXT);
-                writeAllVersionsOfUris(unusedPath, propertySetterStore, extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN), PROPERTY_EXT);
-                writeAllVersionsOfUris(unusedPath, outputStore, extractResourcesUris(workflowConfigString, OUTPUT_URI_PATTERN), OUTPUT_EXT);
+                writeAllVersionsOfUris(unusedPath, regularDictionaryStore,
+                        extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN), DICTIONARY_EXT);
+                writeAllVersionsOfUris(unusedPath, behaviorStore,
+                        extractResourcesUris(workflowConfigString, BEHAVIOR_URI_PATTERN), BEHAVIOR_EXT);
+                writeAllVersionsOfUris(unusedPath, httpCallsStore,
+                        extractResourcesUris(workflowConfigString, HTTPCALLS_URI_PATTERN), HTTPCALLS_EXT);
+                writeAllVersionsOfUris(unusedPath, langChainStore,
+                        extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN), LANGCHAIN_EXT);
+                writeAllVersionsOfUris(unusedPath, propertySetterStore,
+                        extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN), PROPERTY_EXT);
+                writeAllVersionsOfUris(unusedPath, outputStore,
+                        extractResourcesUris(workflowConfigString, OUTPUT_URI_PATTERN), OUTPUT_EXT);
 
             }
 
-            // Export schedules for this bot
-            exportSchedules(agentId, botPath);
+            // Export schedules for this agent
+            exportSchedules(agentId, agentPath);
 
-            String zipFilename = prepareZipFilename(botDocumentDescriptor, agentId, agentVersion);
+            String zipFilename = prepareZipFilename(agentDocumentDescriptor, agentId, agentVersion);
             String targetZipPath = FileUtilities.buildPath(tmpPath.toString(), zipFilename);
-            this.zipArchive.createZip(botPath.toString(), targetZipPath);
+            this.zipArchive.createZip(agentPath.toString(), targetZipPath);
             return Response.ok().location(URI.create("/backup/export/" + zipFilename)).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
@@ -175,7 +183,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         }
     }
 
-    private <T> void writeAllVersionsOfUris(Path unusedPath, IResourceStore<T> store, List<URI> dictionaryUris, String ext) {
+    private <T> void writeAllVersionsOfUris(Path unusedPath, IResourceStore<T> store, List<URI> dictionaryUris,
+            String ext) {
         for (URI dictionaryUri : dictionaryUris) {
             Integer versionToExport = 1;
             IResourceId resourceIdUnused = RestUtilities.extractResourceId(dictionaryUri);
@@ -214,11 +223,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     }
 
-    private String prepareZipFilename(DocumentDescriptor botDocumentDescriptor, String agentId, Integer agentVersion)
+    private String prepareZipFilename(DocumentDescriptor agentDocumentDescriptor, String agentId, Integer agentVersion)
             throws UnsupportedEncodingException {
         String zipFilename = "";
-        if (!isNullOrEmpty(botDocumentDescriptor.getName())) {
-            zipFilename = URLEncoder.encode(botDocumentDescriptor.getName() + "-", StandardCharsets.UTF_8);
+        if (!isNullOrEmpty(agentDocumentDescriptor.getName())) {
+            zipFilename = URLEncoder.encode(agentDocumentDescriptor.getName() + "-", StandardCharsets.UTF_8);
         }
         zipFilename += agentId + "-" + agentVersion + ".zip";
         return zipFilename;
@@ -236,8 +245,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                         log.error(ex.getLocalizedMessage(), ex);
                         return "";
                     }
-                }
-        ));
+                }));
     }
 
     private void writeConfigs(Path path, Map<IResourceId, String> configs, String fileExtension) {
@@ -258,7 +266,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     private void writeUnusedConfigs(Path path, Map<IResourceId, String> configs, String fileExtension) {
         configs.forEach((resourceId, value) -> {
-            String filename = MessageFormat.format("{0}.{1}.{2}.json", resourceId.getId(), resourceId.getVersion(), fileExtension);
+            String filename = MessageFormat.format("{0}.{1}.{2}.json", resourceId.getId(), resourceId.getVersion(),
+                    fileExtension);
             Path filePath = Paths.get(path.toString(), filename);
             try {
                 deleteFileIfExists(filePath);
@@ -272,9 +281,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         });
     }
 
-
     private Path writeDirAndDocument(String documentId, Integer documentVersion,
-                                     String configurationString, Path tmpPath, String fileExtension)
+            String configurationString, Path tmpPath, String fileExtension)
             throws IOException {
 
         Path dir = Files.createDirectories(Paths.get(tmpPath.toString(), documentId, String.valueOf(documentVersion)));
@@ -282,8 +290,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         String filename = MessageFormat.format("{0}.{1}.json", documentId, fileExtension);
         Path filePath = Paths.get(dir.toString(), filename);
         deleteFileIfExists(filePath);
-        Path botConfigFilePath = Files.createFile(filePath);
-        try (BufferedWriter writer = Files.newBufferedWriter(botConfigFilePath)) {
+        Path agentConfigFilePath = Files.createFile(filePath);
+        try (BufferedWriter writer = Files.newBufferedWriter(agentConfigFilePath)) {
             writer.write(configurationString);
         }
 
@@ -292,7 +300,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     private DocumentDescriptor writeDocumentDescriptor(Path path, String documentId, Integer documentVersion)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IOException {
-        DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptorWithHistory(documentId, documentVersion);
+        DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptorWithHistory(documentId,
+                documentVersion);
         String filename = MessageFormat.format("{0}.descriptor.json", documentId);
         Path filePath = Paths.get(path.toString(), filename);
         deleteFileIfExists(filePath);
@@ -320,31 +329,28 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         }
     }
 
-    private static String sanitizeFileName(String botFilename) {
-        if (botFilename == null || botFilename.isEmpty()) {
+    private static String sanitizeFileName(String agentFilename) {
+        if (agentFilename == null || agentFilename.isEmpty()) {
             throw new BadRequestException("Filename is empty.");
         }
 
-        botFilename = botFilename.
-                replaceAll("\\.\\./", "").
-                replaceAll("\\\\", "").
-                replaceAll("/", "");
+        agentFilename = agentFilename.replaceAll("\\.\\./", "").replaceAll("\\\\", "").replaceAll("/", "");
 
-        if (!botFilename.matches("^[a-zA-Z0-9_.+\\-]+$")) {
+        if (!agentFilename.matches("^[a-zA-Z0-9_.+\\-]+$")) {
             throw new BadRequestException("Filename contains invalid characters.");
         }
 
-        return botFilename;
+        return agentFilename;
     }
 
-    private void exportSchedules(String agentId, Path botPath) {
+    private void exportSchedules(String agentId, Path agentPath) {
         try {
-            List<ScheduleConfiguration> schedules = scheduleStore.readSchedulesByBotId(agentId);
+            List<ScheduleConfiguration> schedules = scheduleStore.readSchedulesByAgentId(agentId);
             if (schedules.isEmpty()) {
                 return;
             }
 
-            Path schedulesDir = Files.createDirectories(Paths.get(botPath.toString(), "schedules"));
+            Path schedulesDir = Files.createDirectories(Paths.get(agentPath.toString(), "schedules"));
             for (ScheduleConfiguration schedule : schedules) {
                 String json = jsonSerialization.serialize(schedule);
                 json = secretScrubber.scrubJson(json);

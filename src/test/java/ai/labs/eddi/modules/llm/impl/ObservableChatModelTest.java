@@ -150,8 +150,7 @@ class ObservableChatModelTest {
                     .messages(List.of(
                             SystemMessage.from("You are helpful"),
                             UserMessage.from("Hello"),
-                            UserMessage.from("How are you?")
-                    ))
+                            UserMessage.from("How are you?")))
                     .build();
             when(delegate.chat(request)).thenReturn(MOCK_RESPONSE);
 
@@ -243,7 +242,8 @@ class ObservableChatModelTest {
             ChatModel wrapped = ObservableChatModel.wrapIfNeeded(delegate, "openai", "10000", null, null);
 
             RuntimeException ex = assertThrows(RuntimeException.class, () -> wrapped.chat(request));
-            // The original exception should be the cause (unwrapped from ExecutionException)
+            // The original exception should be the cause (unwrapped from
+            // ExecutionException)
             assertInstanceOf(IllegalArgumentException.class, ex.getCause());
             assertEquals("Bad input", ex.getCause().getMessage());
         }
@@ -256,7 +256,7 @@ class ObservableChatModelTest {
                     .build();
             when(delegate.chat(request)).thenReturn(MOCK_RESPONSE);
 
-            // Both timeout and logging
+            // Agenth timeout and logging
             ChatModel wrapped = ObservableChatModel.wrapIfNeeded(delegate, "vertex-ai", "10000", "true", "true");
             ChatResponse response = wrapped.chat(request);
 

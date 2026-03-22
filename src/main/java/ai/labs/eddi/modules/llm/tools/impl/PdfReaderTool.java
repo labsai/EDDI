@@ -21,7 +21,7 @@ import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 
 /**
  * PDF reader tool for extracting text from PDF documents.
- * Supports both local files and URLs.
+ * Supports agenth local files and URLs.
  */
 @ApplicationScoped
 public class PdfReaderTool {
@@ -163,7 +163,7 @@ public class PdfReaderTool {
             String text = stripper.getText(document);
 
             LOGGER.info("Extracted " + text.length() + " characters from PDF with " +
-                       document.getNumberOfPages() + " pages");
+                    document.getNumberOfPages() + " pages");
 
             // Limit output size
             if (text.length() > 10000) {
@@ -199,7 +199,7 @@ public class PdfReaderTool {
             String text = stripper.getText(document);
 
             LOGGER.info("Extracted text from pages " + startPage + "-" + endPage +
-                       " (" + text.length() + " characters)");
+                    " (" + text.length() + " characters)");
 
             // Limit output size
             if (text.length() > 10000) {
@@ -228,7 +228,7 @@ public class PdfReaderTool {
         Path tempFile = Files.createTempFile("eddi-pdf-", ".pdf");
 
         HttpResponse<Path> response = httpClient.send(request,
-            HttpResponse.BodyHandlers.ofFile(tempFile));
+                HttpResponse.BodyHandlers.ofFile(tempFile));
 
         if (response.statusCode() != 200) {
             Files.deleteIfExists(tempFile);
@@ -239,4 +239,3 @@ public class PdfReaderTool {
         return tempFile;
     }
 }
-

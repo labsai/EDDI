@@ -10,19 +10,19 @@ class SecretReferenceTest {
 
     @Test
     void parse_validReference() {
-        var ref = SecretReference.parse("${eddivault:default/myBot/openaiKey}");
+        var ref = SecretReference.parse("${eddivault:default/myAgent/openaiKey}");
 
         assertEquals("default", ref.tenantId());
-        assertEquals("myBot", ref.agentId());
+        assertEquals("myAgent", ref.agentId());
         assertEquals("openaiKey", ref.keyName());
     }
 
     @Test
     void toReferenceString_roundtrip() {
-        var ref = new SecretReference("tenant1", "bot42", "apiKey");
+        var ref = new SecretReference("tenant1", "agent42", "apiKey");
         String refStr = ref.toReferenceString();
 
-        assertEquals("${eddivault:tenant1/bot42/apiKey}", refStr);
+        assertEquals("${eddivault:tenant1/agent42/apiKey}", refStr);
 
         var parsed = SecretReference.parse(refStr);
         assertEquals(ref, parsed);

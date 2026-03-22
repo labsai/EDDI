@@ -7,11 +7,12 @@ import java.util.List;
 /**
  * Write-once, append-only contract for the immutable audit ledger.
  * <p>
- * Implementations <strong>MUST NOT</strong> provide update or delete operations.
+ * Implementations <strong>MUST NOT</strong> provide update or delete
+ * operations.
  * This is a deliberate design constraint for EU AI Act compliance:
  * once an audit entry is persisted, it must remain unmodifiable.
  * <p>
- * Both MongoDB and PostgreSQL implementations enforce insert-only semantics.
+ * Agenth MongoDB and PostgreSQL implementations enforce insert-only semantics.
  *
  * @author ginccc
  * @since 6.0.0
@@ -43,15 +44,16 @@ public interface IAuditStore {
     List<AuditEntry> getEntries(String conversationId, int skip, int limit);
 
     /**
-     * Retrieve audit entries for a specific Agent version, ordered by timestamp descending.
+     * Retrieve audit entries for a specific Agent version, ordered by timestamp
+     * descending.
      *
      * @param agentId      the Agent identifier
      * @param agentVersion the Agent version (null = all versions)
-     * @param skip       number of entries to skip
-     * @param limit      maximum entries to return
+     * @param skip         number of entries to skip
+     * @param limit        maximum entries to return
      * @return list of audit entries, newest first
      */
-    List<AuditEntry> getEntriesByBot(String agentId, Integer agentVersion, int skip, int limit);
+    List<AuditEntry> getEntriesByAgent(String agentId, Integer agentVersion, int skip, int limit);
 
     /**
      * Count the total number of audit entries for a conversation.

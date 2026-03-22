@@ -6,7 +6,7 @@
 
 **EDDI** (Enhanced Dialog Driven Interface) is a multi-agent orchestration middleware for conversational AI. This repo is the **Java/Quarkus backend**.
 
-EDDI is a **config-driven engine**, not a monolithic application. Bot behavior lives in JSON configurations; Java code builds the _components_ and _infrastructure_ (the "engine") that reads and executes those configurations.
+EDDI is a **config-driven engine**, not a monolithic application. Agent behavior lives in JSON configurations; Java code builds the _components_ and _infrastructure_ (the "engine") that reads and executes those configurations.
 
 ### Ecosystem (5 repos, all under `c:\dev\git\`)
 
@@ -20,7 +20,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Bot behavior l
 
 ### Key Architecture
 
-- **Config-driven engine**: Bot logic is JSON configs, Java is the processing engine
+- **Config-driven engine**: Agent logic is JSON configs, Java is the processing engine
 - **Lifecycle pipeline**: Input → Parse → Behavior Rules → Actions → Tasks → Output
 - **Stateless tasks, stateful memory**: `ILifecycleTask` implementations are singletons; all state lives in `IConversationMemory`
 - **Action-based orchestration**: Tasks emit/listen for string-based actions, never call each other directly
@@ -36,7 +36,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Bot behavior l
    - [`docs/project-philosophy.md`](docs/project-philosophy.md) — **Supreme directive.** 7 architectural pillars governing all EDDI development
    - [`docs/changelog.md`](docs/changelog.md) — **READ FIRST.** Running log of all changes, decisions, and reasoning across ALL repos and sessions
    - [`docs/v6-planning/implementation_plan.md`](docs/v6-planning/implementation_plan.md) — Full architecture audit (14 appendices, A-N) and phased roadmap
-   - [`docs/v6-planning/business-logic-analysis.md`](docs/v6-planning/business-logic-analysis.md) — Configuration model, Bot Father, parser/expression deep dive
+   - [`docs/v6-planning/business-logic-analysis.md`](docs/v6-planning/business-logic-analysis.md) — Configuration model, Agent Father, parser/expression deep dive
    - If working on **EDDI-Manager**: also read `c:\dev\git\EDDI-Manager\HANDOFF.md` and `c:\dev\git\EDDI-Manager\AGENTS.md`
 2. **Check git status**: Run `git status` and `git log -5 --oneline` to see current branch state and recent work.
 
@@ -74,7 +74,7 @@ Phase 0: Security Quick Wins (6 SP) ✅
   0b. Create PathNavigator (replace OGNL calls)      5 SP
 
 Phase 1: Backend Foundation (20 SP) ✅
-  1. Extract ConversationService from RestBotEngine   5 SP
+  1. Extract ConversationService from RestAgentEngine   5 SP
   2. Decompose LangchainTask into focused classes     5 SP
   3. Add SSE streaming API endpoint                   5 SP
   4. Typed memory accessors (MemoryKey<T>)            3 SP
@@ -111,7 +111,7 @@ Phase 6: PostgreSQL / DB-Agnostic Architecture ✅
   6A. MongoDB sync driver migration                    5 SP
       (replace reactive+blocking with sync driver, 13 files)
   6B. PostgreSQL integration test parity               3 SP
-      (run all 48 ITs against both MongoDB and PostgreSQL)
+      (run all 48 ITs against agenth MongoDB and PostgreSQL)
 
 Phase 6C: Infinispan → Caffeine (2 SP)   [QUICK WIN]  ✅
   6C. Replace Infinispan with Caffeine (2 files, POM cleanup)   2 SP
@@ -121,10 +121,10 @@ Phase 6E: quarkus-langchain4j → langchain4j Core (2 SP)   [QUICK WIN]  ✅
       + ObservableChatModel decorator (provider-agnostic timeout + logging)
 
 Phase 6F: Contextual Logging — MDC + Manager Log Panel (5 SP)   [QUICK WIN]  ✅
-  6F-1. MDC context (botId, conversationId) in ConversationService   1 SP
+  6F-1. MDC context (agentId, conversationId) in ConversationService   1 SP
   6F-2. BoundedLogStore — ring buffer log handler with MDC tags      2 SP
   6F-3. REST + SSE endpoint for log streaming/filtering              1 SP
-  6F-4. Manager UI: Logs panel (live tail, bot/conversation filter)  1 SP
+  6F-4. Manager UI: Logs panel (live tail, agent/conversation filter)  1 SP
 
 Phase 6D: Lombok Removal (5 SP)   [QUICK WIN]  ✅
   6D. Delombok 114 files, explicit getters/setters, JBoss Logger    5 SP
@@ -136,14 +136,14 @@ Phase 7: Secrets, Audit + Tenant Foundation (12 SP) ✅
   34b. Tenant Quota Stub — per-tenant rate limits, usage metering   2 SP  ✅
 
 Phase 8a: MCP Servers (8 SP) ✅
-  35. MCP Server: Bot Conversations (11 tools)                      5 SP  ✅
+  35. MCP Server: Agent Conversations (11 tools)                      5 SP  ✅
   36. MCP Server: Admin API (13 tools)                              3 SP  ✅
   8a.2. MCP Resource CRUD + Batch Cascade (5 tools)                 3 SP  ✅
-  8a.3. Bot Discovery & Managed Conversations (6 tools)             3 SP  ✅
+  8a.3. Agent Discovery & Managed Conversations (6 tools)             3 SP  ✅
   37. MCP Resources: EDDI Documentation (docs as MCP resources)     2 SP  ✅
 
 Phase 8b: MCP Client (5 SP) ✅
-  38. MCP Client — bots consume external MCP tools                  5 SP  ✅
+  38. MCP Client — agents consume external MCP tools                  5 SP  ✅
 
 Phase 8c: RAG Foundation (3 SP)
   38b. RAG Lifecycle Task — config-driven vector store retrieval    3 SP
@@ -156,10 +156,10 @@ Phase 9: DAG Pipeline + Governance (10 SP)
 
 Phase 9b: HITL Framework (5 SP)
   41. HITL Framework (pause/resume/approve for MCP + budget)       3 SP
-  42. Workspace AI Operator — system bot with admin API access     2 SP
+  42. Workspace AI Operator — system agent with admin API access     2 SP
 
-Phase 10a: Multi-Bot Orchestration (8 SP)
-  43. Bot-to-bot routing + orchestrator pattern                    5 SP
+Phase 10a: Multi-Agent Orchestration (8 SP)
+  43. Agent-to-agent routing + orchestrator pattern                    5 SP
   44. Cascading model routing (small→better, consensus)            3 SP
 
 Phase 10b: Advanced RAG + Debate (8 SP)
@@ -170,7 +170,7 @@ Phase 10b: Advanced RAG + Debate (8 SP)
 Phase 11a: Persistent Memory + Heartbeat (8 SP)
   47. Cross-conversation persistent user memory                    5 SP
   48. Heartbeat / Scheduled Triggers (cluster-safe via NATS,       3 SP
-      exactly-once, bot self-scheduling via tool)
+      exactly-once, agent self-scheduling via tool)
 
 Phase 11b: Multi-Channel Adapters (5 SP)
   49. Multi-channel adapters (WhatsApp/Telegram/Slack)             5 SP
@@ -198,7 +198,7 @@ Phase 14b: Website — Content + Deployment (9 SP)
 Deferred (post v6.0):
   - Redis distributed cache
   - Helm chart
-  - Self-improving skills (bots that learn from interactions)
+  - Self-improving skills (agents that learn from interactions)
 ```
 
 ---
@@ -207,7 +207,7 @@ Deferred (post v6.0):
 
 ### 4.1 Golden Rules (Non-Negotiable)
 
-1. **Logic is Configuration, Java is the Engine** — Bot behavior (e.g., "if user says 'hello', call API 'X'") MUST NOT be hard-coded in Java. Bot logic belongs in **JSON configurations** (`behavior.json`, `httpcalls.json`, `langchain.json`). Java code creates the `ILifecycleTask` components that _read and execute_ this configuration.
+1. **Logic is Configuration, Java is the Engine** — Agent behavior (e.g., "if user says 'hello', call API 'X'") MUST NOT be hard-coded in Java. Agent logic belongs in **JSON configurations** (`behavior.json`, `httpcalls.json`, `langchain.json`). Java code creates the `ILifecycleTask` components that _read and execute_ this configuration.
 2. **Stateless Tasks, Stateful Memory** — `ILifecycleTask` implementations MUST be stateless. They are singletons shared by all conversations. All conversational state MUST be read from and written to the `IConversationMemory` object passed into the `execute` method.
 3. **Action-Based Orchestration** — Tasks MUST NOT call other tasks directly. The system is event-driven. Tasks are orchestrated by string-based **actions**. A task (like `BehaviorRulesEvaluationTask`) emits actions, and other tasks (like `OutputGenerationTask` or `HttpCallsTask`) listen for them.
 4. **Dependency Injection via Quarkus CDI** — All components (`ILifecycleTask`s, `IResourceStore`s) use `@ApplicationScoped` and `@Inject`. No manual module registration — Quarkus auto-discovers beans.
@@ -237,13 +237,13 @@ The **single source of truth** for a conversation:
 - **`IData<T>`** — generic wrapper for data in a step. Use `Data<T>` to create new objects
 - **Reading**: `currentStep.getLatestData("key")` → check for null → `.getResult()`
 - **Writing**: `currentStep.storeData(new Data<>("key", value))`. Set `data.setPublic(true)` for output-visible data
-- **`ConversationProperties`** — long-term state (e.g., `botName`, `userId`). Slot-filling uses `PropertySetterTask`
+- **`ConversationProperties`** — long-term state (e.g., `agentName`, `userId`). Slot-filling uses `PropertySetterTask`
 
 #### The Configuration-as-Code Model
 
-Bot definitions are versioned MongoDB documents. A "Bot" is a list of "Packages". A "Package" bundles "Package Extensions" (JSON configs).
+Agent definitions are versioned MongoDB documents. A "Agent" is a list of "Workflows". A "Workflow" bundles "Workflow Extensions" (JSON configs).
 
-#### Core Package Extensions
+#### Core Workflow Extensions
 
 - **`behavior.json`** → `BehaviorRulesEvaluationTask` — the **primary orchestrator**. Its `actions` list is the event that triggers other tasks.
 - **`httpcalls.json`** → `HttpCallsTask` — **Tool Definitions** with templated API calls.
@@ -286,16 +286,16 @@ for (MyTask task : configuration.tasks()) {
 ```java
 @Override
 public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-        throws PackageConfigurationException {
+        throws WorkflowConfigurationException {
     Object uriObj = configuration.get("uri");
     if (isNullOrEmpty(uriObj)) {
-        throw new PackageConfigurationException("No resource URI has been defined!");
+        throw new WorkflowConfigurationException("No resource URI has been defined!");
     }
     URI uri = URI.create(uriObj.toString());
     try {
         return resourceClientLibrary.getResource(uri, MyFeatureConfiguration.class);
     } catch (ServiceException e) {
-        throw new PackageConfigurationException(e.getLocalizedMessage(), e);
+        throw new WorkflowConfigurationException(e.getLocalizedMessage(), e);
     }
 }
 ```
@@ -425,14 +425,14 @@ public class MyFeatureTask implements ILifecycleTask {
 
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws PackageConfigurationException {
+            throws WorkflowConfigurationException {
         Object uriObj = configuration.get("uri");
-        if (isNullOrEmpty(uriObj)) throw new PackageConfigurationException("No resource URI defined!");
+        if (isNullOrEmpty(uriObj)) throw new WorkflowConfigurationException("No resource URI defined!");
         URI uri = URI.create(uriObj.toString());
         try {
             return resourceClientLibrary.getResource(uri, MyFeatureConfiguration.class);
         } catch (ServiceException e) {
-            throw new PackageConfigurationException(e.getLocalizedMessage(), e);
+            throw new WorkflowConfigurationException(e.getLocalizedMessage(), e);
         }
     }
 
@@ -459,7 +459,7 @@ When implementing a new feature, provide:
    - `*Store.java` (MongoDB implementation)
    - `IRest*Store.java` (JAX-RS interface)
    - `Rest*Store.java` (JAX-RS implementation)
-3. **Sample JSON config** showing how a bot developer uses the feature
+3. **Sample JSON config** showing how a agent developer uses the feature
 4. **Unit test** (`@QuarkusTest`, Mockito mocks, verify memory reads/writes)
 
 ### 4.7 Best Practices & Common Pitfalls
@@ -479,14 +479,14 @@ When implementing a new feature, provide:
 #### Error Handling
 
 - Wrap external API exceptions in `LifecycleException`
-- Log errors with context (conversation ID, bot ID)
+- Log errors with context (conversation ID, agent ID)
 - Don't let exceptions kill the pipeline — handle gracefully
 
 #### Performance
 
 - Cache expensive resources (models, compiled templates)
 - Use `@PostConstruct` for one-time initialization
-- Track metrics to identify bottlenecks
+- Track metrics to identify agenttlenecks
 - Avoid blocking operations in task execution
 
 #### Memory Management
@@ -498,7 +498,7 @@ When implementing a new feature, provide:
 
 - Validate in `configure()` method
 - Provide sensible defaults
-- Use descriptive error messages in `PackageConfigurationException`
+- Use descriptive error messages in `WorkflowConfigurationException`
 
 #### Logging
 
@@ -511,7 +511,7 @@ When implementing a new feature, provide:
 | File                                        | Purpose                                                   |
 | ------------------------------------------- | --------------------------------------------------------- |
 | `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, MongoDB)           |
-| `src/main/resources/initial-bots/`          | Bot Father and sample bot configs                         |
+| `src/main/resources/initial-agents/`        | Agent Father and sample agent configs                     |
 | `.circleci/config.yml`                      | Current CI (migrating to GitHub Actions)                  |
 | `docs/`                                     | 40 markdown files, published at docs.labs.ai              |
 | `docs/v6-planning/`                         | Architecture analysis, changelog, business logic analysis |

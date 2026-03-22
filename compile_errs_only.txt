@@ -1,1 +1,0 @@
-[ERROR] Failed to execute goal org.apache.maven.plugins:maven-checkstyle-plugin:3.6.0:check (validate) on project eddi: Failed during checkstyle configuration: cannot initialize module TreeWalker - TreeWalker is not allowed as a parent of LineLength Please review 'Parent Module' section for this Check in web documentation if Check is standard. -> [Help 1]

@@ -38,13 +38,13 @@ public class ContextMatcherTest {
 
     @Test
     public void getValuesWithExpressions() {
-        //setup
+        // setup
         final HashMap<String, String> expected = setupValuesWithExpressions();
 
-        //test
+        // test
         Map<String, String> actual = contextMatcher.getConfigs();
 
-        //assert
+        // assert
         Assertions.assertEquals(expected, actual);
     }
 
@@ -66,13 +66,13 @@ public class ContextMatcherTest {
 
     @Test
     public void getValuesWithObject() {
-        //setup
+        // setup
         final HashMap<String, String> expected = setupValuesWithObject(true);
 
-        //test
+        // test
         Map<String, String> actual = contextMatcher.getConfigs();
 
-        //assert
+        // assert
         Assertions.assertEquals(expected, actual);
     }
 
@@ -92,13 +92,13 @@ public class ContextMatcherTest {
 
     @Test
     public void getValuesWithString() {
-        //setup
+        // setup
         final HashMap<String, String> expected = setupValuesWithString();
 
-        //test
+        // test
         Map<String, String> actual = contextMatcher.getConfigs();
 
-        //assert
+        // assert
         Assertions.assertEquals(expected, actual);
     }
 
@@ -113,7 +113,7 @@ public class ContextMatcherTest {
 
     @Test
     public void executeWithExpressionForSuccess() {
-        //setup
+        // setup
         final HashMap<String, String> values = setupValuesWithExpressions();
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
@@ -122,11 +122,11 @@ public class ContextMatcherTest {
             return ret;
         });
 
-        //test
-        IBehaviorCondition.ExecutionState actualExecutionState =
-                contextMatcher.execute(conversationMemory, new LinkedList<>());
+        // test
+        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
+                new LinkedList<>());
 
-        //assert
+        // assert
         verify(currentStep).getAllData("context");
         verify(expressionProvider, times(2)).parseExpressions(values.get("expressions"));
         Assertions.assertEquals(IBehaviorCondition.ExecutionState.SUCCESS, actualExecutionState);
@@ -135,7 +135,7 @@ public class ContextMatcherTest {
 
     @Test
     public void executeWithExpressionForFail() {
-        //setup
+        // setup
         final HashMap<String, String> values = setupValuesWithExpressions();
         final String otherExpressions = "someOtherExpressions(than_expected)";
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
@@ -146,11 +146,11 @@ public class ContextMatcherTest {
         });
         when(expressionProvider.parseExpressions(anyString())).thenAnswer(invocation -> new Expressions());
 
-        //test
-        IBehaviorCondition.ExecutionState actualExecutionState =
-                contextMatcher.execute(conversationMemory, new LinkedList<>());
+        // test
+        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
+                new LinkedList<>());
 
-        //assert
+        // assert
         verify(currentStep).getAllData("context");
         verify(expressionProvider).parseExpressions(values.get("expressions"));
         verify(expressionProvider).parseExpressions(otherExpressions);
@@ -159,11 +159,10 @@ public class ContextMatcherTest {
 
     @Test
     public void executeWithObjectKeyAndValueForSuccess() throws Exception {
-        //setup
+        // setup
         setupValuesWithObject(true);
         final String contextJson = "{\"userInfo\":{\"name\":{\"firstName\":\"John\",\"lastName\":\"Silver\"}}}";
-        final ContextMatcher.ObjectValue objectValue =
-                new ContextMatcher.ObjectValue("someKeyPath", "someObjectValue");
+        final ContextMatcher.ObjectValue objectValue = new ContextMatcher.ObjectValue("someKeyPath", "someObjectValue");
         when(jsonSerialization.deserialize(eq(contextJson), eq(Object.class))).thenAnswer(invocation -> objectValue);
         when(jsonSerialization.serialize(eq(objectValue))).thenAnswer(invocation -> contextJson);
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
@@ -174,11 +173,11 @@ public class ContextMatcherTest {
             return ret;
         });
 
-        //test
-        IBehaviorCondition.ExecutionState actualExecutionState =
-                contextMatcher.execute(conversationMemory, new LinkedList<>());
+        // test
+        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
+                new LinkedList<>());
 
-        //assert
+        // assert
         verify(currentStep).getAllData("context");
         verify(jsonSerialization).serialize(objectValue);
         verify(jsonSerialization).deserialize(contextJson, Object.class);
@@ -187,11 +186,10 @@ public class ContextMatcherTest {
 
     @Test
     public void executeWithObjectKeyAndValueForFail() throws Exception {
-        //setup
+        // setup
         setupValuesWithObject(true);
         final String contextJson = "{\"userInfo\":{\"name\":{\"firstName\":\"Albert\",\"lastName\":\"Silver\"}}}";
-        final ContextMatcher.ObjectValue objectValue =
-                new ContextMatcher.ObjectValue("someKeyPath", "someObjectValue");
+        final ContextMatcher.ObjectValue objectValue = new ContextMatcher.ObjectValue("someKeyPath", "someObjectValue");
         when(jsonSerialization.deserialize(eq(contextJson), eq(Object.class))).thenAnswer(invocation -> objectValue);
         when(jsonSerialization.serialize(eq(objectValue))).thenAnswer(invocation -> contextJson);
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
@@ -202,11 +200,11 @@ public class ContextMatcherTest {
             return ret;
         });
 
-        //test
-        IBehaviorCondition.ExecutionState actualExecutionState =
-                contextMatcher.execute(conversationMemory, new LinkedList<>());
+        // test
+        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
+                new LinkedList<>());
 
-        //assert
+        // assert
         verify(currentStep).getAllData("context");
         verify(jsonSerialization).serialize(objectValue);
         verify(jsonSerialization).deserialize(contextJson, Object.class);
@@ -215,14 +213,12 @@ public class ContextMatcherTest {
 
     @Test
     public void executeWithObjectKeyOnlyForSuccess() throws Exception {
-        //setup
+        // setup
         setupValuesWithObject(false);
         final String contextJson = "{\"userInfo\":{\"name\":{\"firstName\":\"John\",\"lastName\":\"Silver\"}}}";
-        final ContextMatcher.ObjectValue objectValue =
-                new ContextMatcher.ObjectValue("someKeyPath", null);
+        final ContextMatcher.ObjectValue objectValue = new ContextMatcher.ObjectValue("someKeyPath", null);
         when(jsonSerialization.deserialize(eq(contextJson), eq(Object.class))).thenAnswer(invocation -> objectValue);
-        when(jsonSerialization.serialize(eq(objectValue))).
-                thenAnswer(invocation -> contextJson);
+        when(jsonSerialization.serialize(eq(objectValue))).thenAnswer(invocation -> contextJson);
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
             ret.add(new MockData<>("context:someContextKey",
@@ -231,11 +227,11 @@ public class ContextMatcherTest {
             return ret;
         });
 
-        //test
-        IBehaviorCondition.ExecutionState actualExecutionState =
-                contextMatcher.execute(conversationMemory, new LinkedList<>());
+        // test
+        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
+                new LinkedList<>());
 
-        //assert
+        // assert
         verify(currentStep).getAllData("context");
         verify(jsonSerialization).serialize(objectValue);
         verify(jsonSerialization).deserialize(contextJson, Object.class);
@@ -244,14 +240,12 @@ public class ContextMatcherTest {
 
     @Test
     public void executeWithObjectKeyOnlyForFail() throws Exception {
-        //setup
+        // setup
         setupValuesWithObject(false);
         final String contextJson = "{\"userInfo\":\"somethingElse\"}";
-        final ContextMatcher.ObjectValue objectValue =
-                new ContextMatcher.ObjectValue("someKeyPath", null);
+        final ContextMatcher.ObjectValue objectValue = new ContextMatcher.ObjectValue("someKeyPath", null);
         when(jsonSerialization.deserialize(eq(contextJson), eq(Object.class))).thenAnswer(invocation -> objectValue);
-        when(jsonSerialization.serialize(eq(objectValue))).
-                thenAnswer(invocation -> contextJson);
+        when(jsonSerialization.serialize(eq(objectValue))).thenAnswer(invocation -> contextJson);
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
             ret.add(new MockData<>("context:someContextKey",
@@ -260,11 +254,11 @@ public class ContextMatcherTest {
             return ret;
         });
 
-        //test
-        IBehaviorCondition.ExecutionState actualExecutionState =
-                contextMatcher.execute(conversationMemory, new LinkedList<>());
+        // test
+        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
+                new LinkedList<>());
 
-        //assert
+        // assert
         verify(currentStep).getAllData("context");
         verify(jsonSerialization).serialize(objectValue);
         verify(jsonSerialization).deserialize(contextJson, Object.class);
@@ -273,7 +267,7 @@ public class ContextMatcherTest {
 
     @Test
     public void executeWithStringForSuccess() {
-        //setup
+        // setup
         setupValuesWithString();
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
@@ -282,16 +276,17 @@ public class ContextMatcherTest {
             return ret;
         });
 
-        //test
-        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
+        // test
+        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
+                new LinkedList<>());
 
-        //assert
+        // assert
         Assertions.assertEquals(IBehaviorCondition.ExecutionState.SUCCESS, actualExecutionState);
     }
 
     @Test
     public void executeWithStringForFail() {
-        //setup
+        // setup
         setupValuesWithString();
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
@@ -300,10 +295,11 @@ public class ContextMatcherTest {
             return ret;
         });
 
-        //test
-        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
+        // test
+        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
+                new LinkedList<>());
 
-        //assert
+        // assert
         Assertions.assertEquals(IBehaviorCondition.ExecutionState.FAIL, actualExecutionState);
     }
 
@@ -337,12 +333,12 @@ public class ContextMatcherTest {
         }
 
         @Override
-        public String getOriginPackageId() {
+        public String getOriginWorkflowId() {
             return null;
         }
 
         @Override
-        public void setOriginPackageId(String packageId) {
+        public void setOriginWorkflowId(String workflowId) {
         }
 
         @Override
@@ -367,8 +363,10 @@ public class ContextMatcherTest {
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
             MockData<?> that = (MockData<?>) o;
             return java.util.Objects.equals(key, that.key) && java.util.Objects.equals(result, that.result);
         }

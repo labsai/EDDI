@@ -31,14 +31,14 @@ class LifecycleManagerStreamingTest {
     @BeforeEach
     void setUp() throws Exception {
         var componentCache = mock(IComponentCache.class);
-        var packageId = mock(IResourceStore.IResourceId.class);
-        when(packageId.getId()).thenReturn("pkg-1");
-        when(packageId.getVersion()).thenReturn(1);
+        var workflowId = mock(IResourceStore.IResourceId.class);
+        when(workflowId.getId()).thenReturn("pkg-1");
+        when(workflowId.getVersion()).thenReturn(1);
 
         // Return empty component maps for all tasks
         when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
 
-        lifecycleManager = new LifecycleManager(componentCache, packageId);
+        lifecycleManager = new LifecycleManager(componentCache, workflowId);
 
         memory = mock(IConversationMemory.class);
         var currentStep = mock(IConversationMemory.IWritableConversationStep.class);

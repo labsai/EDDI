@@ -10,7 +10,7 @@ public interface IExecutableWorkflow {
 
     String getDescription();
 
-    String getPackageId();
+    String getWorkflowId();
 
     ILifecycleManager getLifecycleManager();
 }

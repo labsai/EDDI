@@ -14,11 +14,10 @@ public class CacheFactory implements ICacheFactory {
     // Cache size configs (previously in infinispan-embedded.xml)
     private static final Map<String, Long> CACHE_SIZES = Map.of(
             "userConversations", 10_000L,
-            "botTriggers", 1_000L,
+            "agentTriggers", 1_000L,
             "conversationState", 1_000L,
             "local", 1_000L,
-            "parser", 1_000L
-    );
+            "parser", 1_000L);
 
     private static final long DEFAULT_MAX_SIZE = 1_000L;
 
@@ -26,12 +25,10 @@ public class CacheFactory implements ICacheFactory {
     @SuppressWarnings("unchecked")
     public <K, V> ICache<K, V> getCache(String cacheName) {
         String name = cacheName != null ? cacheName : "local";
-        Cache<K, V> cache = (Cache<K, V>) caches.computeIfAbsent(name, n ->
-                Caffeine.newBuilder()
-                        .maximumSize(CACHE_SIZES.getOrDefault(n, DEFAULT_MAX_SIZE))
-                        .recordStats()
-                        .build()
-        );
+        Cache<K, V> cache = (Cache<K, V>) caches.computeIfAbsent(name, n -> Caffeine.newBuilder()
+                .maximumSize(CACHE_SIZES.getOrDefault(n, DEFAULT_MAX_SIZE))
+                .recordStats()
+                .build());
         return new CacheImpl<>(name, cache);
     }
 }

@@ -16,8 +16,10 @@ import java.util.List;
 /**
  * REST API for monitoring and administrating the conversation coordinator.
  *
- * <p>Provides status introspection, live SSE event streaming, and dead-letter
- * management for both in-memory and NATS coordinators.</p>
+ * <p>
+ * Provides status introspection, live SSE event streaming, and dead-letter
+ * management for agenth in-memory and NATS coordinators.
+ * </p>
  *
  * @author ginccc
  * @since 6.0.0

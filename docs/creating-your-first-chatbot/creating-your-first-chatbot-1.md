@@ -1,4 +1,4 @@
-# Create a bot that reacts to user inputs
+# Create a agent that reacts to user inputs
 
 _Prerequisites: Up and Running instance of **EDDI** (see:_ [_Getting started_](../getting-started.md)_)_
 
@@ -101,7 +101,7 @@ curl -X POST --header 'Content-Type: application/json' --header 'Accept: applica
 | Phrase.phrase      | `String`, Spaces allowed                                                                             | True     |
 | Phrase.expressions | `String`, "greeting(hello)": "greeting" is the category of this expression and "hello" is an entity. |          |
 
-> The returned URI is a reference for this specific resource. This resource will be referenced in the bot definition.
+> The returned URI is a reference for this specific resource. This resource will be referenced in the agent definition.
 
 ### **2. Creating Behavior Rules**
 
@@ -198,13 +198,13 @@ Next, create a `behaviorRule` resource to configure the decision making a. Make 
 
 | Name                         | Description                                                                                                                                                                                                                                                                                                                                       |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-|  BehaviorRule.name           | `String`, e.g. "Smalltalk"                                                                                                                                                                                                                                                                                                                        |
+| BehaviorRule.name            | `String`, e.g. "Smalltalk"                                                                                                                                                                                                                                                                                                                        |
 | BehaviourGroup.behaviorRules | `Array` of `BehaviorRule`                                                                                                                                                                                                                                                                                                                         |
-|  BehaviorRule.name           | `String`, e.g. "Greeting"                                                                                                                                                                                                                                                                                                                         |
-| BehaviorRule.actions         | `Array` of `String`, e.g. "greet" or "CONVERSATION\_END"                                                                                                                                                                                                                                                                                          |
+| BehaviorRule.name            | `String`, e.g. "Greeting"                                                                                                                                                                                                                                                                                                                         |
+| BehaviorRule.actions         | `Array` of `String`, e.g. "greet" or "CONVERSATION_END"                                                                                                                                                                                                                                                                                           |
 | BehaviorRule.conditions      | `Array` of `RuleChild`                                                                                                                                                                                                                                                                                                                            |
 | RuleChild.type               | <p><code>String</code>, allowed values: </p><p>—>"<code>inputmatcher</code>" (has params: "<code>expressions</code>" (<code>Array</code> of <code>String</code>( and "<code>occurrence</code>")</p><p> —>"<code>negation</code>" (<code>BehaviorExtension</code> object, has params: "<code>conditions</code>" and "<code>occurrence</code>")</p> |
-| RuleChild.values             | <p><code>HashMap</code>, allowed values: </p><p>—>"<code>expressions</code>": <code>String</code>, mandatory. Expression e.g. "greeting(*)" or "how_are_you" </p><p>—>"<code>occurrence</code>": <code>String</code>, optional. Allowed values "<code>currentStep</code>"</p>                                                                     |
+| RuleChild.values             | <p><code>HashMap</code>, allowed values: </p><p>—>"<code>expressions</code>": <code>String</code>, mandatory. Expression e.g. "greeting(\*)" or "how_are_you" </p><p>—>"<code>occurrence</code>": <code>String</code>, optional. Allowed values "<code>currentStep</code>"</p>                                                                    |
 | Negation.conditons           | `Array` of `NegationChild`                                                                                                                                                                                                                                                                                                                        |
 | NegationChild.type           | `String` e.g. "`occurrence`"                                                                                                                                                                                                                                                                                                                      |
 | NegationChild.values         | <p>HashMap, allowed values: </p><p>—>"<code>maxTimesOccurred</code>": <code>String</code>, e.g. 1 </p><p>—>"<code>minTimesOccurred</code>": <code>String</code>, e.g. 1 </p><p>—>"<code>behaviorRuleName</code>": <code>String</code></p>                                                                                                         |
@@ -221,7 +221,7 @@ Example:
 
 > [See also Output Configuration.](../output-configuration.md)
 
-You have guessed it correctly, another **`POST`** to **`/outputstore/outputsets`** creates the bot's `Output` with a JSON in the body like this:
+You have guessed it correctly, another **`POST`** to **`/outputstore/outputsets`** creates the agent's `Output` with a JSON in the body like this:
 
 ```javascript
 {
@@ -344,9 +344,9 @@ Example :
 
 `eddi://ai.labs.output/outputstore/outputsets/5a26d97417312628b46119fc?version=1`
 
-### 4. Creating the Package
+### 4. Creating the Workflow
 
-Now we will align the just created `LifecycleTasks` in the `Package`. Make a **`POST`** to **`/packagestore/packages`** with a JSON in the body like this:
+Now we will align the just created `LifecycleTasks` in the `Workflow`. Make a **`POST`** to **`/packagestore/packages`** with a JSON in the body like this:
 
 ```javascript
 {
@@ -417,14 +417,14 @@ Now we will align the just created `LifecycleTasks` in the `Package`. Make a **`
 }
 ```
 
-### Package parameters
+### Workflow parameters
 
-| Name                        | Description                                          | Required |
-| --------------------------- | ---------------------------------------------------- | -------- |
-| packageextensions           | `Array` of `PackageExtension`                        |          |
-| PackageExtension.type       | possible values, see table below "`Extension Types`" |          |
-| PackageExtension.extensions | `Array` of `Object`                                  | False    |
-| PackageExtension.config     | `Config` object, but can be empty.                   | True     |
+| Name                         | Description                                          | Required |
+| ---------------------------- | ---------------------------------------------------- | -------- |
+| packageextensions            | `Array` of `WorkflowExtension`                       |          |
+| WorkflowExtension.type       | possible values, see table below "`Extension Types`" |          |
+| WorkflowExtension.extensions | `Array` of `Object`                                  | False    |
+| WorkflowExtension.config     | `Config` object, but can be empty.                   | True     |
 
 Extension Types
 
@@ -516,70 +516,72 @@ Now you can use the new feature of defining properties in the package definition
 
 You should again get a return code of `201` with an `URI` in the location header referencing the newly created package format
 
-`eddi://ai.labs.package/packagestore/packages/<UNIQUE_PACKAGE_ID>?version=<PACKAGE_VERSION>`
+`eddi://ai.labs.package/packagestore/packages/<UNIQUE_WORKFLOW_ID>?version=<WORKFLOW_VERSION>`
 
 Example
 
 `eddi://ai.labs.package/packagestore/packages/5a2ae60f17312624f8b8a445?version=1`
 
-> See also the API documentation at [http://localhost:7070/view#!/configurations/createPackage](http://localhost:7070/view#!/configurations/createPackage)
+> See also the API documentation at [http://localhost:7070/view#!/configurations/createWorkflow](http://localhost:7070/view#!/configurations/createWorkflow)
 
-### 5. Creating a Bot
+### 5. Creating a Agent
 
-Make a **`POST`** to **`/botstore/bots`** with a JSON like this:
+Make a **`POST`** to **`/agentstore/agents`** with a JSON like this:
 
 ```javascript
 {
 "packages": [
-"eddi://ai.labs.package/packagestore/packages/<UNIQUE_PACKAGE_ID>?version=<PACKAGE_VERSION>"
+"eddi://ai.labs.package/packagestore/packages/<UNIQUE_WORKFLOW_ID>?version=<WORKFLOW_VERSION>"
 ],
 "channels": []
 }
 ```
 
-### Bot parameters
+### Agent parameters
 
 | Name           | Description                                                                                                                                           |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| packages       | `Array` of `String`, references to `Packages`                                                                                                         |
+| packages       | `Array` of `String`, references to `Workflows`                                                                                                        |
 | channels       | `Array` of `Channel`,                                                                                                                                 |
 | Channel.type   | `String`, e.g. `"eddi://ai.labs.channel.facebook"`                                                                                                    |
 | Channel.config | `Config` Object. For "Facebook" this object has the params "`appSecret`" (`String`), "`verificationToken`" (`String`), "`pageAccessToken`" (`String`) |
 
-b. You should again get a return code of **`201`** with a `URI` in the `location` header referencing the newly created bot :
+b. You should again get a return code of **`201`** with a `URI` in the `location` header referencing the newly created agent :
 
-`eddi://ai.labs.bot/botstore/bots/`**`<UNIQUE_BOT_ID>`**`?version=`**`<BOT_VERSION>`**
+`eddi://ai.labs.agent/agentstore/agents/`**`<UNIQUE_AGENT_ID>`**`?version=`**`<AGENT_VERSION>`**
 
 Example:
 
-`eddi://ai.labs.bot/botstore/bots/5a2ae68a17312624f8b8a446?version=1`
+`eddi://ai.labs.agent/agentstore/agents/5a2ae68a17312624f8b8a446?version=1`
 
-> See also the API documentation at [http://localhost:7070/view#!/configurations/createBot](http://localhost:7070/view#!/configurations/createBot)
+> See also the API documentation at [http://localhost:7070/view#!/configurations/createAgent](http://localhost:7070/view#!/configurations/createAgent)
 
-### 6. Launching the Bot
+### 6. Launching the Agent
 
-Finally, we are ready to let the bot fly. From here on, you have the possibility to let an UI do it for you or you do it step by step.
+Finally, we are ready to let the agent fly. From here on, you have the possibility to let an UI do it for you or you do it step by step.
 
-The UI that automates these steps can be reached here: `/chat/unrestricted/`**`<UNIQUE_BOT_ID>`**
+The UI that automates these steps can be reached here: `/chat/unrestricted/`**`<UNIQUE_AGENT_ID>`**
 
 Otherwise via REST:
 
-1.  Deploy the Bot:
+1.  Deploy the Agent:
 
-    Make a **`POST`** to `/administration/unrestricted/deploy/`**`<UNIQUE_BOT_ID>`**`?version=`**`<BOT_VERSION>`**
+    Make a **`POST`** to `/administration/unrestricted/deploy/`**`<UNIQUE_AGENT_ID>`**`?version=`**`<AGENT_VERSION>`**
 
     You will receive a `202` http code.
-2. Since deployment could take a while it has been made **asynchronous**.
-3. Make a **`GET`** to `/administration/unrestricted/deploymentstatus/`**`<UNIQUE_BOT_ID>`**`?version=`**`<BOT_VERSION>`** to find out the status of deployment.
+
+2.  Since deployment could take a while it has been made **asynchronous**.
+3.  Make a **`GET`** to `/administration/unrestricted/deploymentstatus/`**`<UNIQUE_AGENT_ID>`**`?version=`**`<AGENT_VERSION>`** to find out the status of deployment.
 
 **`NOT_FOUND`**, **`IN_PROGRESS`**, **`ERROR` and `READY`** is what you can expect to be returned in the body.
 
-1. As soon as the Bot is deployed and has `READY` status, make a **`POST`** to `/bots/unrestricted/`**`<UNIQUE_BOT_ID>`**
+1. As soon as the Agent is deployed and has `READY` status, make a **`POST`** to `/agents/unrestricted/`**`<UNIQUE_AGENT_ID>`**
    1. You will receive a `201` with the `URI` for the newly created Conversation, like this:
-      1.  e.g.
+      1. e.g.
 
-          `eddi://ai.labs.conversation/conversationstore/conversations/`**`<UNIQUE_CONVERSATION_ID>`**
-2. Now it's time to start talking to our Bot 1. Make a **`POST`** to `/bots/unrestricted/`**`<UNIQUE_BOT_ID>`**`/`**`<UNIQUE_CONVERSATION_ID>`**
+         `eddi://ai.labs.conversation/conversationstore/conversations/`**`<UNIQUE_CONVERSATION_ID>`**
+
+2. Now it's time to start talking to our Agent 1. Make a **`POST`** to `/agents/unrestricted/`**`<UNIQUE_AGENT_ID>`**`/`**`<UNIQUE_CONVERSATION_ID>`**
 
 **Option 1:** is to hand over the input text as `contentType text/plain`. Include the User Input in the body as `text/plain` (e.g. Hello)&#x20;
 
@@ -592,10 +594,10 @@ Otherwise via REST:
 ```
 
 1. You have two query params you can use to config the returned output 1. `returnDetailed` - default is false - will return all sub results of the entire conversation steps, otherwise only public ones such as input, action, output & quickreplies 2. `returnCurrentStepOnly` - default is true - will return only the latest conversation step that has just been processed, otherwise returns all conversation steps since the beginning of this conversation
-2. The output from the bot will be returned as JSON
-3. If you are interested in fetching the **`conversationmemory`** at any given time, make a **`GET`** to `/bots/unrestricted/`**`<UNIQUE_BOT_ID>`**`/`**`<UNIQUE_CONVERSATION_ID>`**`?returnDetailed=true` (the query param is optional, default is false)
+2. The output from the agent will be returned as JSON
+3. If you are interested in fetching the **`conversationmemory`** at any given time, make a **`GET`** to `/agents/unrestricted/`**`<UNIQUE_AGENT_ID>`**`/`**`<UNIQUE_CONVERSATION_ID>`**`?returnDetailed=true` (the query param is optional, default is false)
 
-> If you made it till here, CONGRATULATIONS, you have created your first Chatbot with **EDDI** !
+> If you made it till here, CONGRATULATIONS, you have created your first Chatagent with **EDDI** !
 
 By the way you can use the attached **postman collection** below to do all of the steps mentioned above by clicking send on each request in postman.
 
@@ -603,12 +605,12 @@ By the way you can use the attached **postman collection** below to do all of th
 2. Create behaviourSet
 3. Create outputSet
 4. Creating package
-5. Creating bot
-6. Deploy the bot
+5. Creating agent
+6. Deploy the agent
 7. Create conversation
-8. Say Hello to the bot
+8. Say Hello to the agent
 
-{% file src="../.gitbook/assets/Creating and chatting with a bot.postman_collection.json" %}
+{% file src="../.gitbook/assets/Creating and chatting with a agent.postman_collection.json" %}
 Example to download
 {% endfile %}
 

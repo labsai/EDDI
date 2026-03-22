@@ -15,7 +15,7 @@ public class Data<T> implements IData<T> {
     private List<T> possibleResults;
     private T result;
     private final Date timestamp;
-    private String originPackageId;
+    private String originWorkflowId;
     private boolean isPublic;
 
     public Data(String key, T result) {
@@ -90,12 +90,12 @@ public class Data<T> implements IData<T> {
         return timestamp;
     }
 
-    public String getOriginPackageId() {
-        return originPackageId;
+    public String getOriginWorkflowId() {
+        return originWorkflowId;
     }
 
-    public void setOriginPackageId(String originPackageId) {
-        this.originPackageId = originPackageId;
+    public void setOriginWorkflowId(String originWorkflowId) {
+        this.originWorkflowId = originWorkflowId;
     }
 
     public boolean isPublic() {

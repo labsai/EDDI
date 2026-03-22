@@ -43,10 +43,10 @@ public class RestAction implements IRestAction {
     }
 
     @Override
-    public List<String> readActions(String packageId, Integer packageVersion, String filter, Integer limit) {
+    public List<String> readActions(String workflowId, Integer packageVersion, String filter, Integer limit) {
         List<String> retActions = new LinkedList<>();
         try {
-            var workflowConfiguration = workflowStore.read(packageId, packageVersion);
+            var workflowConfiguration = workflowStore.read(workflowId, packageVersion);
 
             List<String> actions;
             for (var workflowStep : workflowConfiguration.getWorkflowSteps()) {

@@ -23,7 +23,7 @@ Browser (EDDI Manager)
     │                                      │
     │                                      ├── Quarkus OIDC validates token via JWKS
     │                                      ├── SecurityIdentity populated
-    │                                      └── RestBotManagement checks identity
+    │                                      └── RestAgentManagement checks identity
     │
     └── Token refresh (automatic, every 30s before expiry)
 ```
@@ -53,14 +53,14 @@ docker run -e QUARKUS_OIDC_TENANT_ENABLED=true \
 
 When OIDC is enabled, the following permission rules apply (see `application.properties`):
 
-| Path Pattern                                                                                    | Policy                                   |
-| ----------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `/q/metrics/*`, `/q/health/*`, `/chat/unrestricted/*`, `/bots/unrestricted/*`, `/managedbots/*` | **Permit** (no auth)                     |
-| `/`, `/*`                                                                                       | **Authenticated** (valid token required) |
+| Path Pattern                                                                                        | Policy                                   |
+| --------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `/q/metrics/*`, `/q/health/*`, `/chat/unrestricted/*`, `/agents/unrestricted/*`, `/managedagents/*` | **Permit** (no auth)                     |
+| `/`, `/*`                                                                                           | **Authenticated** (valid token required) |
 
-### RestBotManagement Gate
+### RestAgentManagement Gate
 
-`RestBotManagement.checkUserAuthIfApplicable()` enforces per-request auth:
+`RestAgentManagement.checkUserAuthIfApplicable()` enforces per-request auth:
 
 ```java
 if (checkForUserAuthentication &&
@@ -196,7 +196,7 @@ primary    → NUMBER | FUNCTION '(' args ')' | '(' expression ')' | CONSTANT
 
 ## Tool Execution Pipeline
 
-All tool invocations — both built-in and HTTP-call-based — are routed through `ToolExecutionService.executeToolWrapped()`. This ensures consistent security and operational controls:
+All tool invocations — agenth built-in and HTTP-call-based — are routed through `ToolExecutionService.executeToolWrapped()`. This ensures consistent security and operational controls:
 
 ```
 Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool ──▶ Cost Tracker ──▶ Result
@@ -249,7 +249,7 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool �
 
 ## Conversation Coordinator — Sequential Processing
 
-The `ConversationCoordinator` ensures that messages for the same conversation are processed **sequentially**, preventing race conditions in conversation state. The `isEmpty()` → `offer()` → `submit()` sequence is wrapped in a `synchronized` block to prevent two concurrent requests from both being submitted to the thread pool simultaneously.
+The `ConversationCoordinator` ensures that messages for the same conversation are processed **sequentially**, preventing race conditions in conversation state. The `isEmpty()` → `offer()` → `submit()` sequence is wrapped in a `synchronized` block to prevent two concurrent requests from agenth being submitted to the thread pool simultaneously.
 
 Different conversations are processed **concurrently** — only same-conversation messages are serialised.
 
@@ -276,6 +276,6 @@ When adding a new tool to EDDI:
 ## See Also
 
 - [LangChain Integration](langchain.md) — Full agent configuration reference
-- [Bot Father LangChain Tools Guide](bot-father-langchain-tools-guide.md) — Guided tool setup
+- [Agent Father LangChain Tools Guide](agent-father-langchain-tools-guide.md) — Guided tool setup
 - [Architecture](architecture.md) — EDDI's lifecycle pipeline and concurrency model
 - [Metrics](metrics.md) — Monitoring tool execution performance

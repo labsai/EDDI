@@ -18,57 +18,56 @@ import static ai.labs.eddi.datastore.IResourceStore.*;
 /**
  * @author ginccc
  */
-// @Api(value = "Bot Engine -> Conversations", authorizations = {@Authorization(value = "eddi_auth")})
+// @Api(value = "Agent Engine -> Conversations", authorizations =
+// {@Authorization(value = "eddi_auth")})
 @Path("/conversationstore/conversations")
-@Tag(name = "09. Talk to Bots", description = "Communicate with bots")
+@Tag(name = "09. Talk to Agents", description = "Communicate with agents")
 public interface IRestConversationStore {
-    @GET
-    @Produces(MediaType.APPLICATION_JSON)
-    List<ConversationDescriptor> readConversationDescriptors(@QueryParam("index") @DefaultValue("0") Integer index,
-                                                             @QueryParam("limit") @DefaultValue("20") Integer limit,
-                                                             @QueryParam("filter") String filter,
-                                                             @QueryParam("conversationId") String conversationId,
-                                                             @QueryParam("agentId") String agentId,
-                                                             @QueryParam("agentVersion") Integer agentVersion,
-                                                             @QueryParam("conversationState") ConversationState conversationState,
-                                                             @QueryParam("viewState") ConversationDescriptor.ViewState viewState);
+        @GET
+        @Produces(MediaType.APPLICATION_JSON)
+        List<ConversationDescriptor> readConversationDescriptors(@QueryParam("index") @DefaultValue("0") Integer index,
+                        @QueryParam("limit") @DefaultValue("20") Integer limit,
+                        @QueryParam("filter") String filter,
+                        @QueryParam("conversationId") String conversationId,
+                        @QueryParam("agentId") String agentId,
+                        @QueryParam("agentVersion") Integer agentVersion,
+                        @QueryParam("conversationState") ConversationState conversationState,
+                        @QueryParam("viewState") ConversationDescriptor.ViewState viewState);
 
-    @GET
-    @Path("/simple/{conversationId}")
-    @Produces(MediaType.APPLICATION_JSON)
-    SimpleConversationMemorySnapshot readSimpleConversationLog(@PathParam("conversationId") String conversationId,
-                                                               @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
-                                                               @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
-                                                               @QueryParam("returningFields") List<String> returningFields)
-            throws ResourceStoreException, ResourceNotFoundException;
+        @GET
+        @Path("/simple/{conversationId}")
+        @Produces(MediaType.APPLICATION_JSON)
+        SimpleConversationMemorySnapshot readSimpleConversationLog(@PathParam("conversationId") String conversationId,
+                        @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
+                        @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
+                        @QueryParam("returningFields") List<String> returningFields)
+                        throws ResourceStoreException, ResourceNotFoundException;
 
-    @GET
-    @Path("/{conversationId}")
-    @Produces(MediaType.APPLICATION_JSON)
-    ConversationMemorySnapshot readRawConversationLog(@PathParam("conversationId") String conversationId)
-            throws ResourceStoreException, ResourceNotFoundException;
+        @GET
+        @Path("/{conversationId}")
+        @Produces(MediaType.APPLICATION_JSON)
+        ConversationMemorySnapshot readRawConversationLog(@PathParam("conversationId") String conversationId)
+                        throws ResourceStoreException, ResourceNotFoundException;
 
-    @DELETE
-    @Path("/{conversationId}")
-    void deleteConversationLog(@PathParam("conversationId") String conversationId,
-                               @QueryParam("deletePermanently") @DefaultValue("false") Boolean deletePermanently)
-            throws ResourceStoreException, ResourceNotFoundException;
+        @DELETE
+        @Path("/{conversationId}")
+        void deleteConversationLog(@PathParam("conversationId") String conversationId,
+                        @QueryParam("deletePermanently") @DefaultValue("false") Boolean deletePermanently)
+                        throws ResourceStoreException, ResourceNotFoundException;
 
-    @DELETE
-    @Path("/")
-    Integer permanentlyDeleteEndedConversationLogs(@QueryParam("deleteOlderThanDays") Integer deleteOlderThanDays)
-            throws ResourceStoreException, ResourceNotFoundException, ResourceModifiedException;
+        @DELETE
+        @Path("/")
+        Integer permanentlyDeleteEndedConversationLogs(@QueryParam("deleteOlderThanDays") Integer deleteOlderThanDays)
+                        throws ResourceStoreException, ResourceNotFoundException, ResourceModifiedException;
 
-    @GET
-    @Path("/active/{agentId}")
-    @Produces(MediaType.APPLICATION_JSON)
-    List<ConversationStatus> getActiveConversations(@PathParam("agentId") String agentId,
-                                                    @Parameter(name = "agentVersion", required = true, example = "1")
-                                                    @QueryParam("agentVersion") Integer agentVersion)
-            throws ResourceStoreException, ResourceNotFoundException;
+        @GET
+        @Path("/active/{agentId}")
+        @Produces(MediaType.APPLICATION_JSON)
+        List<ConversationStatus> getActiveConversations(@PathParam("agentId") String agentId,
+                        @Parameter(name = "agentVersion", required = true, example = "1") @QueryParam("agentVersion") Integer agentVersion)
+                        throws ResourceStoreException, ResourceNotFoundException;
 
-    @POST
-    @Path("end")
-    Response endActiveConversations(List<ConversationStatus> conversationStatuses);
+        @POST
+        @Path("end")
+        Response endActiveConversations(List<ConversationStatus> conversationStatuses);
 }
-

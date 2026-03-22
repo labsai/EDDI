@@ -154,9 +154,9 @@ function Test-Prerequisites {
     }
 }
 
-# ── Detect deployed bots ─────────────────────────────────
+# ── Detect deployed agents ─────────────────────────────────
 
-function Get-DeployedBotCount {
+function Get-DeployedAgentCount {
     try {
         $response = Invoke-RestMethod -Uri "http://localhost:${EddiPort}/administration/unrestricted/deploymentstatus" -TimeoutSec 5 -ErrorAction Stop
         if ($response -is [array]) { return $response.Count }
@@ -174,7 +174,7 @@ function Step-Database {
     if ($Db) { return }
 
     Write-Step 1 $TotalSteps "Database"
-    Write-Host "  EDDI needs a database to store bot configs & conversations."
+    Write-Host "  EDDI needs a database to store agent configs & conversations."
     Write-Host ""
     Write-Host "  1) MongoDB        " -NoNewline; Write-Host "document store, simple setup (default)" -ForegroundColor DarkGray
     Write-Host "  2) PostgreSQL     " -NoNewline; Write-Host "relational, SQL-queryable, familiar" -ForegroundColor DarkGray
@@ -303,21 +303,21 @@ function Wait-ForReady {
     exit 1
 }
 
-# ── Import initial bots ──────────────────────────────────
+# ── Import initial agents ──────────────────────────────────
 
-function Import-InitialBots {
-    $botCount = Get-DeployedBotCount
+function Import-InitialAgents {
+    $agentCount = Get-DeployedAgentCount
 
-    if ($botCount -eq 0) {
-        Write-Host "  Deploying Bot Father...  " -NoNewline
+    if ($agentCount -eq 0) {
+        Write-Host "  Deploying Agent Father...  " -NoNewline
         try {
-            Invoke-RestMethod -Uri "http://localhost:${EddiPort}/backup/import/initialBots" -Method Post -TimeoutSec 60 -ErrorAction Stop | Out-Null
+            Invoke-RestMethod -Uri "http://localhost:${EddiPort}/backup/import/initialAgents" -Method Post -TimeoutSec 60 -ErrorAction Stop | Out-Null
             Write-Host "✅" -ForegroundColor Green
         } catch {
             Write-Host "⚠️  (non-fatal — EDDI is still usable)" -ForegroundColor Yellow
         }
     } else {
-        Write-Ok "Found $botCount deployed bot(s), skipping initial import."
+        Write-Ok "Found $agentCount deployed agent(s), skipping initial import."
     }
 }
 
@@ -337,10 +337,10 @@ function Write-Success {
     }
 
     Write-Host ""
-    Write-Host "  🤖 Ready to create your first bot?" -ForegroundColor White
-    Write-Host "     Open the dashboard and chat with Bot Father!"
+    Write-Host "  🤖 Ready to create your first agent?" -ForegroundColor White
+    Write-Host "     Open the dashboard and chat with Agent Father!"
     Write-Host "     It will guide you through choosing an AI provider,"
-    Write-Host "     setting up API keys, and building your first bot."
+    Write-Host "     setting up API keys, and building your first agent."
     Write-Host ""
     Write-Host "  ┌─ Claude Desktop / Cursor ──────────────────────────┐" -ForegroundColor DarkGray
     Write-Host "  │ Add to your MCP config:                            │" -ForegroundColor DarkGray
@@ -377,7 +377,7 @@ Test-Prerequisites
 
 if ($EddiAlreadyRunning) {
     Write-Section "EDDI Already Running"
-    Import-InitialBots
+    Import-InitialAgents
     Write-Success
     exit 0
 }
@@ -392,7 +392,7 @@ Get-ComposeFiles
 try {
     Start-Eddi
     Wait-ForReady
-    Import-InitialBots
+    Import-InitialAgents
     Write-Success
     $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds)
     Write-Host "  Total setup time: ${elapsed}s" -ForegroundColor DarkGray

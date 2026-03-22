@@ -36,7 +36,7 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
- * Lifecycle task for LLM interactions — supports both legacy chat and agent
+ * Lifecycle task for LLM interactions — supports agenth legacy chat and agent
  * (tool-calling) modes.
  * <p>
  * This class is a thin orchestrator that delegates to:
@@ -57,7 +57,7 @@ public class LangchainTask implements ILifecycleTask {
     private static final String KEY_SYSTEM_MESSAGE = "systemMessage";
     private static final String KEY_PROMPT = "prompt";
     private static final String KEY_LOG_SIZE_LIMIT = "logSizeLimit";
-    private static final String KEY_INCLUDE_FIRST_BOT_MESSAGE = "includeFirstBotMessage";
+    private static final String KEY_INCLUDE_FIRST_AGENT_MESSAGE = "includeFirstAgentMessage";
     private static final String KEY_CONVERT_TO_OBJECT = "convertToObject";
     private static final String KEY_ADD_TO_OUTPUT = "addToOutput";
     private static final String MATCH_ALL_OPERATOR = "*";
@@ -174,12 +174,12 @@ public class LangchainTask implements ILifecycleTask {
         if (!isNullOrEmpty(processedParams.get(KEY_LOG_SIZE_LIMIT))) {
             logSizeLimit = Integer.parseInt(processedParams.get(KEY_LOG_SIZE_LIMIT));
         }
-        boolean includeFirstBotMessage = isNullOrEmpty(processedParams.get(KEY_INCLUDE_FIRST_BOT_MESSAGE))
-                || Boolean.parseBoolean(processedParams.get(KEY_INCLUDE_FIRST_BOT_MESSAGE));
+        boolean includeFirstAgentMessage = isNullOrEmpty(processedParams.get(KEY_INCLUDE_FIRST_AGENT_MESSAGE))
+                || Boolean.parseBoolean(processedParams.get(KEY_INCLUDE_FIRST_AGENT_MESSAGE));
 
         // Build conversation messages
         List<ChatMessage> messages = conversationHistoryBuilder.buildMessages(
-                memory, systemMessage, processedParams.get(KEY_PROMPT), logSizeLimit, includeFirstBotMessage);
+                memory, systemMessage, processedParams.get(KEY_PROMPT), logSizeLimit, includeFirstAgentMessage);
 
         if (messages.isEmpty()) {
             return;
@@ -262,7 +262,8 @@ public class LangchainTask implements ILifecycleTask {
         if (memory.getAuditCollector() != null) {
             var compiledPrompt = dataFactory.createData("audit:compiled_prompt",
                     systemMessage + "\n---\n" + (processedParams.get(KEY_PROMPT) != null
-                            ? processedParams.get(KEY_PROMPT) : ""));
+                            ? processedParams.get(KEY_PROMPT)
+                            : ""));
             currentStep.storeData(compiledPrompt);
 
             if (responseContent != null) {

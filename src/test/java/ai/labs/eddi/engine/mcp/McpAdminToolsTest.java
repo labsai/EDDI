@@ -33,242 +33,251 @@ import static org.mockito.Mockito.*;
  */
 class McpAdminToolsTest {
 
-    private static final String AGENT_ID = "test-bot-id";
+        private static final String AGENT_ID = "test-agent-id";
 
-    private IRestAgentAdministration botAdmin;
-    private IRestAgentStore AgentStore;
-    private IRestWorkflowStore WorkflowStore;
-    private IRestDocumentDescriptorStore descriptorStore;
-    private IJsonSerialization jsonSerialization;
-    private McpAdminTools tools;
+        private IRestAgentAdministration agentAdmin;
+        private IRestAgentStore AgentStore;
+        private IRestWorkflowStore WorkflowStore;
+        private IRestDocumentDescriptorStore descriptorStore;
+        private IJsonSerialization jsonSerialization;
+        private McpAdminTools tools;
 
-    @BeforeEach
-    void setUp() throws Exception {
-        botAdmin = mock(IRestAgentAdministration.class);
-        AgentStore = mock(IRestAgentStore.class);
-        WorkflowStore = mock(IRestWorkflowStore.class);
-        descriptorStore = mock(IRestDocumentDescriptorStore.class);
-        jsonSerialization = mock(IJsonSerialization.class);
+        @BeforeEach
+        void setUp() throws Exception {
+                agentAdmin = mock(IRestAgentAdministration.class);
+                AgentStore = mock(IRestAgentStore.class);
+                WorkflowStore = mock(IRestWorkflowStore.class);
+                descriptorStore = mock(IRestDocumentDescriptorStore.class);
+                jsonSerialization = mock(IJsonSerialization.class);
 
-        var restInterfaceFactory = mock(IRestInterfaceFactory.class);
-        when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(AgentStore);
-        when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(WorkflowStore);
-        when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
+                var restInterfaceFactory = mock(IRestInterfaceFactory.class);
+                when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(AgentStore);
+                when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(WorkflowStore);
+                when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
 
-        var scheduleStore = mock(IScheduleStore.class);
-        var scheduleFireExecutor = mock(ScheduleFireExecutor.class);
-        var schedulePollerService = mock(SchedulePollerService.class);
+                var scheduleStore = mock(IScheduleStore.class);
+                var scheduleFireExecutor = mock(ScheduleFireExecutor.class);
+                var schedulePollerService = mock(SchedulePollerService.class);
 
-        lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        tools = new McpAdminTools(restInterfaceFactory, botAdmin, jsonSerialization,
-                scheduleStore, scheduleFireExecutor, schedulePollerService);
-    }
+                lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
+                tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization,
+                                scheduleStore, scheduleFireExecutor, schedulePollerService);
+        }
 
-    // --- deployAgent ---
+        // --- deployAgent ---
 
-    @Test
-    void deployBot_success() throws IOException {
-        when(botAdmin.deployAgent(Environment.production, AGENT_ID, 1, true, true))
-                .thenReturn(Response.ok().build());
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deployed\"}");
+        @Test
+        void deployAgent_success() throws IOException {
+                when(agentAdmin.deployAgent(Environment.production, AGENT_ID, 1, true, true))
+                                .thenReturn(Response.ok().build());
+                when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deployed\"}");
 
-        String result = tools.deployAgent(AGENT_ID, 1, "production");
+                String result = tools.deployAgent(AGENT_ID, 1, "production");
 
-        assertNotNull(result);
-        verify(botAdmin).deployAgent(Environment.production, AGENT_ID, 1, true, true);
-    }
+                assertNotNull(result);
+                verify(agentAdmin).deployAgent(Environment.production, AGENT_ID, 1, true, true);
+        }
 
-    @Test
-    void deployBot_defaultsToUnrestricted() throws IOException {
-        when(botAdmin.deployAgent(Environment.production, AGENT_ID, 2, true, true))
-                .thenReturn(Response.ok().build());
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deployed\"}");
+        @Test
+        void deployAgent_defaultsToUnrestricted() throws IOException {
+                when(agentAdmin.deployAgent(Environment.production, AGENT_ID, 2, true, true))
+                                .thenReturn(Response.ok().build());
+                when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deployed\"}");
 
-        tools.deployAgent(AGENT_ID, 2, null);
+                tools.deployAgent(AGENT_ID, 2, null);
 
-        verify(botAdmin).deployAgent(Environment.production, AGENT_ID, 2, true, true);
-    }
+                verify(agentAdmin).deployAgent(Environment.production, AGENT_ID, 2, true, true);
+        }
 
-    @Test
-    void deployBot_handlesException() {
-        when(botAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
-                .thenThrow(new RuntimeException("Deploy failed"));
+        @Test
+        void deployAgent_handlesException() {
+                when(agentAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
+                                .thenThrow(new RuntimeException("Deploy failed"));
 
-        String result = tools.deployAgent(AGENT_ID, 1, null);
+                String result = tools.deployAgent(AGENT_ID, 1, null);
 
-        assertTrue(result.contains("error"));
-        assertTrue(result.contains("Failed to deploy agent"));
-    }
+                assertTrue(result.contains("error"));
+                assertTrue(result.contains("Failed to deploy agent"));
+        }
 
-    // --- undeployAgent ---
+        // --- undeployAgent ---
 
-    @Test
-    void undeployBot_success() throws IOException {
-        when(botAdmin.undeployAgent(Environment.production, AGENT_ID, 1, false, false))
-                .thenReturn(Response.ok().build());
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"undeployed\"}");
+        @Test
+        void undeployAgent_success() throws IOException {
+                when(agentAdmin.undeployAgent(Environment.production, AGENT_ID, 1, false, false))
+                                .thenReturn(Response.ok().build());
+                when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"undeployed\"}");
 
-        String result = tools.undeployAgent(AGENT_ID, 1, "production", false);
+                String result = tools.undeployAgent(AGENT_ID, 1, "production", false);
 
-        assertNotNull(result);
-        verify(botAdmin).undeployAgent(Environment.production, AGENT_ID, 1, false, false);
-    }
+                assertNotNull(result);
+                verify(agentAdmin).undeployAgent(Environment.production, AGENT_ID, 1, false, false);
+        }
 
-    @Test
-    void undeployBot_withEndConversations() throws IOException {
-        when(botAdmin.undeployAgent(Environment.production, AGENT_ID, 1, true, false))
-                .thenReturn(Response.ok().build());
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"undeployed\"}");
+        @Test
+        void undeployAgent_withEndConversations() throws IOException {
+                when(agentAdmin.undeployAgent(Environment.production, AGENT_ID, 1, true, false))
+                                .thenReturn(Response.ok().build());
+                when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"undeployed\"}");
 
-        tools.undeployAgent(AGENT_ID, 1, null, true);
+                tools.undeployAgent(AGENT_ID, 1, null, true);
 
-        verify(botAdmin).undeployAgent(Environment.production, AGENT_ID, 1, true, false);
-    }
+                verify(agentAdmin).undeployAgent(Environment.production, AGENT_ID, 1, true, false);
+        }
 
-    // --- getDeploymentStatus ---
+        // --- getDeploymentStatus ---
 
-    @Test
-    void getDeploymentStatus_returnsStatus() throws IOException {
-        var status = new AgentDeploymentStatus(Environment.production, AGENT_ID, 1,
-                Status.READY, null);
-        when(botAdmin.getDeploymentStatus(Environment.production, AGENT_ID, 1, "json"))
-                .thenReturn(Response.ok(status).build());
-        when(jsonSerialization.serialize(any())).thenReturn("{\"status\":\"READY\"}");
+        @Test
+        void getDeploymentStatus_returnsStatus() throws IOException {
+                var status = new AgentDeploymentStatus(Environment.production, AGENT_ID, 1,
+                                Status.READY, null);
+                when(agentAdmin.getDeploymentStatus(Environment.production, AGENT_ID, 1, "json"))
+                                .thenReturn(Response.ok(status).build());
+                when(jsonSerialization.serialize(any())).thenReturn("{\"status\":\"READY\"}");
 
-        String result = tools.getDeploymentStatus(AGENT_ID, 1, "production");
+                String result = tools.getDeploymentStatus(AGENT_ID, 1, "production");
 
-        assertNotNull(result);
-        verify(botAdmin).getDeploymentStatus(Environment.production, AGENT_ID, 1, "json");
-    }
+                assertNotNull(result);
+                verify(agentAdmin).getDeploymentStatus(Environment.production, AGENT_ID, 1, "json");
+        }
 
-    @Test
-    void getDeploymentStatus_nullEntity_returnsFallback() throws IOException {
-        when(botAdmin.getDeploymentStatus(Environment.production, AGENT_ID, 1, "json"))
-                .thenReturn(Response.noContent().build());
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"status_check\",\"httpStatus\":204}");
+        @Test
+        void getDeploymentStatus_nullEntity_returnsFallback() throws IOException {
+                when(agentAdmin.getDeploymentStatus(Environment.production, AGENT_ID, 1, "json"))
+                                .thenReturn(Response.noContent().build());
+                when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"status_check\",\"httpStatus\":204}");
 
-        String result = tools.getDeploymentStatus(AGENT_ID, 1, "production");
+                String result = tools.getDeploymentStatus(AGENT_ID, 1, "production");
 
-        assertNotNull(result);
-        // Should not throw on null entity
-    }
+                assertNotNull(result);
+                // Should not throw on null entity
+        }
 
-    // --- listPackages ---
+        // --- listWorkflows ---
 
-    @Test
-    void listPackages_returnsDescriptors() throws IOException {
-        when(WorkflowStore.readPackageDescriptors("", 0, 20))
-                .thenReturn(List.of(new DocumentDescriptor()));
-        when(jsonSerialization.serialize(any())).thenReturn("[{\"name\":\"TestPkg\"}]");
+        @Test
+        void listWorkflows_returnsDescriptors() throws IOException {
+                when(WorkflowStore.readWorkflowDescriptors("", 0, 20))
+                                .thenReturn(List.of(new DocumentDescriptor()));
+                when(jsonSerialization.serialize(any())).thenReturn("[{\"name\":\"TestPkg\"}]");
 
-        String result = tools.listPackages(null, null);
+                String result = tools.listWorkflows(null, null);
 
-        assertNotNull(result);
-        verify(WorkflowStore).readPackageDescriptors("", 0, 20);
-    }
+                assertNotNull(result);
+                verify(WorkflowStore).readWorkflowDescriptors("", 0, 20);
+        }
 
-    @Test
-    void listPackages_withFilterAndLimit() throws IOException {
-        when(WorkflowStore.readPackageDescriptors("greetings", 0, 10))
-                .thenReturn(Collections.emptyList());
-        when(jsonSerialization.serialize(any())).thenReturn("[]");
+        @Test
+        void listWorkflows_withFilterAndLimit() throws IOException {
+                when(WorkflowStore.readWorkflowDescriptors("greetings", 0, 10))
+                                .thenReturn(Collections.emptyList());
+                when(jsonSerialization.serialize(any())).thenReturn("[]");
 
-        tools.listPackages("greetings", 10);
+                tools.listWorkflows("greetings", 10);
 
-        verify(WorkflowStore).readPackageDescriptors("greetings", 0, 10);
-    }
+                verify(WorkflowStore).readWorkflowDescriptors("greetings", 0, 10);
+        }
 
-    // --- createAgent ---
+        // --- createAgent ---
 
-    @Test
-    void createAgent_createsAndPatchesDescriptor() throws IOException {
-        when(AgentStore.createAgent(any(AgentConfiguration.class)))
-                .thenReturn(Response.created(java.net.URI.create("/AgentStore/bots/" + AGENT_ID + "?version=1"))
-                        .build());
-        when(jsonSerialization.serialize(any()))
-                .thenReturn("{\"action\":\"created\",\"agentId\":\"test-bot-id\",\"name\":\"My Bot\"}");
+        @Test
+        void createAgent_createsAndPatchesDescriptor() throws IOException {
+                when(AgentStore.createAgent(any(AgentConfiguration.class)))
+                                .thenReturn(Response
+                                                .created(java.net.URI
+                                                                .create("/AgentStore/agents/" + AGENT_ID
+                                                                                + "?version=1"))
+                                                .build());
+                when(jsonSerialization.serialize(any()))
+                                .thenReturn("{\"action\":\"created\",\"agentId\":\"test-agent-id\",\"name\":\"My Agent\"}");
 
-        String result = tools.createAgent("My Bot", "Test description", null);
+                String result = tools.createAgent("My Agent", "Test description", null);
 
-        assertNotNull(result);
-        assertTrue(result.contains("created"));
-        verify(AgentStore).createAgent(any(AgentConfiguration.class));
+                assertNotNull(result);
+                assertTrue(result.contains("created"));
+                verify(AgentStore).createAgent(any(AgentConfiguration.class));
 
-        // Verify descriptor was patched with name and description
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<PatchInstruction<DocumentDescriptor>> patchCaptor =
-                ArgumentCaptor.forClass(PatchInstruction.class);
-        verify(descriptorStore).patchDescriptor(eq(AGENT_ID), eq(1), patchCaptor.capture());
+                // Verify descriptor was patched with name and description
+                @SuppressWarnings("unchecked")
+                ArgumentCaptor<PatchInstruction<DocumentDescriptor>> patchCaptor = ArgumentCaptor
+                                .forClass(PatchInstruction.class);
+                verify(descriptorStore).patchDescriptor(eq(AGENT_ID), eq(1), patchCaptor.capture());
 
-        var patch = patchCaptor.getValue();
-        assertEquals(PatchInstruction.PatchOperation.SET, patch.getOperation());
-        assertEquals("My Bot", patch.getDocument().getName());
-        assertEquals("Test description", patch.getDocument().getDescription());
-    }
+                var patch = patchCaptor.getValue();
+                assertEquals(PatchInstruction.PatchOperation.SET, patch.getOperation());
+                assertEquals("My Agent", patch.getDocument().getName());
+                assertEquals("Test description", patch.getDocument().getDescription());
+        }
 
-    @Test
-    void createAgent_withPackageUris() throws IOException {
-        when(AgentStore.createAgent(any(AgentConfiguration.class)))
-                .thenReturn(Response.created(java.net.URI.create("/AgentStore/bots/" + AGENT_ID + "?version=1"))
-                        .build());
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\"}");
+        @Test
+        void createAgent_withWorkflowUris() throws IOException {
+                when(AgentStore.createAgent(any(AgentConfiguration.class)))
+                                .thenReturn(Response
+                                                .created(java.net.URI
+                                                                .create("/AgentStore/agents/" + AGENT_ID
+                                                                                + "?version=1"))
+                                                .build());
+                when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\"}");
 
-        tools.createAgent("Bot", null, "eddi://ai.labs.package/WorkflowStore/packages/pkg1?version=1");
+                tools.createAgent("Agent", null, "eddi://ai.labs.package/WorkflowStore/packages/pkg1?version=1");
 
-        ArgumentCaptor<AgentConfiguration> configCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
-        verify(AgentStore).createAgent(configCaptor.capture());
-        assertEquals(1, configCaptor.getValue().getWorkflows().size());
-    }
+                ArgumentCaptor<AgentConfiguration> configCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
+                verify(AgentStore).createAgent(configCaptor.capture());
+                assertEquals(1, configCaptor.getValue().getWorkflows().size());
+        }
 
-    @Test
-    void createAgent_descriptorPatchFailure_stillReturnsSuccess() throws IOException {
-        when(AgentStore.createAgent(any(AgentConfiguration.class)))
-                .thenReturn(Response.created(java.net.URI.create("/AgentStore/bots/" + AGENT_ID + "?version=1"))
-                        .build());
-        doThrow(new RuntimeException("Patch failed"))
-                .when(descriptorStore).patchDescriptor(any(), anyInt(), any());
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\"}");
+        @Test
+        void createAgent_descriptorPatchFailure_stillReturnsSuccess() throws IOException {
+                when(AgentStore.createAgent(any(AgentConfiguration.class)))
+                                .thenReturn(Response
+                                                .created(java.net.URI
+                                                                .create("/AgentStore/agents/" + AGENT_ID
+                                                                                + "?version=1"))
+                                                .build());
+                doThrow(new RuntimeException("Patch failed"))
+                                .when(descriptorStore).patchDescriptor(any(), anyInt(), any());
+                when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\"}");
 
-        String result = tools.createAgent("My Bot", null, null);
+                String result = tools.createAgent("My Agent", null, null);
 
-        // Agent creation should still be reported as successful
-        assertNotNull(result);
-        assertTrue(result.contains("created"));
-    }
+                // Agent creation should still be reported as successful
+                assertNotNull(result);
+                assertTrue(result.contains("created"));
+        }
 
-    // --- deleteBot ---
+        // --- deleteAgent ---
 
-    @Test
-    void deleteBot_success() throws IOException {
-        when(AgentStore.deleteBot(AGENT_ID, 1, false, false))
-                .thenReturn(Response.ok().build());
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deleted\"}");
+        @Test
+        void deleteAgent_success() throws IOException {
+                when(AgentStore.deleteAgent(AGENT_ID, 1, false, false))
+                                .thenReturn(Response.ok().build());
+                when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deleted\"}");
 
-        String result = tools.deleteBot(AGENT_ID, 1, false, false);
+                String result = tools.deleteAgent(AGENT_ID, 1, false, false);
 
-        assertNotNull(result);
-        verify(AgentStore).deleteBot(AGENT_ID, 1, false, false);
-    }
+                assertNotNull(result);
+                verify(AgentStore).deleteAgent(AGENT_ID, 1, false, false);
+        }
 
-    @Test
-    void deleteBot_permanentCascade() throws IOException {
-        when(AgentStore.deleteBot(AGENT_ID, 2, true, true))
-                .thenReturn(Response.ok().build());
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deleted\"}");
+        @Test
+        void deleteAgent_permanentCascade() throws IOException {
+                when(AgentStore.deleteAgent(AGENT_ID, 2, true, true))
+                                .thenReturn(Response.ok().build());
+                when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deleted\"}");
 
-        tools.deleteBot(AGENT_ID, 2, true, true);
+                tools.deleteAgent(AGENT_ID, 2, true, true);
 
-        verify(AgentStore).deleteBot(AGENT_ID, 2, true, true);
-    }
+                verify(AgentStore).deleteAgent(AGENT_ID, 2, true, true);
+        }
 
-    @Test
-    void deleteBot_handlesException() {
-        when(AgentStore.deleteBot(any(), anyInt(), anyBoolean(), anyBoolean()))
-                .thenThrow(new RuntimeException("Not found"));
+        @Test
+        void deleteAgent_handlesException() {
+                when(AgentStore.deleteAgent(any(), anyInt(), anyBoolean(), anyBoolean()))
+                                .thenThrow(new RuntimeException("Not found"));
 
-        String result = tools.deleteBot(AGENT_ID, 1, null, null);
+                String result = tools.deleteAgent(AGENT_ID, 1, null, null);
 
-        assertTrue(result.contains("error"));
-        assertTrue(result.contains("Not found"));
-    }
+                assertTrue(result.contains("error"));
+                assertTrue(result.contains("Not found"));
+        }
 }

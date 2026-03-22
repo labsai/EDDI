@@ -25,8 +25,10 @@ public class ConversationMemorySnapshot {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
 
         ConversationMemorySnapshot that = (ConversationMemorySnapshot) o;
 
@@ -61,12 +63,14 @@ public class ConversationMemorySnapshot {
     }
 
     public static class ConversationStepSnapshot {
-        private List<PackageRunSnapshot> packages = new LinkedList<>();
+        private List<WorkflowRunSnapshot> packages = new LinkedList<>();
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
 
             ConversationStepSnapshot that = (ConversationStepSnapshot) o;
 
@@ -78,26 +82,27 @@ public class ConversationMemorySnapshot {
             return packages != null ? packages.hashCode() : 0;
         }
 
-        public List<PackageRunSnapshot> getWorkflows() {
+        public List<WorkflowRunSnapshot> getWorkflows() {
             return packages;
         }
 
-        public void setWorkflows(List<PackageRunSnapshot> packages) {
+        public void setWorkflows(List<WorkflowRunSnapshot> packages) {
             this.packages = packages;
         }
 
-
     }
 
-    public static class PackageRunSnapshot {
+    public static class WorkflowRunSnapshot {
         private List<ResultSnapshot> lifecycleTasks = new LinkedList<>();
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
 
-            PackageRunSnapshot that = (PackageRunSnapshot) o;
+            WorkflowRunSnapshot that = (WorkflowRunSnapshot) o;
 
             return Objects.equals(lifecycleTasks, that.lifecycleTasks);
         }
@@ -115,7 +120,6 @@ public class ConversationMemorySnapshot {
             this.lifecycleTasks = lifecycleTasks;
         }
 
-
     }
 
     public static class ResultSnapshot {
@@ -123,13 +127,15 @@ public class ConversationMemorySnapshot {
         private Object result;
         private List<?> possibleResults;
         private Date timestamp;
-        private String originPackageId;
+        private String originWorkflowId;
         private boolean isPublic;
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
 
             ResultSnapshot that = (ResultSnapshot) o;
 
@@ -149,12 +155,13 @@ public class ConversationMemorySnapshot {
         public ResultSnapshot() {
         }
 
-        public ResultSnapshot(String key, Object result, List<?> possibleResults, Date timestamp, String originPackageId, boolean isPublic) {
+        public ResultSnapshot(String key, Object result, List<?> possibleResults, Date timestamp,
+                String originWorkflowId, boolean isPublic) {
             this.key = key;
             this.result = result;
             this.possibleResults = possibleResults;
             this.timestamp = timestamp;
-            this.originPackageId = originPackageId;
+            this.originWorkflowId = originWorkflowId;
             this.isPublic = isPublic;
         }
 
@@ -190,12 +197,12 @@ public class ConversationMemorySnapshot {
             this.timestamp = timestamp;
         }
 
-        public String getOriginPackageId() {
-            return originPackageId;
+        public String getOriginWorkflowId() {
+            return originWorkflowId;
         }
 
-        public void setOriginPackageId(String originPackageId) {
-            this.originPackageId = originPackageId;
+        public void setOriginWorkflowId(String originWorkflowId) {
+            this.originWorkflowId = originWorkflowId;
         }
 
         public boolean isPublic() {
@@ -206,11 +213,11 @@ public class ConversationMemorySnapshot {
             this.isPublic = isPublic;
         }
 
-
-
         @Override
         public String toString() {
-            return "ResultSnapshot(" + "key=" + key + ", result=" + result + ", possibleResults=" + possibleResults + ", timestamp=" + timestamp + ", originPackageId=" + originPackageId + ", isPublic=" + isPublic + ")";
+            return "ResultSnapshot(" + "key=" + key + ", result=" + result + ", possibleResults=" + possibleResults
+                    + ", timestamp=" + timestamp + ", originWorkflowId=" + originWorkflowId + ", isPublic=" + isPublic
+                    + ")";
         }
     }
 

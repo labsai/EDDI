@@ -141,7 +141,7 @@ public interface IConversationMemory extends Serializable {
 
         void removeData(String key);
 
-        void setCurrentPackageId(String packageId);
+        void setCurrentWorkflowId(String workflowId);
 
         void resetConversationOutput(String rootKey);
 

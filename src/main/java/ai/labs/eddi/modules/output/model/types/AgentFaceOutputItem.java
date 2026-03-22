@@ -4,16 +4,16 @@ import ai.labs.eddi.modules.output.model.OutputItem;
 
 import java.util.Objects;
 
-public class BotFaceOutputItem extends OutputItem {
+public class AgentFaceOutputItem extends OutputItem {
     private String uri;
     private String alt;
     private int delay;
 
-    public BotFaceOutputItem() {
+    public AgentFaceOutputItem() {
         initType();
     }
 
-    public BotFaceOutputItem(String uri, String alt, int delay) {
+    public AgentFaceOutputItem(String uri, String alt, int delay) {
         initType();
         this.uri = uri;
         this.alt = alt;
@@ -22,14 +22,16 @@ public class BotFaceOutputItem extends OutputItem {
 
     @Override
     protected void initType() {
-        super.type = "botFace";
+        super.type = "agentFace";
     }
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        BotFaceOutputItem that = (BotFaceOutputItem) o;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
+        AgentFaceOutputItem that = (AgentFaceOutputItem) o;
         return delay == that.delay && Objects.equals(uri, that.uri) && Objects.equals(alt, that.alt);
     }
 

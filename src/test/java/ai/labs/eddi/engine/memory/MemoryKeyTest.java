@@ -143,7 +143,7 @@ class MemoryKeyTest {
 
     @Test
     void stepStackGetLatestDataWithMemoryKey() {
-        var memory = new ConversationMemory("bot1", 1);
+        var memory = new ConversationMemory("agent1", 1);
         MemoryKey<List<String>> key = MemoryKey.ofPublic("actions");
 
         // Store data in first step

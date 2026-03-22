@@ -17,7 +17,7 @@ public class ConversationDescriptor extends ResourceDescriptor {
 
     private String agentName;
     private String userId;
-    private URI botResource;
+    private URI agentResource;
     private ViewState viewState;
     private int conversationStepSize;
     private String createdByUserName;
@@ -40,12 +40,12 @@ public class ConversationDescriptor extends ResourceDescriptor {
         this.userId = userId;
     }
 
-    public URI getBotResource() {
-        return botResource;
+    public URI getAgentResource() {
+        return agentResource;
     }
 
-    public void setBotResource(URI botResource) {
-        this.botResource = botResource;
+    public void setAgentResource(URI agentResource) {
+        this.agentResource = agentResource;
     }
 
     public ViewState getViewState() {
@@ -88,4 +88,3 @@ public class ConversationDescriptor extends ResourceDescriptor {
         this.conversationState = conversationState;
     }
 }
-

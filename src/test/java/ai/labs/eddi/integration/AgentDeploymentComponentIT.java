@@ -19,19 +19,19 @@ import static org.hamcrest.Matchers.*;
 @TestProfile(IntegrationTestProfile.class)
 public class AgentDeploymentComponentIT extends BaseIntegrationIT {
 
-        private static final java.util.List<ResourceId> createdBots = new java.util.ArrayList<>();
+        private static final java.util.List<ResourceId> createdAgents = new java.util.ArrayList<>();
 
         @AfterAll
         static void cleanup() {
-                for (ResourceId agentId : createdBots) {
-                        undeployBotQuietly(agentId.id(), agentId.version());
+                for (ResourceId agentId : createdAgents) {
+                        undeployAgentQuietly(agentId.id(), agentId.version());
                 }
         }
 
         @Test
         @DisplayName("should deploy a Agent and reach READY status")
-        void deployBot_reachesReady() throws Exception {
-                ResourceId agentId = createMinimalBot();
+        void deployAgent_reachesReady() throws Exception {
+                ResourceId agentId = createMinimalAgent();
 
                 // Deploy
                 given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false",
@@ -49,13 +49,13 @@ public class AgentDeploymentComponentIT extends BaseIntegrationIT {
                         }
                         Thread.sleep(500);
                 }
-                Assertions.fail("Bot deployment did not reach READY status within 15 seconds");
+                Assertions.fail("Agent deployment did not reach READY status within 15 seconds");
         }
 
         @Test
-        @DisplayName("should undeploy a deployed bot")
-        void undeployBot_succeeds() throws Exception {
-                ResourceId agentId = createMinimalBot();
+        @DisplayName("should undeploy a deployed agent")
+        void undeployAgent_succeeds() throws Exception {
+                ResourceId agentId = createMinimalAgent();
                 deployAgent(agentId.id(), agentId.version());
 
                 // Undeploy
@@ -79,8 +79,8 @@ public class AgentDeploymentComponentIT extends BaseIntegrationIT {
 
         @Test
         @DisplayName("should return deployment status for a Agent version")
-        void getDeploymentStatus_forBot() throws Exception {
-                ResourceId agentId = createMinimalBot();
+        void getDeploymentStatus_forAgent() throws Exception {
+                ResourceId agentId = createMinimalAgent();
                 deployAgent(agentId.id(), agentId.version());
 
                 Response response = given()
@@ -95,7 +95,7 @@ public class AgentDeploymentComponentIT extends BaseIntegrationIT {
 
         // ==================== Helpers ====================
 
-        private ResourceId createMinimalBot() throws Exception {
+        private ResourceId createMinimalAgent() throws Exception {
                 String dictionary = load("agentengine/dictionary.json");
                 String behavior = load("agentengine/rules.json");
                 String output = load("agentengine/output.json");
@@ -124,12 +124,12 @@ public class AgentDeploymentComponentIT extends BaseIntegrationIT {
                                                 }""",
                                 locationDictionary, locationBehavior, locationOutput);
 
-                String locationPackage = createResource(packageBody, "/WorkflowStore/packages");
-                String botBody = String.format("""
-                                {"packages": ["%s"]}""", locationPackage);
-                String botLocation = createResource(botBody, "/AgentStore/bots");
-                ResourceId agentId = extractResourceId(botLocation);
-                createdBots.add(agentId);
+                String locationWorkflow = createResource(packageBody, "/WorkflowStore/packages");
+                String agentBody = String.format("""
+                                {"packages": ["%s"]}""", locationWorkflow);
+                String agentLocation = createResource(agentBody, "/AgentStore/agents");
+                ResourceId agentId = extractResourceId(agentLocation);
+                createdAgents.add(agentId);
                 return agentId;
         }
 }

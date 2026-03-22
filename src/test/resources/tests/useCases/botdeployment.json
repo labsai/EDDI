@@ -1,9 +1,9 @@
 {
-  "intent": "weather-bot",
-  "botDeployments": [
+  "intent": "weather-agent",
+  "agentDeployments": [
     {
       "environment": "unrestricted",
-      "botId": "%s",
+      "agentId": "%s",
       "initialContext": {}
     }
   ]

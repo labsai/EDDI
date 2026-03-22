@@ -17,11 +17,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * Models are cached by (type, parameters) tuple so that identical configs
  * reuse the same model instance. Thread-safe via ConcurrentHashMap.
  * <p>
- * Supports both synchronous ({@link ChatModel}) and streaming
+ * Supports agenth synchronous ({@link ChatModel}) and streaming
  * ({@link StreamingChatModel}) models with separate caches.
  */
 class ChatModelRegistry {
-    private static final String KEY_INCLUDE_FIRST_BOT_MESSAGE = "includeFirstBotMessage";
+    private static final String KEY_INCLUDE_FIRST_AGENT_MESSAGE = "includeFirstAgentMessage";
     private static final String KEY_SYSTEM_MESSAGE = "systemMessage";
     private static final String KEY_PROMPT = "prompt";
     private static final String KEY_LOG_SIZE_LIMIT = "logSizeLimit";
@@ -39,7 +39,7 @@ class ChatModelRegistry {
     private final Map<ModelCacheKey, StreamingChatModel> streamingModelCache = new ConcurrentHashMap<>(1);
 
     ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders,
-                      SecretResolver secretResolver) {
+            SecretResolver secretResolver) {
         this.languageModelApiConnectorBuilders = languageModelApiConnectorBuilders;
         this.secretResolver = secretResolver;
     }
@@ -51,7 +51,8 @@ class ChatModelRegistry {
     ChatModel getOrCreate(String type, Map<String, String> processedParams)
             throws UnsupportedLangchainTaskException {
 
-        // Extract observability params BEFORE filtering (they're removed from cache key)
+        // Extract observability params BEFORE filtering (they're removed from cache
+        // key)
         var timeoutMs = processedParams.get(KEY_TIMEOUT);
         var logReq = processedParams.get(KEY_LOG_REQUESTS);
         var logResp = processedParams.get(KEY_LOG_RESPONSES);
@@ -67,7 +68,8 @@ class ChatModelRegistry {
             throw new UnsupportedLangchainTaskException(String.format("Type \"%s\" is not supported", type));
         }
 
-        // Resolve vault references (late-binding: after Thymeleaf, before builder.build())
+        // Resolve vault references (late-binding: after Thymeleaf, before
+        // builder.build())
         var resolvedParams = secretResolver.resolveSecrets(filteredParams);
         var rawModel = languageModelApiConnectorBuilders.get(type).get().build(resolvedParams);
         var model = ObservableChatModel.wrapIfNeeded(rawModel, type, timeoutMs, logReq, logResp);
@@ -95,7 +97,8 @@ class ChatModelRegistry {
         }
 
         try {
-            // Resolve vault references (late-binding: after Thymeleaf, before builder.build())
+            // Resolve vault references (late-binding: after Thymeleaf, before
+            // builder.build())
             var resolvedParams = secretResolver.resolveSecrets(filteredParams);
             var model = languageModelApiConnectorBuilders.get(type).get().buildStreaming(resolvedParams);
             streamingModelCache.put(cacheKey, model);
@@ -112,7 +115,7 @@ class ChatModelRegistry {
      */
     private Map<String, String> filterParams(Map<String, String> processedParams) {
         var returnMap = new HashMap<>(processedParams);
-        returnMap.remove(KEY_INCLUDE_FIRST_BOT_MESSAGE);
+        returnMap.remove(KEY_INCLUDE_FIRST_AGENT_MESSAGE);
         returnMap.remove(KEY_SYSTEM_MESSAGE);
         returnMap.remove(KEY_PROMPT);
         returnMap.remove(KEY_LOG_SIZE_LIMIT);

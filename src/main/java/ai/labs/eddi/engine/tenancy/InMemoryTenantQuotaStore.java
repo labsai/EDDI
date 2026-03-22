@@ -31,16 +31,17 @@ public class InMemoryTenantQuotaStore implements ITenantQuotaStore {
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.tenant.quota.enabled", defaultValue = "false") boolean enabled,
             @ConfigProperty(name = "eddi.tenant.quota.max-conversations-per-day", defaultValue = "-1") int maxConvPerDay,
-            @ConfigProperty(name = "eddi.tenant.quota.max-bots-per-tenant", defaultValue = "-1") int maxBots,
+            @ConfigProperty(name = "eddi.tenant.quota.max-agents-per-tenant", defaultValue = "-1") int maxAgents,
             @ConfigProperty(name = "eddi.tenant.quota.max-api-calls-per-minute", defaultValue = "-1") int maxApiCalls,
             @ConfigProperty(name = "eddi.tenant.quota.max-monthly-cost-usd", defaultValue = "-1") double maxCost) {
 
         var defaultQuota = new TenantQuota(
-                defaultTenantId, maxConvPerDay, maxBots, maxApiCalls, maxCost, enabled);
+                defaultTenantId, maxConvPerDay, maxAgents, maxApiCalls, maxCost, enabled);
         quotas.put(defaultTenantId, defaultQuota);
 
-        LOGGER.infof("Tenant quota store initialized: tenantId=%s, enabled=%s, maxConv=%d, maxBots=%d, maxApi=%d, maxCost=%.2f",
-                defaultTenantId, enabled, maxConvPerDay, maxBots, maxApiCalls, maxCost);
+        LOGGER.infof(
+                "Tenant quota store initialized: tenantId=%s, enabled=%s, maxConv=%d, maxAgents=%d, maxApi=%d, maxCost=%.2f",
+                defaultTenantId, enabled, maxConvPerDay, maxAgents, maxApiCalls, maxCost);
     }
 
     /**

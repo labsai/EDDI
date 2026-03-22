@@ -22,13 +22,15 @@ import java.util.concurrent.ConcurrentHashMap;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
- * Manages MCP client connections for bots that consume external MCP servers as tool providers.
+ * Manages MCP client connections for agents that consume external MCP servers
+ * as tool providers.
  * <p>
  * Responsibilities:
  * <ul>
  * <li>Create and cache {@link McpClient} connections by URL</li>
  * <li>Discover tools from remote MCP servers via {@link McpToolProvider}</li>
- * <li>Return tool specifications and executors for the {@link AgentOrchestrator}</li>
+ * <li>Return tool specifications and executors for the
+ * {@link AgentOrchestrator}</li>
  * <li>Resolve vault references in API keys via {@link SecretResolver}</li>
  * <li>Graceful cleanup on shutdown via {@code @PreDestroy}</li>
  * </ul>
@@ -64,7 +66,8 @@ public class McpToolProviderManager {
      * Connect to the configured MCP servers and discover their tools.
      * <p>
      * Returns the combined tool specifications and executors from all servers.
-     * Failed connections log a warning but don't prevent other servers from being used.
+     * Failed connections log a warning but don't prevent other servers from being
+     * used.
      *
      * @param mcpServers list of MCP server configurations
      * @return combined tools from all reachable servers
@@ -153,7 +156,8 @@ public class McpToolProviderManager {
             apiKey = secretResolver.resolveValue(apiKey);
         }
 
-        // StreamableHttpMcpTransport (recommended, replaces deprecated HttpMcpTransport)
+        // StreamableHttpMcpTransport (recommended, replaces deprecated
+        // HttpMcpTransport)
         var transportBuilder = StreamableHttpMcpTransport.builder()
                 .url(config.getUrl())
                 .timeout(timeout);

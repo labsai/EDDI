@@ -32,8 +32,8 @@ Each audit entry captures:
 | ---------------- | ------- | ---------------------------------------------------------- |
 | `id`             | UUID    | Auto-generated unique identifier                           |
 | `conversationId` | String  | Conversation this entry belongs to                         |
-| `botId`          | String  | Bot identifier                                             |
-| `botVersion`     | Integer | Bot version                                                |
+| `agentId`        | String  | Agent identifier                                           |
+| `agentVersion`   | Integer | Agent version                                              |
 | `userId`         | String  | User identifier                                            |
 | `environment`    | String  | Deployment environment (e.g., `unrestricted`)              |
 | `stepIndex`      | int     | 0-based step position in the conversation                  |
@@ -62,13 +62,13 @@ GET /auditstore/{conversationId}?skip=0&limit=100
 
 Returns audit entries for a conversation, newest first.
 
-### Get Audit Trail by Bot
+### Get Audit Trail by Agent
 
 ```
-GET /auditstore/bot/{botId}?botVersion=1&skip=0&limit=100
+GET /auditstore/agent/{agentId}?agentVersion=1&skip=0&limit=100
 ```
 
-Returns audit entries for a bot. The `botVersion` parameter is optional.
+Returns audit entries for a agent. The `agentVersion` parameter is optional.
 
 ### Get Entry Count
 
@@ -109,13 +109,13 @@ If a database write fails, entries are **re-queued** for the next flush cycle. A
 ### MongoDB (default)
 
 - Collection: `audit_ledger`
-- Indexes: `conversationId`, `(botId, botVersion)`, `timestamp` (descending)
+- Indexes: `conversationId`, `(agentId, agentVersion)`, `timestamp` (descending)
 - Operations: `insertOne`, `insertMany` only — no update or delete
 
 ### PostgreSQL
 
 - Table: `audit_ledger` (auto-created on first use)
-- Hybrid storage: indexed columns (conversation_id, bot_id, bot_version, timestamp) + JSONB for variable data
+- Hybrid storage: indexed columns (conversation_id, agent_id, agent_version, timestamp) + JSONB for variable data
 - Activated with `@IfBuildProfile("postgres")`
 - Same insert-only contract as MongoDB
 

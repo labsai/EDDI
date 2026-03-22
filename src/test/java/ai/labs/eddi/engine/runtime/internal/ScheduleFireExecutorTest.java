@@ -41,14 +41,15 @@ class ScheduleFireExecutorTest {
     @Test
     void fire_cron_newStrategy_createsConversation() throws Exception {
         var schedule = makeCronSchedule("sched-1", "new");
-        when(conversationService.startConversation(any(), eq("bot-1"), eq("system:scheduler"), any()))
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
                 .thenReturn(new IConversationService.ConversationResult("conv-1", null));
 
         // say() calls the response handler immediately
         doAnswer(inv -> {
             ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
             return null;
-        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(),
+                any());
 
         ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
 
@@ -71,7 +72,8 @@ class ScheduleFireExecutorTest {
         doAnswer(inv -> {
             ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
             return null;
-        }).when(conversationService).say(any(), any(), eq("existing-conv"), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        }).when(conversationService).say(any(), any(), eq("existing-conv"), anyBoolean(), anyBoolean(), any(), any(),
+                anyBoolean(), any());
 
         ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
 
@@ -91,7 +93,8 @@ class ScheduleFireExecutorTest {
         doAnswer(inv -> {
             ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
             return null;
-        }).when(conversationService).say(any(), any(), eq("hb-conv"), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        }).when(conversationService).say(any(), any(), eq("hb-conv"), anyBoolean(), anyBoolean(), any(), any(),
+                anyBoolean(), any());
 
         ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
 
@@ -111,7 +114,8 @@ class ScheduleFireExecutorTest {
         doAnswer(inv -> {
             ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
             return null;
-        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), inputCaptor.capture(), anyBoolean(), any());
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), inputCaptor.capture(),
+                anyBoolean(), any());
 
         executor.fire(schedule, "instance-1", 1);
 
@@ -128,7 +132,8 @@ class ScheduleFireExecutorTest {
         doAnswer(inv -> {
             ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
             return null;
-        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), inputCaptor.capture(), anyBoolean(), any());
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), inputCaptor.capture(),
+                anyBoolean(), any());
 
         executor.fire(schedule, "instance-1", 1);
 
@@ -147,7 +152,8 @@ class ScheduleFireExecutorTest {
         doAnswer(inv -> {
             ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
             return null;
-        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), inputCaptor.capture(), anyBoolean(), any());
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), inputCaptor.capture(),
+                anyBoolean(), any());
 
         executor.fire(schedule, "instance-1", 1);
 
@@ -163,13 +169,13 @@ class ScheduleFireExecutorTest {
     void fire_exceptionResultsInFailedStatus() throws Exception {
         var schedule = makeCronSchedule("sched-err", "new");
         when(conversationService.startConversation(any(), any(), any(), any()))
-                .thenThrow(new RuntimeException("Bot not deployed"));
+                .thenThrow(new RuntimeException("Agent not deployed"));
 
         ScheduleFireLog result = executor.fire(schedule, "instance-1", 3);
 
         assertEquals(FireStatus.FAILED.name(), result.status());
         assertNotNull(result.errorMessage());
-        assertTrue(result.errorMessage().contains("Bot not deployed"));
+        assertTrue(result.errorMessage().contains("Agent not deployed"));
         assertEquals(3, result.attemptNumber());
     }
 
@@ -193,7 +199,8 @@ class ScheduleFireExecutorTest {
         doAnswer(inv -> {
             ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
             return null;
-        }).when(conversationService).say(eq(Environment.production), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        }).when(conversationService).say(eq(Environment.production), any(), any(), anyBoolean(), anyBoolean(), any(),
+                any(), anyBoolean(), any());
 
         ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
 
@@ -207,7 +214,7 @@ class ScheduleFireExecutorTest {
         s.setId(id);
         s.setName("Test Schedule");
         s.setTriggerType(TriggerType.CRON);
-        s.setAgentId("bot-1");
+        s.setAgentId("agent-1");
         s.setCronExpression("0 9 * * *");
         s.setMessage("Good morning");
         s.setEnvironment("production");
@@ -224,7 +231,7 @@ class ScheduleFireExecutorTest {
         s.setId(id);
         s.setName("Test Heartbeat");
         s.setTriggerType(TriggerType.HEARTBEAT);
-        s.setAgentId("bot-1");
+        s.setAgentId("agent-1");
         s.setHeartbeatIntervalSeconds(300L);
         s.setMessage("check");
         s.setEnvironment("production");

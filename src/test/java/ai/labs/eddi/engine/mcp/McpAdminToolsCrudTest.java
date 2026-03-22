@@ -42,16 +42,18 @@ import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for McpAdminTools Phase 8a.2 —
- * update_resource, create_resource, delete_resource, apply_bot_changes, list_bot_resources.
- * Phase 8a.3 — list_bot_triggers, create_bot_trigger, update_bot_trigger, delete_bot_trigger.
+ * update_resource, create_resource, delete_resource, apply_agent_changes,
+ * list_agent_resources.
+ * Phase 8a.3 — list_agent_triggers, create_agent_trigger, update_agent_trigger,
+ * delete_agent_trigger.
  */
 class McpAdminToolsCrudTest {
 
-    private static final String AGENT_ID = "test-bot-id";
+    private static final String AGENT_ID = "test-agent-id";
     private static final String RESOURCE_ID = "test-resource-id";
     private static final String PKG_ID = "test-pkg-id";
 
-    private IRestAgentAdministration botAdmin;
+    private IRestAgentAdministration agentAdmin;
     private IRestAgentStore AgentStore;
     private IRestWorkflowStore WorkflowStore;
     private IRestDocumentDescriptorStore descriptorStore;
@@ -70,7 +72,7 @@ class McpAdminToolsCrudTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        botAdmin = mock(IRestAgentAdministration.class);
+        agentAdmin = mock(IRestAgentAdministration.class);
         AgentStore = mock(IRestAgentStore.class);
         WorkflowStore = mock(IRestWorkflowStore.class);
         descriptorStore = mock(IRestDocumentDescriptorStore.class);
@@ -99,7 +101,7 @@ class McpAdminToolsCrudTest {
         scheduleStore = mock(IScheduleStore.class);
         scheduleFireExecutor = mock(ScheduleFireExecutor.class);
         schedulePollerService = mock(SchedulePollerService.class);
-        tools = new McpAdminTools(restInterfaceFactory, botAdmin, jsonSerialization,
+        tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization,
                 scheduleStore, scheduleFireExecutor, schedulePollerService);
     }
 
@@ -254,15 +256,15 @@ class McpAdminToolsCrudTest {
         assertTrue(result.contains("resourceId is required"));
     }
 
-    // ==================== apply_bot_changes ====================
+    // ==================== apply_agent_changes ====================
 
     @Test
-    void applyBotChanges_singlePackage_success() throws IOException {
+    void applyAgentChanges_singleWorkflow_success() throws IOException {
         // Set up Agent with 1 package
-        var botConfig = new AgentConfiguration();
-        botConfig.setWorkflows(List.of(
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of(
                 URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG_ID + "?version=1")));
-        when(AgentStore.readBot(AGENT_ID, 1)).thenReturn(botConfig);
+        when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
         // Set up package with one extension containing the old URI
         var ext = new WorkflowConfiguration.WorkflowStep();
@@ -272,15 +274,15 @@ class McpAdminToolsCrudTest {
         ext.setConfig(configMap);
         var pkgConfig = new WorkflowConfiguration();
         pkgConfig.setWorkflowSteps(new ArrayList<>(List.of(ext)));
-        when(WorkflowStore.readPackage(PKG_ID, 1)).thenReturn(pkgConfig);
+        when(WorkflowStore.readWorkflow(PKG_ID, 1)).thenReturn(pkgConfig);
 
         // Mock updates
-        when(WorkflowStore.updatePackage(eq(PKG_ID), eq(1), any()))
+        when(WorkflowStore.updateWorkflow(eq(PKG_ID), eq(1), any()))
                 .thenReturn(Response.ok().header("Location",
                         "/WorkflowStore/packages/" + PKG_ID + "?version=2").build());
-        when(AgentStore.updateBot(eq(AGENT_ID), eq(1), any()))
+        when(AgentStore.updateAgent(eq(AGENT_ID), eq(1), any()))
                 .thenReturn(Response.ok().header("Location",
-                        "/AgentStore/bots/" + AGENT_ID + "?version=2").build());
+                        "/AgentStore/agents/" + AGENT_ID + "?version=2").build());
 
         // Parse mappings JSON
         String mappingsJson = "[{\"oldUri\":\"eddi://ai.labs.langchain/langchainstore/langchains/lc1?version=1\"," +
@@ -289,22 +291,22 @@ class McpAdminToolsCrudTest {
                 "oldUri", "eddi://ai.labs.langchain/langchainstore/langchains/lc1?version=1",
                 "newUri", "eddi://ai.labs.langchain/langchainstore/langchains/lc1?version=2"));
         when(jsonSerialization.deserialize(mappingsJson, List.class)).thenReturn(mappings);
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"updatedPackages\":1}");
+        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"updatedWorkflows\":1}");
 
-        String result = tools.applyBotChanges(AGENT_ID, 1, mappingsJson, false, null);
+        String result = tools.applyAgentChanges(AGENT_ID, 1, mappingsJson, false, null);
 
         assertNotNull(result);
         assertTrue(result.contains("cascaded"));
-        verify(WorkflowStore).updatePackage(eq(PKG_ID), eq(1), any());
-        verify(AgentStore).updateBot(eq(AGENT_ID), eq(1), any());
+        verify(WorkflowStore).updateWorkflow(eq(PKG_ID), eq(1), any());
+        verify(AgentStore).updateAgent(eq(AGENT_ID), eq(1), any());
     }
 
     @Test
-    void applyBotChanges_noMatchingUris_noUpdates() throws IOException {
-        var botConfig = new AgentConfiguration();
-        botConfig.setWorkflows(List.of(
+    void applyAgentChanges_noMatchingUris_noUpdates() throws IOException {
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of(
                 URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG_ID + "?version=1")));
-        when(AgentStore.readBot(AGENT_ID, 1)).thenReturn(botConfig);
+        when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
         var ext = new WorkflowConfiguration.WorkflowStep();
         ext.setType(URI.create("eddi://ai.labs.langchain"));
@@ -313,7 +315,7 @@ class McpAdminToolsCrudTest {
         ext.setConfig(configMap);
         var pkgConfig = new WorkflowConfiguration();
         pkgConfig.setWorkflowSteps(new ArrayList<>(List.of(ext)));
-        when(WorkflowStore.readPackage(PKG_ID, 1)).thenReturn(pkgConfig);
+        when(WorkflowStore.readWorkflow(PKG_ID, 1)).thenReturn(pkgConfig);
 
         // Mappings don't match any existing URIs
         String mappingsJson = "[{\"oldUri\":\"eddi://different/resource?version=1\",\"newUri\":\"eddi://different/resource?version=2\"}]";
@@ -321,21 +323,21 @@ class McpAdminToolsCrudTest {
                 "oldUri", "eddi://different/resource?version=1",
                 "newUri", "eddi://different/resource?version=2"));
         when(jsonSerialization.deserialize(mappingsJson, List.class)).thenReturn(mappings);
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"updatedPackages\":0}");
+        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"updatedWorkflows\":0}");
 
-        tools.applyBotChanges(AGENT_ID, 1, mappingsJson, false, null);
+        tools.applyAgentChanges(AGENT_ID, 1, mappingsJson, false, null);
 
         // No package or Agent updates should occur
-        verify(WorkflowStore, never()).updatePackage(any(), anyInt(), any());
-        verify(AgentStore, never()).updateBot(any(), anyInt(), any());
+        verify(WorkflowStore, never()).updateWorkflow(any(), anyInt(), any());
+        verify(AgentStore, never()).updateAgent(any(), anyInt(), any());
     }
 
     @Test
-    void applyBotChanges_withRedeploy_success() throws IOException {
-        var botConfig = new AgentConfiguration();
-        botConfig.setWorkflows(List.of(
+    void applyAgentChanges_withRedeploy_success() throws IOException {
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of(
                 URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG_ID + "?version=1")));
-        when(AgentStore.readBot(AGENT_ID, 1)).thenReturn(botConfig);
+        when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
         var ext = new WorkflowConfiguration.WorkflowStep();
         ext.setType(URI.create("eddi://ai.labs.behavior"));
@@ -344,15 +346,15 @@ class McpAdminToolsCrudTest {
         ext.setConfig(configMap);
         var pkgConfig = new WorkflowConfiguration();
         pkgConfig.setWorkflowSteps(new ArrayList<>(List.of(ext)));
-        when(WorkflowStore.readPackage(PKG_ID, 1)).thenReturn(pkgConfig);
+        when(WorkflowStore.readWorkflow(PKG_ID, 1)).thenReturn(pkgConfig);
 
-        when(WorkflowStore.updatePackage(eq(PKG_ID), eq(1), any()))
+        when(WorkflowStore.updateWorkflow(eq(PKG_ID), eq(1), any()))
                 .thenReturn(Response.ok().header("Location",
                         "/WorkflowStore/packages/" + PKG_ID + "?version=2").build());
-        when(AgentStore.updateBot(eq(AGENT_ID), eq(1), any()))
+        when(AgentStore.updateAgent(eq(AGENT_ID), eq(1), any()))
                 .thenReturn(Response.ok().header("Location",
-                        "/AgentStore/bots/" + AGENT_ID + "?version=2").build());
-        when(botAdmin.deployAgent(Environment.production, AGENT_ID, 2, true, true))
+                        "/AgentStore/agents/" + AGENT_ID + "?version=2").build());
+        when(agentAdmin.deployAgent(Environment.production, AGENT_ID, 2, true, true))
                 .thenReturn(Response.ok().build());
 
         String mappingsJson = "[{\"oldUri\":\"eddi://ai.labs.behavior/behaviorstore/behaviorsets/b1?version=1\"," +
@@ -363,58 +365,58 @@ class McpAdminToolsCrudTest {
         when(jsonSerialization.deserialize(mappingsJson, List.class)).thenReturn(mappings);
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"redeployed\":true}");
 
-        String result = tools.applyBotChanges(AGENT_ID, 1, mappingsJson, true, "production");
+        String result = tools.applyAgentChanges(AGENT_ID, 1, mappingsJson, true, "production");
 
         assertTrue(result.contains("cascaded"));
-        verify(botAdmin).deployAgent(Environment.production, AGENT_ID, 2, true, true);
+        verify(agentAdmin).deployAgent(Environment.production, AGENT_ID, 2, true, true);
     }
 
     @Test
-    void applyBotChanges_missingBotId_returnsError() {
-        String result = tools.applyBotChanges(null, 1, "[{}]", false, null);
+    void applyAgentChanges_missingAgentId_returnsError() {
+        String result = tools.applyAgentChanges(null, 1, "[{}]", false, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("agentId is required"));
     }
 
     @Test
-    void applyBotChanges_emptyMappings_noChanges() throws IOException {
+    void applyAgentChanges_emptyMappings_noChanges() throws IOException {
         when(jsonSerialization.deserialize("[]", List.class)).thenReturn(List.of());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"no_changes\"}");
 
-        String result = tools.applyBotChanges(AGENT_ID, 1, "[]", false, null);
+        String result = tools.applyAgentChanges(AGENT_ID, 1, "[]", false, null);
 
         assertNotNull(result);
-        verify(AgentStore, never()).readBot(any(), anyInt());
+        verify(AgentStore, never()).readAgent(any(), anyInt());
     }
 
     @Test
-    void applyBotChanges_botNotFound_returnsError() throws IOException {
-        when(AgentStore.readBot(AGENT_ID, 1)).thenReturn(null);
+    void applyAgentChanges_agentNotFound_returnsError() throws IOException {
+        when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(null);
         List<Map<String, String>> mappings = List.of(Map.of("oldUri", "a", "newUri", "b"));
         when(jsonSerialization.deserialize(anyString(), eq(List.class))).thenReturn(mappings);
 
-        String result = tools.applyBotChanges(AGENT_ID, 1, "[{\"oldUri\":\"a\",\"newUri\":\"b\"}]", false, null);
+        String result = tools.applyAgentChanges(AGENT_ID, 1, "[{\"oldUri\":\"a\",\"newUri\":\"b\"}]", false, null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Bot not found"));
+        assertTrue(result.contains("Agent not found"));
     }
 
-    // ==================== list_bot_resources ====================
+    // ==================== list_agent_resources ====================
 
     @Test
-    void listBotResources_success() throws IOException {
+    void listAgentResources_success() throws IOException {
         // Set up Agent with 1 package
-        var botConfig = new AgentConfiguration();
-        botConfig.setWorkflows(List.of(
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of(
                 URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG_ID + "?version=1")));
-        when(AgentStore.readBot(AGENT_ID, 1)).thenReturn(botConfig);
+        when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
         // Agent descriptor
         var descriptor = new DocumentDescriptor();
-        descriptor.setName("Test Bot");
+        descriptor.setName("Test Agent");
         when(descriptorStore.readDescriptor(AGENT_ID, 1)).thenReturn(descriptor);
 
-        // Package with 2 extensions
+        // Workflow with 2 extensions
         var ext1 = new WorkflowConfiguration.WorkflowStep();
         ext1.setType(URI.create("eddi://ai.labs.langchain"));
         ext1.setConfig(Map.of("uri", "eddi://ai.labs.langchain/langchainstore/langchains/lc1?version=1"));
@@ -423,79 +425,79 @@ class McpAdminToolsCrudTest {
         ext2.setConfig(Map.of("uri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/b1?version=1"));
         var pkgConfig = new WorkflowConfiguration();
         pkgConfig.setWorkflowSteps(List.of(ext1, ext2));
-        when(WorkflowStore.readPackage(PKG_ID, 1)).thenReturn(pkgConfig);
+        when(WorkflowStore.readWorkflow(PKG_ID, 1)).thenReturn(pkgConfig);
 
         when(jsonSerialization.serialize(any())).thenReturn(
-                "{\"agentId\":\"test-bot-id\",\"agentName\":\"Test Bot\",\"packageCount\":1}");
+                "{\"agentId\":\"test-agent-id\",\"agentName\":\"Test Agent\",\"packageCount\":1}");
 
-        String result = tools.listBotResources(AGENT_ID, 1);
+        String result = tools.listAgentResources(AGENT_ID, 1);
 
         assertNotNull(result);
-        assertTrue(result.contains("Test Bot"));
-        verify(AgentStore).readBot(AGENT_ID, 1);
-        verify(WorkflowStore).readPackage(PKG_ID, 1);
+        assertTrue(result.contains("Test Agent"));
+        verify(AgentStore).readAgent(AGENT_ID, 1);
+        verify(WorkflowStore).readWorkflow(PKG_ID, 1);
     }
 
     @Test
-    void listBotResources_botNotFound_returnsError() {
-        when(AgentStore.readBot(AGENT_ID, 1)).thenReturn(null);
+    void listAgentResources_agentNotFound_returnsError() {
+        when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(null);
 
-        String result = tools.listBotResources(AGENT_ID, 1);
+        String result = tools.listAgentResources(AGENT_ID, 1);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Bot not found"));
+        assertTrue(result.contains("Agent not found"));
     }
 
     @Test
-    void listBotResources_missingBotId_returnsError() {
-        String result = tools.listBotResources(null, 1);
+    void listAgentResources_missingAgentId_returnsError() {
+        String result = tools.listAgentResources(null, 1);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("agentId is required"));
     }
 
     @Test
-    void listBotResources_packageReadFailure_includesError() throws IOException {
-        var botConfig = new AgentConfiguration();
-        botConfig.setWorkflows(List.of(
+    void listAgentResources_packageReadFailure_includesError() throws IOException {
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of(
                 URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG_ID + "?version=1")));
-        when(AgentStore.readBot(AGENT_ID, 1)).thenReturn(botConfig);
+        when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
-        when(WorkflowStore.readPackage(PKG_ID, 1))
-                .thenThrow(new RuntimeException("Package corrupted"));
+        when(WorkflowStore.readWorkflow(PKG_ID, 1))
+                .thenThrow(new RuntimeException("Workflow corrupted"));
         when(jsonSerialization.serialize(any())).thenReturn("{\"packages\":[{\"error\":\"Failed to read package\"}]}");
 
-        String result = tools.listBotResources(AGENT_ID, 1);
+        String result = tools.listAgentResources(AGENT_ID, 1);
 
         // Should still succeed (graceful degradation), but include error info
         assertNotNull(result);
         assertTrue(result.contains("error") || result.contains("packages"));
     }
 
-    // ==================== list_bot_triggers ====================
+    // ==================== list_agent_triggers ====================
 
     @Test
-    void listBotTriggers_success() throws IOException {
+    void listAgentTriggers_success() throws IOException {
         var trigger = new AgentTriggerConfiguration();
         trigger.setIntent("support");
-        when(AgentTriggerStore.readAllBotTriggers()).thenReturn(List.of(trigger));
+        when(AgentTriggerStore.readAllAgentTriggers()).thenReturn(List.of(trigger));
         when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1}");
 
-        String result = tools.listBotTriggers();
+        String result = tools.listAgentTriggers();
 
         assertNotNull(result);
-        verify(AgentTriggerStore).readAllBotTriggers();
+        verify(AgentTriggerStore).readAllAgentTriggers();
     }
 
     @Test
-    void listBotTriggers_error_returnsError() {
-        when(AgentTriggerStore.readAllBotTriggers()).thenThrow(new RuntimeException("db error"));
+    void listAgentTriggers_error_returnsError() {
+        when(AgentTriggerStore.readAllAgentTriggers()).thenThrow(new RuntimeException("db error"));
 
-        String result = tools.listBotTriggers();
+        String result = tools.listAgentTriggers();
 
         assertTrue(result.contains("error"));
     }
 
-    // ==================== create_bot_trigger ====================
+    // ==================== create_agent_trigger ====================
 
     @Test
     void createAgentTrigger_success() throws IOException {
@@ -519,45 +521,45 @@ class McpAdminToolsCrudTest {
         assertTrue(result.contains("config is required"));
     }
 
-    // ==================== update_bot_trigger ====================
+    // ==================== update_agent_trigger ====================
 
     @Test
-    void updateBotTrigger_success() throws IOException {
+    void updateAgentTrigger_success() throws IOException {
         var config = new AgentTriggerConfiguration();
         when(jsonSerialization.deserialize(anyString(), eq(AgentTriggerConfiguration.class))).thenReturn(config);
-        when(AgentTriggerStore.updateBotTrigger(eq("support"), any())).thenReturn(Response.ok().build());
+        when(AgentTriggerStore.updateAgentTrigger(eq("support"), any())).thenReturn(Response.ok().build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"updated\"}");
 
-        String result = tools.updateBotTrigger("support", "{\"intent\":\"support\"}");
+        String result = tools.updateAgentTrigger("support", "{\"intent\":\"support\"}");
 
         assertNotNull(result);
         assertTrue(result.contains("updated"));
     }
 
     @Test
-    void updateBotTrigger_missingIntent_returnsError() {
-        String result = tools.updateBotTrigger(null, "{}");
+    void updateAgentTrigger_missingIntent_returnsError() {
+        String result = tools.updateAgentTrigger(null, "{}");
         assertTrue(result.contains("error"));
         assertTrue(result.contains("intent is required"));
     }
 
-    // ==================== delete_bot_trigger ====================
+    // ==================== delete_agent_trigger ====================
 
     @Test
-    void deleteBotTrigger_success() throws IOException {
-        when(AgentTriggerStore.deleteBotTrigger("support")).thenReturn(Response.ok().build());
+    void deleteAgentTrigger_success() throws IOException {
+        when(AgentTriggerStore.deleteAgentTrigger("support")).thenReturn(Response.ok().build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deleted\"}");
 
-        String result = tools.deleteBotTrigger("support");
+        String result = tools.deleteAgentTrigger("support");
 
         assertNotNull(result);
         assertTrue(result.contains("deleted"));
-        verify(AgentTriggerStore).deleteBotTrigger("support");
+        verify(AgentTriggerStore).deleteAgentTrigger("support");
     }
 
     @Test
-    void deleteBotTrigger_missingIntent_returnsError() {
-        String result = tools.deleteBotTrigger(null);
+    void deleteAgentTrigger_missingIntent_returnsError() {
+        String result = tools.deleteAgentTrigger(null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("intent is required"));
     }

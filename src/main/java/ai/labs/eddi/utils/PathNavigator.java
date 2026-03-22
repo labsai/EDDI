@@ -163,7 +163,7 @@ public class PathNavigator {
             return right;
         }
 
-        // Both are numbers — do arithmetic
+        // Agenth are numbers — do arithmetic
         if (left instanceof Number leftNum && right instanceof Number rightNum) {
             if (left instanceof Double || left instanceof Float ||
                     right instanceof Double || right instanceof Float) {

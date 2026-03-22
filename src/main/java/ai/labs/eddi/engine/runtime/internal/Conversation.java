@@ -216,7 +216,8 @@ public class Conversation implements IConversation {
 
     /**
      * Check if the client flagged this input as a secret via the context map.
-     * The client sends: {@code { "secretInput": { "type": "string", "value": "true" } }}
+     * The client sends:
+     * {@code { "secretInput": { "type": "string", "value": "true" } }}
      */
     private static boolean isSecretInputFlagged(Map<String, Context> contexts) {
         if (contexts == null || !contexts.containsKey(KEY_SECRET_INPUT)) {
@@ -245,7 +246,7 @@ public class Conversation implements IConversation {
     private void executeConversationStep(List<IData<?>> lifecycleData, List<String> lifecycleTaskTypes)
             throws LifecycleException {
         try {
-            executePackages(lifecycleData, lifecycleTaskTypes);
+            executeWorkflows(lifecycleData, lifecycleTaskTypes);
         } catch (ConversationStopException unused) {
             endConversation();
         }
@@ -336,10 +337,10 @@ public class Conversation implements IConversation {
         return contextData;
     }
 
-    private void executePackages(List<IData<?>> data, List<String> lifecycleTaskTypes)
+    private void executeWorkflows(List<IData<?>> data, List<String> lifecycleTaskTypes)
             throws LifecycleException, ConversationStopException {
         for (IExecutableWorkflow executableWorkflow : executableWorkflows) {
-            conversationMemory.getCurrentStep().setCurrentPackageId(executableWorkflow.getPackageId());
+            conversationMemory.getCurrentStep().setCurrentWorkflowId(executableWorkflow.getWorkflowId());
             data.stream().filter(Objects::nonNull)
                     .forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
             ILifecycleManager lifecycleManager = executableWorkflow.getLifecycleManager();

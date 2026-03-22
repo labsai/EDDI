@@ -132,15 +132,15 @@ public abstract class BaseIntegrationIT {
             if ("READY".equals(status))
                 return;
             if ("ERROR".equals(status)) {
-                throw new RuntimeException(String.format("Bot deployment failed (id=%s, version=%s)", id, version));
+                throw new RuntimeException(String.format("Agent deployment failed (id=%s, version=%s)", id, version));
             }
             Thread.sleep(500);
         }
-        throw new RuntimeException("Bot deployment timed out");
+        throw new RuntimeException("Agent deployment timed out");
     }
 
     protected ResourceId createConversation(String agentId, String userId) {
-        Response response = given().post("bots/production/" + agentId + "?userId=" + userId);
+        Response response = given().post("agents/production/" + agentId + "?userId=" + userId);
         String location = response.getHeader("location");
         return extractResourceId(location);
     }
@@ -151,14 +151,14 @@ public abstract class BaseIntegrationIT {
         return given()
                 .contentType(ContentType.TEXT)
                 .body(userInput)
-                .post(String.format("bots/production/%s/%s?returnDetailed=%s&returnCurrentStepOnly=%s",
+                .post(String.format("agents/production/%s/%s?returnDetailed=%s&returnCurrentStepOnly=%s",
                         agentId, conversationId, returnDetailed, returnCurrentStepOnly));
     }
 
     protected Response getConversationLog(String agentId, String conversationId,
             boolean returnDetailed) {
         return given()
-                .get(String.format("bots/production/%s/%s?returnDetailed=%s",
+                .get(String.format("agents/production/%s/%s?returnDetailed=%s",
                         agentId, conversationId, returnDetailed));
     }
 
@@ -179,9 +179,9 @@ public abstract class BaseIntegrationIT {
     // ==================== Cleanup Helpers ====================
 
     /**
-     * Undeploy a bot, ignoring errors (for use in @AfterAll).
+     * Undeploy an agent, ignoring errors (for use in @AfterAll).
      */
-    protected static void undeployBotQuietly(String id, int version) {
+    protected static void undeployAgentQuietly(String id, int version) {
         try {
             given().post(String.format("administration/production/undeploy/%s?version=%s", id, version));
         } catch (Exception ignored) {

@@ -18,24 +18,26 @@ public class WorkflowStoreService implements IWorkflowStoreService {
 
     @Inject
     public WorkflowStoreService(IRestWorkflowStore restWorkflowStore,
-                               IRestDocumentDescriptorStore restDocumentDescriptorStore) {
+            IRestDocumentDescriptorStore restDocumentDescriptorStore) {
         this.restWorkflowStore = restWorkflowStore;
         this.restDocumentDescriptorStore = restDocumentDescriptorStore;
     }
 
     @Override
-    public WorkflowConfiguration getKnowledgePackage(String packageId, Integer packageVersion) throws ServiceException {
+    public WorkflowConfiguration getKnowledgeWorkflow(String workflowId, Integer packageVersion)
+            throws ServiceException {
         try {
-            return restWorkflowStore.readPackage(packageId, packageVersion);
+            return restWorkflowStore.readWorkflow(workflowId, packageVersion);
         } catch (Exception e) {
             throw new ServiceException(e.getLocalizedMessage(), e);
         }
     }
 
     @Override
-    public DocumentDescriptor getPackageDocumentDescriptor(String packageId, Integer packageVersion) throws ServiceException {
+    public DocumentDescriptor getWorkflowDocumentDescriptor(String workflowId, Integer packageVersion)
+            throws ServiceException {
         try {
-            return restDocumentDescriptorStore.readDescriptor(packageId, packageVersion);
+            return restDocumentDescriptorStore.readDescriptor(workflowId, packageVersion);
         } catch (Exception e) {
             throw new ServiceException(e.getLocalizedMessage(), e);
         }

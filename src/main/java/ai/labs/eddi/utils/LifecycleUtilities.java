@@ -1,7 +1,7 @@
 package ai.labs.eddi.utils;
 
 public class LifecycleUtilities {
-    public static String createComponentKey(String packageId, Integer packageVersion, Integer packageIndex) {
-        return packageId + ":" + packageVersion + ":" + packageIndex;
+    public static String createComponentKey(String workflowId, Integer packageVersion, Integer packageIndex) {
+        return workflowId + ":" + packageVersion + ":" + packageIndex;
     }
 }

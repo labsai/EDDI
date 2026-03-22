@@ -24,7 +24,7 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
     private static final Logger LOGGER = Logger.getLogger(PostgresAgentTriggerStore.class);
 
     private static final String CREATE_TABLE = """
-            CREATE TABLE IF NOT EXISTS bot_triggers (
+            CREATE TABLE IF NOT EXISTS agent_triggers (
                 intent VARCHAR(255) PRIMARY KEY,
                 data JSONB NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -37,30 +37,31 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
 
     @Inject
     public PostgresAgentTriggerStore(DataSource dataSource,
-                                   IJsonSerialization jsonSerialization) {
+            IJsonSerialization jsonSerialization) {
         this.dataSource = dataSource;
         this.jsonSerialization = jsonSerialization;
     }
 
     private synchronized void ensureSchema() {
-        if (schemaInitialized) return;
+        if (schemaInitialized)
+            return;
         try (Connection conn = dataSource.getConnection();
-             Statement stmt = conn.createStatement()) {
+                Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
             schemaInitialized = true;
         } catch (SQLException e) {
-            LOGGER.error("Failed to initialize bot_triggers table", e);
+            LOGGER.error("Failed to initialize agent_triggers table", e);
         }
     }
 
     @Override
-    public List<AgentTriggerConfiguration> readAllBotTriggers() throws IResourceStore.ResourceStoreException {
+    public List<AgentTriggerConfiguration> readAllAgentTriggers() throws IResourceStore.ResourceStoreException {
         ensureSchema();
-        String sql = "SELECT data FROM bot_triggers";
+        String sql = "SELECT data FROM agent_triggers";
         List<AgentTriggerConfiguration> triggers = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
+                PreparedStatement ps = conn.prepareStatement(sql);
+                ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
                 triggers.add(jsonSerialization.deserialize(
                         rs.getString("data"), AgentTriggerConfiguration.class));
@@ -72,12 +73,12 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
     }
 
     @Override
-    public AgentTriggerConfiguration readBotTrigger(String intent)
+    public AgentTriggerConfiguration readAgentTrigger(String intent)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         ensureSchema();
-        String sql = "SELECT data FROM bot_triggers WHERE intent = ?";
+        String sql = "SELECT data FROM agent_triggers WHERE intent = ?";
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+                PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, intent);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
@@ -93,12 +94,12 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
     }
 
     @Override
-    public void updateBotTrigger(String intent, AgentTriggerConfiguration agentTriggerConfiguration)
+    public void updateAgentTrigger(String intent, AgentTriggerConfiguration agentTriggerConfiguration)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         ensureSchema();
-        String sql = "UPDATE bot_triggers SET data = ?::jsonb WHERE intent = ?";
+        String sql = "UPDATE agent_triggers SET data = ?::jsonb WHERE intent = ?";
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+                PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, jsonSerialization.serialize(agentTriggerConfiguration));
             ps.setString(2, intent);
             int rows = ps.executeUpdate();
@@ -118,9 +119,9 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
             throws IResourceStore.ResourceAlreadyExistsException, IResourceStore.ResourceStoreException {
         ensureSchema();
         // Check existence
-        String check = "SELECT 1 FROM bot_triggers WHERE intent = ?";
+        String check = "SELECT 1 FROM agent_triggers WHERE intent = ?";
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(check)) {
+                PreparedStatement ps = conn.prepareStatement(check)) {
             ps.setString(1, agentTriggerConfiguration.getIntent());
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
@@ -135,9 +136,9 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
         }
 
-        String sql = "INSERT INTO bot_triggers (intent, data) VALUES (?, ?::jsonb)";
+        String sql = "INSERT INTO agent_triggers (intent, data) VALUES (?, ?::jsonb)";
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+                PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, agentTriggerConfiguration.getIntent());
             ps.setString(2, jsonSerialization.serialize(agentTriggerConfiguration));
             ps.executeUpdate();
@@ -147,11 +148,11 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
     }
 
     @Override
-    public void deleteBotTrigger(String intent) {
+    public void deleteAgentTrigger(String intent) {
         ensureSchema();
-        String sql = "DELETE FROM bot_triggers WHERE intent = ?";
+        String sql = "DELETE FROM agent_triggers WHERE intent = ?";
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+                PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, intent);
             ps.executeUpdate();
         } catch (SQLException e) {

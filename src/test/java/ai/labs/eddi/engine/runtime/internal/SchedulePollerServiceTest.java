@@ -36,13 +36,13 @@ class SchedulePollerServiceTest {
                 scheduleStore,
                 fireExecutor,
                 new SimpleMeterRegistry(),
-                true,                    // enabled
-                Duration.ofMinutes(5),   // leaseTimeout
-                5,                       // maxRetries
-                15,                      // backoffBaseSeconds
-                4,                       // backoffMultiplier
-                "test-instance",         // instanceId
-                "UTC"                    // defaultTimeZone
+                true, // enabled
+                Duration.ofMinutes(5), // leaseTimeout
+                5, // maxRetries
+                15, // backoffBaseSeconds
+                4, // backoffMultiplier
+                "test-instance", // instanceId
+                "UTC" // defaultTimeZone
         );
         poller.init();
     }
@@ -203,7 +203,7 @@ class SchedulePollerServiceTest {
         s.setId(id);
         s.setName("Test Schedule");
         s.setTriggerType(TriggerType.CRON);
-        s.setAgentId("bot-1");
+        s.setAgentId("agent-1");
         s.setCronExpression(cron);
         s.setMessage(message);
         s.setEnvironment("production");
@@ -218,7 +218,7 @@ class SchedulePollerServiceTest {
         s.setId(id);
         s.setName("Test Heartbeat");
         s.setTriggerType(TriggerType.HEARTBEAT);
-        s.setAgentId("bot-1");
+        s.setAgentId("agent-1");
         s.setHeartbeatIntervalSeconds(intervalSec);
         s.setMessage(message);
         s.setEnvironment("production");
@@ -233,7 +233,6 @@ class SchedulePollerServiceTest {
                 "log-1", scheduleId, "fire-1",
                 Instant.now(), Instant.now(), Instant.now(),
                 status, "test-instance", "conv-1",
-                null, 1, 0.0
-        );
+                null, 1, 0.0);
     }
 }

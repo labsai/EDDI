@@ -43,15 +43,15 @@ import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 public class RestAgentEngine implements IRestAgentEngine {
 
     private final IConversationService conversationService;
-    private final int botTimeout;
+    private final int agentTimeout;
 
     private static final Logger LOGGER = Logger.getLogger(RestAgentEngine.class);
 
     @Inject
     public RestAgentEngine(IConversationService conversationService,
-            @ConfigProperty(name = "systemRuntime.botTimeoutInSeconds") int botTimeout) {
+            @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.conversationService = conversationService;
-        this.botTimeout = botTimeout;
+        this.agentTimeout = agentTimeout;
     }
 
     @Override
@@ -67,7 +67,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         try {
             var result = conversationService.startConversation(environment, agentId, userId, context);
             return Response.created(result.conversationUri()).build();
-        } catch (BotNotReadyException e) {
+        } catch (AgentNotReadyException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN).entity(e.getMessage()).build();
         } catch (ResourceStoreException | ResourceNotFoundException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
@@ -91,7 +91,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         try {
             return conversationService.readConversation(environment, agentId, conversationId,
                     returnDetailed, returnCurrentStepOnly, returningFields);
-        } catch (BotMismatchException e) {
+        } catch (AgentMismatchException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (ResourceStoreException e) {
@@ -170,7 +170,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             List<String> returningFields, InputData inputData,
             boolean rerunOnly, AsyncResponse response) {
 
-        response.setTimeout(botTimeout, TimeUnit.SECONDS);
+        response.setTimeout(agentTimeout, TimeUnit.SECONDS);
         response.setTimeoutHandler(
                 (asyncResp) -> asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
 
@@ -178,9 +178,9 @@ public class RestAgentEngine implements IRestAgentEngine {
             conversationService.say(environment, agentId, conversationId,
                     returnDetailed, returnCurrentStepOnly, returningFields,
                     inputData, rerunOnly, response::resume);
-        } catch (BotMismatchException e) {
+        } catch (AgentMismatchException e) {
             response.resume(Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(e.getMessage()).build());
-        } catch (BotNotReadyException e) {
+        } catch (AgentNotReadyException e) {
             response.resume(new NotFoundException(e.getMessage()));
         } catch (ConversationEndedException e) {
             response.resume(Response.status(Response.Status.GONE).entity(e.getMessage()).build());
@@ -209,7 +209,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         try {
             boolean performed = conversationService.undo(environment, agentId, conversationId);
             return performed ? Response.ok().build() : Response.status(Response.Status.CONFLICT).build();
-        } catch (BotMismatchException e) {
+        } catch (AgentMismatchException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Error while processing message!", e);
         } catch (ResourceNotFoundException e) {
@@ -237,7 +237,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         try {
             boolean performed = conversationService.redo(environment, agentId, conversationId);
             return performed ? Response.ok().build() : Response.status(Response.Status.CONFLICT).build();
-        } catch (BotMismatchException e) {
+        } catch (AgentMismatchException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Error while processing message!", e);
         } catch (ResourceNotFoundException e) {

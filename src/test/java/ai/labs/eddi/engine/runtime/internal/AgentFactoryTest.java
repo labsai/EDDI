@@ -39,25 +39,25 @@ class AgentFactoryTest {
 
     @Nested
     @DisplayName("getAgent")
-    class GetBotTests {
+    class GetAgentTests {
 
         @Test
         @DisplayName("should return null when Agent is not deployed")
-        void getBot_notDeployed_returnsNull() {
-            IAgent result = AgentFactory.getAgent(production, "bot1", 1);
+        void getAgent_notDeployed_returnsNull() {
+            IAgent result = AgentFactory.getAgent(production, "agent1", 1);
             assertNull(result);
         }
 
         @Test
         @DisplayName("should return Agent when deployed and READY")
-        void getBot_deployed_returnsBot() throws Exception {
-            // Deploy a bot
-            Agent mockBot = createReadyBot("bot1", 1);
-            when(agentStoreClientLibrary.getAgent("bot1", 1)).thenReturn(mockBot);
+        void getAgent_deployed_returnsAgent() throws Exception {
+            // Deploy an agent
+            Agent mockAgent = createReadyAgent("agent1", 1);
+            when(agentStoreClientLibrary.getAgent("agent1", 1)).thenReturn(mockAgent);
 
-            AgentFactory.deployAgent(production, "bot1", 1, null);
+            AgentFactory.deployAgent(production, "agent1", 1, null);
 
-            IAgent result = AgentFactory.getAgent(production, "bot1", 1);
+            IAgent result = AgentFactory.getAgent(production, "agent1", 1);
             assertNotNull(result);
             assertEquals(READY, result.getDeploymentStatus());
         }
@@ -67,71 +67,71 @@ class AgentFactoryTest {
 
     @Nested
     @DisplayName("deployAgent")
-    class DeployBotTests {
+    class DeployAgentTests {
 
         @Test
         @DisplayName("should deploy Agent and set status to READY")
-        void deployBot_success() throws Exception {
-            Agent mockBot = createReadyBot("bot1", 1);
-            when(agentStoreClientLibrary.getAgent("bot1", 1)).thenReturn(mockBot);
+        void deployAgent_success() throws Exception {
+            Agent mockAgent = createReadyAgent("agent1", 1);
+            when(agentStoreClientLibrary.getAgent("agent1", 1)).thenReturn(mockAgent);
 
             DeploymentProcess process = mock(DeploymentProcess.class);
-            AgentFactory.deployAgent(production, "bot1", 1, process);
+            AgentFactory.deployAgent(production, "agent1", 1, process);
 
             verify(process).completed(READY);
 
-            IAgent result = AgentFactory.getAgent(production, "bot1", 1);
+            IAgent result = AgentFactory.getAgent(production, "agent1", 1);
             assertNotNull(result);
             assertEquals(READY, result.getDeploymentStatus());
         }
 
         @Test
         @DisplayName("should set ERROR status when agentStoreClientLibrary throws")
-        void deployBot_storeError_setsErrorStatus() throws Exception {
-            when(agentStoreClientLibrary.getAgent("bot1", 1))
+        void deployAgent_storeError_setsErrorStatus() throws Exception {
+            when(agentStoreClientLibrary.getAgent("agent1", 1))
                     .thenThrow(new ServiceException("DB connection failed"));
 
             DeploymentProcess process = mock(DeploymentProcess.class);
             // AgentFactory.deployAgent() catches ServiceException inside compute() lambda
             // and sets ERROR status — it does NOT propagate the exception
             assertDoesNotThrow(
-                    () -> AgentFactory.deployAgent(production, "bot1", 1, process));
+                    () -> AgentFactory.deployAgent(production, "agent1", 1, process));
 
             verify(process).completed(ERROR);
 
             // The Agent should be stored with ERROR status (not removed)
-            IAgent errorBot = AgentFactory.getAgent(production, "bot1", 1);
-            assertNotNull(errorBot, "Bot with ERROR status should still be in the environment");
-            assertEquals(ERROR, errorBot.getDeploymentStatus());
+            IAgent errorAgent = AgentFactory.getAgent(production, "agent1", 1);
+            assertNotNull(errorAgent, "Agent with ERROR status should still be in the environment");
+            assertEquals(ERROR, errorAgent.getDeploymentStatus());
         }
 
         @Test
-        @DisplayName("should not redeploy an already READY bot")
-        void deployBot_alreadyReady_skips() throws Exception {
-            Agent mockBot = createReadyBot("bot1", 1);
-            when(agentStoreClientLibrary.getAgent("bot1", 1)).thenReturn(mockBot);
+        @DisplayName("should not redeploy an already READY agent")
+        void deployAgent_alreadyReady_skips() throws Exception {
+            Agent mockAgent = createReadyAgent("agent1", 1);
+            when(agentStoreClientLibrary.getAgent("agent1", 1)).thenReturn(mockAgent);
 
             DeploymentProcess process1 = mock(DeploymentProcess.class);
             DeploymentProcess process2 = mock(DeploymentProcess.class);
 
-            AgentFactory.deployAgent(production, "bot1", 1, process1);
-            AgentFactory.deployAgent(production, "bot1", 1, process2);
+            AgentFactory.deployAgent(production, "agent1", 1, process1);
+            AgentFactory.deployAgent(production, "agent1", 1, process2);
 
-            // First deploy creates bot, second is a no-op
+            // First deploy creates agent, second is a no-op
             verify(process1).completed(READY);
             verify(process2).completed(READY);
-            verify(agentStoreClientLibrary, times(1)).getAgent("bot1", 1);
+            verify(agentStoreClientLibrary, times(1)).getAgent("agent1", 1);
         }
 
         @Test
         @DisplayName("should handle null deploymentProcess gracefully")
-        void deployBot_nullProcess_handledGracefully() throws Exception {
-            Agent mockBot = createReadyBot("bot1", 1);
-            when(agentStoreClientLibrary.getAgent("bot1", 1)).thenReturn(mockBot);
+        void deployAgent_nullProcess_handledGracefully() throws Exception {
+            Agent mockAgent = createReadyAgent("agent1", 1);
+            when(agentStoreClientLibrary.getAgent("agent1", 1)).thenReturn(mockAgent);
 
-            assertDoesNotThrow(() -> AgentFactory.deployAgent(production, "bot1", 1, null));
+            assertDoesNotThrow(() -> AgentFactory.deployAgent(production, "agent1", 1, null));
 
-            IAgent result = AgentFactory.getAgent(production, "bot1", 1);
+            IAgent result = AgentFactory.getAgent(production, "agent1", 1);
             assertNotNull(result);
         }
     }
@@ -140,25 +140,25 @@ class AgentFactoryTest {
 
     @Nested
     @DisplayName("undeployAgent")
-    class UndeployBotTests {
+    class UndeployAgentTests {
 
         @Test
-        @DisplayName("should remove deployed bot")
-        void undeployBot_removes() throws Exception {
-            Agent mockBot = createReadyBot("bot1", 1);
-            when(agentStoreClientLibrary.getAgent("bot1", 1)).thenReturn(mockBot);
+        @DisplayName("should remove deployed agent")
+        void undeployAgent_removes() throws Exception {
+            Agent mockAgent = createReadyAgent("agent1", 1);
+            when(agentStoreClientLibrary.getAgent("agent1", 1)).thenReturn(mockAgent);
 
-            AgentFactory.deployAgent(production, "bot1", 1, null);
-            assertNotNull(AgentFactory.getAgent(production, "bot1", 1));
+            AgentFactory.deployAgent(production, "agent1", 1, null);
+            assertNotNull(AgentFactory.getAgent(production, "agent1", 1));
 
-            AgentFactory.undeployAgent(production, "bot1", 1);
-            assertNull(AgentFactory.getAgent(production, "bot1", 1));
+            AgentFactory.undeployAgent(production, "agent1", 1);
+            assertNull(AgentFactory.getAgent(production, "agent1", 1));
         }
 
         @Test
         @DisplayName("should handle undeploy of non-existent Agent gracefully")
-        void undeployBot_nonExistent_noError() {
-            assertDoesNotThrow(() -> AgentFactory.undeployAgent(production, "nobot", 1));
+        void undeployAgent_nonExistent_noError() {
+            assertDoesNotThrow(() -> AgentFactory.undeployAgent(production, "noagent", 1));
         }
     }
 
@@ -167,40 +167,40 @@ class AgentFactoryTest {
 
     @Nested
     @DisplayName("getLatestAgent/getLatestReadyAgent")
-    class LatestBotTests {
+    class LatestAgentTests {
 
         @Test
-        @DisplayName("should return null when no bots deployed")
-        void getLatestBot_noBots_returnsNull() {
-            assertNull(AgentFactory.getLatestAgent(production, "bot1"));
+        @DisplayName("should return null when no agents deployed")
+        void getLatestAgent_noAgents_returnsNull() {
+            assertNull(AgentFactory.getLatestAgent(production, "agent1"));
         }
 
         @Test
-        @DisplayName("should return latest version bot")
-        void getLatestBot_multipleVersions_returnsLatest() throws Exception {
-            Agent bot1v1 = createReadyBot("bot1", 1);
-            Agent bot1v2 = createReadyBot("bot1", 2);
-            when(agentStoreClientLibrary.getAgent("bot1", 1)).thenReturn(bot1v1);
-            when(agentStoreClientLibrary.getAgent("bot1", 2)).thenReturn(bot1v2);
+        @DisplayName("should return latest version agent")
+        void getLatestAgent_multipleVersions_returnsLatest() throws Exception {
+            Agent agent1v1 = createReadyAgent("agent1", 1);
+            Agent agent1v2 = createReadyAgent("agent1", 2);
+            when(agentStoreClientLibrary.getAgent("agent1", 1)).thenReturn(agent1v1);
+            when(agentStoreClientLibrary.getAgent("agent1", 2)).thenReturn(agent1v2);
 
-            AgentFactory.deployAgent(production, "bot1", 1, null);
-            AgentFactory.deployAgent(production, "bot1", 2, null);
+            AgentFactory.deployAgent(production, "agent1", 1, null);
+            AgentFactory.deployAgent(production, "agent1", 2, null);
 
-            IAgent latest = AgentFactory.getLatestAgent(production, "bot1");
+            IAgent latest = AgentFactory.getLatestAgent(production, "agent1");
             assertNotNull(latest);
             assertEquals(2, latest.getAgentVersion());
         }
 
         @Test
-        @DisplayName("getLatestReadyAgent should skip non-READY bots")
-        void getLatestReadyBot_skipsNonReady() throws Exception {
-            Agent bot1v1 = createReadyBot("bot1", 1);
-            when(agentStoreClientLibrary.getAgent("bot1", 1)).thenReturn(bot1v1);
-            AgentFactory.deployAgent(production, "bot1", 1, null);
+        @DisplayName("getLatestReadyAgent should skip non-READY agents")
+        void getLatestReadyAgent_skipsNonReady() throws Exception {
+            Agent agent1v1 = createReadyAgent("agent1", 1);
+            when(agentStoreClientLibrary.getAgent("agent1", 1)).thenReturn(agent1v1);
+            AgentFactory.deployAgent(production, "agent1", 1, null);
 
-            IAgent readyBot = AgentFactory.getLatestReadyAgent(production, "bot1");
-            assertNotNull(readyBot);
-            assertEquals(READY, readyBot.getDeploymentStatus());
+            IAgent readyAgent = AgentFactory.getLatestReadyAgent(production, "agent1");
+            assertNotNull(readyAgent);
+            assertEquals(READY, readyAgent.getDeploymentStatus());
         }
     }
 
@@ -208,25 +208,25 @@ class AgentFactoryTest {
 
     @Nested
     @DisplayName("getAllLatestAgents")
-    class GetAllBotsTests {
+    class GetAllAgentsTests {
 
         @Test
-        @DisplayName("should return empty list when no bots deployed")
-        void getAllLatestBots_empty() {
-            var bots = AgentFactory.getAllLatestAgents(production);
-            assertTrue(bots.isEmpty());
+        @DisplayName("should return empty list when no agents deployed")
+        void getAllLatestAgents_empty() {
+            var agents = AgentFactory.getAllLatestAgents(production);
+            assertTrue(agents.isEmpty());
         }
 
         @Test
         @DisplayName("should return one Agent per unique agentId")
-        void getAllLatestBots_uniquePerBotId() throws Exception {
-            Agent botA = createReadyBot("botA", 1);
-            Agent botB = createReadyBot("botB", 1);
-            when(agentStoreClientLibrary.getAgent("botA", 1)).thenReturn(botA);
-            when(agentStoreClientLibrary.getAgent("botB", 1)).thenReturn(botB);
+        void getAllLatestAgents_uniquePerAgentId() throws Exception {
+            Agent agentA = createReadyAgent("agentA", 1);
+            Agent agentB = createReadyAgent("agentB", 1);
+            when(agentStoreClientLibrary.getAgent("agentA", 1)).thenReturn(agentA);
+            when(agentStoreClientLibrary.getAgent("agentB", 1)).thenReturn(agentB);
 
-            AgentFactory.deployAgent(production, "botA", 1, null);
-            AgentFactory.deployAgent(production, "botB", 1, null);
+            AgentFactory.deployAgent(production, "agentA", 1, null);
+            AgentFactory.deployAgent(production, "agentB", 1, null);
 
             var all = AgentFactory.getAllLatestAgents(production);
             assertEquals(2, all.size());
@@ -240,29 +240,29 @@ class AgentFactoryTest {
     class EnvironmentTests {
 
         @Test
-        @DisplayName("bots deployed in different environments should not interfere")
+        @DisplayName("agents deployed in different environments should not interfere")
         void environments_isolated() throws Exception {
-            Agent unrestrictedBot = createReadyBot("bot1", 1);
-            Agent restrictedBot = createReadyBot("bot1", 1);
-            when(agentStoreClientLibrary.getAgent("bot1", 1))
-                    .thenReturn(unrestrictedBot)
-                    .thenReturn(restrictedBot);
+            Agent unrestrictedAgent = createReadyAgent("agent1", 1);
+            Agent restrictedAgent = createReadyAgent("agent1", 1);
+            when(agentStoreClientLibrary.getAgent("agent1", 1))
+                    .thenReturn(unrestrictedAgent)
+                    .thenReturn(restrictedAgent);
 
-            AgentFactory.deployAgent(production, "bot1", 1, null);
-            AgentFactory.deployAgent(Deployment.Environment.production, "bot1", 1, null);
+            AgentFactory.deployAgent(production, "agent1", 1, null);
+            AgentFactory.deployAgent(Deployment.Environment.production, "agent1", 1, null);
 
-            assertNotNull(AgentFactory.getAgent(production, "bot1", 1));
-            assertNotNull(AgentFactory.getAgent(Deployment.Environment.production, "bot1", 1));
+            assertNotNull(AgentFactory.getAgent(production, "agent1", 1));
+            assertNotNull(AgentFactory.getAgent(Deployment.Environment.production, "agent1", 1));
 
-            AgentFactory.undeployAgent(production, "bot1", 1);
-            assertNull(AgentFactory.getAgent(production, "bot1", 1));
-            assertNotNull(AgentFactory.getAgent(Deployment.Environment.production, "bot1", 1));
+            AgentFactory.undeployAgent(production, "agent1", 1);
+            assertNull(AgentFactory.getAgent(production, "agent1", 1));
+            assertNotNull(AgentFactory.getAgent(Deployment.Environment.production, "agent1", 1));
         }
     }
 
     // ==================== Helper ====================
 
-    private Agent createReadyBot(String agentId, int version) {
+    private Agent createReadyAgent(String agentId, int version) {
         return new Agent(agentId, version);
     }
 }

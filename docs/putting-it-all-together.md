@@ -2,11 +2,11 @@
 
 **Version: ≥5.5.x**
 
-This guide shows how all of EDDI's components work together to create a complete, functional bot. We'll build a real-world example step-by-step, explaining how each piece connects.
+This guide shows how all of EDDI's components work together to create a complete, functional agent. We'll build a real-world example step-by-step, explaining how each piece connects.
 
 ## The Big Picture
 
-EDDI bots are composed of interconnected components that flow through the Lifecycle Pipeline:
+EDDI agents are composed of interconnected components that flow through the Lifecycle Pipeline:
 
 ```
 Dictionary → Parser → Behavior Rules → Actions → HTTP Calls / LLM → Output → User
@@ -15,11 +15,12 @@ Dictionary → Parser → Behavior Rules → Actions → HTTP Calls / LLM → Ou
   words     meaning    to do        execution    or call AI   response
 ```
 
-Each component is a **separate configuration** that's **combined into packages**, which are **assembled into bots**.
+Each component is a **separate configuration** that's **combined into packages**, which are **assembled into agents**.
 
-## Real-World Example: Hotel Booking Bot
+## Real-World Example: Hotel Booking Agent
 
-Let's build a bot that helps users book hotel rooms. It will:
+Let's build a agent that helps users book hotel rooms. It will:
+
 1. Greet users
 2. Ask for city and dates
 3. Check availability via API
@@ -29,18 +30,19 @@ Let's build a bot that helps users book hotel rooms. It will:
 ### Component Overview
 
 We'll need:
+
 - **Dictionary**: Define hotel-related vocabulary
 - **Parser**: Extract entities (cities, dates)
 - **Behavior Rules**: Conversation flow logic
 - **Properties**: Store user inputs
 - **HTTP Calls**: Check availability and create bookings
 - **Output Templates**: Display results dynamically
-- **Package**: Combine everything
-- **Bot**: Reference the package
+- **Workflow**: Combine everything
+- **Agent**: Reference the package
 
 ## Step 1: Create the Dictionary
 
-**Purpose**: Teach the bot hotel-related language
+**Purpose**: Teach the agent hotel-related language
 
 ```bash
 curl -X POST http://localhost:7070/regulardictionarystore/regulardictionaries \
@@ -170,6 +172,7 @@ curl -X POST http://localhost:7070/behaviorstore/behaviorsets \
 **Returns**: `eddi://ai.labs.behavior/behaviorstore/behaviorsets/BEHAVIOR_ID?version=1`
 
 **How it connects**:
+
 - Welcome rule triggers on first message → shows welcome output
 - Check Availability rule triggers when user asks about availability AND city is in context → calls API
 - Book Room rule triggers when user wants to book AND room is selected → creates booking
@@ -267,12 +270,13 @@ curl -X POST http://localhost:7070/httpcallsstore/httpcalls \
 **Returns**: `eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/HTTP_ID?version=1`
 
 **How it connects**:
+
 - `check-availability` call is triggered by behavior rule → fetches available rooms → creates quick reply buttons
 - `create-booking` call is triggered after user selects room → creates booking → stores booking ID and price
 
 ## Step 5: Create Output Templates
 
-**Purpose**: Define bot responses with dynamic data
+**Purpose**: Define agent responses with dynamic data
 
 ```bash
 curl -X POST http://localhost:7070/outputstore/outputsets \
@@ -286,7 +290,7 @@ curl -X POST http://localhost:7070/outputstore/outputsets \
             "valueAlternatives": [
               {
                 "type": "text",
-                "text": "Welcome to Hotel Booking Bot! I can help you find and book hotel rooms. Which city are you interested in?"
+                "text": "Welcome to Hotel Booking Agent! I can help you find and book hotel rooms. Which city are you interested in?"
               }
             ]
           }
@@ -325,11 +329,12 @@ curl -X POST http://localhost:7070/outputstore/outputsets \
 **Returns**: `eddi://ai.labs.output/outputstore/outputsets/OUTPUT_ID?version=1`
 
 **How it connects**:
+
 - `welcome` action → shows greeting
 - `httpcall(check-availability)` action → shows room count dynamically from API response
 - `booking_confirmed` action → shows booking details from stored properties
 
-## Step 6: Create Package
+## Step 6: Create Workflow
 
 **Purpose**: Bundle all components together
 
@@ -378,60 +383,65 @@ curl -X POST http://localhost:7070/packagestore/packages \
   }'
 ```
 
-**Returns**: `eddi://ai.labs.package/packagestore/packages/PACKAGE_ID?version=1`
+**Returns**: `eddi://ai.labs.package/packagestore/packages/WORKFLOW_ID?version=1`
 
-**How it connects**: Package defines the order of lifecycle tasks and loads all configurations
+**How it connects**: Workflow defines the order of lifecycle tasks and loads all configurations
 
-## Step 7: Create Bot
+## Step 7: Create Agent
 
-**Purpose**: Create the top-level bot entity
+**Purpose**: Create the top-level agent entity
 
 ```bash
-curl -X POST http://localhost:7070/botstore/bots \
+curl -X POST http://localhost:7070/agentstore/agents \
   -H "Content-Type: application/json" \
   -d '{
     "packages": [
-      "eddi://ai.labs.package/packagestore/packages/PACKAGE_ID?version=1"
+      "eddi://ai.labs.package/packagestore/packages/WORKFLOW_ID?version=1"
     ]
   }'
 ```
 
-**Returns**: Bot ID (e.g., `BOT_ID`)
+**Returns**: Agent ID (e.g., `AGENT_ID`)
 
-**How it connects**: Bot references the package, which contains all the components
+**How it connects**: Agent references the package, which contains all the components
 
-## Step 8: Deploy Bot
+## Step 8: Deploy Agent
 
 ```bash
-curl -X POST "http://localhost:7070/administration/unrestricted/deploy/BOT_ID?version=1&autoDeploy=true"
+curl -X POST "http://localhost:7070/administration/unrestricted/deploy/AGENT_ID?version=1&autoDeploy=true"
 ```
 
-**Result**: Bot is now active and ready to handle conversations!
+**Result**: Agent is now active and ready to handle conversations!
 
-## Step 9: Test the Bot
+## Step 9: Test the Agent
 
 ### Initial Conversation
 
 ```bash
-curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID" \
+curl -X POST "http://localhost:7070/agents/unrestricted/AGENT_ID" \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
 
 **Response**:
+
 ```json
 {
   "conversationId": "CONV_ID",
-  "conversationOutputs": [{
-    "output": ["Welcome to Hotel Booking Bot! I can help you find and book hotel rooms. Which city are you interested in?"]
-  }]
+  "conversationOutputs": [
+    {
+      "output": [
+        "Welcome to Hotel Booking Agent! I can help you find and book hotel rooms. Which city are you interested in?"
+      ]
+    }
+  ]
 }
 ```
 
 ### Provide City and Check Availability
 
 ```bash
-curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/CONV_ID" \
+curl -X POST "http://localhost:7070/agents/unrestricted/AGENT_ID/CONV_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "input": "check availability in Paris",
@@ -444,6 +454,7 @@ curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/CONV_ID" \
 ```
 
 **What happens internally**:
+
 1. **Parser**: "check availability in Paris" → `["intent(check_availability)", "entity(hotel)"]`
 2. **Behavior Rules**: Matches "Check Availability" rule (has intent + city in context)
 3. **Actions**: Triggers `httpcall(check-availability)`
@@ -453,23 +464,28 @@ curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/CONV_ID" \
 7. **Memory**: Stores API response for later use
 
 **Response**:
+
 ```json
 {
-  "conversationOutputs": [{
-    "output": ["Great! I found 5 available rooms in Paris. Here are your options:"],
-    "quickReplies": [
-      {"value": "Deluxe Suite", "expressions": "property(room_id(101))"},
-      {"value": "Standard Room", "expressions": "property(room_id(102))"},
-      {"value": "Executive Suite", "expressions": "property(room_id(103))"}
-    ]
-  }]
+  "conversationOutputs": [
+    {
+      "output": [
+        "Great! I found 5 available rooms in Paris. Here are your options:"
+      ],
+      "quickReplies": [
+        { "value": "Deluxe Suite", "expressions": "property(room_id(101))" },
+        { "value": "Standard Room", "expressions": "property(room_id(102))" },
+        { "value": "Executive Suite", "expressions": "property(room_id(103))" }
+      ]
+    }
+  ]
 }
 ```
 
 ### Book a Room
 
 ```bash
-curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/CONV_ID" \
+curl -X POST "http://localhost:7070/agents/unrestricted/AGENT_ID/CONV_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "input": "book Deluxe Suite",
@@ -481,6 +497,7 @@ curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/CONV_ID" \
 ```
 
 **What happens internally**:
+
 1. **Parser**: "book Deluxe Suite" → `["intent(book)", "entity(room)"]`
 2. **Behavior Rules**: Matches "Book Room" rule (has intent + selectedRoom)
 3. **Actions**: Triggers `httpcall(create-booking)` and `booking_confirmed`
@@ -489,11 +506,16 @@ curl -X POST "http://localhost:7070/bots/unrestricted/BOT_ID/CONV_ID" \
 6. **Output**: Shows confirmation with dynamic booking details
 
 **Response**:
+
 ```json
 {
-  "conversationOutputs": [{
-    "output": ["🎉 Booking confirmed! Your booking ID is BK-12345. Total price: $450. We've sent a confirmation email. Have a great stay!"]
-  }]
+  "conversationOutputs": [
+    {
+      "output": [
+        "🎉 Booking confirmed! Your booking ID is BK-12345. Total price: $450. We've sent a confirmation email. Have a great stay!"
+      ]
+    }
+  ]
 }
 ```
 
@@ -542,33 +564,44 @@ Response to User with output + quick replies
 ## Key Takeaways
 
 ### 1. Components are Modular
+
 Each component (dictionary, behavior rules, HTTP calls, outputs) is:
+
 - Created independently via API
 - Versioned separately
-- Reusable across multiple bots
+- Reusable across multiple agents
 - Testable in isolation
 
-### 2. Packages Define Execution Order
+### 2. Workflows Define Execution Order
+
 The order in the package matters:
+
 ```
 Parser → Behavior Rules → Properties → HTTP Calls → Output → Templating
 ```
+
 This is the lifecycle pipeline order.
 
 ### 3. Behavior Rules are the Orchestrator
+
 Behavior rules decide:
+
 - WHEN to call APIs (`httpcall(check-availability)`)
 - WHEN to show outputs (`welcome`, `booking_confirmed`)
 - WHICH actions to trigger based on conditions
 
 ### 4. Memory is the Connector
+
 Everything stores data in and reads from conversation memory:
+
 - HTTP Calls store responses: `memory.current.httpCalls.availableRooms`
 - Properties store extracted data: `context.city`
 - Outputs read data: `[[${context.bookingId}]]`
 
 ### 5. Context Bridges External Systems
+
 Your application passes context to inject real-world data:
+
 - User IDs
 - Session tokens
 - Business state
@@ -577,6 +610,7 @@ Your application passes context to inject real-world data:
 ## Common Patterns
 
 ### Pattern 1: Progressive Data Collection
+
 ```
 Step 1: Ask for city → Store in property
 Step 2: Ask for dates → Store in property
@@ -584,6 +618,7 @@ Step 3: When all data present → Trigger API call
 ```
 
 ### Pattern 2: API-Then-LLM
+
 ```
 Step 1: Fetch data via HTTP Call
 Step 2: Pass data to LLM with context
@@ -591,6 +626,7 @@ Step 3: LLM formats response naturally
 ```
 
 ### Pattern 3: Multi-Step Confirmation
+
 ```
 Step 1: Show options (quick replies)
 Step 2: User selects → Store selection
@@ -603,7 +639,7 @@ Step 3: Confirm selection → Trigger action
 - **Add Error Handling**: Create behavior rules for failed API calls
 - **Add Validation**: Check date formats, availability before booking
 - **Add Conversation Memory**: Store booking history across conversations
-- **Export for Reuse**: Export the bot and share with team
+- **Export for Reuse**: Export the agent and share with team
 
 ## Related Documentation
 
@@ -613,4 +649,3 @@ Step 3: Confirm selection → Trigger action
 - [HTTP Calls](httpcalls.md) - API integration details
 - [Output Templating](output-templating.md) - Dynamic responses
 - [Conversation Memory](conversation-memory.md) - State management
-

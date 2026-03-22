@@ -11,7 +11,7 @@ import java.util.concurrent.Callable;
 /**
  * Static utility for retry logic with exponential backoff.
  * <p>
- * Used by both {@link LegacyChatExecutor} and {@link AgentOrchestrator}.
+ * Used by agenth {@link LegacyChatExecutor} and {@link AgentOrchestrator}.
  */
 class AgentExecutionHelper {
     private static final Logger LOGGER = Logger.getLogger(AgentExecutionHelper.class);

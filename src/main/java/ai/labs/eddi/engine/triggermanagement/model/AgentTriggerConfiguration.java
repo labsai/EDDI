@@ -1,6 +1,5 @@
 package ai.labs.eddi.engine.triggermanagement.model;
 
-
 import ai.labs.eddi.engine.model.AgentDeployment;
 
 import java.util.LinkedList;
@@ -18,11 +17,11 @@ public class AgentTriggerConfiguration {
         this.intent = intent;
     }
 
-    public List<AgentDeployment> getBotDeployments() {
+    public List<AgentDeployment> getAgentDeployments() {
         return agentDeployments;
     }
 
-    public void setBotDeployments(List<AgentDeployment> agentDeployments) {
+    public void setAgentDeployments(List<AgentDeployment> agentDeployments) {
         this.agentDeployments = agentDeployments;
     }
 }

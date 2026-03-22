@@ -44,10 +44,10 @@ public class RestOutputActions implements IRestOutputActions {
     }
 
     @Override
-    public List<String> readOutputActions(String packageId, Integer packageVersion, String filter, Integer limit) {
+    public List<String> readOutputActions(String workflowId, Integer packageVersion, String filter, Integer limit) {
         List<String> retOutputKeys = new LinkedList<>();
         try {
-            WorkflowConfiguration workflowConfig = workflowStore.read(packageId, packageVersion);
+            WorkflowConfiguration workflowConfig = workflowStore.read(workflowId, packageVersion);
             List<IResourceStore.IResourceId> resourceIds;
             resourceIds = readBehaviorRuleSetResourceIds(workflowConfig);
             for (IResourceStore.IResourceId resourceId : resourceIds) {

@@ -41,15 +41,15 @@ class RestLogAdminTest {
     void shouldReturnRecentLogsFromBuffer() {
         LogEntry entry = new LogEntry(
                 System.currentTimeMillis(), "INFO", "test.Logger", "test message",
-                "production", "bot-1", 1, "conv-1", "user-1", "test-host-1234");
-        when(boundedLogStore.getEntries("bot-1", null, null, 200))
+                "production", "agent-1", 1, "conv-1", "user-1", "test-host-1234");
+        when(boundedLogStore.getEntries("agent-1", null, null, 200))
                 .thenReturn(List.of(entry));
 
-        List<LogEntry> result = admin.getRecentLogs("bot-1", null, null, 200);
+        List<LogEntry> result = admin.getRecentLogs("agent-1", null, null, 200);
 
         assertEquals(1, result.size());
         assertEquals("test message", result.get(0).message());
-        verify(boundedLogStore).getEntries("bot-1", null, null, 200);
+        verify(boundedLogStore).getEntries("agent-1", null, null, 200);
     }
 
     @Test
@@ -70,18 +70,18 @@ class RestLogAdminTest {
         dbLog.put("message", "historic error");
         dbLog.put("level", "ERROR");
         when(databaseLogs.getLogs(
-                Deployment.Environment.production, "bot-1", null,
+                Deployment.Environment.production, "agent-1", null,
                 null, null, null, 0, 50))
                 .thenReturn(List.of(dbLog));
 
         List<DatabaseLog> result = admin.getHistoryLogs(
-                Deployment.Environment.production, "bot-1", null,
+                Deployment.Environment.production, "agent-1", null,
                 null, null, null, 0, 50);
 
         assertEquals(1, result.size());
         assertEquals("historic error", result.get(0).get("message"));
         verify(databaseLogs).getLogs(
-                Deployment.Environment.production, "bot-1", null,
+                Deployment.Environment.production, "agent-1", null,
                 null, null, null, 0, 50);
     }
 

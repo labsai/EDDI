@@ -109,15 +109,15 @@ class PathNavigatorTest {
     @Test
     void shouldConcatenateStringWithNumber() {
         Map<String, Object> map = new HashMap<>();
-        map.put("name", "Bot");
-        assertEquals("Bot1", PathNavigator.getValue("name+1", map));
+        map.put("name", "Agent");
+        assertEquals("Agent1", PathNavigator.getValue("name+1", map));
     }
 
     // === getValue: Real-world patterns from EDDI configs ===
 
     @Test
     void shouldHandleEDDIResponseHeaderLocation() {
-        // Bot-father pattern: "EDDIResponseHeader.Location"
+        // Agent-father pattern: "EDDIResponseHeader.Location"
         var map = Map.of("EDDIResponseHeader", Map.of("Location", "/resource/123"));
         assertEquals("/resource/123", PathNavigator.getValue("EDDIResponseHeader.Location", map));
     }
@@ -160,10 +160,10 @@ class PathNavigatorTest {
     }
 
     @Test
-    void shouldHandlePropertiesBotLocation() {
-        // Bot-father behavior valuePath: "properties.botLocation"
-        var map = Map.of("properties", Map.of("botLocation", "cloud"));
-        assertEquals("cloud", PathNavigator.getValue("properties.botLocation", map));
+    void shouldHandlePropertiesAgentLocation() {
+        // Agent-father behavior valuePath: "properties.agentLocation"
+        var map = Map.of("properties", Map.of("agentLocation", "cloud"));
+        assertEquals("cloud", PathNavigator.getValue("properties.agentLocation", map));
     }
 
     // === setValue ===

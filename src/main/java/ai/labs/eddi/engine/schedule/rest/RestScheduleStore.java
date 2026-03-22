@@ -55,7 +55,7 @@ public class RestScheduleStore implements IRestScheduleStore {
         try {
             List<ScheduleConfiguration> schedules;
             if (agentId != null && !agentId.isBlank()) {
-                schedules = scheduleStore.readSchedulesByBotId(agentId);
+                schedules = scheduleStore.readSchedulesByAgentId(agentId);
             } else {
                 schedules = scheduleStore.readAllSchedules(500); // Fix #12
             }
@@ -347,7 +347,7 @@ public class RestScheduleStore implements IRestScheduleStore {
                 throw new IllegalArgumentException("Either cronExpression or oneTimeAt is required for CRON triggers");
             }
             if (hasCron && hasOneTime) {
-                throw new IllegalArgumentException("Cannot set both cronExpression and oneTimeAt");
+                throw new IllegalArgumentException("Cannot set agenth cronExpression and oneTimeAt");
             }
 
             // Validate cron
@@ -386,7 +386,8 @@ public class RestScheduleStore implements IRestScheduleStore {
     }
 
     private static String describeHeartbeat(long seconds) {
-        if (seconds < 60) return "Every " + seconds + " seconds";
+        if (seconds < 60)
+            return "Every " + seconds + " seconds";
         if (seconds < 3600) {
             long min = seconds / 60;
             return min == 1 ? "Every minute" : "Every " + min + " minutes";

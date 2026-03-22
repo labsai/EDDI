@@ -20,16 +20,16 @@ EDDI includes a built-in secrets vault for managing sensitive values like API ke
 
 ### Core Components
 
-| Component | Package | Purpose |
-|---|---|---|
-| `SecretReference` | `secrets.model` | Value object: `namespace/scope/key` URI parsing |
-| `EnvelopeCrypto` | `secrets.crypto` | AES-256-GCM encryption with envelope key wrapping |
-| `ISecretProvider` | `secrets` | Interface for reading/writing encrypted secrets |
-| `DatabaseSecretProvider` | `secrets` | MongoDB/PostgreSQL implementation of `ISecretProvider` |
-| `SecretResolver` | `secrets` | Resolves `${eddivault:path}` references to plaintext at runtime |
-| `IRestSecretStore` / `RestSecretStore` | `secrets.rest` | JAX-RS endpoints for secret CRUD |
-| `SecretScrubber` | `secrets.sanitize` | Removes `${eddivault:...}` references from export payloads |
-| `SecretRedactionFilter` | `secrets.sanitize` | Regex-based log redaction for API keys, tokens, vault refs |
+| Component                              | Workflow           | Purpose                                                         |
+| -------------------------------------- | ------------------ | --------------------------------------------------------------- |
+| `SecretReference`                      | `secrets.model`    | Value object: `namespace/scope/key` URI parsing                 |
+| `EnvelopeCrypto`                       | `secrets.crypto`   | AES-256-GCM encryption with envelope key wrapping               |
+| `ISecretProvider`                      | `secrets`          | Interface for reading/writing encrypted secrets                 |
+| `DatabaseSecretProvider`               | `secrets`          | MongoDB/PostgreSQL implementation of `ISecretProvider`          |
+| `SecretResolver`                       | `secrets`          | Resolves `${eddivault:path}` references to plaintext at runtime |
+| `IRestSecretStore` / `RestSecretStore` | `secrets.rest`     | JAX-RS endpoints for secret CRUD                                |
+| `SecretScrubber`                       | `secrets.sanitize` | Removes `${eddivault:...}` references from export payloads      |
+| `SecretRedactionFilter`                | `secrets.sanitize` | Regex-based log redaction for API keys, tokens, vault refs      |
 
 ## Secret References
 
@@ -40,15 +40,15 @@ ${eddivault:namespace/scope/key}
 ```
 
 - **namespace** — tenant or organizational delimiter (e.g., `default`)
-- **scope** — bot or feature scope (e.g., `bot-123`)
+- **scope** — agent or feature scope (e.g., `agent-123`)
 - **key** — the secret name (e.g., `openai-api-key`)
 
 ### Where Vault References Work
 
-| Configuration Type | Fields Resolved |
-|---|---|
-| **HTTP Calls** (`httpcalls.json`) | URL, headers, body, query parameters |
-| **LangChain** (`langchain.json`) | `apiKey` and other model configuration |
+| Configuration Type                    | Fields Resolved                        |
+| ------------------------------------- | -------------------------------------- |
+| **HTTP Calls** (`httpcalls.json`)     | URL, headers, body, query parameters   |
+| **LangChain** (`langchain.json`)      | `apiKey` and other model configuration |
 | **Property Setter** (`property.json`) | Values with `scope: secret` auto-vault |
 
 ### Resolution Behavior
@@ -107,9 +107,9 @@ eddi.vault.cache-max-size=1000
 
 > **⚠️ Important:** The master key must be set via environment variable or secure configuration. If the master key is lost, all encrypted secrets become unrecoverable.
 
-## Secret Input (Bot Conversations)
+## Secret Input (Agent Conversations)
 
-Bots can request secret input from users (e.g., API keys during setup). The flow works end-to-end across backend, chat UI, and Manager.
+Agents can request secret input from users (e.g., API keys during setup). The flow works end-to-end across backend, chat UI, and Manager.
 
 ### Backend: PropertySetterTask + Conversation Scrubbing
 
@@ -141,26 +141,29 @@ To signal the chat UI to show a password field, use the `inputField` output type
 
 ### Chat UI: Password Fields + Secret Mode
 
-Both **eddi-chat-ui** and the **EDDI-Manager chat panel** support secret input:
+Agenth **eddi-chat-ui** and the **EDDI-Manager chat panel** support secret input:
 
 **Backend-driven password fields:**
+
 - When the backend response contains an `inputField` output item with `subType: "password"`, the chat UI replaces the normal text input with a masked `<input type="password">` field
 - An **eye toggle** button allows the user to reveal/hide the value
 - After submission, the input reverts to the normal text field
 
 **Proactive secret mode (client-initiated):**
+
 - A 🔒/🔓 toggle button on the chat input lets users mark any input as secret
 - When toggled ON, the input becomes a password field with eye toggle
 - The `secretInput` context flag is sent to the backend, triggering output scrubbing in `Conversation.java`
 
 **Security measures:**
+
 - Chat UI state for secret values is **ephemeral** — cleared on submit or dialog close
 - No secret values are stored in browser `localStorage` or `sessionStorage`
 - `autoComplete="new-password"` prevents browser caching
 
-### Bot Father Example
+### Agent Father Example
 
-The default Bot Father bot demonstrates vault integration during API key setup:
+The default Agent Father agent demonstrates vault integration during API key setup:
 
 ```json
 // Output configuration — prompts with a password field
@@ -186,34 +189,36 @@ The `scope: secret` instruction causes `PropertySetterTask` to store the API key
 
 All endpoints are under the base path `/secretstore/secrets`.
 
-| Method | Path | Description |
-|---|---|---|
-| `PUT` | `/{tenantId}/{botId}/{keyName}` | Store a secret (body = plaintext value) |
-| `DELETE` | `/{tenantId}/{botId}/{keyName}` | Delete a secret |
-| `GET` | `/{tenantId}/{botId}/{keyName}` | Get secret **metadata only** (never returns plaintext) |
-| `GET` | `/{tenantId}/{botId}` | List all secrets for a tenant+bot (metadata only) |
-| `GET` | `/health` | Vault health check (provider status) |
+| Method   | Path                              | Description                                            |
+| -------- | --------------------------------- | ------------------------------------------------------ |
+| `PUT`    | `/{tenantId}/{agentId}/{keyName}` | Store a secret (body = plaintext value)                |
+| `DELETE` | `/{tenantId}/{agentId}/{keyName}` | Delete a secret                                        |
+| `GET`    | `/{tenantId}/{agentId}/{keyName}` | Get secret **metadata only** (never returns plaintext) |
+| `GET`    | `/{tenantId}/{agentId}`           | List all secrets for a tenant+agent (metadata only)    |
+| `GET`    | `/health`                         | Vault health check (provider status)                   |
 
 > **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`, `checksum`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API.
 
 ### Response Examples
 
-**`PUT /{tenantId}/{botId}/{keyName}`** — returns the vault reference:
+**`PUT /{tenantId}/{agentId}/{keyName}`** — returns the vault reference:
+
 ```json
 {
-  "reference": "${eddivault:default.bot1.apiKey}",
+  "reference": "${eddivault:default.agent1.apiKey}",
   "tenantId": "default",
-  "botId": "bot1",
+  "agentId": "agent1",
   "keyName": "apiKey"
 }
 ```
 
-**`GET /{tenantId}/{botId}`** — returns metadata list:
+**`GET /{tenantId}/{agentId}`** — returns metadata list:
+
 ```json
 [
   {
     "tenantId": "default",
-    "botId": "bot1",
+    "agentId": "agent1",
     "keyName": "apiKey",
     "createdAt": "2026-03-15T10:30:00Z",
     "lastAccessedAt": "2026-03-16T14:00:00Z",
@@ -223,6 +228,7 @@ All endpoints are under the base path `/secretstore/secrets`.
 ```
 
 **`GET /health`** — returns vault provider status:
+
 ```json
 {
   "status": "UP",
@@ -233,7 +239,7 @@ All endpoints are under the base path `/secretstore/secrets`.
 
 ### Input Validation
 
-All path parameters (`tenantId`, `botId`, `keyName`) are validated against `[a-zA-Z0-9._-]{1,128}` to prevent path traversal attacks.
+All path parameters (`tenantId`, `agentId`, `keyName`) are validated against `[a-zA-Z0-9._-]{1,128}` to prevent path traversal attacks.
 
 ## Manager — Secrets Admin Page
 
@@ -241,7 +247,7 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 
 ### Features
 
-- **Namespace filtering** — select tenant ID and bot ID to scope the view
+- **Namespace filtering** — select tenant ID and agent ID to scope the view
 - **Secrets table** — displays `keyName`, `createdAt`, `lastAccessedAt`, and `checksum` (truncated)
 - **Add Secret** — dialog with masked password input (eye toggle, `autoComplete="new-password"`)
 - **Delete Secret** — confirmation dialog before permanent deletion
@@ -260,17 +266,17 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 
 `SecretRedactionFilter` applies pre-compiled regex patterns to all log messages:
 
-| Pattern | Replacement | Example |
-|---|---|---|
-| OpenAI keys (`sk-...`) | `sk-<REDACTED>` | `sk-abc123...` → `sk-<REDACTED>` |
-| Anthropic keys (`sk-ant-...`) | `sk-ant-<REDACTED>` | `sk-ant-api03-...` → `sk-ant-<REDACTED>` |
-| Bearer tokens | `Bearer <REDACTED>` | `Bearer eyJhb...` → `Bearer <REDACTED>` |
-| API key params | `apikey=<REDACTED>` | `apikey=secret123` → `apikey=<REDACTED>` |
-| Vault references | `${eddivault:<REDACTED>}` | `${eddivault:ns/scope/key}` → `${eddivault:<REDACTED>}` |
+| Pattern                       | Replacement               | Example                                                 |
+| ----------------------------- | ------------------------- | ------------------------------------------------------- |
+| OpenAI keys (`sk-...`)        | `sk-<REDACTED>`           | `sk-abc123...` → `sk-<REDACTED>`                        |
+| Anthropic keys (`sk-ant-...`) | `sk-ant-<REDACTED>`       | `sk-ant-api03-...` → `sk-ant-<REDACTED>`                |
+| Bearer tokens                 | `Bearer <REDACTED>`       | `Bearer eyJhb...` → `Bearer <REDACTED>`                 |
+| API key params                | `apikey=<REDACTED>`       | `apikey=secret123` → `apikey=<REDACTED>`                |
+| Vault references              | `${eddivault:<REDACTED>}` | `${eddivault:ns/scope/key}` → `${eddivault:<REDACTED>}` |
 
 ### Export Sanitization
 
-`SecretScrubber` removes vault references from bot export (backup) payloads, replacing them with `<SECRET_REMOVED>`. This prevents secrets from leaking when bots are shared or exported.
+`SecretScrubber` removes vault references from agent export (backup) payloads, replacing them with `<SECRET_REMOVED>`. This prevents secrets from leaking when agents are shared or exported.
 
 ### Memory Protection
 
@@ -284,18 +290,18 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 
 ### Backend (37 tests)
 
-| Test Class | Tests | Coverage |
-|---|---|---|
-| `EnvelopeCryptoTest` | 9 | Encrypt/decrypt, key rotation, wrong key, tampering, large payloads |
-| `SecretResolverTest` | 7 | Single/multiple/nested resolution, no-ops, missing secrets |
-| `SecretRedactionFilterTest` | 6 | All 5 regex patterns, null/empty, safe messages |
-| `SecretScrubberTest` | 4 | Nested object scrubbing, preservation of non-secret fields |
-| `SecretReferenceTest` | 6 | Parsing, equality, hash, invalid references |
-| `ConversationSecretInputTest` | 5 | Secret context scrubbing, normal passthrough, false flag, empty context, output vs. lifecycle data |
+| Test Class                    | Tests | Coverage                                                                                           |
+| ----------------------------- | ----- | -------------------------------------------------------------------------------------------------- |
+| `EnvelopeCryptoTest`          | 9     | Encrypt/decrypt, key rotation, wrong key, tampering, large payloads                                |
+| `SecretResolverTest`          | 7     | Single/multiple/nested resolution, no-ops, missing secrets                                         |
+| `SecretRedactionFilterTest`   | 6     | All 5 regex patterns, null/empty, safe messages                                                    |
+| `SecretScrubberTest`          | 4     | Nested object scrubbing, preservation of non-secret fields                                         |
+| `SecretReferenceTest`         | 6     | Parsing, equality, hash, invalid references                                                        |
+| `ConversationSecretInputTest` | 5     | Secret context scrubbing, normal passthrough, false flag, empty context, output vs. lifecycle data |
 
 ### Frontend (17 tests)
 
-| Test File | Tests | Coverage |
-|---|---|---|
-| `secrets.test.tsx` (Manager) | 12 | Page render, tenant/bot inputs, vault health, create dialog (password, autocomplete, eye toggle), delete confirmation |
-| `chat-store.test.tsx` (Chat UI) | 5 | `SET_INPUT_FIELD`, `CLEAR_INPUT_FIELD`, `TOGGLE_SECRET_MODE`, `CLEAR_MESSAGES` reset, initial defaults |
+| Test File                       | Tests | Coverage                                                                                                                |
+| ------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------- |
+| `secrets.test.tsx` (Manager)    | 12    | Page render, tenant/agent inputs, vault health, create dialog (password, autocomplete, eye toggle), delete confirmation |
+| `chat-store.test.tsx` (Chat UI) | 5     | `SET_INPUT_FIELD`, `CLEAR_INPUT_FIELD`, `TOGGLE_SECRET_MODE`, `CLEAR_MESSAGES` reset, initial defaults                  |

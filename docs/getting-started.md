@@ -10,32 +10,35 @@ This article will help you to get started with **EDDI**.
 
 EDDI is a **middleware orchestration service** for conversational AI. When you run EDDI, you're starting:
 
-1. **The EDDI Service**: A Java/Quarkus application that exposes REST APIs for bot management and conversations
-2. **MongoDB**: A database that stores bot configurations, packages, and conversation history
-3. **Optional UI**: A web-based dashboard for managing bots (accessible at http://localhost:7070)
+1. **The EDDI Service**: A Java/Quarkus application that exposes REST APIs for agent management and conversations
+2. **MongoDB**: A database that stores agent configurations, packages, and conversation history
+3. **Optional UI**: A web-based dashboard for managing agents (accessible at http://localhost:7070)
 
 Once running, you can:
-- Create and configure bots through the API or dashboard
-- Integrate bots into your applications via REST API
+
+- Create and configure agents through the API or dashboard
+- Integrate agents into your applications via REST API
 - Connect to LLM services (OpenAI, Claude, Gemini, etc.)
 - Build complex conversation flows with behavior rules
-- Call external APIs from your bot logic
+- Call external APIs from your agent logic
 
 ## Installation Options
 
 ### Option 0 - One-Command Install (Recommended)
 
 **Linux / macOS / WSL2:**
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/labsai/EDDI/main/install.sh | bash
 ```
 
 **Windows (PowerShell):**
+
 ```powershell
 iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1 | iex
 ```
 
-The wizard guides you through choosing a database (MongoDB or PostgreSQL), optional authentication (Keycloak), and monitoring (Grafana). After setup, Bot Father is deployed automatically to help you create your first AI bot.
+The wizard guides you through choosing a database (MongoDB or PostgreSQL), optional authentication (Keycloak), and monitoring (Grafana). After setup, Agent Father is deployed automatically to help you create your first AI agent.
 
 ### Option 1 - EDDI with Docker (Manual)
 
@@ -46,11 +49,11 @@ _**Prerequisite**: You need an up and running `Docker` environment. (For referen
 ### Use docker-compose (recommended)
 
 1. `Checkout` the `docker-compose` file from `Github`:[`https://github.com/labsai/EDDI/blob/master/docker-compose.yml`](https://github.com/labsai/EDDI/blob/master/docker-compose.yml)
-2.  Run Docker Command:
+2. Run Docker Command:
 
-    ```
-     docker-compose up
-    ```
+   ```
+    docker-compose up
+   ```
 
 ### Use launch docker containers manually
 
@@ -59,11 +62,13 @@ _**Prerequisite**: You need an up and running `Docker` environment. (For referen
     ```
     docker network create eddi-network
     ```
+
 2.  Start a `MongoDB` instance using the `MongoDB` `Docker` image:
 
     ```
     docker run --name mongodb --network=eddi-network -d mongo
     ```
+
 3.  Start **EDDI** :
 
     ```
@@ -74,9 +79,9 @@ _**Prerequisite**: You need an up and running `Docker` environment. (For referen
 
 #### _Prerequisites:_
 
-* Java 21
-* Maven 3.8.4
-* MongoDB > 4.0
+- Java 21
+- Maven 3.8.4
+- MongoDB > 4.0
 
 ### How to run the project
 
@@ -93,8 +98,6 @@ On a terminal, under project root folder, run the following command:
 ```
 
 1. Go to Browser --> [http://localhost:7070](http://localhost:7070)
-
-
 
 ### Build App & Docker image
 
@@ -135,4 +138,3 @@ or
 ```bash
 docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.testing.yml -p ci up -d
 ```
-

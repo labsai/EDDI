@@ -1,7 +1,7 @@
 {
 	"variables": [],
 	"info": {
-		"name": "EDDI -  Weather bot",
+		"name": "EDDI -  Weather agent",
 		"_postman_id": "12926b3f-0dfb-f461-6f0c-f575bdeda5a8",
 		"description": "",
 		"schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json"
@@ -302,7 +302,7 @@
 			"response": []
 		},
 		{
-			"name": "6 - Creating bot",
+			"name": "6 - Creating agent",
 			"event": [
 				{
 					"listen": "test",
@@ -335,7 +335,7 @@
 							"var m = p.exec(location_header);\r",
 							"if (m !== null)\r",
 							"{\r",
-							"    postman.setEnvironmentVariable(\"bot_id\", m[15]+m[16]);\r",
+							"    postman.setEnvironmentVariable(\"agent_id\", m[15]+m[16]);\r",
 							"}\r",
 							""
 						]
@@ -343,7 +343,7 @@
 				}
 			],
 			"request": {
-				"url": "{{host}}/botstore/bots",
+				"url": "{{host}}/agentstore/agents",
 				"method": "POST",
 				"header": [
 					{
@@ -361,10 +361,10 @@
 			"response": []
 		},
 		{
-			"name": "7 - Deploy the bot",
+			"name": "7 - Deploy the agent",
 			"request": {
 				"url": {
-					"raw": "{{host}}/administration/unrestricted/deploy/{{bot_id}}?version=1",
+					"raw": "{{host}}/administration/unrestricted/deploy/{{agent_id}}?version=1",
 					"host": [
 						"{{host}}"
 					],
@@ -372,7 +372,7 @@
 						"administration",
 						"unrestricted",
 						"deploy",
-						"{{bot_id}}"
+						"{{agent_id}}"
 					],
 					"query": [
 						{
@@ -434,7 +434,7 @@
 				}
 			],
 			"request": {
-				"url": "{{host}}/bots/unrestricted/{{bot_id}}",
+				"url": "{{host}}/agents/unrestricted/{{agent_id}}",
 				"method": "POST",
 				"header": [],
 				"body": {
@@ -449,14 +449,14 @@
 			"name": "9 - Say weather",
 			"request": {
 				"url": {
-					"raw": "{{host}}/bots/unrestricted/{{bot_id}}/{{conversation_id}}?returnDetailed=false&returnCurrentStepOnly=true",
+					"raw": "{{host}}/agents/unrestricted/{{agent_id}}/{{conversation_id}}?returnDetailed=false&returnCurrentStepOnly=true",
 					"host": [
 						"{{host}}"
 					],
 					"path": [
-						"bots",
+						"agents",
 						"unrestricted",
-						"{{bot_id}}",
+						"{{agent_id}}",
 						"{{conversation_id}}"
 					],
 					"query": [
@@ -489,14 +489,14 @@
 			"name": "10 - Say city",
 			"request": {
 				"url": {
-					"raw": "{{host}}/bots/unrestricted/{{bot_id}}/{{conversation_id}}?returnDetailed=false&returnCurrentStepOnly=true",
+					"raw": "{{host}}/agents/unrestricted/{{agent_id}}/{{conversation_id}}?returnDetailed=false&returnCurrentStepOnly=true",
 					"host": [
 						"{{host}}"
 					],
 					"path": [
-						"bots",
+						"agents",
 						"unrestricted",
-						"{{bot_id}}",
+						"{{agent_id}}",
 						"{{conversation_id}}"
 					],
 					"query": [
