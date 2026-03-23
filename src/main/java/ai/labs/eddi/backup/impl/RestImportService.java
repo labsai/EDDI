@@ -197,6 +197,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                 p -> p.toString().endsWith(".package.json"))) {
                             for (Path packageFilePath : pkgStream) {
                                 String packageFileString = readFile(packageFilePath);
+                                // Normalize legacy URIs from v5 ZIPs
+                                packageFileString = normalizeLegacyUris(packageFileString);
                                 addExtensionDiffs(diffs, packageFileString, dir);
                             }
                         }
@@ -321,6 +323,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 try {
                     String agentOriginId = extractIdFromAgentFilename(agentFilePath);
                     String agentFileString = readFile(agentFilePath);
+
+                    // Normalize legacy eddi:// URIs from v5 ZIP exports to v6 canonical form
+                    agentFileString = normalizeLegacyUris(agentFileString);
+
                     AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString,
                             AgentConfiguration.class);
                     agentConfig.getWorkflows()
@@ -373,6 +379,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     try {
                         Path packagePath = packageFilePath.getParent();
                         String packageFileString = readFile(packageFilePath);
+
+                        // Normalize legacy eddi:// URIs from v5 ZIP exports to v6 canonical form
+                        packageFileString = normalizeLegacyUris(packageFileString);
 
                         // loading old resources, creating/updating them,
                         // updating document descriptor and replacing references in package config

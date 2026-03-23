@@ -79,12 +79,12 @@ class RestOrphanAdminTest {
                 return switch (type) {
                         case "ai.labs.agent" -> "agentstore/agents";
                         case "ai.labs.package" -> "workflowstore/workflows";
-                        case "ai.labs.behavior" -> "rulestore/rulesets";
-                        case "ai.labs.httpcalls" -> "apicallstore/apicalls";
+                        case "ai.labs.rules" -> "rulestore/rulesets";
+                        case "ai.labs.apicalls" -> "apicallstore/apicalls";
                         case "ai.labs.output" -> "outputstore/outputsets";
                         case "ai.labs.llm" -> "llmstore/llmconfigs";
                         case "ai.labs.property" -> "propertysetterstore/propertysetters";
-                        case "ai.labs.regulardictionary" -> "dictionarystore/dictionaries";
+                        case "ai.labs.dictionary" -> "dictionarystore/dictionaries";
                         case "ai.labs.parser" -> "parserstore/parsers";
                         default -> "unknown";
                 };
@@ -131,8 +131,8 @@ class RestOrphanAdminTest {
                         // All other stores are empty
                         setupStoreReturns(Map.of(
                                         "ai.labs.package", List.of(pkgDesc),
-                                        "ai.labs.behavior",
-                                        List.of(descriptor("ai.labs.behavior", BEH1_ID, 1, "TestBeh"))));
+                                        "ai.labs.rules",
+                                        List.of(descriptor("ai.labs.rules", BEH1_ID, 1, "TestBeh"))));
 
                         OrphanReport report = restOrphanAdmin.scanOrphans(false);
 
@@ -176,12 +176,12 @@ class RestOrphanAdminTest {
                         // Store scans: package store has PKG1 (used) + ORPHAN_PKG (orphan)
                         // Behavior store has BEH1 (used) + ORPHAN_BEH (orphan)
                         DocumentDescriptor orphanPkgDesc = descriptor("ai.labs.package", ORPHAN_PKG_ID, 1, "OrphanPkg");
-                        DocumentDescriptor orphanBehDesc = descriptor("ai.labs.behavior", ORPHAN_BEH_ID, 1,
+                        DocumentDescriptor orphanBehDesc = descriptor("ai.labs.rules", ORPHAN_BEH_ID, 1,
                                         "OrphanBeh");
                         setupStoreReturns(Map.of(
                                         "ai.labs.package", List.of(pkgDesc, orphanPkgDesc),
-                                        "ai.labs.behavior", List.of(
-                                                        descriptor("ai.labs.behavior", BEH1_ID, 1, "UsedBeh"),
+                                        "ai.labs.rules", List.of(
+                                                        descriptor("ai.labs.rules", BEH1_ID, 1, "UsedBeh"),
                                                         orphanBehDesc)));
 
                         OrphanReport report = restOrphanAdmin.scanOrphans(false);
@@ -192,7 +192,7 @@ class RestOrphanAdminTest {
                         List<String> orphanTypes = report.getOrphans().stream()
                                         .map(OrphanInfo::getType).sorted().toList();
                         assertTrue(orphanTypes.contains("ai.labs.package"));
-                        assertTrue(orphanTypes.contains("ai.labs.behavior"));
+                        assertTrue(orphanTypes.contains("ai.labs.rules"));
                 }
 
                 @Test
@@ -241,8 +241,8 @@ class RestOrphanAdminTest {
                                         .thenReturn(Collections.emptyList());
 
                         // All other stores empty
-                        for (String type : List.of("ai.labs.behavior", "ai.labs.httpcalls", "ai.labs.output",
-                                        "ai.labs.llm", "ai.labs.property", "ai.labs.regulardictionary",
+                        for (String type : List.of("ai.labs.rules", "ai.labs.apicalls", "ai.labs.output",
+                                        "ai.labs.llm", "ai.labs.property", "ai.labs.dictionary",
                                         "ai.labs.parser")) {
                                 when(documentDescriptorStore.readDescriptors(eq(type), eq(""), anyInt(), anyInt(),
                                                 eq(true)))
@@ -265,9 +265,9 @@ class RestOrphanAdminTest {
          * Unspecified types return empty lists.
          */
         private void setupStoreReturns(Map<String, List<DocumentDescriptor>> storeDescriptors) throws Exception {
-                for (String type : List.of("ai.labs.package", "ai.labs.behavior", "ai.labs.httpcalls",
+                for (String type : List.of("ai.labs.package", "ai.labs.rules", "ai.labs.apicalls",
                                 "ai.labs.output", "ai.labs.llm", "ai.labs.property",
-                                "ai.labs.regulardictionary", "ai.labs.parser")) {
+                                "ai.labs.dictionary", "ai.labs.parser")) {
                         List<DocumentDescriptor> descs = storeDescriptors.getOrDefault(type, Collections.emptyList());
                         // First call returns the descriptors, subsequent calls return empty (pagination
                         // boundary)

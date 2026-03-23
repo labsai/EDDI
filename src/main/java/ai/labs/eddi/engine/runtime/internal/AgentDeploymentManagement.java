@@ -5,6 +5,7 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
+import ai.labs.eddi.configs.migration.V6RenameMigration;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
@@ -54,6 +55,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private final IConversationMemoryStore conversationMemoryStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IMigrationManager migrationManager;
+    private final V6RenameMigration v6RenameMigration;
     private final IAgentsReadiness agentsReadiness;
     private final IRuntime runtime;
     private final int maximumLifeTimeOfIdleConversationsInDays;
@@ -69,6 +71,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             IConversationMemoryStore conversationMemoryStore,
             IDocumentDescriptorStore documentDescriptorStore,
             IMigrationManager migrationManager,
+            V6RenameMigration v6RenameMigration,
             IRuntime runtime,
             @ConfigProperty(name = "eddi.conversations.maximumLifeTimeOfIdleConversationsInDays") int maximumLifeTimeOfIdleConversationsInDays) {
         this.deploymentStore = deploymentStore;
@@ -78,6 +81,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         this.conversationMemoryStore = conversationMemoryStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.migrationManager = migrationManager;
+        this.v6RenameMigration = v6RenameMigration;
         this.runtime = runtime;
         this.maximumLifeTimeOfIdleConversationsInDays = maximumLifeTimeOfIdleConversationsInDays;
     }
@@ -93,6 +97,9 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     @Override
     public void autoDeployAgents() {
         LOGGER.info("Starting deployment of agents...");
+
+        // V6 rename migration must run before document-level migrations
+        v6RenameMigration.runIfNeeded();
 
         migrationManager.startMigrationIfFirstTimeRun(() -> {
             checkDeployments();

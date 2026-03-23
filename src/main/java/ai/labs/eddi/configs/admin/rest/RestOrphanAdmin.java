@@ -52,12 +52,12 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
      */
     private static final String[][] SCANNABLE_STORE_TYPES = {
             { "ai.labs.package", "Workflow" },
-            { "ai.labs.behavior", "Behavior Set" },
-            { "ai.labs.httpcalls", "HTTP Calls" },
+            { "ai.labs.rules", "Rules" },
+            { "ai.labs.apicalls", "API Calls" },
             { "ai.labs.output", "Output Set" },
-            { "ai.labs.llm", "LangChain" },
+            { "ai.labs.llm", "LLM" },
             { "ai.labs.property", "Property Setter" },
-            { "ai.labs.regulardictionary", "Regular Dictionary" },
+            { "ai.labs.dictionary", "Dictionary" },
             { "ai.labs.parser", "Parser" },
     };
 
