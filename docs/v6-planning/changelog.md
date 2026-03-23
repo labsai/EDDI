@@ -43,6 +43,31 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-23 — V6 Rename Migration: Deployment Field Rename Fix
+
+**Repo:** EDDI
+**Branch:** `feature/version-6.0.0`
+
+**Root cause found:** Commit `b380533a` renamed Java POJO fields `botId`→`agentId` and `botVersion`→`agentVersion` in `DeploymentInfo.java`, but old MongoDB deployment documents retained the `botId`/`botVersion` BSON field names. Jackson deserialized them as `null`, causing `ServiceException: Argument must not be null (id)` every 10s in `checkDeployments()`.
+
+**Files modified:**
+
+- `V6RenameMigration.java` [MODIFIED]: Added `FIELD_NAME_REWRITES` for `botId`→`agentId`, `botVersion`→`agentVersion`. Applied in `migrateEnvironments()` for `deployments` and `conversationmemories` collections.
+- `AgentDeploymentManagement.java` [MODIFIED]: Defensive null-check filter in `checkDeployments()` to skip records with null `agentId`/`agentVersion`.
+
+**Code review completed (no issues):**
+
+- `V6RenameMigration.java` (360 lines) — RESOURCE_COLLECTIONS, URI rewrites, descriptor migration
+- `AbstractBackupService.java` (95 lines) — LEGACY_URI_REWRITES for ZIP import
+- `RestImportService.java` (1014 lines) — normalizeLegacyUris, updateDocumentDescriptor, createOrUpdate methods
+- `MigrationManager.java` (508 lines) — property/apiCalls/output format migrations
+- `RestAgentAdministration.java` (342 lines) — deployment lifecycle
+- `MongoDeploymentStorage.java` (103 lines) — CRUD operations
+
+**Testing:** 1125 unit tests pass, 0 failures.
+
+---
+
 ### 2026-03-20 — Scheduled Triggers & Heartbeats (Code Review + TriggerType)
 
 **Repo:** EDDI
