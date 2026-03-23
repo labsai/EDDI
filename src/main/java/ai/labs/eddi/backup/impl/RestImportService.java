@@ -816,6 +816,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     IResourceId newResourceId = RestUtilities.extractResourceId(newUri);
 
                     if (newResourceId != null) {
+                        // Update the resource URI to point to the new location
+                        // (the old descriptor from the ZIP file still has the old URI)
+                        oldDocumentDescriptor.setResource(newUri);
+
                         PatchInstruction<DocumentDescriptor> patchInstruction = new PatchInstruction<>();
                         patchInstruction.setOperation(PatchInstruction.PatchOperation.SET);
                         patchInstruction.setDocument(oldDocumentDescriptor);

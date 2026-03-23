@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -41,7 +42,7 @@ class SchedulePollerServiceTest {
                 5, // maxRetries
                 15, // backoffBaseSeconds
                 4, // backoffMultiplier
-                "test-instance", // instanceId
+                Optional.of("test-instance"), // instanceId
                 "UTC" // defaultTimeZone
         );
         poller.init();
@@ -63,7 +64,7 @@ class SchedulePollerServiceTest {
     void init_disabledScheduler() {
         var disabled = new SchedulePollerService(
                 scheduleStore, fireExecutor, new SimpleMeterRegistry(),
-                false, Duration.ofMinutes(5), 5, 15, 4, "", "UTC");
+                false, Duration.ofMinutes(5), 5, 15, 4, Optional.empty(), "UTC");
         disabled.init();
         assertFalse(disabled.isEnabled());
     }
@@ -72,7 +73,7 @@ class SchedulePollerServiceTest {
     void init_autoDetectsHostnameIfNotConfigured() {
         var autoId = new SchedulePollerService(
                 scheduleStore, fireExecutor, new SimpleMeterRegistry(),
-                true, Duration.ofMinutes(5), 5, 15, 4, "", "UTC");
+                true, Duration.ofMinutes(5), 5, 15, 4, Optional.empty(), "UTC");
         autoId.init();
         assertNotNull(autoId.getInstanceId());
         assertFalse(autoId.getInstanceId().isBlank());
@@ -84,7 +85,7 @@ class SchedulePollerServiceTest {
     void poll_skipsWhenDisabled() throws Exception {
         var disabled = new SchedulePollerService(
                 scheduleStore, fireExecutor, new SimpleMeterRegistry(),
-                false, Duration.ofMinutes(5), 5, 15, 4, "", "UTC");
+                false, Duration.ofMinutes(5), 5, 15, 4, Optional.empty(), "UTC");
         disabled.init();
 
         disabled.pollDueSchedules();

@@ -20,6 +20,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Polls the schedule store for due schedules and fires them.
@@ -52,7 +53,7 @@ public class SchedulePollerService {
     private final int maxRetries;
     private final int backoffBaseSeconds;
     private final int backoffMultiplier;
-    private final String configuredInstanceId;
+    private final Optional<String> configuredInstanceId;
     private final String defaultTimeZone;
 
     private String instanceId;
@@ -78,8 +79,8 @@ public class SchedulePollerService {
             int backoffBaseSeconds,
             @ConfigProperty(name = "eddi.schedule.backoff-multiplier", defaultValue = "4")
             int backoffMultiplier,
-            @ConfigProperty(name = "eddi.schedule.instance-id", defaultValue = "")
-            String configuredInstanceId,
+            @ConfigProperty(name = "eddi.schedule.instance-id")
+            Optional<String> configuredInstanceId,
             @ConfigProperty(name = "eddi.schedule.default-timezone", defaultValue = "UTC")
             String defaultTimeZone) {
         this.scheduleStore = scheduleStore;
@@ -97,8 +98,8 @@ public class SchedulePollerService {
     @PostConstruct
     void init() {
         // Resolve instance ID
-        if (configuredInstanceId != null && !configuredInstanceId.isBlank()) {
-            instanceId = configuredInstanceId;
+        if (configuredInstanceId.isPresent() && !configuredInstanceId.get().isBlank()) {
+            instanceId = configuredInstanceId.get();
         } else {
             try {
                 instanceId = InetAddress.getLocalHost().getHostName();

@@ -53,15 +53,6 @@ public class V6RenameMigration {
             {"botstore/bots", "agentstore/agents"},
     };
 
-    /** Descriptor type field rewrites (old → new). */
-    private static final String[][] DESCRIPTOR_TYPE_REWRITES = {
-            {"ai.labs.regulardictionary", "ai.labs.dictionary"},
-            {"ai.labs.httpcalls", "ai.labs.apicalls"},
-            {"ai.labs.behavior", "ai.labs.rules"},
-            {"ai.labs.langchain", "ai.labs.llm"},
-            {"ai.labs.package", "ai.labs.package"}, // descriptor type stays as-is (legacy query compat)
-            {"ai.labs.bot", "ai.labs.bot"},           // descriptor type stays as-is
-    };
 
     /** Environment value rewrites. */
     private static final String[][] ENVIRONMENT_REWRITES = {
@@ -69,13 +60,22 @@ public class V6RenameMigration {
             {"restricted", "production"},
     };
 
-    /** All MongoDB collections to scan for URI rewrites. */
+    /**
+     * All MongoDB collections to scan for URI rewrites.
+     * These are the ACTUAL collection names from each store's constructor:
+     *   AgentStore          → "agents"
+     *   WorkflowStore       → "packages"
+     *   RuleSetStore        → "behaviorrulesets"
+     *   ApiCallsStore       → "httpcalls"
+     *   OutputStore         → "outputs"
+     *   LlmStore            → "langchain"   (singular!)
+     *   PropertySetterStore → "propertysetter"
+     *   DictionaryStore     → "regulardictionaries"
+     *   ParserStore         → "parsers"
+     */
     private static final String[] RESOURCE_COLLECTIONS = {
-            "agents", "workflows", "rulesets", "apicalls", "outputs",
-            "llmconfigs", "propertysetter", "dictionaries", "parsers",
-            // Legacy collection names (in case they haven't been renamed yet)
-            "bots", "packages", "behaviorsets", "httpcalls", "langchains",
-            "regulardictionaries",
+            "agents", "packages", "behaviorrulesets", "httpcalls", "outputs",
+            "langchain", "propertysetter", "regulardictionaries", "parsers",
     };
 
     private final MongoDatabase database;
@@ -116,12 +116,13 @@ public class V6RenameMigration {
             totalMigrated += migrateCollection(collectionName + ".history");
         }
 
-        // 2. Rewrite descriptor type fields and resource URIs
-        totalMigrated += migrateDescriptors("documentdescriptors");
-        totalMigrated += migrateDescriptors("documentdescriptors.history");
+        // 2. Rewrite resource URIs in descriptors
+        totalMigrated += migrateDescriptors("descriptors");
+        totalMigrated += migrateDescriptors("descriptors.history");
 
         // 3. Rewrite environment fields in deployment/conversation documents
         totalMigrated += migrateEnvironments("conversationmemories");
+        totalMigrated += migrateEnvironments("deployments");
 
         LOGGER.infof("V6 rename migration complete: %d documents migrated", totalMigrated);
 
@@ -161,7 +162,9 @@ public class V6RenameMigration {
     }
 
     /**
-     * Migrate descriptor documents: rewrite the 'type' field and 'resource' URI.
+     * Migrate descriptor documents: rewrite the 'resource' URI field.
+     * Note: descriptors have no separate 'type' field — the resource URI authority
+     * (e.g., "eddi://ai.labs.behavior/...") is what identifies the type.
      */
     private int migrateDescriptors(String collectionName) {
         MongoCollection<Document> collection;
@@ -176,27 +179,8 @@ public class V6RenameMigration {
 
         int migrated = 0;
         for (Document doc : collection.find()) {
-            boolean changed = false;
-
-            // Rewrite the 'type' field (e.g., "ai.labs.behavior" → "ai.labs.rules")
-            // Note: we intentionally keep ai.labs.package and ai.labs.bot as-is for now
-            // since the orphan scan depends on these descriptor types
-            Object typeObj = doc.get("type");
-            if (typeObj instanceof String typeStr) {
-                for (String[] mapping : DESCRIPTOR_TYPE_REWRITES) {
-                    if (typeStr.equals(mapping[0]) && !mapping[0].equals(mapping[1])) {
-                        doc.put("type", mapping[1]);
-                        changed = true;
-                        break;
-                    }
-                }
-            }
-
-            // Rewrite URIs in the rest of the document
-            Document uriRewritten = rewriteUrisInDocument(doc);
-            changed = changed || uriRewritten != null;
-
-            if (changed) {
+            Document rewritten = rewriteUrisInDocument(doc);
+            if (rewritten != null) {
                 saveDocument(collection, doc, collectionName.endsWith(".history"));
                 migrated++;
             }
