@@ -77,12 +77,12 @@ public class AgentUseCaseIT extends BaseIntegrationIT {
         String userId = "12345";
 
         // Delete any stale trigger from a previous test run
-        given().delete("/AgentTriggerStore/agenttriggers/" + intent);
+        given().delete("/triggerstore/triggers/" + intent);
 
         // Register Agent trigger (create via POST)
         given().contentType(ContentType.JSON)
                 .body(String.format(load("useCases/AgentDeployment.json"), weatherAgentId.id()))
-                .post("/AgentTriggerStore/agenttriggers")
+                .post("/triggerstore/triggers")
                 .then().statusCode(200);
 
         // End any existing conversation

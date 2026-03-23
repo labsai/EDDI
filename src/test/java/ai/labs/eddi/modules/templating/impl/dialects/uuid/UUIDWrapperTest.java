@@ -17,27 +17,27 @@ class UUIDWrapperTest {
     void extractId_withMongoObjectId() {
         assertEquals("6740832a2b0f614abcaee7ab",
                 wrapper.extractId(
-                        "http://localhost:7070/behaviorstore/behaviorsets/6740832a2b0f614abcaee7ab?version=1"));
+                        "http://localhost:7070/rulestore/rulesets/6740832a2b0f614abcaee7ab?version=1"));
     }
 
     @Test
     void extractId_withPostgresUUID() {
         assertEquals("f3be2bcd-aff3-41f0-9a1a-cf4eb513dd81",
                 wrapper.extractId(
-                        "http://localhost:7070/behaviorstore/behaviorsets/f3be2bcd-aff3-41f0-9a1a-cf4eb513dd81?version=1"));
+                        "http://localhost:7070/rulestore/rulesets/f3be2bcd-aff3-41f0-9a1a-cf4eb513dd81?version=1"));
     }
 
     @Test
     void extractId_agentLocation() {
         assertEquals("6740832b2b0f614abcaee7ca",
-                wrapper.extractId("http://localhost:7070/AgentStore/agents/6740832b2b0f614abcaee7ca?version=1"));
+                wrapper.extractId("http://localhost:7070/agentstore/agents/6740832b2b0f614abcaee7ca?version=1"));
     }
 
     @Test
     void extractId_packageLocation() {
         assertEquals("c1d2e3f4-a5b6-47c8-9d0e-f1a2b3c4d5e6",
                 wrapper.extractId(
-                        "http://localhost:7070/WorkflowStore/packages/c1d2e3f4-a5b6-47c8-9d0e-f1a2b3c4d5e6?version=2"));
+                        "http://localhost:7070/workflowstore/workflows/c1d2e3f4-a5b6-47c8-9d0e-f1a2b3c4d5e6?version=2"));
     }
 
     @Test
@@ -60,14 +60,14 @@ class UUIDWrapperTest {
     void extractVersion_withMongoObjectId() {
         assertEquals("1",
                 wrapper.extractVersion(
-                        "http://localhost:7070/behaviorstore/behaviorsets/6740832a2b0f614abcaee7ab?version=1"));
+                        "http://localhost:7070/rulestore/rulesets/6740832a2b0f614abcaee7ab?version=1"));
     }
 
     @Test
     void extractVersion_withPostgresUUID() {
         assertEquals("3",
                 wrapper.extractVersion(
-                        "http://localhost:7070/behaviorstore/behaviorsets/f3be2bcd-aff3-41f0-9a1a-cf4eb513dd81?version=3"));
+                        "http://localhost:7070/rulestore/rulesets/f3be2bcd-aff3-41f0-9a1a-cf4eb513dd81?version=3"));
     }
 
     @Test

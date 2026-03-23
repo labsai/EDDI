@@ -54,22 +54,34 @@ class RestOrphanAdminTest {
 
         private DocumentDescriptor descriptor(String type, String id, int version, String name) {
                 DocumentDescriptor dd = new DocumentDescriptor();
-                dd.setResource(URI.create("eddi://" + type + "/" + storePath(type) + "/" + id + "?version=" + version));
+                dd.setResource(URI.create("eddi://" + uriType(type) + "/" + storePath(type) + "/" + id + "?version=" + version));
                 dd.setName(name);
                 dd.setDeleted(false);
                 return dd;
         }
 
+        /**
+         * Maps descriptor query types to the correct URI scheme type.
+         * The document store queries by type (e.g., "ai.labs.package") but
+         * the resourceURI scheme may differ (e.g., "ai.labs.workflow").
+         */
+        private String uriType(String descriptorType) {
+                return switch (descriptorType) {
+                        case "ai.labs.package" -> "ai.labs.workflow";
+                        default -> descriptorType;
+                };
+        }
+
         private String storePath(String type) {
                 return switch (type) {
-                        case "ai.labs.agent" -> "AgentStore/agents";
-                        case "ai.labs.package" -> "WorkflowStore/packages";
-                        case "ai.labs.behavior" -> "behaviorstore/behaviorsets";
-                        case "ai.labs.httpcalls" -> "httpcallsstore/httpcalls";
+                        case "ai.labs.agent" -> "agentstore/agents";
+                        case "ai.labs.package" -> "workflowstore/workflows";
+                        case "ai.labs.behavior" -> "rulestore/rulesets";
+                        case "ai.labs.httpcalls" -> "apicallstore/apicalls";
                         case "ai.labs.output" -> "outputstore/outputsets";
-                        case "ai.labs.llm" -> "langchainstore/langchains";
+                        case "ai.labs.llm" -> "llmstore/llmconfigs";
                         case "ai.labs.property" -> "propertysetterstore/propertysetters";
-                        case "ai.labs.regulardictionary" -> "regulardictionarystore/regulardictionaries";
+                        case "ai.labs.regulardictionary" -> "dictionarystore/dictionaries";
                         case "ai.labs.parser" -> "parserstore/parsers";
                         default -> "unknown";
                 };
@@ -91,7 +103,7 @@ class RestOrphanAdminTest {
 
                         AgentConfiguration agentConfig = new AgentConfiguration();
                         agentConfig.setWorkflows(new ArrayList<>(List.of(
-                                        URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG1_ID
+                                        URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID
                                                         + "?version=1"))));
                         when(AgentStore.read(AGENT1_ID, 1)).thenReturn(agentConfig);
 
@@ -106,7 +118,7 @@ class RestOrphanAdminTest {
                         WorkflowStep ext = new WorkflowStep();
                         ext.setType(URI.create("eddi://ai.labs.behavior"));
                         ext.setConfig(new HashMap<>(Map.of(
-                                        "uri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/" + BEH1_ID
+                                        "uri", "eddi://ai.labs.behavior/rulestore/rulesets/" + BEH1_ID
                                                         + "?version=1")));
                         pkgConfig.getWorkflowSteps().add(ext);
                         when(WorkflowStore.read(PKG1_ID, 1)).thenReturn(pkgConfig);
@@ -138,7 +150,7 @@ class RestOrphanAdminTest {
 
                         AgentConfiguration agentConfig = new AgentConfiguration();
                         agentConfig.setWorkflows(new ArrayList<>(List.of(
-                                        URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG1_ID
+                                        URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID
                                                         + "?version=1"))));
                         when(AgentStore.read(AGENT1_ID, 1)).thenReturn(agentConfig);
 
@@ -153,7 +165,7 @@ class RestOrphanAdminTest {
                         WorkflowStep ext = new WorkflowStep();
                         ext.setType(URI.create("eddi://ai.labs.behavior"));
                         ext.setConfig(new HashMap<>(Map.of(
-                                        "uri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/" + BEH1_ID
+                                        "uri", "eddi://ai.labs.behavior/rulestore/rulesets/" + BEH1_ID
                                                         + "?version=1")));
                         pkgConfig.getWorkflowSteps().add(ext);
                         when(WorkflowStore.read(PKG1_ID, 1)).thenReturn(pkgConfig);

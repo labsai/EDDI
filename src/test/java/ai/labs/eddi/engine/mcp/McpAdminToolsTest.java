@@ -185,7 +185,7 @@ class McpAdminToolsTest {
                 when(AgentStore.createAgent(any(AgentConfiguration.class)))
                                 .thenReturn(Response
                                                 .created(java.net.URI
-                                                                .create("/AgentStore/agents/" + AGENT_ID
+                                                                .create("/agentstore/agents/" + AGENT_ID
                                                                                 + "?version=1"))
                                                 .build());
                 when(jsonSerialization.serialize(any()))
@@ -214,12 +214,12 @@ class McpAdminToolsTest {
                 when(AgentStore.createAgent(any(AgentConfiguration.class)))
                                 .thenReturn(Response
                                                 .created(java.net.URI
-                                                                .create("/AgentStore/agents/" + AGENT_ID
+                                                                .create("/agentstore/agents/" + AGENT_ID
                                                                                 + "?version=1"))
                                                 .build());
                 when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\"}");
 
-                tools.createAgent("Agent", null, "eddi://ai.labs.package/WorkflowStore/packages/pkg1?version=1");
+                tools.createAgent("Agent", null, "eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=1");
 
                 ArgumentCaptor<AgentConfiguration> configCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
                 verify(AgentStore).createAgent(configCaptor.capture());
@@ -231,7 +231,7 @@ class McpAdminToolsTest {
                 when(AgentStore.createAgent(any(AgentConfiguration.class)))
                                 .thenReturn(Response
                                                 .created(java.net.URI
-                                                                .create("/AgentStore/agents/" + AGENT_ID
+                                                                .create("/agentstore/agents/" + AGENT_ID
                                                                                 + "?version=1"))
                                                 .build());
                 doThrow(new RuntimeException("Patch failed"))

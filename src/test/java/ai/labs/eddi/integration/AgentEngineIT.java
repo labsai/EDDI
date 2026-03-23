@@ -264,8 +264,8 @@ public class AgentEngineIT extends BaseIntegrationIT {
                 String output = load(outputPath);
 
                 String locationDictionary = createAgentResource(dictionary,
-                                "/regulardictionarystore/regulardictionaries");
-                String locationBehavior = createAgentResource(behavior, "/behaviorstore/behaviorsets");
+                                "/dictionarystore/dictionaries");
+                String locationBehavior = createAgentResource(behavior, "/rulestore/rulesets");
                 String locationOutput = createAgentResource(output, "/outputstore/outputsets");
 
                 // Create package with all extensions
@@ -300,12 +300,12 @@ public class AgentEngineIT extends BaseIntegrationIT {
                                                 }""",
                                 locationDictionary, locationBehavior, locationOutput);
 
-                String locationWorkflow = createAgentResource(packageBody, "/WorkflowStore/packages");
+                String locationWorkflow = createAgentResource(packageBody, "/workflowstore/workflows");
 
                 // Create agent
                 String agentBody = String.format("""
                                 {"packages": ["%s"]}""", locationWorkflow);
-                String agentLocation = createAgentResource(agentBody, "/AgentStore/agents");
+                String agentLocation = createAgentResource(agentBody, "/agentstore/agents");
 
                 ResourceId agentId = extractResourceId(agentLocation);
 

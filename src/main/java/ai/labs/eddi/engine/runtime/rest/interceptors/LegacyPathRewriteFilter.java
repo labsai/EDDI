@@ -19,14 +19,14 @@ import java.util.Map;
  * <p>
  * Rewrites:
  * <ul>
- * <li>/BotStore/bots → /agentstore/agents</li>
- * <li>/PackageStore/packages → /workflowstore/workflows</li>
+ * <li>/botstore/bots → /agentstore/agents</li>
+ * <li>/packagestore/packages → /workflowstore/workflows</li>
  * <li>/langchainstore/langchains → /llmstore/llmconfigs</li>
  * <li>/behaviorstore/behaviorsets → /rulestore/rulesets</li>
  * <li>/httpcallsstore/httpcalls → /apicallstore/apicalls</li>
  * <li>/regulardictionarystore/regulardictionaries →
  * /dictionarystore/dictionaries</li>
- * <li>/BotTriggerStore/bottriggers → /triggerstore/triggers</li>
+ * <li>/bottriggerstore/bottriggers → /triggerstore/triggers</li>
  * <li>/{unrestricted|restricted}/ → /production/</li>
  * </ul>
  */
@@ -41,12 +41,12 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
      */
     private static final Map<String, String> PATH_REWRITES = Map.ofEntries(
             Map.entry("/regulardictionarystore/regulardictionaries", "/dictionarystore/dictionaries"),
-            Map.entry("/BotTriggerStore/bottriggers", "/triggerstore/triggers"),
+            Map.entry("/bottriggerstore/bottriggers", "/triggerstore/triggers"),
             Map.entry("/behaviorstore/behaviorsets", "/rulestore/rulesets"),
             Map.entry("/langchainstore/langchains", "/llmstore/llmconfigs"),
             Map.entry("/httpcallsstore/httpcalls", "/apicallstore/apicalls"),
-            Map.entry("/PackageStore/packages", "/workflowstore/workflows"),
-            Map.entry("/BotStore/bots", "/agentstore/agents"),
+            Map.entry("/packagestore/packages", "/workflowstore/workflows"),
+            Map.entry("/botstore/bots", "/agentstore/agents"),
             Map.entry("/langchain/tools", "/llm/tools"));
 
     @Override

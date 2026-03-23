@@ -100,8 +100,8 @@ public class AgentDeploymentComponentIT extends BaseIntegrationIT {
                 String behavior = load("agentengine/rules.json");
                 String output = load("agentengine/output.json");
 
-                String locationDictionary = createResource(dictionary, "/regulardictionarystore/regulardictionaries");
-                String locationBehavior = createResource(behavior, "/behaviorstore/behaviorsets");
+                String locationDictionary = createResource(dictionary, "/dictionarystore/dictionaries");
+                String locationBehavior = createResource(behavior, "/rulestore/rulesets");
                 String locationOutput = createResource(output, "/outputstore/outputsets");
 
                 String packageBody = String.format(
@@ -124,10 +124,10 @@ public class AgentDeploymentComponentIT extends BaseIntegrationIT {
                                                 }""",
                                 locationDictionary, locationBehavior, locationOutput);
 
-                String locationWorkflow = createResource(packageBody, "/WorkflowStore/packages");
+                String locationWorkflow = createResource(packageBody, "/workflowstore/workflows");
                 String agentBody = String.format("""
                                 {"packages": ["%s"]}""", locationWorkflow);
-                String agentLocation = createResource(agentBody, "/AgentStore/agents");
+                String agentLocation = createResource(agentBody, "/agentstore/agents");
                 ResourceId agentId = extractResourceId(agentLocation);
                 createdAgents.add(agentId);
                 return agentId;

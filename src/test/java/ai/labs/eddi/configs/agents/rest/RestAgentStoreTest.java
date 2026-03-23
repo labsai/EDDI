@@ -76,9 +76,9 @@ class RestAgentStoreTest {
                 void deleteAgent_cascade() throws Exception {
                         AgentConfiguration config = new AgentConfiguration();
                         config.setWorkflows(new ArrayList<>(List.of(
-                                        URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG1_ID
+                                        URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID
                                                         + "?version=2"),
-                                        URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG2_ID
+                                        URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG2_ID
                                                         + "?version=1"))));
                         when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
                         // Each package is only referenced by this one agent
@@ -101,9 +101,9 @@ class RestAgentStoreTest {
                 void deleteAgent_cascade_skipsSharedWorkflows() throws Exception {
                         AgentConfiguration config = new AgentConfiguration();
                         config.setWorkflows(new ArrayList<>(List.of(
-                                        URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG1_ID
+                                        URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID
                                                         + "?version=2"),
-                                        URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG2_ID
+                                        URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG2_ID
                                                         + "?version=1"))));
                         when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
                         // PKG1 is shared with 2 agents — should be SKIPPED
@@ -129,9 +129,9 @@ class RestAgentStoreTest {
                 void deleteAgent_cascade_partialFailure() throws Exception {
                         AgentConfiguration config = new AgentConfiguration();
                         config.setWorkflows(new ArrayList<>(List.of(
-                                        URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG1_ID
+                                        URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID
                                                         + "?version=1"),
-                                        URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG2_ID
+                                        URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG2_ID
                                                         + "?version=1"))));
                         when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
                         // Agenth packages only referenced by this agent

@@ -78,7 +78,7 @@ class McpSetupToolsTest {
         void setupAgent_fullWorkflow_createsAllResources() throws Exception {
                 // Mock all store responses with Location headers
                 when(behaviorStore.createBehaviorRuleSet(any()))
-                                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
                                 .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
@@ -87,10 +87,10 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/outputstore/outputsets/out-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
-                                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
                                                 .build());
                 when(AgentStore.createAgent(any()))
-                                .thenReturn(Response.created(URI.create("/AgentStore/agents/agent-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1"))
                                                 .build());
                 when(agentAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
                                 .thenReturn(Response.ok().build());
@@ -119,16 +119,16 @@ class McpSetupToolsTest {
         @Test
         void setupAgent_withoutIntro_skipsOutput() throws Exception {
                 when(behaviorStore.createBehaviorRuleSet(any()))
-                                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
                                 .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
-                                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
                                                 .build());
                 when(AgentStore.createAgent(any()))
-                                .thenReturn(Response.created(URI.create("/AgentStore/agents/agent-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1"))
                                                 .build());
 
                 tools.setupAgent("Test Agent", "You are helpful", null, null,
@@ -144,16 +144,16 @@ class McpSetupToolsTest {
         @Test
         void setupAgent_withoutDeploy_skipsDeploy() throws Exception {
                 when(behaviorStore.createBehaviorRuleSet(any()))
-                                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
                                 .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
-                                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
                                                 .build());
                 when(AgentStore.createAgent(any()))
-                                .thenReturn(Response.created(URI.create("/AgentStore/agents/agent-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1"))
                                                 .build());
 
                 tools.setupAgent("Test Agent", "You are helpful", null, null,
@@ -166,16 +166,16 @@ class McpSetupToolsTest {
         @Test
         void setupAgent_deployFails_returnsSuccessWithWarning() throws Exception {
                 when(behaviorStore.createBehaviorRuleSet(any()))
-                                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
                                 .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
-                                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
                                                 .build());
                 when(AgentStore.createAgent(any()))
-                                .thenReturn(Response.created(URI.create("/AgentStore/agents/agent-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1"))
                                                 .build());
                 when(agentAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
                                 .thenThrow(new RuntimeException("Deploy failed"));
@@ -215,16 +215,16 @@ class McpSetupToolsTest {
         @Test
         void setupAgent_ollamaNoApiKey_succeeds() throws Exception {
                 when(behaviorStore.createBehaviorRuleSet(any()))
-                                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
                                 .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
-                                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
                                                 .build());
                 when(AgentStore.createAgent(any()))
-                                .thenReturn(Response.created(URI.create("/AgentStore/agents/agent-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1"))
                                                 .build());
 
                 // Ollama should NOT require an apiKey
@@ -239,16 +239,16 @@ class McpSetupToolsTest {
         @Test
         void setupAgent_jlamaNoApiKey_succeeds() throws Exception {
                 when(behaviorStore.createBehaviorRuleSet(any()))
-                                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
                                 .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
-                                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
                                                 .build());
                 when(AgentStore.createAgent(any()))
-                                .thenReturn(Response.created(URI.create("/AgentStore/agents/agent-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1"))
                                                 .build());
 
                 String result = tools.setupAgent("Jlama Agent", "You are helpful", "jlama", "tinyllama",
@@ -261,16 +261,16 @@ class McpSetupToolsTest {
         @Test
         void setupAgent_capturesLangchainConfig() throws Exception {
                 when(behaviorStore.createBehaviorRuleSet(any()))
-                                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
                                 .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
-                                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
                                                 .build());
                 when(AgentStore.createAgent(any()))
-                                .thenReturn(Response.created(URI.create("/AgentStore/agents/agent-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1"))
                                                 .build());
 
                 tools.setupAgent("My Agent", "You are a pirate", "anthropic", "claude-3-5-sonnet",
@@ -292,7 +292,7 @@ class McpSetupToolsTest {
         @Test
         void setupAgent_capturesWorkflowConfig() throws Exception {
                 when(behaviorStore.createBehaviorRuleSet(any()))
-                                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
                                 .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
@@ -301,10 +301,10 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/outputstore/outputsets/out-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
-                                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
                                                 .build());
                 when(AgentStore.createAgent(any()))
-                                .thenReturn(Response.created(URI.create("/AgentStore/agents/agent-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1"))
                                                 .build());
 
                 tools.setupAgent("Agent", "prompt", null, null, "key", null, "Hello!",
@@ -326,16 +326,16 @@ class McpSetupToolsTest {
         @Test
         void setupAgent_packageWithoutOutput_has3Extensions() throws Exception {
                 when(behaviorStore.createBehaviorRuleSet(any()))
-                                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
                                 .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
-                                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
                                                 .build());
                 when(AgentStore.createAgent(any()))
-                                .thenReturn(Response.created(URI.create("/AgentStore/agents/agent-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1"))
                                                 .build());
 
                 tools.setupAgent("Agent", "prompt", null, null, "key", null, null,
@@ -435,16 +435,16 @@ class McpSetupToolsTest {
         @Test
         void setupAgent_withQuickReplies_appendsJsonFormat() throws Exception {
                 when(behaviorStore.createBehaviorRuleSet(any()))
-                                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
                                 .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
-                                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
                                                 .build());
                 when(AgentStore.createAgent(any()))
-                                .thenReturn(Response.created(URI.create("/AgentStore/agents/agent-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1"))
                                                 .build());
 
                 tools.setupAgent("QR Agent", "You are helpful", "openai", "gpt-4o",
@@ -473,16 +473,16 @@ class McpSetupToolsTest {
         @Test
         void setupAgent_withSentiment_appendsJsonFormat() throws Exception {
                 when(behaviorStore.createBehaviorRuleSet(any()))
-                                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
                                 .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
-                                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
                                                 .build());
                 when(AgentStore.createAgent(any()))
-                                .thenReturn(Response.created(URI.create("/AgentStore/agents/agent-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1"))
                                                 .build());
 
                 tools.setupAgent("Sentiment Agent", "You are helpful", "gemini", "gemini-2.0-flash",
@@ -512,16 +512,16 @@ class McpSetupToolsTest {
         @Test
         void setupAgent_withAgenthFeatures_appendsFullJsonFormat() throws Exception {
                 when(behaviorStore.createBehaviorRuleSet(any()))
-                                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
                                 .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
-                                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
                                                 .build());
                 when(AgentStore.createAgent(any()))
-                                .thenReturn(Response.created(URI.create("/AgentStore/agents/agent-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1"))
                                                 .build());
 
                 tools.setupAgent("Full Agent", "You are helpful", "openai", "gpt-4o",
@@ -547,16 +547,16 @@ class McpSetupToolsTest {
         @Test
         void setupAgent_anthropic_noResponseFormat() throws Exception {
                 when(behaviorStore.createBehaviorRuleSet(any()))
-                                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
                                 .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
-                                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
                                                 .build());
                 when(AgentStore.createAgent(any()))
-                                .thenReturn(Response.created(URI.create("/AgentStore/agents/agent-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1"))
                                                 .build());
 
                 tools.setupAgent("Anthropic Agent", "You are helpful", "anthropic", "claude-sonnet-4-6",
@@ -703,21 +703,21 @@ class McpSetupToolsTest {
         void createApiAgent_fullWorkflow_createsAllResources() throws Exception {
                 // Mock all store responses
                 when(httpCallsStore.createHttpCalls(any()))
-                                .thenReturn(Response.created(URI.create("/httpcallsstore/httpcalls/hc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/apicallstore/apicalls/hc-1?version=1"))
                                                 .build())
-                                .thenReturn(Response.created(URI.create("/httpcallsstore/httpcalls/hc-2?version=1"))
+                                .thenReturn(Response.created(URI.create("/apicallstore/apicalls/hc-2?version=1"))
                                                 .build());
                 when(behaviorStore.createBehaviorRuleSet(any()))
-                                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
                                 .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
-                                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
                                                 .build());
                 when(AgentStore.createAgent(any()))
-                                .thenReturn(Response.created(URI.create("/AgentStore/agents/agent-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1"))
                                                 .build());
                 when(agentAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
                                 .thenReturn(Response.ok().build());
@@ -767,21 +767,21 @@ class McpSetupToolsTest {
         @Test
         void createApiAgent_packageContainsHttpCallsExtensions() throws Exception {
                 when(httpCallsStore.createHttpCalls(any()))
-                                .thenReturn(Response.created(URI.create("/httpcallsstore/httpcalls/hc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/apicallstore/apicalls/hc-1?version=1"))
                                                 .build())
-                                .thenReturn(Response.created(URI.create("/httpcallsstore/httpcalls/hc-2?version=1"))
+                                .thenReturn(Response.created(URI.create("/apicallstore/apicalls/hc-2?version=1"))
                                                 .build());
                 when(behaviorStore.createBehaviorRuleSet(any()))
-                                .thenReturn(Response.created(URI.create("/behaviorstore/behaviorsets/beh-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
                                 .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
-                                .thenReturn(Response.created(URI.create("/WorkflowStore/packages/pkg-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
                                                 .build());
                 when(AgentStore.createAgent(any()))
-                                .thenReturn(Response.created(URI.create("/AgentStore/agents/agent-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1"))
                                                 .build());
 
                 tools.createApIAgent("Agent", "prompt", SIMPLE_SPEC,

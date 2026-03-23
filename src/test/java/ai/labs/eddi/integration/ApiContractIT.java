@@ -29,7 +29,7 @@ public class ApiContractIT extends BaseIntegrationIT {
                 Response response = given()
                                 .contentType(ContentType.JSON)
                                 .body(json)
-                                .post("/behaviorstore/behaviorsets/");
+                                .post("/rulestore/rulesets/");
 
                 response.then().assertThat()
                                 .statusCode(201)
@@ -42,10 +42,10 @@ public class ApiContractIT extends BaseIntegrationIT {
         @DisplayName("GET should return JSON with correct content type")
         void readBehavior_returnsJson() throws Exception {
                 String json = load("rules/createRules.json");
-                String location = createResource(json, "/behaviorstore/behaviorsets/");
+                String location = createResource(json, "/rulestore/rulesets/");
                 ResourceId id = extractResourceId(location);
 
-                given().get("/behaviorstore/behaviorsets/" + id.id() + "?version=" + id.version())
+                given().get("/rulestore/rulesets/" + id.id() + "?version=" + id.version())
                                 .then().assertThat()
                                 .statusCode(200)
                                 .contentType(ContentType.JSON);
@@ -54,7 +54,7 @@ public class ApiContractIT extends BaseIntegrationIT {
         @Test
         @DisplayName("GET non-existent resource should return 404")
         protected void readNonExistent_returns404() {
-                given().get("/behaviorstore/behaviorsets/000000000000000000000000?version=1")
+                given().get("/rulestore/rulesets/000000000000000000000000?version=1")
                                 .then().assertThat()
                                 .statusCode(404);
         }
@@ -81,7 +81,7 @@ public class ApiContractIT extends BaseIntegrationIT {
 
                 given().contentType(ContentType.JSON)
                                 .body(json)
-                                .post("/regulardictionarystore/regulardictionaries/")
+                                .post("/dictionarystore/dictionaries/")
                                 .then().assertThat()
                                 .statusCode(201)
                                 .header("location", allOf(
@@ -131,7 +131,7 @@ public class ApiContractIT extends BaseIntegrationIT {
         @Test
         @DisplayName("agent store should return descriptors list")
         void agentStore_listDescriptors() {
-                given().get("/AgentStore/agents/descriptors")
+                given().get("/agentstore/agents/descriptors")
                                 .then().assertThat()
                                 .statusCode(200)
                                 .contentType(ContentType.JSON);
@@ -140,7 +140,7 @@ public class ApiContractIT extends BaseIntegrationIT {
         @Test
         @DisplayName("package store should return descriptors list")
         void packageStore_listDescriptors() {
-                given().get("/WorkflowStore/packages/descriptors")
+                given().get("/workflowstore/workflows/descriptors")
                                 .then().assertThat()
                                 .statusCode(200)
                                 .contentType(ContentType.JSON);
@@ -162,8 +162,8 @@ public class ApiContractIT extends BaseIntegrationIT {
                 String behavior = load("agentengine/rules.json");
                 String output = load("agentengine/output.json");
 
-                String locationDictionary = createResource(dictionary, "/regulardictionarystore/regulardictionaries");
-                String locationBehavior = createResource(behavior, "/behaviorstore/behaviorsets");
+                String locationDictionary = createResource(dictionary, "/dictionarystore/dictionaries");
+                String locationBehavior = createResource(behavior, "/rulestore/rulesets");
                 String locationOutput = createResource(output, "/outputstore/outputsets");
 
                 String packageBody = String.format(
@@ -188,10 +188,10 @@ public class ApiContractIT extends BaseIntegrationIT {
                                                 }""",
                                 locationDictionary, locationBehavior, locationOutput);
 
-                String locationWorkflow = createResource(packageBody, "/WorkflowStore/packages");
+                String locationWorkflow = createResource(packageBody, "/workflowstore/workflows");
                 String agentBody = String.format("""
                                 {"packages": ["%s"]}""", locationWorkflow);
-                String agentLocation = createResource(agentBody, "/AgentStore/agents");
+                String agentLocation = createResource(agentBody, "/agentstore/agents");
 
                 ResourceId agentId = extractResourceId(agentLocation);
                 deployAgent(agentId.id(), agentId.version());

@@ -129,7 +129,7 @@ class McpAdminToolsCrudTest {
         when(jsonSerialization.deserialize("{}", BehaviorConfiguration.class)).thenReturn(config);
         when(behaviorStore.updateBehaviorRuleSet(RESOURCE_ID, 1, config))
                 .thenReturn(Response.ok().header("Location",
-                        "/behaviorstore/behaviorsets/" + RESOURCE_ID + "?version=2").build());
+                        "/rulestore/rulesets/" + RESOURCE_ID + "?version=2").build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"updated\"}");
 
         String result = tools.updateResource("behavior", RESOURCE_ID, 1, "{}");
@@ -176,7 +176,7 @@ class McpAdminToolsCrudTest {
         when(jsonSerialization.deserialize("{}", HttpCallsConfiguration.class)).thenReturn(config);
         when(httpCallsStore.createHttpCalls(config))
                 .thenReturn(Response.created(URI.create(
-                        "/httpcallsstore/httpcalls/new-id?version=1")).build());
+                        "/apicallstore/apicalls/new-id?version=1")).build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\",\"resourceId\":\"new-id\"}");
 
         String result = tools.createResource("httpcalls", "{}");
@@ -263,7 +263,7 @@ class McpAdminToolsCrudTest {
         // Set up Agent with 1 package
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(List.of(
-                URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG_ID + "?version=1")));
+                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1")));
         when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
         // Set up package with one extension containing the old URI
@@ -279,10 +279,10 @@ class McpAdminToolsCrudTest {
         // Mock updates
         when(WorkflowStore.updateWorkflow(eq(PKG_ID), eq(1), any()))
                 .thenReturn(Response.ok().header("Location",
-                        "/WorkflowStore/packages/" + PKG_ID + "?version=2").build());
+                        "/workflowstore/workflows/" + PKG_ID + "?version=2").build());
         when(AgentStore.updateAgent(eq(AGENT_ID), eq(1), any()))
                 .thenReturn(Response.ok().header("Location",
-                        "/AgentStore/agents/" + AGENT_ID + "?version=2").build());
+                        "/agentstore/agents/" + AGENT_ID + "?version=2").build());
 
         // Parse mappings JSON
         String mappingsJson = "[{\"oldUri\":\"eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=1\"," +
@@ -305,7 +305,7 @@ class McpAdminToolsCrudTest {
     void applyAgentChanges_noMatchingUris_noUpdates() throws IOException {
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(List.of(
-                URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG_ID + "?version=1")));
+                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1")));
         when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
         var ext = new WorkflowConfiguration.WorkflowStep();
@@ -336,13 +336,13 @@ class McpAdminToolsCrudTest {
     void applyAgentChanges_withRedeploy_success() throws IOException {
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(List.of(
-                URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG_ID + "?version=1")));
+                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1")));
         when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
         var ext = new WorkflowConfiguration.WorkflowStep();
         ext.setType(URI.create("eddi://ai.labs.behavior"));
         var configMap = new HashMap<String, Object>();
-        configMap.put("uri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/b1?version=1");
+        configMap.put("uri", "eddi://ai.labs.behavior/rulestore/rulesets/b1?version=1");
         ext.setConfig(configMap);
         var pkgConfig = new WorkflowConfiguration();
         pkgConfig.setWorkflowSteps(new ArrayList<>(List.of(ext)));
@@ -350,18 +350,18 @@ class McpAdminToolsCrudTest {
 
         when(WorkflowStore.updateWorkflow(eq(PKG_ID), eq(1), any()))
                 .thenReturn(Response.ok().header("Location",
-                        "/WorkflowStore/packages/" + PKG_ID + "?version=2").build());
+                        "/workflowstore/workflows/" + PKG_ID + "?version=2").build());
         when(AgentStore.updateAgent(eq(AGENT_ID), eq(1), any()))
                 .thenReturn(Response.ok().header("Location",
-                        "/AgentStore/agents/" + AGENT_ID + "?version=2").build());
+                        "/agentstore/agents/" + AGENT_ID + "?version=2").build());
         when(agentAdmin.deployAgent(Environment.production, AGENT_ID, 2, true, true))
                 .thenReturn(Response.ok().build());
 
-        String mappingsJson = "[{\"oldUri\":\"eddi://ai.labs.behavior/behaviorstore/behaviorsets/b1?version=1\"," +
-                "\"newUri\":\"eddi://ai.labs.behavior/behaviorstore/behaviorsets/b1?version=2\"}]";
+        String mappingsJson = "[{\"oldUri\":\"eddi://ai.labs.behavior/rulestore/rulesets/b1?version=1\"," +
+                "\"newUri\":\"eddi://ai.labs.behavior/rulestore/rulesets/b1?version=2\"}]";
         List<Map<String, String>> mappings = List.of(Map.of(
-                "oldUri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/b1?version=1",
-                "newUri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/b1?version=2"));
+                "oldUri", "eddi://ai.labs.behavior/rulestore/rulesets/b1?version=1",
+                "newUri", "eddi://ai.labs.behavior/rulestore/rulesets/b1?version=2"));
         when(jsonSerialization.deserialize(mappingsJson, List.class)).thenReturn(mappings);
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"redeployed\":true}");
 
@@ -408,7 +408,7 @@ class McpAdminToolsCrudTest {
         // Set up Agent with 1 package
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(List.of(
-                URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG_ID + "?version=1")));
+                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1")));
         when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
         // Agent descriptor
@@ -422,7 +422,7 @@ class McpAdminToolsCrudTest {
         ext1.setConfig(Map.of("uri", "eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=1"));
         var ext2 = new WorkflowConfiguration.WorkflowStep();
         ext2.setType(URI.create("eddi://ai.labs.behavior"));
-        ext2.setConfig(Map.of("uri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/b1?version=1"));
+        ext2.setConfig(Map.of("uri", "eddi://ai.labs.behavior/rulestore/rulesets/b1?version=1"));
         var pkgConfig = new WorkflowConfiguration();
         pkgConfig.setWorkflowSteps(List.of(ext1, ext2));
         when(WorkflowStore.readWorkflow(PKG_ID, 1)).thenReturn(pkgConfig);
@@ -459,7 +459,7 @@ class McpAdminToolsCrudTest {
     void listAgentResources_packageReadFailure_includesError() throws IOException {
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(List.of(
-                URI.create("eddi://ai.labs.package/WorkflowStore/packages/" + PKG_ID + "?version=1")));
+                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1")));
         when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
         when(WorkflowStore.readWorkflow(PKG_ID, 1))

@@ -210,11 +210,11 @@ public class CreateApiAgentIT {
     Response response = given()
         .contentType(ContentType.JSON)
         .body(HTTPCALLS_USERS)
-        .post("/httpcallsstore/httpcalls");
+        .post("/apicallstore/apicalls");
 
     response.then().assertThat()
         .statusCode(201)
-        .header("location", containsString("/httpcallsstore/httpcalls/"));
+        .header("location", containsString("/apicallstore/apicalls/"));
 
     httpCallsUsersLocation = response.getHeader("location");
   }
@@ -226,11 +226,11 @@ public class CreateApiAgentIT {
     Response response = given()
         .contentType(ContentType.JSON)
         .body(HTTPCALLS_ORDERS)
-        .post("/httpcallsstore/httpcalls");
+        .post("/apicallstore/apicalls");
 
     response.then().assertThat()
         .statusCode(201)
-        .header("location", containsString("/httpcallsstore/httpcalls/"));
+        .header("location", containsString("/apicallstore/apicalls/"));
 
     httpCallsOrdersLocation = response.getHeader("location");
   }
@@ -241,7 +241,7 @@ public class CreateApiAgentIT {
   void readHttpCallsUsers() {
     ResourceId res = extractResourceId(httpCallsUsersLocation);
     given()
-        .get("/httpcallsstore/httpcalls/" + res.id() + "?version=" + res.version())
+        .get("/apicallstore/apicalls/" + res.id() + "?version=" + res.version())
         .then().assertThat()
         .statusCode(200)
         .body("targetServerUrl", equalTo("https://api.example.com/v1"))
@@ -264,7 +264,7 @@ public class CreateApiAgentIT {
     Response response = given()
         .contentType(ContentType.JSON)
         .body(BEHAVIOR_CONFIG)
-        .post("/behaviorstore/behaviorsets");
+        .post("/rulestore/rulesets");
 
     response.then().assertThat().statusCode(201);
     behaviorLocation = response.getHeader("location");
@@ -315,11 +315,11 @@ public class CreateApiAgentIT {
     Response response = given()
         .contentType(ContentType.JSON)
         .body(packageJson)
-        .post("/WorkflowStore/packages");
+        .post("/workflowstore/workflows");
 
     response.then().assertThat()
         .statusCode(201)
-        .header("location", containsString("/WorkflowStore/packages/"));
+        .header("location", containsString("/workflowstore/workflows/"));
 
     packageLocation = response.getHeader("location");
   }
@@ -330,7 +330,7 @@ public class CreateApiAgentIT {
   void readWorkflow() {
     ResourceId res = extractResourceId(packageLocation);
     given()
-        .get("/WorkflowStore/packages/" + res.id() + "?version=" + res.version())
+        .get("/workflowstore/workflows/" + res.id() + "?version=" + res.version())
         .then().assertThat()
         .statusCode(200)
         .body("WorkflowSteps.size()", equalTo(5))
@@ -356,11 +356,11 @@ public class CreateApiAgentIT {
     Response response = given()
         .contentType(ContentType.JSON)
         .body(agentJson)
-        .post("/AgentStore/agents");
+        .post("/agentstore/agents");
 
     response.then().assertThat()
         .statusCode(201)
-        .header("location", containsString("/AgentStore/agents/"));
+        .header("location", containsString("/agentstore/agents/"));
 
     ResourceId res = extractResourceId(response.getHeader("location"));
     agentId = res.id();

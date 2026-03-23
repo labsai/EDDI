@@ -18,7 +18,7 @@ import static org.hamcrest.Matchers.equalTo;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 public class DictionaryCrudIT extends BaseIntegrationIT {
 
-    private static final String ROOT_PATH = "/regulardictionarystore/regulardictionaries/";
+    private static final String ROOT_PATH = "/dictionarystore/dictionaries/";
     private static final String RESOURCE_URI = "eddi://ai.labs.regulardictionary" + ROOT_PATH;
 
     private static String TEST_JSON;

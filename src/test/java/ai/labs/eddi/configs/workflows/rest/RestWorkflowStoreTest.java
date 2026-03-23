@@ -75,13 +75,13 @@ class RestWorkflowStoreTest {
                         WorkflowStep behaviorExt = new WorkflowStep();
                         behaviorExt.setType(URI.create("eddi://ai.labs.behavior"));
                         behaviorExt.setConfig(new HashMap<>(Map.of(
-                                        "uri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/beh1?version=1")));
+                                        "uri", "eddi://ai.labs.behavior/rulestore/rulesets/beh1?version=1")));
                         config.getWorkflowSteps().add(behaviorExt);
 
                         WorkflowStep httpExt = new WorkflowStep();
                         httpExt.setType(URI.create("eddi://ai.labs.httpcalls"));
                         httpExt.setConfig(new HashMap<>(Map.of(
-                                        "uri", "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/http1?version=3")));
+                                        "uri", "eddi://ai.labs.httpcalls/apicallstore/apicalls/http1?version=3")));
                         config.getWorkflowSteps().add(httpExt);
 
                         WorkflowStep outputExt = new WorkflowStep();
@@ -97,10 +97,10 @@ class RestWorkflowStoreTest {
                         restWorkflowStore.deleteWorkflow("pkg1", 1, true, true);
 
                         verify(resourceClientLibrary).deleteResource(
-                                        URI.create("eddi://ai.labs.behavior/behaviorstore/behaviorsets/beh1?version=1"),
+                                        URI.create("eddi://ai.labs.behavior/rulestore/rulesets/beh1?version=1"),
                                         true);
                         verify(resourceClientLibrary).deleteResource(
-                                        URI.create("eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/http1?version=3"),
+                                        URI.create("eddi://ai.labs.httpcalls/apicallstore/apicalls/http1?version=3"),
                                         true);
                         verify(resourceClientLibrary).deleteResource(
                                         URI.create("eddi://ai.labs.output/outputstore/outputsets/out1?version=1"),
@@ -121,7 +121,7 @@ class RestWorkflowStoreTest {
                         dictEntry.put("type", "eddi://ai.labs.parser.dictionaries.regular");
                         dictEntry.put("config", new HashMap<>(Map.of(
                                         "uri",
-                                        "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/dict1?version=1")));
+                                        "eddi://ai.labs.regulardictionary/dictionarystore/dictionaries/dict1?version=1")));
 
                         List<Map<String, Object>> dictionaries = new ArrayList<>();
                         dictionaries.add(dictEntry);
@@ -136,7 +136,7 @@ class RestWorkflowStoreTest {
                         restWorkflowStore.deleteWorkflow("pkg1", 1, true, true);
 
                         verify(resourceClientLibrary).deleteResource(
-                                        URI.create("eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/dict1?version=1"),
+                                        URI.create("eddi://ai.labs.regulardictionary/dictionarystore/dictionaries/dict1?version=1"),
                                         true);
                 }
 
@@ -150,7 +150,7 @@ class RestWorkflowStoreTest {
                         sharedExt.setType(URI.create("eddi://ai.labs.behavior"));
                         sharedExt.setConfig(new HashMap<>(Map.of(
                                         "uri",
-                                        "eddi://ai.labs.behavior/behaviorstore/behaviorsets/shared1?version=1")));
+                                        "eddi://ai.labs.behavior/rulestore/rulesets/shared1?version=1")));
                         config.getWorkflowSteps().add(sharedExt);
 
                         // Output extension — only in this package → should be deleted
@@ -163,7 +163,7 @@ class RestWorkflowStoreTest {
                         when(WorkflowStore.read("pkg1", 1)).thenReturn(config);
 
                         // Shared resource referenced by 2 packages
-                        String sharedUri = "eddi://ai.labs.behavior/behaviorstore/behaviorsets/shared1?version=1";
+                        String sharedUri = "eddi://ai.labs.behavior/rulestore/rulesets/shared1?version=1";
                         when(WorkflowStore.getWorkflowDescriptorsContainingResource(eq(sharedUri), eq(false)))
                                         .thenReturn(List.of(new DocumentDescriptor(), new DocumentDescriptor()));
 
@@ -194,7 +194,7 @@ class RestWorkflowStoreTest {
                         WorkflowStep ext1 = new WorkflowStep();
                         ext1.setType(URI.create("eddi://ai.labs.behavior"));
                         ext1.setConfig(new HashMap<>(Map.of(
-                                        "uri", "eddi://ai.labs.behavior/behaviorstore/behaviorsets/beh1?version=1")));
+                                        "uri", "eddi://ai.labs.behavior/rulestore/rulesets/beh1?version=1")));
                         config.getWorkflowSteps().add(ext1);
 
                         WorkflowStep ext2 = new WorkflowStep();
@@ -205,7 +205,7 @@ class RestWorkflowStoreTest {
 
                         when(WorkflowStore.read("pkg1", 1)).thenReturn(config);
                         when(resourceClientLibrary.deleteResource(
-                                        URI.create("eddi://ai.labs.behavior/behaviorstore/behaviorsets/beh1?version=1"),
+                                        URI.create("eddi://ai.labs.behavior/rulestore/rulesets/beh1?version=1"),
                                         true))
                                         .thenThrow(new ServiceException("DB error"));
                         when(resourceClientLibrary.deleteResource(

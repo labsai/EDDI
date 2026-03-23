@@ -25,7 +25,7 @@ class PostgresApiContractIT extends ApiContractIT {
     @Override
     @DisplayName("GET non-existent resource should return 404")
     protected void readNonExistent_returns404() {
-        given().get("/behaviorstore/behaviorsets/00000000-0000-0000-0000-000000000000?version=1")
+        given().get("/rulestore/rulesets/00000000-0000-0000-0000-000000000000?version=1")
                 .then().assertThat()
                 .statusCode(404);
     }

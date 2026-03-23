@@ -242,21 +242,21 @@ class AgentFactoryTest {
         @Test
         @DisplayName("agents deployed in different environments should not interfere")
         void environments_isolated() throws Exception {
-            Agent unrestrictedAgent = createReadyAgent("agent1", 1);
-            Agent restrictedAgent = createReadyAgent("agent1", 1);
+            Agent productionAgent = createReadyAgent("agent1", 1);
+            Agent testAgent = createReadyAgent("agent1", 1);
             when(agentStoreClientLibrary.getAgent("agent1", 1))
-                    .thenReturn(unrestrictedAgent)
-                    .thenReturn(restrictedAgent);
+                    .thenReturn(productionAgent)
+                    .thenReturn(testAgent);
 
             AgentFactory.deployAgent(production, "agent1", 1, null);
-            AgentFactory.deployAgent(Deployment.Environment.production, "agent1", 1, null);
+            AgentFactory.deployAgent(Deployment.Environment.test, "agent1", 1, null);
 
             assertNotNull(AgentFactory.getAgent(production, "agent1", 1));
-            assertNotNull(AgentFactory.getAgent(Deployment.Environment.production, "agent1", 1));
+            assertNotNull(AgentFactory.getAgent(Deployment.Environment.test, "agent1", 1));
 
             AgentFactory.undeployAgent(production, "agent1", 1);
             assertNull(AgentFactory.getAgent(production, "agent1", 1));
-            assertNotNull(AgentFactory.getAgent(Deployment.Environment.production, "agent1", 1));
+            assertNotNull(AgentFactory.getAgent(Deployment.Environment.test, "agent1", 1));
         }
     }
 
