@@ -210,7 +210,7 @@ public class McpAdminTools {
             @ToolArg(description = "Agent name (required)") String name,
             @ToolArg(description = "Agent description (optional)") String description,
             @ToolArg(description = "Comma-separated list of package URIs to include (optional, " +
-                    "format: eddi://ai.labs.package/WorkflowStore/packages/ID?version=1)") String workflowUris) {
+                    "format: eddi://ai.labs.workflow/workflowstore/workflows/ID?version=1)") String workflowUris) {
         if (name == null || name.isBlank())
             return errorJson("Agent name is required");
         try {
@@ -227,7 +227,7 @@ public class McpAdminTools {
             String location = response.getHeaderString("Location");
 
             // Extract Agent ID from location header (format:
-            // /AgentStore/agents/{id}?version=1)
+            // /agentstore/agents/{id}?version=1)
             String agentId = extractIdFromLocation(location);
 
             // Update descriptor with name and description

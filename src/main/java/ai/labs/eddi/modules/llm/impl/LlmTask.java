@@ -50,7 +50,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  */
 @ApplicationScoped
 public class LlmTask implements ILifecycleTask {
-    public static final String ID = "ai.labs.langchain";
+    public static final String ID = "ai.labs.llm";
 
     private static final String KEY_URI = "uri";
     private static final String KEY_LANGCHAIN = "langchain";

@@ -25,8 +25,6 @@ public class RestLlmStore implements IRestLlmStore {
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<LlmConfiguration> restVersionInfo;
 
-
-
     @Inject
     public RestLlmStore(ILlmStore httpCallsStore,
             IDocumentDescriptorStore documentDescriptorStore,
@@ -47,7 +45,7 @@ public class RestLlmStore implements IRestLlmStore {
 
     @Override
     public List<DocumentDescriptor> readLlmDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.langchain", filter, index, limit);
+        return restVersionInfo.readDescriptors("ai.labs.llm", filter, index, limit);
     }
 
     @Override

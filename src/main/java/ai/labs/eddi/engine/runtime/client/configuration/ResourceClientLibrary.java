@@ -39,12 +39,12 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
 
     @Inject
     public ResourceClientLibrary(IRestParserStore restParserStore,
-                                 IRestRegularDictionaryStore restRegularDictionaryStore,
-                                 IRestBehaviorStore restBehaviorStore,
-                                 IRestHttpCallsStore restHttpCallsStore,
-                                 IRestLlmStore restLlmStore,
-                                 IRestOutputStore restOutputStore,
-                                 IRestPropertySetterStore restPropertySetterStore) {
+            IRestRegularDictionaryStore restRegularDictionaryStore,
+            IRestBehaviorStore restBehaviorStore,
+            IRestHttpCallsStore restHttpCallsStore,
+            IRestLlmStore restLlmStore,
+            IRestOutputStore restOutputStore,
+            IRestPropertySetterStore restPropertySetterStore) {
         this.restParserStore = restParserStore;
         this.restRegularDictionaryStore = restRegularDictionaryStore;
         this.restBehaviorStore = restBehaviorStore;
@@ -127,7 +127,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             }
         });
 
-        restInterfaces.put("ai.labs.langchain", new IResourceService() {
+        restInterfaces.put("ai.labs.llm", new IResourceService() {
             @Override
             public Object read(String id, Integer version) {
                 return restLlmStore.readLlm(id, version);

@@ -354,7 +354,7 @@ public enum Environment {
 | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | `eddi://ai.labs.agent/agentstore/agents/{id}?version=V`                                      | `eddi://ai.labs.agent/agentstore/agents/{id}?version=V`                 |
 | `eddi://ai.labs.package/packagestore/packages/{id}?version=V`                                | `eddi://ai.labs.workflow/workflowstore/workflows/{id}?version=V`        |
-| `eddi://ai.labs.langchain/langchainstore/langchains/{id}?version=V`                          | `eddi://ai.labs.llm/llmstore/llmconfigs/{id}?version=V`                 |
+| `eddi://ai.labs.llm/langchainstore/langchains/{id}?version=V`                                | `eddi://ai.labs.llm/llmstore/llmconfigs/{id}?version=V`                 |
 | `eddi://ai.labs.behavior/behaviorstore/behaviorsets/{id}?version=V`                          | `eddi://ai.labs.rules/rulestore/rulesets/{id}?version=V`                |
 | `eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/{id}?version=V`                           | `eddi://ai.labs.apicalls/apicallstore/apicalls/{id}?version=V`          |
 | `eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/{id}?version=V` | `eddi://ai.labs.dictionary/dictionarystore/dictionaries/{id}?version=V` |
@@ -435,8 +435,8 @@ All MCP tools are in `engine/mcp/` (3 files: `McpSetupTools.java`, `McpConversat
 | `create_agent`          | `create_agent`         | `McpAdminTools.java`        |
 | `delete_agent`          | `delete_agent`         | `McpAdminTools.java`        |
 | `update_agent`          | `update_agent`         | `McpAdminTools.java`        |
-| `list_workflows`         | `list_workflows`       | `McpAdminTools.java`        |
-| `read_workflow`          | `read_workflow`        | `McpAdminTools.java`        |
+| `list_workflows`        | `list_workflows`       | `McpAdminTools.java`        |
+| `read_workflow`         | `read_workflow`        | `McpAdminTools.java`        |
 | `apply_agent_changes`   | `apply_agent_changes`  | `McpAdminTools.java`        |
 | `list_agent_resources`  | `list_agent_resources` | `McpAdminTools.java`        |
 | `list_agent_triggers`   | `list_agent_triggers`  | `McpAdminTools.java`        |
@@ -535,7 +535,7 @@ private void startV6RenameMigration() {
 Map<String, String> URI_PREFIX_MAP = Map.of(
     "eddi://ai.labs.agent/agentstore/agents/", "eddi://ai.labs.agent/agentstore/agents/",
     "eddi://ai.labs.package/packagestore/packages/", "eddi://ai.labs.workflow/workflowstore/workflows/",
-    "eddi://ai.labs.langchain/langchainstore/langchains/", "eddi://ai.labs.llm/llmstore/llmconfigs/",
+    "eddi://ai.labs.llm/langchainstore/langchains/", "eddi://ai.labs.llm/llmstore/llmconfigs/",
     "eddi://ai.labs.behavior/behaviorstore/behaviorsets/", "eddi://ai.labs.rules/rulestore/rulesets/",
     "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/", "eddi://ai.labs.apicalls/apicallstore/apicalls/",
     "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/", "eddi://ai.labs.dictionary/dictionarystore/dictionaries/",

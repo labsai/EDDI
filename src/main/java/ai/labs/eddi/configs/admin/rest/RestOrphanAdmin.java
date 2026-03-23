@@ -55,7 +55,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
             { "ai.labs.behavior", "Behavior Set" },
             { "ai.labs.httpcalls", "HTTP Calls" },
             { "ai.labs.output", "Output Set" },
-            { "ai.labs.langchain", "LangChain" },
+            { "ai.labs.llm", "LangChain" },
             { "ai.labs.property", "Property Setter" },
             { "ai.labs.regulardictionary", "Regular Dictionary" },
             { "ai.labs.parser", "Parser" },

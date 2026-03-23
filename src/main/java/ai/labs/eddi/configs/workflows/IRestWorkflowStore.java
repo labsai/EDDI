@@ -19,10 +19,10 @@ import java.util.List;
  */
 // @Api(value = "Configurations -> (3) Workflows", authorizations =
 // {@Authorization(value = "eddi_auth")})
-@Path("/WorkflowStore/packages")
-@Tag(name = "06. Workflows", description = "packages for agents")
+@Path("/workflowstore/workflows")
+@Tag(name = "06. Workflows", description = "workflow pipelines for agents")
 public interface IRestWorkflowStore extends IRestVersionInfo {
-        String resourceURI = "eddi://ai.labs.package/WorkflowStore/packages/";
+        String resourceURI = "eddi://ai.labs.workflow/workflowstore/workflows/";
 
         @GET
         @Path("/jsonSchema")

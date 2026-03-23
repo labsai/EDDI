@@ -292,9 +292,9 @@ Add this extension to your package:
 
 ```json
 {
-  "type": "eddi://ai.labs.langchain",
+  "type": "eddi://ai.labs.llm",
   "extensions": {
-    "uri": "eddi://ai.labs.langchain/langchainstore/langchains/langchain-id?version=1"
+    "uri": "eddi://ai.labs.llm/langchainstore/langchains/langchain-id?version=1"
   }
 }
 ```

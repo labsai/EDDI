@@ -271,7 +271,7 @@ Another HTTP call creates a package:
   "request": {
     "method": "POST",
     "path": "/packagestore/packages",
-    "body": "{\"packageExtensions\": [{\"type\": \"eddi://ai.labs.langchain\", \"extensions\": {\"uri\": \"[[${memory.current.httpCalls.langchainConfigUri}]]\"}}]}"
+    "body": "{\"packageExtensions\": [{\"type\": \"eddi://ai.labs.llm\", \"extensions\": {\"uri\": \"[[${memory.current.httpCalls.langchainConfigUri}]]\"}}]}"
   },
   "postResponse": {
     "propertyInstructions": [

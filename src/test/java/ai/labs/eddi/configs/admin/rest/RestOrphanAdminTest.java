@@ -67,7 +67,7 @@ class RestOrphanAdminTest {
                         case "ai.labs.behavior" -> "behaviorstore/behaviorsets";
                         case "ai.labs.httpcalls" -> "httpcallsstore/httpcalls";
                         case "ai.labs.output" -> "outputstore/outputsets";
-                        case "ai.labs.langchain" -> "langchainstore/langchains";
+                        case "ai.labs.llm" -> "langchainstore/langchains";
                         case "ai.labs.property" -> "propertysetterstore/propertysetters";
                         case "ai.labs.regulardictionary" -> "regulardictionarystore/regulardictionaries";
                         case "ai.labs.parser" -> "parserstore/parsers";
@@ -227,7 +227,7 @@ class RestOrphanAdminTest {
 
                         // All other stores empty
                         for (String type : List.of("ai.labs.behavior", "ai.labs.httpcalls", "ai.labs.output",
-                                        "ai.labs.langchain", "ai.labs.property", "ai.labs.regulardictionary",
+                                        "ai.labs.llm", "ai.labs.property", "ai.labs.regulardictionary",
                                         "ai.labs.parser")) {
                                 when(documentDescriptorStore.readDescriptors(eq(type), eq(""), anyInt(), anyInt(),
                                                 eq(true)))
@@ -251,7 +251,7 @@ class RestOrphanAdminTest {
          */
         private void setupStoreReturns(Map<String, List<DocumentDescriptor>> storeDescriptors) throws Exception {
                 for (String type : List.of("ai.labs.package", "ai.labs.behavior", "ai.labs.httpcalls",
-                                "ai.labs.output", "ai.labs.langchain", "ai.labs.property",
+                                "ai.labs.output", "ai.labs.llm", "ai.labs.property",
                                 "ai.labs.regulardictionary", "ai.labs.parser")) {
                         List<DocumentDescriptor> descs = storeDescriptors.getOrDefault(type, Collections.emptyList());
                         // First call returns the descriptors, subsequent calls return empty (pagination

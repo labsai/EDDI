@@ -47,7 +47,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.MockitoAnnotations.openMocks;
 
-@SuppressWarnings({"rawtypes", "unchecked"})
+@SuppressWarnings({ "rawtypes", "unchecked" })
 class LlmTaskTest {
         @Mock
         private IResourceClientLibrary resourceClientLibrary;
@@ -124,7 +124,8 @@ class LlmTaskTest {
                                                                 "addToOutput", "true"),
                                                 List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0)),
                                                 4, // times for templatingEngine.processTemplate
-                                                2, // times for currentStep.storeData (audit writes guarded by collector)
+                                                2, // times for currentStep.storeData (audit writes guarded by
+                                                   // collector)
                                                 1 // times for currentStep.addConversationOutputList
                                 ),
                                 Arguments.of(
@@ -134,7 +135,8 @@ class LlmTaskTest {
                                                                 "apiKey", "<apiKey1>"),
                                                 List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0)),
                                                 3, // times for templatingEngine.processTemplate
-                                                1, // times for currentStep.storeData (audit writes guarded by collector)
+                                                1, // times for currentStep.storeData (audit writes guarded by
+                                                   // collector)
                                                 0 // times for currentStep.addConversationOutputList
                                 )
                 // Add more test cases as needed
@@ -606,7 +608,7 @@ class LlmTaskTest {
                 @Test
                 @DisplayName("getId should return correct identifier")
                 void testGetId() {
-                        assertEquals("ai.labs.langchain", langChainTask.getId());
+                        assertEquals("ai.labs.llm", langChainTask.getId());
                 }
 
                 @Test
@@ -708,6 +710,7 @@ class LlmTaskTest {
                         verify(currentStep, atLeastOnce()).storeData(any(IData.class));
                 }
         }
+
         @Nested
         @DisplayName("Audit Memory Key Tests")
         class AuditMemoryKeyTests {
@@ -721,7 +724,8 @@ class LlmTaskTest {
                         when(memory.getCurrentStep()).thenReturn(currentStep);
 
                         // Set audit collector — this enables audit writes
-                        when(memory.getAuditCollector()).thenReturn(entry -> {});
+                        when(memory.getAuditCollector()).thenReturn(entry -> {
+                        });
 
                         var conversationOutput = new ConversationOutput();
                         conversationOutput.put("input", "hi");
@@ -748,7 +752,8 @@ class LlmTaskTest {
 
                         langChainTask.execute(memory, llmConfig);
 
-                        // Verify audit keys are written: langchain data (1) + compiled_prompt + model_response + model_name (3) = 4
+                        // Verify audit keys are written: langchain data (1) + compiled_prompt +
+                        // model_response + model_name (3) = 4
                         verify(currentStep, times(4)).storeData(any(IData.class));
 
                         // Verify the data factory was called with audit key names

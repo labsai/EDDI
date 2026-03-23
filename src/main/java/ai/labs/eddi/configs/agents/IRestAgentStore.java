@@ -19,10 +19,10 @@ import java.util.List;
  */
 // @Api(value = "Configurations -> (4) Agents", authorizations =
 // {@Authorization(value = "eddi_auth")})
-@Path("/AgentStore/agents")
+@Path("/agentstore/agents")
 @Tag(name = "07. Agents", description = "agent configuration")
 public interface IRestAgentStore extends IRestVersionInfo {
-        String resourceURI = "eddi://ai.labs.agent/AgentStore/agents/";
+        String resourceURI = "eddi://ai.labs.agent/agentstore/agents/";
 
         @GET
         @Path("/jsonSchema")
@@ -48,7 +48,7 @@ public interface IRestAgentStore extends IRestVersionInfo {
                         @QueryParam("filter") @DefaultValue("") String filter,
                         @QueryParam("index") @DefaultValue("0") Integer index,
                         @QueryParam("limit") @DefaultValue("20") Integer limit,
-                        @Parameter(name = "body", example = "eddi://ai.labs.package/WorkflowStore/packages/ID?version=VERSION") @DefaultValue("") String containingWorkflowUri,
+                        @Parameter(name = "body", example = "eddi://ai.labs.workflow/workflowstore/workflows/ID?version=VERSION") @DefaultValue("") String containingWorkflowUri,
                         @QueryParam("includePreviousVersions") @DefaultValue("false") Boolean includePreviousVersions);
 
         @GET

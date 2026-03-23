@@ -14,7 +14,7 @@ Agent (.agent.json)
       └─ Extension 3: Output Sets (eddi://ai.labs.output)
   └─ Workflow 2 (.package.json)
       ├─ Extension 1: Dictionary (eddi://ai.labs.parser.dictionaries.regular)
-      └─ Extension 2: LangChain (eddi://ai.labs.langchain)
+      └─ Extension 2: LangChain (eddi://ai.labs.llm)
 ```
 
 ### What Extensions Do
@@ -27,7 +27,7 @@ Each extension type corresponds to a **lifecycle task** or **resource** that the
 | `ai.labs.parser.dictionaries.*` | Define vocabularies and entities | Used by parser to recognize intents and entities      |
 | `ai.labs.behavior`              | Define IF-THEN rules             | Decides what actions to take based on conditions      |
 | `ai.labs.httpcalls`             | Configure external API calls     | Executes HTTP requests to external services           |
-| `ai.labs.langchain`             | Configure LLM integrations       | Sends requests to LLM APIs (OpenAI, Claude, etc.)     |
+| `ai.labs.llm`                   | Configure LLM integrations       | Sends requests to LLM APIs (OpenAI, Claude, etc.)     |
 | `ai.labs.output`                | Define output templates          | Formats responses using conversation data             |
 | `ai.labs.property`              | Extract and store data           | Manages conversation memory properties                |
 

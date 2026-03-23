@@ -19,10 +19,10 @@ import java.util.List;
  */
 // @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (1)
 // Regular Dictionary", authorizations = {@Authorization(value = "eddi_auth")})
-@Path("/regulardictionarystore/regulardictionaries")
-@Tag(name = "01. Regular Dictionary", description = "lifecycle extension for LLM configurations")
+@Path("/dictionarystore/dictionaries")
+@Tag(name = "01. Dictionary", description = "lifecycle extension for regular dictionary parsing")
 public interface IRestRegularDictionaryStore extends IRestVersionInfo {
-    String resourceURI = "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/";
+    String resourceURI = "eddi://ai.labs.regulardictionary/dictionarystore/dictionaries/";
 
     @GET
     @Path("/jsonSchema")

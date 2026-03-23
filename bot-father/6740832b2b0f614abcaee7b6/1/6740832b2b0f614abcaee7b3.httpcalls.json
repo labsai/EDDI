@@ -224,7 +224,7 @@
       "queryParams" : { },
       "method" : "post",
       "contentType" : "application/json",
-      "body" : "{\"packageExtensions\":[{\"type\":\"eddi://ai.labs.parser\"},{\"type\":\"eddi://ai.labs.behavior\",\"config\":{\"uri\":\"[[${properties.behaviorSetLocation}]]\"}},{\"type\":\"eddi://ai.labs.langchain\",\"config\":{\"uri\":\"[[${properties.langChainLocation}]]\"}},{\"type\":\"eddi://ai.labs.output\",\"config\":{\"uri\":\"[[${properties.outputSetLocation}]]\"}}]}"
+      "body" : "{\"packageExtensions\":[{\"type\":\"eddi://ai.labs.parser\"},{\"type\":\"eddi://ai.labs.behavior\",\"config\":{\"uri\":\"[[${properties.behaviorSetLocation}]]\"}},{\"type\":\"eddi://ai.labs.llm\",\"config\":{\"uri\":\"[[${properties.langChainLocation}]]\"}},{\"type\":\"eddi://ai.labs.output\",\"config\":{\"uri\":\"[[${properties.outputSetLocation}]]\"}}]}"
     },
     "postResponse" : {
       "propertyInstructions" : [ {
