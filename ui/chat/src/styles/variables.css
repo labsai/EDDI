@@ -15,23 +15,23 @@
   --chat-text-accent: #cba135;
 
   /* Accent / brand */
-  --chat-accent: #113B92;
+  --chat-accent: #113b92;
   --chat-accent-hover: #1a50b5;
   --chat-accent-soft: rgba(17, 59, 146, 0.15);
 
-  /* Bot bubbles */
-  --chat-bot-bg: #1e1e1e;
-  --chat-bot-border: #2a2a2a;
-  --chat-bot-text: #f1f1f1;
+  /* Agent bubbles */
+  --chat-agent-bg: #1e1e1e;
+  --chat-agent-border: #2a2a2a;
+  --chat-agent-text: #f1f1f1;
 
   /* User bubbles */
-  --chat-user-bg: #113B92;
+  --chat-user-bg: #113b92;
   --chat-user-text: #ffffff;
 
   /* Input */
   --chat-input-bg: #1a1a1a;
   --chat-input-border: #333;
-  --chat-input-focus: #113B92;
+  --chat-input-focus: #113b92;
   --chat-input-text: #f1f1f1;
   --chat-input-placeholder: #666;
 
@@ -45,7 +45,7 @@
   --chat-border: #222;
   --chat-radius: 16px;
   --chat-radius-sm: 8px;
-  --chat-font: 'Noto Sans', system-ui, -apple-system, sans-serif;
+  --chat-font: "Noto Sans", system-ui, -apple-system, sans-serif;
   --chat-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
   --chat-scrollbar-thumb: #444;
   --chat-scrollbar-track: transparent;
@@ -60,26 +60,26 @@
   --chat-text-muted: #666;
   --chat-text-accent: #8b6914;
 
-  --chat-accent: #113B92;
+  --chat-accent: #113b92;
   --chat-accent-hover: #0d2d6b;
   --chat-accent-soft: rgba(17, 59, 146, 0.08);
 
-  --chat-bot-bg: #ffffff;
-  --chat-bot-border: #e0e0e0;
-  --chat-bot-text: #1a1a1a;
+  --chat-agent-bg: #ffffff;
+  --chat-agent-border: #e0e0e0;
+  --chat-agent-text: #1a1a1a;
 
-  --chat-user-bg: #113B92;
+  --chat-user-bg: #113b92;
   --chat-user-text: #ffffff;
 
   --chat-input-bg: #ffffff;
   --chat-input-border: #d0d0d0;
-  --chat-input-focus: #113B92;
+  --chat-input-focus: #113b92;
   --chat-input-text: #1a1a1a;
   --chat-input-placeholder: #999;
 
   --chat-qr-bg: rgba(17, 59, 146, 0.06);
   --chat-qr-border: rgba(17, 59, 146, 0.25);
-  --chat-qr-text: #113B92;
+  --chat-qr-text: #113b92;
   --chat-qr-hover: rgba(17, 59, 146, 0.14);
 
   --chat-border: #e0e0e0;

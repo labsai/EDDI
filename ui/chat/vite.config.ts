@@ -26,11 +26,11 @@ export default defineConfig({
   server: {
     port: 5174,
     proxy: {
-      "/bots": {
+      "/agents": {
         target: "http://localhost:7070",
         changeOrigin: true,
       },
-      "/managedbots": {
+      "/managedagents": {
         target: "http://localhost:7070",
         changeOrigin: true,
       },

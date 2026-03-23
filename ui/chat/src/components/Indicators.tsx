@@ -1,16 +1,16 @@
 /* ──────────────────────────────────────────────
-   TypingIndicator — Bouncing dots (bot is typing)
-   ThinkingIndicator — Pulsing brain (bot is thinking)
+   TypingIndicator — Bouncing dots (agent is typing)
+   ThinkingIndicator — Pulsing brain (agent is thinking)
    ────────────────────────────────────────────── */
 
-/** Three bouncing dots shown while the bot is composing a response. */
+/** Three bouncing dots shown while the agent is composing a response. */
 export function TypingIndicator() {
   return (
     <div className="indicator" data-testid="typing-indicator">
       <div className="message__avatar" style={{
         background: "var(--chat-surface-raised)",
         color: "var(--chat-text-accent)",
-        border: "1px solid var(--chat-bot-border)",
+        border: "1px solid var(--chat-agent-border)",
         width: 32,
         height: 32,
         borderRadius: "50%",
@@ -34,14 +34,14 @@ export function TypingIndicator() {
   );
 }
 
-/** Shown when the bot is in a thinking/reasoning phase (e.g. tool calls, RAG). */
+/** Shown when the agent is in a thinking/reasoning phase (e.g. tool calls, RAG). */
 export function ThinkingIndicator() {
   return (
     <div className="indicator" data-testid="thinking-indicator">
       <div className="message__avatar" style={{
         background: "var(--chat-surface-raised)",
         color: "var(--chat-text-accent)",
-        border: "1px solid var(--chat-bot-border)",
+        border: "1px solid var(--chat-agent-border)",
         width: 32,
         height: 32,
         borderRadius: "50%",

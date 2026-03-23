@@ -1,11 +1,11 @@
 # EDDI Chat UI
 
-A standalone, configurable chat widget for [EDDI](https://github.com/labsai/EDDI) conversational AI bots. Built with React 19, TypeScript, and Vite.
+A standalone, configurable chat widget for [EDDI](https://github.com/labsai/EDDI) conversational AI agents. Built with React 19, TypeScript, and Vite.
 
 ## Features
 
 - 💬 **Rich markdown** — Tables, code blocks, bold/italic, links, lists
-- 🌊 **SSE streaming** — Real-time token-by-token bot responses with thinking indicator
+- 🌊 **SSE streaming** — Real-time token-by-token agent responses with thinking indicator
 - 🎨 **Dark/Light themes** — Toggle via UI or query parameters
 - ⚡ **Quick replies** — Pill buttons for suggested responses
 - ↩↪ **Undo/Redo** — Step through conversation history
@@ -22,11 +22,11 @@ npm run dev        # http://localhost:5174
 
 ### URL Patterns
 
-| URL                                 | Description               |
-| ----------------------------------- | ------------------------- |
-| `/chat/:environment/:botId`         | Connect to a specific bot |
-| `/chat/demo/showcase`               | Demo mode with mock data  |
-| `/chat/managedbots/:intent/:userId` | Managed bot mode          |
+| URL                                   | Description                 |
+| ------------------------------------- | --------------------------- |
+| `/chat/:environment/:agentId`         | Connect to a specific agent |
+| `/chat/demo/showcase`                 | Demo mode with mock data    |
+| `/chat/managedagents/:intent/:userId` | Managed agent mode          |
 
 ### Query Parameters
 
@@ -38,7 +38,7 @@ npm run dev        # http://localhost:5174
 | `hideLogo`            | `?hideLogo=true`            | Show text title instead of logo    |
 | `hideQuickReplies`    | `?hideQuickReplies=true`    | Hide quick reply buttons           |
 | `theme`               | `?theme=light`              | Set initial theme (`dark`/`light`) |
-| `title`               | `?title=My%20Bot`           | Override header title              |
+| `title`               | `?title=My%20Agent`         | Override header title              |
 
 ## Development
 
@@ -63,7 +63,7 @@ src/
 │   ├── ChatInput.tsx     # Auto-grow textarea + send
 │   ├── QuickReplies.tsx  # Suggested reply pills
 │   ├── Indicators.tsx    # Typing + Thinking indicators
-│   └── ScrollToBottom.tsx
+│   └── ScrollToAgenttom.tsx
 ├── hooks/
 │   └── useTheme.ts       # Theme management
 ├── store/
@@ -80,7 +80,7 @@ The chat UI can be embedded in any HTML page via iframe:
 
 ```html
 <iframe
-  src="https://your-eddi-server/chat/unrestricted/your-bot-id?hideNewConversation=true&theme=dark"
+  src="https://your-eddi-server/chat/unrestricted/your-agent-id?hideNewConversation=true&theme=dark"
   style="width: 400px; height: 600px; border: none; border-radius: 12px;"
 ></iframe>
 ```

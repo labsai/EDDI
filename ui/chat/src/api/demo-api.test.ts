@@ -7,7 +7,7 @@ describe("demo-api", () => {
       const result = await demoStartConversation();
       expect(result.conversationId).toBeTruthy();
       expect(result.welcomeMessage).toBeDefined();
-      expect(result.welcomeMessage.role).toBe("bot");
+      expect(result.welcomeMessage.role).toBe("agent");
       expect(result.welcomeMessage.content).toBeTruthy();
       expect(result.quickReplies).toBeDefined();
       expect(result.quickReplies.length).toBeGreaterThan(0);

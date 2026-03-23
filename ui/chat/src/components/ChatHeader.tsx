@@ -1,5 +1,5 @@
 /* ──────────────────────────────────────────────
-   ChatHeader — Branding (logo/title/bot name) +
+   ChatHeader — Branding (logo/title/agent name) +
    theme toggle. Undo/redo/restart moved to input area.
    ────────────────────────────────────────────── */
 
@@ -7,7 +7,7 @@ import { useChatState } from "@/store/chat-store";
 import { useTheme, type ThemeMode } from "@/hooks/useTheme";
 
 export function ChatHeader() {
-  const { config, botName } = useChatState();
+  const { config, agentName } = useChatState();
   const { setTheme } = useTheme(config.theme ?? "dark");
 
   const cycleTheme = () => {
@@ -18,7 +18,7 @@ export function ChatHeader() {
 
   // Determine what to show in the branding area
   const showLogo = config.showLogo !== false;
-  const showBotName = config.showBotName !== false && !!botName;
+  const showAgentName = config.showAgentName !== false && !!agentName;
 
   return (
     <header className="chat-header">
@@ -30,8 +30,8 @@ export function ChatHeader() {
             alt={config.title ?? "EDDI"}
           />
         )}
-        {showBotName && (
-          <span className="chat-header__bot-name">{botName}</span>
+        {showAgentName && (
+          <span className="chat-header__agent-name">{agentName}</span>
         )}
       </div>
 

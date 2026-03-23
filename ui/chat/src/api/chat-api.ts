@@ -28,12 +28,12 @@ function buildUrl(path: string): string {
  */
 export async function startConversation(
   environment: string,
-  botId: string,
+  agentId: string,
   userId?: string,
 ): Promise<string> {
   const params = userId ? `?userId=${encodeURIComponent(userId)}` : "";
   const res = await fetch(
-    buildUrl(`/bots/${environment}/${botId}${params}`),
+    buildUrl(`/agents/${environment}/${agentId}${params}`),
     { method: "POST" },
   );
   if (!res.ok) throw new Error(`Failed to start conversation: ${res.statusText}`);
@@ -49,7 +49,7 @@ export async function startConversation(
  */
 export async function readConversation(
   environment: string,
-  botId: string,
+  agentId: string,
   conversationId: string,
   currentStepOnly = false,
 ): Promise<ConversationSnapshot> {
@@ -58,20 +58,20 @@ export async function readConversation(
     returnCurrentStepOnly: String(currentStepOnly),
   });
   const res = await fetch(
-    buildUrl(`/bots/${environment}/${botId}/${conversationId}?${params}`),
+    buildUrl(`/agents/${environment}/${agentId}/${conversationId}?${params}`),
   );
   if (!res.ok) throw new Error(`Failed to read conversation: ${res.statusText}`);
   return res.json();
 }
 
 /**
- * Send a message (non-streaming) to a direct bot.
- * Returns the conversation snapshot with the bot's reply in `conversationOutputs`.
+ * Send a message (non-streaming) to a direct agent.
+ * Returns the conversation snapshot with the agent's reply in `conversationOutputs`.
  * When `context` is provided, sends as JSON `InputData` instead of plain text.
  */
 export async function sendMessage(
   environment: string,
-  botId: string,
+  agentId: string,
   conversationId: string,
   message: string,
   userId?: string,
@@ -86,7 +86,7 @@ export async function sendMessage(
   const hasContext = context && Object.keys(context).length > 0;
 
   const res = await fetch(
-    buildUrl(`/bots/${environment}/${botId}/${conversationId}?${params}`),
+    buildUrl(`/agents/${environment}/${agentId}/${conversationId}?${params}`),
     {
       method: "POST",
       headers: {
@@ -107,7 +107,7 @@ export async function sendMessage(
  */
 export async function* sendMessageStreaming(
   environment: string,
-  botId: string,
+  agentId: string,
   conversationId: string,
   message: string,
   context?: Record<string, { type: string; value: string }>,
@@ -118,7 +118,7 @@ export async function* sendMessageStreaming(
   }
 
   const res = await fetch(
-    buildUrl(`/bots/${environment}/${botId}/${conversationId}/stream`),
+    buildUrl(`/agents/${environment}/${agentId}/${conversationId}/stream`),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -167,13 +167,13 @@ export async function* sendMessageStreaming(
   }
 }
 
-/* ─── Managed bot endpoints ──────────────────── */
+/* ─── Managed agent endpoints ──────────────────── */
 
 /**
- * Send a message to a managed bot (intent-based routing).
- * Used when the URL is `/chat/managedbots/:intent/:userId`.
+ * Send a message to a managed agent (intent-based routing).
+ * Used when the URL is `/chat/managedagents/:intent/:userId`.
  */
-export async function sendManagedBotMessage(
+export async function sendManagedAgentMessage(
   intent: string,
   userId: string,
   message?: string,
@@ -182,7 +182,7 @@ export async function sendManagedBotMessage(
     returnDetailed: "false",
     returnCurrentStepOnly: "true",
   });
-  const url = buildUrl(`/managedbots/${intent}/${userId}?${params}`);
+  const url = buildUrl(`/managedagents/${intent}/${userId}?${params}`);
 
   if (message) {
     const res = await fetch(url, {
@@ -206,7 +206,7 @@ export async function endConversation(
   conversationId: string,
 ): Promise<void> {
   const res = await fetch(
-    buildUrl(`/bots/${conversationId}/endConversation`),
+    buildUrl(`/agents/${conversationId}/endConversation`),
     { method: "POST" },
   );
   if (!res.ok) throw new Error(`Failed to end conversation: ${res.statusText}`);
@@ -219,11 +219,11 @@ export async function endConversation(
  */
 export async function undoConversation(
   environment: string,
-  botId: string,
+  agentId: string,
   conversationId: string,
 ): Promise<ConversationSnapshot> {
   const res = await fetch(
-    buildUrl(`/bots/${environment}/${botId}/undo/${conversationId}`),
+    buildUrl(`/agents/${environment}/${agentId}/undo/${conversationId}`),
     { method: "POST" },
   );
   if (!res.ok) throw new Error(`Failed to undo: ${res.statusText}`);
@@ -235,28 +235,28 @@ export async function undoConversation(
  */
 export async function redoConversation(
   environment: string,
-  botId: string,
+  agentId: string,
   conversationId: string,
 ): Promise<ConversationSnapshot> {
   const res = await fetch(
-    buildUrl(`/bots/${environment}/${botId}/redo/${conversationId}`),
+    buildUrl(`/agents/${environment}/${agentId}/redo/${conversationId}`),
     { method: "POST" },
   );
   if (!res.ok) throw new Error(`Failed to redo: ${res.statusText}`);
   return res.json();
 }
 
-/* ─── Bot descriptor ─────────────────────────── */
+/* ─── Agent descriptor ─────────────────────────── */
 
 /**
- * Fetch the bot document descriptor to get the bot's display name.
- * Uses the GET /botstore/bots/:botId endpoint.
+ * Fetch the agent document descriptor to get the agent's display name.
+ * Uses the GET /agentstore/agents/:agentId endpoint.
  */
-export async function fetchBotDescriptor(
-  botId: string,
+export async function fetchAgentDescriptor(
+  agentId: string,
 ): Promise<{ name?: string; description?: string }> {
   const res = await fetch(
-    buildUrl(`/botstore/bots/${botId}`),
+    buildUrl(`/agentstore/agents/${agentId}`),
   );
   if (!res.ok) return {};
   try {

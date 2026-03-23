@@ -1,21 +1,21 @@
 /* ──────────────────────────────────────────────
-   ScrollToBottom — Floating button
+   ScrollToAgenttom — Floating button
    ────────────────────────────────────────────── */
 
-interface ScrollToBottomProps {
+interface ScrollToAgenttomProps {
   visible: boolean;
   onClick: () => void;
 }
 
-export function ScrollToBottom({ visible, onClick }: ScrollToBottomProps) {
+export function ScrollToAgenttom({ visible, onClick }: ScrollToAgenttomProps) {
   if (!visible) return null;
 
   return (
     <button
-      className="scroll-to-bottom"
+      className="scroll-to-agenttom"
       onClick={onClick}
-      aria-label="Scroll to bottom"
-      data-testid="scroll-to-bottom"
+      aria-label="Scroll to agenttom"
+      data-testid="scroll-to-agenttom"
     >
       ↓
     </button>

@@ -18,13 +18,13 @@ describe("MessageBubble", () => {
     expect(screen.getByText("Hello")).toBeInTheDocument();
   });
 
-  it("renders bot message content", () => {
-    renderBubble({ id: "2", role: "bot", content: "Hi there", timestamp: 0 });
+  it("renders agent message content", () => {
+    renderBubble({ id: "2", role: "agent", content: "Hi there", timestamp: 0 });
     expect(screen.getByText("Hi there")).toBeInTheDocument();
   });
 
-  it("renders markdown bold text in bot messages", () => {
-    renderBubble({ id: "3", role: "bot", content: "This is **bold**", timestamp: 0 });
+  it("renders markdown bold text in agent messages", () => {
+    renderBubble({ id: "3", role: "agent", content: "This is **bold**", timestamp: 0 });
     const bold = screen.getByText("bold");
     expect(bold.tagName).toBe("STRONG");
   });
@@ -34,18 +34,18 @@ describe("MessageBubble", () => {
     expect(container.querySelector(".message--user")).toBeInTheDocument();
   });
 
-  it("applies bot styling class", () => {
-    const { container } = renderBubble({ id: "5", role: "bot", content: "Hi", timestamp: 0 });
-    expect(container.querySelector(".message--bot")).toBeInTheDocument();
+  it("applies agent styling class", () => {
+    const { container } = renderBubble({ id: "5", role: "agent", content: "Hi", timestamp: 0 });
+    expect(container.querySelector(".message--agent")).toBeInTheDocument();
   });
 
-  it("shows avatar with U for user and E for bot", () => {
+  it("shows avatar with U for user and E for agent", () => {
     const { container } = renderBubble({ id: "6", role: "user", content: "Hi", timestamp: 0 });
     expect(container.querySelector(".message__avatar")?.textContent).toBe("U");
   });
 
-  it("renders links in bot markdown", () => {
-    renderBubble({ id: "7", role: "bot", content: "Visit [EDDI](https://eddi.labs.ai)", timestamp: 0 });
+  it("renders links in agent markdown", () => {
+    renderBubble({ id: "7", role: "agent", content: "Visit [EDDI](https://eddi.labs.ai)", timestamp: 0 });
     const link = screen.getByRole("link", { name: "EDDI" });
     expect(link).toHaveAttribute("href", "https://eddi.labs.ai");
   });

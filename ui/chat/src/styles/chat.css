@@ -49,7 +49,7 @@ a:hover { opacity: 0.85; }
   align-items: center;
   gap: 12px;
   padding: 12px 20px;
-  border-bottom: 1px solid var(--chat-border);
+  border-agenttom: 1px solid var(--chat-border);
   background: var(--chat-surface);
   flex-shrink: 0;
 }
@@ -67,7 +67,7 @@ a:hover { opacity: 0.85; }
   object-fit: contain;
 }
 
-.chat-header__bot-name {
+.chat-header__agent-name {
   font-size: 0.85rem;
   font-weight: 500;
   color: var(--chat-text-muted);
@@ -199,7 +199,7 @@ a:hover { opacity: 0.85; }
   flex-direction: row-reverse;
 }
 
-.message--bot {
+.message--agent {
   align-self: flex-start;
 }
 
@@ -220,10 +220,10 @@ a:hover { opacity: 0.85; }
   color: var(--chat-user-text);
 }
 
-.message--bot .message__avatar {
+.message--agent .message__avatar {
   background: var(--chat-surface-raised);
   color: var(--chat-text-accent);
-  border: 1px solid var(--chat-bot-border);
+  border: 1px solid var(--chat-agent-border);
 }
 
 .message__bubble {
@@ -237,17 +237,17 @@ a:hover { opacity: 0.85; }
 .message--user .message__bubble {
   background: var(--chat-user-bg);
   color: var(--chat-user-text);
-  border-bottom-right-radius: 4px;
+  border-agenttom-right-radius: 4px;
 }
 
-.message--bot .message__bubble {
-  background: var(--chat-bot-bg);
-  color: var(--chat-bot-text);
-  border: 1px solid var(--chat-bot-border);
-  border-bottom-left-radius: 4px;
+.message--agent .message__bubble {
+  background: var(--chat-agent-bg);
+  color: var(--chat-agent-text);
+  border: 1px solid var(--chat-agent-border);
+  border-agenttom-left-radius: 4px;
 }
 
-/* Markdown inside bot messages */
+/* Markdown inside agent messages */
 .message__bubble .markdown-body {
   font-size: inherit;
   line-height: inherit;
@@ -256,7 +256,7 @@ a:hover { opacity: 0.85; }
 
 .message__bubble .markdown-body p { margin: 0.4em 0; }
 .message__bubble .markdown-body p:first-child { margin-top: 0; }
-.message__bubble .markdown-body p:last-child { margin-bottom: 0; }
+.message__bubble .markdown-body p:last-child { margin-agenttom: 0; }
 
 .message__bubble .markdown-body pre {
   background: var(--chat-surface);
@@ -324,10 +324,10 @@ a:hover { opacity: 0.85; }
 }
 
 .indicator__bubble {
-  background: var(--chat-bot-bg);
-  border: 1px solid var(--chat-bot-border);
+  background: var(--chat-agent-bg);
+  border: 1px solid var(--chat-agent-border);
   border-radius: var(--chat-radius);
-  border-bottom-left-radius: 4px;
+  border-agenttom-left-radius: 4px;
   padding: 12px 18px;
   display: flex;
   align-items: center;
@@ -586,7 +586,7 @@ a:hover { opacity: 0.85; }
   font-size: 0.85rem;
   font-weight: 500;
   color: var(--chat-accent);
-  margin-bottom: 8px;
+  margin-agenttom: 8px;
   letter-spacing: 0.02em;
 }
 
@@ -646,11 +646,11 @@ a:hover { opacity: 0.85; }
   opacity: 0.7;
 }
 
-/* ─── Scroll-to-bottom ────────────────────────── */
+/* ─── Scroll-to-agenttom ────────────────────────── */
 
-.scroll-to-bottom {
+.scroll-to-agenttom {
   position: absolute;
-  bottom: 90px;
+  agenttom: 90px;
   left: 50%;
   transform: translateX(-50%);
   width: 38px;
@@ -670,7 +670,7 @@ a:hover { opacity: 0.85; }
   animation: fadeIn 0.2s ease-out;
 }
 
-.scroll-to-bottom:hover {
+.scroll-to-agenttom:hover {
   background: var(--chat-surface-raised);
   color: var(--chat-text);
 }
@@ -839,7 +839,7 @@ a:hover { opacity: 0.85; }
     height: 26px;
   }
 
-  .chat-header__bot-name {
+  .chat-header__agent-name {
     font-size: 0.8rem;
   }
 
@@ -861,11 +861,11 @@ a:hover { opacity: 0.85; }
   }
 
   .message--user .message__bubble {
-    border-bottom-right-radius: 4px;
+    border-agenttom-right-radius: 4px;
   }
 
-  .message--bot .message__bubble {
-    border-bottom-left-radius: 4px;
+  .message--agent .message__bubble {
+    border-agenttom-left-radius: 4px;
   }
 
   .chat-input__textarea {
@@ -897,10 +897,10 @@ a:hover { opacity: 0.85; }
     font-size: 0.9rem;
   }
 
-  .scroll-to-bottom {
+  .scroll-to-agenttom {
     width: 34px;
     height: 34px;
-    bottom: 80px;
+    agenttom: 80px;
   }
 }
 
@@ -915,7 +915,7 @@ a:hover { opacity: 0.85; }
     height: 24px;
   }
 
-  .chat-header__bot-name {
+  .chat-header__agent-name {
     font-size: 0.75rem;
     max-width: 120px;
   }
@@ -997,10 +997,10 @@ a:hover { opacity: 0.85; }
     font-size: 0.82rem;
   }
 
-  .scroll-to-bottom {
+  .scroll-to-agenttom {
     width: 32px;
     height: 32px;
-    bottom: 70px;
+    agenttom: 70px;
     font-size: 1rem;
   }
 }
@@ -1011,7 +1011,7 @@ a:hover { opacity: 0.85; }
     height: 20px;
   }
 
-  .chat-header__bot-name {
+  .chat-header__agent-name {
     font-size: 0.7rem;
     max-width: 80px;
   }
@@ -1081,18 +1081,18 @@ a:hover { opacity: 0.85; }
 }
 
 /* ── Safe areas for notched phones (iPhone X+) ──── */
-@supports (padding: env(safe-area-inset-bottom)) {
+@supports (padding: env(safe-area-inset-agenttom)) {
   .chat-input {
-    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+    padding-agenttom: calc(16px + env(safe-area-inset-agenttom));
   }
 
   .chat-ended {
-    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    padding-agenttom: calc(20px + env(safe-area-inset-agenttom));
   }
 
   @media (max-width: 480px) {
     .chat-input {
-      padding-bottom: calc(12px + env(safe-area-inset-bottom));
+      padding-agenttom: calc(12px + env(safe-area-inset-agenttom));
     }
   }
 }

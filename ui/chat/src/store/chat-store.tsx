@@ -23,7 +23,7 @@ export interface ChatState {
   isThinking: boolean;
   undoAvailable: boolean;
   redoAvailable: boolean;
-  botName: string | null;
+  agentName: string | null;
   config: ChatConfig;
   /** Set when the backend requests a specific input field (e.g. password). */
   activeInputField: InputField | null;
@@ -46,7 +46,7 @@ const defaultConfig: ChatConfig = {
   enableUndo: true,
   enableRedo: true,
   enableNewConversation: true,
-  showBotName: true,
+  showAgentName: true,
 };
 
 export const initialState: ChatState = {
@@ -58,7 +58,7 @@ export const initialState: ChatState = {
   isThinking: false,
   undoAvailable: false,
   redoAvailable: false,
-  botName: null,
+  agentName: null,
   config: defaultConfig,
   activeInputField: null,
   isSecretMode: false,
@@ -70,14 +70,14 @@ export type ChatAction =
   | { type: "SET_CONVERSATION_ID"; id: string | null }
   | { type: "SET_CONVERSATION_STATE"; state: ConversationState }
   | { type: "ADD_MESSAGE"; message: ChatMessage }
-  | { type: "APPEND_TO_LAST_BOT"; token: string }
+  | { type: "APPEND_TO_LAST_AGENT"; token: string }
   | { type: "FINISH_STREAMING" }
   | { type: "SET_QUICK_REPLIES"; replies: QuickReply[] }
   | { type: "SET_PROCESSING"; value: boolean }
   | { type: "SET_THINKING"; value: boolean }
   | { type: "SET_UNDO_REDO"; undoAvailable: boolean; redoAvailable: boolean }
   | { type: "REPLACE_MESSAGES"; messages: ChatMessage[] }
-  | { type: "SET_BOT_NAME"; name: string | null }
+  | { type: "SET_AGENT_NAME"; name: string | null }
   | { type: "CLEAR_MESSAGES" }
   | { type: "SET_CONFIG"; config: Partial<ChatConfig> }
   | { type: "SET_INPUT_FIELD"; field: InputField }
@@ -97,10 +97,10 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "ADD_MESSAGE":
       return { ...state, messages: [...state.messages, action.message] };
 
-    case "APPEND_TO_LAST_BOT": {
+    case "APPEND_TO_LAST_AGENT": {
       const msgs = [...state.messages];
       const last = msgs[msgs.length - 1];
-      if (last?.role === "bot") {
+      if (last?.role === "agent") {
         msgs[msgs.length - 1] = { ...last, content: last.content + action.token };
       }
       return { ...state, messages: msgs };
@@ -109,7 +109,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "FINISH_STREAMING": {
       const msgs = [...state.messages];
       const last = msgs[msgs.length - 1];
-      if (last?.role === "bot") {
+      if (last?.role === "agent") {
         msgs[msgs.length - 1] = { ...last, isStreaming: false };
       }
       return { ...state, messages: msgs, isProcessing: false, isThinking: false };
@@ -144,8 +144,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "REPLACE_MESSAGES":
       return { ...state, messages: action.messages };
 
-    case "SET_BOT_NAME":
-      return { ...state, botName: action.name };
+    case "SET_AGENT_NAME":
+      return { ...state, agentName: action.name };
 
     case "SET_CONFIG":
       return { ...state, config: { ...state.config, ...action.config } };

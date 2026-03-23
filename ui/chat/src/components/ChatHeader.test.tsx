@@ -34,9 +34,9 @@ describe("ChatHeader", () => {
     expect(screen.queryByText("EDDI")).not.toBeInTheDocument();
   });
 
-  it("does not show bot name when no bot name is set in state", () => {
+  it("does not show agent name when no agent name is set in state", () => {
     const { container } = renderHeader();
-    expect(container.querySelector(".chat-header__bot-name")).not.toBeInTheDocument();
+    expect(container.querySelector(".chat-header__agent-name")).not.toBeInTheDocument();
   });
 
   it("renders custom logo URL", () => {

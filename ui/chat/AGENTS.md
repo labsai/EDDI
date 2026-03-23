@@ -4,7 +4,7 @@
 
 ## 1. Project Context
 
-**eddi-chat-ui** is a standalone React 19 chat widget for [EDDI](https://github.com/labsai/EDDI) bots. Built with Vite + TypeScript 5.7, vanilla CSS with CSS custom properties, and `react-markdown` for rich message rendering.
+**eddi-chat-ui** is a standalone React 19 chat widget for [EDDI](https://github.com/labsai/EDDI) agents. Built with Vite + TypeScript 5.7, vanilla CSS with CSS custom properties, and `react-markdown` for rich message rendering.
 
 ### Tech Stack
 
@@ -18,7 +18,7 @@
 
 ### Ecosystem
 
-- **EDDI backend** — Quarkus REST API at `/bots/{env}/{botId}`, serves chat UI from `META-INF/resources/`
+- **EDDI backend** — Quarkus REST API at `/agents/{env}/{agentId}`, serves chat UI from `META-INF/resources/`
 - **EDDI Manager** — Admin UI with embedded chat panel, shares API patterns
 - All repos at `c:\dev\git\`
 
@@ -34,11 +34,11 @@ src/
 ├── components/     # UI components
 │   ├── ChatWidget.tsx      # Main orchestrator (lifecycle, SSE, query params)
 │   ├── ChatHeader.tsx      # Logo/title, undo/redo, theme toggle, new conversation
-│   ├── MessageBubble.tsx   # User/bot messages with markdown
+│   ├── MessageBubble.tsx   # User/agent messages with markdown
 │   ├── ChatInput.tsx       # Auto-grow textarea, Enter/Shift+Enter
 │   ├── QuickReplies.tsx    # Pill buttons for suggested replies
 │   ├── Indicators.tsx      # Typing (dots) + Thinking (brain) indicators
-│   └── ScrollToBottom.tsx  # Floating scroll button
+│   └── ScrollToAgenttom.tsx  # Floating scroll button
 ├── hooks/
 │   └── useTheme.ts     # Dark/light/system theme with localStorage
 ├── store/

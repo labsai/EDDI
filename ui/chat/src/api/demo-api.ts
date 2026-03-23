@@ -39,7 +39,7 @@ const RESPONSES: Record<string, MockResponse> = {
 ### Key Features
 | Feature | Description |
 |---------|-------------|
-| Multi-bot orchestration | Run multiple bots in parallel |
+| Multi-agent orchestration | Run multiple agents in parallel |
 | Plugin architecture | Extensible with custom behaviors |
 | SSE Streaming | Real-time token-by-token responses |
 | REST API | Full conversation management |
@@ -56,14 +56,14 @@ EDDI supports **LLM integration**, behavior rules, HTTP callouts, and much more.
 
 \`\`\`typescript
 // Start a conversation
-const response = await fetch('/bots/unrestricted/myBot', {
+const response = await fetch('/agents/production/myAgent', {
   method: 'POST'
 });
 const conversationId = response.headers.get('Location');
 
 // Send a message
 const result = await fetch(
-  \`/bots/unrestricted/myBot/\${conversationId}\`,
+  \`/agents/production/myAgent/\${conversationId}\`,
   {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
@@ -72,7 +72,7 @@ const result = await fetch(
 );
 \`\`\`
 
-The API returns a \`ConversationMemorySnapshot\` with the bot's response.`,
+The API returns a \`ConversationMemorySnapshot\` with the agent's response.`,
     quickReplies: [
       { value: "What about streaming?" },
       { value: "Tell me more" },
@@ -82,9 +82,9 @@ The API returns a \`ConversationMemorySnapshot\` with the bot's response.`,
   "What about streaming?": {
     text: `EDDI supports **Server-Sent Events (SSE)** for real-time streaming responses.
 
-When streaming is enabled, the bot sends tokens one at a time:
+When streaming is enabled, the agent sends tokens one at a time:
 
-1. 🧠 **Thinking phase** — the bot reasons about your input
+1. 🧠 **Thinking phase** — the agent reasons about your input
 2. ⚡ **Streaming phase** — tokens arrive incrementally
 3. ✅ **Done** — the complete response is ready
 
@@ -105,7 +105,7 @@ This gives users immediate feedback instead of waiting for the entire response.`
 - ✅ MCP (Model Context Protocol) integration
 - ✅ Improved chat UI with streaming
 - ✅ Dark/light theme support
-- 🔄 Multi-bot orchestration (coming soon)
+- 🔄 Multi-agent orchestration (coming soon)
 
 ### Architecture Improvements
 1. **DB-agnostic storage** — choose PostgreSQL or MongoDB
@@ -156,8 +156,8 @@ Try one of the suggested quick replies to see more features!`,
 
 /* ─── Demo API functions ──────────────────────── */
 
-export function isDemoMode(environment?: string, botId?: string): boolean {
-  return environment === "demo" && botId === "showcase";
+export function isDemoMode(environment?: string, agentId?: string): boolean {
+  return environment === "demo" && agentId === "showcase";
 }
 
 export async function demoStartConversation(): Promise<{
@@ -169,8 +169,8 @@ export async function demoStartConversation(): Promise<{
   return {
     conversationId: `demo-conv-${Date.now()}`,
     welcomeMessage: {
-      id: `bot-welcome-${Date.now()}`,
-      role: "bot",
+      id: `agent-welcome-${Date.now()}`,
+      role: "agent",
       content: WELCOME_MESSAGE,
       timestamp: Date.now(),
     },

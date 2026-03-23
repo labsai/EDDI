@@ -4,7 +4,7 @@ import type { ChatMessage } from "@/types";
 
 const makeMsg = (overrides: Partial<ChatMessage> = {}): ChatMessage => ({
   id: `msg-${Date.now()}`,
-  role: "bot",
+  role: "agent",
   content: "Hello",
   timestamp: Date.now(),
   ...overrides,
@@ -33,30 +33,30 @@ describe("chatReducer", () => {
     expect(result.messages[0].content).toBe("Hi");
   });
 
-  it("APPEND_TO_LAST_BOT appends token to last bot message", () => {
+  it("APPEND_TO_LAST_AGENT appends token to last agent message", () => {
     const state: ChatState = {
       ...initialState,
-      messages: [makeMsg({ role: "bot", content: "Hel" })],
+      messages: [makeMsg({ role: "agent", content: "Hel" })],
     };
-    const result = chatReducer(state, { type: "APPEND_TO_LAST_BOT", token: "lo" });
+    const result = chatReducer(state, { type: "APPEND_TO_LAST_AGENT", token: "lo" });
     expect(result.messages[0].content).toBe("Hello");
   });
 
-  it("APPEND_TO_LAST_BOT does nothing if last message is user", () => {
+  it("APPEND_TO_LAST_AGENT does nothing if last message is user", () => {
     const state: ChatState = {
       ...initialState,
       messages: [makeMsg({ role: "user", content: "Hi" })],
     };
-    const result = chatReducer(state, { type: "APPEND_TO_LAST_BOT", token: "!" });
+    const result = chatReducer(state, { type: "APPEND_TO_LAST_AGENT", token: "!" });
     expect(result.messages[0].content).toBe("Hi");
   });
 
-  it("FINISH_STREAMING marks last bot message as not streaming and resets processing/thinking", () => {
+  it("FINISH_STREAMING marks last agent message as not streaming and resets processing/thinking", () => {
     const state: ChatState = {
       ...initialState,
       isProcessing: true,
       isThinking: true,
-      messages: [makeMsg({ role: "bot", content: "Hello", isStreaming: true })],
+      messages: [makeMsg({ role: "agent", content: "Hello", isStreaming: true })],
     };
     const result = chatReducer(state, { type: "FINISH_STREAMING" });
     expect(result.messages[0].isStreaming).toBe(false);
@@ -121,9 +121,9 @@ describe("chatReducer", () => {
   it("SET_CONFIG merges config", () => {
     const result = chatReducer(initialState, {
       type: "SET_CONFIG",
-      config: { title: "My Bot", theme: "light" },
+      config: { title: "My Agent", theme: "light" },
     });
-    expect(result.config.title).toBe("My Bot");
+    expect(result.config.title).toBe("My Agent");
     expect(result.config.theme).toBe("light");
     // Original defaults preserved
     expect(result.config.enableMarkdown).toBe(true);

@@ -15,25 +15,25 @@ function App() {
     <ChatProvider>
       <BrowserRouter>
         <Routes>
-          {/* Managed bot route */}
+          {/* Managed agent route */}
           <Route
-            path="/chat/managedbots/:intent/:userId"
+            path="/chat/managedagents/:intent/:userId"
             element={<ChatWidget />}
           />
-          {/* Direct bot route with userId */}
+          {/* Direct agent route with userId */}
           <Route
-            path="/chat/:environment/:botId/:userId"
+            path="/chat/:environment/:agentId/:userId"
             element={<ChatWidget />}
           />
-          {/* Direct bot route (userId via query param) */}
+          {/* Direct agent route (userId via query param) */}
           <Route
-            path="/chat/:environment/:botId"
+            path="/chat/:environment/:agentId"
             element={<ChatWidget />}
           />
           {/* Fallback */}
           <Route
             path="*"
-            element={<Navigate to="/chat/unrestricted/default" replace />}
+            element={<Navigate to="/chat/production/default" replace />}
           />
         </Routes>
       </BrowserRouter>

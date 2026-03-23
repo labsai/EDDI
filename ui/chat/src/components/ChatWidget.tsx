@@ -13,7 +13,7 @@ import { ChatInput } from "./ChatInput";
 import { SecretInput } from "./SecretInput";
 import { QuickReplies } from "./QuickReplies";
 import { TypingIndicator, ThinkingIndicator } from "./Indicators";
-import { ScrollToBottom } from "./ScrollToBottom";
+import { ScrollToAgenttom } from "./ScrollToAgenttom";
 import { ChatHeader } from "./ChatHeader";
 
 import {
@@ -21,10 +21,10 @@ import {
   readConversation,
   sendMessage,
   sendMessageStreaming,
-  sendManagedBotMessage,
+  sendManagedAgentMessage,
   undoConversation,
   redoConversation,
-  fetchBotDescriptor,
+  fetchAgentDescriptor,
   setBaseUrl,
 } from "@/api/chat-api";
 import {
@@ -47,9 +47,9 @@ const COLOR_PARAM_MAP: Record<string, string[]> = {
   surfaceColor: ["--chat-surface"],
   textColor:    ["--chat-text"],
   textMuted:    ["--chat-text-muted"],
-  botBg:        ["--chat-bot-bg"],
-  botBorder:    ["--chat-bot-border"],
-  botText:      ["--chat-bot-text"],
+  agentBg:        ["--chat-agent-bg"],
+  agentBorder:    ["--chat-agent-border"],
+  agentText:      ["--chat-agent-text"],
   userBg:       ["--chat-user-bg"],
   userText:     ["--chat-user-text"],
   inputBg:      ["--chat-input-bg"],
@@ -90,7 +90,7 @@ function parseConfigFromQuery(params: URLSearchParams): Partial<ChatConfig> {
   if (params.get("hideQuickReplies") === "true") cfg.enableQuickReplies = false;
   if (params.get("hideStreaming") === "true") cfg.enableStreaming = false;
   if (params.get("hideLogo") === "true") cfg.showLogo = false;
-  if (params.get("hideBotName") === "true") cfg.showBotName = false;
+  if (params.get("hideAgentName") === "true") cfg.showAgentName = false;
   if (params.get("theme")) cfg.theme = params.get("theme") as ChatConfig["theme"];
   if (params.get("title")) cfg.title = params.get("title")!;
   if (params.get("accentColor")) cfg.accentColor = params.get("accentColor")!;
@@ -101,14 +101,14 @@ export function ChatWidget() {
   const state = useChatState();
   const dispatch = useChatDispatch();
 
-  const { environment, botId, userId: userIdParam, intent } = useParams();
+  const { environment, agentId, userId: userIdParam, intent } = useParams();
   const [searchParams] = useSearchParams();
 
   const userId =
     userIdParam ?? searchParams.get("userId") ?? undefined;
   const apiServer = searchParams.get("apiServer");
-  const isManagedBot = !!intent;
-  const isDemo = isDemoMode(environment, botId);
+  const isManagedAgent = !!intent;
+  const isDemo = isDemoMode(environment, agentId);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -137,7 +137,7 @@ export function ChatWidget() {
       switch (event.type) {
         case "token":
           dispatch({ type: "SET_THINKING", value: false });
-          dispatch({ type: "APPEND_TO_LAST_BOT", token: event.data });
+          dispatch({ type: "APPEND_TO_LAST_AGENT", token: event.data });
           break;
         case "thinking":
           dispatch({ type: "SET_THINKING", value: true });
@@ -147,7 +147,7 @@ export function ChatWidget() {
           break;
         case "error":
           dispatch({
-            type: "APPEND_TO_LAST_BOT",
+            type: "APPEND_TO_LAST_AGENT",
             token: `\n\n⚠️ Error: ${event.data}`,
           });
           dispatch({ type: "FINISH_STREAMING" });
@@ -176,13 +176,13 @@ export function ChatWidget() {
         redoAvailable: snapshot.redoAvailable ?? false,
       });
 
-      // Handle the "conversationOutputs" format (from POST /bots responses)
+      // Handle the "conversationOutputs" format (from POST /agents responses)
       if (snapshot.conversationOutputs?.length) {
         const output = snapshot.conversationOutputs[0];
 
-        // Extract bot replies and detect input field requests
-        const botReplies: OutputItem[] = output.output ?? [];
-        for (const reply of botReplies) {
+        // Extract agent replies and detect input field requests
+        const agentReplies: OutputItem[] = output.output ?? [];
+        for (const reply of agentReplies) {
           if (reply.type === "inputField") {
             // Backend is requesting a specific input field (e.g. password)
             dispatch({
@@ -198,8 +198,8 @@ export function ChatWidget() {
             dispatch({
               type: "ADD_MESSAGE",
               message: {
-                id: `bot-${Date.now()}-${Math.random()}`,
-                role: "bot",
+                id: `agent-${Date.now()}-${Math.random()}`,
+                role: "agent",
                 content: reply.text,
                 timestamp: Date.now(),
               },
@@ -232,8 +232,8 @@ export function ChatWidget() {
             dispatch({
               type: "ADD_MESSAGE",
               message: {
-                id: `bot-${Date.now()}-${Math.random()}`,
-                role: "bot",
+                id: `agent-${Date.now()}-${Math.random()}`,
+                role: "agent",
                 content: step.output,
                 timestamp: Date.now(),
               },
@@ -259,15 +259,15 @@ export function ChatWidget() {
           dispatch({ type: "ADD_MESSAGE", message: result.welcomeMessage });
           dispatch({ type: "SET_QUICK_REPLIES", replies: result.quickReplies });
           dispatch({ type: "SET_CONVERSATION_STATE", state: "READY" });
-        } else if (isManagedBot && intent && userId) {
-          // Managed bot: GET to load existing or start new
-          const snapshot = await sendManagedBotMessage(intent, userId);
+        } else if (isManagedAgent && intent && userId) {
+          // Managed agent: GET to load existing or start new
+          const snapshot = await sendManagedAgentMessage(intent, userId);
           processSnapshot(snapshot);
-        } else if (environment && botId) {
-          // Direct bot: POST to create conversation
+        } else if (environment && agentId) {
+          // Direct agent: POST to create conversation
           const convId = await startConversation(
             environment,
-            botId,
+            agentId,
             userId,
           );
           dispatch({ type: "SET_CONVERSATION_ID", id: convId });
@@ -275,7 +275,7 @@ export function ChatWidget() {
           // GET to pick up welcome message
           const snapshot = await readConversation(
             environment,
-            botId,
+            agentId,
             convId,
           );
           processSnapshot(snapshot);
@@ -289,16 +289,16 @@ export function ChatWidget() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ─── Fetch bot name ────────────────────────── */
+  /* ─── Fetch agent name ────────────────────────── */
   useEffect(() => {
-    if (isDemo || !botId || state.config.showBotName === false) return;
-    fetchBotDescriptor(botId).then((desc) => {
+    if (isDemo || !agentId || state.config.showAgentName === false) return;
+    fetchAgentDescriptor(agentId).then((desc) => {
       if (desc.name) {
-        dispatch({ type: "SET_BOT_NAME", name: desc.name });
+        dispatch({ type: "SET_AGENT_NAME", name: desc.name });
       }
     }).catch(() => { /* swallow */ });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [botId, isDemo]);
+  }, [agentId, isDemo]);
 
   /* ─── Send message ──────────────────────────── */
   const handleSend = useCallback(
@@ -326,8 +326,8 @@ export function ChatWidget() {
           dispatch({
             type: "ADD_MESSAGE",
             message: {
-              id: `bot-${Date.now()}`,
-              role: "bot",
+              id: `agent-${Date.now()}`,
+              role: "agent",
               content: "",
               timestamp: Date.now(),
               isStreaming: true,
@@ -343,24 +343,24 @@ export function ChatWidget() {
           // Set quick replies after streaming completes
           const qrs = demoGetQuickReplies(text);
           dispatch({ type: "SET_QUICK_REPLIES", replies: qrs });
-        } else if (isManagedBot && intent && userId) {
-          // Managed bot (non-streaming only)
-          const snapshot = await sendManagedBotMessage(intent, userId, text);
+        } else if (isManagedAgent && intent && userId) {
+          // Managed agent (non-streaming only)
+          const snapshot = await sendManagedAgentMessage(intent, userId, text);
           dispatch({ type: "SET_THINKING", value: false });
           processSnapshot(snapshot);
           dispatch({ type: "SET_PROCESSING", value: false });
         } else if (
           state.config.enableStreaming &&
           environment &&
-          botId &&
+          agentId &&
           state.conversationId
         ) {
           // Streaming path
           dispatch({
             type: "ADD_MESSAGE",
             message: {
-              id: `bot-${Date.now()}`,
-              role: "bot",
+              id: `agent-${Date.now()}`,
+              role: "agent",
               content: "",
               timestamp: Date.now(),
               isStreaming: true,
@@ -369,7 +369,7 @@ export function ChatWidget() {
 
           const events = sendMessageStreaming(
             environment,
-            botId,
+            agentId,
             state.conversationId,
             text,
             secretContext,
@@ -379,11 +379,11 @@ export function ChatWidget() {
             handleSSEEvent(event);
           }
           dispatch({ type: "FINISH_STREAMING" });
-        } else if (environment && botId && state.conversationId) {
+        } else if (environment && agentId && state.conversationId) {
           // Non-streaming path — pass context for secret input
           const snapshot = await sendMessage(
             environment,
-            botId,
+            agentId,
             state.conversationId,
             text,
             userId,
@@ -404,11 +404,11 @@ export function ChatWidget() {
       processSnapshot,
       handleSSEEvent,
       isDemo,
-      isManagedBot,
+      isManagedAgent,
       intent,
       userId,
       environment,
-      botId,
+      agentId,
       state.conversationId,
       state.config.enableStreaming,
     ],
@@ -416,14 +416,14 @@ export function ChatWidget() {
 
   /* ─── Undo ──────────────────────────────────── */
   const handleUndo = useCallback(async () => {
-    if (!environment || !botId || !state.conversationId) return;
+    if (!environment || !agentId || !state.conversationId) return;
     if (isDemo) return; // Demo mode doesn't support undo
 
     try {
       dispatch({ type: "SET_PROCESSING", value: true });
       const snapshot = await undoConversation(
         environment,
-        botId,
+        agentId,
         state.conversationId,
       );
 
@@ -440,8 +440,8 @@ export function ChatWidget() {
         }
         if (step.output) {
           msgs.push({
-            id: `bot-${msgs.length}-${Date.now()}`,
-            role: "bot",
+            id: `agent-${msgs.length}-${Date.now()}`,
+            role: "agent",
             content: step.output,
             timestamp: Date.now(),
           });
@@ -458,18 +458,18 @@ export function ChatWidget() {
     } finally {
       dispatch({ type: "SET_PROCESSING", value: false });
     }
-  }, [dispatch, environment, botId, state.conversationId, isDemo]);
+  }, [dispatch, environment, agentId, state.conversationId, isDemo]);
 
   /* ─── Redo ──────────────────────────────────── */
   const handleRedo = useCallback(async () => {
-    if (!environment || !botId || !state.conversationId) return;
+    if (!environment || !agentId || !state.conversationId) return;
     if (isDemo) return;
 
     try {
       dispatch({ type: "SET_PROCESSING", value: true });
       const snapshot = await redoConversation(
         environment,
-        botId,
+        agentId,
         state.conversationId,
       );
 
@@ -485,8 +485,8 @@ export function ChatWidget() {
         }
         if (step.output) {
           msgs.push({
-            id: `bot-${msgs.length}-${Date.now()}`,
-            role: "bot",
+            id: `agent-${msgs.length}-${Date.now()}`,
+            role: "agent",
             content: step.output,
             timestamp: Date.now(),
           });
@@ -503,7 +503,7 @@ export function ChatWidget() {
     } finally {
       dispatch({ type: "SET_PROCESSING", value: false });
     }
-  }, [dispatch, environment, botId, state.conversationId, isDemo]);
+  }, [dispatch, environment, agentId, state.conversationId, isDemo]);
 
   /* ─── Quick reply handler ───────────────────── */
   const handleQuickReply = useCallback(
@@ -524,16 +524,16 @@ export function ChatWidget() {
         dispatch({ type: "ADD_MESSAGE", message: result.welcomeMessage });
         dispatch({ type: "SET_QUICK_REPLIES", replies: result.quickReplies });
         dispatch({ type: "SET_CONVERSATION_STATE", state: "READY" });
-      } else if (environment && botId) {
-        const convId = await startConversation(environment, botId, userId);
+      } else if (environment && agentId) {
+        const convId = await startConversation(environment, agentId, userId);
         dispatch({ type: "SET_CONVERSATION_ID", id: convId });
-        const snapshot = await readConversation(environment, botId, convId);
+        const snapshot = await readConversation(environment, agentId, convId);
         processSnapshot(snapshot);
       }
     } catch (err) {
       console.error("Failed to restart conversation:", err);
     }
-  }, [dispatch, isDemo, environment, botId, userId, processSnapshot]);
+  }, [dispatch, isDemo, environment, agentId, userId, processSnapshot]);
 
   /* ─── Auto-scroll ───────────────────────────── */
   useEffect(() => {
@@ -543,12 +543,12 @@ export function ChatWidget() {
   const handleScroll = useCallback(() => {
     const el = messagesContainerRef.current;
     if (!el) return;
-    const atBottom =
+    const atAgenttom =
       el.scrollHeight - el.scrollTop - el.clientHeight <= 20;
-    setShowScrollBtn(!atBottom);
+    setShowScrollBtn(!atAgenttom);
   }, []);
 
-  const scrollToBottom = useCallback(() => {
+  const scrollToAgenttom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
@@ -588,7 +588,7 @@ export function ChatWidget() {
       </div>
 
       <div style={{ position: "relative" }}>
-        <ScrollToBottom visible={showScrollBtn} onClick={scrollToBottom} />
+        <ScrollToAgenttom visible={showScrollBtn} onClick={scrollToAgenttom} />
       </div>
 
       {!isEnded &&
@@ -665,7 +665,7 @@ export function ChatWidget() {
             ) : (
               <ChatInput
                 onSend={handleSend}
-                disabled={!state.conversationId && !isManagedBot}
+                disabled={!state.conversationId && !isManagedAgent}
               />
             )}
           </div>

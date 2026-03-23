@@ -2,13 +2,13 @@
    EDDI Chat — Shared Types
    ────────────────────────────────────────────── */
 
-/** A single chat message (user or bot). */
+/** A single chat message (user or agent). */
 export interface ChatMessage {
   id: string;
-  role: "user" | "bot";
+  role: "user" | "agent";
   content: string;
   timestamp: number;
-  /** True while the bot is still streaming tokens. */
+  /** True while the agent is still streaming tokens. */
   isStreaming?: boolean;
 }
 
@@ -60,8 +60,8 @@ export interface ConversationStep {
 
 /** Conversation snapshot returned by the backend. */
 export interface ConversationSnapshot {
-  botId: string;
-  botVersion: number;
+  agentId: string;
+  agentVersion: number;
   conversationId: string;
   conversationState: ConversationState;
   environment: string;
@@ -82,7 +82,7 @@ export interface OutputItem {
   defaultValue?: string;
 }
 
-/** Per-step output block from POST /bots responses. */
+/** Per-step output block from POST /agents responses. */
 export interface ConversationOutput {
   actions?: string[];
   output?: OutputItem[];
@@ -112,7 +112,7 @@ export interface ChatConfig {
   enableStreaming?: boolean;
   /** Show quick-reply buttons. Default: `true` */
   enableQuickReplies?: boolean;
-  /** Render markdown in bot messages. Default: `true` */
+  /** Render markdown in agent messages. Default: `true` */
   enableMarkdown?: boolean;
   /** Enable KaTeX math rendering. Default: `true` */
   enableMath?: boolean;
@@ -124,6 +124,6 @@ export interface ChatConfig {
   enableRedo?: boolean;
   /** Show new conversation button. Default: `true` */
   enableNewConversation?: boolean;
-  /** Show bot name in header (fetched from descriptor). Default: `true` */
-  showBotName?: boolean;
+  /** Show agent name in header (fetched from descriptor). Default: `true` */
+  showAgentName?: boolean;
 }
