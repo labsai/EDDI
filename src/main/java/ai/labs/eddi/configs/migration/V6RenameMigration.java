@@ -60,6 +60,12 @@ public class V6RenameMigration {
             {"restricted", "production"},
     };
 
+    /** Field-name rewrites for deployment/conversation documents (old Java name → new Java name). */
+    private static final String[][] FIELD_NAME_REWRITES = {
+            {"botId", "agentId"},
+            {"botVersion", "agentVersion"},
+    };
+
     /**
      * All MongoDB collections to scan for URI rewrites.
      * These are the ACTUAL collection names from each store's constructor:
@@ -209,6 +215,15 @@ public class V6RenameMigration {
         int migrated = 0;
         for (Document doc : collection.find()) {
             boolean changed = false;
+
+            // Rename old field names (e.g., botId → agentId, botVersion → agentVersion)
+            for (String[] mapping : FIELD_NAME_REWRITES) {
+                if (doc.containsKey(mapping[0])) {
+                    doc.put(mapping[1], doc.get(mapping[0]));
+                    doc.remove(mapping[0]);
+                    changed = true;
+                }
+            }
 
             // Rewrite environment field
             Object envObj = doc.get("environment");

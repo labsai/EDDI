@@ -114,6 +114,8 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     public void checkDeployments() {
         try {
             deploymentStore.readDeploymentInfos(deployed).stream()
+                    .filter(deploymentInfo -> deploymentInfo.getAgentId() != null
+                            && deploymentInfo.getAgentVersion() != null)
                     .filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo))
                     .forEach(deploymentInfo -> {
                         try {
