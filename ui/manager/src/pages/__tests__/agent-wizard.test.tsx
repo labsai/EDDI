@@ -2,26 +2,26 @@ import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
-import { BotWizardPage } from "@/pages/bot-wizard";
+import { AgentWizardPage } from "@/pages/agent-wizard";
 
-describe("BotWizardPage", () => {
+describe("AgentWizardPage", () => {
   it("renders wizard heading", () => {
-    renderWithProviders(<BotWizardPage />, {
-      initialRoute: "/manage/bots/wizard",
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
     });
-    expect(screen.getByText("Bot Wizard")).toBeInTheDocument();
+    expect(screen.getByText("Agent Wizard")).toBeInTheDocument();
   });
 
   it("renders step progress indicator", () => {
-    renderWithProviders(<BotWizardPage />, {
-      initialRoute: "/manage/bots/wizard",
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
     });
     expect(screen.getByTestId("wizard-steps")).toBeInTheDocument();
   });
 
   it("renders template selection on step 1", () => {
-    renderWithProviders(<BotWizardPage />, {
-      initialRoute: "/manage/bots/wizard",
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
     });
     expect(screen.getByTestId("template-grid")).toBeInTheDocument();
     expect(screen.getByTestId("template-blank")).toBeInTheDocument();
@@ -30,8 +30,8 @@ describe("BotWizardPage", () => {
   });
 
   it("next button is disabled until template is selected", () => {
-    renderWithProviders(<BotWizardPage />, {
-      initialRoute: "/manage/bots/wizard",
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
     });
     const nextBtn = screen.getByTestId("wizard-next");
     expect(nextBtn).toBeDisabled();
@@ -39,8 +39,8 @@ describe("BotWizardPage", () => {
 
   it("navigates to step 2 after selecting template and clicking Next", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<BotWizardPage />, {
-      initialRoute: "/manage/bots/wizard",
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
     });
 
     // Select template
@@ -52,20 +52,20 @@ describe("BotWizardPage", () => {
 
     await user.click(nextBtn);
 
-    // Step 2: bot name input should appear
-    expect(screen.getByTestId("wizard-bot-name")).toBeInTheDocument();
+    // Step 2: agent name input should appear
+    expect(screen.getByTestId("wizard-agent-name")).toBeInTheDocument();
   });
 
   it("back button navigates to previous step", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<BotWizardPage />, {
-      initialRoute: "/manage/bots/wizard",
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
     });
 
     // Go to step 2
     await user.click(screen.getByTestId("template-blank"));
     await user.click(screen.getByTestId("wizard-next"));
-    expect(screen.getByTestId("wizard-bot-name")).toBeInTheDocument();
+    expect(screen.getByTestId("wizard-agent-name")).toBeInTheDocument();
 
     // Go back
     await user.click(screen.getByTestId("wizard-back"));
@@ -74,8 +74,8 @@ describe("BotWizardPage", () => {
 
   it("navigates all the way to review step", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<BotWizardPage />, {
-      initialRoute: "/manage/bots/wizard",
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
     });
 
     // Step 1: select template
@@ -83,7 +83,7 @@ describe("BotWizardPage", () => {
     await user.click(screen.getByTestId("wizard-next"));
 
     // Step 2: enter name
-    await user.type(screen.getByTestId("wizard-bot-name"), "Test Bot");
+    await user.type(screen.getByTestId("wizard-agent-name"), "Test Agent");
     await user.click(screen.getByTestId("wizard-next"));
 
     // Step 3: packages

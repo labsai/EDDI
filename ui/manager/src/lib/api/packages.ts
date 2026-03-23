@@ -1,61 +1,61 @@
 import { api } from "../api-client";
-import type { BotDescriptor } from "./bots";
+import type { AgentDescriptor } from "./agents";
 
-export { type BotDescriptor as PackageDescriptor };
+export { type AgentDescriptor as WorkflowDescriptor };
 
-export interface PackageExtension {
+export interface WorkflowExtension {
   type: string;
   extensions: Record<string, unknown>;
   config: Record<string, unknown>;
 }
 
-export interface PackageConfiguration {
-  packageExtensions: PackageExtension[];
+export interface WorkflowConfiguration {
+  packageExtensions: WorkflowExtension[];
 }
 
 // API functions
-export function getPackageDescriptors(
+export function getWorkflowDescriptors(
   limit = 100,
   index = 0,
   filter = ""
-): Promise<BotDescriptor[]> {
+): Promise<AgentDescriptor[]> {
   const params = new URLSearchParams({
     limit: String(limit),
     index: String(index),
   });
   if (filter) params.set("filter", filter);
-  return api.get<BotDescriptor[]>(
-    `/packagestore/packages/descriptors?${params.toString()}`
+  return api.get<AgentDescriptor[]>(
+    `/workflowstore/workflows/descriptors?${params.toString()}`
   );
 }
 
-export function getPackage(
+export function getWorkflow(
   id: string,
   version: number
-): Promise<PackageConfiguration> {
-  return api.get<PackageConfiguration>(
-    `/packagestore/packages/${id}?version=${version}`
+): Promise<WorkflowConfiguration> {
+  return api.get<WorkflowConfiguration>(
+    `/workflowstore/workflows/${id}?version=${version}`
   );
 }
 
-export function createPackage(
-  config: PackageConfiguration
+export function createWorkflow(
+  config: WorkflowConfiguration
 ): Promise<{ location: string }> {
-  return api.post<{ location: string }>("/packagestore/packages", config);
+  return api.post<{ location: string }>("/workflowstore/workflows", config);
 }
 
-export function updatePackage(
+export function updateWorkflow(
   id: string,
   version: number,
-  config: PackageConfiguration
+  config: WorkflowConfiguration
 ): Promise<{ location: string }> {
   return api.put(
-    `/packagestore/packages/${id}?version=${version}`,
+    `/workflowstore/workflows/${id}?version=${version}`,
     config
   );
 }
 
-export function deletePackage(
+export function deleteWorkflow(
   id: string,
   version: number,
   options?: { cascade?: boolean; permanent?: boolean }
@@ -63,14 +63,14 @@ export function deletePackage(
   const params = new URLSearchParams({ version: String(version) });
   if (options?.cascade) params.set("cascade", "true");
   if (options?.permanent) params.set("permanent", "true");
-  return api.delete(`/packagestore/packages/${id}?${params}`);
+  return api.delete(`/workflowstore/workflows/${id}?${params}`);
 }
 
 /** Get all versions of a specific package (for version picker) */
-export function getPackageVersions(
+export function getWorkflowVersions(
   id: string
-): Promise<BotDescriptor[]> {
-  return api.get<BotDescriptor[]>(
-    `/packagestore/packages/descriptors?filter=${id}&includePreviousVersions=true`
+): Promise<AgentDescriptor[]> {
+  return api.get<AgentDescriptor[]>(
+    `/workflowstore/workflows/descriptors?filter=${id}&includePreviousVersions=true`
   );
 }

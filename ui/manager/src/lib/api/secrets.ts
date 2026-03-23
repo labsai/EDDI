@@ -2,7 +2,7 @@
 
 export interface SecretMetadata {
   tenantId: string;
-  botId: string;
+  agentId: string;
   keyName: string;
   createdAt: string;   // ISO instant
   lastAccessedAt: string | null;
@@ -16,7 +16,7 @@ export interface SecretStoreRequest {
 export interface SecretStoreResponse {
   reference: string;
   tenantId: string;
-  botId: string;
+  agentId: string;
   keyName: string;
 }
 
@@ -30,12 +30,12 @@ export interface VaultHealth {
 
 const BASE = "/secretstore/secrets";
 
-/** List all secrets for a given tenant+bot namespace. */
+/** List all secrets for a given tenant+agent namespace. */
 export async function listSecrets(
   tenantId: string,
-  botId: string,
+  agentId: string,
 ): Promise<SecretMetadata[]> {
-  const res = await fetch(`${window.location.origin}${BASE}/${tenantId}/${botId}`);
+  const res = await fetch(`${window.location.origin}${BASE}/${tenantId}/${agentId}`);
   if (!res.ok) return [];
   return res.json();
 }
@@ -43,12 +43,12 @@ export async function listSecrets(
 /** Store (create or update) a secret. */
 export async function storeSecret(
   tenantId: string,
-  botId: string,
+  agentId: string,
   keyName: string,
   value: string,
 ): Promise<SecretStoreResponse> {
   const res = await fetch(
-    `${window.location.origin}${BASE}/${tenantId}/${botId}/${keyName}`,
+    `${window.location.origin}${BASE}/${tenantId}/${agentId}/${keyName}`,
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -65,11 +65,11 @@ export async function storeSecret(
 /** Delete a secret from the vault. */
 export async function deleteSecret(
   tenantId: string,
-  botId: string,
+  agentId: string,
   keyName: string,
 ): Promise<void> {
   const res = await fetch(
-    `${window.location.origin}${BASE}/${tenantId}/${botId}/${keyName}`,
+    `${window.location.origin}${BASE}/${tenantId}/${agentId}/${keyName}`,
     { method: "DELETE" },
   );
   if (!res.ok && res.status !== 204) {

@@ -17,12 +17,12 @@ import {
   Trash2,
 } from "lucide-react";
 import { getResourceType } from "@/lib/api/resources";
-import { parseResourceUri } from "@/lib/api/bots";
+import { parseResourceUri } from "@/lib/api/agents";
 import { useResourceDescriptors, useDeleteResource, useDuplicateResource } from "@/hooks/use-resources";
 import { ResourceCard } from "@/components/resources/resource-card";
 import { CreateResourceDialog } from "@/components/resources/create-resource-dialog";
 import { cn } from "@/lib/utils";
-import type { BotDescriptor } from "@/lib/api/bots";
+import type { AgentDescriptor } from "@/lib/api/agents";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -81,7 +81,7 @@ export function ResourceListPage() {
   const Icon = ICON_MAP[rt.icon] ?? FileCode;
   const typeName = t(`${rt.labelKey}.name`);
 
-  const enrichedItems = (items ?? []).map((item: BotDescriptor) => {
+  const enrichedItems = (items ?? []).map((item: AgentDescriptor) => {
     const { id, version } = parseResourceUri(item.resource);
     return { ...item, id, version };
   });

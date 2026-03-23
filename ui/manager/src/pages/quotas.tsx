@@ -132,11 +132,11 @@ export function QuotasPage() {
                   testId="quota-max-conversations"
                 />
                 <QuotaField
-                  label={t("quotas.maxBotsPerTenant", "Max Bots / Tenant")}
-                  value={form.maxBotsPerTenant}
-                  onChange={(v) => handleChange("maxBotsPerTenant", v)}
+                  label={t("quotas.maxAgentsPerTenant", "Max Agents / Tenant")}
+                  value={form.maxAgentsPerTenant}
+                  onChange={(v) => handleChange("maxAgentsPerTenant", v)}
                   hint={t("quotas.limitHint", "-1 = unlimited")}
-                  testId="quota-max-bots"
+                  testId="quota-max-agents"
                 />
                 <QuotaField
                   label={t("quotas.maxApiCallsPerMinute", "Max API Calls / Minute")}

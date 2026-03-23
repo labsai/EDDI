@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import {
   LayoutDashboard,
   Bot,
-  Package,
+  Workflow,
   MessageSquare,
   FileCode,
   Plus,
@@ -11,8 +11,8 @@ import {
   MessageCircle,
   ArrowRight,
 } from "lucide-react";
-import { useDashboardStats, useRecentBots } from "@/hooks/use-dashboard";
-import { groupBotsByName } from "@/hooks/use-bots";
+import { useDashboardStats, useRecentAgents } from "@/hooks/use-dashboard";
+import { groupAgentsByName } from "@/hooks/use-agents";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,22 +21,22 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 export function DashboardPage() {
   const { t } = useTranslation();
   const { data: stats, isLoading: statsLoading } = useDashboardStats();
-  const { data: recentBotsRaw, isLoading: botsLoading } = useRecentBots();
+  const { data: recentAgentsRaw, isLoading: agentsLoading } = useRecentAgents();
 
-  const recentBots = recentBotsRaw ? groupBotsByName(recentBotsRaw).slice(0, 4) : [];
+  const recentAgents = recentAgentsRaw ? groupAgentsByName(recentAgentsRaw).slice(0, 4) : [];
 
   const statCards = [
     {
-      label: t("pages.dashboard.activeBots"),
-      value: stats?.botCount ?? 0,
+      label: t("pages.dashboard.activeAgents"),
+      value: stats?.agentCount ?? 0,
       icon: Bot,
       color: "text-primary bg-primary/10",
-      to: "/manage/bots",
+      to: "/manage/agents",
     },
     {
-      label: t("pages.dashboard.totalPackages"),
+      label: t("pages.dashboard.totalWorkflows"),
       value: stats?.packageCount ?? 0,
-      icon: Package,
+      icon: Workflow,
       color: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10",
       to: "/manage/packages",
     },
@@ -111,15 +111,15 @@ export function DashboardPage() {
         </h2>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" asChild>
-            <Link to="/manage/bots/wizard">
+            <Link to="/manage/agents/wizard">
               <Wand2 className="h-4 w-4" />
               {t("wizard.title")}
             </Link>
           </Button>
           <Button variant="outline" asChild>
-            <Link to="/manage/bots">
+            <Link to="/manage/agents">
               <Plus className="h-4 w-4" />
-              {t("bots.createBot")}
+              {t("agents.createAgent")}
             </Link>
           </Button>
           <Button variant="outline" asChild>
@@ -131,22 +131,22 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* Recent bots */}
+      {/* Recent agents */}
       <div>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {t("pages.dashboard.recentBots")}
+            {t("pages.dashboard.recentAgents")}
           </h2>
           <Link
-            to="/manage/bots"
+            to="/manage/agents"
             className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
           >
-            {t("nav.bots")}
+            {t("nav.agents")}
             <ArrowRight className="h-3 w-3" />
           </Link>
         </div>
 
-        {botsLoading ? (
+        {agentsLoading ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (
               <Card key={i}>
@@ -158,35 +158,35 @@ export function DashboardPage() {
               </Card>
             ))}
           </div>
-        ) : recentBots.length === 0 ? (
+        ) : recentAgents.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center py-8">
               <Bot className="h-10 w-10 text-muted-foreground/50" />
               <p className="mt-3 text-sm text-muted-foreground">
-                {t("pages.dashboard.noRecentBots")}
+                {t("pages.dashboard.noRecentAgents")}
               </p>
               <Button variant="outline" size="sm" className="mt-3" asChild>
-                <Link to="/manage/bots/wizard">
+                <Link to="/manage/agents/wizard">
                   <Plus className="h-4 w-4" />
-                  {t("bots.createBot")}
+                  {t("agents.createAgent")}
                 </Link>
               </Button>
             </CardContent>
           </Card>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {recentBots.map((bot) => (
-              <Link key={bot.id} to={`/manage/botview/${bot.id}`}>
+            {recentAgents.map((agent) => (
+              <Link key={agent.id} to={`/manage/agentview/${agent.id}`}>
                 <Card className="transition-all hover:shadow-md hover:border-primary/30">
                   <CardHeader>
-                    <CardTitle className="truncate text-base">{bot.name || "Unnamed Bot"}</CardTitle>
+                    <CardTitle className="truncate text-base">{agent.name || "Unnamed Agent"}</CardTitle>
                   </CardHeader>
                   <CardContent className="pt-0">
                     <p className="text-xs text-muted-foreground truncate">
-                      {bot.description || "—"}
+                      {agent.description || "—"}
                     </p>
                     <p className="mt-2 text-xs text-muted-foreground/70">
-                      {bot.lastModifiedOn ? formatRelativeTime(bot.lastModifiedOn) : "—"}
+                      {agent.lastModifiedOn ? formatRelativeTime(agent.lastModifiedOn) : "—"}
                     </p>
                   </CardContent>
                 </Card>

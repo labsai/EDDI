@@ -1,51 +1,51 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  getPackageDescriptors,
-  getPackage,
-  getPackageVersions,
-  createPackage,
-  updatePackage,
-  deletePackage,
-  type PackageConfiguration,
+  getWorkflowDescriptors,
+  getWorkflow,
+  getWorkflowVersions,
+  createWorkflow,
+  updateWorkflow,
+  deleteWorkflow,
+  type WorkflowConfiguration,
 } from "@/lib/api/packages";
 
-const PACKAGES_KEY = ["packages"] as const;
+const WORKFLOWS_KEY = ["packages"] as const;
 
-export function usePackageDescriptors(limit = 100, index = 0, filter = "") {
+export function useWorkflowDescriptors(limit = 100, index = 0, filter = "") {
   return useQuery({
-    queryKey: [...PACKAGES_KEY, "descriptors", { limit, index, filter }],
-    queryFn: () => getPackageDescriptors(limit, index, filter),
+    queryKey: [...WORKFLOWS_KEY, "descriptors", { limit, index, filter }],
+    queryFn: () => getWorkflowDescriptors(limit, index, filter),
   });
 }
 
-export function usePackage(id: string, version: number) {
+export function useWorkflow(id: string, version: number) {
   return useQuery({
-    queryKey: [...PACKAGES_KEY, id, version],
-    queryFn: () => getPackage(id, version),
+    queryKey: [...WORKFLOWS_KEY, id, version],
+    queryFn: () => getWorkflow(id, version),
     enabled: !!id && version > 0,
   });
 }
 
 /** Fetch all versions of a specific package (for version picker) */
-export function usePackageVersions(id: string) {
+export function useWorkflowVersions(id: string) {
   return useQuery({
-    queryKey: [...PACKAGES_KEY, id, "versions"],
-    queryFn: () => getPackageVersions(id),
+    queryKey: [...WORKFLOWS_KEY, id, "versions"],
+    queryFn: () => getWorkflowVersions(id),
     enabled: !!id,
   });
 }
 
-export function useCreatePackage() {
+export function useCreateWorkflow() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (config: PackageConfiguration) => createPackage(config),
+    mutationFn: (config: WorkflowConfiguration) => createWorkflow(config),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: PACKAGES_KEY });
+      queryClient.invalidateQueries({ queryKey: WORKFLOWS_KEY });
     },
   });
 }
 
-export function useUpdatePackage() {
+export function useUpdateWorkflow() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -55,42 +55,42 @@ export function useUpdatePackage() {
     }: {
       id: string;
       version: number;
-      config: PackageConfiguration;
-    }) => updatePackage(id, version, config),
+      config: WorkflowConfiguration;
+    }) => updateWorkflow(id, version, config),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: PACKAGES_KEY });
+      queryClient.invalidateQueries({ queryKey: WORKFLOWS_KEY });
     },
   });
 }
 
-export function useDeletePackage() {
+export function useDeleteWorkflow() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, version }: { id: string; version: number }) =>
-      deletePackage(id, version),
+      deleteWorkflow(id, version),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: PACKAGES_KEY });
+      queryClient.invalidateQueries({ queryKey: WORKFLOWS_KEY });
     },
   });
 }
 
-export function useUpdateBotPackages() {
+export function useUpdateAgentWorkflows() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
-      botId,
+      agentId,
       version,
       packages,
     }: {
-      botId: string;
+      agentId: string;
       version: number;
       packages: string[];
     }) => {
-      const { updateBot } = await import("@/lib/api/bots");
-      return updateBot(botId, version, { packages });
+      const { updateAgent } = await import("@/lib/api/agents");
+      return updateAgent(agentId, version, { packages });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["bots"] });
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
   });
 }

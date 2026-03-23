@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   useChatStore,
-  useDeployedBots,
+  useDeployedAgents,
   useStartConversation,
   useSendMessage,
   useEndConversation,
@@ -35,88 +35,88 @@ export function ChatPanel() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [botSelectorOpen, setBotSelectorOpen] = useState(false);
+  const [agentSelectorOpen, setAgentSelectorOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const botSelectorRef = useRef<HTMLDivElement>(null);
+  const agentSelectorRef = useRef<HTMLDivElement>(null);
   const autoStartedRef = useRef(false);
 
   // Store state
   const messages = useChatStore((s) => s.messages);
-  const selectedBotId = useChatStore((s) => s.selectedBotId);
-  const selectedBotName = useChatStore((s) => s.selectedBotName);
+  const selectedAgentId = useChatStore((s) => s.selectedAgentId);
+  const selectedAgentName = useChatStore((s) => s.selectedAgentName);
   const conversationId = useChatStore((s) => s.conversationId);
   const isProcessing = useChatStore((s) => s.isProcessing);
   const isThinking = useChatStore((s) => s.isThinking);
   const undoAvailable = useChatStore((s) => s.undoAvailable);
   const redoAvailable = useChatStore((s) => s.redoAvailable);
   const quickReplies = useChatStore((s) => s.quickReplies);
-  const setSelectedBot = useChatStore((s) => s.setSelectedBot);
+  const setSelectedAgent = useChatStore((s) => s.setSelectedAgent);
   const activeInputField = useChatStore((s) => s.activeInputField);
   const isSecretMode = useChatStore((s) => s.isSecretMode);
   const toggleSecretMode = useChatStore((s) => s.toggleSecretMode);
   const clearInputField = useChatStore((s) => s.clearInputField);
 
   // Queries & mutations
-  const { data: deployedBots, isLoading: botsLoading } = useDeployedBots();
+  const { data: deployedAgents, isLoading: agentsLoading } = useDeployedAgents();
   const startConversation = useStartConversation();
   const sendMessage = useSendMessage();
   const endConversation = useEndConversation();
   const undoConversation = useUndoConversation();
   const redoConversation = useRedoConversation();
 
-  // Auto-start conversation from ?botId= query param
+  // Auto-start conversation from ?agentId= query param
   useEffect(() => {
     if (autoStartedRef.current) return;
-    const botIdParam = searchParams.get("botId");
-    if (!botIdParam || !deployedBots) return;
+    const agentIdParam = searchParams.get("agentId");
+    if (!agentIdParam || !deployedAgents) return;
 
     autoStartedRef.current = true;
 
-    // Find bot name from deployed bots list
-    const bot = deployedBots.find((b) => b.id === botIdParam);
-    const botName = bot?.name ?? "Bot";
+    // Find agent name from deployed agents list
+    const agent = deployedAgents.find((b) => b.id === agentIdParam);
+    const agentName = agent?.name ?? "Agent";
 
     // Auto-select and start conversation
-    setSelectedBot(botIdParam, botName);
-    startConversation.mutate({ botId: botIdParam });
+    setSelectedAgent(agentIdParam, agentName);
+    startConversation.mutate({ agentId: agentIdParam });
 
     // Remove query param so refresh doesn't re-create
     setSearchParams({}, { replace: true });
-  }, [searchParams, deployedBots, setSelectedBot, startConversation, setSearchParams]);
+  }, [searchParams, deployedAgents, setSelectedAgent, startConversation, setSearchParams]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Close bot selector on outside click
+  // Close agent selector on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (
-        botSelectorRef.current &&
-        !botSelectorRef.current.contains(e.target as Node)
+        agentSelectorRef.current &&
+        !agentSelectorRef.current.contains(e.target as Node)
       ) {
-        setBotSelectorOpen(false);
+        setAgentSelectorOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const handleSelectBot = useCallback(
-    (botId: string, botName: string) => {
-      setSelectedBot(botId, botName);
-      setBotSelectorOpen(false);
-      startConversation.mutate({ botId });
+  const handleSelectAgent = useCallback(
+    (agentId: string, agentName: string) => {
+      setSelectedAgent(agentId, agentName);
+      setAgentSelectorOpen(false);
+      startConversation.mutate({ agentId });
     },
-    [setSelectedBot, startConversation]
+    [setSelectedAgent, startConversation]
   );
 
   const handleNewConversation = useCallback(() => {
-    if (!selectedBotId) return;
+    if (!selectedAgentId) return;
     useChatStore.getState().clearMessages();
-    startConversation.mutate({ botId: selectedBotId });
-  }, [selectedBotId, startConversation]);
+    startConversation.mutate({ agentId: selectedAgentId });
+  }, [selectedAgentId, startConversation]);
 
   const handleSend = useCallback(
     (message: string, isSecret?: boolean) => {
@@ -159,58 +159,58 @@ export function ChatPanel() {
             <History className="h-4 w-4" />
           </button>
 
-          {/* Bot selector */}
-          <div ref={botSelectorRef} className="relative flex-1">
+          {/* Agent selector */}
+          <div ref={agentSelectorRef} className="relative flex-1">
             <button
-              onClick={() => setBotSelectorOpen((p) => !p)}
+              onClick={() => setAgentSelectorOpen((p) => !p)}
               className="flex w-full items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-sm transition-colors hover:bg-muted"
-              data-testid="bot-selector"
+              data-testid="agent-selector"
             >
               <Bot className="h-4 w-4 text-muted-foreground" />
               <span
                 className={cn(
                   "flex-1 text-start truncate",
-                  !selectedBotName && "text-muted-foreground"
+                  !selectedAgentName && "text-muted-foreground"
                 )}
               >
-                {selectedBotName ?? t("chat.selectBot")}
+                {selectedAgentName ?? t("chat.selectAgent")}
               </span>
               <ChevronDown
                 className={cn(
                   "h-4 w-4 text-muted-foreground transition-transform",
-                  botSelectorOpen && "rotate-180"
+                  agentSelectorOpen && "rotate-180"
                 )}
               />
             </button>
 
             {/* Dropdown */}
-            {botSelectorOpen && (
+            {agentSelectorOpen && (
               <div className="absolute inset-s-0 top-full z-50 mt-1 w-full rounded-lg border border-border bg-popover p-1 shadow-lg">
-                {botsLoading ? (
+                {agentsLoading ? (
                   <div className="flex items-center justify-center py-3">
                     <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                   </div>
-                ) : !deployedBots?.length ? (
+                ) : !deployedAgents?.length ? (
                   <p className="px-3 py-2 text-xs text-muted-foreground">
-                    {t("chat.noBots")}
+                    {t("chat.noAgents")}
                   </p>
                 ) : (
-                  deployedBots.map((bot) => (
+                  deployedAgents.map((agent) => (
                     <button
-                      key={bot.id}
-                      onClick={() => handleSelectBot(bot.id, bot.name)}
+                      key={agent.id}
+                      onClick={() => handleSelectAgent(agent.id, agent.name)}
                       className={cn(
                         "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted",
-                        bot.id === selectedBotId &&
+                        agent.id === selectedAgentId &&
                           "bg-primary/10 text-primary font-medium"
                       )}
                     >
                       <Bot className="h-4 w-4 shrink-0" />
                       <div className="flex-1 text-start">
-                        <p className="truncate font-medium">{bot.name}</p>
-                        {bot.description && (
+                        <p className="truncate font-medium">{agent.name}</p>
+                        {agent.description && (
                           <p className="truncate text-xs text-muted-foreground">
-                            {bot.description}
+                            {agent.description}
                           </p>
                         )}
                       </div>
@@ -249,7 +249,7 @@ export function ChatPanel() {
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto">
-          {!selectedBotId ? (
+          {!selectedAgentId ? (
             <EmptyState />
           ) : messages.length === 0 ? (
             <div className="flex h-full items-center justify-center">

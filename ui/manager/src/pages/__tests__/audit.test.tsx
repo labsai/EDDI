@@ -47,11 +47,11 @@ describe("AuditPage", () => {
     expect(screen.getByTestId("conversation-input")).toBeInTheDocument();
   });
 
-  it("shows bot search mode when toggled", async () => {
+  it("shows agent search mode when toggled", async () => {
     renderAudit();
     const user = userEvent.setup();
-    await user.click(screen.getByTestId("mode-bot"));
-    expect(screen.getByTestId("bot-input")).toBeInTheDocument();
+    await user.click(screen.getByTestId("mode-agent"));
+    expect(screen.getByTestId("agent-input")).toBeInTheDocument();
     expect(screen.getByTestId("version-input")).toBeInTheDocument();
   });
 

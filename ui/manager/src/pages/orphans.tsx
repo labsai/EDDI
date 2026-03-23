@@ -7,13 +7,13 @@ import type { OrphanInfo } from "@/lib/api/orphans";
 
 /** Human-readable labels for store types */
 const TYPE_LABELS: Record<string, string> = {
-  "ai.labs.package": "Package",
-  "ai.labs.behavior": "Behavior Set",
-  "ai.labs.httpcalls": "HTTP Calls",
+  "ai.labs.workflow": "Workflow",
+  "ai.labs.rules": "Rule Set",
+  "ai.labs.apicalls": "API Calls",
   "ai.labs.output": "Output Set",
-  "ai.labs.langchain": "LangChain",
+  "ai.labs.llm": "LLM",
   "ai.labs.property": "Property Setter",
-  "ai.labs.regulardictionary": "Dictionary",
+  "ai.labs.dictionary": "Dictionary",
   "ai.labs.parser": "Parser",
 };
 
@@ -72,7 +72,7 @@ export function OrphansPage() {
           <p className="mt-1 text-sm text-muted-foreground">
             {t(
               "orphans.description",
-              "Find and clean up resources not referenced by any bot or package."
+              "Find and clean up resources not referenced by any agent or package."
             )}
           </p>
         </div>

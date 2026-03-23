@@ -1,34 +1,34 @@
 import { http, HttpResponse } from "msw";
 
-const BOTS_MOCK = [
+const AGENTS_MOCK = [
   {
-    resource: "eddi://ai.labs.bot/botstore/bots/bot1?version=1",
-    name: "Support Bot",
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent1?version=1",
+    name: "Support Agent",
     description: "Customer support assistant",
     createdOn: Date.now() - 86400000,
     lastModifiedOn: Date.now(),
   },
   {
-    resource: "eddi://ai.labs.bot/botstore/bots/bot2?version=1",
-    name: "FAQ Bot",
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent2?version=1",
+    name: "FAQ Agent",
     description: "Frequently asked questions",
     createdOn: Date.now() - 172800000,
     lastModifiedOn: Date.now() - 3600000,
   },
 ];
 
-const PACKAGES_MOCK = [
+const WORKFLOWS_MOCK = [
   {
-    resource: "eddi://ai.labs.package/packagestore/packages/pkg1?version=1",
-    name: "Support Package",
-    description: "Package for support bot",
+    resource: "eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=1",
+    name: "Support Workflow",
+    description: "Workflow for support agent",
     createdOn: Date.now() - 86400000,
     lastModifiedOn: Date.now(),
   },
   {
-    resource: "eddi://ai.labs.package/packagestore/packages/pkg2?version=1",
-    name: "FAQ Package",
-    description: "Package for FAQ bot",
+    resource: "eddi://ai.labs.workflow/workflowstore/workflows/pkg2?version=1",
+    name: "FAQ Workflow",
+    description: "Workflow for FAQ agent",
     createdOn: Date.now() - 172800000,
     lastModifiedOn: Date.now() - 7200000,
   },
@@ -42,8 +42,8 @@ const CONVERSATIONS_MOCK = [
     description: "",
     createdOn: Date.now() - 3600000,
     lastModifiedOn: Date.now() - 600000,
-    botId: "bot1",
-    botVersion: 1,
+    agentId: "agent1",
+    agentVersion: 1,
     conversationState: "READY",
   },
   {
@@ -53,8 +53,8 @@ const CONVERSATIONS_MOCK = [
     description: "",
     createdOn: Date.now() - 86400000,
     lastModifiedOn: Date.now() - 3600000,
-    botId: "bot2",
-    botVersion: 1,
+    agentId: "agent2",
+    agentVersion: 1,
     conversationState: "ENDED",
   },
 ];
@@ -301,21 +301,21 @@ const RESOURCE_SCHEMAS: Record<string, object> = {
 };
 
 export const handlers = [
-  // JSON Schema endpoints for bots and packages
-  http.get("*/botstore/bots/jsonSchema", () => {
+  // JSON Schema endpoints for agents and packages
+  http.get("*/agentstore/agents/jsonSchema", () => {
     return HttpResponse.json({
       $schema: "https://json-schema.org/draft/2020-12/schema",
       type: "object",
-      title: "BotConfiguration",
+      title: "AgentConfiguration",
       properties: {
         packages: {
           type: "array",
-          description: "List of package URIs that make up this bot",
+          description: "List of package URIs that make up this agent",
           items: { type: "string", format: "uri" },
         },
         channels: {
           type: "array",
-          description: "Channel connectors for this bot",
+          description: "Channel connectors for this agent",
           items: {
             type: "object",
             properties: {
@@ -327,11 +327,11 @@ export const handlers = [
       },
     });
   }),
-  http.get("*/packagestore/packages/jsonSchema", () => {
+  http.get("*/workflowstore/workflows/jsonSchema", () => {
     return HttpResponse.json({
       $schema: "https://json-schema.org/draft/2020-12/schema",
       type: "object",
-      title: "PackageConfiguration",
+      title: "WorkflowConfiguration",
       properties: {
         packageExtensions: {
           type: "array",
@@ -339,7 +339,7 @@ export const handlers = [
           items: {
             type: "object",
             properties: {
-              type: { type: "string", description: "Extension type (e.g. ai.labs.behavior, ai.labs.langchain)" },
+              type: { type: "string", description: "Extension type (e.g. ai.labs.rules, ai.labs.llm)" },
               extensions: { type: "object", additionalProperties: true, description: "Extension-specific configuration" },
               config: {
                 type: "object",
@@ -354,18 +354,18 @@ export const handlers = [
     });
   }),
 
-  // Bot descriptors
-  http.get("*/botstore/bots/descriptors", () => {
-    return HttpResponse.json(BOTS_MOCK);
+  // Agent descriptors
+  http.get("*/agentstore/agents/descriptors", () => {
+    return HttpResponse.json(AGENTS_MOCK);
   }),
 
-  // Get bot
-  http.get("*/botstore/bots/:id", ({ request }) => {
+  // Get agent
+  http.get("*/agentstore/agents/:id", ({ request }) => {
     const url = new URL(request.url);
     const version = parseInt(url.searchParams.get("version") ?? "1", 10);
     return HttpResponse.json({
       packages: [
-        "eddi://ai.labs.package/packagestore/packages/pkg1?version=1",
+        "eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=1",
       ],
       channels: [],
       _version: version,
@@ -373,22 +373,22 @@ export const handlers = [
   }),
 
   // Deployment status
-  http.get("*/administration/:env/deploymentstatus/:botId", () => {
+  http.get("*/administration/:env/deploymentstatus/:agentId", () => {
     return HttpResponse.json({ status: "READY" });
   }),
 
-  // Deploy bot
-  http.post("*/administration/:env/deploy/:botId", () => {
+  // Deploy agent
+  http.post("*/administration/:env/deploy/:agentId", () => {
     return new HttpResponse(null, { status: 200 });
   }),
 
-  // Undeploy bot
-  http.post("*/administration/:env/undeploy/:botId", () => {
+  // Undeploy agent
+  http.post("*/administration/:env/undeploy/:agentId", () => {
     return new HttpResponse(null, { status: 200 });
   }),
 
-  // Update bot
-  http.put("*/botstore/bots/:id", ({ request, params }) => {
+  // Update agent
+  http.put("*/agentstore/agents/:id", ({ request, params }) => {
     const url = new URL(request.url);
     const currentVersion = parseInt(
       url.searchParams.get("version") ?? "1",
@@ -398,50 +398,50 @@ export const handlers = [
     return new HttpResponse(null, {
       status: 200,
       headers: {
-        Location: `eddi://ai.labs.bot/botstore/bots/${params.id}?version=${newVersion}`,
+        Location: `eddi://ai.labs.agent/agentstore/agents/${params.id}?version=${newVersion}`,
       },
     });
   }),
 
-  // Duplicate bot
-  http.post("*/botstore/bots/:id", ({ request }) => {
+  // Duplicate agent
+  http.post("*/agentstore/agents/:id", ({ request }) => {
     const url = new URL(request.url);
     const deepCopy = url.searchParams.get("deepCopy");
     const newId = `dup-${Date.now()}`;
     return new HttpResponse(null, {
       status: 201,
       headers: {
-        Location: `eddi://ai.labs.bot/botstore/bots/${newId}?version=1${deepCopy ? "&deepCopy=true" : ""}`,
+        Location: `eddi://ai.labs.agent/agentstore/agents/${newId}?version=1${deepCopy ? "&deepCopy=true" : ""}`,
       },
     });
   }),
 
-  // Delete bot
-  http.delete("*/botstore/bots/:id", () => {
+  // Delete agent
+  http.delete("*/agentstore/agents/:id", () => {
     return new HttpResponse(null, { status: 204 });
   }),
 
-  // Package descriptors
-  http.get("*/packagestore/packages/descriptors", () => {
-    return HttpResponse.json(PACKAGES_MOCK);
+  // Workflow descriptors
+  http.get("*/workflowstore/workflows/descriptors", () => {
+    return HttpResponse.json(WORKFLOWS_MOCK);
   }),
 
   // Get package
-  http.get("*/packagestore/packages/:id", () => {
+  http.get("*/workflowstore/workflows/:id", () => {
     return HttpResponse.json({
       packageExtensions: [
         {
-          type: "ai.labs.behavior",
+          type: "ai.labs.rules",
           extensions: {},
           config: {
-            uri: "eddi://ai.labs.behavior/behaviorstore/behaviorsets/beh1?version=1",
+            uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1",
           },
         },
         {
-          type: "ai.labs.langchain",
+          type: "ai.labs.llm",
           extensions: {},
           config: {
-            uri: "eddi://ai.labs.langchain/langchainstore/langchains/lc1?version=1",
+            uri: "eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=1",
           },
         },
       ],
@@ -449,15 +449,15 @@ export const handlers = [
   }),
 
   // Create package
-  http.post("*/packagestore/packages", () => {
+  http.post("*/workflowstore/workflows", () => {
     return new HttpResponse(null, {
       status: 201,
-      headers: { Location: "/packagestore/packages/new-pkg?version=1" },
+      headers: { Location: "/workflowstore/workflows/new-pkg?version=1" },
     });
   }),
 
   // Delete package
-  http.delete("*/packagestore/packages/:id", () => {
+  http.delete("*/workflowstore/workflows/:id", () => {
     return new HttpResponse(null, { status: 204 });
   }),
 
@@ -478,27 +478,27 @@ export const handlers = [
   // Simple conversation log
   http.get("*/conversationstore/conversations/simple/:id", () => {
     return HttpResponse.json({
-      botId: "bot1",
-      botVersion: 1,
+      agentId: "agent1",
+      agentVersion: 1,
       conversationId: "conv1",
       conversationState: "READY",
-      environment: "unrestricted",
+      environment: "production",
       undoAvailable: true,
       redoAvailable: false,
       conversationSteps: [
         {
           conversationStep: [
-            { key: "input:initial", value: "Hello", timestamp: new Date().toISOString(), originPackageId: null },
-            { key: "actions", value: ["greet"], timestamp: new Date().toISOString(), originPackageId: "pkg1" },
-            { key: "output:text:greet", value: "Hi there! How can I help you?", timestamp: new Date().toISOString(), originPackageId: "pkg1" },
+            { key: "input:initial", value: "Hello", timestamp: new Date().toISOString(), originWorkflowId: null },
+            { key: "actions", value: ["greet"], timestamp: new Date().toISOString(), originWorkflowId: "pkg1" },
+            { key: "output:text:greet", value: "Hi there! How can I help you?", timestamp: new Date().toISOString(), originWorkflowId: "pkg1" },
           ],
           timestamp: new Date().toISOString(),
         },
         {
           conversationStep: [
-            { key: "input:initial", value: "What's the weather?", timestamp: new Date().toISOString(), originPackageId: null },
-            { key: "actions", value: ["get_weather"], timestamp: new Date().toISOString(), originPackageId: "pkg1" },
-            { key: "output:text:get_weather", value: "The weather in NYC is sunny at 72°F.", timestamp: new Date().toISOString(), originPackageId: "pkg1" },
+            { key: "input:initial", value: "What's the weather?", timestamp: new Date().toISOString(), originWorkflowId: null },
+            { key: "actions", value: ["get_weather"], timestamp: new Date().toISOString(), originWorkflowId: "pkg1" },
+            { key: "output:text:get_weather", value: "The weather in NYC is sunny at 72°F.", timestamp: new Date().toISOString(), originWorkflowId: "pkg1" },
           ],
           timestamp: new Date().toISOString(),
         },
@@ -508,7 +508,7 @@ export const handlers = [
         { "output:text:get_weather": "The weather in NYC is sunny at 72°F." },
       ],
       conversationProperties: {
-        botName: "Support Bot",
+        agentName: "Support Agent",
       },
     });
   }),
@@ -516,11 +516,11 @@ export const handlers = [
   // Raw conversation log
   http.get("*/conversationstore/conversations/:id", () => {
     return HttpResponse.json({
-      botId: "bot1",
-      botVersion: 1,
+      agentId: "agent1",
+      agentVersion: 1,
       conversationId: "conv1",
       conversationState: "READY",
-      environment: "unrestricted",
+      environment: "production",
       conversationSteps: [],
     });
   }),
@@ -530,26 +530,26 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
-  // --- Chat / Bot Engine ---
+  // --- Chat / Agent Engine ---
 
   // Start conversation
-  http.post("*/bots/:env/:botId", ({ params }) => {
+  http.post("*/agents/:env/:agentId", ({ params }) => {
     return new HttpResponse(null, {
       status: 201,
       headers: {
-        Location: `/bots/${params.env}/${params.botId}/conv-${Date.now()}`,
+        Location: `/agents/${params.env}/${params.agentId}/conv-${Date.now()}`,
       },
     });
   }),
 
   // Send message (text/plain or JSON) — returns snapshot
-  http.post("*/bots/:env/:botId/:conversationId", () => {
+  http.post("*/agents/:env/:agentId/:conversationId", () => {
     return HttpResponse.json({
-      botId: "bot1",
-      botVersion: 1,
+      agentId: "agent1",
+      agentVersion: 1,
       conversationId: "conv-mock",
       conversationState: "READY",
-      environment: "unrestricted",
+      environment: "production",
       conversationSteps: [
         {
           input: "",
@@ -561,13 +561,13 @@ export const handlers = [
   }),
 
   // Read conversation (GET)
-  http.get("*/bots/:env/:botId/:conversationId", () => {
+  http.get("*/agents/:env/:agentId/:conversationId", () => {
     return HttpResponse.json({
-      botId: "bot1",
-      botVersion: 1,
+      agentId: "agent1",
+      agentVersion: 1,
       conversationId: "conv-mock",
       conversationState: "READY",
-      environment: "unrestricted",
+      environment: "production",
       conversationSteps: [
         {
           output: "Welcome! How can I help you today?",
@@ -575,16 +575,16 @@ export const handlers = [
         },
       ],
       conversationProperties: {
-        botName: "Support Bot",
+        agentName: "Support Agent",
       },
     });
   }),
 
   // --- Backup / Import / Export ---
-  http.post("*/backup/export/:botId", () => {
+  http.post("*/backup/export/:agentId", () => {
     return new HttpResponse(null, {
       status: 200,
-      headers: { Location: "/backup/export/test-bot-1.zip" },
+      headers: { Location: "/backup/export/test-agent-1.zip" },
     });
   }),
 
@@ -597,21 +597,21 @@ export const handlers = [
 
   http.post("*/backup/import/preview", () => {
     return HttpResponse.json({
-      botOriginId: "origin-bot-1",
-      botName: "Weather Bot",
+      agentOriginId: "origin-agent-1",
+      agentName: "Weather Agent",
       resources: [
         {
-          originId: "origin-bot-1",
-          resourceType: "bot",
-          name: "Weather Bot",
+          originId: "origin-agent-1",
+          resourceType: "agent",
+          name: "Weather Agent",
           action: "UPDATE",
-          localId: "bot1",
+          localId: "agent1",
           localVersion: 1,
         },
         {
           originId: "origin-pkg-1",
           resourceType: "package",
-          name: "Main Package",
+          name: "Main Workflow",
           action: "UPDATE",
           localId: "pkg1",
           localVersion: 1,
@@ -643,12 +643,12 @@ export const handlers = [
     if (strategy === "merge") {
       return new HttpResponse(null, {
         status: 200,
-        headers: { Location: "/botstore/bots/bot1?version=2" },
+        headers: { Location: "/agentstore/agents/agent1?version=2" },
       });
     }
     return new HttpResponse(null, {
       status: 200,
-      headers: { Location: "/botstore/bots/imported-bot?version=1" },
+      headers: { Location: "/agentstore/agents/imported-agent?version=1" },
     });
   }),
 
@@ -656,17 +656,17 @@ export const handlers = [
   http.get("*/extensionstore/extensions", () => {
     return HttpResponse.json([
       { type: "ai.labs.parser", displayName: "Parser", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
-      { type: "ai.labs.behavior", displayName: "Behavior Rules", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "ai.labs.rules", displayName: "Rules", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
       { type: "ai.labs.property", displayName: "Property Setter", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
-      { type: "ai.labs.httpcalls", displayName: "HTTP Calls", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
-      { type: "ai.labs.langchain", displayName: "LangChain", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "ai.labs.apicalls", displayName: "API Calls", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "ai.labs.llm", displayName: "LLM", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
       { type: "ai.labs.output", displayName: "Output", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
       { type: "ai.labs.output.template", displayName: "Output Template", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
     ]);
   }),
 
   // Update package
-  http.put("*/packagestore/packages/:id", ({ request, params }) => {
+  http.put("*/workflowstore/workflows/:id", ({ request, params }) => {
     const url = new URL(request.url);
     const currentVersion = parseInt(
       url.searchParams.get("version") ?? "1",
@@ -676,14 +676,14 @@ export const handlers = [
     return new HttpResponse(null, {
       status: 200,
       headers: {
-        Location: `eddi://ai.labs.package/packagestore/packages/${params.id}?version=${newVersion}`,
+        Location: `eddi://ai.labs.workflow/workflowstore/workflows/${params.id}?version=${newVersion}`,
       },
     });
   }),
 
   // --- Resource Stores ---
   // Specific handlers for behavior and httpcalls with realistic mock data
-  http.get("*/behaviorstore/behaviorsets/:id", ({ request }) => {
+  http.get("*/rulestore/rulesets/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
     // Don't match descriptor endpoints
@@ -733,7 +733,7 @@ export const handlers = [
     });
   }),
 
-  http.get("*/httpcallsstore/httpcalls/:id", ({ request }) => {
+  http.get("*/apicallstore/apicalls/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
     if (url.pathname.endsWith("/descriptors") || includePrevious) {
@@ -772,7 +772,7 @@ export const handlers = [
   }),
 
   // LangChain mock data
-  http.get("*/langchainstore/langchains/:id", ({ request }) => {
+  http.get("*/llmstore/llmconfigs/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
     if (url.pathname.endsWith("/descriptors") || includePrevious) return;
@@ -791,7 +791,7 @@ export const handlers = [
           enableBuiltInTools: true,
           builtInToolsWhitelist: ["calculator", "datetime"],
           tools: [
-            "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/weather?version=1",
+            "eddi://ai.labs.apicalls/apicallstore/apicalls/weather?version=1",
           ],
           conversationHistoryLimit: 10,
           maxBudgetPerConversation: 1.0,
@@ -851,7 +851,7 @@ export const handlers = [
   }),
 
   // Dictionary mock data
-  http.get("*/regulardictionarystore/regulardictionaries/:id", ({ request }) => {
+  http.get("*/dictionarystore/dictionaries/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
     if (url.pathname.endsWith("/descriptors") || includePrevious) return;
@@ -871,15 +871,15 @@ export const handlers = [
   }),
 
   // Generic descriptor handlers for all 6 resource types
-  ...createResourceHandlers("behaviorstore", "behaviorsets", "behavior"),
-  ...createResourceHandlers("httpcallsstore", "httpcalls", "httpcalls"),
+  ...createResourceHandlers("rulestore", "rulesets", "rules"),
+  ...createResourceHandlers("apicallstore", "apicalls", "apicalls"),
   ...createResourceHandlers("outputstore", "outputsets", "output"),
   ...createResourceHandlers(
-    "regulardictionarystore",
-    "regulardictionaries",
+    "dictionarystore",
+    "dictionaries",
     "dictionary"
   ),
-  ...createResourceHandlers("langchainstore", "langchains", "langchain"),
+  ...createResourceHandlers("llmstore", "llmconfigs", "llm"),
   ...createResourceHandlers(
     "propertysetterstore",
     "propertysetters",
@@ -1056,14 +1056,14 @@ const ORPHAN_REPORT_MOCK = {
   deletedCount: 0,
   orphans: [
     {
-      resourceUri: "eddi://ai.labs.package/packagestore/packages/orphan1?version=1",
-      type: "ai.labs.package",
-      name: "Unused Package",
+      resourceUri: "eddi://ai.labs.workflow/workflowstore/workflows/orphan1?version=1",
+      type: "ai.labs.workflow",
+      name: "Unused Workflow",
       deleted: false,
     },
     {
-      resourceUri: "eddi://ai.labs.behavior/behaviorstore/behaviorsets/orphan2?version=1",
-      type: "ai.labs.behavior",
+      resourceUri: "eddi://ai.labs.rules/rulestore/rulesets/orphan2?version=1",
+      type: "ai.labs.rules",
       name: "Old Behavior Set",
       deleted: true,
     },
@@ -1089,11 +1089,11 @@ const MOCK_LOG_ENTRIES = [
   {
     timestamp: Date.now() - 5000,
     level: "INFO",
-    loggerName: "ai.labs.eddi.engine.runtime.BotEngine",
-    message: "Processing conversation conv-1 for bot bot-1",
-    environment: "unrestricted",
-    botId: "bot-1",
-    botVersion: 1,
+    loggerName: "ai.labs.eddi.engine.runtime.AgentEngine",
+    message: "Processing conversation conv-1 for agent agent-1",
+    environment: "production",
+    agentId: "agent-1",
+    agentVersion: 1,
     conversationId: "conv-1",
     userId: "user-1",
     instanceId: "eddi-host-a1b2",
@@ -1103,9 +1103,9 @@ const MOCK_LOG_ENTRIES = [
     level: "WARNING",
     loggerName: "ai.labs.eddi.modules.langchain.impl.LangchainTask",
     message: "LLM response took 8200ms, exceeding timeout threshold of 5000ms",
-    environment: "unrestricted",
-    botId: "bot-1",
-    botVersion: 1,
+    environment: "production",
+    agentId: "agent-1",
+    agentVersion: 1,
     conversationId: "conv-1",
     userId: "user-1",
     instanceId: "eddi-host-a1b2",
@@ -1116,9 +1116,9 @@ const MOCK_LOG_ENTRIES = [
     loggerName: "ai.labs.eddi.modules.httpcalls.impl.HttpCallsTask",
     message:
       "Failed to execute HTTP call 'get_weather'\n\tat ai.labs.eddi.modules.httpcalls.impl.HttpCallsTask.executeTask(HttpCallsTask.java:85)\n\tat ai.labs.eddi.modules.httpcalls.impl.HttpCallsTask.execute(HttpCallsTask.java:42)\n\tat ai.labs.eddi.engine.lifecycle.LifecycleManager.executeComponent(LifecycleManager.java:120)\nCaused by: java.net.ConnectException: Connection refused\n\tat java.net.http/jdk.internal.net.http.HttpClientImpl.send(HttpClientImpl.java:565)\n\tat java.net.http/jdk.internal.net.http.HttpClientImpl.send(HttpClientImpl.java:510)",
-    environment: "unrestricted",
-    botId: "bot-1",
-    botVersion: 1,
+    environment: "production",
+    agentId: "agent-1",
+    agentVersion: 1,
     conversationId: "conv-1",
     userId: "user-1",
     instanceId: "eddi-host-a1b2",
@@ -1148,7 +1148,7 @@ export const logAdminHandlers = [
 const MOCK_SECRETS = [
   {
     tenantId: "default",
-    botId: "bot1",
+    agentId: "agent1",
     keyName: "apiKey",
     createdAt: new Date(Date.now() - 86400000).toISOString(),
     lastAccessedAt: new Date(Date.now() - 3600000).toISOString(),
@@ -1156,7 +1156,7 @@ const MOCK_SECRETS = [
   },
   {
     tenantId: "default",
-    botId: "bot1",
+    agentId: "agent1",
     keyName: "dbPassword",
     createdAt: new Date(Date.now() - 172800000).toISOString(),
     lastAccessedAt: null,
@@ -1166,20 +1166,20 @@ const MOCK_SECRETS = [
 
 export const secretsHandlers = [
   // List secrets
-  http.get("*/secretstore/secrets/:tenantId/:botId", ({ params }) => {
+  http.get("*/secretstore/secrets/:tenantId/:agentId", ({ params }) => {
     const filtered = MOCK_SECRETS.filter(
-      (s) => s.tenantId === params.tenantId && s.botId === params.botId,
+      (s) => s.tenantId === params.tenantId && s.agentId === params.agentId,
     );
     return HttpResponse.json(filtered);
   }),
 
   // Store secret
-  http.put("*/secretstore/secrets/:tenantId/:botId/:keyName", ({ params }) => {
+  http.put("*/secretstore/secrets/:tenantId/:agentId/:keyName", ({ params }) => {
     return HttpResponse.json(
       {
-        reference: `\${eddivault:${params.tenantId}.${params.botId}.${params.keyName}}`,
+        reference: `\${eddivault:${params.tenantId}.${params.agentId}.${params.keyName}}`,
         tenantId: params.tenantId,
-        botId: params.botId,
+        agentId: params.agentId,
         keyName: params.keyName,
       },
       { status: 201 },
@@ -1188,7 +1188,7 @@ export const secretsHandlers = [
 
   // Delete secret
   http.delete(
-    "*/secretstore/secrets/:tenantId/:botId/:keyName",
+    "*/secretstore/secrets/:tenantId/:agentId/:keyName",
     () => new HttpResponse(null, { status: 204 }),
   ),
 
@@ -1204,10 +1204,10 @@ const MOCK_AUDIT_ENTRIES = [
   {
     id: "audit-1",
     conversationId: "conv1",
-    botId: "bot1",
-    botVersion: 1,
+    agentId: "agent1",
+    agentVersion: 1,
     userId: "user-1",
-    environment: "unrestricted",
+    environment: "production",
     stepIndex: 0,
     taskId: "ai.labs.parser",
     taskType: "expressions",
@@ -1225,12 +1225,12 @@ const MOCK_AUDIT_ENTRIES = [
   {
     id: "audit-2",
     conversationId: "conv1",
-    botId: "bot1",
-    botVersion: 1,
+    agentId: "agent1",
+    agentVersion: 1,
     userId: "user-1",
-    environment: "unrestricted",
+    environment: "production",
     stepIndex: 0,
-    taskId: "ai.labs.behavior",
+    taskId: "ai.labs.rules",
     taskType: "behavior",
     taskIndex: 1,
     durationMs: 3,
@@ -1246,12 +1246,12 @@ const MOCK_AUDIT_ENTRIES = [
   {
     id: "audit-3",
     conversationId: "conv1",
-    botId: "bot1",
-    botVersion: 1,
+    agentId: "agent1",
+    agentVersion: 1,
     userId: "user-1",
-    environment: "unrestricted",
+    environment: "production",
     stepIndex: 0,
-    taskId: "ai.labs.langchain",
+    taskId: "ai.labs.llm",
     taskType: "langchain",
     taskIndex: 2,
     durationMs: 1850,
@@ -1273,10 +1273,10 @@ const MOCK_AUDIT_ENTRIES = [
   {
     id: "audit-4",
     conversationId: "conv1",
-    botId: "bot1",
-    botVersion: 1,
+    agentId: "agent1",
+    agentVersion: 1,
     userId: "user-1",
-    environment: "unrestricted",
+    environment: "production",
     stepIndex: 0,
     taskId: "ai.labs.output",
     taskType: "output",
@@ -1299,7 +1299,7 @@ export const auditHandlers = [
     return HttpResponse.json(MOCK_AUDIT_ENTRIES.length);
   }),
 
-  http.get("*/auditstore/bot/:botId", () => {
+  http.get("*/auditstore/agent/:agentId", () => {
     return HttpResponse.json(MOCK_AUDIT_ENTRIES);
   }),
 
@@ -1314,7 +1314,7 @@ export const auditHandlers = [
 const MOCK_QUOTA = {
   tenantId: "default",
   maxConversationsPerDay: -1,
-  maxBotsPerTenant: -1,
+  maxAgentsPerTenant: -1,
   maxApiCallsPerMinute: -1,
   maxMonthlyCostUsd: -1,
   enabled: false,
@@ -1359,9 +1359,9 @@ const SCHEDULES_MOCK = [
     id: "sched-1",
     name: "Daily Health Check",
     triggerType: "CRON",
-    botId: "bot1",
-    botVersion: 0,
-    environment: "unrestricted",
+    agentId: "agent1",
+    agentVersion: 0,
+    environment: "production",
     cronExpression: "0 9 * * MON-FRI",
     cronDescription: "At 09:00 AM, Monday through Friday",
     message: "health_check",
@@ -1378,9 +1378,9 @@ const SCHEDULES_MOCK = [
     id: "sched-2",
     name: "Heartbeat Monitor",
     triggerType: "HEARTBEAT",
-    botId: "bot2",
-    botVersion: 0,
-    environment: "unrestricted",
+    agentId: "agent2",
+    agentVersion: 0,
+    environment: "production",
     heartbeatIntervalSeconds: 300,
     message: "ping",
     conversationStrategy: "persistent",
@@ -1396,9 +1396,9 @@ const SCHEDULES_MOCK = [
     id: "sched-3",
     name: "Failed Report",
     triggerType: "CRON",
-    botId: "bot1",
-    botVersion: 0,
-    environment: "unrestricted",
+    agentId: "agent1",
+    agentVersion: 0,
+    environment: "production",
     cronExpression: "*/5 * * * *",
     cronDescription: "Every 5 minutes",
     message: "generate_report",
@@ -1418,7 +1418,7 @@ const FIRE_LOGS_MOCK = [
     id: "fire-1",
     scheduleId: "sched-1",
     scheduleName: "Daily Health Check",
-    botId: "bot1",
+    agentId: "agent1",
     conversationId: "conv-123",
     firedAt: Date.now() - 86400000,
     completedAt: Date.now() - 86399000,
@@ -1430,7 +1430,7 @@ const FIRE_LOGS_MOCK = [
     id: "fire-2",
     scheduleId: "sched-1",
     scheduleName: "Daily Health Check",
-    botId: "bot1",
+    agentId: "agent1",
     conversationId: "conv-124",
     firedAt: Date.now() - 172800000,
     completedAt: Date.now() - 172799500,
@@ -1444,9 +1444,9 @@ export const scheduleHandlers = [
   // List all schedules
   http.get("*/schedulestore/schedules", ({ request }) => {
     const url = new URL(request.url);
-    const botId = url.searchParams.get("botId");
-    if (botId) {
-      return HttpResponse.json(SCHEDULES_MOCK.filter((s) => s.botId === botId));
+    const agentId = url.searchParams.get("agentId");
+    if (agentId) {
+      return HttpResponse.json(SCHEDULES_MOCK.filter((s) => s.agentId === agentId));
     }
     return HttpResponse.json(SCHEDULES_MOCK);
   }),

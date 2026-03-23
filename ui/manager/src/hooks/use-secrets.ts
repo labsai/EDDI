@@ -10,19 +10,19 @@ import {
 
 const secretKeys = {
   all: ["secrets"] as const,
-  list: (tenantId: string, botId: string) =>
-    ["secrets", "list", tenantId, botId] as const,
+  list: (tenantId: string, agentId: string) =>
+    ["secrets", "list", tenantId, agentId] as const,
   health: ["secrets", "health"] as const,
 };
 
 /* ─── Hooks ─── */
 
-/** List secrets for a tenant+bot namespace. */
-export function useSecrets(tenantId: string, botId: string) {
+/** List secrets for a tenant+agent namespace. */
+export function useSecrets(tenantId: string, agentId: string) {
   return useQuery({
-    queryKey: secretKeys.list(tenantId, botId),
-    queryFn: () => listSecrets(tenantId, botId),
-    enabled: !!tenantId && !!botId,
+    queryKey: secretKeys.list(tenantId, agentId),
+    queryFn: () => listSecrets(tenantId, agentId),
+    enabled: !!tenantId && !!agentId,
   });
 }
 
@@ -32,13 +32,13 @@ export function useStoreSecret() {
   return useMutation({
     mutationFn: (args: {
       tenantId: string;
-      botId: string;
+      agentId: string;
       keyName: string;
       value: string;
-    }) => storeSecret(args.tenantId, args.botId, args.keyName, args.value),
+    }) => storeSecret(args.tenantId, args.agentId, args.keyName, args.value),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({
-        queryKey: secretKeys.list(vars.tenantId, vars.botId),
+        queryKey: secretKeys.list(vars.tenantId, vars.agentId),
       });
     },
   });
@@ -50,12 +50,12 @@ export function useDeleteSecret() {
   return useMutation({
     mutationFn: (args: {
       tenantId: string;
-      botId: string;
+      agentId: string;
       keyName: string;
-    }) => deleteSecret(args.tenantId, args.botId, args.keyName),
+    }) => deleteSecret(args.tenantId, args.agentId, args.keyName),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({
-        queryKey: secretKeys.list(vars.tenantId, vars.botId),
+        queryKey: secretKeys.list(vars.tenantId, vars.agentId),
       });
     },
   });

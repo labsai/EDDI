@@ -8,13 +8,13 @@
 
 ### Ecosystem (5 repos, all under `c:\dev\git\`)
 
-| Repo                       | Tech                      | Purpose                                            |
-| -------------------------- | ------------------------- | -------------------------------------------------- |
-| **EDDI**                   | Java 21, Quarkus, MongoDB | Backend engine, REST API, lifecycle pipeline       |
-| **EDDI-Manager** (this)    | React 19, Vite, Tailwind  | Admin dashboard — bots, packages, extensions, chat |
-| **eddi-chat-ui**           | React, TypeScript         | Standalone chat widget                             |
-| **eddi-website**           | HTML → migrating to Astro | Marketing site at eddi.labs.ai                     |
-| **EDDI-integration-tests** | Java                      | End-to-end API tests                               |
+| Repo                       | Tech                      | Purpose                                              |
+| -------------------------- | ------------------------- | ---------------------------------------------------- |
+| **EDDI**                   | Java 21, Quarkus, MongoDB | Backend engine, REST API, lifecycle pipeline         |
+| **EDDI-Manager** (this)    | React 19, Vite, Tailwind  | Admin dashboard — agents, packages, extensions, chat |
+| **eddi-chat-ui**           | React, TypeScript         | Standalone chat widget                               |
+| **eddi-website**           | HTML → migrating to Astro | Marketing site at eddi.labs.ai                       |
+| **EDDI-integration-tests** | Java                      | End-to-end API tests                                 |
 
 ### Tech Stack
 
@@ -81,7 +81,7 @@ src/
 │   └── ui/                    # Reusable UI primitives
 ├── hooks/                     # TanStack Query hooks
 ├── lib/
-│   ├── api/                   # API modules (bots.ts, resources.ts, etc.)
+│   ├── api/                   # API modules (agents.ts, resources.ts, etc.)
 │   └── api-client.ts          # Base fetch wrapper
 ├── i18n/locales/              # 11 locale JSON files
 ├── pages/
@@ -172,24 +172,24 @@ All 6 extension types are in `src/lib/api/resources.ts` as `RESOURCE_TYPES`:
 
 All phases tracked in [`HANDOFF.md`](HANDOFF.md):
 
-| Phase    | Description                                                                          | Status |
-| -------- | ------------------------------------------------------------------------------------ | ------ |
-| 3.1–3.13 | Read-only dashboard (layout, bots, packages, chat, resources)                        | ✅     |
-| 3.14     | JSON Editor, Version Picker, Cascade Save                                            | ✅     |
-| 3.15     | Bot Editor (deploy, duplicate, version picker)                                       | ✅     |
-| 3.16     | Package Editor (drag-and-drop pipeline)                                              | ✅     |
-| 3.17     | Behavior Rules & HTTP Calls Editors                                                  | ✅     |
-| 3.18     | LangChain, Output, Property Setter, Dictionary Editors                               | ✅     |
-| 3.19     | Polish, remaining tests, documentation                                               | ✅     |
-| 3.20     | UI/UX Enterprise Polish (component library, toasts, dark mode)                       | ✅     |
-| 3.21     | MSW Browser Mode, Backend Integration & JSON Schema                                  | ✅     |
-| **4.1**  | **Keycloak Auth Adapter** — login/logout, token refresh, route guards, role-based UI | ✅     |
-| **4.2**  | **E2E Test Suite (Playwright)** — full coverage of bots, packages, editors, chat     | ✅     |
-| **4.3**  | **Real-Backend Integration Testing** — validate full CRUD with live EDDI             | ✅     |
-| **4.4**  | **JSON Schema Enrichment** — victools migration + mock schema enrichment              | ✅     |
+| Phase    | Description                                                                                           | Status |
+| -------- | ----------------------------------------------------------------------------------------------------- | ------ |
+| 3.1–3.13 | Read-only dashboard (layout, agents, packages, chat, resources)                                       | ✅     |
+| 3.14     | JSON Editor, Version Picker, Cascade Save                                                             | ✅     |
+| 3.15     | Agent Editor (deploy, duplicate, version picker)                                                      | ✅     |
+| 3.16     | Workflow Editor (drag-and-drop pipeline)                                                              | ✅     |
+| 3.17     | Behavior Rules & HTTP Calls Editors                                                                   | ✅     |
+| 3.18     | LangChain, Output, Property Setter, Dictionary Editors                                                | ✅     |
+| 3.19     | Polish, remaining tests, documentation                                                                | ✅     |
+| 3.20     | UI/UX Enterprise Polish (component library, toasts, dark mode)                                        | ✅     |
+| 3.21     | MSW Browser Mode, Backend Integration & JSON Schema                                                   | ✅     |
+| **4.1**  | **Keycloak Auth Adapter** — login/logout, token refresh, route guards, role-based UI                  | ✅     |
+| **4.2**  | **E2E Test Suite (Playwright)** — full coverage of agents, packages, editors, chat                    | ✅     |
+| **4.3**  | **Real-Backend Integration Testing** — validate full CRUD with live EDDI                              | ✅     |
+| **4.4**  | **JSON Schema Enrichment** — victools migration + mock schema enrichment                              | ✅     |
 | **4.5**  | **Production Build + Dashboard** — single bundle, loading indicator, old dashboard → Manager redirect | ✅     |
 
-**Phase 5+**: Phases 5–6 (NATS JetStream, PostgreSQL/DB-agnostic) ✅ complete. Phase 6E (langchain4j core + ObservableChatModel) ✅ complete. Phase 6F (Contextual Logging) ✅ complete. Phase 6D (Lombok Removal) ✅ complete. Phase 7 (Secrets+Audit+Tenancy) ✅ complete (33b remaining). Phase 8a (MCP Servers, 33 tools) ✅ complete. Phase 8b (MCP Client) ✅ complete. Then: RAG Foundation (8c), DAG+OTel (9), HITL (9b), Multi-Bot (10a), Advanced RAG+Debate (10b), Persistent Memory+Heartbeat (11), CI/CD (12), **Advanced Manager UI — Debugger, Visual Pipeline, Taint Tracking (13)**, Website Astro (14). See EDDI [`AGENTS.md`](../EDDI/AGENTS.md) and [`project-philosophy.md`](../EDDI/docs/project-philosophy.md) for full roadmap and principles.
+**Phase 5+**: Phases 5–6 (NATS JetStream, PostgreSQL/DB-agnostic) ✅ complete. Phase 6E (langchain4j core + ObservableChatModel) ✅ complete. Phase 6F (Contextual Logging) ✅ complete. Phase 6D (Lombok Removal) ✅ complete. Phase 7 (Secrets+Audit+Tenancy) ✅ complete (33b remaining). Phase 8a (MCP Servers, 33 tools) ✅ complete. Phase 8b (MCP Client) ✅ complete. Then: RAG Foundation (8c), DAG+OTel (9), HITL (9b), Multi-Agent (10a), Advanced RAG+Debate (10b), Persistent Memory+Heartbeat (11), CI/CD (12), **Advanced Manager UI — Debugger, Visual Pipeline, Taint Tracking (13)**, Website Astro (14). See EDDI [`AGENTS.md`](../EDDI/AGENTS.md) and [`project-philosophy.md`](../EDDI/docs/project-philosophy.md) for full roadmap and principles.
 
 ---
 

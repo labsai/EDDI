@@ -1,17 +1,17 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
 import { DashboardPage } from "@/pages/dashboard";
-import { BotsPage } from "@/pages/bots";
-import { BotDetailPage } from "@/pages/bot-detail";
-import { PackagesPage } from "@/pages/packages";
-import { PackageDetailPage } from "@/pages/package-detail";
+import { AgentsPage } from "@/pages/agents";
+import { AgentDetailPage } from "@/pages/agent-detail";
+import { WorkflowsPage } from "@/pages/packages";
+import { WorkflowDetailPage } from "@/pages/package-detail";
 import { ConversationsPage } from "@/pages/conversations";
 import { ConversationDetailPage } from "@/pages/conversation-detail";
 import { ChatPage } from "@/pages/chat";
 import { ResourcesPage } from "@/pages/resources";
 import { ResourceListPage } from "@/pages/resource-list";
 import { ResourceDetailPage } from "@/pages/resource-detail";
-import { BotWizardPage } from "@/pages/bot-wizard";
+import { AgentWizardPage } from "@/pages/agent-wizard";
 import { CoordinatorPage } from "@/pages/coordinator";
 import { SchedulesPage } from "@/pages/schedules";
 import { OrphansPage } from "@/pages/orphans";
@@ -25,11 +25,11 @@ export function App() {
     <Routes>
       <Route element={<AppLayout />}>
         <Route path="/manage" element={<DashboardPage />} />
-        <Route path="/manage/bots" element={<BotsPage />} />
-        <Route path="/manage/bots/wizard" element={<BotWizardPage />} />
-        <Route path="/manage/botview/:id" element={<BotDetailPage />} />
-        <Route path="/manage/packages" element={<PackagesPage />} />
-        <Route path="/manage/packageview/:id" element={<PackageDetailPage />} />
+        <Route path="/manage/agents" element={<AgentsPage />} />
+        <Route path="/manage/agents/wizard" element={<AgentWizardPage />} />
+        <Route path="/manage/agentview/:id" element={<AgentDetailPage />} />
+        <Route path="/manage/packages" element={<WorkflowsPage />} />
+        <Route path="/manage/packageview/:id" element={<WorkflowDetailPage />} />
         <Route path="/manage/conversations" element={<ConversationsPage />} />
         <Route path="/manage/coordinator" element={<CoordinatorPage />} />
         <Route path="/manage/schedules" element={<SchedulesPage />} />

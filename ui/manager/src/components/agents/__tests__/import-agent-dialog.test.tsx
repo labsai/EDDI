@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { ImportBotDialog } from "@/components/bots/import-bot-dialog";
+import { ImportAgentDialog } from "@/components/agents/import-agent-dialog";
 
 // vi.hoisted ensures these are available when vi.mock factory runs
 const { mockImportMutate, mockPreviewMutate, mockMergeMutate } = vi.hoisted(
@@ -13,7 +13,7 @@ const { mockImportMutate, mockPreviewMutate, mockMergeMutate } = vi.hoisted(
 );
 
 vi.mock("@/hooks/use-backup", () => ({
-  useImportBot: () => ({
+  useImportAgent: () => ({
     mutate: mockImportMutate,
     isPending: false,
   }),
@@ -21,7 +21,7 @@ vi.mock("@/hooks/use-backup", () => ({
     mutate: mockPreviewMutate,
     isPending: false,
   }),
-  useImportBotMerge: () => ({
+  useImportAgentMerge: () => ({
     mutate: mockMergeMutate,
     isPending: false,
   }),
@@ -41,7 +41,7 @@ function renderDialog(
     ...props,
   };
   return {
-    ...renderWithProviders(<ImportBotDialog {...defaultProps} />),
+    ...renderWithProviders(<ImportAgentDialog {...defaultProps} />),
     ...defaultProps,
   };
 }
@@ -50,15 +50,15 @@ async function uploadFile(user: ReturnType<typeof userEvent.setup>) {
   const fileInput = screen.getByTestId("import-file-input");
   await user.upload(
     fileInput,
-    new File(["zip"], "bot.zip", { type: "application/zip" })
+    new File(["zip"], "agent.zip", { type: "application/zip" })
   );
 }
 
 const PREVIEW_RESPONSE = {
-  botOriginId: "origin-bot-1",
-  botName: "Weather Bot",
+  agentOriginId: "origin-agent-1",
+  agentName: "Weather Agent",
   resources: [
-    { originId: "o1", resourceType: "bot", name: "WBot Config", action: "UPDATE", localId: "b1", localVersion: 1 },
+    { originId: "o1", resourceType: "agent", name: "WAgent Config", action: "UPDATE", localId: "b1", localVersion: 1 },
     { originId: "o2", resourceType: "package", name: "Main Pkg", action: "UPDATE", localId: "p1", localVersion: 1 },
     { originId: "o3", resourceType: "behavior", name: "Greeting Rules", action: "CREATE", localId: null, localVersion: null },
   ],
@@ -81,17 +81,17 @@ beforeEach(() => {
   mockMergeMutate.mockReset();
 });
 
-describe("ImportBotDialog", () => {
+describe("ImportAgentDialog", () => {
   // --- Rendering ---
 
   it("renders nothing when closed", () => {
     renderDialog({ open: false });
-    expect(screen.queryByTestId("import-bot-dialog")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("import-agent-dialog")).not.toBeInTheDocument();
   });
 
   it("renders upload drop zone when open", () => {
     renderDialog();
-    expect(screen.getByTestId("import-bot-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("import-agent-dialog")).toBeInTheDocument();
     expect(screen.getByTestId("import-drop-zone")).toBeInTheDocument();
   });
 
@@ -111,9 +111,9 @@ describe("ImportBotDialog", () => {
     const fileInput = screen.getByTestId("import-file-input");
     await user.upload(
       fileInput,
-      new File(["x".repeat(2048)], "my-bot-export.zip", { type: "application/zip" })
+      new File(["x".repeat(2048)], "my-agent-export.zip", { type: "application/zip" })
     );
-    expect(screen.getByText("my-bot-export.zip")).toBeInTheDocument();
+    expect(screen.getByText("my-agent-export.zip")).toBeInTheDocument();
     expect(screen.getByText("2.0 KB")).toBeInTheDocument();
   });
 
@@ -143,7 +143,7 @@ describe("ImportBotDialog", () => {
     await user.click(screen.getByTestId("import-confirm-strategy"));
 
     expect(mockImportMutate).toHaveBeenCalledTimes(1);
-    expect(mockImportMutate.mock.calls[0]![0].name).toBe("bot.zip");
+    expect(mockImportMutate.mock.calls[0]![0].name).toBe("agent.zip");
   });
 
   it("create import calls onSuccess on completion", async () => {
@@ -178,8 +178,8 @@ describe("ImportBotDialog", () => {
     const user = userEvent.setup();
     await navigateToPreview(user);
 
-    // Bot name header
-    expect(screen.getByText("Weather Bot")).toBeInTheDocument();
+    // Agent name header
+    expect(screen.getByText("Weather Agent")).toBeInTheDocument();
 
     // Table has rows with resource names
     expect(screen.getByText("Main Pkg")).toBeInTheDocument();
@@ -245,7 +245,7 @@ describe("ImportBotDialog", () => {
   it("X button calls onClose", async () => {
     const { onClose } = renderDialog();
     const user = userEvent.setup();
-    const btn = screen.getByTestId("import-bot-dialog").querySelector("button");
+    const btn = screen.getByTestId("import-agent-dialog").querySelector("button");
     if (btn) {
       await user.click(btn);
       expect(onClose).toHaveBeenCalled();

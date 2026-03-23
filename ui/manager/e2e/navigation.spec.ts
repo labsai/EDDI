@@ -10,14 +10,14 @@ test.describe("Navigation", () => {
     await expect(page.locator("h1")).toContainText("Dashboard");
   });
 
-  test("navigates to bots page via sidebar", async ({ page }) => {
+  test("navigates to agents page via sidebar", async ({ page }) => {
     await page.goto("/manage");
     await waitForApp(page);
     await page
       .getByTestId("sidebar")
-      .getByRole("link", { name: /bots/i })
+      .getByRole("link", { name: /agents/i })
       .click();
-    await expect(page).toHaveURL(/\/manage\/bots/);
+    await expect(page).toHaveURL(/\/manage\/agents/);
   });
 
   test("navigates to packages page via sidebar", async ({ page }) => {

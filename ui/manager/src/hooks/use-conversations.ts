@@ -13,21 +13,21 @@ export function useConversationDescriptors(
   limit = 20,
   index = 0,
   filter = "",
-  botId = "",
+  agentId = "",
   conversationState?: ConversationState
 ) {
   return useQuery({
     queryKey: [
       ...CONVERSATIONS_KEY,
       "descriptors",
-      { limit, index, filter, botId, conversationState },
+      { limit, index, filter, agentId, conversationState },
     ],
     queryFn: () =>
       getConversationDescriptors(
         limit,
         index,
         filter,
-        botId,
+        agentId,
         undefined,
         conversationState
       ),

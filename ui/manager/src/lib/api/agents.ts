@@ -1,10 +1,10 @@
 import { api } from "../api-client";
 
-export const ENVIRONMENTS = ["unrestricted", "restricted", "test"] as const;
+export const ENVIRONMENTS = ["production", "test"] as const;
 export type Environment = (typeof ENVIRONMENTS)[number];
 
 // Types matching EDDI backend
-export interface BotDescriptor {
+export interface AgentDescriptor {
   resource: string;
   name: string;
   description: string;
@@ -14,7 +14,7 @@ export interface BotDescriptor {
   lastModifiedBy?: string;
 }
 
-export interface Bot {
+export interface Agent {
   packages?: string[];
   channels?: string[];
 }
@@ -28,7 +28,7 @@ export function parseResourceUri(resource: string): {
   id: string;
   version: number;
 } {
-  // Format: eddi://ai.labs.bot/botstore/bots/ID?version=VERSION
+  // Format: eddi://ai.labs.agent/agentstore/agents/ID?version=VERSION
   const url = new URL(resource.replace("eddi://", "http://"));
   const parts = url.pathname.split("/");
   const id = parts[parts.length - 1]!;
@@ -37,47 +37,47 @@ export function parseResourceUri(resource: string): {
 }
 
 // API functions
-export function getBotDescriptors(
+export function getAgentDescriptors(
   limit = 20,
   index = 0,
   filter = ""
-): Promise<BotDescriptor[]> {
+): Promise<AgentDescriptor[]> {
   const params = new URLSearchParams({
     limit: String(limit),
     index: String(index),
   });
   if (filter) params.set("filter", filter);
-  return api.get<BotDescriptor[]>(
-    `/botstore/bots/descriptors?${params.toString()}`
+  return api.get<AgentDescriptor[]>(
+    `/agentstore/agents/descriptors?${params.toString()}`
   );
 }
 
-export function getBotDescriptorsWithVersions(
-  botId: string
-): Promise<BotDescriptor[]> {
-  return api.get<BotDescriptor[]>(
-    `/botstore/bots/descriptors?includePreviousVersions=true&filter=${botId}`
+export function getAgentDescriptorsWithVersions(
+  agentId: string
+): Promise<AgentDescriptor[]> {
+  return api.get<AgentDescriptor[]>(
+    `/agentstore/agents/descriptors?includePreviousVersions=true&filter=${agentId}`
   );
 }
 
-export function getBot(id: string, version?: number): Promise<Bot> {
+export function getAgent(id: string, version?: number): Promise<Agent> {
   const versionSuffix = version ? `?version=${version}` : "";
-  return api.get<Bot>(`/botstore/bots/${id}${versionSuffix}`);
+  return api.get<Agent>(`/agentstore/agents/${id}${versionSuffix}`);
 }
 
-export function createBot(bot: Bot): Promise<{ location: string }> {
-  return api.post<{ location: string }>("/botstore/bots", bot);
+export function createAgent(agent: Agent): Promise<{ location: string }> {
+  return api.post<{ location: string }>("/agentstore/agents", agent);
 }
 
-export function updateBot(
+export function updateAgent(
   id: string,
   version: number,
-  bot: Bot
+  agent: Agent
 ): Promise<{ location: string }> {
-  return api.put(`/botstore/bots/${id}?version=${version}`, bot);
+  return api.put(`/agentstore/agents/${id}?version=${version}`, agent);
 }
 
-export function deleteBot(
+export function deleteAgent(
   id: string,
   version: number,
   options?: { cascade?: boolean; permanent?: boolean }
@@ -85,46 +85,46 @@ export function deleteBot(
   const params = new URLSearchParams({ version: String(version) });
   if (options?.cascade) params.set("cascade", "true");
   if (options?.permanent) params.set("permanent", "true");
-  return api.delete(`/botstore/bots/${id}?${params}`);
+  return api.delete(`/agentstore/agents/${id}?${params}`);
 }
 
-export function duplicateBot(
+export function duplicateAgent(
   id: string,
   version: number,
   deepCopy = false
 ): Promise<{ location: string }> {
   return api.post<{ location: string }>(
-    `/botstore/bots/${id}?version=${version}&deepCopy=${deepCopy}`
+    `/agentstore/agents/${id}?version=${version}&deepCopy=${deepCopy}`
   );
 }
 
-export function deployBot(
+export function deployAgent(
   environment: string,
-  botId: string,
+  agentId: string,
   version: number
 ): Promise<void> {
   return api.post(
-    `/administration/${environment}/deploy/${botId}?version=${version}`
+    `/administration/${environment}/deploy/${agentId}?version=${version}`
   );
 }
 
-export function undeployBot(
+export function undeployAgent(
   environment: string,
-  botId: string,
+  agentId: string,
   version: number
 ): Promise<void> {
   return api.post(
-    `/administration/${environment}/undeploy/${botId}?version=${version}`
+    `/administration/${environment}/undeploy/${agentId}?version=${version}`
   );
 }
 
 export function getDeploymentStatus(
   environment: string,
-  botId: string,
+  agentId: string,
   version: number
 ): Promise<DeploymentStatus> {
   return api.get<DeploymentStatus>(
-    `/administration/${environment}/deploymentstatus/${botId}?version=${version}`
+    `/administration/${environment}/deploymentstatus/${agentId}?version=${version}`
   );
 }
 
@@ -134,13 +134,13 @@ export interface EnvironmentStatus {
 }
 
 export async function getDeploymentStatuses(
-  botId: string,
+  agentId: string,
   version: number
 ): Promise<EnvironmentStatus[]> {
   const results = await Promise.allSettled(
     ENVIRONMENTS.map(async (env) => {
       try {
-        const result = await getDeploymentStatus(env, botId, version);
+        const result = await getDeploymentStatus(env, agentId, version);
         return { environment: env, status: result.status };
       } catch {
         return { environment: env, status: "NOT_FOUND" as const };

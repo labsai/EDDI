@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getJsonSchema, getBotJsonSchema, getPackageJsonSchema } from "@/lib/api/schemas";
+import { getJsonSchema, getAgentJsonSchema, getWorkflowJsonSchema } from "@/lib/api/schemas";
 import { getResourceType } from "@/lib/api/resources";
 
 /**
@@ -24,12 +24,12 @@ export function useJsonSchema(typeSlug: string | undefined) {
 }
 
 /**
- * Fetch the JSON Schema for bot configurations.
+ * Fetch the JSON Schema for agent configurations.
  */
-export function useBotJsonSchema() {
+export function useAgentJsonSchema() {
   return useQuery({
-    queryKey: ["jsonSchema", "bot"],
-    queryFn: getBotJsonSchema,
+    queryKey: ["jsonSchema", "agent"],
+    queryFn: getAgentJsonSchema,
     staleTime: Infinity,
     gcTime: Infinity,
     retry: 1,
@@ -39,10 +39,10 @@ export function useBotJsonSchema() {
 /**
  * Fetch the JSON Schema for package configurations.
  */
-export function usePackageJsonSchema() {
+export function useWorkflowJsonSchema() {
   return useQuery({
     queryKey: ["jsonSchema", "package"],
-    queryFn: getPackageJsonSchema,
+    queryFn: getWorkflowJsonSchema,
     staleTime: Infinity,
     gcTime: Infinity,
     retry: 1,

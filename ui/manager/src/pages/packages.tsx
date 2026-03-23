@@ -1,16 +1,16 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Package, Search, Plus, ExternalLink, Trash2, Copy } from "lucide-react";
+import { Workflow, Search, Plus, ExternalLink, Trash2, Copy } from "lucide-react";
 import { toast } from "sonner";
 import {
-  usePackageDescriptors,
-  useDeletePackage,
+  useWorkflowDescriptors,
+  useDeleteWorkflow,
 } from "@/hooks/use-packages";
-import { PackageCard } from "@/components/packages/package-card";
-import { CreatePackageDialog } from "@/components/packages/create-package-dialog";
-import { parseResourceUri } from "@/lib/api/bots";
+import { WorkflowCard } from "@/components/packages/package-card";
+import { CreateWorkflowDialog } from "@/components/packages/create-package-dialog";
+import { parseResourceUri } from "@/lib/api/agents";
 import { cn } from "@/lib/utils";
-import type { BotDescriptor } from "@/lib/api/bots";
+import type { AgentDescriptor } from "@/lib/api/agents";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -24,7 +24,7 @@ import {
 } from "@/components/shared/view-toggle";
 import { Link } from "react-router-dom";
 
-export function PackagesPage() {
+export function WorkflowsPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -32,10 +32,10 @@ export function PackagesPage() {
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("packages"));
 
   const { data: packages, isLoading, isError, refetch } =
-    usePackageDescriptors(100, 0, search);
-  const deleteMutation = useDeletePackage();
+    useWorkflowDescriptors(100, 0, search);
+  const deleteMutation = useDeleteWorkflow();
 
-  const enrichedPackages = (packages ?? []).map((pkg: BotDescriptor) => {
+  const enrichedWorkflows = (packages ?? []).map((pkg: AgentDescriptor) => {
     const { id, version } = parseResourceUri(pkg.resource);
     return { ...pkg, id, version };
   });
@@ -73,7 +73,7 @@ export function PackagesPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
-            <Package className="h-8 w-8 text-primary" />
+            <Workflow className="h-8 w-8 text-primary" />
             {t("pages.packages.title")}
           </h1>
           <p className="mt-1 text-muted-foreground">
@@ -85,7 +85,7 @@ export function PackagesPage() {
           data-testid="create-package-btn"
         >
           <Plus className="h-4 w-4" />
-          {t("packages.createPackage")}
+          {t("packages.createWorkflow")}
         </Button>
       </div>
 
@@ -131,19 +131,19 @@ export function PackagesPage() {
         />
       )}
 
-      {!isLoading && !isError && enrichedPackages.length === 0 && (
+      {!isLoading && !isError && enrichedWorkflows.length === 0 && (
         <EmptyState
-          icon={Package}
+          icon={Workflow}
           title={search ? t("common.noResults") : t("packages.empty")}
-          actionLabel={!search ? t("packages.createPackage") : undefined}
+          actionLabel={!search ? t("packages.createWorkflow") : undefined}
           onAction={!search ? () => setCreateOpen(true) : undefined}
         />
       )}
 
-      {!isLoading && !isError && enrichedPackages.length > 0 && (
+      {!isLoading && !isError && enrichedWorkflows.length > 0 && (
         <>
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {t("packages.count", { count: enrichedPackages.length })}
+            {t("packages.count", { count: enrichedWorkflows.length })}
           </p>
 
           {view === "card" ? (
@@ -154,8 +154,8 @@ export function PackagesPage() {
               )}
               data-testid="package-grid"
             >
-              {enrichedPackages.map((pkg) => (
-                <PackageCard
+              {enrichedWorkflows.map((pkg) => (
+                <WorkflowCard
                   key={pkg.resource}
                   pkg={pkg}
                   onDuplicate={handleDuplicate}
@@ -189,7 +189,7 @@ export function PackagesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {enrichedPackages.map((pkg) => (
+                  {enrichedWorkflows.map((pkg) => (
                     <tr
                       key={pkg.resource}
                       className="hover:bg-secondary/30 transition-colors"
@@ -199,7 +199,7 @@ export function PackagesPage() {
                           to={`/manage/packageview/${pkg.id}`}
                           className="text-sm font-medium text-foreground hover:text-primary transition-colors"
                         >
-                          {pkg.name || t("packages.unnamed", "Unnamed Package")}
+                          {pkg.name || t("packages.unnamed", "Unnamed Workflow")}
                           <ExternalLink className="ms-1 inline h-3 w-3 opacity-40" />
                         </Link>
                       </td>
@@ -246,7 +246,7 @@ export function PackagesPage() {
       )}
 
       {/* Create dialog */}
-      <CreatePackageDialog
+      <CreateWorkflowDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
       />

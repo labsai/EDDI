@@ -17,7 +17,7 @@ import {
 
 const KEYS = {
   all: ["schedules"] as const,
-  list: (botId?: string) => ["schedules", "list", botId] as const,
+  list: (agentId?: string) => ["schedules", "list", agentId] as const,
   detail: (id: string) => ["schedules", "detail", id] as const,
   fireLogs: (id: string) => ["schedules", "fire-logs", id] as const,
   failed: ["schedules", "failed"] as const,
@@ -25,10 +25,10 @@ const KEYS = {
 
 // ==================== Queries ====================
 
-export function useSchedules(botId?: string) {
+export function useSchedules(agentId?: string) {
   return useQuery({
-    queryKey: KEYS.list(botId),
-    queryFn: () => getSchedules(botId),
+    queryKey: KEYS.list(agentId),
+    queryFn: () => getSchedules(agentId),
     refetchInterval: 10_000,
   });
 }

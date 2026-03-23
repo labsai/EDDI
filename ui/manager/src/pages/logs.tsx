@@ -166,17 +166,17 @@ export function LogsPage() {
 
 function LiveTab() {
   const { t } = useTranslation();
-  const [botFilter, setBotFilter] = useState("");
+  const [agentFilter, setAgentFilter] = useState("");
   const [levelFilter, setLevelFilter] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
   const filters = useMemo(
     () => ({
-      botId: botFilter || undefined,
+      agentId: agentFilter || undefined,
       level: levelFilter || undefined,
     }),
-    [botFilter, levelFilter]
+    [agentFilter, levelFilter]
   );
 
   const { entries, sseConnected, paused, setPaused, clearEntries } =
@@ -222,14 +222,14 @@ function LiveTab() {
 
         <div className="flex-1" />
 
-        {/* Bot filter */}
+        {/* Agent filter */}
         <input
           type="text"
-          placeholder={t("logs.filterBot", "Bot ID...")}
-          value={botFilter}
-          onChange={(e) => setBotFilter(e.target.value)}
+          placeholder={t("logs.filterAgent", "Agent ID...")}
+          value={agentFilter}
+          onChange={(e) => setAgentFilter(e.target.value)}
           className="w-36 rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-          data-testid="filter-bot"
+          data-testid="filter-agent"
         />
 
         {/* Level filter */}
@@ -336,11 +336,11 @@ function HistoryTab() {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
           type="text"
-          placeholder={t("logs.filterBot", "Bot ID...")}
-          value={filters.botId ?? ""}
-          onChange={(e) => updateFilter("botId", e.target.value)}
+          placeholder={t("logs.filterAgent", "Agent ID...")}
+          value={filters.agentId ?? ""}
+          onChange={(e) => updateFilter("agentId", e.target.value)}
           className="w-36 rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-          data-testid="history-filter-bot"
+          data-testid="history-filter-agent"
         />
         <input
           type="text"
@@ -400,9 +400,9 @@ function HistoryTab() {
                   {formatTimestamp(entry.timestamp)}
                 </span>
                 <LevelBadge level={entry.level ?? "INFO"} />
-                {entry.botId && (
+                {entry.agentId && (
                   <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
-                    {entry.botId}
+                    {entry.agentId}
                   </span>
                 )}
                 {entry.instanceId && (
@@ -472,9 +472,9 @@ function LogRow({ entry }: { entry: LogEntry }) {
           {formatTimestamp(entry.timestamp)}
         </span>
         <LevelBadge level={entry.level} />
-        {entry.botId && (
+        {entry.agentId && (
           <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
-            {entry.botId}
+            {entry.agentId}
           </span>
         )}
         {entry.conversationId && (

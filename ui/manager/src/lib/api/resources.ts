@@ -1,8 +1,8 @@
 import { api } from "../api-client";
-import type { BotDescriptor } from "./bots";
+import type { AgentDescriptor } from "./agents";
 
-export { parseResourceUri } from "./bots";
-export type { BotDescriptor as ResourceDescriptor };
+export { parseResourceUri } from "./agents";
+export type { AgentDescriptor as ResourceDescriptor };
 
 /** Configuration for a resource type slug → store path + plural path */
 export interface ResourceTypeConfig {
@@ -16,17 +16,17 @@ export interface ResourceTypeConfig {
 /** All supported resource types */
 export const RESOURCE_TYPES: ResourceTypeConfig[] = [
   {
-    slug: "behavior",
-    store: "behaviorstore",
-    plural: "behaviorsets",
-    labelKey: "resources.types.behavior",
+    slug: "rules",
+    store: "rulestore",
+    plural: "rulesets",
+    labelKey: "resources.types.rules",
     icon: "GitBranch",
   },
   {
-    slug: "httpcalls",
-    store: "httpcallsstore",
-    plural: "httpcalls",
-    labelKey: "resources.types.httpcalls",
+    slug: "apicalls",
+    store: "apicallstore",
+    plural: "apicalls",
+    labelKey: "resources.types.apicalls",
     icon: "Globe",
   },
   {
@@ -37,17 +37,17 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     icon: "MessageSquareText",
   },
   {
-    slug: "dictionaries",
-    store: "regulardictionarystore",
-    plural: "regulardictionaries",
-    labelKey: "resources.types.dictionaries",
+    slug: "dictionary",
+    store: "dictionarystore",
+    plural: "dictionaries",
+    labelKey: "resources.types.dictionary",
     icon: "BookOpen",
   },
   {
-    slug: "langchain",
-    store: "langchainstore",
-    plural: "langchains",
-    labelKey: "resources.types.langchain",
+    slug: "llm",
+    store: "llmstore",
+    plural: "llmconfigs",
+    labelKey: "resources.types.llm",
     icon: "Brain",
   },
   {
@@ -76,13 +76,13 @@ export function getResourceDescriptors(
   limit = 100,
   index = 0,
   filter = ""
-): Promise<BotDescriptor[]> {
+): Promise<AgentDescriptor[]> {
   const params = new URLSearchParams({
     limit: String(limit),
     index: String(index),
   });
   if (filter) params.set("filter", filter);
-  return api.get<BotDescriptor[]>(
+  return api.get<AgentDescriptor[]>(
     `${basePath(rt)}/descriptors?${params.toString()}`
   );
 }
@@ -133,8 +133,8 @@ export function duplicateResource(
 export function getResourceVersions(
   rt: ResourceTypeConfig,
   id: string
-): Promise<BotDescriptor[]> {
-  return api.get<BotDescriptor[]>(
+): Promise<AgentDescriptor[]> {
+  return api.get<AgentDescriptor[]>(
     `${basePath(rt)}/descriptors?filter=${id}&includePreviousVersions=true`
   );
 }

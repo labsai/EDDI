@@ -1,25 +1,25 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
-import { useCreateBot } from "@/hooks/use-bots";
+import { useCreateAgent } from "@/hooks/use-agents";
 
-interface CreateBotDialogProps {
+interface CreateAgentDialogProps {
   open: boolean;
   onClose: () => void;
 }
 
-export function CreateBotDialog({ open, onClose }: CreateBotDialogProps) {
+export function CreateAgentDialog({ open, onClose }: CreateAgentDialogProps) {
   const { t } = useTranslation();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const createBot = useCreateBot();
+  const createAgent = useCreateAgent();
 
   if (!open) return null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await createBot.mutateAsync({ packages: [], channels: [] });
+      await createAgent.mutateAsync({ packages: [], channels: [] });
       setName("");
       setDescription("");
       onClose();
@@ -45,7 +45,7 @@ export function CreateBotDialog({ open, onClose }: CreateBotDialogProps) {
           {/* Header */}
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-foreground">
-              {t("bots.createTitle", "Create New Bot")}
+              {t("agents.createTitle", "Create New Agent")}
             </h2>
             <button
               onClick={onClose}
@@ -59,17 +59,17 @@ export function CreateBotDialog({ open, onClose }: CreateBotDialogProps) {
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             <div>
               <label
-                htmlFor="bot-name"
+                htmlFor="agent-name"
                 className="mb-1.5 block text-sm font-medium text-foreground"
               >
-                {t("bots.name", "Name")}
+                {t("agents.name", "Name")}
               </label>
               <input
-                id="bot-name"
+                id="agent-name"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder={t("bots.namePlaceholder", "My Bot")}
+                placeholder={t("agents.namePlaceholder", "My Agent")}
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 autoFocus
               />
@@ -77,18 +77,18 @@ export function CreateBotDialog({ open, onClose }: CreateBotDialogProps) {
 
             <div>
               <label
-                htmlFor="bot-description"
+                htmlFor="agent-description"
                 className="mb-1.5 block text-sm font-medium text-foreground"
               >
-                {t("bots.description", "Description")}
+                {t("agents.description", "Description")}
               </label>
               <textarea
-                id="bot-description"
+                id="agent-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder={t(
-                  "bots.descriptionPlaceholder",
-                  "Describe what this bot does..."
+                  "agents.descriptionPlaceholder",
+                  "Describe what this agent does..."
                 )}
                 rows={3}
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
@@ -96,7 +96,7 @@ export function CreateBotDialog({ open, onClose }: CreateBotDialogProps) {
             </div>
 
             {/* Error */}
-            {createBot.isError && (
+            {createAgent.isError && (
               <p className="text-sm text-destructive">
                 {t("common.error")}
               </p>
@@ -113,10 +113,10 @@ export function CreateBotDialog({ open, onClose }: CreateBotDialogProps) {
               </button>
               <button
                 type="submit"
-                disabled={createBot.isPending}
+                disabled={createAgent.isPending}
                 className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {createBot.isPending
+                {createAgent.isPending
                   ? t("common.loading")
                   : t("common.create")}
               </button>

@@ -1,28 +1,28 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
-import { PackagesPage } from "@/pages/packages";
+import { WorkflowsPage } from "@/pages/packages";
 
-describe("PackagesPage", () => {
+describe("WorkflowsPage", () => {
   it("renders page heading", () => {
-    renderWithProviders(<PackagesPage />);
-    expect(screen.getByText("Packages")).toBeInTheDocument();
+    renderWithProviders(<WorkflowsPage />);
+    expect(screen.getByText("Workflows")).toBeInTheDocument();
   });
 
   it("renders search input", () => {
-    renderWithProviders(<PackagesPage />);
+    renderWithProviders(<WorkflowsPage />);
     expect(screen.getByTestId("package-search")).toBeInTheDocument();
   });
 
   it("renders create package button", () => {
-    renderWithProviders(<PackagesPage />);
+    renderWithProviders(<WorkflowsPage />);
     expect(screen.getByTestId("create-package-btn")).toBeInTheDocument();
   });
 
   it("shows subtitle text", () => {
-    renderWithProviders(<PackagesPage />);
+    renderWithProviders(<WorkflowsPage />);
     expect(
-      screen.getByText("Configure bot packages and extensions")
+      screen.getByText("Configure agent packages and extensions")
     ).toBeInTheDocument();
   });
 });

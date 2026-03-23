@@ -6,17 +6,17 @@ import { DashboardPage } from "@/pages/dashboard";
 // Mock the dashboard hooks since they need API calls
 vi.mock("@/hooks/use-dashboard", () => ({
   useDashboardStats: () => ({
-    data: { botCount: 5, packageCount: 3, conversationCount: 42, resourceCount: 0 },
+    data: { agentCount: 5, packageCount: 3, conversationCount: 42, resourceCount: 0 },
     isLoading: false,
   }),
-  useRecentBots: () => ({
+  useRecentAgents: () => ({
     data: [],
     isLoading: false,
   }),
 }));
 
-vi.mock("@/hooks/use-bots", () => ({
-  groupBotsByName: () => [],
+vi.mock("@/hooks/use-agents", () => ({
+  groupAgentsByName: () => [],
 }));
 
 describe("DashboardPage", () => {
@@ -35,6 +35,6 @@ describe("DashboardPage", () => {
   it("renders quick action buttons", () => {
     renderWithProviders(<DashboardPage />);
     // Quick actions section exists
-    expect(screen.getByText("Bot Wizard")).toBeInTheDocument();
+    expect(screen.getByText("Agent Wizard")).toBeInTheDocument();
   });
 });

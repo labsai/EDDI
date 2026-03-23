@@ -25,7 +25,7 @@ describe("ConversationsPage", () => {
   it("shows subtitle text", () => {
     renderWithProviders(<ConversationsPage />);
     expect(
-      screen.getByText("View and manage bot conversations")
+      screen.getByText("View and manage agent conversations")
     ).toBeInTheDocument();
   });
 });

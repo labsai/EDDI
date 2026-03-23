@@ -53,7 +53,7 @@ function computeInlineHeight(
   return clampedLines * LINE_HEIGHT + PADDING_Y;
 }
 
-/** Shared Monaco options for both inline and fullscreen modes */
+/** Shared Monaco options for agenth inline and fullscreen modes */
 function getBaseOptions(readOnly: boolean): editor.IStandaloneEditorConstructionOptions {
   return {
     readOnly,

@@ -1,18 +1,18 @@
 import { test, expect } from "@playwright/test";
 import { waitForApp } from "./e2e-helpers";
 
-test.describe("Bot Detail", () => {
+test.describe("Agent Detail", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/manage/botview/bot1");
+    await page.goto("/manage/agentview/agent1");
     await waitForApp(page);
   });
 
-  test("renders bot detail heading", async ({ page }) => {
-    await expect(page.locator("h1")).toContainText(/bot detail/i);
+  test("renders agent detail heading", async ({ page }) => {
+    await expect(page.locator("h1")).toContainText(/agent detail/i);
   });
 
-  test("shows back link to bots list", async ({ page }) => {
-    await expect(page.getByText(/back to bots/i)).toBeVisible();
+  test("shows back link to agents list", async ({ page }) => {
+    await expect(page.getByText(/back to agents/i)).toBeVisible();
   });
 
   test("shows version selector", async ({ page }) => {
@@ -34,8 +34,8 @@ test.describe("Bot Detail", () => {
   });
 
   test("shows packages section", async ({ page }) => {
-    // Use heading text to avoid matching sidebar "Packages" link
-    await expect(page.locator("main").getByText("Packages").first()).toBeVisible();
+    // Use heading text to avoid matching sidebar "Workflows" link
+    await expect(page.locator("main").getByText("Workflows").first()).toBeVisible();
     await expect(page.getByText(/add package/i)).toBeVisible();
   });
 
@@ -48,8 +48,8 @@ test.describe("Bot Detail", () => {
     await expect(page.getByText(/raw configuration/i)).toBeVisible();
   });
 
-  test("back link navigates to bots list", async ({ page }) => {
-    await page.getByText(/back to bots/i).click();
-    await expect(page).toHaveURL(/\/manage\/bots/);
+  test("back link navigates to agents list", async ({ page }) => {
+    await page.getByText(/back to agents/i).click();
+    await expect(page).toHaveURL(/\/manage\/agents/);
   });
 });

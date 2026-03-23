@@ -8,18 +8,18 @@ The current Manager UI (Phases 3.1–3.13) is a **read-only dashboard**. This pl
 
 All extension types follow a **uniform CRUD pattern**:
 
-| Endpoint                                                | Verb   | Description                         |
-| ------------------------------------------------------- | ------ | ----------------------------------- |
-| `GET /{store}/descriptors`                              | GET    | List all configs                    |
-| `GET /{store}/{id}?version=N`                           | GET    | Read config                         |
-| `PUT /{store}/{id}?version=N`                           | PUT    | Update config (creates new version) |
-| `POST /{store}`                                         | POST   | Create new config                   |
-| `POST /{store}/{id}?version=N`                          | POST   | Duplicate                           |
-| `DELETE /{store}/{id}?version=N`                        | DELETE | Delete                              |
-| `GET /{store}/jsonSchema`                               | GET    | JSON Schema for validation          |
-| `POST /administration/{env}/deploy/{botId}?version=N`   | POST   | Deploy bot                          |
-| `POST /administration/{env}/undeploy/{botId}?version=N` | POST   | Undeploy bot                        |
-| `GET /extensionstore/extensions`                        | GET    | List available task types           |
+| Endpoint                                                  | Verb   | Description                         |
+| --------------------------------------------------------- | ------ | ----------------------------------- |
+| `GET /{store}/descriptors`                                | GET    | List all configs                    |
+| `GET /{store}/{id}?version=N`                             | GET    | Read config                         |
+| `PUT /{store}/{id}?version=N`                             | PUT    | Update config (creates new version) |
+| `POST /{store}`                                           | POST   | Create new config                   |
+| `POST /{store}/{id}?version=N`                            | POST   | Duplicate                           |
+| `DELETE /{store}/{id}?version=N`                          | DELETE | Delete                              |
+| `GET /{store}/jsonSchema`                                 | GET    | JSON Schema for validation          |
+| `POST /administration/{env}/deploy/{agentId}?version=N`   | POST   | Deploy agent                        |
+| `POST /administration/{env}/undeploy/{agentId}?version=N` | POST   | Undeploy agent                      |
+| `GET /extensionstore/extensions`                          | GET    | List available task types           |
 
 **Extension store paths:**
 
@@ -55,13 +55,13 @@ Shared layout: header (name, version picker, save/cancel), tabs (Form | JSON), d
 
 Dropdown showing all versions of a resource. Calls `GET /descriptors?includePreviousVersions=true`.
 
-#### [MODIFY] `src/lib/api/bots.ts`
+#### [MODIFY] `src/lib/api/agents.ts`
 
-Add `updateBot()`, `duplicateBot()`, `deleteBot()` API functions.
+Add `updateAgent()`, `duplicateAgent()`, `deleteAgent()` API functions.
 
 #### [MODIFY] `src/lib/api/packages.ts`
 
-Add `updatePackage()`, `duplicatePackage()`, `deletePackage()` API functions.
+Add `updateWorkflow()`, `duplicateWorkflow()`, `deleteWorkflow()` API functions.
 
 #### [NEW] `src/lib/api/extensions.ts`
 
@@ -73,20 +73,20 @@ TanStack Query hooks wrapping extension CRUD (read, update, create, delete, dupl
 
 ---
 
-### Phase 3.15 — Bot Editor (Edit, Deploy, Undeploy)
+### Phase 3.15 — Agent Editor (Edit, Deploy, Undeploy)
 
-#### [MODIFY] `src/pages/bot-detail.tsx`
+#### [MODIFY] `src/pages/agent-detail.tsx`
 
-- **Edit mode**: inline-edit name/description, save via `PUT /botstore/bots/{id}`
-- **Package list**: add/remove package URIs from `BotConfiguration.packages[]`
-- **Deploy/Undeploy**: wire buttons to `POST /administration/{env}/deploy/{botId}` and `POST /administration/{env}/undeploy/{botId}`
-- **Deployment status**: poll `GET /administration/{env}/deploymentstatus/{botId}`
-- **Duplicate**: wire to `POST /botstore/bots/{id}?deepCopy=true`
+- **Edit mode**: inline-edit name/description, save via `PUT /agentstore/agents/{id}`
+- **Workflow list**: add/remove package URIs from `AgentConfiguration.packages[]`
+- **Deploy/Undeploy**: wire buttons to `POST /administration/{env}/deploy/{agentId}` and `POST /administration/{env}/undeploy/{agentId}`
+- **Deployment status**: poll `GET /administration/{env}/deploymentstatus/{agentId}`
+- **Duplicate**: wire to `POST /agentstore/agents/{id}?deepCopy=true`
 - **Version picker**: select between versions
 
 #### [NEW] `src/lib/api/administration.ts`
 
-API module: `deployBot()`, `undeployBot()`, `getDeploymentStatus()`, `getDeploymentStatuses()`.
+API module: `deployAgent()`, `undeployAgent()`, `getDeploymentStatus()`, `getDeploymentStatuses()`.
 
 #### [NEW] `src/hooks/use-administration.ts`
 
@@ -94,9 +94,9 @@ TanStack Query mutations for deploy/undeploy with polling for status.
 
 ---
 
-### Phase 3.16 — Package Editor (Extension Pipeline Builder)
+### Phase 3.16 — Workflow Editor (Extension Pipeline Builder)
 
-This is the most complex phase. A Package is an ordered list of extension URIs (the "pipeline").
+This is the most complex phase. A Workflow is an ordered list of extension URIs (the "pipeline").
 
 #### [MODIFY] `src/pages/package-detail.tsx`
 
@@ -104,7 +104,7 @@ This is the most complex phase. A Package is an ordered list of extension URIs (
 - **Add extension**: dropdown sourced from `GET /extensionstore/extensions`, creates new config via POST, then adds URI to package
 - **Remove extension**: removes URI from `packages.packageExtensions[]` and optionally deletes the config
 - **Click extension**: navigates to the extension-specific editor (Phase 3.17–3.18)
-- **Save**: `PUT /packagestore/packages/{id}` with updated `PackageConfiguration`
+- **Save**: `PUT /packagestore/packages/{id}` with updated `WorkflowConfiguration`
 
 #### [NEW] `src/components/editors/pipeline-builder.tsx`
 
@@ -139,7 +139,7 @@ Generic wrapper: loads config by type + ID + version, renders the right editor c
 - **Save**: `PUT /httpcallsstore/httpcalls/{id}`
 
 > [!NOTE]
-> **Completed 2026-03-07.** Both editors use a `renderFormEditor` render prop on `ConfigEditorLayout` for two-way Form↔JSON sync. 14 new tests, 119 total. Pre/post instructions shown as JSON preview — full sub-editors deferred to Phase 3.19.
+> **Completed 2026-03-07.** Agenth editors use a `renderFormEditor` render prop on `ConfigEditorLayout` for two-way Form↔JSON sync. 14 new tests, 119 total. Pre/post instructions shown as JSON preview — full sub-editors deferred to Phase 3.19.
 
 ---
 
@@ -188,7 +188,7 @@ Generic wrapper: loads config by type + ID + version, renders the right editor c
 
 - Unit tests for each editor component (render, form validation, save flow)
 - MSW handlers for all extension CRUD endpoints
-- Integration tests for bot deploy/undeploy flow
+- Integration tests for agent deploy/undeploy flow
 
 #### Documentation
 
@@ -219,7 +219,7 @@ For each phase:
 2. Edit the resource, change fields, save → verify config persists
 3. Use JSON editor tab → edit raw JSON → save → verify form reflects changes
 4. Version picker → switch to older version → verify read-only
-5. Deploy/undeploy a bot → verify status updates
+5. Deploy/undeploy a agent → verify status updates
 
 ---
 
@@ -227,8 +227,8 @@ For each phase:
 
 ```mermaid
 graph TD
-    A[3.14 JSON Editor + Version Picker] --> B[3.15 Bot Editor]
-    A --> C[3.16 Package Editor]
+    A[3.14 JSON Editor + Version Picker] --> B[3.15 Agent Editor]
+    A --> C[3.16 Workflow Editor]
     C --> D[3.17 Behavior + HTTP Calls]
     C --> E[3.18 LangChain + Output + Dict]
     B --> F[3.19 Polish + i18n + Tests]

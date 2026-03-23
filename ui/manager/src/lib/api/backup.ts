@@ -2,20 +2,20 @@ const BASE_URL = window.location.origin;
 
 /**
  * Step 1: Trigger export — backend prepares a zip and returns a Location header.
- * POST /backup/export/{botId}?botVersion={version}
+ * POST /backup/export/{agentId}?agentVersion={version}
  */
-export async function exportBot(
-  botId: string,
+export async function exportAgent(
+  agentId: string,
   version = 1
 ): Promise<string> {
   const res = await fetch(
-    `${BASE_URL}/backup/export/${botId}?botVersion=${version}`,
+    `${BASE_URL}/backup/export/${agentId}?agentVersion=${version}`,
     { method: "POST" }
   );
   if (!res.ok) {
     throw new Error(`Export failed: ${res.statusText}`);
   }
-  // Location header contains the download path, e.g. /backup/export/mybot-abc-1.zip
+  // Location header contains the download path, e.g. /backup/export/myagent-abc-1.zip
   const location = res.headers.get("Location");
   if (!location) {
     throw new Error("Export succeeded but no Location header returned");
@@ -27,7 +27,7 @@ export async function exportBot(
  * Step 2: Download the zip file at the given path.
  * GET /backup/export/{filename}
  */
-export async function downloadBotZip(downloadPath: string): Promise<void> {
+export async function downloadAgentZip(downloadPath: string): Promise<void> {
   const url = downloadPath.startsWith("http")
     ? downloadPath
     : `${BASE_URL}${downloadPath}`;
@@ -38,7 +38,7 @@ export async function downloadBotZip(downloadPath: string): Promise<void> {
   }
 
   const blob = await res.blob();
-  const filename = downloadPath.split("/").pop() || "bot-export.zip";
+  const filename = downloadPath.split("/").pop() || "agent-export.zip";
 
   // Trigger browser download
   const a = document.createElement("a");
@@ -53,20 +53,20 @@ export async function downloadBotZip(downloadPath: string): Promise<void> {
 /**
  * Combined: export + download in one call.
  */
-export async function exportAndDownloadBot(
-  botId: string,
+export async function exportAndDownloadAgent(
+  agentId: string,
   version = 1
 ): Promise<void> {
-  const location = await exportBot(botId, version);
-  await downloadBotZip(location);
+  const location = await exportAgent(agentId, version);
+  await downloadAgentZip(location);
 }
 
 /**
- * Import a bot from a zip file (create new — default strategy).
+ * Import a agent from a zip file (create new — default strategy).
  * POST /backup/import with Content-Type: application/zip
- * Returns the Location of the newly created bot.
+ * Returns the Location of the newly created agent.
  */
-export async function importBot(file: File): Promise<string> {
+export async function importAgent(file: File): Promise<string> {
   const res = await fetch(`${BASE_URL}/backup/import`, {
     method: "POST",
     headers: { "Content-Type": "application/zip" },
@@ -93,8 +93,8 @@ export interface ResourceDiff {
 }
 
 export interface ImportPreview {
-  botOriginId: string | null;
-  botName: string | null;
+  agentOriginId: string | null;
+  agentName: string | null;
   resources: ResourceDiff[];
 }
 
@@ -117,10 +117,10 @@ export async function previewImport(file: File): Promise<ImportPreview> {
 }
 
 /**
- * Import a bot with merge strategy.
+ * Import a agent with merge strategy.
  * POST /backup/import?strategy=merge&selectedResources=...
  */
-export async function importBotMerge(
+export async function importAgentMerge(
   file: File,
   selectedOriginIds?: string[]
 ): Promise<string> {

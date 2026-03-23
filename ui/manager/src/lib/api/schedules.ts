@@ -20,8 +20,8 @@ export interface ScheduleConfiguration {
   triggerType: TriggerType;
 
   // Target
-  botId: string;
-  botVersion: number; // 0 = latest deployed
+  agentId: string;
+  agentVersion: number; // 0 = latest deployed
   environment: string;
   tenantId?: string;
 
@@ -66,7 +66,7 @@ export interface ScheduleFireLog {
   id?: string;
   scheduleId: string;
   scheduleName?: string;
-  botId: string;
+  agentId: string;
   conversationId?: string;
   firedAt: number;
   completedAt?: number;
@@ -81,9 +81,9 @@ export interface ScheduleFireLog {
 const BASE = "/schedulestore/schedules";
 
 export async function getSchedules(
-  botId?: string
+  agentId?: string
 ): Promise<ScheduleConfiguration[]> {
-  const query = botId ? `?botId=${encodeURIComponent(botId)}` : "";
+  const query = agentId ? `?agentId=${encodeURIComponent(agentId)}` : "";
   return api.get<ScheduleConfiguration[]>(`${BASE}${query}`);
 }
 

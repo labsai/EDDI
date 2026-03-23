@@ -24,27 +24,27 @@ export async function getJsonSchema(
 }
 
 /**
- * Fetch JSON Schema for bots.
- * GET /botstore/bots/jsonSchema
+ * Fetch JSON Schema for agents.
+ * GET /agentstore/agents/jsonSchema
  */
-export async function getBotJsonSchema(): Promise<object> {
-  const cached = schemaCache.get("bot");
+export async function getAgentJsonSchema(): Promise<object> {
+  const cached = schemaCache.get("agent");
   if (cached) return cached;
 
-  const schema = await api.get<object>("/botstore/bots/jsonSchema");
-  schemaCache.set("bot", schema);
+  const schema = await api.get<object>("/agentstore/agents/jsonSchema");
+  schemaCache.set("agent", schema);
   return schema;
 }
 
 /**
  * Fetch JSON Schema for packages.
- * GET /packagestore/packages/jsonSchema
+ * GET /workflowstore/workflows/jsonSchema
  */
-export async function getPackageJsonSchema(): Promise<object> {
+export async function getWorkflowJsonSchema(): Promise<object> {
   const cached = schemaCache.get("package");
   if (cached) return cached;
 
-  const schema = await api.get<object>("/packagestore/packages/jsonSchema");
+  const schema = await api.get<object>("/workflowstore/workflows/jsonSchema");
   schemaCache.set("package", schema);
   return schema;
 }

@@ -22,7 +22,7 @@ async function startApp() {
   // In development, start MSW browser worker if the backend is unreachable
   if (import.meta.env.DEV) {
     try {
-      const res = await fetch("/botstore/bots/descriptors?limit=1", {
+      const res = await fetch("/agentstore/agents/descriptors?limit=1", {
         signal: AbortSignal.timeout(1500),
       });
       if (!res.ok) throw new Error("Backend not OK");

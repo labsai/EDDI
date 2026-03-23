@@ -42,34 +42,34 @@ describe("SecretsPage", () => {
     expect(screen.getByTestId("secrets-page")).toBeInTheDocument();
   });
 
-  it("renders tenant and bot ID inputs", () => {
+  it("renders tenant and agent ID inputs", () => {
     renderSecrets();
     expect(screen.getByTestId("tenant-input")).toBeInTheDocument();
-    expect(screen.getByTestId("bot-id-input")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-id-input")).toBeInTheDocument();
   });
 
-  it("shows Enter a Bot ID prompt when no bot ID is set", () => {
+  it("shows Enter a Agent ID prompt when no agent ID is set", () => {
     renderSecrets();
-    expect(screen.getByText("Enter a Bot ID")).toBeInTheDocument();
+    expect(screen.getByText("Enter a Agent ID")).toBeInTheDocument();
   });
 
-  it("disables Add Secret button when no bot ID", () => {
+  it("disables Add Secret button when no agent ID", () => {
     renderSecrets();
     const btn = screen.getByTestId("create-secret-button");
     expect(btn).toBeDisabled();
   });
 
-  it("enables Add Secret button after entering bot ID", async () => {
+  it("enables Add Secret button after entering agent ID", async () => {
     renderSecrets();
     const user = userEvent.setup();
-    await user.type(screen.getByTestId("bot-id-input"), "bot1");
+    await user.type(screen.getByTestId("agent-id-input"), "agent1");
     expect(screen.getByTestId("create-secret-button")).not.toBeDisabled();
   });
 
-  it("loads and displays secrets after entering bot ID and clicking refresh", async () => {
+  it("loads and displays secrets after entering agent ID and clicking refresh", async () => {
     renderSecrets();
     const user = userEvent.setup();
-    await user.type(screen.getByTestId("bot-id-input"), "bot1");
+    await user.type(screen.getByTestId("agent-id-input"), "agent1");
     await user.click(screen.getByTestId("refresh-button"));
 
     await waitFor(() => {
@@ -89,7 +89,7 @@ describe("SecretsPage", () => {
   it("opens create dialog when Add Secret is clicked", async () => {
     renderSecrets();
     const user = userEvent.setup();
-    await user.type(screen.getByTestId("bot-id-input"), "bot1");
+    await user.type(screen.getByTestId("agent-id-input"), "agent1");
     await user.click(screen.getByTestId("create-secret-button"));
 
     expect(screen.getByTestId("new-key-input")).toBeInTheDocument();
@@ -100,7 +100,7 @@ describe("SecretsPage", () => {
   it("create dialog has password input with autocomplete off", async () => {
     renderSecrets();
     const user = userEvent.setup();
-    await user.type(screen.getByTestId("bot-id-input"), "bot1");
+    await user.type(screen.getByTestId("agent-id-input"), "agent1");
     await user.click(screen.getByTestId("create-secret-button"));
 
     const keyInput = screen.getByTestId("new-key-input");
@@ -113,7 +113,7 @@ describe("SecretsPage", () => {
   it("eye toggle reveals secret value", async () => {
     renderSecrets();
     const user = userEvent.setup();
-    await user.type(screen.getByTestId("bot-id-input"), "bot1");
+    await user.type(screen.getByTestId("agent-id-input"), "agent1");
     await user.click(screen.getByTestId("create-secret-button"));
 
     const valueInput = screen.getByTestId("new-value-input");
@@ -126,7 +126,7 @@ describe("SecretsPage", () => {
   it("confirm create button is disabled until key and value are entered", async () => {
     renderSecrets();
     const user = userEvent.setup();
-    await user.type(screen.getByTestId("bot-id-input"), "bot1");
+    await user.type(screen.getByTestId("agent-id-input"), "agent1");
     await user.click(screen.getByTestId("create-secret-button"));
 
     const confirmBtn = screen.getByTestId("confirm-create-button");
@@ -141,7 +141,7 @@ describe("SecretsPage", () => {
     renderSecrets();
     const user = userEvent.setup();
 
-    await user.type(screen.getByTestId("bot-id-input"), "bot1");
+    await user.type(screen.getByTestId("agent-id-input"), "agent1");
     await user.click(screen.getByTestId("refresh-button"));
 
     await waitFor(() => {

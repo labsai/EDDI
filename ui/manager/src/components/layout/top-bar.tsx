@@ -34,12 +34,12 @@ function useBreadcrumbs() {
   ];
 
   const labelMap: Record<string, string> = {
-    bots: t("nav.bots"),
+    agents: t("nav.agents"),
     packages: t("nav.packages"),
     conversations: t("nav.conversations"),
     chat: t("nav.chat"),
     resources: t("nav.resources"),
-    wizard: t("wizard.title", "Bot Wizard"),
+    wizard: t("wizard.title", "Agent Wizard"),
   };
 
   let currentPath = "/manage";

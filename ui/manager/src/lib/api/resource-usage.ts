@@ -1,20 +1,20 @@
-import { getPackageDescriptors, getPackage } from "./packages";
-import { getBotDescriptors, getBot, parseResourceUri } from "./bots";
+import { getWorkflowDescriptors, getWorkflow } from "./packages";
+import { getAgentDescriptors, getAgent, parseResourceUri } from "./agents";
 
 export interface ResourceUsage {
-  packageId: string;
+  workflowId: string;
   packageVersion: number;
   packageName: string;
-  botId: string;
-  botVersion: number;
-  botName: string;
+  agentId: string;
+  agentVersion: number;
+  agentName: string;
 }
 
 /**
- * Find all packages and bots that reference a given resource URI.
+ * Find all packages and agents that reference a given resource URI.
  *
  * Scans all packages for extensions whose config.uri contains
- * the resource ID, then scans all bots for references to those packages.
+ * the resource ID, then scans all agents for references to those packages.
  */
 export async function findResourceUsage(
   resourceId: string,
@@ -24,13 +24,13 @@ export async function findResourceUsage(
   const usages: ResourceUsage[] = [];
 
   // 1. Get all packages
-  const pkgDescriptors = await getPackageDescriptors(200, 0, "");
+  const pkgDescriptors = await getWorkflowDescriptors(200, 0, "");
 
   for (const pkgDesc of pkgDescriptors) {
     const { id: pkgId, version: pkgVersion } = parseResourceUri(pkgDesc.resource);
 
     try {
-      const pkg = await getPackage(pkgId, pkgVersion);
+      const pkg = await getWorkflow(pkgId, pkgVersion);
       // Check if any extension references this resource
       const hasReference = pkg.packageExtensions.some((ext) => {
         const uri = ext.config?.uri;
@@ -42,26 +42,26 @@ export async function findResourceUsage(
 
       if (!hasReference) continue;
 
-      // 2. Find bots that reference this package
-      const botDescriptors = await getBotDescriptors(200, 0, "");
+      // 2. Find agents that reference this package
+      const agentDescriptors = await getAgentDescriptors(200, 0, "");
 
-      for (const botDesc of botDescriptors) {
-        const { id: botId, version: botVersion } = parseResourceUri(botDesc.resource);
+      for (const agentDesc of agentDescriptors) {
+        const { id: agentId, version: agentVersion } = parseResourceUri(agentDesc.resource);
         try {
-          const bot = await getBot(botId, botVersion);
+          const agent = await getAgent(agentId, agentVersion);
           const pkgUri = pkgDesc.resource;
-          if (bot.packages?.some((uri) => uri === pkgUri)) {
+          if (agent.packages?.some((uri) => uri === pkgUri)) {
             usages.push({
-              packageId: pkgId,
+              workflowId: pkgId,
               packageVersion: pkgVersion,
               packageName: pkgDesc.name || pkgId,
-              botId,
-              botVersion,
-              botName: botDesc.name || botId,
+              agentId,
+              agentVersion,
+              agentName: agentDesc.name || agentId,
             });
           }
         } catch {
-          // Skip bots that can't be loaded
+          // Skip agents that can't be loaded
         }
       }
     } catch {

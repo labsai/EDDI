@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { getDashboardStats, type DashboardStats } from "@/lib/api/dashboard";
-import { useBotDescriptors } from "./use-bots";
+import { useAgentDescriptors } from "./use-agents";
 
 export function useDashboardStats() {
   return useQuery<DashboardStats>({
@@ -10,7 +10,7 @@ export function useDashboardStats() {
   });
 }
 
-/** Fetch a small number of recent bots for the dashboard */
-export function useRecentBots() {
-  return useBotDescriptors(4, 0);
+/** Fetch a small number of recent agents for the dashboard */
+export function useRecentAgents() {
+  return useAgentDescriptors(4, 0);
 }

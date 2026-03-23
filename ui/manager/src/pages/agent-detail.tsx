@@ -4,7 +4,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   Bot,
-  Package,
+  Workflow,
   Rocket,
   Square,
   Clock,
@@ -22,18 +22,18 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-  useBot,
+  useAgent,
   useDeploymentStatus,
   useDeploymentStatuses,
-  useDeployBot,
-  useUndeployBot,
-  useDeleteBot,
-  useDuplicateBot,
-  useBotVersions,
-} from "@/hooks/use-bots";
-import { useExportBot } from "@/hooks/use-backup";
-import { usePackageDescriptors, useUpdateBotPackages } from "@/hooks/use-packages";
-import { parseResourceUri, type EnvironmentStatus } from "@/lib/api/bots";
+  useDeployAgent,
+  useUndeployAgent,
+  useDeleteAgent,
+  useDuplicateAgent,
+  useAgentVersions,
+} from "@/hooks/use-agents";
+import { useExportAgent } from "@/hooks/use-backup";
+import { useWorkflowDescriptors, useUpdateAgentWorkflows } from "@/hooks/use-packages";
+import { parseResourceUri, type EnvironmentStatus } from "@/lib/api/agents";
 
 /* ─── Status config for environment badges ─── */
 const statusConfig = {
@@ -44,32 +44,32 @@ const statusConfig = {
 };
 
 const envLabels: Record<string, string> = {
-  unrestricted: "botDetail.envUnrestricted",
-  restricted: "botDetail.envRestricted",
-  test: "botDetail.envTest",
+  production: "agentDetail.envProduction",
+  
+  test: "agentDetail.envTest",
 };
 
 /* ─── Main page ─── */
-export function BotDetailPage() {
+export function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
   const navigate = useNavigate();
 
   const [version, setVersion] = useState(1);
-  const [showAddPackage, setShowAddPackage] = useState(false);
+  const [showAddWorkflow, setShowAddWorkflow] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  const { data: bot, isLoading, isError, refetch } = useBot(id!, version);
+  const { data: agent, isLoading, isError, refetch } = useAgent(id!, version);
   const { data: deployment } = useDeploymentStatus(id!, version);
   const { data: envStatuses } = useDeploymentStatuses(id!, version);
-  const { data: versions } = useBotVersions(id!);
+  const { data: versions } = useAgentVersions(id!);
 
-  const deployMutation = useDeployBot();
-  const undeployMutation = useUndeployBot();
-  const deleteMutation = useDeleteBot();
-  const duplicateMutation = useDuplicateBot();
-  const updatePackagesMutation = useUpdateBotPackages();
-  const exportMutation = useExportBot();
+  const deployMutation = useDeployAgent();
+  const undeployMutation = useUndeployAgent();
+  const deleteMutation = useDeleteAgent();
+  const duplicateMutation = useDuplicateAgent();
+  const updateWorkflowsMutation = useUpdateAgentWorkflows();
+  const exportMutation = useExportAgent();
 
   const status = deployment?.status ?? "NOT_FOUND";
   const config = statusConfig[status];
@@ -86,17 +86,17 @@ export function BotDetailPage() {
   }, [saveMessage]);
 
   function handleDeploy() {
-    deployMutation.mutate({ botId: id!, version });
+    deployMutation.mutate({ agentId: id!, version });
   }
 
   function handleUndeploy() {
-    undeployMutation.mutate({ botId: id!, version });
+    undeployMutation.mutate({ agentId: id!, version });
   }
 
   async function handleDelete() {
-    if (window.confirm(t("bots.confirmDelete"))) {
+    if (window.confirm(t("agents.confirmDelete"))) {
       await deleteMutation.mutateAsync({ id: id!, version });
-      navigate("/manage/bots");
+      navigate("/manage/agents");
     }
   }
 
@@ -108,27 +108,27 @@ export function BotDetailPage() {
         deepCopy: true,
       });
       const { id: newId } = parseResourceUri(result.location);
-      navigate(`/manage/botview/${newId}`);
+      navigate(`/manage/agentview/${newId}`);
     } catch {
       // Error handled by mutation state
     }
   }
 
-  function handleRemovePackage(packageUri: string) {
-    if (!bot?.packages) return;
-    const updated = bot.packages.filter((p) => p !== packageUri);
-    updatePackagesMutation.mutate({ botId: id!, version, packages: updated });
+  function handleRemoveWorkflow(packageUri: string) {
+    if (!agent?.packages) return;
+    const updated = agent.packages.filter((p) => p !== packageUri);
+    updateWorkflowsMutation.mutate({ agentId: id!, version, packages: updated });
   }
 
-  function handleAddPackage(packageUri: string) {
-    const current = bot?.packages ?? [];
+  function handleAddWorkflow(packageUri: string) {
+    const current = agent?.packages ?? [];
     if (current.includes(packageUri)) return;
-    updatePackagesMutation.mutate({
-      botId: id!,
+    updateWorkflowsMutation.mutate({
+      agentId: id!,
       version,
       packages: [...current, packageUri],
     });
-    setShowAddPackage(false);
+    setShowAddWorkflow(false);
   }
 
   const handleVersionChange = useCallback((v: number) => {
@@ -143,7 +143,7 @@ export function BotDetailPage() {
     );
   }
 
-  if (isError || !bot) {
+  if (isError || !agent) {
     return (
       <div className="space-y-4">
         <BackLink />
@@ -171,7 +171,7 @@ export function BotDetailPage() {
             <Bot className="h-8 w-8 text-primary" />
             <div>
               <h1 className="text-3xl font-bold text-foreground">
-                {t("botDetail.title", "Bot Detail")}
+                {t("agentDetail.title", "Agent Detail")}
               </h1>
               <p className="font-mono text-sm text-muted-foreground">ID: {id}</p>
             </div>
@@ -217,19 +217,19 @@ export function BotDetailPage() {
             {isBusy
               ? t("common.loading")
               : isDeployed
-                ? t("bots.undeploy")
-                : t("bots.deploy")}
+                ? t("agents.undeploy")
+                : t("agents.deploy")}
           </button>
 
           {/* Chat — only when deployed */}
           {isDeployed && (
             <Link
-              to={`/manage/chat?botId=${id}`}
+              to={`/manage/chat?agentId=${id}`}
               className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400"
               data-testid="chat-btn"
             >
               <MessageSquare className="h-4 w-4" />
-              {t("bots.chat", "Chat")}
+              {t("agents.chat", "Chat")}
             </Link>
           )}
 
@@ -238,32 +238,32 @@ export function BotDetailPage() {
             onClick={handleDuplicate}
             disabled={duplicateMutation.isPending}
             className="rounded-lg border border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
-            data-testid="duplicate-bot-btn"
+            data-testid="duplicate-agent-btn"
           >
             <Copy className="h-4 w-4 inline-block me-1.5" />
             {duplicateMutation.isPending
-              ? t("botDetail.duplicating")
-              : t("botDetail.duplicate")}
+              ? t("agentDetail.duplicating")
+              : t("agentDetail.duplicate")}
           </button>
 
           {/* Export */}
           <button
-            onClick={() => exportMutation.mutate({ botId: id!, version })}
+            onClick={() => exportMutation.mutate({ agentId: id!, version })}
             disabled={exportMutation.isPending}
             className="rounded-lg border border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
-            data-testid="export-bot-btn"
+            data-testid="export-agent-btn"
           >
             <Download className="h-4 w-4 inline-block me-1.5" />
             {exportMutation.isPending
-              ? t("bots.exporting", "Exporting...")
-              : t("bots.export", "Export")}
+              ? t("agents.exporting", "Exporting...")
+              : t("agents.export", "Export")}
           </button>
 
           {/* Delete */}
           <button
             onClick={handleDelete}
             className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
-            data-testid="delete-bot-btn"
+            data-testid="delete-agent-btn"
           >
             <Trash2 className="h-4 w-4" />
           </button>
@@ -289,44 +289,44 @@ export function BotDetailPage() {
       {envStatuses && envStatuses.length > 0 && (
         <EnvironmentBadges
           statuses={envStatuses}
-          onDeploy={(env) => deployMutation.mutate({ environment: env, botId: id!, version })}
-          onUndeploy={(env) => undeployMutation.mutate({ environment: env, botId: id!, version })}
+          onDeploy={(env) => deployMutation.mutate({ environment: env, agentId: id!, version })}
+          onUndeploy={(env) => undeployMutation.mutate({ environment: env, agentId: id!, version })}
           isBusy={isBusy}
         />
       )}
 
-      {/* Packages section */}
+      {/* Workflows section */}
       <section className="rounded-xl border bg-card shadow-sm">
         <div className="flex items-center justify-between border-b border-border p-5">
           <div className="flex items-center gap-2">
-            <Package className="h-5 w-5 text-primary" />
+            <Workflow className="h-5 w-5 text-primary" />
             <h2 className="text-lg font-semibold text-foreground">
-              {t("botDetail.packages", "Packages")}
+              {t("agentDetail.packages", "Workflows")}
             </h2>
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-              {bot.packages?.length ?? 0}
+              {agent.packages?.length ?? 0}
             </span>
           </div>
           <button
-            onClick={() => setShowAddPackage(!showAddPackage)}
+            onClick={() => setShowAddWorkflow(!showAddWorkflow)}
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
             data-testid="add-package-btn"
           >
             <Plus className="h-4 w-4" />
-            {t("botDetail.addPackage", "Add Package")}
+            {t("agentDetail.addWorkflow", "Add Workflow")}
           </button>
         </div>
 
-        {/* Package list */}
+        {/* Workflow list */}
         <div className="divide-y divide-border">
-          {(!bot.packages || bot.packages.length === 0) && (
+          {(!agent.packages || agent.packages.length === 0) && (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-              <Package className="h-10 w-10 opacity-50" />
-              <p className="mt-3 text-sm">{t("botDetail.noPackages", "No packages added yet")}</p>
+              <Workflow className="h-10 w-10 opacity-50" />
+              <p className="mt-3 text-sm">{t("agentDetail.noWorkflows", "No packages added yet")}</p>
             </div>
           )}
 
-          {bot.packages?.map((pkgUri) => {
+          {agent.packages?.map((pkgUri) => {
             const { id: pkgId, version: pkgVersion } = parseResourceUri(pkgUri);
             return (
               <div
@@ -349,8 +349,8 @@ export function BotDetailPage() {
                   </div>
                 </div>
                 <button
-                  onClick={() => handleRemovePackage(pkgUri)}
-                  disabled={updatePackagesMutation.isPending}
+                  onClick={() => handleRemoveWorkflow(pkgUri)}
+                  disabled={updateWorkflowsMutation.isPending}
                   className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
                   title={t("common.delete")}
                 >
@@ -363,16 +363,16 @@ export function BotDetailPage() {
       </section>
 
       {/* Add package panel */}
-      {showAddPackage && (
-        <AddPackagePanel
-          currentPackages={bot.packages ?? []}
-          onAdd={handleAddPackage}
-          onClose={() => setShowAddPackage(false)}
+      {showAddWorkflow && (
+        <AddWorkflowPanel
+          currentWorkflows={agent.packages ?? []}
+          onAdd={handleAddWorkflow}
+          onClose={() => setShowAddWorkflow(false)}
         />
       )}
 
       {/* Raw config (collapsible) */}
-      <RawConfigSection bot={bot} />
+      <RawConfigSection agent={agent} />
     </div>
   );
 }
@@ -383,11 +383,11 @@ function BackLink() {
   const { t } = useTranslation();
   return (
     <Link
-      to="/manage/bots"
+      to="/manage/agents"
       className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
     >
       <ArrowLeft className="h-4 w-4" />
-      {t("botDetail.backToBots", "Back to Bots")}
+      {t("agentDetail.backToAgents", "Back to Agents")}
     </Link>
   );
 }
@@ -462,7 +462,7 @@ function EnvironmentBadges({
       <div className="flex items-center gap-2 border-b border-border px-5 py-3">
         <Server className="h-5 w-5 text-primary" />
         <h2 className="text-sm font-semibold text-foreground">
-          {t("botDetail.environments", "Environments")}
+          {t("agentDetail.environments", "Environments")}
         </h2>
       </div>
       <div className="grid grid-cols-1 gap-0 divide-y divide-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
@@ -496,7 +496,7 @@ function EnvironmentBadges({
                   isBusy && "cursor-not-allowed opacity-50"
                 )}
               >
-                {isUp ? t("bots.undeploy") : t("bots.deploy")}
+                {isUp ? t("agents.undeploy") : t("agents.deploy")}
               </button>
             </div>
           );
@@ -506,29 +506,29 @@ function EnvironmentBadges({
   );
 }
 
-/* ─── Add Package Panel ─── */
-function AddPackagePanel({
-  currentPackages,
+/* ─── Add Workflow Panel ─── */
+function AddWorkflowPanel({
+  currentWorkflows,
   onAdd,
   onClose,
 }: {
-  currentPackages: string[];
+  currentWorkflows: string[];
   onAdd: (uri: string) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
   const [filter, setFilter] = useState("");
-  const { data: packages, isLoading } = usePackageDescriptors(100, 0, filter);
+  const { data: packages, isLoading } = useWorkflowDescriptors(100, 0, filter);
 
   const available = (packages ?? []).filter(
-    (pkg) => !currentPackages.includes(pkg.resource)
+    (pkg) => !currentWorkflows.includes(pkg.resource)
   );
 
   return (
     <section className="rounded-xl border bg-card shadow-sm">
       <div className="flex items-center justify-between border-b border-border p-5">
         <h3 className="text-lg font-semibold text-foreground">
-          {t("botDetail.selectPackage", "Select Package to Add")}
+          {t("agentDetail.selectWorkflow", "Select Workflow to Add")}
         </h3>
         <button
           onClick={onClose}
@@ -580,7 +580,7 @@ function AddPackagePanel({
 }
 
 /* ─── Raw Config Section ─── */
-function RawConfigSection({ bot }: { bot: { packages?: string[]; channels?: string[] } }) {
+function RawConfigSection({ agent }: { agent: { packages?: string[]; channels?: string[] } }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
@@ -593,7 +593,7 @@ function RawConfigSection({ bot }: { bot: { packages?: string[]; channels?: stri
         <div className="flex items-center gap-2">
           <Settings className="h-5 w-5 text-muted-foreground" />
           <h2 className="text-lg font-semibold text-foreground">
-            {t("botDetail.rawConfig", "Raw Configuration")}
+            {t("agentDetail.rawConfig", "Raw Configuration")}
           </h2>
         </div>
         <span className="text-sm text-muted-foreground">
@@ -603,7 +603,7 @@ function RawConfigSection({ bot }: { bot: { packages?: string[]; channels?: stri
       {expanded && (
         <div className="border-t border-border p-5">
           <pre className="overflow-x-auto rounded-lg bg-secondary p-4 text-sm text-foreground">
-            {JSON.stringify(bot, null, 2)}
+            {JSON.stringify(agent, null, 2)}
           </pre>
         </div>
       )}

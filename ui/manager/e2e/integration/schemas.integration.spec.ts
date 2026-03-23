@@ -7,8 +7,8 @@ import { API_BASE, waitForBackend } from "./integration-helpers";
  */
 
 const SCHEMA_ENDPOINTS = [
-  { name: "Bots", path: "/botstore/bots/jsonSchema" },
-  { name: "Packages", path: "/packagestore/packages/jsonSchema" },
+  { name: "Agents", path: "/agentstore/agents/jsonSchema" },
+  { name: "Workflows", path: "/packagestore/packages/jsonSchema" },
   { name: "Behavior Rules", path: "/behaviorstore/behaviorsets/jsonSchema" },
   { name: "HTTP Calls", path: "/httpcallsstore/httpcalls/jsonSchema" },
   { name: "Output Sets", path: "/outputstore/outputsets/jsonSchema" },

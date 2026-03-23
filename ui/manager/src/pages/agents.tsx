@@ -3,10 +3,10 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Bot, Search, Plus, Upload, Wand2, ExternalLink, Trash2, Copy, Download } from "lucide-react";
 import { toast } from "sonner";
-import { useBotDescriptors, useDeleteBot, useDuplicateBot, groupBotsByName } from "@/hooks/use-bots";
-import { BotCard } from "@/components/bots/bot-card";
-import { CreateBotDialog } from "@/components/bots/create-bot-dialog";
-import { ImportBotDialog } from "@/components/bots/import-bot-dialog";
+import { useAgentDescriptors, useDeleteAgent, useDuplicateAgent, groupAgentsByName } from "@/hooks/use-agents";
+import { AgentCard } from "@/components/agents/agent-card";
+import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
+import { ImportAgentDialog } from "@/components/agents/import-agent-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -18,27 +18,27 @@ import {
   setStoredViewMode,
   type ViewMode,
 } from "@/components/shared/view-toggle";
-import { useExportBot } from "@/hooks/use-backup";
+import { useExportAgent } from "@/hooks/use-backup";
 import { cn } from "@/lib/utils";
 
-export function BotsPage() {
+export function AgentsPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
-  const [view, setView] = useState<ViewMode>(() => getStoredViewMode("bots"));
+  const [view, setView] = useState<ViewMode>(() => getStoredViewMode("agents"));
 
-  const { data: bots, isLoading, isError, refetch } = useBotDescriptors(100, 0, search);
-  const deleteMutation = useDeleteBot();
-  const duplicateMutation = useDuplicateBot();
-  const exportMutation = useExportBot();
+  const { data: agents, isLoading, isError, refetch } = useAgentDescriptors(100, 0, search);
+  const deleteMutation = useDeleteAgent();
+  const duplicateMutation = useDuplicateAgent();
+  const exportMutation = useExportAgent();
 
   function handleImportSuccess() {
-    toast.success(t("bots.importSuccess", "Bot imported successfully"));
+    toast.success(t("agents.importSuccess", "Agent imported successfully"));
   }
 
-  const groupedBots = bots ? groupBotsByName(bots) : [];
+  const groupedAgents = agents ? groupAgentsByName(agents) : [];
 
   function handleDelete(id: string, version: number) {
     setDeleteTarget({ id, version });
@@ -60,7 +60,7 @@ export function BotsPage() {
     duplicateMutation.mutate(
       { id, version, deepCopy: true },
       {
-        onSuccess: () => toast.success(t("botDetail.duplicateSuccess")),
+        onSuccess: () => toast.success(t("agentDetail.duplicateSuccess")),
         onError: () => toast.error(t("common.error")),
       }
     );
@@ -68,7 +68,7 @@ export function BotsPage() {
 
   function handleViewChange(mode: ViewMode) {
     setView(mode);
-    setStoredViewMode("bots", mode);
+    setStoredViewMode("agents", mode);
   }
 
   return (
@@ -78,33 +78,33 @@ export function BotsPage() {
         <div>
           <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
             <Bot className="h-8 w-8 text-primary" />
-            {t("pages.bots.title")}
+            {t("pages.agents.title")}
           </h1>
           <p className="mt-1 text-muted-foreground">
-            {t("pages.bots.subtitle")}
+            {t("pages.agents.subtitle")}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             onClick={() => setImportOpen(true)}
-            data-testid="import-bot-btn"
+            data-testid="import-agent-btn"
           >
             <Upload className="h-4 w-4" />
-            {t("bots.import", "Import")}
+            {t("agents.import", "Import")}
           </Button>
-          <Button variant="outline" asChild data-testid="bot-wizard-btn">
-            <Link to="/manage/bots/wizard">
+          <Button variant="outline" asChild data-testid="agent-wizard-btn">
+            <Link to="/manage/agents/wizard">
               <Wand2 className="h-4 w-4" />
               {t("wizard.title")}
             </Link>
           </Button>
           <Button
             onClick={() => setCreateOpen(true)}
-            data-testid="create-bot-btn"
+            data-testid="create-agent-btn"
           >
             <Plus className="h-4 w-4" />
-            {t("bots.createBot")}
+            {t("agents.createAgent")}
           </Button>
         </div>
       </div>
@@ -119,7 +119,7 @@ export function BotsPage() {
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t("common.search")}
             className="w-full rounded-lg border border-input bg-background py-2.5 ps-10 pe-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
-            data-testid="bot-search"
+            data-testid="agent-search"
           />
         </div>
         <ViewToggle view={view} onChange={handleViewChange} />
@@ -152,20 +152,20 @@ export function BotsPage() {
         />
       )}
 
-      {!isLoading && !isError && groupedBots.length === 0 && (
+      {!isLoading && !isError && groupedAgents.length === 0 && (
         <EmptyState
           icon={Bot}
-          title={search ? t("common.noResults") : t("bots.empty")}
-          actionLabel={!search ? t("bots.createBot") : undefined}
+          title={search ? t("common.noResults") : t("agents.empty")}
+          actionLabel={!search ? t("agents.createAgent") : undefined}
           onAction={!search ? () => setCreateOpen(true) : undefined}
         />
       )}
 
-      {!isLoading && !isError && groupedBots.length > 0 && (
+      {!isLoading && !isError && groupedAgents.length > 0 && (
         <>
           {/* Results count */}
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {t("bots.count", { count: groupedBots.length })}
+            {t("agents.count", { count: groupedAgents.length })}
           </p>
 
           {view === "card" ? (
@@ -175,12 +175,12 @@ export function BotsPage() {
                 "grid gap-4",
                 "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
               )}
-              data-testid="bot-grid"
+              data-testid="agent-grid"
             >
-              {groupedBots.map((bot) => (
-                <BotCard
-                  key={bot.id}
-                  bot={bot}
+              {groupedAgents.map((agent) => (
+                <AgentCard
+                  key={agent.id}
+                  agent={agent}
                   onDuplicate={handleDuplicate}
                   onDelete={handleDelete}
                 />
@@ -190,7 +190,7 @@ export function BotsPage() {
             /* List table */
             <div
               className="overflow-hidden rounded-xl border bg-card shadow-sm"
-              data-testid="bot-list"
+              data-testid="agent-list"
             >
               <table className="w-full">
                 <thead>
@@ -213,54 +213,54 @@ export function BotsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {groupedBots.map((bot) => (
+                  {groupedAgents.map((agent) => (
                     <tr
-                      key={bot.id}
+                      key={agent.id}
                       className="hover:bg-secondary/30 transition-colors"
                     >
                       <td className="px-5 py-3">
                         <Link
-                          to={`/manage/botview/${bot.id}`}
+                          to={`/manage/agentview/${agent.id}`}
                           className="text-sm font-medium text-foreground hover:text-primary transition-colors"
                         >
-                          {bot.name || t("bots.unnamed", "Unnamed Bot")}
+                          {agent.name || t("agents.unnamed", "Unnamed Agent")}
                           <ExternalLink className="ms-1 inline h-3 w-3 opacity-40" />
                         </Link>
                       </td>
                       <td className="px-5 py-3">
                         <span className="font-mono text-xs text-muted-foreground">
-                          {bot.id.slice(0, 12)}…
+                          {agent.id.slice(0, 12)}…
                         </span>
                       </td>
                       <td className="px-5 py-3">
                         <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                          v{bot.version}
+                          v{agent.version}
                         </span>
                       </td>
                       <td className="px-5 py-3">
                         <span className="text-sm text-muted-foreground">
-                          {new Date(bot.lastModifiedOn).toLocaleString()}
+                          {new Date(agent.lastModifiedOn).toLocaleString()}
                         </span>
                       </td>
                       <td className="px-5 py-3 text-end">
                         <div className="inline-flex items-center gap-1">
                           <button
-                            onClick={() => handleDuplicate(bot.id, bot.version)}
+                            onClick={() => handleDuplicate(agent.id, agent.version)}
                             className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
                             title={t("common.duplicate", "Duplicate")}
                           >
                             <Copy className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => exportMutation.mutate({ botId: bot.id, version: bot.version })}
+                            onClick={() => exportMutation.mutate({ agentId: agent.id, version: agent.version })}
                             disabled={exportMutation.isPending}
                             className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors disabled:opacity-50"
-                            title={t("bots.export", "Export")}
+                            title={t("agents.export", "Export")}
                           >
                             <Download className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => handleDelete(bot.id, bot.version)}
+                            onClick={() => handleDelete(agent.id, agent.version)}
                             className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                             title={t("common.delete")}
                           >
@@ -278,10 +278,10 @@ export function BotsPage() {
       )}
 
       {/* Create dialog */}
-      <CreateBotDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      <CreateAgentDialog open={createOpen} onClose={() => setCreateOpen(false)} />
 
       {/* Import dialog */}
-      <ImportBotDialog
+      <ImportAgentDialog
         open={importOpen}
         onClose={() => setImportOpen(false)}
         onSuccess={handleImportSuccess}
@@ -291,8 +291,8 @@ export function BotsPage() {
       <AlertDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title={t("bots.confirmDelete")}
-        description={t("bots.confirmDelete")}
+        title={t("agents.confirmDelete")}
+        description={t("agents.confirmDelete")}
         confirmLabel={t("common.delete")}
         cancelLabel={t("common.cancel")}
         onConfirm={confirmDelete}

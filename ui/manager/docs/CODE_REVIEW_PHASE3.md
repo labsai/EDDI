@@ -8,11 +8,11 @@
 
 ## Decisions
 
-| Question                              | Decision                                                                   |
-| ------------------------------------- | -------------------------------------------------------------------------- |
-| Tackle critical items before Phase 4? | **Yes**, all items below will be addressed                                 |
-| Dashboard data source?                | **Both** — mock data for dev, real EDDI backend integration for production |
-| Invest in shared design system?       | **Yes, 100%** — clean and professional component library                   |
+| Question                              | Decision                                                                     |
+| ------------------------------------- | ---------------------------------------------------------------------------- |
+| Tackle critical items before Phase 4? | **Yes**, all items below will be addressed                                   |
+| Dashboard data source?                | **Agenth** — mock data for dev, real EDDI backend integration for production |
+| Invest in shared design system?       | **Yes, 100%** — clean and professional component library                     |
 
 ---
 
@@ -25,7 +25,7 @@
 | **Lucide icons**        | Consistent icon language across all views creates visual coherence.                                                         |
 | **i18n**                | Full internationalization with 11 languages — excellent for enterprise reach.                                               |
 | **Editor architecture** | `ConfigEditorLayout` with Form↔JSON toggle + `VersionPicker` is a well-designed abstraction.                                |
-| **Bot Wizard**          | Multi-step stepper with gradient template cards is the most visually polished component.                                    |
+| **Agent Wizard**        | Multi-step stepper with gradient template cards is the most visually polished component.                                    |
 | **Test coverage**       | 17 test files in `pages/__tests__/`, MSW handlers for all APIs.                                                             |
 | **Tech stack**          | React 19, Tanstack Query, Zustand, Monaco, dnd-kit, Radix — enterprise-grade choices.                                       |
 
@@ -41,9 +41,9 @@ The dashboard is the **first thing enterprise buyers see** and it currently show
 
 **Recommendations:**
 
-- Wire stat cards to real API data (active bots count, conversation count, etc.)
+- Wire stat cards to real API data (active agents count, conversation count, etc.)
 - Add a recent activity feed (last 5 conversations, recent deployments)
-- Add a "Quick Actions" section (Create Bot, Import, Open Chat)
+- Add a "Quick Actions" section (Create Agent, Import, Open Chat)
 - Consider a small line chart (conversation volume over last 7 days)
 - Provide mock data for dev mode, real backend integration for production
 
@@ -60,13 +60,13 @@ Every page re-implements buttons and inputs as raw `<button>` and `<input>` tags
 **Example — Three different "primary button" patterns:**
 
 ```tsx
-// bots.tsx
+// agents.tsx
 'rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground shadow-sm';
 
 // config-editor-layout.tsx
 'rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm';
 
-// bot-wizard.tsx
+// agent-wizard.tsx
 'rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm';
 ```
 
@@ -78,8 +78,8 @@ Every page re-implements buttons and inputs as raw `<button>` and `<input>` tags
 
 Enterprise users expect polished confirmation dialogs — not browser-native `window.confirm()`. This appears in:
 
-- `src/pages/bots.tsx` — delete bot
-- `src/pages/bot-detail.tsx` — delete bot
+- `src/pages/agents.tsx` — delete agent
+- `src/pages/agent-detail.tsx` — delete agent
 - `src/pages/resource-detail.tsx` — delete resource
 - `src/pages/package-detail.tsx` — delete package
 - `src/pages/conversations.tsx` — delete conversation
@@ -110,15 +110,15 @@ Save feedback is handled by inline `saveMessage` state with manual `setTimeout` 
 
 Several patterns are copy-pasted across multiple files:
 
-| Pattern                                | Files                                                  |
-| -------------------------------------- | ------------------------------------------------------ |
-| `formatRelativeTime` / `formatTimeAgo` | `bot-detail.tsx`, `bot-card.tsx`, `package-detail.tsx` |
-| `BackLink` component                   | `bot-detail.tsx`, `package-detail.tsx`                 |
-| `VersionSelect` component              | `bot-detail.tsx`, `package-detail.tsx`                 |
-| `RawConfigSection` component           | `bot-detail.tsx`, `package-detail.tsx`                 |
-| `statusConfig` object                  | `bot-detail.tsx`, `bot-card.tsx`                       |
-| Error state UI                         | Identical pattern in every list & detail page          |
-| Empty state UI                         | Nearly identical across all list pages                 |
+| Pattern                                | Files                                                      |
+| -------------------------------------- | ---------------------------------------------------------- |
+| `formatRelativeTime` / `formatTimeAgo` | `agent-detail.tsx`, `agent-card.tsx`, `package-detail.tsx` |
+| `BackLink` component                   | `agent-detail.tsx`, `package-detail.tsx`                   |
+| `VersionSelect` component              | `agent-detail.tsx`, `package-detail.tsx`                   |
+| `RawConfigSection` component           | `agent-detail.tsx`, `package-detail.tsx`                   |
+| `statusConfig` object                  | `agent-detail.tsx`, `agent-card.tsx`                       |
+| Error state UI                         | Identical pattern in every list & detail page              |
+| Empty state UI                         | Nearly identical across all list pages                     |
 
 **Action:** Extract to `src/components/shared/`: `<BackLink>`, `<VersionSelect>`, `<RawConfigSection>`, `<ErrorState>`, `<EmptyState>`, `<PageHeader>`. Move `formatRelativeTime` and `statusConfig` to `src/lib/utils.ts`.
 
@@ -145,7 +145,7 @@ const EDITOR_MAP: Record<string, (p, o, r) => ReactNode> = {
 
 ### 8. Custom Dropdown Menus Instead of Radix
 
-The `BotCard` context menu and `ChatPanel` bot selector use custom dropdowns with manual `useState` + fixed-overlay click-away detection. `@radix-ui/react-dropdown-menu` is already installed.
+The `AgentCard` context menu and `ChatPanel` agent selector use custom dropdowns with manual `useState` + fixed-overlay click-away detection. `@radix-ui/react-dropdown-menu` is already installed.
 
 **Action:** Replace custom dropdown implementations with Radix primitives for better keyboard navigation, focus management, and accessibility.
 
@@ -164,7 +164,7 @@ The `BotCard` context menu and `ChatPanel` bot selector use custom dropdowns wit
 
 The top bar only has a language selector and a theme toggle. Enterprise apps typically also show:
 
-- Breadcrumbs (Dashboard > Bots > Bot Detail)
+- Breadcrumbs (Dashboard > Agents > Agent Detail)
 - User avatar / org switcher
 - Global search (Cmd+K)
 - Notification bell
@@ -179,14 +179,14 @@ Even if auth isn't implemented yet, a breadcrumb trail would significantly impro
 
 - No hover animation on the logo
 - No section groupings (e.g., "Management" / "Development" / "Operations")
-- No badge counts on nav items (e.g., "Bots (3)")
+- No badge counts on nav items (e.g., "Agents (3)")
 - The collapsed state icon `E.` as inline SVG text looks basic — consider a proper logomark
 
 ### 12. Cards Lack Visual Hierarchy
 
-Bot cards and resource type cards have the same `rounded-xl border bg-card p-5 shadow-sm` treatment. No visual differentiation between interactive and display-only cards. Consider:
+Agent cards and resource type cards have the same `rounded-xl border bg-card p-5 shadow-sm` treatment. No visual differentiation between interactive and display-only cards. Consider:
 
-- Subtle gradient top-border accent on bot cards
+- Subtle gradient top-border accent on agent cards
 - Status-color left-border stripe for deployment state
 - Hover state micro-animation (scale + shadow lift already partially implemented)
 
@@ -196,7 +196,7 @@ Currently using Noto Sans as the primary font. Consider pairing it with a displa
 
 ### 14. Empty State Illustrations
 
-Empty states use faded icon + text. Enterprise tools like Linear, Vercel, or Supabase use custom illustrations or branded graphics. Consider adding SVG illustrations for key empty states (no bots, no conversations, etc.).
+Empty states use faded icon + text. Enterprise tools like Linear, Vercel, or Supabase use custom illustrations or branded graphics. Consider adding SVG illustrations for key empty states (no agents, no conversations, etc.).
 
 ---
 
@@ -270,8 +270,8 @@ The solid bold orange background for active sidebar items is visually heavy. But
 
 ### 3. Component Swaps & Page Refactoring
 
-- [ ] **Bots (`bots.tsx`, `bot-detail.tsx`):** Swap raw `<button>` for `<Button>`. Replace `window.confirm` with `<AlertDialog>`. Use `<Skeleton>` for loading.
-- [ ] **Packages & Conversations:** Apply `<Button>`, `<AlertDialog>`, and `<Skeleton>` swaps.
+- [ ] **Agents (`agents.tsx`, `agent-detail.tsx`):** Swap raw `<button>` for `<Button>`. Replace `window.confirm` with `<AlertDialog>`. Use `<Skeleton>` for loading.
+- [ ] **Workflows & Conversations:** Apply `<Button>`, `<AlertDialog>`, and `<Skeleton>` swaps.
 - [ ] **Resources (`resource-detail.tsx`):** Refactor the 6-level nested ternary operator in `renderFormEditor` to a cleaner `EDITOR_MAP` dictionary.
 
 ### 4. Enhanced Dashboard Experience

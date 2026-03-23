@@ -1,5 +1,5 @@
 import { api } from "../api-client";
-import type { BotDescriptor } from "./bots";
+import type { AgentDescriptor } from "./agents";
 
 /** Update a document descriptor (name + description) */
 export function updateDescriptor(
@@ -20,13 +20,13 @@ export function getDescriptors(
   limit = 100,
   index = 0,
   filter = ""
-): Promise<BotDescriptor[]> {
+): Promise<AgentDescriptor[]> {
   const params = new URLSearchParams({
     limit: String(limit),
     index: String(index),
   });
   if (filter) params.set("filter", filter);
-  return api.get<BotDescriptor[]>(
+  return api.get<AgentDescriptor[]>(
     `/${resourceType}/descriptors?${params.toString()}`
   );
 }

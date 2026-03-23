@@ -50,7 +50,7 @@ describe("QuotasPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("quota-max-conversations")).toBeInTheDocument();
     });
-    expect(screen.getByTestId("quota-max-bots")).toBeInTheDocument();
+    expect(screen.getByTestId("quota-max-agents")).toBeInTheDocument();
     expect(screen.getByTestId("quota-max-api-calls")).toBeInTheDocument();
     expect(screen.getByTestId("quota-max-cost")).toBeInTheDocument();
   });

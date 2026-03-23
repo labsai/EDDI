@@ -147,9 +147,9 @@ export function ConversationDetailPage() {
             {config.label}
           </span>
 
-          {/* Bot info */}
+          {/* Agent info */}
           <span className="rounded-full bg-secondary px-3 py-1.5 text-sm font-medium text-secondary-foreground">
-            {conversation.botId} v{conversation.botVersion}
+            {conversation.agentId} v{conversation.agentVersion}
           </span>
 
           {/* Step count */}
@@ -293,7 +293,7 @@ function ChatBubbleStep({
         </div>
       )}
 
-      {/* Bot message — left aligned */}
+      {/* Agent message — left aligned */}
       {output && (
         <div className="flex justify-start">
           <div className="flex items-end gap-2 max-w-[80%] sm:max-w-[70%]">

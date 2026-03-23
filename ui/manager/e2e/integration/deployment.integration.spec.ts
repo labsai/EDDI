@@ -9,7 +9,7 @@ import {
 /**
  * Deployment lifecycle tests.
  * Serial mode — deploy → check status → undeploy must run in order.
- * Fully self-contained: creates its own bot + package.
+ * Fully self-contained: creates its own agent + package.
  *
  * Key API behaviors:
  * - POST /administration/unrestricted/deploy returns 202 (accepted)
@@ -19,61 +19,61 @@ import {
 test.describe("Deployment — Real Backend", () => {
   test.describe.configure({ timeout: 120_000, mode: "serial" });
 
-  let testBotId: string;
-  let testBotVersion = 1;
-  let testPackageId: string;
-  let testPackageVersion = 1;
+  let testAgentId: string;
+  let testAgentVersion = 1;
+  let testWorkflowId: string;
+  let testWorkflowVersion = 1;
 
   test.beforeAll(async ({ request }) => {
     await waitForBackend(request);
 
-    // Create a package for our test bot
+    // Create a package for our test agent
     const pkgRes = await request.post(`${API_BASE}/packagestore/packages`, {
       data: { packageExtensions: [] },
     });
     expect(pkgRes.status()).toBe(201);
     const pkgLoc = pkgRes.headers()["location"]!;
     const pkg = extractIdFromLocation(pkgLoc);
-    testPackageId = pkg.id;
-    testPackageVersion = pkg.version;
+    testWorkflowId = pkg.id;
+    testWorkflowVersion = pkg.version;
 
-    // Create a bot referencing the package
-    const botRes = await request.post(`${API_BASE}/botstore/bots`, {
+    // Create a agent referencing the package
+    const agentRes = await request.post(`${API_BASE}/agentstore/agents`, {
       data: { packages: [pkgLoc] },
     });
-    expect(botRes.status()).toBe(201);
-    const botLoc = botRes.headers()["location"]!;
-    const bot = extractIdFromLocation(botLoc);
-    testBotId = bot.id;
-    testBotVersion = bot.version;
+    expect(agentRes.status()).toBe(201);
+    const agentLoc = agentRes.headers()["location"]!;
+    const agent = extractIdFromLocation(agentLoc);
+    testAgentId = agent.id;
+    testAgentVersion = agent.version;
   });
 
   test.afterAll(async ({ request }) => {
     // Undeploy (best-effort)
     try {
       await request.post(
-        `${API_BASE}/administration/unrestricted/undeploy/${testBotId}?version=${testBotVersion}`
+        `${API_BASE}/administration/unrestricted/undeploy/${testAgentId}?version=${testAgentVersion}`
       );
     } catch {
       /* ignore */
     }
     await cleanupResource(
       request,
-      "botstore/bots",
-      testBotId,
-      testBotVersion
+      "agentstore/agents",
+      testAgentId,
+      testAgentVersion
     );
     await cleanupResource(
       request,
       "packagestore/packages",
-      testPackageId,
-      testPackageVersion
+      testWorkflowId,
+      testWorkflowVersion
     );
   });
 
-  test("Deploy bot returns 202 (accepted)", async ({ request }) => {
+  test("Deploy agent returns 202 (accepted)", async ({ request }) => {
     const res = await request.post(
-      `${API_BASE}/administration/unrestricted/deploy/${testBotId}?version=${testBotVersion}`
+      `${API_BASE}/administration/unrestricted/deploy/${testAgentId}?version=${testAgentVersion}`
     );
     expect([200, 202]).toContain(res.status());
 
@@ -81,7 +81,7 @@ test.describe("Deployment — Real Backend", () => {
     const start = Date.now();
     while (Date.now() - start < 15_000) {
       const statusRes = await request.get(
-        `${API_BASE}/administration/unrestricted/deploymentstatus/${testBotId}?version=${testBotVersion}`
+        `${API_BASE}/administration/unrestricted/deploymentstatus/${testAgentId}?version=${testAgentVersion}`
       );
       if (statusRes.ok()) {
         const body = await statusRes.json();
@@ -95,7 +95,7 @@ test.describe("Deployment — Real Backend", () => {
     request,
   }) => {
     const res = await request.get(
-      `${API_BASE}/administration/unrestricted/deploymentstatus/${testBotId}?version=${testBotVersion}`
+      `${API_BASE}/administration/unrestricted/deploymentstatus/${testAgentId}?version=${testAgentVersion}`
     );
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
@@ -106,7 +106,7 @@ test.describe("Deployment — Real Backend", () => {
     request,
   }) => {
     const res = await request.get(
-      `${API_BASE}/administration/test/deploymentstatus/${testBotId}?version=${testBotVersion}`
+      `${API_BASE}/administration/test/deploymentstatus/${testAgentId}?version=${testAgentVersion}`
     );
     if (res.ok()) {
       const body = await res.json();
@@ -116,9 +116,9 @@ test.describe("Deployment — Real Backend", () => {
     }
   });
 
-  test("Undeploy bot succeeds", async ({ request }) => {
+  test("Undeploy agent succeeds", async ({ request }) => {
     const res = await request.post(
-      `${API_BASE}/administration/unrestricted/undeploy/${testBotId}?version=${testBotVersion}`
+      `${API_BASE}/administration/unrestricted/undeploy/${testAgentId}?version=${testAgentVersion}`
     );
     expect(res.ok()).toBeTruthy();
 
@@ -127,7 +127,7 @@ test.describe("Deployment — Real Backend", () => {
 
     // Verify NOT_FOUND after undeploy
     const statusRes = await request.get(
-      `${API_BASE}/administration/unrestricted/deploymentstatus/${testBotId}?version=${testBotVersion}`
+      `${API_BASE}/administration/unrestricted/deploymentstatus/${testAgentId}?version=${testAgentVersion}`
     );
     if (statusRes.ok()) {
       const body = await statusRes.json();

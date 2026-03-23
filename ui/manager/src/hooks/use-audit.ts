@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   getAuditTrail,
-  getAuditTrailByBot,
+  getAuditTrailByAgent,
   getEntryCount,
 } from "@/lib/api/audit";
 
@@ -10,8 +10,8 @@ import {
 const KEYS = {
   trail: (conversationId: string, skip: number, limit: number) =>
     ["audit", "trail", conversationId, skip, limit] as const,
-  trailByBot: (botId: string, botVersion: number | null | undefined, skip: number, limit: number) =>
-    ["audit", "trail-by-bot", botId, botVersion, skip, limit] as const,
+  trailByAgent: (agentId: string, agentVersion: number | null | undefined, skip: number, limit: number) =>
+    ["audit", "trail-by-agent", agentId, agentVersion, skip, limit] as const,
   count: (conversationId: string) =>
     ["audit", "count", conversationId] as const,
 };
@@ -27,17 +27,17 @@ export function useAuditTrail(conversationId: string, skip = 0, limit = 100) {
   });
 }
 
-/** Fetch audit entries for a bot. Disabled when botId is empty. */
-export function useAuditTrailByBot(
-  botId: string,
-  botVersion?: number | null,
+/** Fetch audit entries for a agent. Disabled when agentId is empty. */
+export function useAuditTrailByAgent(
+  agentId: string,
+  agentVersion?: number | null,
   skip = 0,
   limit = 100,
 ) {
   return useQuery({
-    queryKey: KEYS.trailByBot(botId, botVersion, skip, limit),
-    queryFn: () => getAuditTrailByBot(botId, botVersion, skip, limit),
-    enabled: !!botId,
+    queryKey: KEYS.trailByAgent(agentId, agentVersion, skip, limit),
+    queryFn: () => getAuditTrailByAgent(agentId, agentVersion, skip, limit),
+    enabled: !!agentId,
   });
 }
 

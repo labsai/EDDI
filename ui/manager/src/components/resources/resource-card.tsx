@@ -12,7 +12,7 @@ import {
   Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { BotDescriptor } from "@/lib/api/bots";
+import type { AgentDescriptor } from "@/lib/api/agents";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
@@ -27,7 +27,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
 };
 
 interface ResourceCardProps {
-  item: BotDescriptor & { id: string; version: number };
+  item: AgentDescriptor & { id: string; version: number };
   typeSlug: string;
   iconName: string;
   onDuplicate: (id: string, version: number) => void;

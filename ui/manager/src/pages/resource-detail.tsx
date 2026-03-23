@@ -105,18 +105,18 @@ export function ResourceDetailPage() {
   const Icon = ICON_MAP[rt?.icon ?? ""] ?? FileCode;
   const typeName = rt ? t(`${rt.labelKey}.name`) : type ?? "";
 
-  // Cascade context from URL search params (set when navigating from bot/package)
+  // Cascade context from URL search params (set when navigating from agent/package)
   const cascadeContext: CascadeContext | undefined = (() => {
     const pkgId = searchParams.get("pkgId");
     const pkgVer = searchParams.get("pkgVer");
-    const botId = searchParams.get("botId");
-    const botVer = searchParams.get("botVer");
-    if (pkgId && pkgVer && botId && botVer) {
+    const agentId = searchParams.get("agentId");
+    const agentVer = searchParams.get("agentVer");
+    if (pkgId && pkgVer && agentId && agentVer) {
       return {
-        packageId: pkgId,
+        workflowId: pkgId,
         packageVersion: parseInt(pkgVer, 10),
-        botId: botId,
-        botVersion: parseInt(botVer, 10),
+        agentId: agentId,
+        agentVersion: parseInt(agentVer, 10),
       };
     }
     return undefined;
@@ -169,7 +169,7 @@ export function ResourceDetailPage() {
         const parsed = JSON.parse(jsonString);
 
         if (cascadeContext) {
-          // Path A: Auto-cascade (navigated from bot/package)
+          // Path A: Auto-cascade (navigated from agent/package)
           cascadeSave.mutate(
             {
               id: id ?? "",
@@ -198,7 +198,7 @@ export function ResourceDetailPage() {
                 setNewResourceVersion(result.newResourceVersion);
                 setCurrentVersion(result.newResourceVersion);
 
-                // Check if any bots/packages reference this
+                // Check if any agents/packages reference this
                 if (rt) {
                   try {
                     const found = await findResourceUsage(
@@ -237,10 +237,10 @@ export function ResourceDetailPage() {
             version: newResourceVersion,
             body: {}, // Body not needed — config already saved in step 1
             context: {
-              packageId: usage.packageId,
+              workflowId: usage.workflowId,
               packageVersion: usage.packageVersion,
-              botId: usage.botId,
-              botVersion: usage.botVersion,
+              agentId: usage.agentId,
+              agentVersion: usage.agentVersion,
             },
           });
         }
@@ -327,7 +327,7 @@ export function ResourceDetailPage() {
             <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
               {t(
                 "editor.cascadeMode",
-                "Changes will cascade to parent package and bot"
+                "Changes will cascade to parent package and agent"
               )}
             </p>
           )}

@@ -18,33 +18,33 @@ test.describe("Dashboard", () => {
     await expect(counts).toHaveCount(4);
   });
 
-  test("stat card navigates to bots page", async ({ page }) => {
-    // Click the bots stat card
-    await page.locator('main a[href="/manage/bots"]').first().click();
-    await expect(page).toHaveURL(/\/manage\/bots/);
+  test("stat card navigates to agents page", async ({ page }) => {
+    // Click the agents stat card
+    await page.locator('main a[href="/manage/agents"]').first().click();
+    await expect(page).toHaveURL(/\/manage\/agents/);
   });
 
   test("quick action buttons are visible", async ({ page }) => {
-    // Quick action section has buttons for Bot Wizard, Create Bot, Chat
+    // Quick action section has buttons for Agent Wizard, Create Agent, Chat
     await expect(
-      page.locator('main a[href="/manage/bots/wizard"]')
+      page.locator('main a[href="/manage/agents/wizard"]')
     ).toBeVisible();
     await expect(
       page.locator('main a[href="/manage/chat"]')
     ).toBeVisible();
   });
 
-  test("recent bots section shows bot cards", async ({ page }) => {
-    // MSW returns 2 bots — they should appear in the recent bots grid
-    await expect(page.getByText("Support Bot")).toBeVisible();
-    await expect(page.getByText("FAQ Bot")).toBeVisible();
+  test("recent agents section shows agent cards", async ({ page }) => {
+    // MSW returns 2 agents — they should appear in the recent agents grid
+    await expect(page.getByText("Support Agent")).toBeVisible();
+    await expect(page.getByText("FAQ Agent")).toBeVisible();
   });
 
-  test("clicking recent bot navigates to bot detail", async ({ page }) => {
-    const firstBotCard = page
-      .locator('main a[href^="/manage/botview/"]')
+  test("clicking recent agent navigates to agent detail", async ({ page }) => {
+    const firstAgentCard = page
+      .locator('main a[href^="/manage/agentview/"]')
       .first();
-    await firstBotCard.click();
-    await expect(page).toHaveURL(/\/manage\/botview\//);
+    await firstAgentCard.click();
+    await expect(page).toHaveURL(/\/manage\/agentview\//);
   });
 });

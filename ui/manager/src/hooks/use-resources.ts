@@ -128,7 +128,7 @@ export function useUpdateResource(slug: string) {
 
 /**
  * Cascade save: saves a resource, then optionally updates parent
- * package and bot to reference the new version.
+ * package and agent to reference the new version.
  */
 export function useCascadeSave(slug: string) {
   const queryClient = useQueryClient();
@@ -152,7 +152,7 @@ export function useCascadeSave(slug: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: resourceKeys(slug) });
       queryClient.invalidateQueries({ queryKey: ["packages"] });
-      queryClient.invalidateQueries({ queryKey: ["bots"] });
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
   });
 }

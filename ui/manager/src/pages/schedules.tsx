@@ -210,22 +210,22 @@ function CreateScheduleDialog({
   const createMutation = useCreateSchedule();
   const [triggerType, setTriggerType] = useState<TriggerType>("CRON");
   const [name, setName] = useState("");
-  const [botId, setBotId] = useState("");
+  const [agentId, setAgentId] = useState("");
   const [cronExpression, setCronExpression] = useState("0 9 * * MON-FRI");
   const [heartbeatInterval, setHeartbeatInterval] = useState(300);
   const [message, setMessage] = useState("Hello");
-  const [environment, setEnvironment] = useState("unrestricted");
+  const [environment, setEnvironment] = useState("production");
   const [strategy, setStrategy] = useState<"new" | "persistent">("new");
 
   // Reset form when dialog opens
   const resetForm = useCallback(() => {
     setName("");
-    setBotId("");
+    setAgentId("");
     setTriggerType("CRON");
     setCronExpression("0 9 * * MON-FRI");
     setHeartbeatInterval(300);
     setMessage("Hello");
-    setEnvironment("unrestricted");
+    setEnvironment("production");
     setStrategy("new");
   }, []);
 
@@ -248,7 +248,7 @@ function CreateScheduleDialog({
   // Form validation
   const isValid =
     name.trim().length > 0 &&
-    botId.trim().length > 0 &&
+    agentId.trim().length > 0 &&
     (triggerType === "CRON"
       ? cronExpression.trim().length > 0
       : heartbeatInterval >= 60);
@@ -258,8 +258,8 @@ function CreateScheduleDialog({
     const config: Partial<ScheduleConfiguration> = {
       name: name.trim(),
       triggerType,
-      botId: botId.trim(),
-      botVersion: 0,
+      agentId: agentId.trim(),
+      agentVersion: 0,
       environment,
       message,
       conversationStrategy:
@@ -378,17 +378,17 @@ function CreateScheduleDialog({
             </div>
           )}
 
-          {/* Bot ID */}
+          {/* Agent ID */}
           <div>
             <label className="mb-1 block text-sm font-medium text-muted-foreground">
-              {t("schedules.botId", "Bot ID")}
+              {t("schedules.agentId", "Agent ID")}
             </label>
             <input
-              value={botId}
-              onChange={(e) => setBotId(e.target.value)}
+              value={agentId}
+              onChange={(e) => setAgentId(e.target.value)}
               placeholder={t(
-                "schedules.botIdPlaceholder",
-                "Enter bot ID..."
+                "schedules.agentIdPlaceholder",
+                "Enter agent ID..."
               )}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-accent focus:outline-none"
             />
@@ -404,8 +404,8 @@ function CreateScheduleDialog({
               onChange={(e) => setEnvironment(e.target.value)}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
             >
-              <option value="unrestricted">Unrestricted</option>
-              <option value="restricted">Restricted</option>
+              <option value="production">Production</option>
+              
               <option value="test">Test</option>
             </select>
           </div>
@@ -420,7 +420,7 @@ function CreateScheduleDialog({
               onChange={(e) => setMessage(e.target.value)}
               placeholder={t(
                 "schedules.messagePlaceholder",
-                "Message to send to bot"
+                "Message to send to agent"
               )}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-accent focus:outline-none"
             />
@@ -552,7 +552,7 @@ export function SchedulesPage() {
             <p className="text-sm text-muted-foreground">
               {t(
                 "schedules.subtitle",
-                "Manage scheduled bot triggers — cron jobs and heartbeats"
+                "Manage scheduled agent triggers — cron jobs and heartbeats"
               )}
             </p>
           </div>
@@ -676,7 +676,7 @@ export function SchedulesPage() {
             <p className="mt-1 text-xs">
               {t(
                 "schedules.emptyHint",
-                "Create a schedule to automate bot triggers."
+                "Create a schedule to automate agent triggers."
               )}
             </p>
           </div>
@@ -695,7 +695,7 @@ export function SchedulesPage() {
                     {t("schedules.colSchedule", "Schedule")}
                   </th>
                   <th className="px-5 py-3 text-start font-medium">
-                    {t("schedules.colBot", "Bot")}
+                    {t("schedules.colAgent", "Agent")}
                   </th>
                   <th className="px-5 py-3 text-start font-medium">
                     {t("schedules.colStatus", "Status")}
@@ -739,7 +739,7 @@ export function SchedulesPage() {
                       </td>
                       <td className="px-5 py-3">
                         <code className="text-xs text-foreground">
-                          {s.botId}
+                          {s.agentId}
                         </code>
                       </td>
                       <td className="px-5 py-3">

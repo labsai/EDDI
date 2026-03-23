@@ -10,8 +10,8 @@ describe("Sidebar", () => {
     );
 
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
-    expect(screen.getByText("Bots")).toBeInTheDocument();
-    expect(screen.getByText("Packages")).toBeInTheDocument();
+    expect(screen.getByText("Agents")).toBeInTheDocument();
+    expect(screen.getByText("Workflows")).toBeInTheDocument();
     expect(screen.getByText("Conversations")).toBeInTheDocument();
     expect(screen.getByText("Resources")).toBeInTheDocument();
   });
@@ -22,7 +22,7 @@ describe("Sidebar", () => {
     );
 
     expect(screen.queryByText("Dashboard")).not.toBeInTheDocument();
-    expect(screen.queryByText("Bots")).not.toBeInTheDocument();
+    expect(screen.queryByText("Agents")).not.toBeInTheDocument();
   });
 
   it("renders collapse toggle button", () => {

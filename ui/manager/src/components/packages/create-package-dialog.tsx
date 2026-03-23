@@ -1,16 +1,16 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
-import { useCreatePackage } from "@/hooks/use-packages";
+import { useCreateWorkflow } from "@/hooks/use-packages";
 
-interface CreatePackageDialogProps {
+interface CreateWorkflowDialogProps {
   open: boolean;
   onClose: () => void;
 }
 
-export function CreatePackageDialog({ open, onClose }: CreatePackageDialogProps) {
+export function CreateWorkflowDialog({ open, onClose }: CreateWorkflowDialogProps) {
   const { t } = useTranslation();
-  const createMutation = useCreatePackage();
+  const createMutation = useCreateWorkflow();
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -38,7 +38,7 @@ export function CreatePackageDialog({ open, onClose }: CreatePackageDialogProps)
           {/* Header */}
           <div className="flex items-center justify-between border-b border-border p-5">
             <h2 className="text-lg font-semibold text-foreground">
-              {t("packages.createTitle", "Create New Package")}
+              {t("packages.createTitle", "Create New Workflow")}
             </h2>
             <button
               onClick={onClose}
@@ -58,7 +58,7 @@ export function CreatePackageDialog({ open, onClose }: CreatePackageDialogProps)
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder={t("packages.namePlaceholder", "My Package")}
+                placeholder={t("packages.namePlaceholder", "My Workflow")}
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 autoFocus
               />

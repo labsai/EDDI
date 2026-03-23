@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { waitForApp, expectHeading } from "./e2e-helpers";
 
-test.describe("Packages Page", () => {
+test.describe("Workflows Page", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/manage/packages");
     await waitForApp(page);
@@ -13,8 +13,8 @@ test.describe("Packages Page", () => {
 
   test("shows package cards with mock data", async ({ page }) => {
     // MSW returns 2 packages
-    await expect(page.getByText("Support Package")).toBeVisible();
-    await expect(page.getByText("FAQ Package")).toBeVisible();
+    await expect(page.getByText("Support Workflow")).toBeVisible();
+    await expect(page.getByText("FAQ Workflow")).toBeVisible();
   });
 
   test("search input is functional", async ({ page }) => {
@@ -30,12 +30,12 @@ test.describe("Packages Page", () => {
   });
 
   test("package card navigates to package detail", async ({ page }) => {
-    await page.getByText("Support Package").click();
+    await page.getByText("Support Workflow").click();
     await expect(page).toHaveURL(/\/manage\/packageview\//);
   });
 });
 
-test.describe("Package Detail", () => {
+test.describe("Workflow Detail", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/manage/packageview/pkg1");
     await waitForApp(page);

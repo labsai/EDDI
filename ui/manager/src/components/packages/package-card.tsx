@@ -1,23 +1,23 @@
 import { useTranslation } from "react-i18next";
 import {
-  Package,
+  Workflow,
   Copy,
   Trash2,
   MoreVertical,
   ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { BotDescriptor } from "@/lib/api/bots";
+import type { AgentDescriptor } from "@/lib/api/agents";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
-interface PackageCardProps {
-  pkg: BotDescriptor & { id: string; version: number };
+interface WorkflowCardProps {
+  pkg: AgentDescriptor & { id: string; version: number };
   onDuplicate: (id: string, version: number) => void;
   onDelete: (id: string, version: number) => void;
 }
 
-export function PackageCard({ pkg, onDuplicate, onDelete }: PackageCardProps) {
+export function WorkflowCard({ pkg, onDuplicate, onDelete }: WorkflowCardProps) {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -34,7 +34,7 @@ export function PackageCard({ pkg, onDuplicate, onDelete }: PackageCardProps) {
       {/* Icon + menu */}
       <div className="flex items-start justify-between">
         <div className="rounded-lg bg-primary/10 p-2">
-          <Package className="h-5 w-5 text-primary" />
+          <Workflow className="h-5 w-5 text-primary" />
         </div>
 
         {/* Context menu */}
@@ -79,13 +79,13 @@ export function PackageCard({ pkg, onDuplicate, onDelete }: PackageCardProps) {
         </div>
       </div>
 
-      {/* Package info */}
+      {/* Workflow info */}
       <div className="mt-4 flex-1">
         <Link
           to={`/manage/packageview/${pkg.id}`}
           className="text-lg font-semibold text-foreground hover:text-primary transition-colors"
         >
-          {pkg.name || t("packages.unnamed", "Unnamed Package")}
+          {pkg.name || t("packages.unnamed", "Unnamed Workflow")}
           <ExternalLink className="ms-1 inline h-3.5 w-3.5 opacity-0 group-hover:opacity-50" />
         </Link>
         <p className="mt-0.5 font-mono text-xs text-muted-foreground/70 truncate" title={pkg.id}>

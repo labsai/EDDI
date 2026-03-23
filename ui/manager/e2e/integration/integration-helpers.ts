@@ -2,7 +2,7 @@ import { type APIRequestContext, expect } from "@playwright/test";
 
 /**
  * Base URL for API calls through the Vite dev server proxy.
- * The Vite dev server on port 3000 proxies all /botstore, /packagestore, etc.
+ * The Vite dev server on port 3000 proxies all /agentstore, /packagestore, etc.
  * paths to EDDI on localhost:7070.
  */
 export const API_BASE = "http://localhost:3000";
@@ -10,8 +10,8 @@ export const API_BASE = "http://localhost:3000";
 /**
  * Poll the EDDI liveness endpoint until the backend is ready.
  * Uses /q/health/live (liveness-only) instead of /q/health to avoid
- * blocking on the @Readiness BotsReadinessHealthCheck which may report
- * DOWN if there's stale deployment state pointing to nonexistent bots.
+ * blocking on the @Readiness AgentsReadinessHealthCheck which may report
+ * DOWN if there's stale deployment state pointing to nonexistent agents.
  */
 export async function waitForBackend(
   request: APIRequestContext,
@@ -41,8 +41,8 @@ export async function waitForBackend(
  * Parse an eddi:// URI or Location header to extract resource ID and version.
  *
  * Real backend behavior:
- *   CREATE:  "eddi://ai.labs.bot/botstore/bots/abc123"           → { id: "abc123", version: 1 }
- *   UPDATE:  "eddi://ai.labs.bot/botstore/bots/abc123?version=2" → { id: "abc123", version: 2 }
+ *   CREATE:  "eddi://ai.labs.agent/agentstore/agents/abc123"           → { id: "abc123", version: 1 }
+ *   UPDATE:  "eddi://ai.labs.agent/agentstore/agents/abc123?version=2" → { id: "abc123", version: 2 }
  *   CONV:    "eddi://ai.labs.conversation/conversationstore/conversations/abc123" → { id: "abc123", version: 1 }
  */
 export function extractIdFromLocation(location: string): {
@@ -76,15 +76,15 @@ export async function cleanupResource(
 }
 
 /**
- * Create a bot + package, deploy, and return all IDs for testing.
+ * Create a agent + package, deploy, and return all IDs for testing.
  * Used by conversation and deployment tests to be fully self-contained.
  */
-export async function createAndDeployBot(
+export async function createAndDeployAgent(
   request: APIRequestContext
 ): Promise<{
-  botId: string;
-  botVersion: number;
-  packageId: string;
+  agentId: string;
+  agentVersion: number;
+  workflowId: string;
   packageVersion: number;
 }> {
   // Create package
@@ -95,17 +95,17 @@ export async function createAndDeployBot(
   const pkgLoc = pkgRes.headers()["location"]!;
   const pkg = extractIdFromLocation(pkgLoc);
 
-  // Create bot referencing the package
-  const botRes = await request.post(`${API_BASE}/botstore/bots`, {
+  // Create agent referencing the package
+  const agentRes = await request.post(`${API_BASE}/agentstore/agents`, {
     data: { packages: [pkgLoc] },
   });
-  expect(botRes.status()).toBe(201);
-  const botLoc = botRes.headers()["location"]!;
-  const bot = extractIdFromLocation(botLoc);
+  expect(agentRes.status()).toBe(201);
+  const agentLoc = agentRes.headers()["location"]!;
+  const agent = extractIdFromLocation(agentLoc);
 
   // Deploy
   const deployRes = await request.post(
-    `${API_BASE}/administration/unrestricted/deploy/${bot.id}?version=${bot.version}`
+    `${API_BASE}/administration/unrestricted/deploy/${agent.id}?version=${agent.version}`
   );
   expect([200, 202]).toContain(deployRes.status());
 
@@ -113,7 +113,7 @@ export async function createAndDeployBot(
   const start = Date.now();
   while (Date.now() - start < 15_000) {
     const statusRes = await request.get(
-      `${API_BASE}/administration/unrestricted/deploymentstatus/${bot.id}?version=${bot.version}`
+      `${API_BASE}/administration/unrestricted/deploymentstatus/${agent.id}?version=${agent.version}`
     );
     if (statusRes.ok()) {
       const body = await statusRes.json();
@@ -123,9 +123,9 @@ export async function createAndDeployBot(
   }
 
   return {
-    botId: bot.id,
-    botVersion: bot.version,
-    packageId: pkg.id,
+    agentId: agent.id,
+    agentVersion: agent.version,
+    workflowId: pkg.id,
     packageVersion: pkg.version,
   };
 }

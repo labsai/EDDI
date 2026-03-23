@@ -11,7 +11,7 @@ interface ViewToggleProps {
 
 /**
  * Toggle between card (grid) and list (table) views.
- * Used on bots, packages, resources, and conversations pages.
+ * Used on agents, packages, resources, and conversations pages.
  */
 export function ViewToggle({ view, onChange }: ViewToggleProps) {
   const { t } = useTranslation();

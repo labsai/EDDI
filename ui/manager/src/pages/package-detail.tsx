@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
-  Package,
+  Workflow,
   Plus,
   Trash2,
   RefreshCw,
@@ -14,14 +14,14 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-  usePackage,
-  useUpdatePackage,
-  useDeletePackage,
-  usePackageVersions,
+  useWorkflow,
+  useUpdateWorkflow,
+  useDeleteWorkflow,
+  useWorkflowVersions,
 } from "@/hooks/use-packages";
 
-import { parseResourceUri } from "@/lib/api/bots";
-import type { PackageExtension } from "@/lib/api/packages";
+import { parseResourceUri } from "@/lib/api/agents";
+import type { WorkflowExtension } from "@/lib/api/packages";
 import type { ExtensionDescriptor } from "@/lib/api/extensions";
 import {
   PipelineBuilder,
@@ -31,7 +31,7 @@ import { AddExtensionDialog } from "@/components/editors/add-extension-dialog";
 
 
 /* ─── Main page ─── */
-export function PackageDetailPage() {
+export function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -39,7 +39,7 @@ export function PackageDetailPage() {
   const [version, setVersion] = useState(1);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [localExtensions, setLocalExtensions] = useState<
-    PackageExtension[] | null
+    WorkflowExtension[] | null
   >(null);
   const [saveMessage, setSaveMessage] = useState<{
     type: "success" | "error";
@@ -51,10 +51,10 @@ export function PackageDetailPage() {
     isLoading,
     isError,
     refetch,
-  } = usePackage(id!, version);
-  const { data: versionDescriptors } = usePackageVersions(id!);
-  const updateMutation = useUpdatePackage();
-  const deleteMutation = useDeletePackage();
+  } = useWorkflow(id!, version);
+  const { data: versionDescriptors } = useWorkflowVersions(id!);
+  const updateMutation = useUpdateWorkflow();
+  const deleteMutation = useDeleteWorkflow();
 
   // Version picker data
   const versions = useMemo(() => {
@@ -114,7 +114,7 @@ export function PackageDetailPage() {
 
   const handleAddExtension = useCallback(
     (descriptor: ExtensionDescriptor) => {
-      const newExt: PackageExtension = {
+      const newExt: WorkflowExtension = {
         type: descriptor.type,
         extensions: {},
         config: {},
@@ -135,7 +135,7 @@ export function PackageDetailPage() {
       });
       setSaveMessage({
         type: "success",
-        text: t("packageEditor.saved", "Package saved successfully"),
+        text: t("packageEditor.saved", "Workflow saved successfully"),
       });
       setLocalExtensions(null);
     } catch {
@@ -205,10 +205,10 @@ export function PackageDetailPage() {
         <div className="space-y-2">
           <BackLink />
           <div className="flex items-center gap-3">
-            <Package className="h-8 w-8 text-primary" />
+            <Workflow className="h-8 w-8 text-primary" />
             <div>
               <h1 className="text-3xl font-bold text-foreground">
-                {t("packageEditor.title", "Package Editor")}
+                {t("packageEditor.title", "Workflow Editor")}
               </h1>
               <p className="font-mono text-sm text-muted-foreground">
                 ID: {id}
@@ -294,7 +294,7 @@ export function PackageDetailPage() {
       <section className="rounded-xl border bg-card shadow-sm">
         <div className="flex items-center justify-between border-b border-border p-5">
           <div className="flex items-center gap-2">
-            <Package className="h-5 w-5 text-primary" />
+            <Workflow className="h-5 w-5 text-primary" />
             <h2 className="text-lg font-semibold text-foreground">
               {t("packageEditor.pipeline", "Extension Pipeline")}
             </h2>
@@ -343,7 +343,7 @@ function BackLink() {
       className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
     >
       <ArrowLeft className="h-4 w-4" />
-      {t("packageDetail.backToPackages", "Back to Packages")}
+      {t("packageDetail.backToWorkflows", "Back to Workflows")}
     </Link>
   );
 }
@@ -405,7 +405,7 @@ function formatRelativeTime(timestamp: number): string {
 function RawConfigSection({
   config,
 }: {
-  config: { packageExtensions?: PackageExtension[] };
+  config: { packageExtensions?: WorkflowExtension[] };
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);

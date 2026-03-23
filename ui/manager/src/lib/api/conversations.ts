@@ -11,8 +11,8 @@ export interface ConversationDescriptor {
   description: string;
   createdOn: number;
   lastModifiedOn: number;
-  botId: string;
-  botVersion: number;
+  agentId: string;
+  agentVersion: number;
   conversationState: ConversationState;
   viewState?: ViewState;
   createdBy?: string;
@@ -26,7 +26,7 @@ export interface ConversationStepData {
   key: string;
   value: unknown;
   timestamp?: string;
-  originPackageId?: string | null;
+  originWorkflowId?: string | null;
   isPublic?: boolean;
 }
 
@@ -36,8 +36,8 @@ export interface SimpleConversationStep {
 }
 
 export interface SimpleConversationMemorySnapshot {
-  botId: string;
-  botVersion: number;
+  agentId: string;
+  agentVersion: number;
   conversationId: string;
   conversationState: ConversationState;
   environment: string;
@@ -56,7 +56,7 @@ export function extractInput(step: SimpleConversationStep): string | undefined {
   return entry?.value as string | undefined;
 }
 
-/** Extract bot output from a conversationOutput map (one per step).
+/** Extract agent output from a conversationOutput map (one per step).
  * Handles two formats:
  * 1. Nested (from conversationOutputs): { output: [{ type, text, delay }], quickReplies: [...] }
  * 2. Flat (from conversationSteps): { "output:text:action_name": { text: "..." }, ... }
@@ -155,8 +155,8 @@ export function extractActions(step: SimpleConversationStep): string[] {
 }
 
 export interface ConversationMemorySnapshot {
-  botId: string;
-  botVersion: number;
+  agentId: string;
+  agentVersion: number;
   conversationId: string;
   conversationState: ConversationState;
   environment: string;
@@ -180,8 +180,8 @@ export function getConversationDescriptors(
   limit = 20,
   index = 0,
   filter = "",
-  botId = "",
-  botVersion?: number,
+  agentId = "",
+  agentVersion?: number,
   conversationState?: ConversationState
 ): Promise<ConversationDescriptor[]> {
   const params = new URLSearchParams({
@@ -189,8 +189,8 @@ export function getConversationDescriptors(
     index: String(index),
   });
   if (filter) params.set("filter", filter);
-  if (botId) params.set("botId", botId);
-  if (botVersion) params.set("botVersion", String(botVersion));
+  if (agentId) params.set("agentId", agentId);
+  if (agentVersion) params.set("agentVersion", String(agentVersion));
   if (conversationState) params.set("conversationState", conversationState);
   return api.get<ConversationDescriptor[]>(
     `/conversationstore/conversations?${params.toString()}`

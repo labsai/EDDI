@@ -12,15 +12,15 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useDeploymentStatus, useDeployBot, useUndeployBot } from "@/hooks/use-bots";
-import { useExportBot } from "@/hooks/use-backup";
-import type { BotDescriptor } from "@/lib/api/bots";
+import { useDeploymentStatus, useDeployAgent, useUndeployAgent } from "@/hooks/use-agents";
+import { useExportAgent } from "@/hooks/use-backup";
+import type { AgentDescriptor } from "@/lib/api/agents";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
-interface BotCardProps {
-  bot: BotDescriptor & { id: string; version: number };
+interface AgentCardProps {
+  agent: AgentDescriptor & { id: string; version: number };
   onDuplicate: (id: string, version: number) => void;
   onDelete: (id: string, version: number) => void;
   onExport?: (id: string, version: number) => void;
@@ -57,13 +57,13 @@ const statusConfig = {
   },
 };
 
-export function BotCard({ bot, onDuplicate, onDelete }: BotCardProps) {
+export function AgentCard({ agent, onDuplicate, onDelete }: AgentCardProps) {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
-  const { data: deployment } = useDeploymentStatus(bot.id, bot.version);
-  const deployMutation = useDeployBot();
-  const undeployMutation = useUndeployBot();
-  const exportMutation = useExportBot();
+  const { data: deployment } = useDeploymentStatus(agent.id, agent.version);
+  const deployMutation = useDeployAgent();
+  const undeployMutation = useUndeployAgent();
+  const exportMutation = useExportAgent();
 
   const status = deployment?.status ?? "NOT_FOUND";
   const config = statusConfig[status];
@@ -77,25 +77,25 @@ export function BotCard({ bot, onDuplicate, onDelete }: BotCardProps) {
 
   function handleDeploy() {
     deployMutation.mutate(
-      { botId: bot.id, version: bot.version },
+      { agentId: agent.id, version: agent.version },
       {
-        onSuccess: () => toast.success(t("bots.deploySuccess", "Bot deployed successfully")),
-        onError: () => toast.error(t("bots.deployError", "Deploy failed")),
+        onSuccess: () => toast.success(t("agents.deploySuccess", "Agent deployed successfully")),
+        onError: () => toast.error(t("agents.deployError", "Deploy failed")),
       }
     );
   }
 
   function handleUndeploy() {
     undeployMutation.mutate(
-      { botId: bot.id, version: bot.version },
+      { agentId: agent.id, version: agent.version },
       {
-        onSuccess: () => toast.success(t("bots.undeploySuccess", "Bot undeployed")),
-        onError: () => toast.error(t("bots.undeployError", "Undeploy failed")),
+        onSuccess: () => toast.success(t("agents.undeploySuccess", "Agent undeployed")),
+        onError: () => toast.error(t("agents.undeployError", "Undeploy failed")),
       }
     );
   }
 
-  const timeAgo = formatTimeAgo(bot.lastModifiedOn);
+  const timeAgo = formatTimeAgo(agent.lastModifiedOn);
 
   return (
     <div
@@ -104,7 +104,7 @@ export function BotCard({ bot, onDuplicate, onDelete }: BotCardProps) {
         "hover:shadow-md hover:border-primary/30",
         `ring-1 ${config.ring}`
       )}
-      data-testid={`bot-card-${bot.id}`}
+      data-testid={`agent-card-${agent.id}`}
     >
       {/* Status badge + menu */}
       <div className="flex items-start justify-between">
@@ -125,7 +125,7 @@ export function BotCard({ bot, onDuplicate, onDelete }: BotCardProps) {
           <button
             onClick={() => setMenuOpen(!menuOpen)}
             className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100"
-            data-testid={`bot-menu-${bot.id}`}
+            data-testid={`agent-menu-${agent.id}`}
           >
             <MoreVertical className="h-4 w-4" />
           </button>
@@ -138,7 +138,7 @@ export function BotCard({ bot, onDuplicate, onDelete }: BotCardProps) {
               <div className="absolute inset-e-0 z-50 mt-1 w-44 rounded-lg border bg-popover py-1 shadow-lg">
                 <button
                   onClick={() => {
-                    onDuplicate(bot.id, bot.version);
+                    onDuplicate(agent.id, agent.version);
                     setMenuOpen(false);
                   }}
                   className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-secondary"
@@ -148,7 +148,7 @@ export function BotCard({ bot, onDuplicate, onDelete }: BotCardProps) {
                 </button>
                 <button
                   onClick={() => {
-                    exportMutation.mutate({ botId: bot.id, version: bot.version });
+                    exportMutation.mutate({ agentId: agent.id, version: agent.version });
                     setMenuOpen(false);
                   }}
                   disabled={exportMutation.isPending}
@@ -156,12 +156,12 @@ export function BotCard({ bot, onDuplicate, onDelete }: BotCardProps) {
                 >
                   <Download className="h-4 w-4" />
                   {exportMutation.isPending
-                    ? t("bots.exporting", "Exporting...")
-                    : t("bots.export", "Export")}
+                    ? t("agents.exporting", "Exporting...")
+                    : t("agents.export", "Export")}
                 </button>
                 <button
                   onClick={() => {
-                    onDelete(bot.id, bot.version);
+                    onDelete(agent.id, agent.version);
                     setMenuOpen(false);
                   }}
                   className="flex w-full items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-destructive/10"
@@ -175,26 +175,26 @@ export function BotCard({ bot, onDuplicate, onDelete }: BotCardProps) {
         </div>
       </div>
 
-      {/* Bot info */}
+      {/* Agent info */}
       <div className="mt-4 flex-1">
         <Link
-          to={`/manage/botview/${bot.id}`}
+          to={`/manage/agentview/${agent.id}`}
           className="text-lg font-semibold text-foreground hover:text-primary transition-colors"
         >
-          {bot.name || t("bots.unnamed", "Unnamed Bot")}
+          {agent.name || t("agents.unnamed", "Unnamed Agent")}
           <ExternalLink className="ms-1 inline h-3.5 w-3.5 opacity-0 group-hover:opacity-50" />
         </Link>
-        <p className="mt-0.5 font-mono text-xs text-muted-foreground/70 truncate" title={bot.id}>
-          {bot.id}
+        <p className="mt-0.5 font-mono text-xs text-muted-foreground/70 truncate" title={agent.id}>
+          {agent.id}
         </p>
         <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-          {bot.description || "No description"}
+          {agent.description || "No description"}
         </p>
       </div>
 
       {/* Footer: meta + actions */}
       <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
-        <span className="text-xs text-muted-foreground" title={new Date(bot.lastModifiedOn).toLocaleString()}>
+        <span className="text-xs text-muted-foreground" title={new Date(agent.lastModifiedOn).toLocaleString()}>
           {timeAgo}
         </span>
 
@@ -202,12 +202,12 @@ export function BotCard({ bot, onDuplicate, onDelete }: BotCardProps) {
           {/* Chat button — only when deployed */}
           {isDeployed && (
             <Link
-              to={`/manage/chat?botId=${bot.id}`}
+              to={`/manage/chat?agentId=${agent.id}`}
               className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400"
-              data-testid={`bot-chat-${bot.id}`}
+              data-testid={`agent-chat-${agent.id}`}
             >
               <MessageSquare className="h-3.5 w-3.5" />
-              {t("bots.chat", "Chat")}
+              {t("agents.chat", "Chat")}
             </Link>
           )}
 
@@ -225,8 +225,8 @@ export function BotCard({ bot, onDuplicate, onDelete }: BotCardProps) {
             {isBusy
               ? t("common.loading")
               : isDeployed
-                ? t("bots.undeploy", "Undeploy")
-                : t("bots.deploy", "Deploy")}
+                ? t("agents.undeploy", "Undeploy")
+                : t("agents.deploy", "Deploy")}
           </button>
         </div>
       </div>

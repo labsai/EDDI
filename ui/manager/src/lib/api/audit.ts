@@ -5,8 +5,8 @@ import { api } from "../api-client";
 export interface AuditEntry {
   id: string;
   conversationId: string;
-  botId: string;
-  botVersion: number | null;
+  agentId: string;
+  agentVersion: number | null;
   userId: string | null;
   environment: string | null;
   stepIndex: number;
@@ -39,18 +39,18 @@ export async function getAuditTrail(
   );
 }
 
-/** Get the audit trail for a specific bot. */
-export async function getAuditTrailByBot(
-  botId: string,
-  botVersion?: number | null,
+/** Get the audit trail for a specific agent. */
+export async function getAuditTrailByAgent(
+  agentId: string,
+  agentVersion?: number | null,
   skip = 0,
   limit = 100,
 ): Promise<AuditEntry[]> {
   const params = new URLSearchParams({ skip: String(skip), limit: String(limit) });
-  if (botVersion != null) {
-    params.set("botVersion", String(botVersion));
+  if (agentVersion != null) {
+    params.set("agentVersion", String(agentVersion));
   }
-  return api.get<AuditEntry[]>(`${BASE}/bot/${botId}?${params.toString()}`);
+  return api.get<AuditEntry[]>(`${BASE}/agent/${agentId}?${params.toString()}`);
 }
 
 /** Get the number of audit entries for a conversation. */

@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import {
   LayoutDashboard,
   Bot,
-  Package,
+  Workflow,
   MessageSquare,
   MessageCircle,
   FileCode,
@@ -29,8 +29,8 @@ const navSections = [
     labelKey: "nav.sectionManagement",
     items: [
       { path: "/manage", icon: LayoutDashboard, labelKey: "nav.dashboard" },
-      { path: "/manage/bots", icon: Bot, labelKey: "nav.bots" },
-      { path: "/manage/packages", icon: Package, labelKey: "nav.packages" },
+      { path: "/manage/agents", icon: Bot, labelKey: "nav.agents" },
+      { path: "/manage/packages", icon: Workflow, labelKey: "nav.packages" },
     ],
   },
   {

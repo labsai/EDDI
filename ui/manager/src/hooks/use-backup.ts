@@ -1,27 +1,27 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  exportAndDownloadBot,
-  importBot,
+  exportAndDownloadAgent,
+  importAgent,
   previewImport,
-  importBotMerge,
+  importAgentMerge,
 } from "@/lib/api/backup";
 import type { ImportPreview } from "@/lib/api/backup";
 
-const BOTS_KEY = ["bots"] as const;
+const AGENTS_KEY = ["agents"] as const;
 
-export function useExportBot() {
+export function useExportAgent() {
   return useMutation({
-    mutationFn: ({ botId, version = 1 }: { botId: string; version?: number }) =>
-      exportAndDownloadBot(botId, version),
+    mutationFn: ({ agentId, version = 1 }: { agentId: string; version?: number }) =>
+      exportAndDownloadAgent(agentId, version),
   });
 }
 
-export function useImportBot() {
+export function useImportAgent() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (file: File) => importBot(file),
+    mutationFn: (file: File) => importAgent(file),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: BOTS_KEY });
+      queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
     },
   });
 }
@@ -32,7 +32,7 @@ export function usePreviewImport() {
   });
 }
 
-export function useImportBotMerge() {
+export function useImportAgentMerge() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -41,9 +41,9 @@ export function useImportBotMerge() {
     }: {
       file: File;
       selectedOriginIds?: string[];
-    }) => importBotMerge(file, selectedOriginIds),
+    }) => importAgentMerge(file, selectedOriginIds),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: BOTS_KEY });
+      queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
     },
   });
 }

@@ -11,34 +11,34 @@ test.describe("Chat Panel", () => {
     await expectHeading(page, /chat/i);
   });
 
-  test("shows bot selector", async ({ page }) => {
-    const botSelector = page.getByTestId("bot-selector");
-    await expect(botSelector).toBeVisible();
+  test("shows agent selector", async ({ page }) => {
+    const agentSelector = page.getByTestId("agent-selector");
+    await expect(agentSelector).toBeVisible();
   });
 
   test("streaming toggle is present", async ({ page }) => {
     await expect(page.getByTestId("streaming-toggle")).toBeVisible();
   });
 
-  test("bot selector is clickable", async ({ page }) => {
-    // Bot selector is a Radix Select (rendered as <button>)
-    const botSelector = page.getByTestId("bot-selector");
-    await botSelector.click();
+  test("agent selector is clickable", async ({ page }) => {
+    // Agent selector is a Radix Select (rendered as <button>)
+    const agentSelector = page.getByTestId("agent-selector");
+    await agentSelector.click();
 
-    // After clicking, a dropdown with bot options should appear
+    // After clicking, a dropdown with agent options should appear
     // Radix Select renders options in a portal
     await expect(
-      page.getByText("Support Bot").first()
+      page.getByText("Support Agent").first()
     ).toBeVisible({ timeout: 5000 });
   });
 
-  test("chat input appears after selecting a bot", async ({ page }) => {
-    // Click bot selector to open dropdown
-    const botSelector = page.getByTestId("bot-selector");
-    await botSelector.click();
+  test("chat input appears after selecting a agent", async ({ page }) => {
+    // Click agent selector to open dropdown
+    const agentSelector = page.getByTestId("agent-selector");
+    await agentSelector.click();
 
-    // Select a bot from the dropdown
-    await page.getByText("Support Bot").first().click();
+    // Select a agent from the dropdown
+    await page.getByText("Support Agent").first().click();
 
     // Wait for conversation to be created, then check for input
     const chatInput = page.getByTestId("chat-input");

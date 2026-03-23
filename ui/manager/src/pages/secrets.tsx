@@ -29,7 +29,7 @@ export function SecretsPage() {
 
   /* ─── Namespace state ─── */
   const [tenantId, setTenantId] = useState(DEFAULT_TENANT);
-  const [botId, setBotId] = useState("");
+  const [agentId, setAgentId] = useState("");
 
   /* ─── Dialog state ─── */
   const [showCreate, setShowCreate] = useState(false);
@@ -43,7 +43,7 @@ export function SecretsPage() {
     data: secrets,
     isLoading,
     refetch,
-  } = useSecrets(tenantId, botId);
+  } = useSecrets(tenantId, agentId);
   const { data: health } = useVaultHealth();
   const storeMut = useStoreSecret();
   const deleteMut = useDeleteSecret();
@@ -54,7 +54,7 @@ export function SecretsPage() {
     storeMut.mutate(
       {
         tenantId,
-        botId,
+        agentId,
         keyName: newKeyName.trim(),
         value: newValue.trim(),
       },
@@ -75,14 +75,14 @@ export function SecretsPage() {
           toast.error(err instanceof Error ? err.message : String(err)),
       },
     );
-  }, [tenantId, botId, newKeyName, newValue, storeMut, t]);
+  }, [tenantId, agentId, newKeyName, newValue, storeMut, t]);
 
   const handleDelete = useCallback(() => {
     if (!deleteTarget) return;
     deleteMut.mutate(
       {
         tenantId: deleteTarget.tenantId,
-        botId: deleteTarget.botId,
+        agentId: deleteTarget.agentId,
         keyName: deleteTarget.keyName,
       },
       {
@@ -151,7 +151,7 @@ export function SecretsPage() {
           )}
           <button
             onClick={() => setShowCreate(true)}
-            disabled={!botId}
+            disabled={!agentId}
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
             data-testid="create-secret-button"
           >
@@ -178,20 +178,20 @@ export function SecretsPage() {
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-muted-foreground">
-            {t("secrets.botId", "Bot ID")}
+            {t("secrets.agentId", "Agent ID")}
           </label>
           <input
             type="text"
-            value={botId}
-            onChange={(e) => setBotId(e.target.value)}
-            placeholder={t("secrets.botIdPlaceholder", "Enter bot ID...")}
+            value={agentId}
+            onChange={(e) => setAgentId(e.target.value)}
+            placeholder={t("secrets.agentIdPlaceholder", "Enter agent ID...")}
             className="h-9 w-64 rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            data-testid="bot-id-input"
+            data-testid="agent-id-input"
           />
         </div>
         <button
           onClick={() => refetch()}
-          disabled={!botId || isLoading}
+          disabled={!agentId || isLoading}
           className="inline-flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
           data-testid="refresh-button"
         >
@@ -240,7 +240,7 @@ export function SecretsPage() {
               <tbody className="divide-y divide-border">
                 {secrets.map((s) => (
                   <tr
-                    key={`${s.tenantId}-${s.botId}-${s.keyName}`}
+                    key={`${s.tenantId}-${s.agentId}-${s.keyName}`}
                     className="transition-colors hover:bg-muted/50"
                   >
                     <td className="px-4 py-3">
@@ -296,17 +296,17 @@ export function SecretsPage() {
         </div>
       )}
 
-      {/* Not loaded yet (no botId) */}
-      {!botId && !secrets && (
+      {/* Not loaded yet (no agentId) */}
+      {!agentId && !secrets && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border p-12 text-center">
           <KeyRound className="h-12 w-12 text-muted-foreground/30" />
           <p className="mt-4 text-lg font-medium text-foreground">
-            {t("secrets.enterBotId", "Enter a Bot ID")}
+            {t("secrets.enterAgentId", "Enter a Agent ID")}
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
             {t(
-              "secrets.enterBotIdHint",
-              "Specify a bot ID above to view and manage its secrets.",
+              "secrets.enterAgentIdHint",
+              "Specify a agent ID above to view and manage its secrets.",
             )}
           </p>
         </div>

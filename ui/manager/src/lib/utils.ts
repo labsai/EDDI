@@ -20,7 +20,7 @@ export function formatRelativeTime(timestamp: number): string {
   return "just now";
 }
 
-/** Bot deployment status color configuration */
+/** Agent deployment status color configuration */
 export const statusConfig: Record<
   string,
   { label: string; color: string; dot: string }

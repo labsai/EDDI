@@ -16,7 +16,7 @@
       },
       {
         "name": "editor",
-        "description": "Can create, edit, and delete bots, packages, and extensions"
+        "description": "Can create, edit, and delete agents, packages, and extensions"
       },
       {
         "name": "viewer",

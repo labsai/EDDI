@@ -255,13 +255,13 @@ export function ConversationsPage() {
                       </p>
                     </div>
 
-                    {/* Bot info + Step count */}
-                    {conv.botId && (
+                    {/* Agent info + Step count */}
+                    {conv.agentId && (
                       <div className="mt-2 flex items-center gap-1.5">
                         <Bot className="h-3.5 w-3.5 text-muted-foreground" />
                         <span className="text-xs text-muted-foreground truncate">
-                          {conv.botId}
-                          {conv.botVersion ? ` v${conv.botVersion}` : ""}
+                          {conv.agentId}
+                          {conv.agentVersion ? ` v${conv.agentVersion}` : ""}
                         </span>
                       </div>
                     )}
@@ -296,7 +296,7 @@ export function ConversationsPage() {
                       {t("conversations.id")}
                     </th>
                     <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      {t("conversations.bot")}
+                      {t("conversations.agent")}
                     </th>
                     <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       {t("conversations.state")}
@@ -337,8 +337,8 @@ export function ConversationsPage() {
                         </td>
                         <td className="px-5 py-3">
                           <span className="text-sm text-muted-foreground">
-                            {conv.botId
-                              ? `${conv.botId.length > 12 ? conv.botId.slice(0, 12) + "…" : conv.botId}${conv.botVersion ? ` v${conv.botVersion}` : ""}`
+                            {conv.agentId
+                              ? `${conv.agentId.length > 12 ? conv.agentId.slice(0, 12) + "…" : conv.agentId}${conv.agentVersion ? ` v${conv.agentVersion}` : ""}`
                               : "—"}
                           </span>
                         </td>

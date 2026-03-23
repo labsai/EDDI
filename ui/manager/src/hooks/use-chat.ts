@@ -22,19 +22,19 @@ import {
   extractQuickReplies,
 } from "@/lib/api/conversations";
 import {
-  getBotDescriptors,
+  getAgentDescriptors,
   getDeploymentStatus,
-  type BotDescriptor,
+  type AgentDescriptor,
   parseResourceUri,
-} from "@/lib/api/bots";
+} from "@/lib/api/agents";
 
 // --- Zustand Store ---
 
 interface ChatState {
   messages: ChatMessage[];
   conversationId: string | null;
-  selectedBotId: string | null;
-  selectedBotName: string | null;
+  selectedAgentId: string | null;
+  selectedAgentName: string | null;
   isProcessing: boolean;
   isThinking: boolean;
   streamingEnabled: boolean;
@@ -47,10 +47,10 @@ interface ChatState {
   isSecretMode: boolean;
 
   // Actions
-  setSelectedBot: (botId: string | null, botName: string | null) => void;
+  setSelectedAgent: (agentId: string | null, agentName: string | null) => void;
   setConversationId: (id: string | null) => void;
   addMessage: (message: ChatMessage) => void;
-  appendToLastBotMessage: (token: string) => void;
+  appendToLastAgentMessage: (token: string) => void;
   finishStreaming: () => void;
   setProcessing: (v: boolean) => void;
   setThinking: (v: boolean) => void;
@@ -76,8 +76,8 @@ const loadStreamingPref = (): boolean => {
 export const useChatStore = create<ChatState>((set) => ({
   messages: [],
   conversationId: null,
-  selectedBotId: null,
-  selectedBotName: null,
+  selectedAgentId: null,
+  selectedAgentName: null,
   isProcessing: false,
   isThinking: false,
   streamingEnabled: loadStreamingPref(),
@@ -87,10 +87,10 @@ export const useChatStore = create<ChatState>((set) => ({
   activeInputField: null,
   isSecretMode: false,
 
-  setSelectedBot: (botId, botName) =>
+  setSelectedAgent: (agentId, agentName) =>
     set({
-      selectedBotId: botId,
-      selectedBotName: botName,
+      selectedAgentId: agentId,
+      selectedAgentName: agentName,
       conversationId: null,
       messages: [],
     }),
@@ -100,11 +100,11 @@ export const useChatStore = create<ChatState>((set) => ({
   addMessage: (message) =>
     set((s) => ({ messages: [...s.messages, message] })),
 
-  appendToLastBotMessage: (token) =>
+  appendToLastAgentMessage: (token) =>
     set((s) => {
       const msgs = [...s.messages];
       const last = msgs[msgs.length - 1];
-      if (last?.role === "bot") {
+      if (last?.role === "agent") {
         msgs[msgs.length - 1] = { ...last, content: last.content + token };
       }
       return { messages: msgs };
@@ -114,7 +114,7 @@ export const useChatStore = create<ChatState>((set) => ({
     set((s) => {
       const msgs = [...s.messages];
       const last = msgs[msgs.length - 1];
-      if (last?.role === "bot") {
+      if (last?.role === "agent") {
         msgs[msgs.length - 1] = { ...last, isStreaming: false };
       }
       return { messages: msgs, isProcessing: false };
@@ -153,8 +153,8 @@ export const useChatStore = create<ChatState>((set) => ({
     set({
       messages: [],
       conversationId: null,
-      selectedBotId: null,
-      selectedBotName: null,
+      selectedAgentId: null,
+      selectedAgentName: null,
       isProcessing: false,
       isThinking: false,
       undoAvailable: false,
@@ -169,36 +169,36 @@ export const useChatStore = create<ChatState>((set) => ({
 
 const CHAT_KEY = ["chat"] as const;
 
-/** Fetch bot descriptors and filter to only those that are deployed. */
-export function useDeployedBots() {
+/** Fetch agent descriptors and filter to only those that are deployed. */
+export function useDeployedAgents() {
   return useQuery({
-    queryKey: [...CHAT_KEY, "deployedBots"],
+    queryKey: [...CHAT_KEY, "deployedAgents"],
     queryFn: async () => {
-      const descriptors = await getBotDescriptors(100, 0, "");
+      const descriptors = await getAgentDescriptors(100, 0, "");
       // Deduplicate by name, keep latest version
       const grouped = new Map<
         string,
-        BotDescriptor & { id: string; version: number }
+        AgentDescriptor & { id: string; version: number }
       >();
-      for (const bot of descriptors) {
-        const { id, version } = parseResourceUri(bot.resource);
-        const existing = grouped.get(bot.name);
+      for (const agent of descriptors) {
+        const { id, version } = parseResourceUri(agent.resource);
+        const existing = grouped.get(agent.name);
         if (!existing || version > existing.version) {
-          grouped.set(bot.name, { ...bot, id, version });
+          grouped.set(agent.name, { ...agent, id, version });
         }
       }
-      const bots = Array.from(grouped.values());
+      const agents = Array.from(grouped.values());
 
       // Check deployment status for each
-      const deployed: (BotDescriptor & { id: string; version: number })[] = [];
-      for (const bot of bots) {
+      const deployed: (AgentDescriptor & { id: string; version: number })[] = [];
+      for (const agent of agents) {
         try {
-          const status = await getDeploymentStatus("unrestricted", bot.id, bot.version);
+          const status = await getDeploymentStatus("production", agent.id, agent.version);
           if (status.status === "READY") {
-            deployed.push(bot);
+            deployed.push(agent);
           }
         } catch {
-          // skip bots whose status can't be fetched
+          // skip agents whose status can't be fetched
         }
       }
       return deployed;
@@ -207,18 +207,18 @@ export function useDeployedBots() {
   });
 }
 
-/** Start a new conversation with a bot, then GET to pick up welcome messages. */
+/** Start a new conversation with a agent, then GET to pick up welcome messages. */
 export function useStartConversation() {
   const store = useChatStore;
   return useMutation({
-    mutationFn: async ({ botId }: { botId: string }) => {
-      const conversationId = await startConversation("unrestricted", botId);
+    mutationFn: async ({ agentId }: { agentId: string }) => {
+      const conversationId = await startConversation("production", agentId);
       store.getState().setConversationId(conversationId);
 
       // GET immediately to pick up any welcome message
       const snapshot = await readConversation(
-        "unrestricted",
-        botId,
+        "production",
+        agentId,
         conversationId,
         false
       );
@@ -230,7 +230,7 @@ export function useStartConversation() {
         if (text) {
           store.getState().addMessage({
             id: `welcome-${Date.now()}-${Math.random()}`,
-            role: "bot",
+            role: "agent",
             content: text,
             timestamp: Date.now(),
           });
@@ -254,8 +254,8 @@ export function useSendMessage() {
   return useMutation({
     mutationFn: async ({ message, isSecret }: { message: string; isSecret?: boolean }) => {
       const state = store.getState();
-      const { selectedBotId, conversationId, streamingEnabled } = state;
-      if (!selectedBotId || !conversationId) {
+      const { selectedAgentId, conversationId, streamingEnabled } = state;
+      if (!selectedAgentId || !conversationId) {
         throw new Error("No active conversation");
       }
 
@@ -276,16 +276,16 @@ export function useSendMessage() {
       if (streamingEnabled) {
         // --- Streaming path ---
         state.addMessage({
-          id: `bot-${Date.now()}`,
-          role: "bot",
+          id: `agent-${Date.now()}`,
+          role: "agent",
           content: "",
           timestamp: Date.now(),
           isStreaming: true,
         });
 
         const events = sendMessageStreaming(
-          "unrestricted",
-          selectedBotId,
+          "production",
+          selectedAgentId,
           conversationId,
           { input: message }
         );
@@ -299,8 +299,8 @@ export function useSendMessage() {
         let snapshot;
         if (isSecret) {
           snapshot = await sendMessageWithContext(
-            "unrestricted",
-            selectedBotId,
+            "production",
+            selectedAgentId,
             conversationId,
             {
               input: message,
@@ -309,14 +309,14 @@ export function useSendMessage() {
           );
         } else {
           snapshot = await sendMessage(
-            "unrestricted",
-            selectedBotId,
+            "production",
+            selectedAgentId,
             conversationId,
             message
           );
         }
 
-        // Extract bot output from the last conversationOutput
+        // Extract agent output from the last conversationOutput
         const lastOutput = snapshot.conversationOutputs?.[
           (snapshot.conversationOutputs?.length ?? 1) - 1
         ];
@@ -324,8 +324,8 @@ export function useSendMessage() {
 
         if (output) {
           state.addMessage({
-            id: `bot-${Date.now()}`,
-            role: "bot",
+            id: `agent-${Date.now()}`,
+            role: "agent",
             content: output,
             timestamp: Date.now(),
           });
@@ -353,7 +353,7 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore) {
   switch (event.type) {
     case "token":
       store.getState().setThinking(false);
-      store.getState().appendToLastBotMessage(event.data);
+      store.getState().appendToLastAgentMessage(event.data);
       break;
     case "done":
       store.getState().finishStreaming();
@@ -361,7 +361,7 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore) {
     case "error":
       store
         .getState()
-        .appendToLastBotMessage(`\n\n⚠️ Error: ${event.data}`);
+        .appendToLastAgentMessage(`\n\n⚠️ Error: ${event.data}`);
       store.getState().finishStreaming();
       break;
     case "task_start":
@@ -391,8 +391,8 @@ function snapshotToMessages(snapshot: SimpleConversationMemorySnapshot): ChatMes
     }
     if (output) {
       messages.push({
-        id: `bot-${messages.length}-${Date.now()}`,
-        role: "bot",
+        id: `agent-${messages.length}-${Date.now()}`,
+        role: "agent",
         content: output,
         timestamp: Date.now(),
       });
@@ -401,12 +401,12 @@ function snapshotToMessages(snapshot: SimpleConversationMemorySnapshot): ChatMes
   return messages;
 }
 
-/** Fetch conversation history for the selected bot. */
-export function useConversationHistory(botId: string | null) {
+/** Fetch conversation history for the selected agent. */
+export function useConversationHistory(agentId: string | null) {
   return useQuery({
-    queryKey: [...CHAT_KEY, "history", botId],
-    queryFn: () => getConversationDescriptors(50, 0, "", botId ?? ""),
-    enabled: !!botId,
+    queryKey: [...CHAT_KEY, "history", agentId],
+    queryFn: () => getConversationDescriptors(50, 0, "", agentId ?? ""),
+    enabled: !!agentId,
     staleTime: 30_000,
   });
 }
@@ -416,18 +416,18 @@ export function useLoadConversation() {
   const store = useChatStore;
   return useMutation({
     mutationFn: async ({
-      botId,
+      agentId,
       conversationId,
     }: {
-      botId: string;
+      agentId: string;
       conversationId: string;
     }) => {
       store.getState().clearMessages();
       store.getState().setConversationId(conversationId);
 
       const snapshot = await readConversation(
-        "unrestricted",
-        botId,
+        "production",
+        agentId,
         conversationId,
         false
       );
@@ -449,10 +449,10 @@ export function useUndoConversation() {
   const store = useChatStore;
   return useMutation({
     mutationFn: async () => {
-      const { selectedBotId, conversationId } = store.getState();
-      if (!selectedBotId || !conversationId) throw new Error("No active conversation");
+      const { selectedAgentId, conversationId } = store.getState();
+      if (!selectedAgentId || !conversationId) throw new Error("No active conversation");
 
-      const snapshot = await undoConversationApi("unrestricted", selectedBotId, conversationId);
+      const snapshot = await undoConversationApi("production", selectedAgentId, conversationId);
       const messages = snapshotToMessages(snapshot);
       store.getState().replaceMessages(messages);
       store.getState().setUndoRedo(
@@ -469,10 +469,10 @@ export function useRedoConversation() {
   const store = useChatStore;
   return useMutation({
     mutationFn: async () => {
-      const { selectedBotId, conversationId } = store.getState();
-      if (!selectedBotId || !conversationId) throw new Error("No active conversation");
+      const { selectedAgentId, conversationId } = store.getState();
+      if (!selectedAgentId || !conversationId) throw new Error("No active conversation");
 
-      const snapshot = await redoConversationApi("unrestricted", selectedBotId, conversationId);
+      const snapshot = await redoConversationApi("production", selectedAgentId, conversationId);
       const messages = snapshotToMessages(snapshot);
       store.getState().replaceMessages(messages);
       store.getState().setUndoRedo(

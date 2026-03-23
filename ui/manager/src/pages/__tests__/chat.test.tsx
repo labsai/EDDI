@@ -14,13 +14,13 @@ describe("ChatPage", () => {
   it("renders page subtitle", () => {
     renderWithProviders(<ChatPage />);
     expect(
-      screen.getByText("Talk to your deployed bots")
+      screen.getByText("Talk to your deployed agents")
     ).toBeInTheDocument();
   });
 
-  it("renders bot selector", () => {
+  it("renders agent selector", () => {
     renderWithProviders(<ChatPage />);
-    expect(screen.getByTestId("bot-selector")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-selector")).toBeInTheDocument();
   });
 
   it("renders chat input", () => {
@@ -38,10 +38,10 @@ describe("ChatPage", () => {
     expect(screen.getByTestId("history-toggle")).toBeInTheDocument();
   });
 
-  it("shows empty state when no bot selected", () => {
+  it("shows empty state when no agent selected", () => {
     renderWithProviders(<ChatPage />);
     expect(
-      screen.getByText("Select a bot and start chatting!")
+      screen.getByText("Select a agent and start chatting!")
     ).toBeInTheDocument();
   });
 });

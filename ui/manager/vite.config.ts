@@ -13,7 +13,7 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      "/botstore": "http://localhost:7070",
+      "/agentstore": "http://localhost:7070",
       "/packagestore": "http://localhost:7070",
       "/behaviorstore": "http://localhost:7070",
       "/regulardictionarystore": "http://localhost:7070",
@@ -26,10 +26,10 @@ export default defineConfig({
       "/conversationstore": "http://localhost:7070",
       "/descriptorstore": "http://localhost:7070",
       "/administration": "http://localhost:7070",
-      "/bots": "http://localhost:7070",
+      "/agents": "http://localhost:7070",
       "/backup": "http://localhost:7070",
       "/managerresource": "http://localhost:7070",
-      "/managedbots": "http://localhost:7070",
+      "/managedagents": "http://localhost:7070",
     },
   },
 });

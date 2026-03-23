@@ -474,7 +474,7 @@ function TaskEditor({
                           onChange({ ...task, tools });
                         }}
                         readOnly={readOnly}
-                        placeholder="eddi://ai.labs.httpcalls/..."
+                        placeholder="eddi://ai.labs.apicalls/..."
                         className="h-7 flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                       />
                       {!readOnly && (

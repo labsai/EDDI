@@ -11,15 +11,15 @@ interface ChatHistoryProps {
 
 export function ChatHistory({ open, onNewConversation }: ChatHistoryProps) {
   const { t } = useTranslation();
-  const selectedBotId = useChatStore((s) => s.selectedBotId);
+  const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   const conversationId = useChatStore((s) => s.conversationId);
-  const { data: conversations, isLoading } = useConversationHistory(selectedBotId);
+  const { data: conversations, isLoading } = useConversationHistory(selectedAgentId);
   const loadConversation = useLoadConversation();
 
   const handleResume = (conv: ConversationDescriptor) => {
-    if (!selectedBotId) return;
+    if (!selectedAgentId) return;
     const convId = parseConversationUri(conv.resource);
-    loadConversation.mutate({ botId: selectedBotId, conversationId: convId });
+    loadConversation.mutate({ agentId: selectedAgentId, conversationId: convId });
   };
 
   if (!open) return null;

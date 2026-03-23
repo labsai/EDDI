@@ -1,31 +1,31 @@
-import { parseResourceUri } from "./bots";
+import { parseResourceUri } from "./agents";
 import {
   updateResource,
   type ResourceTypeConfig,
 } from "./resources";
 import {
-  getPackage,
-  updatePackage,
-  type PackageConfiguration,
+  getWorkflow,
+  updateWorkflow,
+  type WorkflowConfiguration,
 } from "./packages";
-import { getBot, updateBot, type Bot } from "./bots";
+import { getAgent, updateAgent, type Agent } from "./agents";
 
 export interface CascadeContext {
-  packageId: string;
+  workflowId: string;
   packageVersion: number;
-  botId: string;
-  botVersion: number;
+  agentId: string;
+  agentVersion: number;
 }
 
 export interface CascadeResult {
   newResourceVersion: number;
-  newPackageVersion?: number;
-  newBotVersion?: number;
+  newWorkflowVersion?: number;
+  newAgentVersion?: number;
 }
 
 /**
  * Save a resource config, then cascade version updates up through
- * the package → bot chain.
+ * the package → agent chain.
  *
  * The EDDI backend increments version on every PUT, returning the
  * new URI in the Location header. We parse that to update parent references.
@@ -49,34 +49,34 @@ export async function cascadeSaveResource(
   const oldResourceUri = buildResourceUri(rt, resourceId, resourceVersion);
   const newResourceUri = buildResourceUri(rt, resourceId, newResourceVersion);
 
-  const pkg = await getPackage(context.packageId, context.packageVersion);
+  const pkg = await getWorkflow(context.workflowId, context.packageVersion);
   const updatedPkg = replaceExtensionUri(pkg, oldResourceUri, newResourceUri);
-  const pkgResult = await updatePackage(
-    context.packageId,
+  const pkgResult = await updateWorkflow(
+    context.workflowId,
     context.packageVersion,
     updatedPkg
   );
-  const newPackageVersion = parseVersionFromLocation(pkgResult.location);
+  const newWorkflowVersion = parseVersionFromLocation(pkgResult.location);
 
-  // 3. Update the parent bot
-  const oldPkgUri = `eddi://ai.labs.package/packagestore/packages/${context.packageId}?version=${context.packageVersion}`;
-  const newPkgUri = `eddi://ai.labs.package/packagestore/packages/${context.packageId}?version=${newPackageVersion}`;
+  // 3. Update the parent agent
+  const oldPkgUri = `eddi://ai.labs.workflow/workflowstore/workflows/${context.workflowId}?version=${context.packageVersion}`;
+  const newPkgUri = `eddi://ai.labs.workflow/workflowstore/workflows/${context.workflowId}?version=${newWorkflowVersion}`;
 
-  const bot = await getBot(context.botId, context.botVersion);
-  const updatedBot: Bot = {
-    ...bot,
-    packages: (bot.packages ?? []).map((uri) =>
+  const agent = await getAgent(context.agentId, context.agentVersion);
+  const updatedAgent: Agent = {
+    ...agent,
+    packages: (agent.packages ?? []).map((uri) =>
       uri === oldPkgUri ? newPkgUri : uri
     ),
   };
-  const botResult = await updateBot(
-    context.botId,
-    context.botVersion,
-    updatedBot
+  const agentResult = await updateAgent(
+    context.agentId,
+    context.agentVersion,
+    updatedAgent
   );
-  const newBotVersion = parseVersionFromLocation(botResult.location);
+  const newAgentVersion = parseVersionFromLocation(agentResult.location);
 
-  return { newResourceVersion, newPackageVersion, newBotVersion };
+  return { newResourceVersion, newWorkflowVersion, newAgentVersion };
 }
 
 /** Parse version number from a Location URI like `eddi://…?version=2` */
@@ -97,10 +97,10 @@ function buildResourceUri(
 
 /** Replace old extension URI with new one inside a package config */
 function replaceExtensionUri(
-  pkg: PackageConfiguration,
+  pkg: WorkflowConfiguration,
   oldUri: string,
   newUri: string
-): PackageConfiguration {
+): WorkflowConfiguration {
   return {
     ...pkg,
     packageExtensions: pkg.packageExtensions.map((ext) => {

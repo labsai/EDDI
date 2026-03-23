@@ -8,8 +8,8 @@ export interface LogEntry {
   loggerName: string;
   message: string;
   environment?: string;
-  botId?: string;
-  botVersion?: number;
+  agentId?: string;
+  agentVersion?: number;
   conversationId?: string;
   userId?: string;
   instanceId?: string;
@@ -21,8 +21,8 @@ export interface DatabaseLogEntry {
   loggerName?: string;
   timestamp?: string | number;
   environment?: string;
-  botId?: string;
-  botVersion?: number;
+  agentId?: string;
+  agentVersion?: number;
   conversationId?: string;
   userId?: string;
   instanceId?: string;
@@ -33,7 +33,7 @@ export interface InstanceInfo {
 }
 
 export interface LogFilters {
-  botId?: string;
+  agentId?: string;
   conversationId?: string;
   level?: string;
   limit?: number;
@@ -41,8 +41,8 @@ export interface LogFilters {
 
 export interface HistoryFilters {
   environment?: string;
-  botId?: string;
-  botVersion?: number;
+  agentId?: string;
+  agentVersion?: number;
   conversationId?: string;
   userId?: string;
   instanceId?: string;
@@ -58,7 +58,7 @@ export async function getRecentLogs(
   filters: LogFilters = {}
 ): Promise<LogEntry[]> {
   const params = new URLSearchParams();
-  if (filters.botId) params.set("botId", filters.botId);
+  if (filters.agentId) params.set("agentId", filters.agentId);
   if (filters.conversationId)
     params.set("conversationId", filters.conversationId);
   if (filters.level) params.set("level", filters.level);
@@ -73,8 +73,8 @@ export async function getHistoryLogs(
 ): Promise<DatabaseLogEntry[]> {
   const params = new URLSearchParams();
   if (filters.environment) params.set("environment", filters.environment);
-  if (filters.botId) params.set("botId", filters.botId);
-  if (filters.botVersion) params.set("botVersion", String(filters.botVersion));
+  if (filters.agentId) params.set("agentId", filters.agentId);
+  if (filters.agentVersion) params.set("agentVersion", String(filters.agentVersion));
   if (filters.conversationId)
     params.set("conversationId", filters.conversationId);
   if (filters.userId) params.set("userId", filters.userId);
@@ -98,7 +98,7 @@ export async function getInstanceId(): Promise<InstanceInfo> {
  */
 export function createLogEventSource(filters: LogFilters = {}): EventSource {
   const params = new URLSearchParams();
-  if (filters.botId) params.set("botId", filters.botId);
+  if (filters.agentId) params.set("agentId", filters.agentId);
   if (filters.conversationId)
     params.set("conversationId", filters.conversationId);
   if (filters.level) params.set("level", filters.level);

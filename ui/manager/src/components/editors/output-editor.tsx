@@ -44,7 +44,7 @@ export interface OutputConfig {
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const OUTPUT_TYPES = [
-  "text", "image", "quickReply", "botFace", "inputField",
+  "text", "image", "quickReply", "agentFace", "inputField",
   "applicationLink", "button", "other",
 ] as const;
 

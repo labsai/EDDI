@@ -11,14 +11,14 @@ import {
   getResourceVersions,
 } from "@/lib/api/resources";
 
-const behavior = RESOURCE_TYPES.find((rt) => rt.slug === "behavior")!;
+const behavior = RESOURCE_TYPES.find((rt) => rt.slug === "rules")!;
 
 describe("getResourceType", () => {
   it("returns config for known slug", () => {
-    const rt = getResourceType("behavior");
+    const rt = getResourceType("rules");
     expect(rt).toBeDefined();
-    expect(rt!.store).toBe("behaviorstore");
-    expect(rt!.plural).toBe("behaviorsets");
+    expect(rt!.store).toBe("rulestore");
+    expect(rt!.plural).toBe("rulesets");
   });
 
   it("returns undefined for unknown slug", () => {
@@ -28,11 +28,11 @@ describe("getResourceType", () => {
   it("returns all 6 resource types", () => {
     expect(RESOURCE_TYPES).toHaveLength(6);
     const slugs = RESOURCE_TYPES.map((rt) => rt.slug);
-    expect(slugs).toContain("behavior");
-    expect(slugs).toContain("httpcalls");
+    expect(slugs).toContain("rules");
+    expect(slugs).toContain("apicalls");
     expect(slugs).toContain("output");
-    expect(slugs).toContain("dictionaries");
-    expect(slugs).toContain("langchain");
+    expect(slugs).toContain("dictionary");
+    expect(slugs).toContain("llm");
     expect(slugs).toContain("propertysetter");
   });
 });

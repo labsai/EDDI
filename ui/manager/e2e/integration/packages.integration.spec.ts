@@ -6,16 +6,16 @@ import {
   cleanupResource,
 } from "./integration-helpers";
 
-test.describe("Packages CRUD — Real Backend", () => {
+test.describe("Workflows CRUD — Real Backend", () => {
   test.describe.configure({ timeout: 120_000, mode: "serial" });
-  const createdPackages: { id: string; version: number }[] = [];
+  const createdWorkflows: { id: string; version: number }[] = [];
 
   test.beforeAll(async ({ request }) => {
     await waitForBackend(request);
   });
 
   test.afterAll(async ({ request }) => {
-    for (const pkg of createdPackages) {
+    for (const pkg of createdWorkflows) {
       await cleanupResource(
         request,
         "packagestore/packages",
@@ -46,7 +46,7 @@ test.describe("Packages CRUD — Real Backend", () => {
     expect(location).toBeTruthy();
 
     const { id, version } = extractIdFromLocation(location!);
-    createdPackages.push({ id, version });
+    createdWorkflows.push({ id, version });
 
     // READ
     const getRes = await request.get(
@@ -68,7 +68,7 @@ test.describe("Packages CRUD — Real Backend", () => {
 
     const updated = extractIdFromLocation(updateLocation!);
     expect(updated.version).toBe(version + 1);
-    createdPackages.push({ id: updated.id, version: updated.version });
+    createdWorkflows.push({ id: updated.id, version: updated.version });
 
     // READ updated
     const getUpdatedRes = await request.get(

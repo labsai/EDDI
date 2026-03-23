@@ -37,10 +37,10 @@ export const EXTENSION_TYPE_INFO: Record<
   { label: string; icon: string; order: number }
 > = {
   "ai.labs.parser": { label: "Parser", icon: "FileText", order: 1 },
-  "ai.labs.behavior": { label: "Behavior Rules", icon: "GitBranch", order: 2 },
+  "ai.labs.rules": { label: "Rules", icon: "GitBranch", order: 2 },
   "ai.labs.property": { label: "Property Setter", icon: "Settings", order: 3 },
-  "ai.labs.httpcalls": { label: "HTTP Calls", icon: "Globe", order: 4 },
-  "ai.labs.langchain": { label: "LangChain", icon: "Brain", order: 5 },
+  "ai.labs.apicalls": { label: "API Calls", icon: "Globe", order: 4 },
+  "ai.labs.llm": { label: "LLM", icon: "Brain", order: 5 },
   "ai.labs.output": { label: "Output", icon: "MessageSquareText", order: 6 },
   "ai.labs.output.template": { label: "Output Template", icon: "FileCode", order: 7 },
 };

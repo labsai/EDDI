@@ -17,7 +17,7 @@ import {
   Loader2,
   Shield,
 } from "lucide-react";
-import { useAuditTrail, useAuditTrailByBot } from "@/hooks/use-audit";
+import { useAuditTrail, useAuditTrailByAgent } from "@/hooks/use-audit";
 import type { AuditEntry } from "@/lib/api/audit";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ const DEFAULT_STYLE = { bg: "bg-gray-500/15", text: "text-gray-400", icon: Hash 
 
 const PAGE_SIZE = 100;
 
-type SearchMode = "conversation" | "bot";
+type SearchMode = "conversation" | "agent";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -199,11 +199,11 @@ export function AuditPage() {
   const { t } = useTranslation();
   const [mode, setMode] = useState<SearchMode>("conversation");
   const [conversationId, setConversationId] = useState("");
-  const [botId, setBotId] = useState("");
-  const [botVersion, setBotVersion] = useState("");
+  const [agentId, setAgentId] = useState("");
+  const [agentVersion, setAgentVersion] = useState("");
   const [searchValue, setSearchValue] = useState("");
-  const [searchBotId, setSearchBotId] = useState("");
-  const [searchBotVersion, setSearchBotVersion] = useState<number | undefined>();
+  const [searchAgentId, setSearchAgentId] = useState("");
+  const [searchAgentVersion, setSearchAgentVersion] = useState<number | undefined>();
   const [skip, setSkip] = useState(0);
 
   // Queries
@@ -212,17 +212,17 @@ export function AuditPage() {
     skip,
     PAGE_SIZE,
   );
-  const botQuery = useAuditTrailByBot(
-    mode === "bot" ? searchBotId : "",
-    searchBotVersion,
+  const agentQuery = useAuditTrailByAgent(
+    mode === "agent" ? searchAgentId : "",
+    searchAgentVersion,
     skip,
     PAGE_SIZE,
   );
 
-  const entries = mode === "conversation" ? convQuery.data : botQuery.data;
-  const isLoading = mode === "conversation" ? convQuery.isLoading : botQuery.isLoading;
-  const isFetching = mode === "conversation" ? convQuery.isFetching : botQuery.isFetching;
-  const hasSearched = mode === "conversation" ? !!searchValue : !!searchBotId;
+  const entries = mode === "conversation" ? convQuery.data : agentQuery.data;
+  const isLoading = mode === "conversation" ? convQuery.isLoading : agentQuery.isLoading;
+  const isFetching = mode === "conversation" ? convQuery.isFetching : agentQuery.isFetching;
+  const hasSearched = mode === "conversation" ? !!searchValue : !!searchAgentId;
 
   // Group entries by step
   const stepGroups = useMemo(() => {
@@ -245,11 +245,11 @@ export function AuditPage() {
     if (mode === "conversation") {
       setSearchValue(conversationId.trim());
     } else {
-      setSearchBotId(botId.trim());
-      const v = parseInt(botVersion, 10);
-      setSearchBotVersion(isNaN(v) ? undefined : v);
+      setSearchAgentId(agentId.trim());
+      const v = parseInt(agentVersion, 10);
+      setSearchAgentVersion(isNaN(v) ? undefined : v);
     }
-  }, [mode, conversationId, botId, botVersion]);
+  }, [mode, conversationId, agentId, agentVersion]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -293,15 +293,15 @@ export function AuditPage() {
             {t("audit.byConversation", "By Conversation")}
           </button>
           <button
-            onClick={() => setMode("bot")}
+            onClick={() => setMode("agent")}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-              mode === "bot"
+              mode === "agent"
                 ? "bg-primary text-primary-foreground shadow-sm"
                 : "bg-foreground/5 text-foreground/60 hover:text-foreground/80"
             }`}
-            data-testid="mode-bot"
+            data-testid="mode-agent"
           >
-            {t("audit.byBot", "By Bot")}
+            {t("audit.byAgent", "By Agent")}
           </button>
         </div>
 
@@ -321,17 +321,17 @@ export function AuditPage() {
             <>
               <input
                 type="text"
-                value={botId}
-                onChange={(e) => setBotId(e.target.value)}
+                value={agentId}
+                onChange={(e) => setAgentId(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={t("audit.botIdPlaceholder", "Enter bot ID...")}
+                placeholder={t("audit.agentIdPlaceholder", "Enter agent ID...")}
                 className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                data-testid="bot-input"
+                data-testid="agent-input"
               />
               <input
                 type="text"
-                value={botVersion}
-                onChange={(e) => setBotVersion(e.target.value)}
+                value={agentVersion}
+                onChange={(e) => setAgentVersion(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={t("audit.versionPlaceholder", "Version (optional)")}
                 className="w-36 rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -393,7 +393,7 @@ export function AuditPage() {
             {t("audit.empty", "Search for audit entries")}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {t("audit.emptyHint", "Enter a conversation or bot ID above to browse the audit trail.")}
+            {t("audit.emptyHint", "Enter a conversation or agent ID above to browse the audit trail.")}
           </p>
         </div>
       )}

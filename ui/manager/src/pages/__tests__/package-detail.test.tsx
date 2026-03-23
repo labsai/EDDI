@@ -4,7 +4,7 @@ import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
-import { PackageDetailPage } from "@/pages/package-detail";
+import { WorkflowDetailPage } from "@/pages/package-detail";
 
 function renderPage(id = "pkg1") {
   const queryClient = new QueryClient({
@@ -21,7 +21,7 @@ function renderPage(id = "pkg1") {
           <Routes>
             <Route
               path="/manage/packageview/:id"
-              element={<PackageDetailPage />}
+              element={<WorkflowDetailPage />}
             />
           </Routes>
         </ThemeProvider>
@@ -30,12 +30,12 @@ function renderPage(id = "pkg1") {
   );
 }
 
-describe("PackageDetailPage", () => {
+describe("WorkflowDetailPage", () => {
   it("renders page heading", async () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("Package Editor")).toBeInTheDocument();
+      expect(screen.getByText("Workflow Editor")).toBeInTheDocument();
     });
   });
 

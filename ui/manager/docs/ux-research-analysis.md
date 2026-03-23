@@ -1,7 +1,7 @@
 # UX Research Analysis — Impact on Phases 3.14–3.19
 
 > **Date:** 2026-03-06  
-> **Source:** Deep research on AI middleware UX/UI across Voiceflow, n8n, Langflow, Dify, Botpress, LangSmith, Make.com  
+> **Source:** Deep research on AI middleware UX/UI across Voiceflow, n8n, Langflow, Dify, Agentpress, LangSmith, Make.com  
 > **Purpose:** Validate and refine the editing layer plan before implementation
 
 ---
@@ -38,7 +38,7 @@ config-editor-layout.tsx
 ├── Tab bar: [ Form | JSON ]
 ├── Form view → extension-specific editor component (3.17–3.18)
 └── JSON view → Monaco editor with schema validation (3.14)
-    Both read/write the SAME reactive state object
+    Agenth read/write the SAME reactive state object
 ```
 
 ### 2. Side-Sheet Inspector Instead of Navigation (Phase 3.16)
@@ -64,11 +64,11 @@ config-editor-layout.tsx
 
 ## 🆕 New Items for Existing Phases
 
-### Bot Environment Status Badges (Phase 3.15)
+### Agent Environment Status Badges (Phase 3.15)
 
-**Research says:** Don't show duplicate bot cards per environment. Show one card per bot with environment columns/badges.
+**Research says:** Don't show duplicate agent cards per environment. Show one card per agent with environment columns/badges.
 
-**Recommended change:** In Phase 3.15, enhance bot cards to show Dev/Test/Prod deployment status as badges within a single card rather than duplicating cards.
+**Recommended change:** In Phase 3.15, enhance agent cards to show Dev/Test/Prod deployment status as badges within a single card rather than duplicating cards.
 
 ---
 
@@ -90,8 +90,8 @@ config-editor-layout.tsx
 | Phase    | Refined Description                                                                                |
 | -------- | -------------------------------------------------------------------------------------------------- |
 | **3.14** | JSON Editor + Version Picker + **`config-editor-layout.tsx` with Form↔JSON toggle architecture**   |
-| **3.15** | Bot Editor + **Environment Status Badges** (not duplicate cards)                                   |
-| **3.16** | Package Editor + **Side-sheet extension inspector** (instead of page navigation)                   |
+| **3.15** | Agent Editor + **Environment Status Badges** (not duplicate cards)                                 |
+| **3.16** | Workflow Editor + **Side-sheet extension inspector** (instead of page navigation)                  |
 | **3.17** | Behavior + HTTP Calls Editors as **sheet-embeddable components** + optional `cmdk` variable picker |
 | **3.18** | LangChain + Output + PropSetter + Dict as **sheet-embeddable components**                          |
 | **3.19** | Polish, i18n, Tests + `cmdk` autocomplete polish                                                   |

@@ -9,7 +9,7 @@ export interface InputData {
 
 export interface ChatMessage {
   id: string;
-  role: "user" | "bot";
+  role: "user" | "agent";
   content: string;
   timestamp: number;
   isStreaming?: boolean;
@@ -35,7 +35,7 @@ function buildUrl(path: string): string {
   return `${BASE_URL}${path}`;
 }
 
-/** Extract conversation ID from Location header (e.g. "/bots/unrestricted/bot1/CONV_ID") */
+/** Extract conversation ID from Location header (e.g. "/agents/production/agent1/CONV_ID") */
 export function parseConversationIdFromLocation(location: string): string {
   const parts = location.split("/");
   return parts[parts.length - 1] || location;
@@ -46,9 +46,9 @@ export function parseConversationIdFromLocation(location: string): string {
 /** Start a new conversation. Returns the location header containing the conversation ID. */
 export async function startConversation(
   environment: string,
-  botId: string
+  agentId: string
 ): Promise<string> {
-  const response = await fetch(buildUrl(`/bots/${environment}/${botId}`), {
+  const response = await fetch(buildUrl(`/agents/${environment}/${agentId}`), {
     method: "POST",
   });
   if (!response.ok) {
@@ -61,7 +61,7 @@ export async function startConversation(
 /** Read an existing conversation (GET). Used after start (welcome message) and to resume. */
 export async function readConversation(
   environment: string,
-  botId: string,
+  agentId: string,
   conversationId: string,
   returnCurrentStepOnly = false
 ): Promise<SimpleConversationMemorySnapshot> {
@@ -71,7 +71,7 @@ export async function readConversation(
   });
   const response = await fetch(
     buildUrl(
-      `/bots/${environment}/${botId}/${conversationId}?${params.toString()}`
+      `/agents/${environment}/${agentId}/${conversationId}?${params.toString()}`
     )
   );
   if (!response.ok) {
@@ -83,7 +83,7 @@ export async function readConversation(
 /** Send a plain-text message (non-streaming). */
 export async function sendMessage(
   environment: string,
-  botId: string,
+  agentId: string,
   conversationId: string,
   message: string
 ): Promise<SimpleConversationMemorySnapshot> {
@@ -93,7 +93,7 @@ export async function sendMessage(
   });
   const response = await fetch(
     buildUrl(
-      `/bots/${environment}/${botId}/${conversationId}?${params.toString()}`
+      `/agents/${environment}/${agentId}/${conversationId}?${params.toString()}`
     ),
     {
       method: "POST",
@@ -110,7 +110,7 @@ export async function sendMessage(
 /** Send a message with context (non-streaming). */
 export async function sendMessageWithContext(
   environment: string,
-  botId: string,
+  agentId: string,
   conversationId: string,
   inputData: InputData
 ): Promise<SimpleConversationMemorySnapshot> {
@@ -120,7 +120,7 @@ export async function sendMessageWithContext(
   });
   const response = await fetch(
     buildUrl(
-      `/bots/${environment}/${botId}/${conversationId}?${params.toString()}`
+      `/agents/${environment}/${agentId}/${conversationId}?${params.toString()}`
     ),
     {
       method: "POST",
@@ -140,13 +140,13 @@ export async function sendMessageWithContext(
  */
 export async function* sendMessageStreaming(
   environment: string,
-  botId: string,
+  agentId: string,
   conversationId: string,
   inputData: InputData
 ): AsyncGenerator<SSEEvent> {
   const response = await fetch(
     buildUrl(
-      `/bots/${environment}/${botId}/${conversationId}/stream`
+      `/agents/${environment}/${agentId}/${conversationId}/stream`
     ),
     {
       method: "POST",
@@ -204,7 +204,7 @@ export async function endConversation(
   conversationId: string
 ): Promise<void> {
   const response = await fetch(
-    buildUrl(`/bots/${conversationId}/endConversation`),
+    buildUrl(`/agents/${conversationId}/endConversation`),
     { method: "POST" }
   );
   if (!response.ok) {
@@ -215,11 +215,11 @@ export async function endConversation(
 /** Undo the last conversation step. */
 export async function undoConversation(
   environment: string,
-  botId: string,
+  agentId: string,
   conversationId: string
 ): Promise<SimpleConversationMemorySnapshot> {
   const response = await fetch(
-    buildUrl(`/bots/${environment}/${botId}/undo/${conversationId}`),
+    buildUrl(`/agents/${environment}/${agentId}/undo/${conversationId}`),
     { method: "POST" }
   );
   if (!response.ok) {
@@ -231,11 +231,11 @@ export async function undoConversation(
 /** Redo a previously undone step. */
 export async function redoConversation(
   environment: string,
-  botId: string,
+  agentId: string,
   conversationId: string
 ): Promise<SimpleConversationMemorySnapshot> {
   const response = await fetch(
-    buildUrl(`/bots/${environment}/${botId}/redo/${conversationId}`),
+    buildUrl(`/agents/${environment}/${agentId}/redo/${conversationId}`),
     { method: "POST" }
   );
   if (!response.ok) {

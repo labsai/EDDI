@@ -5,7 +5,7 @@ import { api } from "../api-client";
 export interface TenantQuota {
   tenantId: string;
   maxConversationsPerDay: number;
-  maxBotsPerTenant: number;
+  maxAgentsPerTenant: number;
   maxApiCallsPerMinute: number;
   maxMonthlyCostUsd: number;
   enabled: boolean;

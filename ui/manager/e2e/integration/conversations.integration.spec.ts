@@ -2,35 +2,35 @@ import { test, expect } from "@playwright/test";
 import {
   API_BASE,
   waitForBackend,
-  createAndDeployBot,
+  createAndDeployAgent,
   cleanupResource,
 } from "./integration-helpers";
 
 /**
  * Conversation lifecycle tests.
- * Fully self-contained — creates and deploys its own bot,
- * no dependency on Bot Father.
+ * Fully self-contained — creates and deploys its own agent,
+ * no dependency on Agent Father.
  *
- * POST /bots/{env}/{botId}/{convId} returns 200 with full conversation JSON
+ * POST /agents/{env}/{agentId}/{convId} returns 200 with full conversation JSON
  * snapshot in v6. (The pre-v6 AsyncResponse 500 timeout issue is resolved.)
  */
 test.describe("Conversations — Real Backend", () => {
   test.describe.configure({ timeout: 120_000, mode: "serial" });
 
-  let botId: string;
-  let botVersion: number;
-  let packageId: string;
+  let agentId: string;
+  let agentVersion: number;
+  let workflowId: string;
   let packageVersion: number;
   const conversationsToCleanup: string[] = [];
 
   test.beforeAll(async ({ request }) => {
     await waitForBackend(request);
 
-    // Create and deploy our own bot — no Bot Father dependency
-    const deployed = await createAndDeployBot(request);
-    botId = deployed.botId;
-    botVersion = deployed.botVersion;
-    packageId = deployed.packageId;
+    // Create and deploy our own agent — no Agent Father dependency
+    const deployed = await createAndDeployAgent(request);
+    agentId = deployed.agentId;
+    agentVersion = deployed.agentVersion;
+    workflowId = deployed.workflowId;
     packageVersion = deployed.packageVersion;
   });
 
@@ -38,7 +38,7 @@ test.describe("Conversations — Real Backend", () => {
     // Undeploy
     try {
       await request.post(
-        `${API_BASE}/administration/unrestricted/undeploy/${botId}?version=${botVersion}`
+        `${API_BASE}/administration/unrestricted/undeploy/${agentId}?version=${agentVersion}`
       );
     } catch {
       /* ignore */
@@ -53,12 +53,12 @@ test.describe("Conversations — Real Backend", () => {
         /* ignore */
       }
     }
-    // Delete bot and package
-    await cleanupResource(request, "botstore/bots", botId, botVersion);
+    // Delete agent and package
+    await cleanupResource(request, "agentstore/agents", agentId, agentVersion);
     await cleanupResource(
       request,
       "packagestore/packages",
-      packageId,
+      workflowId,
       packageVersion
     );
   });
@@ -78,7 +78,7 @@ test.describe("Conversations — Real Backend", () => {
     request,
   }) => {
     const res = await request.post(
-      `${API_BASE}/bots/unrestricted/${botId}`
+      `${API_BASE}/agents/unrestricted/${agentId}`
     );
     expect(res.status()).toBe(201);
     const location = res.headers()["location"];
@@ -95,7 +95,7 @@ test.describe("Conversations — Real Backend", () => {
   }) => {
     // Create conversation
     const createRes = await request.post(
-      `${API_BASE}/bots/unrestricted/${botId}`
+      `${API_BASE}/agents/unrestricted/${agentId}`
     );
     expect(createRes.status()).toBe(201);
     const location = createRes.headers()["location"]!;
@@ -108,7 +108,7 @@ test.describe("Conversations — Real Backend", () => {
 
     // Send message — returns 200 with full conversation snapshot
     const sayRes = await request.post(
-      `${API_BASE}/bots/unrestricted/${botId}/${conversationId}`,
+      `${API_BASE}/agents/unrestricted/${agentId}/${conversationId}`,
       {
         headers: { "Content-Type": "text/plain" },
         data: "Hello from integration test!",
@@ -118,7 +118,7 @@ test.describe("Conversations — Real Backend", () => {
     expect(sayRes.status()).toBe(200);
     const snapshot = await sayRes.json();
     expect(snapshot.conversationId).toBe(conversationId);
-    expect(snapshot.botId).toBe(botId);
+    expect(snapshot.agentId).toBe(agentId);
     expect(snapshot.conversationState).toBe("READY");
     expect(snapshot.conversationSteps.length).toBeGreaterThan(0);
   });
@@ -126,7 +126,7 @@ test.describe("Conversations — Real Backend", () => {
   test("Read conversation state via simple endpoint", async ({ request }) => {
     // Create conversation
     const createRes = await request.post(
-      `${API_BASE}/bots/unrestricted/${botId}`
+      `${API_BASE}/agents/unrestricted/${agentId}`
     );
     const location = createRes.headers()["location"]!;
     const convId = location.split("/").filter(Boolean).pop()!;
@@ -141,19 +141,19 @@ test.describe("Conversations — Real Backend", () => {
     expect(res.ok()).toBeTruthy();
     const snapshot = await res.json();
     expect(snapshot.conversationState).toBe("READY");
-    expect(snapshot.botId).toBe(botId);
+    expect(snapshot.agentId).toBe(agentId);
   });
 
-  test("List conversations filtered by botId", async ({ request }) => {
+  test("List conversations filtered by agentId", async ({ request }) => {
     const res = await request.get(
-      `${API_BASE}/conversationstore/conversations?botId=${botId}&limit=10`
+      `${API_BASE}/conversationstore/conversations?agentId=${agentId}&limit=10`
     );
     expect(res.ok()).toBeTruthy();
     const conversations = await res.json();
     expect(Array.isArray(conversations)).toBeTruthy();
-    // All returned conversations should belong to this bot
+    // All returned conversations should belong to this agent
     for (const conv of conversations) {
-      expect(conv.botId).toBe(botId);
+      expect(conv.agentId).toBe(agentId);
     }
   });
 });

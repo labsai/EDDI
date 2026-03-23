@@ -31,7 +31,7 @@ import {
   Puzzle,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import type { PackageExtension } from "@/lib/api/packages";
+import type { WorkflowExtension } from "@/lib/api/packages";
 import { EXTENSION_TYPE_INFO } from "@/lib/api/extensions";
 
 /* ─── Icon map ─── */
@@ -60,15 +60,15 @@ function parseExtensionUri(uri: string): { slug: string; id: string } | null {
   try {
     const url = new URL(uri.replace("eddi://", "http://"));
     const segments = url.pathname.split("/").filter(Boolean);
-    // e.g. /behaviorstore/behaviorsets/abc123 → slug=behavior, id=abc123
+    // e.g. /rulestore/rulesets/abc123 → slug=rules, id=abc123
     if (segments.length >= 3) {
       // Map store name to resource slug
       const storeMap: Record<string, string> = {
-        behaviorstore: "behavior",
-        httpcallsstore: "httpcalls",
-        langchainstore: "langchain",
+        rulestore: "rules",
+        apicallstore: "apicalls",
+        llmstore: "llm",
         outputstore: "output",
-        regulardictionarystore: "dictionaries",
+        dictionarystore: "dictionary",
         propertysetterstore: "propertysetter",
         parserstore: "parser",
       };
@@ -91,7 +91,7 @@ export interface PipelineItem {
   id: string;
   /** Original index in packageExtensions */
   index: number;
-  extension: PackageExtension;
+  extension: WorkflowExtension;
 }
 
 export interface PipelineBuilderProps {

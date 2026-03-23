@@ -75,9 +75,9 @@ describe("getStoredViewMode / setStoredViewMode", () => {
   });
 
   it("stores different values for different pages", () => {
-    setStoredViewMode("bots", "list");
+    setStoredViewMode("agents", "list");
     setStoredViewMode("packages", "card");
-    expect(getStoredViewMode("bots")).toBe("list");
+    expect(getStoredViewMode("agents")).toBe("list");
     expect(getStoredViewMode("packages")).toBe("card");
   });
 

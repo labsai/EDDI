@@ -7,7 +7,7 @@ import {
   Check,
   LayoutTemplate,
   FileText,
-  Package,
+  Workflow,
   Rocket,
   Bot,
   MessageSquare,
@@ -15,24 +15,24 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useCreateBot, useDeployBot } from "@/hooks/use-bots";
+import { useCreateAgent, useDeployAgent } from "@/hooks/use-agents";
 import { useNavigate, Link } from "react-router-dom";
 
 // Wizard step definitions
 const STEPS = [
   { id: "template", icon: LayoutTemplate },
   { id: "info", icon: FileText },
-  { id: "packages", icon: Package },
+  { id: "packages", icon: Workflow },
   { id: "review", icon: Rocket },
 ] as const;
 
-interface BotTemplate {
+interface AgentTemplate {
   id: string;
   icon: typeof Bot;
   gradient: string;
 }
 
-const TEMPLATES: BotTemplate[] = [
+const TEMPLATES: AgentTemplate[] = [
   {
     id: "blank",
     icon: Bot,
@@ -54,11 +54,11 @@ interface WizardState {
   template: string;
   name: string;
   description: string;
-  createPackage: boolean;
+  createWorkflow: boolean;
   autoDeploy: boolean;
 }
 
-export function BotWizardPage() {
+export function AgentWizardPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(0);
@@ -66,13 +66,13 @@ export function BotWizardPage() {
     template: "",
     name: "",
     description: "",
-    createPackage: true,
+    createWorkflow: true,
     autoDeploy: false,
   });
   const [isCreating, setIsCreating] = useState(false);
 
-  const createBot = useCreateBot();
-  const deployBot = useDeployBot();
+  const createAgent = useCreateAgent();
+  const deployAgent = useDeployAgent();
 
   const step = STEPS[currentStep]!;
 
@@ -106,7 +106,7 @@ export function BotWizardPage() {
   async function handleCreate(deploy: boolean) {
     setIsCreating(true);
     try {
-      const result = await createBot.mutateAsync({
+      const result = await createAgent.mutateAsync({
         packages: [],
         channels: [],
       });
@@ -114,23 +114,23 @@ export function BotWizardPage() {
       if (deploy && result.location) {
         const parts = result.location.split("/");
         const idPart = parts[parts.length - 1];
-        const botId = idPart?.split("?")[0];
-        if (botId) {
-          deployBot.mutate({ botId, version: 1 });
+        const agentId = idPart?.split("?")[0];
+        if (agentId) {
+          deployAgent.mutate({ agentId, version: 1 });
         }
       }
 
-      // Navigate to bot detail
+      // Navigate to agent detail
       if (result.location) {
         const parts = result.location.split("/");
         const idPart = parts[parts.length - 1];
-        const botId = idPart?.split("?")[0];
-        if (botId) {
-          navigate(`/manage/botview/${botId}`);
+        const agentId = idPart?.split("?")[0];
+        if (agentId) {
+          navigate(`/manage/agentview/${agentId}`);
           return;
         }
       }
-      navigate("/manage/bots");
+      navigate("/manage/agents");
     } catch {
       setIsCreating(false);
     }
@@ -141,20 +141,20 @@ export function BotWizardPage() {
       {/* Header */}
       <div className="space-y-2">
         <Link
-          to="/manage/bots"
+          to="/manage/agents"
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
-          {t("wizard.backToBots", "Back to Bots")}
+          {t("wizard.backToAgents", "Back to Agents")}
         </Link>
         <h1 className="flex items-center gap-3 text-3xl font-bold text-foreground">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-primary to-primary/60 text-primary-foreground shadow-lg">
             <Wand2 className="h-5 w-5" />
           </div>
-          {t("wizard.title", "Bot Wizard")}
+          {t("wizard.title", "Agent Wizard")}
         </h1>
         <p className="text-muted-foreground">
-          {t("wizard.subtitle", "Create a new bot step by step")}
+          {t("wizard.subtitle", "Create a new agent step by step")}
         </p>
       </div>
 
@@ -218,9 +218,9 @@ export function BotWizardPage() {
           />
         )}
         {step.id === "packages" && (
-          <PackagesStep
-            createPackage={state.createPackage}
-            onToggle={(v) => setState({ ...state, createPackage: v })}
+          <WorkflowsStep
+            createWorkflow={state.createWorkflow}
+            onToggle={(v) => setState({ ...state, createWorkflow: v })}
           />
         )}
         {step.id === "review" && (
@@ -302,15 +302,15 @@ function TemplateStep({
   const { t } = useTranslation();
 
   const templateNames: Record<string, string> = {
-    blank: t("wizard.templateBlank", "Blank Bot"),
-    qa: t("wizard.templateQA", "Q&A Bot"),
-    weather: t("wizard.templateWeather", "Weather Bot"),
+    blank: t("wizard.templateBlank", "Blank Agent"),
+    qa: t("wizard.templateQA", "Q&A Agent"),
+    weather: t("wizard.templateWeather", "Weather Agent"),
   };
 
   const templateDescriptions: Record<string, string> = {
-    blank: t("wizard.templateBlankDesc", "Start from scratch with an empty bot configuration"),
-    qa: t("wizard.templateQADesc", "Pre-configured bot for answering frequently asked questions"),
-    weather: t("wizard.templateWeatherDesc", "Example bot using HTTP calls to fetch weather data"),
+    blank: t("wizard.templateBlankDesc", "Start from scratch with an empty agent configuration"),
+    qa: t("wizard.templateQADesc", "Pre-configured agent for answering frequently asked questions"),
+    weather: t("wizard.templateWeatherDesc", "Example agent using HTTP calls to fetch weather data"),
   };
 
   return (
@@ -319,7 +319,7 @@ function TemplateStep({
         {t("wizard.step1Title", "Choose a Template")}
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        {t("wizard.step1Desc", "Select a starting point for your bot")}
+        {t("wizard.step1Desc", "Select a starting point for your agent")}
       </p>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3" data-testid="template-grid">
@@ -384,10 +384,10 @@ function InfoStep({
   return (
     <div>
       <h2 className="text-xl font-semibold text-foreground">
-        {t("wizard.step2Title", "Bot Information")}
+        {t("wizard.step2Title", "Agent Information")}
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        {t("wizard.step2Desc", "Give your bot a name and description")}
+        {t("wizard.step2Desc", "Give your agent a name and description")}
       </p>
 
       <div className="mt-6 space-y-5">
@@ -396,7 +396,7 @@ function InfoStep({
             htmlFor="wizard-name"
             className="mb-1.5 block text-sm font-medium text-foreground"
           >
-            {t("bots.name", "Name")} *
+            {t("agents.name", "Name")} *
           </label>
           <input
             ref={nameRef}
@@ -404,9 +404,9 @@ function InfoStep({
             type="text"
             value={name}
             onChange={(e) => onNameChange(e.target.value)}
-            placeholder={t("bots.namePlaceholder", "My Bot")}
+            placeholder={t("agents.namePlaceholder", "My Agent")}
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
-            data-testid="wizard-bot-name"
+            data-testid="wizard-agent-name"
             autoFocus
           />
         </div>
@@ -415,19 +415,19 @@ function InfoStep({
             htmlFor="wizard-desc"
             className="mb-1.5 block text-sm font-medium text-foreground"
           >
-            {t("bots.description", "Description")}
+            {t("agents.description", "Description")}
           </label>
           <textarea
             id="wizard-desc"
             value={description}
             onChange={(e) => onDescriptionChange(e.target.value)}
             placeholder={t(
-              "bots.descriptionPlaceholder",
-              "Describe what this bot does..."
+              "agents.descriptionPlaceholder",
+              "Describe what this agent does..."
             )}
             rows={3}
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none transition-shadow"
-            data-testid="wizard-bot-desc"
+            data-testid="wizard-agent-desc"
           />
         </div>
       </div>
@@ -435,11 +435,11 @@ function InfoStep({
   );
 }
 
-function PackagesStep({
-  createPackage,
+function WorkflowsStep({
+  createWorkflow,
   onToggle,
 }: {
-  createPackage: boolean;
+  createWorkflow: boolean;
   onToggle: (v: boolean) => void;
 }) {
   const { t } = useTranslation();
@@ -447,12 +447,12 @@ function PackagesStep({
   return (
     <div>
       <h2 className="text-xl font-semibold text-foreground">
-        {t("wizard.step3Title", "Packages")}
+        {t("wizard.step3Title", "Workflows")}
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
         {t(
           "wizard.step3Desc",
-          "Configure the initial packages for your bot"
+          "Configure the initial packages for your agent"
         )}
       </p>
 
@@ -460,19 +460,19 @@ function PackagesStep({
         <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-4 transition-colors hover:bg-secondary/50">
           <input
             type="checkbox"
-            checked={createPackage}
+            checked={createWorkflow}
             onChange={(e) => onToggle(e.target.checked)}
             className="mt-0.5 h-4 w-4 rounded border-input text-primary accent-primary"
             data-testid="wizard-create-package"
           />
           <div>
             <p className="text-sm font-medium text-foreground">
-              {t("wizard.createDefaultPackage", "Create a default package")}
+              {t("wizard.createDefaultWorkflow", "Create a default package")}
             </p>
             <p className="mt-0.5 text-xs text-muted-foreground">
               {t(
-                "wizard.createDefaultPackageDesc",
-                "An empty package will be created and linked to the bot. You can add extensions later."
+                "wizard.createDefaultWorkflowDesc",
+                "An empty package will be created and linked to the agent. You can add extensions later."
               )}
             </p>
           </div>
@@ -486,9 +486,9 @@ function ReviewStep({ state }: { state: WizardState }) {
   const { t } = useTranslation();
 
   const templateLabels: Record<string, string> = {
-    blank: t("wizard.templateBlank", "Blank Bot"),
-    qa: t("wizard.templateQA", "Q&A Bot"),
-    weather: t("wizard.templateWeather", "Weather Bot"),
+    blank: t("wizard.templateBlank", "Blank Agent"),
+    qa: t("wizard.templateQA", "Q&A Agent"),
+    weather: t("wizard.templateWeather", "Weather Agent"),
   };
 
   return (
@@ -497,7 +497,7 @@ function ReviewStep({ state }: { state: WizardState }) {
         {t("wizard.step4Title", "Review & Create")}
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        {t("wizard.step4Desc", "Review your bot configuration before creating")}
+        {t("wizard.step4Desc", "Review your agent configuration before creating")}
       </p>
 
       <div className="mt-6 space-y-4">
@@ -512,7 +512,7 @@ function ReviewStep({ state }: { state: WizardState }) {
           </div>
           <div className="flex items-center justify-between px-4 py-3">
             <span className="text-sm font-medium text-muted-foreground">
-              {t("bots.name", "Name")}
+              {t("agents.name", "Name")}
             </span>
             <span className="text-sm font-medium text-foreground">
               {state.name || "—"}
@@ -520,7 +520,7 @@ function ReviewStep({ state }: { state: WizardState }) {
           </div>
           <div className="flex items-center justify-between px-4 py-3 bg-secondary/30">
             <span className="text-sm font-medium text-muted-foreground">
-              {t("bots.description", "Description")}
+              {t("agents.description", "Description")}
             </span>
             <span className="text-sm text-foreground max-w-xs truncate">
               {state.description || "—"}
@@ -528,10 +528,10 @@ function ReviewStep({ state }: { state: WizardState }) {
           </div>
           <div className="flex items-center justify-between px-4 py-3">
             <span className="text-sm font-medium text-muted-foreground">
-              {t("wizard.defaultPackageLabel", "Default Package")}
+              {t("wizard.defaultWorkflowLabel", "Default Workflow")}
             </span>
             <span className="text-sm font-medium text-foreground">
-              {state.createPackage ? "✓" : "—"}
+              {state.createWorkflow ? "✓" : "—"}
             </span>
           </div>
         </div>

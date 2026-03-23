@@ -9,11 +9,11 @@ import {
   ArrowRight,
   ArrowLeft,
 } from "lucide-react";
-import { useImportBot, usePreviewImport, useImportBotMerge } from "@/hooks/use-backup";
+import { useImportAgent, usePreviewImport, useImportAgentMerge } from "@/hooks/use-backup";
 import type { ImportPreview } from "@/lib/api/backup";
 import { Button } from "@/components/ui/button";
 
-interface ImportBotDialogProps {
+interface ImportAgentDialogProps {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
@@ -21,7 +21,7 @@ interface ImportBotDialogProps {
 
 type Step = "upload" | "strategy" | "preview" | "importing";
 
-export function ImportBotDialog({ open, onClose, onSuccess }: ImportBotDialogProps) {
+export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialogProps) {
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -32,9 +32,9 @@ export function ImportBotDialog({ open, onClose, onSuccess }: ImportBotDialogPro
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
-  const importMutation = useImportBot();
+  const importMutation = useImportAgent();
   const previewMutation = usePreviewImport();
-  const mergeMutation = useImportBotMerge();
+  const mergeMutation = useImportAgentMerge();
 
   const reset = useCallback(() => {
     setStep("upload");
@@ -160,12 +160,12 @@ export function ImportBotDialog({ open, onClose, onSuccess }: ImportBotDialogPro
         <div
           className="w-full max-w-lg rounded-xl border bg-card p-6 shadow-2xl max-h-[80vh] flex flex-col"
           onClick={(e) => e.stopPropagation()}
-          data-testid="import-bot-dialog"
+          data-testid="import-agent-dialog"
         >
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-semibold text-foreground">
-              {t("importDialog.title", "Import Bot")}
+              {t("importDialog.title", "Import Agent")}
             </h2>
             <button
               onClick={handleClose}
@@ -191,7 +191,7 @@ export function ImportBotDialog({ open, onClose, onSuccess }: ImportBotDialogPro
                   {t("importDialog.dropZone", "Drop a .zip file here or click to browse")}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {t("importDialog.dropZoneHint", "Exported bot archive (.zip)")}
+                  {t("importDialog.dropZoneHint", "Exported agent archive (.zip)")}
                 </p>
               </div>
               <input
@@ -245,7 +245,7 @@ export function ImportBotDialog({ open, onClose, onSuccess }: ImportBotDialogPro
                     <div className="flex items-center gap-1.5">
                       <Plus className="h-4 w-4 text-emerald-500" />
                       <span className="text-sm font-medium text-foreground">
-                        {t("importDialog.createNew", "Create as new bot")}
+                        {t("importDialog.createNew", "Create as new agent")}
                       </span>
                     </div>
                     <p className="mt-0.5 text-xs text-muted-foreground">
@@ -317,11 +317,11 @@ export function ImportBotDialog({ open, onClose, onSuccess }: ImportBotDialogPro
           {/* Step: Preview */}
           {step === "preview" && preview && (
             <div className="flex-1 flex flex-col space-y-4 min-h-0">
-              {/* Bot name */}
+              {/* Agent name */}
               <div className="flex items-center gap-2">
                 <FileArchive className="h-5 w-5 text-primary shrink-0" />
                 <p className="text-sm font-semibold text-foreground">
-                  {preview.botName || preview.botOriginId || "Bot"}
+                  {preview.agentName || preview.agentOriginId || "Agent"}
                 </p>
               </div>
 
@@ -424,7 +424,7 @@ export function ImportBotDialog({ open, onClose, onSuccess }: ImportBotDialogPro
             <div className="flex-1 flex flex-col items-center justify-center gap-4 py-8">
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground border-t-primary" />
               <p className="text-sm text-muted-foreground">
-                {t("importDialog.importing", "Importing bot...")}
+                {t("importDialog.importing", "Importing agent...")}
               </p>
             </div>
           )}
@@ -436,7 +436,7 @@ export function ImportBotDialog({ open, onClose, onSuccess }: ImportBotDialogPro
 
 function ResourceTypeBadge({ type }: { type: string }) {
   const colors: Record<string, string> = {
-    bot: "bg-purple-500/10 text-purple-500",
+    agent: "bg-purple-500/10 text-purple-500",
     package: "bg-blue-500/10 text-blue-500",
     behavior: "bg-amber-500/10 text-amber-500",
     httpcalls: "bg-green-500/10 text-green-500",
