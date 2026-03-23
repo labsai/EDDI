@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.configs.apicalls.model.HttpCall;
-import ai.labs.eddi.configs.apicalls.model.HttpCallsConfiguration;
+import ai.labs.eddi.configs.apicalls.model.ApiCall;
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.apicalls.model.Request;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
@@ -21,8 +21,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * Parses an OpenAPI spec and generates EDDI-compatible HttpCallsConfiguration resources,
- * grouped by OpenAPI tag. Each tag becomes a separate HttpCallsConfiguration with
+ * Parses an OpenAPI spec and generates EDDI-compatible ApiCallsConfiguration resources,
+ * grouped by OpenAPI tag. Each tag becomes a separate ApiCallsConfiguration with
  * proper naming (e.g. "MyAPI - Users", "MyAPI - Orders").
  *
  * <p>This is a stateless utility used by {@link McpSetupTools#createApIAgent}.</p>
@@ -43,18 +43,18 @@ final class McpApiToolBuilder {
     /**
      * Result of building configs from an OpenAPI spec.
      *
-     * @param configsByGroup map of group/tag name → HttpCallsConfiguration
+     * @param configsByGroup map of group/tag name → ApiCallsConfiguration
      * @param apiSummary     human-readable summary of available endpoints for LLM context
      * @param endpointCount  total number of endpoints processed
      */
     record ApiBuildResult(
-            Map<String, HttpCallsConfiguration> configsByGroup,
+            Map<String, ApiCallsConfiguration> configsByGroup,
             String apiSummary,
             int endpointCount
     ) {}
 
     /**
-     * Parse an OpenAPI spec and build grouped HttpCallsConfigurations.
+     * Parse an OpenAPI spec and build grouped ApiCallsConfigurations.
      *
      * @param openApiSpec    OpenAPI spec as JSON/YAML string or a URL
      * @param endpointFilter comma-separated filter (e.g. "GET /users,POST /orders"), null for all
@@ -70,7 +70,7 @@ final class McpApiToolBuilder {
         Set<String> allowedEndpoints = parseEndpointFilter(endpointFilter);
 
         // Collect all operations grouped by tag
-        Map<String, List<HttpCall>> callsByGroup = new LinkedHashMap<>();
+        Map<String, List<ApiCall>> callsByGroup = new LinkedHashMap<>();
         int endpointCount = 0;
         var summaryLines = new ArrayList<String>();
 
@@ -102,7 +102,7 @@ final class McpApiToolBuilder {
                             ? operation.getTags().get(0)
                             : DEFAULT_GROUP;
 
-                    HttpCall httpCall = buildHttpCall(method, path, operation, apiAuth);
+                    ApiCall httpCall = buildApiCall(method, path, operation, apiAuth);
                     callsByGroup.computeIfAbsent(group, k -> new ArrayList<>()).add(httpCall);
                     endpointCount++;
 
@@ -117,10 +117,10 @@ final class McpApiToolBuilder {
                     (allowedEndpoints.isEmpty() ? "" : " matching the filter"));
         }
 
-        // Build HttpCallsConfiguration per group
-        Map<String, HttpCallsConfiguration> configsByGroup = new LinkedHashMap<>();
+        // Build ApiCallsConfiguration per group
+        Map<String, ApiCallsConfiguration> configsByGroup = new LinkedHashMap<>();
         for (var entry : callsByGroup.entrySet()) {
-            var config = new HttpCallsConfiguration();
+            var config = new ApiCallsConfiguration();
             config.setTargetServerUrl(baseUrl);
             config.setHttpCalls(entry.getValue());
             configsByGroup.put(entry.getKey(), config);
@@ -170,11 +170,11 @@ final class McpApiToolBuilder {
     }
 
     /**
-     * Build a single HttpCall from an OpenAPI operation.
+     * Build a single ApiCall from an OpenAPI operation.
      */
-    private static HttpCall buildHttpCall(String method, String path,
+    private static ApiCall buildApiCall(String method, String path,
                                            Operation operation, String apiAuth) {
-        var httpCall = new HttpCall();
+        var httpCall = new ApiCall();
 
         // Name: operationId or generated slug
         String name = operation.getOperationId();

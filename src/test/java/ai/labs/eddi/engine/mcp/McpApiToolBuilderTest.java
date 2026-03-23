@@ -1,6 +1,6 @@
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.configs.apicalls.model.HttpCall;
+import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -150,9 +150,9 @@ class McpApiToolBuilderTest {
         var result = McpApiToolBuilder.parseAndBuild(
                 PETSTORE_SPEC, null, null, "Bearer sk-test-key");
 
-        // Every HttpCall should have the Authorization header
+        // Every ApiCall should have the Authorization header
         for (var config : result.configsByGroup().values()) {
-            for (HttpCall call : config.getHttpCalls()) {
+            for (ApiCall call : config.getHttpCalls()) {
                 assertEquals("Bearer sk-test-key",
                         call.getRequest().getHeaders().get("Authorization"));
             }
@@ -196,7 +196,7 @@ class McpApiToolBuilderTest {
         var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
         var petsConfig = result.configsByGroup().get("pets");
 
-        HttpCall getPet = petsConfig.getHttpCalls().stream()
+        ApiCall getPet = petsConfig.getHttpCalls().stream()
                 .filter(c -> "getPet".equals(c.getName()))
                 .findFirst()
                 .orElseThrow();
@@ -210,7 +210,7 @@ class McpApiToolBuilderTest {
         var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
         var petsConfig = result.configsByGroup().get("pets");
 
-        HttpCall listPets = petsConfig.getHttpCalls().stream()
+        ApiCall listPets = petsConfig.getHttpCalls().stream()
                 .filter(c -> "listPets".equals(c.getName()))
                 .findFirst()
                 .orElseThrow();
@@ -225,7 +225,7 @@ class McpApiToolBuilderTest {
         var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
         var petsConfig = result.configsByGroup().get("pets");
 
-        HttpCall createPet = petsConfig.getHttpCalls().stream()
+        ApiCall createPet = petsConfig.getHttpCalls().stream()
                 .filter(c -> "createPet".equals(c.getName()))
                 .findFirst()
                 .orElseThrow();
@@ -244,7 +244,7 @@ class McpApiToolBuilderTest {
         var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
         var petsConfig = result.configsByGroup().get("pets");
 
-        HttpCall listPets = petsConfig.getHttpCalls().stream()
+        ApiCall listPets = petsConfig.getHttpCalls().stream()
                 .filter(c -> "listPets".equals(c.getName()))
                 .findFirst()
                 .orElseThrow();
@@ -259,7 +259,7 @@ class McpApiToolBuilderTest {
         var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
         var petsConfig = result.configsByGroup().get("pets");
 
-        HttpCall listPets = petsConfig.getHttpCalls().stream()
+        ApiCall listPets = petsConfig.getHttpCalls().stream()
                 .filter(c -> "listPets".equals(c.getName()))
                 .findFirst()
                 .orElseThrow();
@@ -334,7 +334,7 @@ class McpApiToolBuilderTest {
         var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
         var petsConfig = result.configsByGroup().get("pets");
 
-        HttpCall getPet = petsConfig.getHttpCalls().stream()
+        ApiCall getPet = petsConfig.getHttpCalls().stream()
                 .filter(c -> "getPet".equals(c.getName()))
                 .findFirst()
                 .orElseThrow();

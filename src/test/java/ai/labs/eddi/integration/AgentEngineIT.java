@@ -292,7 +292,7 @@ public class AgentEngineIT extends BaseIntegrationIT {
                                                         ]
                                                       }
                                                     },
-                                                    {"type": "eddi://ai.labs.behavior", "config": {"uri": "%s"}},
+                                                    {"type": "eddi://ai.labs.rules", "config": {"uri": "%s"}},
                                                     {"type": "eddi://ai.labs.output", "config": {"uri": "%s"}},
                                                     {"type": "eddi://ai.labs.templating", "config": {}},
                                                     {"type": "eddi://ai.labs.property", "config": {}}

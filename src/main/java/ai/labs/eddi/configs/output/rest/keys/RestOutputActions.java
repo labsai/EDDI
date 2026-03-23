@@ -1,9 +1,9 @@
 package ai.labs.eddi.configs.output.rest.keys;
 
-import ai.labs.eddi.configs.rules.IBehaviorStore;
-import ai.labs.eddi.configs.rules.model.BehaviorConfiguration;
-import ai.labs.eddi.configs.rules.model.BehaviorGroupConfiguration;
-import ai.labs.eddi.configs.rules.model.BehaviorRuleConfiguration;
+import ai.labs.eddi.configs.rules.IRuleSetStore;
+import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
+import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
+import ai.labs.eddi.configs.rules.model.RuleConfiguration;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.keys.IRestOutputActions;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
@@ -29,14 +29,14 @@ import java.util.Map;
 @ApplicationScoped
 public class RestOutputActions implements IRestOutputActions {
     private final IWorkflowStore workflowStore;
-    private final IBehaviorStore behaviorStore;
+    private final IRuleSetStore behaviorStore;
     private final IOutputStore outputStore;
 
 
 
     @Inject
     public RestOutputActions(IWorkflowStore workflowStore,
-                             IBehaviorStore behaviorStore,
+                             IRuleSetStore behaviorStore,
                              IOutputStore outputStore) {
         this.workflowStore = workflowStore;
         this.behaviorStore = behaviorStore;
@@ -49,11 +49,11 @@ public class RestOutputActions implements IRestOutputActions {
         try {
             WorkflowConfiguration workflowConfig = workflowStore.read(workflowId, packageVersion);
             List<IResourceStore.IResourceId> resourceIds;
-            resourceIds = readBehaviorRuleSetResourceIds(workflowConfig);
+            resourceIds = readRuleSetResourceIds(workflowConfig);
             for (IResourceStore.IResourceId resourceId : resourceIds) {
-                BehaviorConfiguration behaviorConfiguration = behaviorStore.read(resourceId.getId(), resourceId.getVersion());
-                for (BehaviorGroupConfiguration groupConfiguration : behaviorConfiguration.getBehaviorGroups()) {
-                    for (BehaviorRuleConfiguration behaviorRuleConfiguration : groupConfiguration.getBehaviorRules()) {
+                RuleSetConfiguration behaviorConfiguration = behaviorStore.read(resourceId.getId(), resourceId.getVersion());
+                for (RuleGroupConfiguration groupConfiguration : behaviorConfiguration.getBehaviorGroups()) {
+                    for (RuleConfiguration behaviorRuleConfiguration : groupConfiguration.getRules()) {
                         for (String action : behaviorRuleConfiguration.getActions()) {
                             if (action.contains(filter)) {
                                 CollectionUtilities.addAllWithoutDuplicates(retOutputKeys, List.of(action));
@@ -88,11 +88,11 @@ public class RestOutputActions implements IRestOutputActions {
         return retOutputKeys;
     }
 
-    private List<IResourceStore.IResourceId> readBehaviorRuleSetResourceIds(WorkflowConfiguration workflowConfiguration) {
+    private List<IResourceStore.IResourceId> readRuleSetResourceIds(WorkflowConfiguration workflowConfiguration) {
         List<IResourceStore.IResourceId> resourceIds = new LinkedList<>();
 
         for (WorkflowConfiguration.WorkflowStep workflowStep : workflowConfiguration.getWorkflowSteps()) {
-            if (!workflowStep.getType().toString().startsWith("eddi://ai.labs.behavior")) {
+            if (!workflowStep.getType().toString().startsWith("eddi://ai.labs.rules")) {
                 continue;
             }
 

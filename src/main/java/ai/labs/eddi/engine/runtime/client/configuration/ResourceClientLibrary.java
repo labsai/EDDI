@@ -1,12 +1,12 @@
 package ai.labs.eddi.engine.runtime.client.configuration;
 
-import ai.labs.eddi.configs.rules.IRestBehaviorStore;
-import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
+import ai.labs.eddi.configs.rules.IRestRuleSetStore;
+import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
-import ai.labs.eddi.configs.dictionary.IRestRegularDictionaryStore;
+import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
@@ -27,9 +27,9 @@ import static ai.labs.eddi.datastore.IResourceStore.IResourceId;
 @ApplicationScoped
 public class ResourceClientLibrary implements IResourceClientLibrary {
     private final IRestParserStore restParserStore;
-    private final IRestRegularDictionaryStore restRegularDictionaryStore;
-    private final IRestBehaviorStore restBehaviorStore;
-    private final IRestHttpCallsStore restHttpCallsStore;
+    private final IRestDictionaryStore restDictionaryStore;
+    private final IRestRuleSetStore restRuleSetStore;
+    private final IRestApiCallsStore restApiCallsStore;
     private final IRestLlmStore restLlmStore;
     private final IRestOutputStore restOutputStore;
     private final IRestPropertySetterStore restPropertySetterStore;
@@ -39,16 +39,16 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
 
     @Inject
     public ResourceClientLibrary(IRestParserStore restParserStore,
-            IRestRegularDictionaryStore restRegularDictionaryStore,
-            IRestBehaviorStore restBehaviorStore,
-            IRestHttpCallsStore restHttpCallsStore,
+            IRestDictionaryStore restDictionaryStore,
+            IRestRuleSetStore restRuleSetStore,
+            IRestApiCallsStore restApiCallsStore,
             IRestLlmStore restLlmStore,
             IRestOutputStore restOutputStore,
             IRestPropertySetterStore restPropertySetterStore) {
         this.restParserStore = restParserStore;
-        this.restRegularDictionaryStore = restRegularDictionaryStore;
-        this.restBehaviorStore = restBehaviorStore;
-        this.restHttpCallsStore = restHttpCallsStore;
+        this.restDictionaryStore = restDictionaryStore;
+        this.restRuleSetStore = restRuleSetStore;
+        this.restApiCallsStore = restApiCallsStore;
         this.restLlmStore = restLlmStore;
         this.restOutputStore = restOutputStore;
         this.restPropertySetterStore = restPropertySetterStore;
@@ -79,51 +79,51 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         restInterfaces.put("ai.labs.regulardictionary", new IResourceService() {
             @Override
             public Object read(String id, Integer version) {
-                return restRegularDictionaryStore.readRegularDictionary(id, version, "", "", 0, 0);
+                return restDictionaryStore.readRegularDictionary(id, version, "", "", 0, 0);
             }
 
             @Override
             public Response duplicate(String id, Integer version) {
-                return restRegularDictionaryStore.duplicateRegularDictionary(id, version);
+                return restDictionaryStore.duplicateRegularDictionary(id, version);
             }
 
             @Override
             public Response delete(String id, Integer version, boolean permanent) {
-                return restRegularDictionaryStore.deleteRegularDictionary(id, version, permanent);
+                return restDictionaryStore.deleteRegularDictionary(id, version, permanent);
             }
         });
 
         restInterfaces.put("ai.labs.behavior", new IResourceService() {
             @Override
             public Object read(String id, Integer version) {
-                return restBehaviorStore.readBehaviorRuleSet(id, version);
+                return restRuleSetStore.readRuleSet(id, version);
             }
 
             @Override
             public Response duplicate(String id, Integer version) {
-                return restBehaviorStore.duplicateBehaviorRuleSet(id, version);
+                return restRuleSetStore.duplicateRuleSet(id, version);
             }
 
             @Override
             public Response delete(String id, Integer version, boolean permanent) {
-                return restBehaviorStore.deleteBehaviorRuleSet(id, version, permanent);
+                return restRuleSetStore.deleteRuleSet(id, version, permanent);
             }
         });
 
         restInterfaces.put("ai.labs.httpcalls", new IResourceService() {
             @Override
             public Object read(String id, Integer version) {
-                return restHttpCallsStore.readHttpCalls(id, version);
+                return restApiCallsStore.readApiCalls(id, version);
             }
 
             @Override
             public Response duplicate(String id, Integer version) {
-                return restHttpCallsStore.duplicateHttpCalls(id, version);
+                return restApiCallsStore.duplicateApiCalls(id, version);
             }
 
             @Override
             public Response delete(String id, Integer version, boolean permanent) {
-                return restHttpCallsStore.deleteHttpCalls(id, version, permanent);
+                return restApiCallsStore.deleteApiCalls(id, version, permanent);
             }
         });
 

@@ -1,8 +1,8 @@
 package ai.labs.eddi.modules.llm.tools;
 
-import ai.labs.eddi.configs.apicalls.IHttpCallsStore;
-import ai.labs.eddi.configs.apicalls.model.HttpCall;
-import ai.labs.eddi.configs.apicalls.model.HttpCallsConfiguration;
+import ai.labs.eddi.configs.apicalls.IApiCallsStore;
+import ai.labs.eddi.configs.apicalls.model.ApiCall;
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.ConversationMemory;
@@ -11,7 +11,7 @@ import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.modules.apicalls.impl.IHttpCallExecutor;
+import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.model.ToolExecutionTrace;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -40,14 +40,14 @@ public class EddiToolBridge {
 
     static {
         try {
-            INTERNAL_EXECUTE_METHOD = EddiToolBridge.class.getMethod("executeHttpCallInternal", String.class, String.class, Map.class);
+            INTERNAL_EXECUTE_METHOD = EddiToolBridge.class.getMethod("executeApiCallInternal", String.class, String.class, Map.class);
         } catch (NoSuchMethodException e) {
-            throw new ExceptionInInitializerError("Failed to cache executeHttpCallInternal method: " + e.getMessage());
+            throw new ExceptionInInitializerError("Failed to cache executeApiCallInternal method: " + e.getMessage());
         }
     }
 
     @Inject
-    IHttpCallsStore httpCallsStore;
+    IApiCallsStore httpCallsStore;
 
     @Inject
     IConversationMemoryStore conversationMemoryStore;
@@ -62,13 +62,13 @@ public class EddiToolBridge {
     IJsonSerialization jsonSerialization;
 
     @Inject
-    IHttpCallExecutor httpCallExecutor;
+    IApiCallExecutor httpCallExecutor;
 
     @Inject
     ToolExecutionService toolExecutionService;
 
     // Cache for httpcall configurations to avoid repeated lookups
-    private final Map<String, HttpCallsConfiguration> configCache = new ConcurrentHashMap<>();
+    private final Map<String, ApiCallsConfiguration> configCache = new ConcurrentHashMap<>();
 
     /**
      * This method is exposed to the LLM as a tool.
@@ -79,12 +79,12 @@ public class EddiToolBridge {
      * generic execution mechanism.
      *
      * @param conversationId The current conversation ID
-     * @param httpCallUri The URI of the httpcall configuration (e.g., "eddi://ai.labs.httpcalls/weather_api?version=1")
+     * @param httpCallUri The URI of the httpcall configuration (e.g., "eddi://ai.labs.apicalls/weather_api?version=1")
      * @param arguments Arguments to pass to the httpcall for templating
      * @return JSON string with the httpcall result
      */
     @Tool("Executes a pre-configured EDDI httpcall. Use only httpcalls that have been explicitly provided to you.")
-    public String executeHttpCall(String conversationId, String httpCallUri, Map<String, Object> arguments) {
+    public String executeApiCall(String conversationId, String httpCallUri, Map<String, Object> arguments) {
         return toolExecutionService.executeTool(
                 this,
                 INTERNAL_EXECUTE_METHOD,
@@ -94,23 +94,23 @@ public class EddiToolBridge {
         );
     }
 
-    public String executeHttpCallInternal(String conversationId, String httpCallUri, Map<String, Object> arguments) {
+    public String executeApiCallInternal(String conversationId, String httpCallUri, Map<String, Object> arguments) {
         try {
             LOGGER.info("Agent executing httpcall: " + httpCallUri + " for conversation: " + conversationId);
 
             // Parse the URI to extract the httpcall configuration reference
             URI uri = URI.create(httpCallUri);
 
-            // Load the HttpCallsConfiguration
-            HttpCallsConfiguration config = getOrLoadConfig(uri);
+            // Load the ApiCallsConfiguration
+            ApiCallsConfiguration config = getOrLoadConfig(uri);
             if (config == null) {
-                return errorResult("HttpCalls configuration not found: " + httpCallUri);
+                return errorResult("ApiCalls configuration not found: " + httpCallUri);
             }
 
-            // Find the specific HttpCall within the configuration
+            // Find the specific ApiCall within the configuration
             // For simplicity, we take the first call that matches any action
             // In a real scenario, the URI would specify which call to execute
-            HttpCall httpCall = config.getHttpCalls().stream()
+            ApiCall httpCall = config.getHttpCalls().stream()
                     .findFirst()
                     .orElse(null);
 
@@ -121,7 +121,7 @@ public class EddiToolBridge {
             // Load the conversation memory snapshot
             ConversationMemorySnapshot snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
 
-            // Create a temporary memory instance to satisfy HttpCallExecutor contract
+            // Create a temporary memory instance to satisfy ApiCallExecutor contract
             ConversationMemory memory = new ConversationMemory(conversationId, snapshot.getAgentId(), snapshot.getAgentVersion(), snapshot.getUserId());
 
             // Build template data by merging agent arguments with conversation memory
@@ -141,7 +141,7 @@ public class EddiToolBridge {
             return jsonSerialization.serialize(result);
 
         } catch (IResourceStore.ResourceNotFoundException e) {
-            LOGGER.error("HttpCall configuration not found: " + httpCallUri, e);
+            LOGGER.error("ApiCall configuration not found: " + httpCallUri, e);
             return errorResult("Configuration not found: " + httpCallUri);
         } catch (IResourceStore.ResourceStoreException e) {
             LOGGER.error("Error loading httpcall configuration: " + httpCallUri, e);
@@ -153,13 +153,13 @@ public class EddiToolBridge {
     }
 
     /**
-     * Loads or retrieves from cache an HttpCallsConfiguration
+     * Loads or retrieves from cache an ApiCallsConfiguration
      */
-    private HttpCallsConfiguration getOrLoadConfig(URI uri) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    private ApiCallsConfiguration getOrLoadConfig(URI uri) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         String cacheKey = uri.toString();
         if (!configCache.containsKey(cacheKey)) {
             try {
-                HttpCallsConfiguration config = resourceClientLibrary.getResource(uri, HttpCallsConfiguration.class);
+                ApiCallsConfiguration config = resourceClientLibrary.getResource(uri, ApiCallsConfiguration.class);
                 configCache.put(cacheKey, config);
             } catch (ServiceException e) {
                 throw new IResourceStore.ResourceStoreException("Error loading configuration", e);

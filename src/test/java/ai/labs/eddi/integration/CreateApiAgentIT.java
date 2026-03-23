@@ -17,7 +17,7 @@ import static org.hamcrest.Matchers.*;
  * REST API. It validates the resource creation workflow that
  * {@code create_api_agent} produces:
  * <ol>
- * <li>Create 2 HttpCallsConfiguration resources (grouped by tag: users,
+ * <li>Create 2 ApiCallsConfiguration resources (grouped by tag: users,
  * orders)</li>
  * <li>Create Behavior Rules and LangChain configuration</li>
  * <li>Create Workflow with 5 extensions (parser + behavior + 2×httpcalls +
@@ -201,12 +201,12 @@ public class CreateApiAgentIT {
     return new ResourceId(id, version);
   }
 
-  // ==================== Step 1: Create HttpCalls resources ====================
+  // ==================== Step 1: Create ApiCalls resources ====================
 
   @Test
   @Order(1)
-  @DisplayName("should create HttpCalls config for 'users' tag group")
-  void createHttpCallsUsers() {
+  @DisplayName("should create ApiCalls config for 'users' tag group")
+  void createApiCallsUsers() {
     Response response = given()
         .contentType(ContentType.JSON)
         .body(HTTPCALLS_USERS)
@@ -221,8 +221,8 @@ public class CreateApiAgentIT {
 
   @Test
   @Order(2)
-  @DisplayName("should create HttpCalls config for 'orders' tag group")
-  void createHttpCallsOrders() {
+  @DisplayName("should create ApiCalls config for 'orders' tag group")
+  void createApiCallsOrders() {
     Response response = given()
         .contentType(ContentType.JSON)
         .body(HTTPCALLS_ORDERS)
@@ -237,8 +237,8 @@ public class CreateApiAgentIT {
 
   @Test
   @Order(3)
-  @DisplayName("should read back HttpCalls config with correct structure")
-  void readHttpCallsUsers() {
+  @DisplayName("should read back ApiCalls config with correct structure")
+  void readApiCallsUsers() {
     ResourceId res = extractResourceId(httpCallsUsersLocation);
     given()
         .get("/apicallstore/apicalls/" + res.id() + "?version=" + res.version())
@@ -304,9 +304,9 @@ public class CreateApiAgentIT {
         {
           "WorkflowSteps": [
             { "type": "eddi://ai.labs.parser", "config": {} },
-            { "type": "eddi://ai.labs.behavior", "config": { "uri": "%s" } },
-            { "type": "eddi://ai.labs.httpcalls", "config": { "uri": "%s" } },
-            { "type": "eddi://ai.labs.httpcalls", "config": { "uri": "%s" } },
+            { "type": "eddi://ai.labs.rules", "config": { "uri": "%s" } },
+            { "type": "eddi://ai.labs.apicalls", "config": { "uri": "%s" } },
+            { "type": "eddi://ai.labs.apicalls", "config": { "uri": "%s" } },
             { "type": "eddi://ai.labs.llm", "config": { "uri": "%s" } }
           ]
         }
@@ -335,9 +335,9 @@ public class CreateApiAgentIT {
         .statusCode(200)
         .body("WorkflowSteps.size()", equalTo(5))
         .body("WorkflowSteps[0].type", equalTo("eddi://ai.labs.parser"))
-        .body("WorkflowSteps[1].type", equalTo("eddi://ai.labs.behavior"))
-        .body("WorkflowSteps[2].type", equalTo("eddi://ai.labs.httpcalls"))
-        .body("WorkflowSteps[3].type", equalTo("eddi://ai.labs.httpcalls"))
+        .body("WorkflowSteps[1].type", equalTo("eddi://ai.labs.rules"))
+        .body("WorkflowSteps[2].type", equalTo("eddi://ai.labs.apicalls"))
+        .body("WorkflowSteps[3].type", equalTo("eddi://ai.labs.apicalls"))
         .body("WorkflowSteps[4].type", equalTo("eddi://ai.labs.llm"));
   }
 

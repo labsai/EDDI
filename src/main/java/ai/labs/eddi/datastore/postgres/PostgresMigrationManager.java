@@ -30,7 +30,7 @@ public class PostgresMigrationManager implements IMigrationManager {
     }
 
     @Override
-    public IDocumentMigration migrateHttpCalls() {
+    public IDocumentMigration migrateApiCalls() {
         return document -> null;
     }
 

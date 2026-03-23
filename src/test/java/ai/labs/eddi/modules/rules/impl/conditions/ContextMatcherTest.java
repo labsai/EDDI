@@ -123,13 +123,13 @@ public class ContextMatcherTest {
         });
 
         // test
-        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
                 new LinkedList<>());
 
         // assert
         verify(currentStep).getAllData("context");
         verify(expressionProvider, times(2)).parseExpressions(values.get("expressions"));
-        Assertions.assertEquals(IBehaviorCondition.ExecutionState.SUCCESS, actualExecutionState);
+        Assertions.assertEquals(IRuleCondition.ExecutionState.SUCCESS, actualExecutionState);
 
     }
 
@@ -147,14 +147,14 @@ public class ContextMatcherTest {
         when(expressionProvider.parseExpressions(anyString())).thenAnswer(invocation -> new Expressions());
 
         // test
-        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
                 new LinkedList<>());
 
         // assert
         verify(currentStep).getAllData("context");
         verify(expressionProvider).parseExpressions(values.get("expressions"));
         verify(expressionProvider).parseExpressions(otherExpressions);
-        Assertions.assertEquals(IBehaviorCondition.ExecutionState.FAIL, actualExecutionState);
+        Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
     }
 
     @Test
@@ -174,14 +174,14 @@ public class ContextMatcherTest {
         });
 
         // test
-        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
                 new LinkedList<>());
 
         // assert
         verify(currentStep).getAllData("context");
         verify(jsonSerialization).serialize(objectValue);
         verify(jsonSerialization).deserialize(contextJson, Object.class);
-        Assertions.assertEquals(IBehaviorCondition.ExecutionState.SUCCESS, actualExecutionState);
+        Assertions.assertEquals(IRuleCondition.ExecutionState.SUCCESS, actualExecutionState);
     }
 
     @Test
@@ -201,14 +201,14 @@ public class ContextMatcherTest {
         });
 
         // test
-        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
                 new LinkedList<>());
 
         // assert
         verify(currentStep).getAllData("context");
         verify(jsonSerialization).serialize(objectValue);
         verify(jsonSerialization).deserialize(contextJson, Object.class);
-        Assertions.assertEquals(IBehaviorCondition.ExecutionState.FAIL, actualExecutionState);
+        Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
     }
 
     @Test
@@ -228,14 +228,14 @@ public class ContextMatcherTest {
         });
 
         // test
-        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
                 new LinkedList<>());
 
         // assert
         verify(currentStep).getAllData("context");
         verify(jsonSerialization).serialize(objectValue);
         verify(jsonSerialization).deserialize(contextJson, Object.class);
-        Assertions.assertEquals(IBehaviorCondition.ExecutionState.SUCCESS, actualExecutionState);
+        Assertions.assertEquals(IRuleCondition.ExecutionState.SUCCESS, actualExecutionState);
     }
 
     @Test
@@ -255,14 +255,14 @@ public class ContextMatcherTest {
         });
 
         // test
-        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
                 new LinkedList<>());
 
         // assert
         verify(currentStep).getAllData("context");
         verify(jsonSerialization).serialize(objectValue);
         verify(jsonSerialization).deserialize(contextJson, Object.class);
-        Assertions.assertEquals(IBehaviorCondition.ExecutionState.FAIL, actualExecutionState);
+        Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
     }
 
     @Test
@@ -277,11 +277,11 @@ public class ContextMatcherTest {
         });
 
         // test
-        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
                 new LinkedList<>());
 
         // assert
-        Assertions.assertEquals(IBehaviorCondition.ExecutionState.SUCCESS, actualExecutionState);
+        Assertions.assertEquals(IRuleCondition.ExecutionState.SUCCESS, actualExecutionState);
     }
 
     @Test
@@ -296,11 +296,11 @@ public class ContextMatcherTest {
         });
 
         // test
-        IBehaviorCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
                 new LinkedList<>());
 
         // assert
-        Assertions.assertEquals(IBehaviorCondition.ExecutionState.FAIL, actualExecutionState);
+        Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
     }
 
     private static class MockData<T> implements IData<T> {

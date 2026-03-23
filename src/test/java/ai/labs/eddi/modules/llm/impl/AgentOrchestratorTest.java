@@ -186,7 +186,7 @@ class AgentOrchestratorTest {
     void testIsAgentMode_TrueWithCustomTools() {
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(false);
-        task.setTools(List.of("eddi://ai.labs.httpcalls/weather?version=1"));
+        task.setTools(List.of("eddi://ai.labs.apicalls/weather?version=1"));
 
         assertTrue(task.isAgentMode());
     }

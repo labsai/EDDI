@@ -1,9 +1,9 @@
 package ai.labs.eddi.modules.rules.impl.conditions;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.modules.rules.impl.BehaviorGroup;
-import ai.labs.eddi.modules.rules.impl.BehaviorRule;
-import ai.labs.eddi.modules.rules.impl.BehaviorSet;
+import ai.labs.eddi.modules.rules.impl.RuleGroup;
+import ai.labs.eddi.modules.rules.impl.Rule;
+import ai.labs.eddi.modules.rules.impl.RuleSet;
 
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -15,13 +15,13 @@ import java.util.Map;
  * @author ginccc
  */
 
-public class Dependency implements IBehaviorCondition {
+public class Dependency implements IRuleCondition {
     public static final String ID = "dependency";
 
     private String reference;
 
     private final String referenceQualifier = "reference";
-    private BehaviorSet behaviorSet;
+    private RuleSet behaviorSet;
 
     @Override
     public String getId() {
@@ -45,24 +45,24 @@ public class Dependency implements IBehaviorCondition {
     }
 
     @Override
-    public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
-            throws BehaviorRule.InfiniteLoopException, BehaviorRule.RuntimeException {
+    public ExecutionState execute(IConversationMemory memory, List<Rule> trace)
+            throws Rule.InfiniteLoopException, Rule.RuntimeException {
 
         //before we execute the behavior rules we make deep copies, so that we don't change the rules in conversation memory!
-        List<BehaviorRule> filteredBehaviorRules = new LinkedList<>();
+        List<Rule> filteredRules = new LinkedList<>();
         try {
-            List<BehaviorGroup> behaviorGroups = behaviorSet.getBehaviorGroups();
-            List<BehaviorRule> behaviorRules = new LinkedList<>();
-            for (BehaviorGroup behaviorGroup : behaviorGroups) {
-                behaviorRules.addAll(behaviorGroup.getBehaviorRules());
+            List<RuleGroup> behaviorGroups = behaviorSet.getRuleGroups();
+            List<Rule> behaviorRules = new LinkedList<>();
+            for (RuleGroup behaviorGroup : behaviorGroups) {
+                behaviorRules.addAll(behaviorGroup.getRules());
             }
-            filteredBehaviorRules.addAll(cloneBehaviorRules(behaviorRules, reference));
+            filteredRules.addAll(cloneRules(behaviorRules, reference));
         } catch (CloneNotSupportedException e) {
-            throw new BehaviorRule.RuntimeException(e.getLocalizedMessage(), e);
+            throw new Rule.RuntimeException(e.getLocalizedMessage(), e);
         }
 
         ExecutionState state = ExecutionState.NOT_EXECUTED;
-        for (BehaviorRule behaviorRule : filteredBehaviorRules) {
+        for (Rule behaviorRule : filteredRules) {
             state = behaviorRule.execute(memory, trace);
             if (state == ExecutionState.ERROR || state == ExecutionState.SUCCESS) {
                 break;
@@ -79,16 +79,16 @@ public class Dependency implements IBehaviorCondition {
     }
 
     @Override
-    public IBehaviorCondition clone() {
+    public IRuleCondition clone() {
         Dependency clone = new Dependency();
         clone.setConfigs(getConfigs());
-        clone.setContainingBehaviorRuleSet(behaviorSet);
+        clone.setContainingRuleSet(behaviorSet);
         return clone;
     }
 
-    private List<BehaviorRule> cloneBehaviorRules(List<BehaviorRule> behaviorRules, String filter) throws CloneNotSupportedException {
-        List<BehaviorRule> clone = new LinkedList<>();
-        for (BehaviorRule behaviorRule : behaviorRules) {
+    private List<Rule> cloneRules(List<Rule> behaviorRules, String filter) throws CloneNotSupportedException {
+        List<Rule> clone = new LinkedList<>();
+        for (Rule behaviorRule : behaviorRules) {
             if (behaviorRule.getName().equals(filter)) {
                 clone.add(behaviorRule.clone());
             }
@@ -98,7 +98,7 @@ public class Dependency implements IBehaviorCondition {
     }
 
     @Override
-    public void setContainingBehaviorRuleSet(BehaviorSet behaviorSet) {
+    public void setContainingRuleSet(RuleSet behaviorSet) {
         this.behaviorSet = behaviorSet;
     }
 

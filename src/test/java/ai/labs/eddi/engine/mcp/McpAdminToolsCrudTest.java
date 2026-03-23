@@ -1,21 +1,21 @@
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.configs.rules.IRestBehaviorStore;
-import ai.labs.eddi.configs.rules.model.BehaviorConfiguration;
+import ai.labs.eddi.configs.rules.IRestRuleSetStore;
+import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
-import ai.labs.eddi.configs.apicalls.model.HttpCallsConfiguration;
+import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
-import ai.labs.eddi.configs.dictionary.IRestRegularDictionaryStore;
+import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
@@ -57,12 +57,12 @@ class McpAdminToolsCrudTest {
     private IRestAgentStore AgentStore;
     private IRestWorkflowStore WorkflowStore;
     private IRestDocumentDescriptorStore descriptorStore;
-    private IRestBehaviorStore behaviorStore;
+    private IRestRuleSetStore behaviorStore;
     private IRestLlmStore llmStore;
-    private IRestHttpCallsStore httpCallsStore;
+    private IRestApiCallsStore httpCallsStore;
     private IRestOutputStore outputStore;
     private IRestPropertySetterStore propertySetterStore;
-    private IRestRegularDictionaryStore dictionaryStore;
+    private IRestDictionaryStore dictionaryStore;
     private IRestAgentTriggerStore AgentTriggerStore;
     private IJsonSerialization jsonSerialization;
     private IScheduleStore scheduleStore;
@@ -76,12 +76,12 @@ class McpAdminToolsCrudTest {
         AgentStore = mock(IRestAgentStore.class);
         WorkflowStore = mock(IRestWorkflowStore.class);
         descriptorStore = mock(IRestDocumentDescriptorStore.class);
-        behaviorStore = mock(IRestBehaviorStore.class);
+        behaviorStore = mock(IRestRuleSetStore.class);
         llmStore = mock(IRestLlmStore.class);
-        httpCallsStore = mock(IRestHttpCallsStore.class);
+        httpCallsStore = mock(IRestApiCallsStore.class);
         outputStore = mock(IRestOutputStore.class);
         propertySetterStore = mock(IRestPropertySetterStore.class);
-        dictionaryStore = mock(IRestRegularDictionaryStore.class);
+        dictionaryStore = mock(IRestDictionaryStore.class);
         AgentTriggerStore = mock(IRestAgentTriggerStore.class);
         jsonSerialization = mock(IJsonSerialization.class);
 
@@ -89,12 +89,12 @@ class McpAdminToolsCrudTest {
         when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(AgentStore);
         when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(WorkflowStore);
         when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
-        when(restInterfaceFactory.get(IRestBehaviorStore.class)).thenReturn(behaviorStore);
+        when(restInterfaceFactory.get(IRestRuleSetStore.class)).thenReturn(behaviorStore);
         when(restInterfaceFactory.get(IRestLlmStore.class)).thenReturn(llmStore);
-        when(restInterfaceFactory.get(IRestHttpCallsStore.class)).thenReturn(httpCallsStore);
+        when(restInterfaceFactory.get(IRestApiCallsStore.class)).thenReturn(httpCallsStore);
         when(restInterfaceFactory.get(IRestOutputStore.class)).thenReturn(outputStore);
         when(restInterfaceFactory.get(IRestPropertySetterStore.class)).thenReturn(propertySetterStore);
-        when(restInterfaceFactory.get(IRestRegularDictionaryStore.class)).thenReturn(dictionaryStore);
+        when(restInterfaceFactory.get(IRestDictionaryStore.class)).thenReturn(dictionaryStore);
         when(restInterfaceFactory.get(IRestAgentTriggerStore.class)).thenReturn(AgentTriggerStore);
 
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
@@ -125,9 +125,9 @@ class McpAdminToolsCrudTest {
 
     @Test
     void updateResource_behavior_success() throws IOException {
-        var config = new BehaviorConfiguration();
-        when(jsonSerialization.deserialize("{}", BehaviorConfiguration.class)).thenReturn(config);
-        when(behaviorStore.updateBehaviorRuleSet(RESOURCE_ID, 1, config))
+        var config = new RuleSetConfiguration();
+        when(jsonSerialization.deserialize("{}", RuleSetConfiguration.class)).thenReturn(config);
+        when(behaviorStore.updateRuleSet(RESOURCE_ID, 1, config))
                 .thenReturn(Response.ok().header("Location",
                         "/rulestore/rulesets/" + RESOURCE_ID + "?version=2").build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"updated\"}");
@@ -135,7 +135,7 @@ class McpAdminToolsCrudTest {
         String result = tools.updateResource("behavior", RESOURCE_ID, 1, "{}");
 
         assertNotNull(result);
-        verify(behaviorStore).updateBehaviorRuleSet(RESOURCE_ID, 1, config);
+        verify(behaviorStore).updateRuleSet(RESOURCE_ID, 1, config);
     }
 
     @Test
@@ -172,9 +172,9 @@ class McpAdminToolsCrudTest {
 
     @Test
     void createResource_httpcalls_success() throws IOException {
-        var config = new HttpCallsConfiguration();
-        when(jsonSerialization.deserialize("{}", HttpCallsConfiguration.class)).thenReturn(config);
-        when(httpCallsStore.createHttpCalls(config))
+        var config = new ApiCallsConfiguration();
+        when(jsonSerialization.deserialize("{}", ApiCallsConfiguration.class)).thenReturn(config);
+        when(httpCallsStore.createApiCalls(config))
                 .thenReturn(Response.created(URI.create(
                         "/apicallstore/apicalls/new-id?version=1")).build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\",\"resourceId\":\"new-id\"}");
@@ -183,7 +183,7 @@ class McpAdminToolsCrudTest {
 
         assertNotNull(result);
         assertTrue(result.contains("created"));
-        verify(httpCallsStore).createHttpCalls(config);
+        verify(httpCallsStore).createApiCalls(config);
     }
 
     @Test
@@ -219,7 +219,7 @@ class McpAdminToolsCrudTest {
 
     @Test
     void deleteResource_httpcalls_success() throws IOException {
-        when(httpCallsStore.deleteHttpCalls(RESOURCE_ID, 1, false))
+        when(httpCallsStore.deleteApiCalls(RESOURCE_ID, 1, false))
                 .thenReturn(Response.ok().build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deleted\"}");
 
@@ -227,19 +227,19 @@ class McpAdminToolsCrudTest {
 
         assertNotNull(result);
         assertTrue(result.contains("deleted"));
-        verify(httpCallsStore).deleteHttpCalls(RESOURCE_ID, 1, false);
+        verify(httpCallsStore).deleteApiCalls(RESOURCE_ID, 1, false);
     }
 
     @Test
     void deleteResource_permanent_success() throws IOException {
-        when(behaviorStore.deleteBehaviorRuleSet(RESOURCE_ID, 2, true))
+        when(behaviorStore.deleteRuleSet(RESOURCE_ID, 2, true))
                 .thenReturn(Response.ok().build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deleted\",\"permanent\":true}");
 
         String result = tools.deleteResource("behavior", RESOURCE_ID, 2, true);
 
         assertNotNull(result);
-        verify(behaviorStore).deleteBehaviorRuleSet(RESOURCE_ID, 2, true);
+        verify(behaviorStore).deleteRuleSet(RESOURCE_ID, 2, true);
     }
 
     @Test
@@ -340,9 +340,9 @@ class McpAdminToolsCrudTest {
         when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
         var ext = new WorkflowConfiguration.WorkflowStep();
-        ext.setType(URI.create("eddi://ai.labs.behavior"));
+        ext.setType(URI.create("eddi://ai.labs.rules"));
         var configMap = new HashMap<String, Object>();
-        configMap.put("uri", "eddi://ai.labs.behavior/rulestore/rulesets/b1?version=1");
+        configMap.put("uri", "eddi://ai.labs.rules/rulestore/rulesets/b1?version=1");
         ext.setConfig(configMap);
         var pkgConfig = new WorkflowConfiguration();
         pkgConfig.setWorkflowSteps(new ArrayList<>(List.of(ext)));
@@ -357,11 +357,11 @@ class McpAdminToolsCrudTest {
         when(agentAdmin.deployAgent(Environment.production, AGENT_ID, 2, true, true))
                 .thenReturn(Response.ok().build());
 
-        String mappingsJson = "[{\"oldUri\":\"eddi://ai.labs.behavior/rulestore/rulesets/b1?version=1\"," +
-                "\"newUri\":\"eddi://ai.labs.behavior/rulestore/rulesets/b1?version=2\"}]";
+        String mappingsJson = "[{\"oldUri\":\"eddi://ai.labs.rules/rulestore/rulesets/b1?version=1\"," +
+                "\"newUri\":\"eddi://ai.labs.rules/rulestore/rulesets/b1?version=2\"}]";
         List<Map<String, String>> mappings = List.of(Map.of(
-                "oldUri", "eddi://ai.labs.behavior/rulestore/rulesets/b1?version=1",
-                "newUri", "eddi://ai.labs.behavior/rulestore/rulesets/b1?version=2"));
+                "oldUri", "eddi://ai.labs.rules/rulestore/rulesets/b1?version=1",
+                "newUri", "eddi://ai.labs.rules/rulestore/rulesets/b1?version=2"));
         when(jsonSerialization.deserialize(mappingsJson, List.class)).thenReturn(mappings);
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"redeployed\":true}");
 
@@ -421,8 +421,8 @@ class McpAdminToolsCrudTest {
         ext1.setType(URI.create("eddi://ai.labs.llm"));
         ext1.setConfig(Map.of("uri", "eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=1"));
         var ext2 = new WorkflowConfiguration.WorkflowStep();
-        ext2.setType(URI.create("eddi://ai.labs.behavior"));
-        ext2.setConfig(Map.of("uri", "eddi://ai.labs.behavior/rulestore/rulesets/b1?version=1"));
+        ext2.setType(URI.create("eddi://ai.labs.rules"));
+        ext2.setConfig(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/b1?version=1"));
         var pkgConfig = new WorkflowConfiguration();
         pkgConfig.setWorkflowSteps(List.of(ext1, ext2));
         when(WorkflowStore.readWorkflow(PKG_ID, 1)).thenReturn(pkgConfig);

@@ -4,7 +4,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.modules.rules.impl.BehaviorRule;
+import ai.labs.eddi.modules.rules.impl.Rule;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.utils.StringUtilities;
@@ -22,7 +22,7 @@ import java.util.Map;
  * @author ginccc
  */
 
-public class ContextMatcher implements IBehaviorCondition {
+public class ContextMatcher implements IRuleCondition {
     public static final String ID = "contextmatcher";
     private static final String CONTEXT = "context";
 
@@ -102,7 +102,7 @@ public class ContextMatcher implements IBehaviorCondition {
     }
 
     @Override
-    public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
+    public ExecutionState execute(IConversationMemory memory, List<Rule> trace) {
         List<IData<Context>> contextData = memory.getCurrentStep().getAllData(CONTEXT);
 
         ExecutionState state;
@@ -153,8 +153,8 @@ public class ContextMatcher implements IBehaviorCondition {
     }
 
     @Override
-    public IBehaviorCondition clone() {
-        IBehaviorCondition clone = new ContextMatcher(expressionProvider, jsonSerialization);
+    public IRuleCondition clone() {
+        IRuleCondition clone = new ContextMatcher(expressionProvider, jsonSerialization);
         clone.setConfigs(getConfigs());
         return clone;
     }

@@ -6,7 +6,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.modules.rules.impl.conditions.BaseMatcher.ConversationStepOccurrence;
-import ai.labs.eddi.modules.rules.impl.conditions.IBehaviorCondition.ExecutionState;
+import ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.ExecutionState;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

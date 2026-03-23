@@ -5,7 +5,7 @@ public interface IMigrationManager {
 
     IDocumentMigration migratePropertySetter();
 
-    IDocumentMigration migrateHttpCalls();
+    IDocumentMigration migrateApiCalls();
 
     IDocumentMigration migrateOutput();
 

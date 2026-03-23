@@ -18,11 +18,11 @@ abstract class AbstractBackupService {
         static final String PROPERTY_EXT = "property";
         static final String OUTPUT_EXT = "output";
         static final Pattern DICTIONARY_URI_PATTERN = Pattern
-                        .compile("\"eddi://ai.labs.regulardictionary/dictionarystore/dictionaries/.*?\"");
+                        .compile("\"eddi://ai.labs.dictionary/dictionarystore/dictionaries/.*?\"");
         static final Pattern BEHAVIOR_URI_PATTERN = Pattern
-                        .compile("\"eddi://ai.labs.behavior/rulestore/rulesets/.*?\"");
+                        .compile("\"eddi://ai.labs.rules/rulestore/rulesets/.*?\"");
         static final Pattern HTTPCALLS_URI_PATTERN = Pattern
-                        .compile("\"eddi://ai.labs.httpcalls/apicallstore/apicalls/.*?\"");
+                        .compile("\"eddi://ai.labs.apicalls/apicallstore/apicalls/.*?\"");
         static final Pattern LANGCHAIN_URI_PATTERN = Pattern
                         .compile("\"eddi://ai.labs.llm/llmstore/llmconfigs/.*?\"");
         static final Pattern PROPERTY_URI_PATTERN = Pattern

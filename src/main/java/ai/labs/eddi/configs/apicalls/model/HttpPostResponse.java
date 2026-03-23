@@ -2,13 +2,13 @@ package ai.labs.eddi.configs.apicalls.model;
 
 
 public class HttpPostResponse extends PostResponse {
-    private RetryHttpCallInstruction retryHttpCallInstruction;
+    private RetryApiCallInstruction retryApiCallInstruction;
 
-    public RetryHttpCallInstruction getRetryHttpCallInstruction() {
-        return retryHttpCallInstruction;
+    public RetryApiCallInstruction getRetryApiCallInstruction() {
+        return retryApiCallInstruction;
     }
 
-    public void setRetryHttpCallInstruction(RetryHttpCallInstruction retryHttpCallInstruction) {
-        this.retryHttpCallInstruction = retryHttpCallInstruction;
+    public void setRetryApiCallInstruction(RetryApiCallInstruction retryApiCallInstruction) {
+        this.retryApiCallInstruction = retryApiCallInstruction;
     }
 }

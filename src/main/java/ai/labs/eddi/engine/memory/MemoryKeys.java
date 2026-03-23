@@ -35,7 +35,7 @@ public final class MemoryKeys {
 
     /**
      * Parsed expression string. Written by InputParserTask, read by
-     * BehaviorRulesEvaluationTask.
+     * RulesEvaluationTask.
      */
     public static final MemoryKey<String> EXPRESSIONS_PARSED = MemoryKey.of("expressions:parsed");
 
@@ -70,9 +70,9 @@ public final class MemoryKeys {
      */
     public static final String QUICK_REPLIES_PREFIX = "quickReplies";
 
-    // ---- HttpCalls ----
+    // ---- ApiCalls ----
 
-    /** HttpCalls prefix key. Used for dynamic keys like "httpCalls:callName". */
+    /** ApiCalls prefix key. Used for dynamic keys like "httpCalls:callName". */
     public static final String HTTP_CALLS_PREFIX = "httpCalls";
 
     // ---- Properties ----

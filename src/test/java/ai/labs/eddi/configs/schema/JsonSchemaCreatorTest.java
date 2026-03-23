@@ -1,12 +1,12 @@
 package ai.labs.eddi.configs.schema;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
-import ai.labs.eddi.configs.rules.model.BehaviorConfiguration;
-import ai.labs.eddi.configs.apicalls.model.HttpCallsConfiguration;
+import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
-import ai.labs.eddi.configs.dictionary.model.RegularDictionaryConfiguration;
+import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,10 +37,10 @@ public class JsonSchemaCreatorTest {
         return Stream.of(
                 AgentConfiguration.class,
                 WorkflowConfiguration.class,
-                BehaviorConfiguration.class,
-                HttpCallsConfiguration.class,
+                RuleSetConfiguration.class,
+                ApiCallsConfiguration.class,
                 OutputConfigurationSet.class,
-                RegularDictionaryConfiguration.class,
+                DictionaryConfiguration.class,
                 PropertySetterConfiguration.class
         );
     }
@@ -88,7 +88,7 @@ public class JsonSchemaCreatorTest {
 
     @Test
     void generateSchema_dictionaryConfiguration_hasDescriptions() throws Exception {
-        String schemaJson = schemaCreator.generateSchema(RegularDictionaryConfiguration.class);
+        String schemaJson = schemaCreator.generateSchema(DictionaryConfiguration.class);
         JsonNode schema = objectMapper.readTree(schemaJson);
         JsonNode properties = schema.get("properties");
 
@@ -102,23 +102,23 @@ public class JsonSchemaCreatorTest {
 
     @Test
     void generateSchema_behaviorConfiguration_hasExpectedProperties() throws Exception {
-        String schemaJson = schemaCreator.generateSchema(BehaviorConfiguration.class);
+        String schemaJson = schemaCreator.generateSchema(RuleSetConfiguration.class);
         JsonNode schema = objectMapper.readTree(schemaJson);
         JsonNode properties = schema.get("properties");
 
         assertTrue(properties.has("behaviorGroups"),
-                "BehaviorConfiguration schema must have 'behaviorGroups' property");
+                "RuleSetConfiguration schema must have 'behaviorGroups' property");
     }
 
     @Test
     void generateSchema_httpCallsConfiguration_hasExpectedProperties() throws Exception {
-        String schemaJson = schemaCreator.generateSchema(HttpCallsConfiguration.class);
+        String schemaJson = schemaCreator.generateSchema(ApiCallsConfiguration.class);
         JsonNode schema = objectMapper.readTree(schemaJson);
         JsonNode properties = schema.get("properties");
 
         assertTrue(properties.has("targetServerUrl"),
-                "HttpCallsConfiguration schema must have 'targetServerUrl' property");
+                "ApiCallsConfiguration schema must have 'targetServerUrl' property");
         assertTrue(properties.has("httpCalls"),
-                "HttpCallsConfiguration schema must have 'httpCalls' property");
+                "ApiCallsConfiguration schema must have 'httpCalls' property");
     }
 }

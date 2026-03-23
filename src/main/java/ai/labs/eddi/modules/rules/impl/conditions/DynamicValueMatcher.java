@@ -2,7 +2,7 @@ package ai.labs.eddi.modules.rules.impl.conditions;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
-import ai.labs.eddi.modules.rules.impl.BehaviorRule;
+import ai.labs.eddi.modules.rules.impl.Rule;
 
 import java.util.HashMap;
 import java.util.List;
@@ -11,7 +11,7 @@ import java.util.Map;
 import static ai.labs.eddi.utils.MatchingUtilities.executeValuePath;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
-public class DynamicValueMatcher implements IBehaviorCondition {
+public class DynamicValueMatcher implements IRuleCondition {
     public static final String ID = "dynamicvaluematcher";
     private final IMemoryItemConverter memoryItemConverter;
 
@@ -60,7 +60,7 @@ public class DynamicValueMatcher implements IBehaviorCondition {
     }
 
     @Override
-    public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
+    public ExecutionState execute(IConversationMemory memory, List<Rule> trace) {
         ExecutionState state;
         if (!isNullOrEmpty(valuePath)) {
             var conversationValues = memoryItemConverter.convert(memory);
@@ -74,7 +74,7 @@ public class DynamicValueMatcher implements IBehaviorCondition {
     }
 
     @Override
-    public IBehaviorCondition clone() {
+    public IRuleCondition clone() {
         DynamicValueMatcher clone = new DynamicValueMatcher(memoryItemConverter);
         clone.setConfigs(getConfigs());
         return clone;

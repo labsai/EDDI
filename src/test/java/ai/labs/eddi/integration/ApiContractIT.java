@@ -34,7 +34,7 @@ public class ApiContractIT extends BaseIntegrationIT {
                 response.then().assertThat()
                                 .statusCode(201)
                                 .header("location", allOf(
-                                                containsString("eddi://ai.labs.behavior"),
+                                                containsString("eddi://ai.labs.rules"),
                                                 containsString("?version=1")));
         }
 
@@ -85,7 +85,7 @@ public class ApiContractIT extends BaseIntegrationIT {
                                 .then().assertThat()
                                 .statusCode(201)
                                 .header("location", allOf(
-                                                containsString("eddi://ai.labs.regulardictionary"),
+                                                containsString("eddi://ai.labs.dictionary"),
                                                 containsString("?version=1")));
         }
 
@@ -180,7 +180,7 @@ public class ApiContractIT extends BaseIntegrationIT {
                                                         "corrections": []
                                                       }
                                                     },
-                                                    {"type": "eddi://ai.labs.behavior", "config": {"uri": "%s"}},
+                                                    {"type": "eddi://ai.labs.rules", "config": {"uri": "%s"}},
                                                     {"type": "eddi://ai.labs.output", "config": {"uri": "%s"}},
                                                     {"type": "eddi://ai.labs.templating", "config": {}},
                                                     {"type": "eddi://ai.labs.property", "config": {}}

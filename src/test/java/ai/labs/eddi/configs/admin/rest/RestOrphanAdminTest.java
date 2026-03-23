@@ -68,6 +68,9 @@ class RestOrphanAdminTest {
         private String uriType(String descriptorType) {
                 return switch (descriptorType) {
                         case "ai.labs.package" -> "ai.labs.workflow";
+                        case "ai.labs.behavior" -> "ai.labs.rules";
+                        case "ai.labs.httpcalls" -> "ai.labs.apicalls";
+                        case "ai.labs.regulardictionary" -> "ai.labs.dictionary";
                         default -> descriptorType;
                 };
         }
@@ -116,9 +119,9 @@ class RestOrphanAdminTest {
 
                         WorkflowConfiguration pkgConfig = new WorkflowConfiguration();
                         WorkflowStep ext = new WorkflowStep();
-                        ext.setType(URI.create("eddi://ai.labs.behavior"));
+                        ext.setType(URI.create("eddi://ai.labs.rules"));
                         ext.setConfig(new HashMap<>(Map.of(
-                                        "uri", "eddi://ai.labs.behavior/rulestore/rulesets/" + BEH1_ID
+                                        "uri", "eddi://ai.labs.rules/rulestore/rulesets/" + BEH1_ID
                                                         + "?version=1")));
                         pkgConfig.getWorkflowSteps().add(ext);
                         when(WorkflowStore.read(PKG1_ID, 1)).thenReturn(pkgConfig);
@@ -163,9 +166,9 @@ class RestOrphanAdminTest {
 
                         WorkflowConfiguration pkgConfig = new WorkflowConfiguration();
                         WorkflowStep ext = new WorkflowStep();
-                        ext.setType(URI.create("eddi://ai.labs.behavior"));
+                        ext.setType(URI.create("eddi://ai.labs.rules"));
                         ext.setConfig(new HashMap<>(Map.of(
-                                        "uri", "eddi://ai.labs.behavior/rulestore/rulesets/" + BEH1_ID
+                                        "uri", "eddi://ai.labs.rules/rulestore/rulesets/" + BEH1_ID
                                                         + "?version=1")));
                         pkgConfig.getWorkflowSteps().add(ext);
                         when(WorkflowStore.read(PKG1_ID, 1)).thenReturn(pkgConfig);

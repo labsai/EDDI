@@ -1,14 +1,14 @@
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.configs.rules.IRestBehaviorStore;
-import ai.labs.eddi.configs.rules.model.BehaviorConfiguration;
+import ai.labs.eddi.configs.rules.IRestRuleSetStore;
+import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
-import ai.labs.eddi.configs.apicalls.model.HttpCallsConfiguration;
+import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
@@ -17,8 +17,8 @@ import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
-import ai.labs.eddi.configs.dictionary.IRestRegularDictionaryStore;
-import ai.labs.eddi.configs.dictionary.model.RegularDictionaryConfiguration;
+import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
+import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
@@ -402,12 +402,12 @@ public class McpAdminTools {
      */
     private Object readResourceByType(String type, String id, int version) {
         return switch (type) {
-            case "behavior" -> getRestStore(IRestBehaviorStore.class).readBehaviorRuleSet(id, version);
+            case "behavior" -> getRestStore(IRestRuleSetStore.class).readRuleSet(id, version);
             case "langchain" -> getRestStore(IRestLlmStore.class).readLlm(id, version);
-            case "httpcalls" -> getRestStore(IRestHttpCallsStore.class).readHttpCalls(id, version);
+            case "httpcalls" -> getRestStore(IRestApiCallsStore.class).readApiCalls(id, version);
             case "output" -> getRestStore(IRestOutputStore.class).readOutputSet(id, version, "", "", 0, 0);
             case "propertysetter" -> getRestStore(IRestPropertySetterStore.class).readPropertySetter(id, version);
-            case "dictionaries" -> getRestStore(IRestRegularDictionaryStore.class)
+            case "dictionaries" -> getRestStore(IRestDictionaryStore.class)
                     .readRegularDictionary(id, version, "", "", 0, 0);
             default -> throw new IllegalArgumentException("Unknown resource type: " + type +
                     ". Supported: behavior, langchain, httpcalls, output, propertysetter, dictionaries");
@@ -744,24 +744,24 @@ public class McpAdminTools {
     private Response updateResourceByType(String type, String id, int version, String configJson)
             throws IOException {
         return switch (type) {
-            case "behavior" -> getRestStore(IRestBehaviorStore.class)
-                    .updateBehaviorRuleSet(id, version,
-                            jsonSerialization.deserialize(configJson, BehaviorConfiguration.class));
+            case "behavior" -> getRestStore(IRestRuleSetStore.class)
+                    .updateRuleSet(id, version,
+                            jsonSerialization.deserialize(configJson, RuleSetConfiguration.class));
             case "langchain" -> getRestStore(IRestLlmStore.class)
                     .updateLlm(id, version,
                             jsonSerialization.deserialize(configJson, LlmConfiguration.class));
-            case "httpcalls" -> getRestStore(IRestHttpCallsStore.class)
-                    .updateHttpCalls(id, version,
-                            jsonSerialization.deserialize(configJson, HttpCallsConfiguration.class));
+            case "httpcalls" -> getRestStore(IRestApiCallsStore.class)
+                    .updateApiCalls(id, version,
+                            jsonSerialization.deserialize(configJson, ApiCallsConfiguration.class));
             case "output" -> getRestStore(IRestOutputStore.class)
                     .updateOutputSet(id, version,
                             jsonSerialization.deserialize(configJson, OutputConfigurationSet.class));
             case "propertysetter" -> getRestStore(IRestPropertySetterStore.class)
                     .updatePropertySetter(id, version,
                             jsonSerialization.deserialize(configJson, PropertySetterConfiguration.class));
-            case "dictionaries" -> getRestStore(IRestRegularDictionaryStore.class)
+            case "dictionaries" -> getRestStore(IRestDictionaryStore.class)
                     .updateRegularDictionary(id, version,
-                            jsonSerialization.deserialize(configJson, RegularDictionaryConfiguration.class));
+                            jsonSerialization.deserialize(configJson, DictionaryConfiguration.class));
             default -> throw new IllegalArgumentException("Unknown resource type: " + type +
                     ". Supported: behavior, langchain, httpcalls, output, propertysetter, dictionaries");
         };
@@ -772,19 +772,19 @@ public class McpAdminTools {
      */
     private Response createResourceByType(String type, String configJson) throws IOException {
         return switch (type) {
-            case "behavior" -> getRestStore(IRestBehaviorStore.class)
-                    .createBehaviorRuleSet(jsonSerialization.deserialize(configJson, BehaviorConfiguration.class));
+            case "behavior" -> getRestStore(IRestRuleSetStore.class)
+                    .createRuleSet(jsonSerialization.deserialize(configJson, RuleSetConfiguration.class));
             case "langchain" -> getRestStore(IRestLlmStore.class)
                     .createLlm(jsonSerialization.deserialize(configJson, LlmConfiguration.class));
-            case "httpcalls" -> getRestStore(IRestHttpCallsStore.class)
-                    .createHttpCalls(jsonSerialization.deserialize(configJson, HttpCallsConfiguration.class));
+            case "httpcalls" -> getRestStore(IRestApiCallsStore.class)
+                    .createApiCalls(jsonSerialization.deserialize(configJson, ApiCallsConfiguration.class));
             case "output" -> getRestStore(IRestOutputStore.class)
                     .createOutputSet(jsonSerialization.deserialize(configJson, OutputConfigurationSet.class));
             case "propertysetter" -> getRestStore(IRestPropertySetterStore.class)
                     .createPropertySetter(jsonSerialization.deserialize(configJson, PropertySetterConfiguration.class));
-            case "dictionaries" -> getRestStore(IRestRegularDictionaryStore.class)
+            case "dictionaries" -> getRestStore(IRestDictionaryStore.class)
                     .createRegularDictionary(
-                            jsonSerialization.deserialize(configJson, RegularDictionaryConfiguration.class));
+                            jsonSerialization.deserialize(configJson, DictionaryConfiguration.class));
             default -> throw new IllegalArgumentException("Unknown resource type: " + type +
                     ". Supported: behavior, langchain, httpcalls, output, propertysetter, dictionaries");
         };
@@ -795,14 +795,14 @@ public class McpAdminTools {
      */
     private Response deleteResourceByType(String type, String id, int version, boolean permanent) {
         return switch (type) {
-            case "behavior" -> getRestStore(IRestBehaviorStore.class).deleteBehaviorRuleSet(id, version, permanent);
+            case "behavior" -> getRestStore(IRestRuleSetStore.class).deleteRuleSet(id, version, permanent);
             case "langchain" -> getRestStore(IRestLlmStore.class).deleteLlm(id, version, permanent);
-            case "httpcalls" -> getRestStore(IRestHttpCallsStore.class).deleteHttpCalls(id, version, permanent);
+            case "httpcalls" -> getRestStore(IRestApiCallsStore.class).deleteApiCalls(id, version, permanent);
             case "output" -> getRestStore(IRestOutputStore.class).deleteOutputSet(id, version, permanent);
             case "propertysetter" ->
                 getRestStore(IRestPropertySetterStore.class).deletePropertySetter(id, version, permanent);
             case "dictionaries" ->
-                getRestStore(IRestRegularDictionaryStore.class).deleteRegularDictionary(id, version, permanent);
+                getRestStore(IRestDictionaryStore.class).deleteRegularDictionary(id, version, permanent);
             default -> throw new IllegalArgumentException("Unknown resource type: " + type +
                     ". Supported: behavior, langchain, httpcalls, output, propertysetter, dictionaries");
         };
@@ -810,7 +810,7 @@ public class McpAdminTools {
 
     /**
      * Map a workflow extension type URI to the MCP resource type slug.
-     * E.g., "eddi://ai.labs.behavior" → "behavior"
+     * E.g., "eddi://ai.labs.rules" → "behavior"
      */
     private static String uriToResourceType(String typeUri) {
         if (typeUri == null)

@@ -3,7 +3,7 @@ package ai.labs.eddi.modules.rules.impl.conditions;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
-import ai.labs.eddi.modules.rules.impl.conditions.IBehaviorCondition.ExecutionState;
+import ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.ExecutionState;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

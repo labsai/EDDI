@@ -2,7 +2,7 @@ package ai.labs.eddi.modules.rules.impl.conditions;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
-import ai.labs.eddi.modules.rules.impl.BehaviorRule;
+import ai.labs.eddi.modules.rules.impl.Rule;
 import ai.labs.eddi.utils.PathNavigator;
 import org.jboss.logging.Logger;
 
@@ -14,7 +14,7 @@ import java.util.Map;
  * @author ginccc
  */
 
-public class SizeMatcher implements IBehaviorCondition {
+public class SizeMatcher implements IRuleCondition {
     public static final String ID = "sizematcher";
     private static final String valuePathQualifier = "valuePath";
     private final String minQualifier = "min";
@@ -73,8 +73,8 @@ public class SizeMatcher implements IBehaviorCondition {
     }
 
     @Override
-    public ExecutionState execute(final IConversationMemory memory, final List<BehaviorRule> trace)
-            throws BehaviorRule.RuntimeException {
+    public ExecutionState execute(final IConversationMemory memory, final List<Rule> trace)
+            throws Rule.RuntimeException {
         if (min == -1 && max == -1 && equal == -1) {
             return ExecutionState.NOT_EXECUTED;
         }
@@ -108,8 +108,8 @@ public class SizeMatcher implements IBehaviorCondition {
         return isMin && isMax && isEqual ? ExecutionState.SUCCESS : ExecutionState.FAIL;
     }
 
-    public IBehaviorCondition clone() {
-        IBehaviorCondition clone = new SizeMatcher(memoryItemConverter);
+    public IRuleCondition clone() {
+        IRuleCondition clone = new SizeMatcher(memoryItemConverter);
         clone.setConfigs(getConfigs());
         return clone;
     }

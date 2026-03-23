@@ -7,12 +7,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static ai.labs.eddi.modules.rules.impl.conditions.IBehaviorCondition.ExecutionState.SUCCESS;
+import static ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.ExecutionState.SUCCESS;
 
 /**
  * @author ginccc
  */
-public abstract class BaseMatcher implements IBehaviorCondition {
+public abstract class BaseMatcher implements IRuleCondition {
     private static final String KEY_OCCURRENCE = "occurrence";
     static final String KEY_EMPTY = "empty";
 
@@ -29,7 +29,7 @@ public abstract class BaseMatcher implements IBehaviorCondition {
     }
 
     @Override
-    public IBehaviorCondition clone() throws CloneNotSupportedException {
+    public IRuleCondition clone() throws CloneNotSupportedException {
         throw new CloneNotSupportedException("Should be Overridden by Subclass!");
     }
 

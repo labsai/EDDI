@@ -77,7 +77,7 @@ public interface IRestParserStore extends IRestVersionInfo {
      * "type": "eddi://ai.labs.parser.dictionaries.regular",
      * "config": {
      * "uri":
-     * "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/<INSERT_ID_OF_DICTIONARY>?version=<VERSION_NUMBER>"
+     * "eddi://ai.labs.dictionary/regulardictionarystore/regulardictionaries/<INSERT_ID_OF_DICTIONARY>?version=<VERSION_NUMBER>"
      * }
      * }
      * ],

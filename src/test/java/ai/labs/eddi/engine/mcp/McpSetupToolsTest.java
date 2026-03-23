@@ -1,9 +1,9 @@
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.configs.rules.IRestBehaviorStore;
+import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
-import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
+import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -27,10 +27,10 @@ import static org.mockito.Mockito.*;
 
 class McpSetupToolsTest {
 
-        private IRestBehaviorStore behaviorStore;
+        private IRestRuleSetStore behaviorStore;
         private IRestLlmStore langchainStore;
         private IRestOutputStore outputStore;
-        private IRestHttpCallsStore httpCallsStore;
+        private IRestApiCallsStore httpCallsStore;
         private IRestWorkflowStore WorkflowStore;
         private IRestAgentStore AgentStore;
         private IRestDocumentDescriptorStore descriptorStore;
@@ -41,10 +41,10 @@ class McpSetupToolsTest {
 
         @BeforeEach
         void setUp() throws Exception {
-                behaviorStore = mock(IRestBehaviorStore.class);
+                behaviorStore = mock(IRestRuleSetStore.class);
                 langchainStore = mock(IRestLlmStore.class);
                 outputStore = mock(IRestOutputStore.class);
-                httpCallsStore = mock(IRestHttpCallsStore.class);
+                httpCallsStore = mock(IRestApiCallsStore.class);
                 WorkflowStore = mock(IRestWorkflowStore.class);
                 AgentStore = mock(IRestAgentStore.class);
                 descriptorStore = mock(IRestDocumentDescriptorStore.class);
@@ -54,10 +54,10 @@ class McpSetupToolsTest {
 
                 // Wire store mocks through IRestInterfaceFactory
                 var restInterfaceFactory = mock(IRestInterfaceFactory.class);
-                when(restInterfaceFactory.get(IRestBehaviorStore.class)).thenReturn(behaviorStore);
+                when(restInterfaceFactory.get(IRestRuleSetStore.class)).thenReturn(behaviorStore);
                 when(restInterfaceFactory.get(IRestLlmStore.class)).thenReturn(langchainStore);
                 when(restInterfaceFactory.get(IRestOutputStore.class)).thenReturn(outputStore);
-                when(restInterfaceFactory.get(IRestHttpCallsStore.class)).thenReturn(httpCallsStore);
+                when(restInterfaceFactory.get(IRestApiCallsStore.class)).thenReturn(httpCallsStore);
                 when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(WorkflowStore);
                 when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(AgentStore);
                 when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
@@ -77,7 +77,7 @@ class McpSetupToolsTest {
         @Test
         void setupAgent_fullWorkflow_createsAllResources() throws Exception {
                 // Mock all store responses with Location headers
-                when(behaviorStore.createBehaviorRuleSet(any()))
+                when(behaviorStore.createRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
@@ -104,7 +104,7 @@ class McpSetupToolsTest {
 
                 // Verify all resources created in order
                 verify(parserStore).createParser(any());
-                verify(behaviorStore).createBehaviorRuleSet(any());
+                verify(behaviorStore).createRuleSet(any());
                 verify(langchainStore).createLlm(any());
                 verify(outputStore).createOutputSet(any());
                 verify(WorkflowStore).createWorkflow(any());
@@ -118,7 +118,7 @@ class McpSetupToolsTest {
 
         @Test
         void setupAgent_withoutIntro_skipsOutput() throws Exception {
-                when(behaviorStore.createBehaviorRuleSet(any()))
+                when(behaviorStore.createRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
@@ -143,7 +143,7 @@ class McpSetupToolsTest {
 
         @Test
         void setupAgent_withoutDeploy_skipsDeploy() throws Exception {
-                when(behaviorStore.createBehaviorRuleSet(any()))
+                when(behaviorStore.createRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
@@ -165,7 +165,7 @@ class McpSetupToolsTest {
 
         @Test
         void setupAgent_deployFails_returnsSuccessWithWarning() throws Exception {
-                when(behaviorStore.createBehaviorRuleSet(any()))
+                when(behaviorStore.createRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
@@ -214,7 +214,7 @@ class McpSetupToolsTest {
 
         @Test
         void setupAgent_ollamaNoApiKey_succeeds() throws Exception {
-                when(behaviorStore.createBehaviorRuleSet(any()))
+                when(behaviorStore.createRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
@@ -238,7 +238,7 @@ class McpSetupToolsTest {
 
         @Test
         void setupAgent_jlamaNoApiKey_succeeds() throws Exception {
-                when(behaviorStore.createBehaviorRuleSet(any()))
+                when(behaviorStore.createRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
@@ -260,7 +260,7 @@ class McpSetupToolsTest {
 
         @Test
         void setupAgent_capturesLangchainConfig() throws Exception {
-                when(behaviorStore.createBehaviorRuleSet(any()))
+                when(behaviorStore.createRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
@@ -291,7 +291,7 @@ class McpSetupToolsTest {
 
         @Test
         void setupAgent_capturesWorkflowConfig() throws Exception {
-                when(behaviorStore.createBehaviorRuleSet(any()))
+                when(behaviorStore.createRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
@@ -318,14 +318,14 @@ class McpSetupToolsTest {
                 // Should have 4 extensions: parser, behavior, langchain, output
                 assertEquals(4, pkgConfig.getWorkflowSteps().size());
                 assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getWorkflowSteps().get(0).getType());
-                assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getWorkflowSteps().get(1).getType());
+                assertEquals(URI.create("eddi://ai.labs.rules"), pkgConfig.getWorkflowSteps().get(1).getType());
                 assertEquals(URI.create("eddi://ai.labs.llm"), pkgConfig.getWorkflowSteps().get(2).getType());
                 assertEquals(URI.create("eddi://ai.labs.output"), pkgConfig.getWorkflowSteps().get(3).getType());
         }
 
         @Test
         void setupAgent_packageWithoutOutput_has3Extensions() throws Exception {
-                when(behaviorStore.createBehaviorRuleSet(any()))
+                when(behaviorStore.createRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
@@ -356,9 +356,9 @@ class McpSetupToolsTest {
                 assertEquals(1, config.getBehaviorGroups().size());
 
                 var group = config.getBehaviorGroups().get(0);
-                assertEquals(1, group.getBehaviorRules().size());
+                assertEquals(1, group.getRules().size());
 
-                var rule = group.getBehaviorRules().get(0);
+                var rule = group.getRules().get(0);
                 assertEquals("Send Message to LLM", rule.getName());
                 assertEquals(List.of("send_message"), rule.getActions());
                 assertEquals("inputmatcher", rule.getConditions().get(0).getType());
@@ -434,7 +434,7 @@ class McpSetupToolsTest {
 
         @Test
         void setupAgent_withQuickReplies_appendsJsonFormat() throws Exception {
-                when(behaviorStore.createBehaviorRuleSet(any()))
+                when(behaviorStore.createRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
@@ -472,7 +472,7 @@ class McpSetupToolsTest {
 
         @Test
         void setupAgent_withSentiment_appendsJsonFormat() throws Exception {
-                when(behaviorStore.createBehaviorRuleSet(any()))
+                when(behaviorStore.createRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
@@ -511,7 +511,7 @@ class McpSetupToolsTest {
 
         @Test
         void setupAgent_withAgenthFeatures_appendsFullJsonFormat() throws Exception {
-                when(behaviorStore.createBehaviorRuleSet(any()))
+                when(behaviorStore.createRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
@@ -546,7 +546,7 @@ class McpSetupToolsTest {
 
         @Test
         void setupAgent_anthropic_noResponseFormat() throws Exception {
-                when(behaviorStore.createBehaviorRuleSet(any()))
+                when(behaviorStore.createRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
@@ -702,12 +702,12 @@ class McpSetupToolsTest {
         @Test
         void createApiAgent_fullWorkflow_createsAllResources() throws Exception {
                 // Mock all store responses
-                when(httpCallsStore.createHttpCalls(any()))
+                when(httpCallsStore.createApiCalls(any()))
                                 .thenReturn(Response.created(URI.create("/apicallstore/apicalls/hc-1?version=1"))
                                                 .build())
                                 .thenReturn(Response.created(URI.create("/apicallstore/apicalls/hc-2?version=1"))
                                                 .build());
-                when(behaviorStore.createBehaviorRuleSet(any()))
+                when(behaviorStore.createRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
@@ -730,9 +730,9 @@ class McpSetupToolsTest {
                 assertNotNull(result);
 
                 // Verify httpcalls created (2 groups: users, orders)
-                verify(httpCallsStore, times(2)).createHttpCalls(any());
+                verify(httpCallsStore, times(2)).createApiCalls(any());
                 verify(parserStore).createParser(any());
-                verify(behaviorStore).createBehaviorRuleSet(any());
+                verify(behaviorStore).createRuleSet(any());
                 verify(langchainStore).createLlm(any());
                 verify(WorkflowStore).createWorkflow(any());
                 verify(AgentStore).createAgent(any());
@@ -765,13 +765,13 @@ class McpSetupToolsTest {
         }
 
         @Test
-        void createApiAgent_packageContainsHttpCallsExtensions() throws Exception {
-                when(httpCallsStore.createHttpCalls(any()))
+        void createApiAgent_packageContainsApiCallsExtensions() throws Exception {
+                when(httpCallsStore.createApiCalls(any()))
                                 .thenReturn(Response.created(URI.create("/apicallstore/apicalls/hc-1?version=1"))
                                                 .build())
                                 .thenReturn(Response.created(URI.create("/apicallstore/apicalls/hc-2?version=1"))
                                                 .build());
-                when(behaviorStore.createBehaviorRuleSet(any()))
+                when(behaviorStore.createRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
@@ -794,9 +794,9 @@ class McpSetupToolsTest {
                 // Should have 5 extensions: parser + behavior + 2 httpcalls groups + langchain
                 assertEquals(5, pkgConfig.getWorkflowSteps().size());
                 assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getWorkflowSteps().get(0).getType());
-                assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getWorkflowSteps().get(1).getType());
-                assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getWorkflowSteps().get(2).getType());
-                assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getWorkflowSteps().get(3).getType());
+                assertEquals(URI.create("eddi://ai.labs.rules"), pkgConfig.getWorkflowSteps().get(1).getType());
+                assertEquals(URI.create("eddi://ai.labs.apicalls"), pkgConfig.getWorkflowSteps().get(2).getType());
+                assertEquals(URI.create("eddi://ai.labs.apicalls"), pkgConfig.getWorkflowSteps().get(3).getType());
                 assertEquals(URI.create("eddi://ai.labs.llm"), pkgConfig.getWorkflowSteps().get(4).getType());
         }
 }

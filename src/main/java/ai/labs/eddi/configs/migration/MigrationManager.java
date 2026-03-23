@@ -106,7 +106,7 @@ public class MigrationManager implements IMigrationManager {
             this.isCurrentlyRunning = true;
             if (isMigrationNeeded()) {
                 startPropertyMigration();
-                startHttpCallsMigration();
+                startApiCallsMigration();
                 startOutputMigration();
                 if (!skipConversationMemories) {
                     startConversationMemoryMigration();
@@ -142,9 +142,9 @@ public class MigrationManager implements IMigrationManager {
     }
 
 
-    private void startHttpCallsMigration() {
+    private void startApiCallsMigration() {
         try {
-            IDocumentMigration migration = migrateHttpCalls();
+            IDocumentMigration migration = migrateApiCalls();
             boolean migrationHasExecuted =
                     iterateMigration(COLLECTION_HTTPCALLS, migration,
                             httpCallsCollection, httpCallsCollectionHistory);
@@ -254,20 +254,20 @@ public class MigrationManager implements IMigrationManager {
 
     @Override
     @SuppressWarnings("unchecked")
-    public IDocumentMigration migrateHttpCalls() {
+    public IDocumentMigration migrateApiCalls() {
         return document -> {
             try {
-                boolean convertedHttpCalls = false;
+                boolean convertedApiCalls = false;
                 if (document.containsKey(OLD_FIELD_NAME_TARGET_SERVER)) {
                     document.put(FIELD_NAME_TARGET_SERVER_URL, document.get(OLD_FIELD_NAME_TARGET_SERVER));
                     document.remove(OLD_FIELD_NAME_TARGET_SERVER);
-                    convertedHttpCalls = true;
+                    convertedApiCalls = true;
                 }
                 String differentOldFieldName = OLD_FIELD_NAME_TARGET_SERVER + "Uri";
                 if (document.containsKey(differentOldFieldName)) {
                     document.put(FIELD_NAME_TARGET_SERVER_URL, document.get(differentOldFieldName));
                     document.remove(differentOldFieldName);
-                    convertedHttpCalls = true;
+                    convertedApiCalls = true;
                 }
                 if (document.containsKey(FIELD_NAME_HTTP_CALLS)) {
                     var httpCalls = (List<Map<String, Object>>) document.get(FIELD_NAME_HTTP_CALLS);
@@ -275,18 +275,18 @@ public class MigrationManager implements IMigrationManager {
                         if (httpCall.containsKey(FIELD_NAME_PRE_REQUEST)) {
                             var preRequest =
                                     (Map<String, List<Map<String, Object>>>) httpCall.get(FIELD_NAME_PRE_REQUEST);
-                            convertedHttpCalls = convertPreAndPostProcessing(preRequest) || convertedHttpCalls;
+                            convertedApiCalls = convertPreAndPostProcessing(preRequest) || convertedApiCalls;
                         }
 
                         if (httpCall.containsKey(FIELD_NAME_POST_RESPONSE)) {
                             var postResponse =
                                     (Map<String, List<Map<String, Object>>>) httpCall.get(FIELD_NAME_POST_RESPONSE);
-                            convertedHttpCalls = convertPreAndPostProcessing(postResponse) || convertedHttpCalls;
+                            convertedApiCalls = convertPreAndPostProcessing(postResponse) || convertedApiCalls;
                         }
                     }
                 }
 
-                return convertedHttpCalls ? document : null;
+                return convertedApiCalls ? document : null;
             } catch (Exception e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
                 return null;

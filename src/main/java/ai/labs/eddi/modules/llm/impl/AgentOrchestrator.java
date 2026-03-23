@@ -126,12 +126,12 @@ class AgentOrchestrator {
         String effectiveSystemMessage = systemMessage;
         if (task.getTools() != null && !task.getTools().isEmpty()) {
             StringBuilder toolInstructions = new StringBuilder(
-                    "\n\nYou have access to the following external tools via the 'executeHttpCall' function:\n");
+                    "\n\nYou have access to the following external tools via the 'executeApiCall' function:\n");
             for (String toolUri : task.getTools()) {
                 toolInstructions.append("- ").append(toolUri).append("\n");
             }
             toolInstructions
-                    .append("When using 'executeHttpCall', pass the exact URI as the 'httpCallUri' argument.\n");
+                    .append("When using 'executeApiCall', pass the exact URI as the 'httpCallUri' argument.\n");
 
             if (isNullOrEmpty(effectiveSystemMessage)) {
                 effectiveSystemMessage = toolInstructions.toString();

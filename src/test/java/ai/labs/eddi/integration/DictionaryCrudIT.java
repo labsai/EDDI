@@ -19,7 +19,7 @@ import static org.hamcrest.Matchers.equalTo;
 public class DictionaryCrudIT extends BaseIntegrationIT {
 
     private static final String ROOT_PATH = "/dictionarystore/dictionaries/";
-    private static final String RESOURCE_URI = "eddi://ai.labs.regulardictionary" + ROOT_PATH;
+    private static final String RESOURCE_URI = "eddi://ai.labs.dictionary" + ROOT_PATH;
 
     private static String TEST_JSON;
     private static String TEST_JSON2;

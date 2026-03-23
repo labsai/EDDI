@@ -19,7 +19,7 @@ import static org.hamcrest.Matchers.equalTo;
 public class RulesCrudIT extends BaseIntegrationIT {
 
     private static final String ROOT_PATH = "/rulestore/rulesets/";
-    private static final String RESOURCE_URI = "eddi://ai.labs.behavior" + ROOT_PATH;
+    private static final String RESOURCE_URI = "eddi://ai.labs.rules" + ROOT_PATH;
 
     private static String TEST_JSON;
     private static String TEST_JSON2;

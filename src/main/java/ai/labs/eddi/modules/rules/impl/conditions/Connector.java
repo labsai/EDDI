@@ -1,7 +1,7 @@
 package ai.labs.eddi.modules.rules.impl.conditions;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.modules.rules.impl.BehaviorRule;
+import ai.labs.eddi.modules.rules.impl.Rule;
 
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -12,7 +12,7 @@ import java.util.Map;
 /**
  * @author ginccc
  */
-public class Connector implements IBehaviorCondition {
+public class Connector implements IRuleCondition {
     public static final String ID = "connector";
     private final String operatorQualifier = "operator";
 
@@ -22,7 +22,7 @@ public class Connector implements IBehaviorCondition {
 
     private Operator operator;
 
-    private final List<IBehaviorCondition> conditions = new LinkedList<>();
+    private final List<IRuleCondition> conditions = new LinkedList<>();
 
     private Connector(Operator operator) {
         this.operator = operator;
@@ -54,14 +54,14 @@ public class Connector implements IBehaviorCondition {
         }
     }
 
-    public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace)
-            throws BehaviorRule.InfiniteLoopException, BehaviorRule.RuntimeException {
+    public ExecutionState execute(IConversationMemory memory, List<Rule> trace)
+            throws Rule.InfiniteLoopException, Rule.RuntimeException {
 
         ExecutionState state;
         if (operator == Operator.OR) {
             state = ExecutionState.FAIL;
 
-            for (IBehaviorCondition condition : conditions) {
+            for (IRuleCondition condition : conditions) {
                 var executionState = condition.execute(memory, trace);
                 if (executionState == ExecutionState.SUCCESS || executionState == ExecutionState.ERROR) {
                     state = executionState;
@@ -72,7 +72,7 @@ public class Connector implements IBehaviorCondition {
         {
             state = ExecutionState.SUCCESS;
 
-            for (IBehaviorCondition condition : conditions) {
+            for (IRuleCondition condition : conditions) {
                 var executionState = condition.execute(memory, trace);
                 if (executionState == ExecutionState.FAIL || executionState == ExecutionState.ERROR) {
                     state = executionState;
@@ -89,11 +89,11 @@ public class Connector implements IBehaviorCondition {
     }
 
     @Override
-    public IBehaviorCondition clone() throws CloneNotSupportedException {
+    public IRuleCondition clone() throws CloneNotSupportedException {
         Connector clone = new Connector(operator);
 
-        List<IBehaviorCondition> conditionClone = new LinkedList<>();
-        for (IBehaviorCondition condition : conditions) {
+        List<IRuleCondition> conditionClone = new LinkedList<>();
+        for (IRuleCondition condition : conditions) {
             conditionClone.add(condition.clone());
         }
 
@@ -104,14 +104,14 @@ public class Connector implements IBehaviorCondition {
     }
 
     @Override
-    public void setConditions(List<IBehaviorCondition> conditions) {
+    public void setConditions(List<IRuleCondition> conditions) {
         this.conditions.addAll(conditions);
     }
 
     public Connector() {
     }
 
-    public List<IBehaviorCondition> getConditions() {
+    public List<IRuleCondition> getConditions() {
         return conditions;
     }
 }

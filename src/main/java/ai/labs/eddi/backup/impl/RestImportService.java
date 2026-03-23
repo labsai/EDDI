@@ -5,15 +5,15 @@ import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
-import ai.labs.eddi.configs.rules.IRestBehaviorStore;
-import ai.labs.eddi.configs.rules.model.BehaviorConfiguration;
+import ai.labs.eddi.configs.rules.IRestRuleSetStore;
+import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
-import ai.labs.eddi.configs.apicalls.model.HttpCallsConfiguration;
+import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.output.IRestOutputStore;
@@ -23,8 +23,8 @@ import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
-import ai.labs.eddi.configs.dictionary.IRestRegularDictionaryStore;
-import ai.labs.eddi.configs.dictionary.model.RegularDictionaryConfiguration;
+import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
+import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -381,7 +381,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         List<URI> dictionaryUris = extractResourcesUris(packageFileString, DICTIONARY_URI_PATTERN);
                         List<URI> newDictionaryUris = createOrUpdateResources(
                                 readResources(dictionaryUris, packagePath,
-                                        DICTIONARY_EXT, RegularDictionaryConfiguration.class),
+                                        DICTIONARY_EXT, DictionaryConfiguration.class),
                                 dictionaryUris, isMerge, selectedSet,
                                 this::createNewDictionaries, this::updateDictionary);
 
@@ -392,7 +392,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         List<URI> behaviorUris = extractResourcesUris(packageFileString, BEHAVIOR_URI_PATTERN);
                         List<URI> newBehaviorUris = createOrUpdateResources(
                                 readResources(behaviorUris, packagePath,
-                                        BEHAVIOR_EXT, BehaviorConfiguration.class),
+                                        BEHAVIOR_EXT, RuleSetConfiguration.class),
                                 behaviorUris, isMerge, selectedSet,
                                 this::createNewBehaviors, this::updateBehavior);
 
@@ -401,14 +401,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                         // ... for http calls
                         List<URI> httpCallsUris = extractResourcesUris(packageFileString, HTTPCALLS_URI_PATTERN);
-                        List<URI> newHttpCallsUris = createOrUpdateResources(
+                        List<URI> newApiCallsUris = createOrUpdateResources(
                                 readResources(httpCallsUris, packagePath,
-                                        HTTPCALLS_EXT, HttpCallsConfiguration.class),
+                                        HTTPCALLS_EXT, ApiCallsConfiguration.class),
                                 httpCallsUris, isMerge, selectedSet,
-                                this::createNewHttpCalls, this::updateHttpCalls);
+                                this::createNewApiCalls, this::updateApiCalls);
 
-                        updateDocumentDescriptor(packagePath, httpCallsUris, newHttpCallsUris);
-                        packageFileString = replaceURIs(packageFileString, httpCallsUris, newHttpCallsUris);
+                        updateDocumentDescriptor(packagePath, httpCallsUris, newApiCallsUris);
+                        packageFileString = replaceURIs(packageFileString, httpCallsUris, newApiCallsUris);
 
                         // ... for langchain
                         List<URI> langchainUris = extractResourcesUris(packageFileString, LANGCHAIN_URI_PATTERN);
@@ -643,9 +643,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return packageResponse.getLocation();
     }
 
-    private List<URI> createNewDictionaries(List<RegularDictionaryConfiguration> dictionaryConfigurations)
+    private List<URI> createNewDictionaries(List<DictionaryConfiguration> dictionaryConfigurations)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestRegularDictionaryStore restDictionaryStore = getRestResourceStore(IRestRegularDictionaryStore.class);
+        IRestDictionaryStore restDictionaryStore = getRestResourceStore(IRestDictionaryStore.class);
         return dictionaryConfigurations.stream().map(regularDictionaryConfiguration -> {
             Response dictionaryResponse = restDictionaryStore.createRegularDictionary(regularDictionaryConfiguration);
             checkIfCreatedResponse(dictionaryResponse);
@@ -653,21 +653,21 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }).toList();
     }
 
-    private List<URI> createNewBehaviors(List<BehaviorConfiguration> behaviorConfigurations)
+    private List<URI> createNewBehaviors(List<RuleSetConfiguration> behaviorConfigurations)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestBehaviorStore restBehaviorStore = getRestResourceStore(IRestBehaviorStore.class);
+        IRestRuleSetStore restRuleSetStore = getRestResourceStore(IRestRuleSetStore.class);
         return behaviorConfigurations.stream().map(behaviorConfiguration -> {
-            Response behaviorResponse = restBehaviorStore.createBehaviorRuleSet(behaviorConfiguration);
+            Response behaviorResponse = restRuleSetStore.createRuleSet(behaviorConfiguration);
             checkIfCreatedResponse(behaviorResponse);
             return behaviorResponse.getLocation();
         }).toList();
     }
 
-    private List<URI> createNewHttpCalls(List<HttpCallsConfiguration> httpCallsConfigurations)
+    private List<URI> createNewApiCalls(List<ApiCallsConfiguration> httpCallsConfigurations)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestHttpCallsStore restHttpCallsStore = getRestResourceStore(IRestHttpCallsStore.class);
+        IRestApiCallsStore restApiCallsStore = getRestResourceStore(IRestApiCallsStore.class);
         return httpCallsConfigurations.stream().map(httpCallsConfiguration -> {
-            Response httpCallsResponse = restHttpCallsStore.createHttpCalls(httpCallsConfiguration);
+            Response httpCallsResponse = restApiCallsStore.createApiCalls(httpCallsConfiguration);
             checkIfCreatedResponse(httpCallsResponse);
             return httpCallsResponse.getLocation();
         }).toList();
@@ -705,13 +705,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     // ==================== Resource Update (new merge logic) ====================
 
-    private URI updateDictionary(RegularDictionaryConfiguration config, String localId, Integer localVersion)
+    private URI updateDictionary(DictionaryConfiguration config, String localId, Integer localVersion)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestRegularDictionaryStore store = getRestResourceStore(IRestRegularDictionaryStore.class);
+        IRestDictionaryStore store = getRestResourceStore(IRestDictionaryStore.class);
         Response response = store.updateRegularDictionary(localId, localVersion, config);
         if (response.getStatus() == 200) {
-            return URI.create(IRestRegularDictionaryStore.resourceURI + localId +
-                    IRestRegularDictionaryStore.versionQueryParam + (localVersion + 1));
+            return URI.create(IRestDictionaryStore.resourceURI + localId +
+                    IRestDictionaryStore.versionQueryParam + (localVersion + 1));
         }
         // Fallback: create new
         Response createResp = store.createRegularDictionary(config);
@@ -719,28 +719,28 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return createResp.getLocation();
     }
 
-    private URI updateBehavior(BehaviorConfiguration config, String localId, Integer localVersion)
+    private URI updateBehavior(RuleSetConfiguration config, String localId, Integer localVersion)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestBehaviorStore store = getRestResourceStore(IRestBehaviorStore.class);
-        Response response = store.updateBehaviorRuleSet(localId, localVersion, config);
+        IRestRuleSetStore store = getRestResourceStore(IRestRuleSetStore.class);
+        Response response = store.updateRuleSet(localId, localVersion, config);
         if (response.getStatus() == 200) {
-            return URI.create(IRestBehaviorStore.resourceURI + localId +
-                    IRestBehaviorStore.versionQueryParam + (localVersion + 1));
+            return URI.create(IRestRuleSetStore.resourceURI + localId +
+                    IRestRuleSetStore.versionQueryParam + (localVersion + 1));
         }
-        Response createResp = store.createBehaviorRuleSet(config);
+        Response createResp = store.createRuleSet(config);
         checkIfCreatedResponse(createResp);
         return createResp.getLocation();
     }
 
-    private URI updateHttpCalls(HttpCallsConfiguration config, String localId, Integer localVersion)
+    private URI updateApiCalls(ApiCallsConfiguration config, String localId, Integer localVersion)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestHttpCallsStore store = getRestResourceStore(IRestHttpCallsStore.class);
-        Response response = store.updateHttpCalls(localId, localVersion, config);
+        IRestApiCallsStore store = getRestResourceStore(IRestApiCallsStore.class);
+        Response response = store.updateApiCalls(localId, localVersion, config);
         if (response.getStatus() == 200) {
-            return URI.create(IRestHttpCallsStore.resourceURI + localId +
-                    IRestHttpCallsStore.versionQueryParam + (localVersion + 1));
+            return URI.create(IRestApiCallsStore.resourceURI + localId +
+                    IRestApiCallsStore.versionQueryParam + (localVersion + 1));
         }
-        Response createResp = store.createHttpCalls(config);
+        Response createResp = store.createApiCalls(config);
         checkIfCreatedResponse(createResp);
         return createResp.getLocation();
     }
@@ -872,13 +872,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     if (migratedPropertySetterDocument != null) {
                         resourceContent = jsonSerialization.serialize(migratedPropertySetterDocument);
                     }
-                } else if (uri.toString().startsWith(IRestHttpCallsStore.resourceBaseType)) {
+                } else if (uri.toString().startsWith(IRestApiCallsStore.resourceBaseType)) {
                     var resourceAsMap = jsonSerialization.deserialize(resourceContent, Map.class);
-                    var migratedHttpCallsDocument = migrationManager.migrateHttpCalls()
+                    var migratedApiCallsDocument = migrationManager.migrateApiCalls()
                             .migrate(new Document(resourceAsMap));
 
-                    if (migratedHttpCallsDocument != null) {
-                        resourceContent = jsonSerialization.serialize(migratedHttpCallsDocument);
+                    if (migratedApiCallsDocument != null) {
+                        resourceContent = jsonSerialization.serialize(migratedApiCallsDocument);
                     }
                 } else if (uri.toString().startsWith(IRestOutputStore.resourceBaseType)) {
                     var resourceAsMap = jsonSerialization.deserialize(resourceContent, Map.class);

@@ -1,12 +1,12 @@
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.configs.rules.IRestBehaviorStore;
+import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
-import ai.labs.eddi.configs.rules.model.BehaviorConfiguration;
-import ai.labs.eddi.configs.rules.model.BehaviorGroupConfiguration;
-import ai.labs.eddi.configs.rules.model.BehaviorRuleConditionConfiguration;
-import ai.labs.eddi.configs.rules.model.BehaviorRuleConfiguration;
+import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
+import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
+import ai.labs.eddi.configs.rules.model.RuleConditionConfiguration;
+import ai.labs.eddi.configs.rules.model.RuleConfiguration;
 import ai.labs.eddi.configs.apicalls.model.OutputBuildingInstruction;
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.QuickRepliesBuildingInstruction;
@@ -15,7 +15,7 @@ import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.apicalls.IRestHttpCallsStore;
+import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
@@ -132,7 +132,7 @@ public class McpSetupTools {
 
             // --- Step 2: Create Behavior Rules ---
             var behaviorConfig = createBehaviorConfig();
-            Response behaviorResponse = getRestStore(IRestBehaviorStore.class).createBehaviorRuleSet(behaviorConfig);
+            Response behaviorResponse = getRestStore(IRestRuleSetStore.class).createRuleSet(behaviorConfig);
             String behaviorLocation = behaviorResponse.getHeaderString("Location");
             String behaviorId = extractIdFromLocation(behaviorLocation);
             int behaviorVersion = extractVersionFromLocation(behaviorLocation);
@@ -231,20 +231,20 @@ public class McpSetupTools {
      * The parser must be in the workflow before behavior rules so that
      * expressions are available for matching.
      */
-    BehaviorConfiguration createBehaviorConfig() {
-        var condition = new BehaviorRuleConditionConfiguration();
+    RuleSetConfiguration createBehaviorConfig() {
+        var condition = new RuleConditionConfiguration();
         condition.setType("inputmatcher");
         condition.setConfigs(Map.of("expressions", "*"));
 
-        var rule = new BehaviorRuleConfiguration();
+        var rule = new RuleConfiguration();
         rule.setName("Send Message to LLM");
         rule.setActions(List.of("send_message"));
         rule.setConditions(List.of(condition));
 
-        var group = new BehaviorGroupConfiguration();
-        group.setBehaviorRules(List.of(rule));
+        var group = new RuleGroupConfiguration();
+        group.setRules(List.of(rule));
 
-        var config = new BehaviorConfiguration();
+        var config = new RuleSetConfiguration();
         config.setExpressionsAsActions(true);
         config.setBehaviorGroups(List.of(group));
         return config;
@@ -446,15 +446,15 @@ public class McpSetupTools {
 
         // Behavior rules
         var behavior = new WorkflowConfiguration.WorkflowStep();
-        behavior.setType(URI.create("eddi://ai.labs.behavior"));
+        behavior.setType(URI.create("eddi://ai.labs.rules"));
         behavior.setConfig(Map.of("uri", behaviorLocation));
         extensions.add(behavior);
 
-        // HttpCalls (zero or more groups)
+        // ApiCalls (zero or more groups)
         if (httpCallsLocations != null) {
             for (String httpCallsLocation : httpCallsLocations) {
                 var httpCalls = new WorkflowConfiguration.WorkflowStep();
-                httpCalls.setType(URI.create("eddi://ai.labs.httpcalls"));
+                httpCalls.setType(URI.create("eddi://ai.labs.apicalls"));
                 httpCalls.setConfig(Map.of("uri", httpCallsLocation));
                 extensions.add(httpCalls);
             }
@@ -481,7 +481,7 @@ public class McpSetupTools {
 
     @Tool(name = "create_api_agent", description = "Create a Agent that can call any REST API described by an OpenAPI specification. "
             +
-            "Parses the OpenAPI spec, generates HttpCalls configurations (grouped by API tag), " +
+            "Parses the OpenAPI spec, generates ApiCalls configurations (grouped by API tag), " +
             "and creates a fully deployed Agent with LLM-powered API interaction. " +
             "The LLM can then call the API endpoints as tools through EDDI's controlled workflow.")
     public String createApIAgent(
@@ -530,13 +530,13 @@ public class McpSetupTools {
                 return errorJson("OpenAPI parsing failed: " + e.getMessage());
             }
 
-            // --- Step 2: Create HttpCalls resources (one per group) ---
+            // --- Step 2: Create ApiCalls resources (one per group) ---
             var httpCallsLocations = new ArrayList<String>();
             var groupNames = new ArrayList<String>();
             for (var entry : buildResult.configsByGroup().entrySet()) {
                 String groupName = entry.getKey();
                 var config = entry.getValue();
-                Response httpCallsResponse = getRestStore(IRestHttpCallsStore.class).createHttpCalls(config);
+                Response httpCallsResponse = getRestStore(IRestApiCallsStore.class).createApiCalls(config);
                 String httpCallsLocation = httpCallsResponse.getHeaderString("Location");
                 httpCallsLocations.add(httpCallsLocation);
                 groupNames.add(groupName);
@@ -559,7 +559,7 @@ public class McpSetupTools {
 
             // --- Step 4: Create Behavior Rules ---
             var behaviorConfig = createBehaviorConfig();
-            Response behaviorResponse = getRestStore(IRestBehaviorStore.class).createBehaviorRuleSet(behaviorConfig);
+            Response behaviorResponse = getRestStore(IRestRuleSetStore.class).createRuleSet(behaviorConfig);
             String behaviorLocation = behaviorResponse.getHeaderString("Location");
             createdResources.put("behaviorLocation", behaviorLocation);
             patchDescriptor(extractIdFromLocation(behaviorLocation),

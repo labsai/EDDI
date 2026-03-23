@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.rules.impl;
 
-import ai.labs.eddi.configs.rules.model.BehaviorConfiguration;
+import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -35,16 +35,16 @@ class RulesEvaluationTaskTest {
     @Mock
     private IJsonSerialization jsonSerialization;
     @Mock
-    private IBehaviorDeserialization behaviorSerialization;
+    private IRuleDeserialization behaviorSerialization;
     @Mock
     private IExpressionProvider expressionProvider;
 
-    private BehaviorRulesEvaluationTask task;
+    private RulesEvaluationTask task;
 
     @BeforeEach
     void setUp() {
         openMocks(this);
-        task = new BehaviorRulesEvaluationTask(
+        task = new RulesEvaluationTask(
                 resourceClientLibrary, jsonSerialization,
                 behaviorSerialization, expressionProvider);
     }
@@ -82,13 +82,13 @@ class RulesEvaluationTaskTest {
                     IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
 
-            BehaviorRule successRule = new BehaviorRule("Greeting");
+            Rule successRule = new Rule("Greeting");
             successRule.setActions(List.of("greet"));
 
-            var results = new BehaviorSetResult();
+            var results = new RuleSetResult();
             results.getSuccessRules().add(successRule);
 
-            var evaluator = mock(BehaviorRulesEvaluator.class);
+            var evaluator = mock(RulesEvaluator.class);
             when(evaluator.evaluate(memory)).thenReturn(results);
             when(evaluator.isAppendActions()).thenReturn(true);
             when(evaluator.isExpressionsAsActions()).thenReturn(false);
@@ -106,13 +106,13 @@ class RulesEvaluationTaskTest {
                     IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
 
-            BehaviorRule droppedRule = new BehaviorRule("DroppedRule");
+            Rule droppedRule = new Rule("DroppedRule");
             droppedRule.setActions(List.of("dropped_action"));
 
-            var results = new BehaviorSetResult();
+            var results = new RuleSetResult();
             results.getDroppedSuccessRules().add(droppedRule);
 
-            var evaluator = mock(BehaviorRulesEvaluator.class);
+            var evaluator = mock(RulesEvaluator.class);
             when(evaluator.evaluate(memory)).thenReturn(results);
             when(evaluator.isAppendActions()).thenReturn(true);
             when(evaluator.isExpressionsAsActions()).thenReturn(false);
@@ -130,9 +130,9 @@ class RulesEvaluationTaskTest {
                     IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
 
-            var results = new BehaviorSetResult();
+            var results = new RuleSetResult();
 
-            var evaluator = mock(BehaviorRulesEvaluator.class);
+            var evaluator = mock(RulesEvaluator.class);
             when(evaluator.evaluate(memory)).thenReturn(results);
             when(evaluator.isAppendActions()).thenReturn(true);
             when(evaluator.isExpressionsAsActions()).thenReturn(false);
@@ -147,8 +147,8 @@ class RulesEvaluationTaskTest {
         void execute_evaluationError_throwsLifecycleException() throws Exception {
             IConversationMemory memory = mock(IConversationMemory.class);
 
-            var evaluator = mock(BehaviorRulesEvaluator.class);
-            doThrow(new BehaviorRulesEvaluator.BehaviorRuleExecutionException("test error",
+            var evaluator = mock(RulesEvaluator.class);
+            doThrow(new RulesEvaluator.RuleExecutionException("test error",
                     new RuntimeException("cause"))).when(evaluator).evaluate(memory);
 
             assertThrows(LifecycleException.class, () -> task.execute(memory, evaluator));
@@ -162,16 +162,16 @@ class RulesEvaluationTaskTest {
                     IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
 
-            BehaviorRule rule1 = new BehaviorRule("Rule1");
+            Rule rule1 = new Rule("Rule1");
             rule1.setActions(List.of("action_a", "action_b"));
-            BehaviorRule rule2 = new BehaviorRule("Rule2");
+            Rule rule2 = new Rule("Rule2");
             rule2.setActions(List.of("action_c"));
 
-            var results = new BehaviorSetResult();
+            var results = new RuleSetResult();
             results.getSuccessRules().add(rule1);
             results.getSuccessRules().add(rule2);
 
-            var evaluator = mock(BehaviorRulesEvaluator.class);
+            var evaluator = mock(RulesEvaluator.class);
             when(evaluator.evaluate(memory)).thenReturn(results);
             when(evaluator.isAppendActions()).thenReturn(true);
             when(evaluator.isExpressionsAsActions()).thenReturn(false);
@@ -194,17 +194,17 @@ class RulesEvaluationTaskTest {
             Map<String, Object> config = new HashMap<>();
             config.put("uri", "http://example.com/behavior");
 
-            var behaviorConfig = new BehaviorConfiguration();
-            when(resourceClientLibrary.getResource(any(URI.class), eq(BehaviorConfiguration.class)))
+            var behaviorConfig = new RuleSetConfiguration();
+            when(resourceClientLibrary.getResource(any(URI.class), eq(RuleSetConfiguration.class)))
                     .thenReturn(behaviorConfig);
             when(jsonSerialization.serialize(behaviorConfig)).thenReturn("{}");
 
-            var behaviorSet = new BehaviorSet();
+            var behaviorSet = new RuleSet();
             when(behaviorSerialization.deserialize("{}")).thenReturn(behaviorSet);
 
             Object result = task.configure(config, Collections.emptyMap());
             assertNotNull(result);
-            assertInstanceOf(BehaviorRulesEvaluator.class, result);
+            assertInstanceOf(RulesEvaluator.class, result);
         }
 
         @Test
@@ -213,7 +213,7 @@ class RulesEvaluationTaskTest {
             Map<String, Object> config = new HashMap<>();
             config.put("uri", "http://example.com/behavior");
 
-            when(resourceClientLibrary.getResource(any(URI.class), eq(BehaviorConfiguration.class)))
+            when(resourceClientLibrary.getResource(any(URI.class), eq(RuleSetConfiguration.class)))
                     .thenThrow(new ServiceException("not found"));
 
             assertThrows(WorkflowConfigurationException.class,
@@ -227,17 +227,17 @@ class RulesEvaluationTaskTest {
             config.put("uri", "http://example.com/behavior");
             config.put("appendActions", "false");
 
-            var behaviorConfig = new BehaviorConfiguration();
-            when(resourceClientLibrary.getResource(any(URI.class), eq(BehaviorConfiguration.class)))
+            var behaviorConfig = new RuleSetConfiguration();
+            when(resourceClientLibrary.getResource(any(URI.class), eq(RuleSetConfiguration.class)))
                     .thenReturn(behaviorConfig);
             when(jsonSerialization.serialize(behaviorConfig)).thenReturn("{}");
 
-            var behaviorSet = new BehaviorSet();
+            var behaviorSet = new RuleSet();
             when(behaviorSerialization.deserialize("{}")).thenReturn(behaviorSet);
 
             Object result = task.configure(config, Collections.emptyMap());
             assertNotNull(result);
-            var evaluator = (BehaviorRulesEvaluator) result;
+            var evaluator = (RulesEvaluator) result;
             assertFalse(evaluator.isAppendActions());
         }
     }

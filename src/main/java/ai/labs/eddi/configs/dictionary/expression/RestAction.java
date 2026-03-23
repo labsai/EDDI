@@ -1,7 +1,7 @@
 package ai.labs.eddi.configs.dictionary.expression;
 
-import ai.labs.eddi.configs.rules.IBehaviorStore;
-import ai.labs.eddi.configs.apicalls.IHttpCallsStore;
+import ai.labs.eddi.configs.rules.IRuleSetStore;
+import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration.WorkflowStep;
@@ -25,16 +25,16 @@ import java.util.List;
 @ApplicationScoped
 public class RestAction implements IRestAction {
     private final IWorkflowStore workflowStore;
-    private final IBehaviorStore behaviorStore;
-    private final IHttpCallsStore httpCallsStore;
+    private final IRuleSetStore behaviorStore;
+    private final IApiCallsStore httpCallsStore;
     private final IOutputStore outputStore;
 
 
 
     @Inject
     public RestAction(IWorkflowStore workflowStore,
-                      IBehaviorStore behaviorStore,
-                      IHttpCallsStore httpCallsStore,
+                      IRuleSetStore behaviorStore,
+                      IApiCallsStore httpCallsStore,
                       IOutputStore outputStore) {
         this.workflowStore = workflowStore;
         this.behaviorStore = behaviorStore;
@@ -55,9 +55,9 @@ public class RestAction implements IRestAction {
                 var id = resourceId.getId();
                 var version = resourceId.getVersion();
 
-                if (type.startsWith("eddi://ai.labs.behavior")) {
+                if (type.startsWith("eddi://ai.labs.rules")) {
                     actions = behaviorStore.readActions(id, version, filter, limit);
-                } else if (type.startsWith("eddi://ai.labs.httpcalls")) {
+                } else if (type.startsWith("eddi://ai.labs.apicalls")) {
                     actions = httpCallsStore.readActions(id, version, filter, limit);
                 } else if (type.startsWith("eddi://ai.labs.output")) {
                     actions = outputStore.readActions(id, version, filter, limit);

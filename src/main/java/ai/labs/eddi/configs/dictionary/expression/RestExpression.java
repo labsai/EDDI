@@ -2,7 +2,7 @@ package ai.labs.eddi.configs.dictionary.expression;
 
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
-import ai.labs.eddi.configs.dictionary.IRegularDictionaryStore;
+import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.dictionary.IRestExpression;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.CollectionUtilities;
@@ -24,13 +24,13 @@ import java.util.Map;
 @ApplicationScoped
 public class RestExpression implements IRestExpression {
     private final IWorkflowStore workflowStore;
-    private final IRegularDictionaryStore regularDictionaryStore;
+    private final IDictionaryStore regularDictionaryStore;
 
 
 
     @Inject
     public RestExpression(IWorkflowStore workflowStore,
-                          IRegularDictionaryStore regularDictionaryStore) {
+                          IDictionaryStore regularDictionaryStore) {
         this.workflowStore = workflowStore;
         this.regularDictionaryStore = regularDictionaryStore;
     }

@@ -1,6 +1,6 @@
 package ai.labs.eddi.modules.nlp.extensions.dictionaries.providers;
 
-import ai.labs.eddi.configs.dictionary.model.RegularDictionaryConfiguration;
+import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
 import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
@@ -63,19 +63,19 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
         try {
             Object uriObj = config.get(KEY_URI);
             if (!RuntimeUtilities.isNullOrEmpty(uriObj) && uriObj.toString().startsWith("eddi")) {
-                RegularDictionaryConfiguration regularDictionaryConfiguration =
+                DictionaryConfiguration regularDictionaryConfiguration =
                         fetchRegularDictionaryConfiguration(URI.create(uriObj.toString()));
                 return addConfigsToDictionary(regularDictionaryConfiguration);
             } else {
-                throw new ServiceException("No resource URI has been defined! [RegularDictionaryConfiguration]");
+                throw new ServiceException("No resource URI has been defined! [DictionaryConfiguration]");
             }
         } catch (ServiceException e) {
-            String message = "Error while fetching RegularDictionaryConfiguration!\n" + e.getLocalizedMessage();
+            String message = "Error while fetching DictionaryConfiguration!\n" + e.getLocalizedMessage();
             throw new IllegalExtensionConfigurationException(message, e);
         }
     }
 
-    private RegularDictionary addConfigsToDictionary(RegularDictionaryConfiguration regularDictionaryConfiguration) {
+    private RegularDictionary addConfigsToDictionary(DictionaryConfiguration regularDictionaryConfiguration) {
         var regularDictionary = new RegularDictionary();
         regularDictionary.setLookupIfKnown(true);
 
@@ -120,9 +120,9 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
         return expressionProvider.parseExpressions(exp);
     }
 
-    private RegularDictionaryConfiguration fetchRegularDictionaryConfiguration(URI resourceURI)
+    private DictionaryConfiguration fetchRegularDictionaryConfiguration(URI resourceURI)
             throws ServiceException {
-        return resourceClientLibrary.getResource(resourceURI, RegularDictionaryConfiguration.class);
+        return resourceClientLibrary.getResource(resourceURI, DictionaryConfiguration.class);
     }
 
     private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(RegularDictionaryProvider.class);

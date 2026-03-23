@@ -37,7 +37,7 @@ import java.util.Map;
  * "systemMessage": "You are helpful"
  * },
  * "enableBuiltInTools": true,
- * "tools": ["eddi://ai.labs.httpcalls/weather?version=1"],
+ * "tools": ["eddi://ai.labs.apicalls/weather?version=1"],
  * "maxBudgetPerConversation": 1.0
  * }
  * ]
@@ -477,11 +477,11 @@ public record LlmConfiguration(List<Task> tasks) {
         private Integer maxResults;
         private Double minScore;
 
-        public String getHttpCall() {
+        public String getApiCall() {
             return httpCall;
         }
 
-        public void setHttpCall(String httpCall) {
+        public void setApiCall(String httpCall) {
             this.httpCall = httpCall;
         }
 

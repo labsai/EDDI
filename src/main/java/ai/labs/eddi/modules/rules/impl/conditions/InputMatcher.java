@@ -2,7 +2,7 @@ package ai.labs.eddi.modules.rules.impl.conditions;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
-import ai.labs.eddi.modules.rules.impl.BehaviorRule;
+import ai.labs.eddi.modules.rules.impl.Rule;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.utils.StringUtilities;
@@ -14,7 +14,7 @@ import java.util.Map;
 
 import static ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_PARSED;
-import static ai.labs.eddi.modules.rules.impl.conditions.IBehaviorCondition.ExecutionState.*;
+import static ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.ExecutionState.*;
 
 /**
  * @author ginccc
@@ -59,7 +59,7 @@ public class InputMatcher extends BaseMatcher {
     }
 
     @Override
-    public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
+    public ExecutionState execute(IConversationMemory memory, List<Rule> trace) {
         IData<String> data;
         ExecutionState state = NOT_EXECUTED;
         switch (occurrence) {
@@ -108,8 +108,8 @@ public class InputMatcher extends BaseMatcher {
     }
 
     @Override
-    public IBehaviorCondition clone() {
-        IBehaviorCondition clone = new InputMatcher(expressionProvider);
+    public IRuleCondition clone() {
+        IRuleCondition clone = new InputMatcher(expressionProvider);
         clone.setConfigs(getConfigs());
         return clone;
     }

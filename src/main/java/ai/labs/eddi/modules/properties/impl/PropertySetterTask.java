@@ -202,7 +202,7 @@ public class PropertySetterTask implements ILifecycleTask {
                                             // NOTE: Do NOT resolve vault references here — they must stay as-is
                                             // in conversation properties (which are persisted to DB).
                                             // Vault refs are resolved at point-of-use by downstream consumers
-                                            // (ChatModelRegistry, HttpCallExecutor) to prevent secret leakage.
+                                            // (ChatModelRegistry, ApiCallExecutor) to prevent secret leakage.
                                             conversationProperties.put(name, new Property(name, templateString, scope));
                                         }
                                     }

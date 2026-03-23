@@ -2,7 +2,7 @@ package ai.labs.eddi.modules.rules.impl.conditions;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
-import ai.labs.eddi.modules.rules.impl.BehaviorRule;
+import ai.labs.eddi.modules.rules.impl.Rule;
 
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -13,7 +13,7 @@ import java.util.Map;
  * @author ginccc
  */
 
-public class Occurrence implements IBehaviorCondition {
+public class Occurrence implements IRuleCondition {
     public static final String ID = "occurrence";
     private static final String BEHAVIOR_RULES_SUCCESS = "behavior_rules:success";
 
@@ -25,9 +25,9 @@ public class Occurrence implements IBehaviorCondition {
     private int maxTimesOccurred = -1;
     private int minTimesOccurred = -1;
 
-    private int countTimesOccurred(List<List<String>> allBehaviorRulesHistorical) {
+    private int countTimesOccurred(List<List<String>> allRulesHistorical) {
         int occurrences = 0;
-        for (List<String> history : allBehaviorRulesHistorical) {
+        for (List<String> history : allRulesHistorical) {
             for (String behaviorRuleName : history) {
                 if (this.behaviorRuleName.equals(behaviorRuleName)) {
                     occurrences++;
@@ -38,15 +38,15 @@ public class Occurrence implements IBehaviorCondition {
         return occurrences;
     }
 
-    private List<List<String>> getAllBehaviorRules(List<List<IData<List<String>>>> allData) {
-        List<List<String>> allBehaviorRules = new LinkedList<>();
+    private List<List<String>> getAllRules(List<List<IData<List<String>>>> allData) {
+        List<List<String>> allRules = new LinkedList<>();
         for (List<IData<List<String>>> dataList : allData) {
             for (IData<List<String>> data : dataList) {
-                allBehaviorRules.add(data.getResult());
+                allRules.add(data.getResult());
             }
         }
 
-        return allBehaviorRules;
+        return allRules;
     }
 
     @Override
@@ -84,11 +84,11 @@ public class Occurrence implements IBehaviorCondition {
     }
 
     @Override
-    public ExecutionState execute(IConversationMemory memory, List<BehaviorRule> trace) {
+    public ExecutionState execute(IConversationMemory memory, List<Rule> trace) {
         boolean success;
         List<List<IData<List<String>>>> allData = memory.getAllSteps().getAllData(BEHAVIOR_RULES_SUCCESS);
         if (allData != null) {
-            final int actualTimesOccurred = countTimesOccurred(getAllBehaviorRules(allData));
+            final int actualTimesOccurred = countTimesOccurred(getAllRules(allData));
             boolean isMin = true;
             boolean isMax = true;
 
@@ -109,8 +109,8 @@ public class Occurrence implements IBehaviorCondition {
     }
 
     @Override
-    public IBehaviorCondition clone() {
-        IBehaviorCondition occurrence = new Occurrence();
+    public IRuleCondition clone() {
+        IRuleCondition occurrence = new Occurrence();
         occurrence.setConfigs(getConfigs());
 
         return occurrence;

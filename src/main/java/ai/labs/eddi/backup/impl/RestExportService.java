@@ -2,18 +2,18 @@ package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.backup.IRestExportService;
 import ai.labs.eddi.backup.IZipArchive;
-import ai.labs.eddi.configs.rules.IBehaviorStore;
+import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.apicalls.IHttpCallsStore;
+import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
-import ai.labs.eddi.configs.dictionary.IRegularDictionaryStore;
+import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -53,9 +53,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IAgentStore agentStore;
     private final IWorkflowStore workflowStore;
-    private final IRegularDictionaryStore regularDictionaryStore;
-    private final IBehaviorStore behaviorStore;
-    private final IHttpCallsStore httpCallsStore;
+    private final IDictionaryStore regularDictionaryStore;
+    private final IRuleSetStore behaviorStore;
+    private final IApiCallsStore httpCallsStore;
     private final ILlmStore llmStore;
     private final IPropertySetterStore propertySetterStore;
     private final IOutputStore outputStore;
@@ -72,9 +72,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     public RestExportService(IDocumentDescriptorStore documentDescriptorStore,
             IAgentStore agentStore,
             IWorkflowStore workflowStore,
-            IRegularDictionaryStore regularDictionaryStore,
-            IBehaviorStore behaviorStore,
-            IHttpCallsStore httpCallsStore,
+            IDictionaryStore regularDictionaryStore,
+            IRuleSetStore behaviorStore,
+            IApiCallsStore httpCallsStore,
             ILlmStore llmStore,
             IPropertySetterStore propertySetterStore,
             IOutputStore outputStore,
@@ -213,7 +213,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                         }
                     };
                     config = store.readIncludingDeleted(resourceIdUnused.getId(), versionToExport);
-                } catch (IResourceStore.ResourceNotFoundException | IBehaviorStore.ResourceStoreException ex) {
+                } catch (IResourceStore.ResourceNotFoundException | IRuleSetStore.ResourceStoreException ex) {
                     break;
                 }
                 versionToExport++;
