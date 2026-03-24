@@ -18,11 +18,11 @@ import java.util.List;
  */
 // @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3)
 // LangChain", authorizations = {@Authorization(value = "eddi_auth")})
-@Path("/llmstore/llmconfigs")
+@Path("/llmstore/llms")
 @Tag(name = "03. LLM Configs", description = "lifecycle extension for LLM configurations")
 public interface IRestLlmStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.llm";
-    String resourceURI = resourceBaseType + "/llmstore/llmconfigs/";
+    String resourceURI = resourceBaseType + "/llmstore/llms/";
 
     @GET
     @Path("/jsonSchema")

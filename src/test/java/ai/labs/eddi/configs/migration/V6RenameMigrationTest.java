@@ -12,8 +12,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
-import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -71,7 +69,7 @@ class V6RenameMigrationTest {
         @DisplayName("should rewrite langchain authority + store path")
         void rewriteLangchainUri() {
             String input = "eddi://ai.labs.langchain/langchainstore/langchains/abc123?version=1";
-            String expected = "eddi://ai.labs.llm/llmstore/llmconfigs/abc123?version=1";
+            String expected = "eddi://ai.labs.llm/llmstore/llms/abc123?version=1";
             assertEquals(expected, migration.rewriteUriString(input));
         }
 
@@ -229,8 +227,8 @@ class V6RenameMigrationTest {
             assertTrue(renamedTo.contains("rulesets.history"), "Should rename behaviorrulesets.history → rulesets.history");
             assertTrue(renamedTo.contains("apicalls"), "Should rename httpcalls → apicalls");
             assertTrue(renamedTo.contains("apicalls.history"), "Should rename httpcalls.history → apicalls.history");
-            assertTrue(renamedTo.contains("llmconfigs"), "Should rename langchain → llmconfigs");
-            assertTrue(renamedTo.contains("llmconfigs.history"), "Should rename langchain.history → llmconfigs.history");
+            assertTrue(renamedTo.contains("llms"), "Should rename langchain → llms");
+            assertTrue(renamedTo.contains("llms.history"), "Should rename langchain.history → llms.history");
             assertTrue(renamedTo.contains("dictionaries"), "Should rename regulardictionaries → dictionaries");
             assertTrue(renamedTo.contains("dictionaries.history"), "Should rename regulardictionaries.history → dictionaries.history");
             assertEquals(12, renamedTo.size(), "Should rename exactly 12 collections (6 + 6 history)");

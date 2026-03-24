@@ -49,7 +49,7 @@ public class V6RenameMigration {
             {"regulardictionarystore/regulardictionaries", "dictionarystore/dictionaries"},
             {"httpcallsstore/httpcalls", "apicallstore/apicalls"},
             {"behaviorstore/behaviorsets", "rulestore/rulesets"},
-            {"langchainstore/langchains", "llmstore/llmconfigs"},
+            {"langchainstore/langchains", "llmstore/llms"},
             {"packagestore/packages", "workflowstore/workflows"},
             {"botstore/bots", "agentstore/agents"},
     };
@@ -63,7 +63,7 @@ public class V6RenameMigration {
             {"packages",            "workflows"},
             {"behaviorrulesets",    "rulesets"},
             {"httpcalls",           "apicalls"},
-            {"langchain",           "llmconfigs"},
+            {"langchain",           "llms"},
             {"regulardictionaries", "dictionaries"},
     };
 
@@ -95,14 +95,14 @@ public class V6RenameMigration {
      *   RuleSetStore        → "rulesets"        (was "behaviorrulesets")
      *   ApiCallsStore       → "apicalls"        (was "httpcalls")
      *   OutputStore         → "outputs"
-     *   LlmStore            → "llmconfigs"      (was "langchain")
+     *   LlmStore            → "llms"      (was "langchain")
      *   PropertySetterStore → "propertysetter"
      *   DictionaryStore     → "dictionaries"    (was "regulardictionaries")
      *   ParserStore         → "parsers"
      */
     private static final String[] RESOURCE_COLLECTIONS = {
             "agents", "workflows", "rulesets", "apicalls", "outputs",
-            "llmconfigs", "propertysetter", "dictionaries", "parsers",
+            "llms", "propertysetter", "dictionaries", "parsers",
     };
 
     private final MongoDatabase database;

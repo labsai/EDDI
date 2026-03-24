@@ -113,7 +113,7 @@ class McpAdminToolsCrudTest {
         when(jsonSerialization.deserialize("{\"tasks\":[]}", LlmConfiguration.class)).thenReturn(config);
         when(llmStore.updateLlm(RESOURCE_ID, 1, config))
                 .thenReturn(Response.ok().header("Location",
-                        "/llmstore/llmconfigs/" + RESOURCE_ID + "?version=2").build());
+                        "/llmstore/llms/" + RESOURCE_ID + "?version=2").build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"updated\",\"newVersion\":2}");
 
         String result = tools.updateResource("langchain", RESOURCE_ID, 1, "{\"tasks\":[]}");
@@ -270,7 +270,7 @@ class McpAdminToolsCrudTest {
         var ext = new WorkflowConfiguration.WorkflowStep();
         ext.setType(URI.create("eddi://ai.labs.llm"));
         var configMap = new HashMap<String, Object>();
-        configMap.put("uri", "eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=1");
+        configMap.put("uri", "eddi://ai.labs.llm/llmstore/llms/lc1?version=1");
         ext.setConfig(configMap);
         var pkgConfig = new WorkflowConfiguration();
         pkgConfig.setWorkflowSteps(new ArrayList<>(List.of(ext)));
@@ -285,11 +285,11 @@ class McpAdminToolsCrudTest {
                         "/agentstore/agents/" + AGENT_ID + "?version=2").build());
 
         // Parse mappings JSON
-        String mappingsJson = "[{\"oldUri\":\"eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=1\"," +
-                "\"newUri\":\"eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=2\"}]";
+        String mappingsJson = "[{\"oldUri\":\"eddi://ai.labs.llm/llmstore/llms/lc1?version=1\"," +
+                "\"newUri\":\"eddi://ai.labs.llm/llmstore/llms/lc1?version=2\"}]";
         List<Map<String, String>> mappings = List.of(Map.of(
-                "oldUri", "eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=1",
-                "newUri", "eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=2"));
+                "oldUri", "eddi://ai.labs.llm/llmstore/llms/lc1?version=1",
+                "newUri", "eddi://ai.labs.llm/llmstore/llms/lc1?version=2"));
         when(jsonSerialization.deserialize(mappingsJson, List.class)).thenReturn(mappings);
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"updatedWorkflows\":1}");
 
@@ -311,7 +311,7 @@ class McpAdminToolsCrudTest {
         var ext = new WorkflowConfiguration.WorkflowStep();
         ext.setType(URI.create("eddi://ai.labs.llm"));
         var configMap = new HashMap<String, Object>();
-        configMap.put("uri", "eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=1");
+        configMap.put("uri", "eddi://ai.labs.llm/llmstore/llms/lc1?version=1");
         ext.setConfig(configMap);
         var pkgConfig = new WorkflowConfiguration();
         pkgConfig.setWorkflowSteps(new ArrayList<>(List.of(ext)));
@@ -419,7 +419,7 @@ class McpAdminToolsCrudTest {
         // Workflow with 2 extensions
         var ext1 = new WorkflowConfiguration.WorkflowStep();
         ext1.setType(URI.create("eddi://ai.labs.llm"));
-        ext1.setConfig(Map.of("uri", "eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=1"));
+        ext1.setConfig(Map.of("uri", "eddi://ai.labs.llm/llmstore/llms/lc1?version=1"));
         var ext2 = new WorkflowConfiguration.WorkflowStep();
         ext2.setType(URI.create("eddi://ai.labs.rules"));
         ext2.setConfig(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/b1?version=1"));

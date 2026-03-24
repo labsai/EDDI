@@ -81,7 +81,7 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
-                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1"))
                                                 .build());
                 when(outputStore.createOutputSet(any()))
                                 .thenReturn(Response.created(URI.create("/outputstore/outputsets/out-1?version=1"))
@@ -122,7 +122,7 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
-                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
@@ -147,7 +147,7 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
-                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
@@ -169,7 +169,7 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
-                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
@@ -218,7 +218,7 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
-                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
@@ -242,7 +242,7 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
-                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
@@ -264,7 +264,7 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
-                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
@@ -295,7 +295,7 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
-                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1"))
                                                 .build());
                 when(outputStore.createOutputSet(any()))
                                 .thenReturn(Response.created(URI.create("/outputstore/outputsets/out-1?version=1"))
@@ -329,7 +329,7 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
-                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
@@ -438,7 +438,7 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
-                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
@@ -476,7 +476,7 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
-                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
@@ -515,7 +515,7 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
-                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
@@ -550,7 +550,7 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
-                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
@@ -711,7 +711,7 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
-                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))
@@ -775,7 +775,7 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
                 when(langchainStore.createLlm(any()))
-                                .thenReturn(Response.created(URI.create("/llmstore/llmconfigs/lc-1?version=1"))
+                                .thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1"))
                                                 .build());
                 when(WorkflowStore.createWorkflow(any()))
                                 .thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1"))

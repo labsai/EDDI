@@ -26,7 +26,7 @@ abstract class AbstractBackupService {
         static final Pattern HTTPCALLS_URI_PATTERN = Pattern
                         .compile("\"eddi://ai.labs.apicalls/apicallstore/apicalls/.*?\"");
         static final Pattern LANGCHAIN_URI_PATTERN = Pattern
-                        .compile("\"eddi://ai.labs.llm/llmstore/llmconfigs/.*?\"");
+                        .compile("\"eddi://ai.labs.llm/llmstore/llms/.*?\"");
         static final Pattern PROPERTY_URI_PATTERN = Pattern
                         .compile("\"eddi://ai.labs.property/propertysetterstore/propertysetters/.*?\"");
         static final Pattern OUTPUT_URI_PATTERN = Pattern
@@ -55,7 +55,7 @@ abstract class AbstractBackupService {
                         {"eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/",
                                         "eddi://ai.labs.apicalls/apicallstore/apicalls/"},
                         {"eddi://ai.labs.langchain/langchainstore/langchains/",
-                                        "eddi://ai.labs.llm/llmstore/llmconfigs/"},
+                                        "eddi://ai.labs.llm/llmstore/llms/"},
                         {"eddi://ai.labs.package/packagestore/packages/",
                                         "eddi://ai.labs.workflow/workflowstore/workflows/"},
                         {"eddi://ai.labs.bot/botstore/bots/",

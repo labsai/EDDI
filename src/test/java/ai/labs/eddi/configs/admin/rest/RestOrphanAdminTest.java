@@ -82,7 +82,7 @@ class RestOrphanAdminTest {
                         case "ai.labs.rules" -> "rulestore/rulesets";
                         case "ai.labs.apicalls" -> "apicallstore/apicalls";
                         case "ai.labs.output" -> "outputstore/outputsets";
-                        case "ai.labs.llm" -> "llmstore/llmconfigs";
+                        case "ai.labs.llm" -> "llmstore/llms";
                         case "ai.labs.property" -> "propertysetterstore/propertysetters";
                         case "ai.labs.dictionary" -> "dictionarystore/dictionaries";
                         case "ai.labs.parser" -> "parserstore/parsers";

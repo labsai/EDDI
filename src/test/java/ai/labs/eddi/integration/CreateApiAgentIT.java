@@ -279,7 +279,7 @@ public class CreateApiAgentIT {
     Response response = given()
         .contentType(ContentType.JSON)
         .body(LANGCHAIN_CONFIG)
-        .post("/llmstore/llmconfigs");
+        .post("/llmstore/llms");
 
     response.then().assertThat().statusCode(201);
     langchainLocation = response.getHeader("location");
@@ -287,7 +287,7 @@ public class CreateApiAgentIT {
     // Verify enriched prompt includes API summary
     ResourceId res = extractResourceId(langchainLocation);
     given()
-        .get("/llmstore/llmconfigs/" + res.id() + "?version=" + res.version())
+        .get("/llmstore/llms/" + res.id() + "?version=" + res.version())
         .then().assertThat()
         .statusCode(200)
         .body("tasks[0].parameters.systemMessage",

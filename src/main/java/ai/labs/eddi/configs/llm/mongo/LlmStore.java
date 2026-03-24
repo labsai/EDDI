@@ -17,6 +17,6 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration>
 
     @Inject
     public LlmStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
-        super(storageFactory, "llmconfigs", documentBuilder, LlmConfiguration.class);
+        super(storageFactory, "llms", documentBuilder, LlmConfiguration.class);
     }
 }
