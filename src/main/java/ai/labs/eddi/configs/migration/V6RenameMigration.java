@@ -13,17 +13,19 @@ import jakarta.inject.Inject;
 import java.util.*;
 
 import static ai.labs.eddi.datastore.mongo.MongoResourceStorage.ID_FIELD;
-import static ai.labs.eddi.datastore.mongo.MongoResourceStorage.VERSION_FIELD;
 import static com.mongodb.client.model.Filters.eq;
 
 /**
- * V6 Rename Migration — rewrites legacy eddi:// URIs, store paths, environment values,
+ * V6 Rename Migration — rewrites legacy eddi:// URIs, store paths, environment
+ * values,
  * and descriptor type fields across all MongoDB collections.
  * <p>
- * This migration is idempotent: it records completion in the migration_log collection
+ * This migration is idempotent: it records completion in the migration_log
+ * collection
  * and will not re-run if already applied.
  * <p>
- * Controlled by the config property {@code eddi.migration.v6-rename.enabled} (default: false).
+ * Controlled by the config property {@code eddi.migration.v6-rename.enabled}
+ * (default: false).
  * Set to true when migrating a v5 database to v6.
  *
  * @since 6.0.0
@@ -34,24 +36,26 @@ public class V6RenameMigration {
     private static final Logger LOGGER = Logger.getLogger(V6RenameMigration.class);
     private static final String MIGRATION_KEY = "v6-rename-migration-complete";
 
-    /** URI authority rewrites (old → new). Longest-first to avoid partial matches. */
+    /**
+     * URI authority rewrites (old → new). Longest-first to avoid partial matches.
+     */
     private static final String[][] URI_AUTHORITY_REWRITES = {
-            {"eddi://ai.labs.regulardictionary/", "eddi://ai.labs.dictionary/"},
-            {"eddi://ai.labs.httpcalls/", "eddi://ai.labs.apicalls/"},
-            {"eddi://ai.labs.behavior/", "eddi://ai.labs.rules/"},
-            {"eddi://ai.labs.langchain/", "eddi://ai.labs.llm/"},
-            {"eddi://ai.labs.package/", "eddi://ai.labs.workflow/"},
-            {"eddi://ai.labs.bot/", "eddi://ai.labs.agent/"},
+            { "eddi://ai.labs.regulardictionary/", "eddi://ai.labs.dictionary/" },
+            { "eddi://ai.labs.httpcalls/", "eddi://ai.labs.apicalls/" },
+            { "eddi://ai.labs.behavior/", "eddi://ai.labs.rules/" },
+            { "eddi://ai.labs.langchain/", "eddi://ai.labs.llm/" },
+            { "eddi://ai.labs.package/", "eddi://ai.labs.workflow/" },
+            { "eddi://ai.labs.bot/", "eddi://ai.labs.agent/" },
     };
 
     /** Store path rewrites (old → new) — applied inside URI strings. */
     private static final String[][] STORE_PATH_REWRITES = {
-            {"regulardictionarystore/regulardictionaries", "dictionarystore/dictionaries"},
-            {"httpcallsstore/httpcalls", "apicallstore/apicalls"},
-            {"behaviorstore/behaviorsets", "rulestore/rulesets"},
-            {"langchainstore/langchains", "llmstore/llms"},
-            {"packagestore/packages", "workflowstore/workflows"},
-            {"botstore/bots", "agentstore/agents"},
+            { "regulardictionarystore/regulardictionaries", "dictionarystore/dictionaries" },
+            { "httpcallsstore/httpcalls", "apicallstore/apicalls" },
+            { "behaviorstore/behaviorsets", "rulestore/rulesets" },
+            { "langchainstore/langchains", "llmstore/llms" },
+            { "packagestore/packages", "workflowstore/workflows" },
+            { "botstore/bots", "agentstore/agents" },
     };
 
     /**
@@ -59,12 +63,12 @@ public class V6RenameMigration {
      * Each entry also implies a corresponding ".history" rename.
      */
     private static final String[][] COLLECTION_RENAMES = {
-            {"bots",                "agents"},
-            {"packages",            "workflows"},
-            {"behaviorrulesets",    "rulesets"},
-            {"httpcalls",           "apicalls"},
-            {"langchain",           "llms"},
-            {"regulardictionaries", "dictionaries"},
+            { "bots", "agents" },
+            { "packages", "workflows" },
+            { "behaviorrulesets", "rulesets" },
+            { "httpcalls", "apicalls" },
+            { "langchain", "llms" },
+            { "regulardictionaries", "dictionaries" },
     };
 
     /**
@@ -72,33 +76,36 @@ public class V6RenameMigration {
      * Applied after collection renames so we work on the "agents" collection.
      */
     private static final String[][] AGENT_FIELD_RENAMES = {
-            {"packages", "workflows"},
+            { "packages", "workflows" },
     };
 
     /** Environment value rewrites. */
     private static final String[][] ENVIRONMENT_REWRITES = {
-            {"unrestricted", "production"},
-            {"restricted", "production"},
+            { "unrestricted", "production" },
+            { "restricted", "production" },
     };
 
-    /** Field-name rewrites for deployment/conversation documents (old Java name → new Java name). */
+    /**
+     * Field-name rewrites for deployment/conversation documents (old Java name →
+     * new Java name).
+     */
     private static final String[][] FIELD_NAME_REWRITES = {
-            {"botId", "agentId"},
-            {"botVersion", "agentVersion"},
+            { "botId", "agentId" },
+            { "botVersion", "agentVersion" },
     };
 
     /**
      * All MongoDB collections to scan for URI rewrites.
      * These are the NEW (post-rename) v6 collection names:
-     *   AgentStore          → "agents"
-     *   WorkflowStore       → "workflows"      (was "packages")
-     *   RuleSetStore        → "rulesets"        (was "behaviorrulesets")
-     *   ApiCallsStore       → "apicalls"        (was "httpcalls")
-     *   OutputStore         → "outputs"
-     *   LlmStore            → "llms"      (was "langchain")
-     *   PropertySetterStore → "propertysetter"
-     *   DictionaryStore     → "dictionaries"    (was "regulardictionaries")
-     *   ParserStore         → "parsers"
+     * AgentStore → "agents"
+     * WorkflowStore → "workflows" (was "packages")
+     * RuleSetStore → "rulesets" (was "behaviorrulesets")
+     * ApiCallsStore → "apicalls" (was "httpcalls")
+     * OutputStore → "outputs"
+     * LlmStore → "llms" (was "langchain")
+     * PropertySetterStore → "propertysetter"
+     * DictionaryStore → "dictionaries" (was "regulardictionaries")
+     * ParserStore → "parsers"
      */
     private static final String[] RESOURCE_COLLECTIONS = {
             "agents", "workflows", "rulesets", "apicalls", "outputs",
@@ -111,9 +118,8 @@ public class V6RenameMigration {
 
     @Inject
     public V6RenameMigration(MongoDatabase database,
-                             MigrationLogStore migrationLogStore,
-                             @ConfigProperty(name = "eddi.migration.v6-rename.enabled",
-                                     defaultValue = "false") boolean enabled) {
+            MigrationLogStore migrationLogStore,
+            @ConfigProperty(name = "eddi.migration.v6-rename.enabled", defaultValue = "false") boolean enabled) {
         this.database = database;
         this.migrationLogStore = migrationLogStore;
         this.enabled = enabled;
@@ -166,7 +172,8 @@ public class V6RenameMigration {
     /**
      * Rename MongoDB collections from v5 names to v6 names.
      * Each collection and its ".history" counterpart are renamed.
-     * Safe to call if collections have already been renamed (skips if old name doesn't exist).
+     * Safe to call if collections have already been renamed (skips if old name
+     * doesn't exist).
      */
     private void renameCollections() {
         for (String[] mapping : COLLECTION_RENAMES) {
@@ -177,7 +184,8 @@ public class V6RenameMigration {
 
     /**
      * Rename a single MongoDB collection if the old name exists.
-     * Silently skips if the source collection doesn't exist or the target already exists.
+     * Silently skips if the source collection doesn't exist or the target already
+     * exists.
      */
     private void renameCollectionIfExists(String oldName, String newName) {
         try {

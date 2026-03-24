@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
  *
  * @author ginccc
  */
-final class McpApiToolBuilder {
+public final class McpApiToolBuilder {
 
     private static final Logger LOGGER = Logger.getLogger(McpApiToolBuilder.class);
     private static final String DEFAULT_GROUP = "General";
@@ -47,7 +47,7 @@ final class McpApiToolBuilder {
      * @param apiSummary     human-readable summary of available endpoints for LLM context
      * @param endpointCount  total number of endpoints processed
      */
-    record ApiBuildResult(
+    public record ApiBuildResult(
             Map<String, ApiCallsConfiguration> configsByGroup,
             String apiSummary,
             int endpointCount
@@ -63,7 +63,7 @@ final class McpApiToolBuilder {
      * @return build result with grouped configs and API summary
      * @throws IllegalArgumentException if the spec cannot be parsed
      */
-    static ApiBuildResult parseAndBuild(String openApiSpec, String endpointFilter,
+    public static ApiBuildResult parseAndBuild(String openApiSpec, String endpointFilter,
                                          String apiBaseUrl, String apiAuth) {
         OpenAPI openAPI = parseSpec(openApiSpec);
         String baseUrl = resolveBaseUrl(openAPI, apiBaseUrl);
@@ -142,7 +142,7 @@ final class McpApiToolBuilder {
     /**
      * Parse an OpenAPI spec from a JSON/YAML string or URL.
      */
-    static OpenAPI parseSpec(String specInput) {
+    public static OpenAPI parseSpec(String specInput) {
         var parseOptions = new ParseOptions();
         parseOptions.setResolve(true);
 

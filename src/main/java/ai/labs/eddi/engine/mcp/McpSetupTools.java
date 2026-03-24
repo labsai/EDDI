@@ -1,50 +1,21 @@
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.configs.rules.IRestRuleSetStore;
-import ai.labs.eddi.configs.parser.IRestParserStore;
-import ai.labs.eddi.configs.parser.model.ParserConfiguration;
-import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
-import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
-import ai.labs.eddi.configs.rules.model.RuleConditionConfiguration;
-import ai.labs.eddi.configs.rules.model.RuleConfiguration;
-import ai.labs.eddi.configs.apicalls.model.OutputBuildingInstruction;
-import ai.labs.eddi.configs.apicalls.model.PostResponse;
-import ai.labs.eddi.configs.apicalls.model.QuickRepliesBuildingInstruction;
-
-import ai.labs.eddi.configs.agents.IRestAgentStore;
-import ai.labs.eddi.configs.agents.model.AgentConfiguration;
-import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
-import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
-import ai.labs.eddi.configs.patch.PatchInstruction;
-import ai.labs.eddi.configs.llm.IRestLlmStore;
-import ai.labs.eddi.configs.output.IRestOutputStore;
-import ai.labs.eddi.configs.output.model.OutputConfiguration;
-import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
-import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
-import ai.labs.eddi.engine.api.IRestAgentAdministration;
-import ai.labs.eddi.engine.model.Deployment;
-import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
-import ai.labs.eddi.modules.llm.model.LlmConfiguration;
-import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.setup.AgentSetupService;
+import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
+import ai.labs.eddi.engine.setup.CreateApiAgentRequest;
+import ai.labs.eddi.engine.setup.SetupAgentRequest;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
-
-import java.net.URI;
-import java.util.*;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
 
 /**
  * MCP composite tool for setting up a fully working Agent in a single call.
- * Codifies the Agent Father's 12-step workflow as a programmatic Java
- * operation.
+ * Thin wrapper that delegates to {@link AgentSetupService}.
  *
  * @author ginccc
  */
@@ -53,16 +24,13 @@ public class McpSetupTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpSetupTools.class);
 
-    private final IRestInterfaceFactory restInterfaceFactory;
-    private final IRestAgentAdministration agentAdmin;
+    private final AgentSetupService agentSetupService;
     private final IJsonSerialization jsonSerialization;
 
     @Inject
-    public McpSetupTools(IRestInterfaceFactory restInterfaceFactory,
-            IRestAgentAdministration agentAdmin,
-            IJsonSerialization jsonSerialization) {
-        this.restInterfaceFactory = restInterfaceFactory;
-        this.agentAdmin = agentAdmin;
+    public McpSetupTools(AgentSetupService agentSetupService,
+                         IJsonSerialization jsonSerialization) {
+        this.agentSetupService = agentSetupService;
         this.jsonSerialization = jsonSerialization;
     }
 
@@ -100,703 +68,90 @@ public class McpSetupTools {
             @ToolArg(description = "Automatically deploy the Agent after creation? (default: true)") Boolean deploy,
             @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
         try {
-            // Validate required params
-            if (name == null || name.isBlank()) {
-                return errorJson("Agent name is required");
-            }
-            if (systemPrompt == null || systemPrompt.isBlank()) {
-                return errorJson("System prompt is required");
-            }
-            // API key required for cloud LLM providers, optional for local ones
-            boolean isLocalLLM = isLocalLlmProvider(provider);
-            if (!isLocalLLM && (apiKey == null || apiKey.isBlank())) {
-                return errorJson("API key is required for cloud LLM providers (anthropic, openai, gemini)");
-            }
-
-            var params = resolveParams(provider, model, deploy, environment);
-            boolean toolsEnabled = enableBuiltInTools != null && enableBuiltInTools;
-            boolean quickReplies = enableQuickReplies != null && enableQuickReplies;
-            boolean sentiment = enableSentimentAnalysis != null && enableSentimentAnalysis;
-            String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
-
-            var createdResources = new LinkedHashMap<String, Object>(); // track for result
-
-            // --- Step 1: Create Parser (minimal NLU for expression generation) ---
-            var parserConfig = createParserConfig();
-            Response parserResponse = getRestStore(IRestParserStore.class).createParser(parserConfig);
-            String parserLocation = parserResponse.getHeaderString("Location");
-            String parserId = extractIdFromLocation(parserLocation);
-            int parserVersion = extractVersionFromLocation(parserLocation);
-            createdResources.put("parserLocation", parserLocation);
-            patchDescriptor(parserId, parserVersion, name);
-
-            // --- Step 2: Create Behavior Rules ---
-            var behaviorConfig = createBehaviorConfig();
-            Response behaviorResponse = getRestStore(IRestRuleSetStore.class).createRuleSet(behaviorConfig);
-            String behaviorLocation = behaviorResponse.getHeaderString("Location");
-            String behaviorId = extractIdFromLocation(behaviorLocation);
-            int behaviorVersion = extractVersionFromLocation(behaviorLocation);
-            createdResources.put("behaviorLocation", behaviorLocation);
-            patchDescriptor(behaviorId, behaviorVersion, name);
-
-            // --- Step 3: Create LangChain Configuration ---
-            var llmConfig = createLlmConfig(
-                    params.providerType, params.modelId, apiKey, systemPrompt,
-                    toolsEnabled, builtInToolsWhitelist, baseUrl, promptResponseJson,
-                    quickReplies, sentiment, mcpServers);
-            Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
-            String langchainLocation = llmResponse.getHeaderString("Location");
-            String langchainId = extractIdFromLocation(langchainLocation);
-            int langchainVersion = extractVersionFromLocation(langchainLocation);
-            createdResources.put("langchainLocation", langchainLocation);
-            patchDescriptor(langchainId, langchainVersion, name);
-
-            // --- Step 4: Create Output Set (if intro message provided) ---
-            String outputLocation = null;
-            if (introMessage != null && !introMessage.isBlank()) {
-                var outputConfig = createOutputConfig(introMessage);
-                Response outputResponse = getRestStore(IRestOutputStore.class).createOutputSet(outputConfig);
-                outputLocation = outputResponse.getHeaderString("Location");
-                String outputId = extractIdFromLocation(outputLocation);
-                int outputVersion = extractVersionFromLocation(outputLocation);
-                createdResources.put("outputLocation", outputLocation);
-                patchDescriptor(outputId, outputVersion, name);
-            }
-
-            // --- Step 5: Create Workflow ---
-            var packageConfig = createWorkflowConfig(parserLocation, behaviorLocation, null, langchainLocation,
-                    outputLocation);
-            Response packageResponse = getRestStore(IRestWorkflowStore.class).createWorkflow(packageConfig);
-            String packageLocation = packageResponse.getHeaderString("Location");
-            String workflowId = extractIdFromLocation(packageLocation);
-            int packageVersion = extractVersionFromLocation(packageLocation);
-            createdResources.put("packageLocation", packageLocation);
-            patchDescriptor(workflowId, packageVersion, name);
-
-            // --- Step 6: Create Agent ---
-            var agentConfig = new AgentConfiguration();
-            agentConfig.setWorkflows(List.of(URI.create(packageLocation)));
-            Response agentResponse = getRestStore(IRestAgentStore.class).createAgent(agentConfig);
-            String agentLocation = agentResponse.getHeaderString("Location");
-            String agentId = extractIdFromLocation(agentLocation);
-            int agentVersion = extractVersionFromLocation(agentLocation);
-            createdResources.put("agentLocation", agentLocation);
-            patchDescriptor(agentId, agentVersion, name);
-
-            // --- Step 7: Deploy (synchronous wait for completion) ---
-            if (params.shouldDeploy && agentId != null) {
-                var deployResult = deployAndWait(params.env, agentId, agentVersion);
-                createdResources.putAll(deployResult);
-            }
-
-            var result = new LinkedHashMap<String, Object>();
-            result.put("action", "setup_complete");
-            result.put("agentId", agentId != null ? agentId : "unknown");
-            result.put("agentName", name);
-            result.put("provider", params.providerType);
-            result.put("model", params.modelId);
-            if (quickReplies || sentiment) {
-                result.put("responseFormat", "json");
-                if (quickReplies)
-                    result.put("quickRepliesEnabled", true);
-                if (sentiment)
-                    result.put("sentimentAnalysisEnabled", true);
-            }
-            result.put("resources", createdResources);
+            var request = new SetupAgentRequest(
+                    name, systemPrompt, provider, model, apiKey, baseUrl,
+                    introMessage, enableBuiltInTools, builtInToolsWhitelist,
+                    enableQuickReplies, enableSentimentAnalysis, mcpServers,
+                    deploy, environment);
+            var result = agentSetupService.setupAgent(request);
             return jsonSerialization.serialize(result);
-
+        } catch (AgentSetupException e) {
+            return errorJson(e.getMessage());
         } catch (Exception e) {
             LOGGER.error("MCP setup_agent failed", e);
             return errorJson("Failed to set up agent: " + e.getMessage());
         }
     }
 
-    // --- Config Builders ---
-
-    /**
-     * Create a minimal parser config with basic built-in dictionaries.
-     * The parser produces NLU expressions from user input, which the
-     * inputmatcher(*) condition needs to evaluate.
-     */
-    ParserConfiguration createParserConfig() {
-        var config = new ParserConfiguration();
-        config.setExtensions(Map.of(
-                "dictionaries", List.of(),
-                "corrections", List.of()));
-        return config;
-    }
-
-    /**
-     * Create behavior rules: catch-all inputmatcher(*) → send_message action.
-     * The parser must be in the workflow before behavior rules so that
-     * expressions are available for matching.
-     */
-    RuleSetConfiguration createBehaviorConfig() {
-        var condition = new RuleConditionConfiguration();
-        condition.setType("inputmatcher");
-        condition.setConfigs(Map.of("expressions", "*"));
-
-        var rule = new RuleConfiguration();
-        rule.setName("Send Message to LLM");
-        rule.setActions(List.of("send_message"));
-        rule.setConditions(List.of(condition));
-
-        var group = new RuleGroupConfiguration();
-        group.setRules(List.of(rule));
-
-        var config = new RuleSetConfiguration();
-        config.setExpressionsAsActions(true);
-        config.setBehaviorGroups(List.of(group));
-        return config;
-    }
-
-    /**
-     * Create LangChain config with the specified model, system prompt, and tool
-     * settings.
-     * Uses provider-specific parameter key names (e.g., Ollama uses 'model' not
-     * 'modelName').
-     */
-    LlmConfiguration createLlmConfig(String modelType, String modelId,
-            String apiKey, String systemPrompt,
-            boolean enableTooling, String toolsWhitelist,
-            String baseUrl, String promptResponseJson,
-            boolean quickReplies, boolean sentiment,
-            String mcpServers) {
-        var task = new LlmConfiguration.Task();
-        task.setActions(List.of("send_message"));
-        task.setId(modelType);
-        task.setType(modelType);
-        task.setDescription("LLM integration via " + modelType);
-
-        // Build effective system message: user prompt + optional JSON format
-        // instruction
-        String effectiveSystemPrompt = systemPrompt;
-        if (promptResponseJson != null) {
-            effectiveSystemPrompt = systemPrompt + "\n\n" + promptResponseJson;
-        }
-
-        var params = new LinkedHashMap<String, String>();
-        params.put("systemMessage", effectiveSystemPrompt);
-        // When JSON format is active, postResponse extracts the clean text — don't also
-        // output raw JSON
-        // The raw LLM response is still stored in memory as langchain:{type}:{id} for
-        // debugging
-        params.put("addToOutput", promptResponseJson == null ? "true" : "false");
-        params.put("timeout", "60000");
-        params.put("temperature", "0.3");
-        params.put("logRequests", "true");
-        params.put("logResponses", "true");
-
-        // When JSON response format is active, store as named object for postResponse
-        // extraction
-        if (promptResponseJson != null) {
-            params.put("convertToObject", "true");
-            task.setResponseObjectName("aiOutput");
-        }
-
-        // Provider-specific parameter mapping
-        switch (modelType) {
-            case "ollama" -> {
-                // Ollama uses 'model' not 'modelName', no apiKey needed
-                params.put("model", modelId);
-                if (baseUrl != null && !baseUrl.isBlank()) {
-                    params.put("baseUrl", baseUrl);
-                }
-            }
-            case "jlama" -> {
-                // jlama uses 'modelName', optional 'authToken' instead of 'apiKey'
-                params.put("modelName", modelId);
-                if (apiKey != null && !apiKey.isBlank()) {
-                    params.put("authToken", apiKey);
-                }
-            }
-            default -> {
-                // Cloud providers (anthropic, openai, gemini, etc.): 'modelName' + 'apiKey'
-                params.put("modelName", modelId);
-                if (apiKey != null && !apiKey.isBlank()) {
-                    params.put("apiKey", apiKey);
-                }
-                if (baseUrl != null && !baseUrl.isBlank()) {
-                    params.put("baseUrl", baseUrl);
-                }
-                // Set responseFormat=json for providers that support it (OpenAI, Gemini)
-                if (promptResponseJson != null && supportsResponseFormat(modelType)) {
-                    params.put("responseFormat", "json");
-                }
-            }
-        }
-
-        task.setParameters(params);
-
-        if (enableTooling) {
-            task.setEnableBuiltInTools(true);
-            if (toolsWhitelist != null && !toolsWhitelist.isBlank()) {
-                task.setBuiltInToolsWhitelist(
-                        List.of(toolsWhitelist.split(",")).stream()
-                                .map(String::trim)
-                                .filter(s -> !s.isEmpty())
-                                .toList());
-            }
-        }
-
-        task.setConversationHistoryLimit(10);
-
-        // MCP servers — external tool providers
-        if (mcpServers != null && !mcpServers.isBlank()) {
-            var mcpConfigs = new ArrayList<LlmConfiguration.McpServerConfig>();
-            for (String serverUrl : mcpServers.split(",")) {
-                String trimmed = serverUrl.trim();
-                if (!trimmed.isEmpty()) {
-                    var mcpConfig = new LlmConfiguration.McpServerConfig();
-                    mcpConfig.setUrl(trimmed);
-                    mcpConfigs.add(mcpConfig);
-                }
-            }
-            if (!mcpConfigs.isEmpty()) {
-                task.setMcpServers(mcpConfigs);
-            }
-        }
-
-        // Build postResponse to extract text output and quick replies from LLM JSON
-        if (promptResponseJson != null) {
-            task.setPostResponse(buildPostResponse(quickReplies, sentiment));
-        }
-
-        return new LlmConfiguration(List.of(task));
-    }
-
-    /**
-     * Build the postResponse that extracts structured data from the LLM JSON
-     * output:
-     * 1. propertyInstructions: parse aiOutput JSON string into aiOutputObject
-     * 2. outputBuildInstructions: extract htmlResponseText as text output to chat
-     * 3. qrBuildInstructions: iterate quickReplies array into QR buttons
-     * Sentiment stays internal (in memory) — not shown to user.
-     */
-    PostResponse buildPostResponse(boolean quickReplies, boolean sentiment) {
-        var postResponse = new PostResponse();
-
-        // The langchain task with convertToObject=true already puts the deserialized
-        // JSON response as a Map under templateDataObjects["aiOutput"] (the
-        // responseObjectName).
-        // We can reference aiOutput fields directly in templates — no
-        // propertyInstructions needed.
-
-        // Step 1: Extract htmlResponseText as the text output shown to the user
-        var outputInstruction = new OutputBuildingInstruction();
-        outputInstruction.setIterationObjectName("obj");
-        outputInstruction.setTemplateFilterExpression("");
-        outputInstruction.setOutputType("text");
-        outputInstruction.setOutputValue("[(${aiOutput.htmlResponseText})]");
-        postResponse.setOutputBuildInstructions(List.of(outputInstruction));
-
-        // Step 2: Build quick reply buttons from the quickReplies array
-        if (quickReplies) {
-            var qrInstruction = new QuickRepliesBuildingInstruction();
-            qrInstruction.setPathToTargetArray("aiOutput.quickReplies");
-            qrInstruction.setIterationObjectName("quickReply");
-            qrInstruction.setTemplateFilterExpression("");
-            qrInstruction.setQuickReplyValue("[(${quickReply})]");
-            qrInstruction.setQuickReplyExpressions("trigger(quick_reply)");
-            postResponse.setQrBuildInstructions(List.of(qrInstruction));
-        }
-
-        return postResponse;
-    }
-
-    /**
-     * Create output set with a CONVERSATION_START intro message.
-     */
-    OutputConfigurationSet createOutputConfig(String introMessage) {
-        var textItem = new TextOutputItem(introMessage, 0);
-
-        var output = new OutputConfiguration.Output();
-        output.setValueAlternatives(List.of(textItem));
-
-        var outputEntry = new OutputConfiguration();
-        outputEntry.setAction("CONVERSATION_START");
-        outputEntry.setTimesOccurred(0);
-        outputEntry.setOutputs(List.of(output));
-
-        var outputSet = new OutputConfigurationSet();
-        outputSet.setOutputSet(List.of(outputEntry));
-        return outputSet;
-    }
-
-    /**
-     * Create package with parser + behavior + [httpcalls...] + langchain [+ output]
-     * workflow.
-     * The parser MUST be first in the workflow — it produces NLU expressions
-     * that the behavior rules' inputmatcher condition needs.
-     */
-    WorkflowConfiguration createWorkflowConfig(String parserLocation,
-            String behaviorLocation,
-            List<String> httpCallsLocations,
-            String langchainLocation,
-            String outputLocation) {
-        var extensions = new ArrayList<WorkflowConfiguration.WorkflowStep>();
-
-        // Parser (must be first — produces expressions for behavior rules)
-        if (parserLocation != null) {
-            var parser = new WorkflowConfiguration.WorkflowStep();
-            parser.setType(URI.create("eddi://ai.labs.parser"));
-            parser.setConfig(Map.of("uri", parserLocation));
-            extensions.add(parser);
-        }
-
-        // Behavior rules
-        var behavior = new WorkflowConfiguration.WorkflowStep();
-        behavior.setType(URI.create("eddi://ai.labs.rules"));
-        behavior.setConfig(Map.of("uri", behaviorLocation));
-        extensions.add(behavior);
-
-        // ApiCalls (zero or more groups)
-        if (httpCallsLocations != null) {
-            for (String httpCallsLocation : httpCallsLocations) {
-                var httpCalls = new WorkflowConfiguration.WorkflowStep();
-                httpCalls.setType(URI.create("eddi://ai.labs.apicalls"));
-                httpCalls.setConfig(Map.of("uri", httpCallsLocation));
-                extensions.add(httpCalls);
-            }
-        }
-
-        // LangChain
-        var langchain = new WorkflowConfiguration.WorkflowStep();
-        langchain.setType(URI.create("eddi://ai.labs.llm"));
-        langchain.setConfig(Map.of("uri", langchainLocation));
-        extensions.add(langchain);
-
-        // Output (optional)
-        if (outputLocation != null) {
-            var output = new WorkflowConfiguration.WorkflowStep();
-            output.setType(URI.create("eddi://ai.labs.output"));
-            output.setConfig(Map.of("uri", outputLocation));
-            extensions.add(output);
-        }
-
-        var config = new WorkflowConfiguration();
-        config.setWorkflowSteps(extensions);
-        return config;
-    }
-
-    @Tool(name = "create_api_agent", description = "Create a Agent that can call any REST API described by an OpenAPI specification. "
-            +
-            "Parses the OpenAPI spec, generates ApiCalls configurations (grouped by API tag), " +
-            "and creates a fully deployed Agent with LLM-powered API interaction. " +
-            "The LLM can then call the API endpoints as tools through EDDI's controlled workflow.")
+    @Tool(name = "create_api_agent", description = "Create a Agent that can interact with any REST API using an OpenAPI spec. " +
+            "This parses the OpenAPI spec, generates ApiCalls configurations for each tag group, " +
+            "creates behavior rules with API-specific actions, and deploys a Agent that the LLM " +
+            "can use to call the API endpoints. Endpoints are grouped by OpenAPI tag into separate " +
+            "ApiCalls resources. Deprecated endpoints are automatically skipped.")
     public String createApIAgent(
             @ToolArg(description = "Agent name (required)") String name,
-            @ToolArg(description = "System prompt / role for the LLM (required). " +
-                    "Should describe the API and how the Agent should use it.") String systemPrompt,
-            @ToolArg(description = "OpenAPI 3.0/3.1 specification as JSON/YAML string or URL (required)") String openApiSpec,
-            @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', 'gemini', " +
-                    "'gemini-vertex', 'huggingface', 'ollama', or 'jlama'") String provider,
-            @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default), 'gpt-5.4', " +
-                    "'gemini-3.1-pro-preview', 'deepseek-chat', 'llama3.2:1b' (ollama)") String model,
-            @ToolArg(description = "API key for the LLM provider (required). " +
-                    "Can be a vault reference like '${vault:openai-key}'") String apiKey,
+            @ToolArg(description = "System prompt for the LLM (required). " +
+                    "Include instructions on how to use the API.") String systemPrompt,
+            @ToolArg(description = "OpenAPI 3.x spec as JSON/YAML string or a URL (required)") String openApiSpec,
+            @ToolArg(description = "LLM provider: 'anthropic' (default), 'openai', 'gemini', etc.") String provider,
+            @ToolArg(description = "Model name (default: 'claude-sonnet-4-6')") String model,
+            @ToolArg(description = "LLM API key (required for cloud providers). " +
+                    "Use vault reference: '${vault:key-name}'.") String apiKey,
             @ToolArg(description = "Override the API base URL from the spec (optional)") String apiBaseUrl,
-            @ToolArg(description = "API authorization header value or vault reference (optional). " +
-                    "E.g. 'Bearer sk-...' or '${vault:api-key}'") String apiAuth,
-            @ToolArg(description = "Comma-separated endpoint filter, e.g. 'GET /users,POST /orders' (optional, default: all)") String endpoints,
-            @ToolArg(description = "Enable quick reply buttons in Agent responses? (default: false).") Boolean enableQuickReplies,
-            @ToolArg(description = "Enable sentiment analysis in Agent responses? (default: false).") Boolean enableSentimentAnalysis,
-            @ToolArg(description = "Automatically deploy the Agent after creation? (default: true)") Boolean deploy,
+            @ToolArg(description = "Authorization header for API calls, e.g. 'Bearer token123' (optional). " +
+                    "Use vault reference: '${vault:api-token}'.") String apiAuth,
+            @ToolArg(description = "Comma-separated endpoint filter, e.g. 'GET /users,POST /orders'. " +
+                    "If omitted, all non-deprecated endpoints are included.") String endpoints,
+            @ToolArg(description = "Enable quick reply buttons in Agent responses? (default: false)") Boolean enableQuickReplies,
+            @ToolArg(description = "Enable sentiment analysis in Agent responses? (default: false)") Boolean enableSentimentAnalysis,
+            @ToolArg(description = "Deploy after creation? (default: true)") Boolean deploy,
             @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
         try {
-            // Validate required params
-            if (name == null || name.isBlank()) {
-                return errorJson("Agent name is required");
-            }
-            if (systemPrompt == null || systemPrompt.isBlank()) {
-                return errorJson("System prompt is required");
-            }
-            if (openApiSpec == null || openApiSpec.isBlank()) {
-                return errorJson("OpenAPI spec is required");
-            }
-            if (apiKey == null || apiKey.isBlank()) {
-                return errorJson("API key is required");
-            }
-
-            var params = resolveParams(provider, model, deploy, environment);
-
-            var createdResources = new LinkedHashMap<String, Object>();
-
-            // --- Step 1: Parse OpenAPI and build grouped httpcalls configs ---
-            McpApiToolBuilder.ApiBuildResult buildResult;
-            try {
-                buildResult = McpApiToolBuilder.parseAndBuild(openApiSpec, endpoints, apiBaseUrl, apiAuth);
-            } catch (IllegalArgumentException e) {
-                return errorJson("OpenAPI parsing failed: " + e.getMessage());
-            }
-
-            // --- Step 2: Create ApiCalls resources (one per group) ---
-            var httpCallsLocations = new ArrayList<String>();
-            var groupNames = new ArrayList<String>();
-            for (var entry : buildResult.configsByGroup().entrySet()) {
-                String groupName = entry.getKey();
-                var config = entry.getValue();
-                Response httpCallsResponse = getRestStore(IRestApiCallsStore.class).createApiCalls(config);
-                String httpCallsLocation = httpCallsResponse.getHeaderString("Location");
-                httpCallsLocations.add(httpCallsLocation);
-                groupNames.add(groupName);
-
-                // Patch descriptor with "{agentName} - {groupName}"
-                String httpCallsId = extractIdFromLocation(httpCallsLocation);
-                int httpCallsVersion = extractVersionFromLocation(httpCallsLocation);
-                patchDescriptor(httpCallsId, httpCallsVersion, name + " - " + groupName);
-            }
-            createdResources.put("httpCallsGroups", groupNames);
-            createdResources.put("httpCallsLocations", httpCallsLocations);
-
-            // --- Step 3: Create Parser ---
-            var parserConfig = createParserConfig();
-            Response parserResponse = getRestStore(IRestParserStore.class).createParser(parserConfig);
-            String parserLocation = parserResponse.getHeaderString("Location");
-            createdResources.put("parserLocation", parserLocation);
-            patchDescriptor(extractIdFromLocation(parserLocation),
-                    extractVersionFromLocation(parserLocation), name);
-
-            // --- Step 4: Create Behavior Rules ---
-            var behaviorConfig = createBehaviorConfig();
-            Response behaviorResponse = getRestStore(IRestRuleSetStore.class).createRuleSet(behaviorConfig);
-            String behaviorLocation = behaviorResponse.getHeaderString("Location");
-            createdResources.put("behaviorLocation", behaviorLocation);
-            patchDescriptor(extractIdFromLocation(behaviorLocation),
-                    extractVersionFromLocation(behaviorLocation), name);
-
-            // --- Step 5: Create LangChain Configuration ---
-            // Enrich system prompt with API summary
-            String enrichedPrompt = systemPrompt + "\n\n" + buildResult.apiSummary();
-            boolean quickReplies = enableQuickReplies != null && enableQuickReplies;
-            boolean sentiment = enableSentimentAnalysis != null && enableSentimentAnalysis;
-            String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
-            var llmConfig = createLlmConfig(
-                    params.providerType, params.modelId, apiKey, enrichedPrompt, false, null, null, promptResponseJson,
-                    quickReplies, sentiment, null);
-            Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
-            String langchainLocation = llmResponse.getHeaderString("Location");
-            createdResources.put("langchainLocation", langchainLocation);
-            patchDescriptor(extractIdFromLocation(langchainLocation),
-                    extractVersionFromLocation(langchainLocation), name);
-
-            // --- Step 6: Create Workflow (with httpcalls in workflow) ---
-            var packageConfig = createWorkflowConfig(
-                    parserLocation, behaviorLocation, httpCallsLocations, langchainLocation, null);
-            Response packageResponse = getRestStore(IRestWorkflowStore.class).createWorkflow(packageConfig);
-            String packageLocation = packageResponse.getHeaderString("Location");
-            createdResources.put("packageLocation", packageLocation);
-            patchDescriptor(extractIdFromLocation(packageLocation),
-                    extractVersionFromLocation(packageLocation), name);
-
-            // --- Step 7: Create Agent ---
-            var agentConfig = new AgentConfiguration();
-            agentConfig.setWorkflows(List.of(URI.create(packageLocation)));
-            Response agentResponse = getRestStore(IRestAgentStore.class).createAgent(agentConfig);
-            String agentLocation = agentResponse.getHeaderString("Location");
-            String agentId = extractIdFromLocation(agentLocation);
-            int agentVersion = extractVersionFromLocation(agentLocation);
-            createdResources.put("agentLocation", agentLocation);
-            patchDescriptor(agentId, agentVersion, name);
-
-            // --- Step 8: Deploy (synchronous wait for completion) ---
-            if (params.shouldDeploy && agentId != null) {
-                var deployResult = deployAndWait(params.env, agentId, agentVersion);
-                createdResources.putAll(deployResult);
-            }
-
-            var result = new LinkedHashMap<String, Object>();
-            result.put("action", "api_agent_created");
-            result.put("agentId", agentId != null ? agentId : "unknown");
-            result.put("agentName", name);
-            result.put("provider", params.providerType);
-            result.put("model", params.modelId);
-            result.put("endpointCount", buildResult.endpointCount());
-            result.put("groups", groupNames);
-            result.put("resources", createdResources);
+            var request = new CreateApiAgentRequest(
+                    name, systemPrompt, openApiSpec, provider, model, apiKey,
+                    apiBaseUrl, apiAuth, endpoints,
+                    enableQuickReplies, enableSentimentAnalysis,
+                    deploy, environment);
+            var result = agentSetupService.createApiAgent(request);
             return jsonSerialization.serialize(result);
-
+        } catch (AgentSetupException e) {
+            return errorJson(e.getMessage());
         } catch (Exception e) {
             LOGGER.error("MCP create_api_agent failed", e);
             return errorJson("Failed to create API agent: " + e.getMessage());
         }
     }
 
-    /**
-     * Resolve common parameters with defaults.
-     */
-    private record ResolvedParams(String providerType, String modelId,
-            boolean shouldDeploy, Deployment.Environment env) {
-    }
+    // ==================== Static Delegates for Test Compatibility ====================
 
-    private ResolvedParams resolveParams(String provider, String model,
-            Boolean deploy, String environment) {
-        return new ResolvedParams(
-                provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : "anthropic",
-                model != null && !model.isBlank() ? model.trim() : "claude-sonnet-4-6",
-                deploy == null || deploy,
-                parseEnvironment(environment));
+    /**
+     * @see AgentSetupService#buildPromptResponseJson(boolean, boolean)
+     */
+    public static String buildPromptResponseJson(boolean quickReplies, boolean sentiment) {
+        return AgentSetupService.buildPromptResponseJson(quickReplies, sentiment);
     }
 
     /**
-     * Deploy a Agent using the REST endpoint with waitForCompletion=true.
-     * The endpoint waits up to 30s for deployment to complete and returns the
-     * actual status.
+     * @see AgentSetupService#supportsResponseFormat(String)
      */
-    private Map<String, Object> deployAndWait(Deployment.Environment env, String agentId, int agentVersion) {
-        var result = new LinkedHashMap<String, Object>();
-        result.put("environment", env.name());
-        try {
-            Response response = agentAdmin.deployAgent(env, agentId, agentVersion, true, true);
-            int httpStatus = response.getStatus();
-
-            if (httpStatus == 200) {
-                // Synchronous response with actual deployment status
-                try {
-                    @SuppressWarnings("unchecked")
-                    var body = (java.util.Map<String, Object>) response.getEntity();
-                    String deployStatus = body != null && body.containsKey("status")
-                            ? body.get("status").toString()
-                            : "UNKNOWN";
-                    result.put("deployed", "READY".equals(deployStatus));
-                    result.put("deploymentStatus", deployStatus);
-                    if (body != null && body.containsKey("error")) {
-                        result.put("deployError", body.get("error").toString());
-                    }
-                    if (!"READY".equals(deployStatus)) {
-                        String warning = "Agent created but deployment status is " + deployStatus +
-                                ". Check Agent configuration and credentials.";
-                        if (body != null && body.containsKey("error")) {
-                            warning += " Error: " + body.get("error");
-                        }
-                        result.put("deployWarning", warning);
-                    }
-                } catch (Exception parseError) {
-                    LOGGER.debug("Could not parse deploy response", parseError);
-                    result.put("deployed", false);
-                    result.put("deploymentStatus", "UNKNOWN");
-                    result.put("deployWarning", "Deploy returned 200 but could not parse status.");
-                }
-            } else if (httpStatus == 202) {
-                // Async response (shouldn't happen with waitForCompletion=true, but handle it)
-                result.put("deployed", false);
-                result.put("deploymentStatus", "IN_PROGRESS");
-                result.put("deployWarning", "Deployment accepted but not yet complete.");
-            } else {
-                result.put("deployed", false);
-                result.put("deployError", "Unexpected deploy response: HTTP " + httpStatus);
-            }
-        } catch (Exception deployError) {
-            LOGGER.warn("MCP deploy failed for Agent " + agentId, deployError);
-            result.put("deployed", false);
-            result.put("deployError", "Deployment failed. Check server logs for details.");
-        }
-        return result;
+    public static boolean supportsResponseFormat(String modelType) {
+        return AgentSetupService.supportsResponseFormat(modelType);
     }
 
     /**
-     * Check if the given model type is a local LLM provider (no API key needed).
+     * @see AgentSetupService#isLocalLlmProvider(String)
      */
-    static boolean isLocalLlmProvider(String model) {
-        if (model == null || model.isBlank())
-            return false;
-        String normalized = model.trim().toLowerCase();
-        return "ollama".equals(normalized) || "jlama".equals(normalized);
+    public static boolean isLocalLlmProvider(String provider) {
+        return AgentSetupService.isLocalLlmProvider(provider);
     }
 
-    /**
-     * Check if the provider supports the builder-level responseFormat=json
-     * parameter.
-     * Providers that support this will enforce JSON output at the API level,
-     * making structured responses more reliable (especially with smaller models).
-     */
-    static boolean supportsResponseFormat(String modelType) {
-        return "openai".equals(modelType) || "gemini".equals(modelType) || "gemini-vertex".equals(modelType);
-    }
+    // ==================== Service Accessors for Tests ====================
 
     /**
-     * Build the promptResponseJson format instruction for the LLM.
-     * Returns null if neither feature is enabled.
-     *
-     * <p>
-     * This follows the same pattern as the Gnowbe learner agent:
-     * the instruction tells the LLM to respond with a single valid JSON object
-     * containing the main text reply and optional structured data.
-     * </p>
-     *
-     * @param quickReplies include quick reply button suggestions
-     * @param sentiment    include sentiment analysis fields
-     * @return the format instruction string, or null if no features enabled
+     * Provide access to the underlying service for tests that need to call
+     * config builder methods directly.
      */
-    static String buildPromptResponseJson(boolean quickReplies, boolean sentiment) {
-        if (!quickReplies && !sentiment) {
-            return null;
-        }
-
-        // Build the JSON schema as a map — cleaner than manual string escaping
-        var schema = new LinkedHashMap<String, Object>();
-        schema.put("htmlResponseText",
-                "String - your main reply to the user, optionally formatted with basic inline HTML tags for readability.");
-
-        if (quickReplies) {
-            schema.put("quickReplies", List.of(
-                    "short, button-like suggestions for how the user might want to respond next: " +
-                            "Provide 2-4 concise quick reply buttons that are relevant to your latest answer " +
-                            "and any recent user input. They should prompt fast responses or encourage deeper " +
-                            "exploration (e.g., 'Yes, I agree', 'Tell me more')"));
-        }
-
-        if (sentiment) {
-            var sentimentObj = new LinkedHashMap<String, Object>();
-            sentimentObj.put("score", "Float - range from -1.0 (very negative) to +1.0 (very positive)");
-            sentimentObj.put("trend", "String - e.g., 'improved', 'worsened', or 'unchanged'");
-            sentimentObj.put("emotions", List.of("String - e.g., 'anger', 'joy', 'frustration', etc."));
-            sentimentObj.put("intent", "String - e.g., 'complaint', 'question', 'feedback', 'feature_request'");
-            sentimentObj.put("urgency", "String - 'low', 'medium', or 'high'");
-            sentimentObj.put("confidence", "Float - 0.0 to 1.0, how confident you are in the sentiment assessment");
-            sentimentObj.put("topicTags",
-                    List.of("String - e.g., 'billing', 'shipping', 'product_quality', 'account'"));
-            sentimentObj.put("userFeedback", "String - direct user feedback if present; otherwise empty");
-            schema.put("sentiment", sentimentObj);
-        }
-
-        try {
-            String jsonSchema = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(schema);
-            return "Response with one single valid JSON Object (without wrapping it in " +
-                    "any formatting or markdown). Always use the following json structure as response:" +
-                    jsonSchema;
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            // Should never happen with simple maps/strings
-            throw new RuntimeException("Failed to serialize JSON schema", e);
-        }
-    }
-
-    /**
-     * Patch a resource descriptor with the Agent name.
-     * Descriptors are auto-created by DocumentDescriptorFilter when using REST HTTP
-     * proxies.
-     */
-    private void patchDescriptor(String id, int version, String name) {
-        if (id == null)
-            return;
-        try {
-            var patchDoc = new DocumentDescriptor();
-            patchDoc.setName(name);
-
-            var patch = new PatchInstruction<DocumentDescriptor>();
-            patch.setOperation(PatchInstruction.PatchOperation.SET);
-            patch.setDocument(patchDoc);
-            getRestStore(IRestDocumentDescriptorStore.class).patchDescriptor(id, version, patch);
-        } catch (Exception e) {
-            LOGGER.warn("MCP patchDescriptor failed for " + id, e);
-        }
-    }
-
-    /**
-     * Get a REST interface proxy via IRestInterfaceFactory.
-     * Delegates to McpToolUtils.getRestStore().
-     */
-    private <T> T getRestStore(Class<T> clazz) {
-        return McpToolUtils.getRestStore(restInterfaceFactory, clazz);
+    AgentSetupService getService() {
+        return agentSetupService;
     }
 }

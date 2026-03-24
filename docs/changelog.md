@@ -13,6 +13,49 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## AgentSetupService Extraction — REST Endpoints for Agent Setup (2026-03-24)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Extracted all agent setup business logic from `McpSetupTools` (803 lines) into a shared `AgentSetupService` CDI bean. The service is now exposed via both MCP tools (unchanged interface) and new REST endpoints.
+
+| Component | Files | Change |
+|-----------|-------|--------|
+| **Request Records** | `SetupAgentRequest.java`, `CreateApiAgentRequest.java` | NEW — Typed request objects for both operations |
+| **Result Record** | `SetupResult.java` | NEW — Structured result with builder pattern |
+| **Service** | `AgentSetupService.java` (~400 lines) | NEW — All config builders, validation, deploy logic |
+| **REST Interface** | `IRestAgentSetup.java` | NEW — `POST /administration/agents/setup`, `POST /administration/agents/setup-api` |
+| **REST Impl** | `RestAgentSetup.java` | NEW — Thin adapter (201/400/500) |
+| **MCP Tools** | `McpSetupTools.java` (803→145 lines) | REWRITE — Thin wrapper: builds request, calls service, serializes result |
+| **Utility** | `McpApiToolBuilder.java` | Class + `ApiBuildResult` + `parseAndBuild` + `parseSpec` made `public` |
+| **Tests** | `McpSetupToolsTest.java` | REWRITE — Config builder tests via `service.`, MCP integration tests via `tools.` |
+
+**New REST API:**
+
+| Method | Path | Request | Response |
+|--------|------|---------|----------|
+| `POST` | `/administration/agents/setup` | `SetupAgentRequest` | `201 SetupResult` / `400 error` |
+| `POST` | `/administration/agents/setup-api` | `CreateApiAgentRequest` | `201 SetupResult` / `400 error` |
+
+**Design decisions:**
+
+- Service-first architecture ensures consistency between MCP and REST interfaces
+- `SetupResult` with builder avoids Map soup in responses
+- Static utility methods (`buildPromptResponseJson`, `isLocalLlmProvider`, `supportsResponseFormat`) preserved as delegates on `McpSetupTools` for backward compatibility
+- `AgentSetupException` (checked) for validation errors vs `RuntimeException` for infrastructure failures
+
+**Also in this commit:**
+
+- `V6RenameMigration.java` — updated collection rename mappings for v6 naming alignment
+
+**Scope:** 9 files changed (6 new, 3 modified). New `engine.setup` package with service + records. `engine.api` and `engine.rest` extended.
+
+**Testing:** ✅ Full suite passes — 140+ tests, 0 failures. `McpSetupToolsTest` (19), `McpApiToolBuilderTest` (17) all green.
+
+---
+
 ## V6 Content Rename — Complete String/Comment/Doc Alignment (2026-03-22)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

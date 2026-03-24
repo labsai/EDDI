@@ -13,6 +13,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +39,7 @@ class McpSetupToolsTest {
         private IRestParserStore parserStore;
         private IJsonSerialization jsonSerialization;
         private McpSetupTools tools;
+        private AgentSetupService service;
 
         @BeforeEach
         void setUp() throws Exception {
@@ -71,7 +73,8 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/parserstore/parsers/par-1?version=1"))
                                                 .build());
 
-                tools = new McpSetupTools(restInterfaceFactory, agentAdmin, jsonSerialization);
+                service = new AgentSetupService(restInterfaceFactory, agentAdmin);
+                tools = new McpSetupTools(service, jsonSerialization);
         }
 
         @Test
@@ -349,9 +352,11 @@ class McpSetupToolsTest {
                 assertEquals(3, packageCaptor.getValue().getWorkflowSteps().size());
         }
 
+        // --- Config builder tests (via AgentSetupService) ---
+
         @Test
         void createBehaviorConfig_producesCorrectStructure() {
-                var config = tools.createBehaviorConfig();
+                var config = service.createBehaviorConfig();
                 assertTrue(config.getExpressionsAsActions());
                 assertEquals(1, config.getBehaviorGroups().size());
 
@@ -367,7 +372,7 @@ class McpSetupToolsTest {
 
         @Test
         void createLlmConfig_withTooling_setsToolFields() {
-                var config = tools.createLlmConfig(
+                var config = service.createLlmConfig(
                                 "anthropic", "claude-sonnet-4-6", "key", "You are helpful",
                                 true, "calculator,websearch", null, null, false, false, null);
 
@@ -378,7 +383,7 @@ class McpSetupToolsTest {
 
         @Test
         void createLlmConfig_ollama_usesModelParam() {
-                var config = tools.createLlmConfig(
+                var config = service.createLlmConfig(
                                 "ollama", "llama3.2:1b", null, "prompt",
                                 false, null, "http://host.docker.internal:11434", null, false, false, null);
 
@@ -392,7 +397,7 @@ class McpSetupToolsTest {
 
         @Test
         void createLlmConfig_jlama_usesAuthToken() {
-                var config = tools.createLlmConfig(
+                var config = service.createLlmConfig(
                                 "jlama", "tinyllama", "my-token", "prompt",
                                 false, null, null, null, false, false, null);
 
@@ -406,7 +411,7 @@ class McpSetupToolsTest {
         @Test
         void createLlmConfig_withJsonFormat_setsPostResponse() {
                 String jsonPrompt = McpSetupTools.buildPromptResponseJson(true, true);
-                var config = tools.createLlmConfig(
+                var config = service.createLlmConfig(
                                 "openai", "gpt-4o", "key", "prompt",
                                 false, null, null, jsonPrompt, true, true, null);
 
@@ -421,7 +426,7 @@ class McpSetupToolsTest {
 
         @Test
         void createLlmConfig_withoutJsonFormat_noPostResponse() {
-                var config = tools.createLlmConfig(
+                var config = service.createLlmConfig(
                                 "anthropic", "claude-sonnet-4-6", "key", "prompt",
                                 false, null, null, null, false, false, null);
 
@@ -510,7 +515,7 @@ class McpSetupToolsTest {
         }
 
         @Test
-        void setupAgent_withAgenthFeatures_appendsFullJsonFormat() throws Exception {
+        void setupAgent_withBothFeatures_appendsFullJsonFormat() throws Exception {
                 when(behaviorStore.createRuleSet(any()))
                                 .thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1"))
                                                 .build());
@@ -538,7 +543,7 @@ class McpSetupToolsTest {
                 assertEquals("true", params.get("convertToObject"));
                 assertEquals("json", params.get("responseFormat"));
 
-                // PostResponse should have agenth output and QR instructions
+                // PostResponse should have both output and QR instructions
                 assertNotNull(task.getPostResponse());
                 assertNotNull(task.getPostResponse().getOutputBuildInstructions());
                 assertNotNull(task.getPostResponse().getQrBuildInstructions());
@@ -597,7 +602,7 @@ class McpSetupToolsTest {
         }
 
         @Test
-        void buildPromptResponseJson_agenth() {
+        void buildPromptResponseJson_both() {
                 String result = McpSetupTools.buildPromptResponseJson(true, true);
                 assertNotNull(result);
                 assertTrue(result.contains("quickReplies"));
@@ -637,7 +642,7 @@ class McpSetupToolsTest {
 
         @Test
         void createOutputConfig_hasConversationStartAction() {
-                var config = tools.createOutputConfig("Welcome!");
+                var config = service.createOutputConfig("Welcome!");
 
                 assertEquals(1, config.getOutputSet().size());
                 var output = config.getOutputSet().get(0);
@@ -648,7 +653,7 @@ class McpSetupToolsTest {
 
         @Test
         void buildPostResponse_withQuickReplies_hasQrInstructions() {
-                var postResponse = tools.buildPostResponse(true, false);
+                var postResponse = service.buildPostResponse(true, false);
 
                 // No propertyInstructions — aiOutput is already a Map in templateDataObjects
                 assertNull(postResponse.getPropertyInstructions());
@@ -666,7 +671,7 @@ class McpSetupToolsTest {
 
         @Test
         void buildPostResponse_withoutQuickReplies_noQrInstructions() {
-                var postResponse = tools.buildPostResponse(false, true);
+                var postResponse = service.buildPostResponse(false, true);
 
                 assertNull(postResponse.getPropertyInstructions());
                 assertNotNull(postResponse.getOutputBuildInstructions());
