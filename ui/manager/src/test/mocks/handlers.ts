@@ -441,7 +441,7 @@ export const handlers = [
           type: "ai.labs.llm",
           extensions: {},
           config: {
-            uri: "eddi://ai.labs.llm/llmstore/llmconfigs/lc1?version=1",
+            uri: "eddi://ai.labs.llm/llmstore/llms/lc1?version=1",
           },
         },
       ],
@@ -772,7 +772,7 @@ export const handlers = [
   }),
 
   // LangChain mock data
-  http.get("*/llmstore/llmconfigs/:id", ({ request }) => {
+  http.get("*/llmstore/llms/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
     if (url.pathname.endsWith("/descriptors") || includePrevious) return;
@@ -879,7 +879,7 @@ export const handlers = [
     "dictionaries",
     "dictionary"
   ),
-  ...createResourceHandlers("llmstore", "llmconfigs", "llm"),
+  ...createResourceHandlers("llmstore", "llms", "llm"),
   ...createResourceHandlers(
     "propertysetterstore",
     "propertysetters",

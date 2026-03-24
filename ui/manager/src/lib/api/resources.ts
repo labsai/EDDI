@@ -46,7 +46,7 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
   {
     slug: "llm",
     store: "llmstore",
-    plural: "llmconfigs",
+    plural: "llms",
     labelKey: "resources.types.llm",
     icon: "Brain",
   },
