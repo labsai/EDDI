@@ -32,7 +32,7 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
         @Inject
         public WorkflowStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder,
                         IDocumentDescriptorStore documentDescriptorStore) {
-                super(storageFactory, "packages", documentBuilder, WorkflowConfiguration.class,
+                super(storageFactory, "workflows", documentBuilder, WorkflowConfiguration.class,
                                 WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD,
                                 WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD);
                 this.documentDescriptorStore = documentDescriptorStore;

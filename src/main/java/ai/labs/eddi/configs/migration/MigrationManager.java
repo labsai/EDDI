@@ -64,7 +64,7 @@ public class MigrationManager implements IMigrationManager {
     public static final String FIELD_NAME_TARGET_SERVER_URL = "targetServerUrl";
     public static final String OLD_FIELD_NAME_TARGET_SERVER = "targetServer";
     public static final String COLLECTION_OUTPUTS = "outputs";
-    public static final String COLLECTION_HTTPCALLS = "httpcalls";
+    public static final String COLLECTION_HTTPCALLS = "apicalls";
     public static final String COLLECTION_PROPERTYSETTER = "propertysetter";
     public static final String COLLECTION_CONVERSATION_MEMORY = "conversationmemories";
     public static final String FIELD_NAME_VALIDATION = "validation";

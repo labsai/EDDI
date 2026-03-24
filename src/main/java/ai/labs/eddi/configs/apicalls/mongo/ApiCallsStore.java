@@ -22,7 +22,7 @@ public class ApiCallsStore extends AbstractResourceStore<ApiCallsConfiguration>
 
     @Inject
     public ApiCallsStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
-        super(storageFactory, "httpcalls", documentBuilder, ApiCallsConfiguration.class);
+        super(storageFactory, "apicalls", documentBuilder, ApiCallsConfiguration.class);
     }
 
     @Override

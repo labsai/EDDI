@@ -1,5 +1,6 @@
 package ai.labs.eddi.configs.migration;
 
+import com.mongodb.MongoNamespace;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
@@ -53,6 +54,26 @@ public class V6RenameMigration {
             {"botstore/bots", "agentstore/agents"},
     };
 
+    /**
+     * MongoDB collection renames (v5 name → v6 name).
+     * Each entry also implies a corresponding ".history" rename.
+     */
+    private static final String[][] COLLECTION_RENAMES = {
+            {"bots",                "agents"},
+            {"packages",            "workflows"},
+            {"behaviorrulesets",    "rulesets"},
+            {"httpcalls",           "apicalls"},
+            {"langchain",           "llmconfigs"},
+            {"regulardictionaries", "dictionaries"},
+    };
+
+    /**
+     * BSON field renames inside agent documents (old field → new field).
+     * Applied after collection renames so we work on the "agents" collection.
+     */
+    private static final String[][] AGENT_FIELD_RENAMES = {
+            {"packages", "workflows"},
+    };
 
     /** Environment value rewrites. */
     private static final String[][] ENVIRONMENT_REWRITES = {
@@ -68,20 +89,20 @@ public class V6RenameMigration {
 
     /**
      * All MongoDB collections to scan for URI rewrites.
-     * These are the ACTUAL collection names from each store's constructor:
+     * These are the NEW (post-rename) v6 collection names:
      *   AgentStore          → "agents"
-     *   WorkflowStore       → "packages"
-     *   RuleSetStore        → "behaviorrulesets"
-     *   ApiCallsStore       → "httpcalls"
+     *   WorkflowStore       → "workflows"      (was "packages")
+     *   RuleSetStore        → "rulesets"        (was "behaviorrulesets")
+     *   ApiCallsStore       → "apicalls"        (was "httpcalls")
      *   OutputStore         → "outputs"
-     *   LlmStore            → "langchain"   (singular!)
+     *   LlmStore            → "llmconfigs"      (was "langchain")
      *   PropertySetterStore → "propertysetter"
-     *   DictionaryStore     → "regulardictionaries"
+     *   DictionaryStore     → "dictionaries"    (was "regulardictionaries")
      *   ParserStore         → "parsers"
      */
     private static final String[] RESOURCE_COLLECTIONS = {
-            "agents", "packages", "behaviorrulesets", "httpcalls", "outputs",
-            "langchain", "propertysetter", "regulardictionaries", "parsers",
+            "agents", "workflows", "rulesets", "apicalls", "outputs",
+            "llmconfigs", "propertysetter", "dictionaries", "parsers",
     };
 
     private final MongoDatabase database;
@@ -116,17 +137,23 @@ public class V6RenameMigration {
 
         int totalMigrated = 0;
 
-        // 1. Rewrite URIs in all resource + history collections
+        // 0. Rename MongoDB collections (v5 → v6 names)
+        renameCollections();
+
+        // 1. Rename BSON fields in agent documents (packages → workflows)
+        totalMigrated += migrateAgentFields();
+
+        // 2. Rewrite URIs in all resource + history collections
         for (String collectionName : RESOURCE_COLLECTIONS) {
             totalMigrated += migrateCollection(collectionName);
             totalMigrated += migrateCollection(collectionName + ".history");
         }
 
-        // 2. Rewrite resource URIs in descriptors
+        // 3. Rewrite resource URIs in descriptors
         totalMigrated += migrateDescriptors("descriptors");
         totalMigrated += migrateDescriptors("descriptors.history");
 
-        // 3. Rewrite environment fields in deployment/conversation documents
+        // 4. Rewrite environment fields in deployment/conversation documents
         totalMigrated += migrateEnvironments("conversationmemories");
         totalMigrated += migrateEnvironments("deployments");
 
@@ -134,6 +161,106 @@ public class V6RenameMigration {
 
         migrationLogStore.createMigrationLog(
                 new ai.labs.eddi.configs.migration.model.MigrationLog(MIGRATION_KEY));
+    }
+
+    /**
+     * Rename MongoDB collections from v5 names to v6 names.
+     * Each collection and its ".history" counterpart are renamed.
+     * Safe to call if collections have already been renamed (skips if old name doesn't exist).
+     */
+    private void renameCollections() {
+        for (String[] mapping : COLLECTION_RENAMES) {
+            renameCollectionIfExists(mapping[0], mapping[1]);
+            renameCollectionIfExists(mapping[0] + ".history", mapping[1] + ".history");
+        }
+    }
+
+    /**
+     * Rename a single MongoDB collection if the old name exists.
+     * Silently skips if the source collection doesn't exist or the target already exists.
+     */
+    private void renameCollectionIfExists(String oldName, String newName) {
+        try {
+            MongoCollection<Document> oldCollection = database.getCollection(oldName);
+            if (oldCollection.estimatedDocumentCount() == 0) {
+                // Collection either doesn't exist or is empty — nothing to rename
+                return;
+            }
+            String dbName = database.getName();
+            MongoNamespace target = new MongoNamespace(dbName, newName);
+            oldCollection.renameCollection(target);
+            LOGGER.infof("  Renamed collection: %s → %s", oldName, newName);
+        } catch (com.mongodb.MongoCommandException e) {
+            if (e.getErrorCode() == 48) {
+                // Target namespace already exists — collection was previously renamed
+                LOGGER.debugf("  Collection %s already renamed to %s — skipping", oldName, newName);
+            } else {
+                LOGGER.warnf("  Failed to rename collection %s → %s: %s", oldName, newName, e.getMessage());
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("  Failed to rename collection %s → %s: %s", oldName, newName, e.getMessage());
+        }
+    }
+
+    /**
+     * Rename BSON fields in agent documents (e.g., "packages" → "workflows").
+     * Runs after collection renames so we operate on the "agents" collection.
+     */
+    private int migrateAgentFields() {
+        MongoCollection<Document> collection;
+        try {
+            collection = database.getCollection("agents");
+            if (collection.estimatedDocumentCount() == 0) {
+                return 0;
+            }
+        } catch (Exception e) {
+            return 0;
+        }
+
+        int migrated = 0;
+        for (Document doc : collection.find()) {
+            boolean changed = false;
+
+            for (String[] mapping : AGENT_FIELD_RENAMES) {
+                if (doc.containsKey(mapping[0])) {
+                    doc.put(mapping[1], doc.get(mapping[0]));
+                    doc.remove(mapping[0]);
+                    changed = true;
+                }
+            }
+
+            if (changed) {
+                var query = eq(ID_FIELD, doc.get(ID_FIELD));
+                collection.replaceOne(query, doc);
+                migrated++;
+            }
+        }
+
+        // Also migrate history collection
+        try {
+            MongoCollection<Document> historyCollection = database.getCollection("agents.history");
+            for (Document doc : historyCollection.find()) {
+                boolean changed = false;
+                for (String[] mapping : AGENT_FIELD_RENAMES) {
+                    if (doc.containsKey(mapping[0])) {
+                        doc.put(mapping[1], doc.get(mapping[0]));
+                        doc.remove(mapping[0]);
+                        changed = true;
+                    }
+                }
+                if (changed) {
+                    saveDocument(historyCollection, doc, true);
+                    migrated++;
+                }
+            }
+        } catch (Exception e) {
+            // History collection may not exist
+        }
+
+        if (migrated > 0) {
+            LOGGER.infof("  agents: renamed %d document fields (packages → workflows)", migrated);
+        }
+        return migrated;
     }
 
     /**
@@ -313,8 +440,9 @@ public class V6RenameMigration {
 
     /**
      * Apply all URI authority and store path rewrites to a single string value.
+     * Package-private for testing.
      */
-    private String rewriteUriString(String value) {
+    String rewriteUriString(String value) {
         if (value == null || !value.contains("eddi://")) {
             return value;
         }

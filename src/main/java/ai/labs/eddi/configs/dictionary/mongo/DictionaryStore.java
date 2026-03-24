@@ -27,7 +27,7 @@ public class DictionaryStore extends AbstractResourceStore<DictionaryConfigurati
 
     @Inject
     public DictionaryStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
-        super(storageFactory, "regulardictionaries", documentBuilder, DictionaryConfiguration.class);
+        super(storageFactory, "dictionaries", documentBuilder, DictionaryConfiguration.class);
     }
 
     @Override

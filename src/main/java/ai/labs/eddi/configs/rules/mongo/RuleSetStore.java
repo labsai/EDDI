@@ -24,7 +24,7 @@ public class RuleSetStore extends AbstractResourceStore<RuleSetConfiguration>
 
     @Inject
     public RuleSetStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
-        super(storageFactory, "behaviorrulesets", documentBuilder, RuleSetConfiguration.class);
+        super(storageFactory, "rulesets", documentBuilder, RuleSetConfiguration.class);
     }
 
     @Override

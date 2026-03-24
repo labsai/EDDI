@@ -25,7 +25,7 @@ import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
  */
 @ApplicationScoped
 public class AgentStore extends AbstractResourceStore<AgentConfiguration> implements IAgentStore {
-    public static final String WORKFLOWS_FIELD = "packages";
+    public static final String WORKFLOWS_FIELD = "workflows";
     private static final String WORKFLOW_RESOURCE_URI = "eddi://ai.labs.workflow/workflowstore/workflows/";
     private static final String VERSION_QUERY_PARAM = "?version=";
 
