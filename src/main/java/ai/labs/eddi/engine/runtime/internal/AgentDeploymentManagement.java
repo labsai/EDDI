@@ -171,6 +171,8 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             if (lastDeploymentCheck == null || lastDeploymentCheck.isBefore(oneHourAgo)) {
                 lastDeploymentCheck = Instant.now();
                 var postUndeloymentAttempts = deploymentStore.readDeploymentInfos(deployed).stream()
+                        .filter(deploymentInfo -> deploymentInfo.getAgentId() != null
+                                && deploymentInfo.getAgentVersion() != null)
                         .map(deploymentInfo -> {
                             var environmentName = deploymentInfo.getEnvironment().toString();
                             var environment = Environment.valueOf(environmentName);
