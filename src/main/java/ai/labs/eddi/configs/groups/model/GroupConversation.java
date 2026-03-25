@@ -20,18 +20,42 @@ public class GroupConversation {
     private String originalQuestion;
     private List<TranscriptEntry> transcript = new ArrayList<>();
     private Map<String, String> memberConversationIds = new LinkedHashMap<>();
-    private int currentRound;
+    private int currentPhaseIndex;
+    private String currentPhaseName;
     private String synthesizedAnswer;
     private int depth;
     private Instant created;
     private Instant lastModified;
 
-    public record TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int round, TranscriptEntryType type,
-            Instant timestamp, String errorReason) {
+    /**
+     * A single entry in the discussion transcript. Each entry records one agent's
+     * contribution during a specific phase.
+     *
+     * @param speakerAgentId
+     *            the agent that produced this entry
+     * @param speakerDisplayName
+     *            human-readable name
+     * @param content
+     *            the agent's response text
+     * @param phaseIndex
+     *            which phase produced this (0-indexed)
+     * @param phaseName
+     *            human-readable phase name, e.g. "Peer Critique"
+     * @param type
+     *            entry classification
+     * @param timestamp
+     *            when the entry was created
+     * @param errorReason
+     *            error detail if type is ERROR or SKIPPED
+     * @param targetAgentId
+     *            who this entry addresses (for CRITIQUE), null if broadcast
+     */
+    public record TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int phaseIndex, String phaseName,
+            TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId) {
     }
 
     public enum TranscriptEntryType {
-        QUESTION, OPINION, SYNTHESIS, ERROR, SKIPPED
+        QUESTION, OPINION, CRITIQUE, REVISION, CHALLENGE, DEFENSE, ARGUMENT, REBUTTAL, SYNTHESIS, ERROR, SKIPPED
     }
 
     public enum GroupConversationState {
@@ -96,12 +120,20 @@ public class GroupConversation {
         this.memberConversationIds = memberConversationIds;
     }
 
-    public int getCurrentRound() {
-        return currentRound;
+    public int getCurrentPhaseIndex() {
+        return currentPhaseIndex;
     }
 
-    public void setCurrentRound(int currentRound) {
-        this.currentRound = currentRound;
+    public void setCurrentPhaseIndex(int currentPhaseIndex) {
+        this.currentPhaseIndex = currentPhaseIndex;
+    }
+
+    public String getCurrentPhaseName() {
+        return currentPhaseName;
+    }
+
+    public void setCurrentPhaseName(String currentPhaseName) {
+        this.currentPhaseName = currentPhaseName;
     }
 
     public String getSynthesizedAnswer() {

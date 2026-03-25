@@ -2,7 +2,7 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
-import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
@@ -54,7 +54,6 @@ public class McpGroupTools {
             int idx = parseIntOrDefault(index, 0);
             int lim = parseIntOrDefault(limit, 20);
             String flt = filter != null ? filter : "";
-
             List<DocumentDescriptor> descriptors = groupStore.readGroupDescriptors(flt, idx, lim);
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
@@ -79,14 +78,14 @@ public class McpGroupTools {
         }
     }
 
-    @Tool(description = "Create a new agent group configuration. " + "Specify member agents, protocol type (SEQUENTIAL/PARALLEL), "
-            + "max rounds, and optional moderator.")
+    @Tool(description = "Create a new agent group. Styles: ROUND_TABLE, " + "PEER_REVIEW, DEVIL_ADVOCATE, DELPHI, DEBATE.")
     public String create_group(@ToolArg(description = "Group name") String name, @ToolArg(description = "Group description") String description,
             @ToolArg(description = "Comma-separated agent IDs") String memberAgentIds,
             @ToolArg(description = "Comma-separated display names") String memberDisplayNames,
             @ToolArg(description = "Moderator agent ID (optional)") String moderatorAgentId,
-            @ToolArg(description = "Protocol: SEQUENTIAL or PARALLEL (default SEQUENTIAL)") String protocolType,
-            @ToolArg(description = "Max rounds (default 2)") String maxRounds) {
+            @ToolArg(description = "Discussion style: ROUND_TABLE, PEER_REVIEW, "
+                    + "DEVIL_ADVOCATE, DELPHI, DEBATE (default ROUND_TABLE)") String style,
+            @ToolArg(description = "Max rounds for ROUND_TABLE/DELPHI (default 2)") String maxRounds) {
         try {
             AgentGroupConfiguration config = new AgentGroupConfiguration();
             config.setName(name);
@@ -98,7 +97,7 @@ public class McpGroupTools {
             List<GroupMember> members = new ArrayList<>();
             for (int i = 0; i < agentIds.length; i++) {
                 String displayName = i < displayNames.length ? displayNames[i].trim() : "Agent " + (i + 1);
-                members.add(new GroupMember(agentIds[i].trim(), displayName, i + 1, false, false));
+                members.add(new GroupMember(agentIds[i].trim(), displayName, i + 1, null));
             }
             config.setMembers(members);
 
@@ -106,21 +105,25 @@ public class McpGroupTools {
                 config.setModeratorAgentId(moderatorAgentId.trim());
             }
 
-            // Protocol
-            ProtocolConfig.ProtocolType type = "PARALLEL".equalsIgnoreCase(protocolType)
-                    ? ProtocolConfig.ProtocolType.PARALLEL
-                    : ProtocolConfig.ProtocolType.SEQUENTIAL;
-            int rounds = parseIntOrDefault(maxRounds, 2);
-            config.setProtocol(
-                    new ProtocolConfig(type, rounds, 60, ProtocolConfig.MemberFailurePolicy.SKIP, 2, ProtocolConfig.MemberUnavailablePolicy.SKIP));
+            // Style
+            DiscussionStyle discussionStyle = DiscussionStyle.ROUND_TABLE;
+            if (style != null && !style.isBlank()) {
+                try {
+                    discussionStyle = DiscussionStyle.valueOf(style.trim().toUpperCase());
+                } catch (IllegalArgumentException e) {
+                    // Fall back to ROUND_TABLE
+                }
+            }
+            config.setStyle(discussionStyle);
+            config.setMaxRounds(parseIntOrDefault(maxRounds, 2));
 
-            // Default context config
-            config.setContextConfig(new ContextConfig(ContextConfig.HistoryStrategy.FULL, null, false, null, null, null));
+            // Default protocol (error handling only)
+            config.setProtocol(new ProtocolConfig(60, ProtocolConfig.MemberFailurePolicy.SKIP, 2, ProtocolConfig.MemberUnavailablePolicy.SKIP));
 
             Response response = groupStore.createGroup(config);
             String location = response.getLocation() != null ? response.getLocation().toString() : "";
             String groupId = extractIdFromLocation(location);
-            return "Created group '%s' with ID: %s (%d members)".formatted(name, groupId, members.size());
+            return "Created group '%s' (style=%s) with ID: %s (%d members)".formatted(name, discussionStyle, groupId, members.size());
         } catch (Exception e) {
             LOGGER.errorf("create_group failed: %s", e.getMessage());
             return errorJson(e.getMessage());
@@ -155,8 +158,7 @@ public class McpGroupTools {
 
     // --- Group Conversation ---
 
-    @Tool(description = "Start a multi-agent group discussion. " + "All configured member agents will participate in structured "
-            + "debate rounds, with optional moderator synthesis.")
+    @Tool(description = "Start a multi-agent group discussion using the " + "group's configured discussion style.")
     public String discuss_with_group(@ToolArg(description = "Group configuration ID") String groupId,
             @ToolArg(description = "The question to discuss") String question, @ToolArg(description = "User ID (optional)") String userId) {
         try {

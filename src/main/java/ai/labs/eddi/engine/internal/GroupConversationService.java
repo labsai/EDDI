@@ -3,9 +3,14 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
-import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
+import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
@@ -32,12 +37,14 @@ import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 /**
- * Core orchestrator for multi-agent group conversations. Coordinates multiple
- * agents in structured debate rounds with moderator synthesis.
+ * Phase-based orchestrator for multi-agent group conversations. Supports 5
+ * discussion styles (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, DELPHI, DEBATE)
+ * plus fully custom phase definitions.
  * <p>
  * Agents participate through their normal pipelines via
- * {@link IConversationService#say}. The orchestrator constructs input messages
- * with group context and collects responses into a transcript.
+ * {@link IConversationService#say}. The orchestrator constructs phase-specific
+ * input messages with appropriate context and collects responses into a
+ * transcript.
  *
  * @author ginccc
  */
@@ -46,34 +53,6 @@ public class GroupConversationService implements IGroupConversationService {
 
     private static final Logger LOGGER = Logger.getLogger(GroupConversationService.class);
     private static final Environment DEFAULT_ENV = Environment.production;
-
-    // Default input templates (Thymeleaf syntax)
-    private static final String DEFAULT_ROUND1_TEMPLATE = """
-            A panel of experts is discussing the following question:
-            "[[${question}]]"
-
-            As [[${displayName}]], please share your professional perspective.""";
-
-    private static final String DEFAULT_ROUNDN_TEMPLATE = """
-            The discussion continues (Round [[${round}]]).
-
-            Previous responses:
-            [# th:each="entry : ${previousResponses}"]
-            — [[${entry.speaker}]] (Round [[${entry.round}]]): "[[${entry.content}]]"
-            [/]
-
-            As [[${displayName}]], please respond to the others' perspectives.""";
-
-    private static final String DEFAULT_SYNTHESIS_TEMPLATE = """
-            The panel discussed this question for [[${totalRounds}]] rounds:
-            "[[${question}]]"
-
-            Full transcript:
-            [# th:each="entry : ${transcript}"]
-            [Round [[${entry.round}]]] [[${entry.speaker}]]: "[[${entry.content}]]"
-            [/]
-
-            Synthesize a balanced conclusion with clear recommendation.""";
 
     private final IAgentGroupStore groupStore;
     private final IGroupConversationStore conversationStore;
@@ -112,7 +91,6 @@ public class GroupConversationService implements IGroupConversationService {
         long startTime = System.nanoTime();
         counterGroupDiscussion.increment();
 
-        // Depth check
         if (depth > maxDepth) {
             throw new GroupDepthExceededException("Maximum group discussion depth (%d) exceeded".formatted(maxDepth));
         }
@@ -123,73 +101,58 @@ public class GroupConversationService implements IGroupConversationService {
             throw new IResourceStore.ResourceNotFoundException("Group configuration not found: " + groupId);
         }
 
-        // Create group conversation
+        // Resolve phases
+        List<DiscussionPhase> phases = resolvePhases(config);
+        if (phases.isEmpty()) {
+            throw new GroupDiscussionException("No phases defined for group: " + groupId);
+        }
+
+        ProtocolConfig protocol = resolveProtocol(config);
         GroupConversation gc = createGroupConversation(groupId, question, userId, depth);
 
         try {
-            ProtocolConfig protocol = config.getProtocol() != null
-                    ? config.getProtocol()
-                    : new ProtocolConfig(ProtocolConfig.ProtocolType.SEQUENTIAL, 2, 60, ProtocolConfig.MemberFailurePolicy.SKIP, 2,
-                            ProtocolConfig.MemberUnavailablePolicy.SKIP);
+            // Execute each phase
+            for (int phaseIdx = 0; phaseIdx < phases.size(); phaseIdx++) {
+                DiscussionPhase phase = phases.get(phaseIdx);
 
-            ContextConfig contextConfig = config.getContextConfig() != null
-                    ? config.getContextConfig()
-                    : new ContextConfig(ContextConfig.HistoryStrategy.FULL, null, false, null, null, null);
+                for (int repeat = 0; repeat < Math.max(phase.repeats(), 1); repeat++) {
+                    gc.setCurrentPhaseIndex(phaseIdx);
+                    gc.setCurrentPhaseName(phase.name());
 
-            // Order members by speakingOrder
-            List<GroupMember> orderedMembers = config.getMembers().stream()
-                    .sorted(Comparator.comparing(m -> m.speakingOrder() != null ? m.speakingOrder() : Integer.MAX_VALUE)).toList();
+                    if (phase.type() == PhaseType.SYNTHESIS) {
+                        gc.setState(GroupConversationState.SYNTHESIZING);
+                    }
 
-            int maxRounds = protocol.maxRounds() > 0 ? protocol.maxRounds() : 2;
+                    List<GroupMember> speakers = resolveParticipants(phase, config.getMembers(), config.getModeratorAgentId());
 
-            // Run debate rounds
-            for (int round = 1; round <= maxRounds; round++) {
-                gc.setCurrentRound(round);
+                    if (phase.targetEachPeer()) {
+                        executePeerTargetedPhase(gc, config, speakers, phase, protocol, question, phaseIdx);
+                    } else if (phase.turnOrder() == TurnOrder.PARALLEL) {
+                        executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx);
+                    } else {
+                        executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx);
+                    }
 
-                if (protocol.type() == ProtocolConfig.ProtocolType.SEQUENTIAL) {
-                    executeSequentialRound(gc, config, orderedMembers, protocol, contextConfig, question, round);
-                } else {
-                    executeParallelRound(gc, config, orderedMembers, protocol, contextConfig, question, round);
+                    gc.setLastModified(Instant.now());
+                    conversationStore.update(gc);
                 }
-
-                gc.setLastModified(Instant.now());
-                conversationStore.update(gc);
             }
 
-            // Synthesis
-            if (config.getModeratorAgentId() != null && !config.getModeratorAgentId().isBlank()) {
-                gc.setState(GroupConversationState.SYNTHESIZING);
-                conversationStore.update(gc);
-
-                String synthesized = executeSynthesis(gc, config, contextConfig, question);
-                gc.setSynthesizedAnswer(synthesized);
-            }
+            // Extract synthesis from the last SYNTHESIS phase entry
+            gc.getTranscript().stream().filter(e -> e.type() == TranscriptEntryType.SYNTHESIS && e.content() != null)
+                    .reduce((first, second) -> second) // last one
+                    .ifPresent(e -> gc.setSynthesizedAnswer(e.content()));
 
             gc.setState(GroupConversationState.COMPLETED);
             gc.setLastModified(Instant.now());
             conversationStore.update(gc);
-
             return gc;
 
         } catch (GroupDiscussionException e) {
-            gc.setState(GroupConversationState.FAILED);
-            gc.setLastModified(Instant.now());
-            try {
-                conversationStore.update(gc);
-            } catch (Exception updateErr) {
-                LOGGER.warnf("Failed to update group conversation state to FAILED: %s", updateErr.getMessage());
-            }
-            counterGroupFailure.increment();
+            failConversation(gc);
             throw e;
         } catch (Exception e) {
-            gc.setState(GroupConversationState.FAILED);
-            gc.setLastModified(Instant.now());
-            try {
-                conversationStore.update(gc);
-            } catch (Exception updateErr) {
-                LOGGER.warnf("Failed to update group conversation state to FAILED: %s", updateErr.getMessage());
-            }
-            counterGroupFailure.increment();
+            failConversation(gc);
             throw new GroupDiscussionException("Group discussion failed: " + e.getMessage(), e);
         } finally {
             timerGroupDiscussion.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
@@ -206,8 +169,6 @@ public class GroupConversationService implements IGroupConversationService {
     public void deleteGroupConversation(String groupConversationId) throws IResourceStore.ResourceStoreException {
         try {
             GroupConversation gc = conversationStore.read(groupConversationId);
-
-            // Cascade-delete private conversations
             for (String privateConvId : gc.getMemberConversationIds().values()) {
                 try {
                     conversationService.endConversation(privateConvId);
@@ -215,7 +176,6 @@ public class GroupConversationService implements IGroupConversationService {
                     LOGGER.warnf("Failed to end private conversation %s: %s", privateConvId, e.getMessage());
                 }
             }
-
             conversationStore.delete(groupConversationId);
         } catch (IResourceStore.ResourceNotFoundException e) {
             LOGGER.warnf("Group conversation %s not found for deletion", groupConversationId);
@@ -227,86 +187,140 @@ public class GroupConversationService implements IGroupConversationService {
         return conversationStore.listByGroupId(groupId, index, limit);
     }
 
-    // --- Private helpers ---
+    // =================================================================
+    // Phase resolution
+    // =================================================================
 
-    private GroupConversation createGroupConversation(String groupId, String question, String userId, int depth)
-            throws IResourceStore.ResourceStoreException {
+    private List<DiscussionPhase> resolvePhases(AgentGroupConfiguration config) {
+        // Custom phases take priority
+        if (config.getPhases() != null && !config.getPhases().isEmpty()) {
+            return config.getPhases();
+        }
 
-        GroupConversation gc = new GroupConversation();
-        gc.setGroupId(groupId);
-        gc.setUserId(userId);
-        gc.setState(GroupConversationState.IN_PROGRESS);
-        gc.setOriginalQuestion(question);
-        gc.setCurrentRound(0);
-        gc.setDepth(depth);
-        gc.setCreated(Instant.now());
-        gc.setLastModified(Instant.now());
-
-        // Add the user question as first transcript entry
-        gc.getTranscript().add(new TranscriptEntry("user", "User", question, 0, TranscriptEntryType.QUESTION, Instant.now(), null));
-
-        String id = conversationStore.create(gc);
-        gc.setId(id);
-        return gc;
+        // Expand style preset
+        DiscussionStyle style = config.getStyle() != null ? config.getStyle() : DiscussionStyle.ROUND_TABLE;
+        return DiscussionStylePresets.expand(style, config.getMaxRounds());
     }
 
-    private void executeSequentialRound(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> members, ProtocolConfig protocol,
-            ContextConfig contextConfig, String question, int round) throws GroupDiscussionException {
+    private ProtocolConfig resolveProtocol(AgentGroupConfiguration config) {
+        return config.getProtocol() != null
+                ? config.getProtocol()
+                : new ProtocolConfig(60, ProtocolConfig.MemberFailurePolicy.SKIP, 2, ProtocolConfig.MemberUnavailablePolicy.SKIP);
+    }
 
-        for (GroupMember member : members) {
-            String input = buildInput(config, contextConfig, member, question, gc.getTranscript(), round);
+    /**
+     * Determines which members participate in a phase based on the
+     * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
+     */
+    private List<GroupMember> resolveParticipants(DiscussionPhase phase, List<GroupMember> allMembers, String moderatorAgentId) {
+        String participants = phase.participants() != null ? phase.participants() : "ALL";
 
-            TranscriptEntry entry = executeAgentTurn(member, gc, input, protocol, round);
+        if ("MODERATOR".equalsIgnoreCase(participants)) {
+            if (moderatorAgentId == null || moderatorAgentId.isBlank()) {
+                LOGGER.warnf("Phase '%s' requires MODERATOR but none configured, " + "falling back to ALL", phase.name());
+                return allMembers;
+            }
+            return List.of(new GroupMember(moderatorAgentId, "Moderator", 0, "MODERATOR"));
+        }
 
+        if (participants.toUpperCase().startsWith("ROLE:")) {
+            String role = participants.substring(5).trim();
+            List<GroupMember> filtered = allMembers.stream().filter(m -> role.equalsIgnoreCase(m.role()))
+                    .sorted(Comparator.comparing(m -> m.speakingOrder() != null ? m.speakingOrder() : Integer.MAX_VALUE)).toList();
+            if (filtered.isEmpty()) {
+                LOGGER.warnf("Phase '%s' requires ROLE:%s but no members " + "have that role, falling back to ALL", phase.name(), role);
+                return allMembers;
+            }
+            return filtered;
+        }
+
+        // ALL
+        return allMembers.stream().sorted(Comparator.comparing(m -> m.speakingOrder() != null ? m.speakingOrder() : Integer.MAX_VALUE)).toList();
+    }
+
+    // =================================================================
+    // Phase execution
+    // =================================================================
+
+    private void executeSequentialPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
+            ProtocolConfig protocol, String question, int phaseIdx) throws GroupDiscussionException {
+        for (GroupMember speaker : speakers) {
+            String input = buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, null);
+            TranscriptEntry entry = executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null);
             gc.getTranscript().add(entry);
         }
     }
 
-    private void executeParallelRound(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> members, ProtocolConfig protocol,
-            ContextConfig contextConfig, String question, int round) throws GroupDiscussionException {
+    private void executeParallelPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
+            ProtocolConfig protocol, String question, int phaseIdx) throws GroupDiscussionException {
 
-        // Build inputs before parallel execution (context is same for all in parallel)
-        List<TranscriptEntry> previousEntries = gc.getTranscript();
+        List<TranscriptEntry> snapshotTranscript = List.copyOf(gc.getTranscript());
 
-        List<CompletableFuture<TranscriptEntry>> futures = members.stream().map(member -> CompletableFuture.supplyAsync(() -> {
+        List<CompletableFuture<TranscriptEntry>> futures = speakers.stream().map(speaker -> CompletableFuture.supplyAsync(() -> {
             try {
-                String input = buildInput(config, contextConfig, member, question, previousEntries, round);
-                return executeAgentTurn(member, gc, input, protocol, round);
+                String input = buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null);
+                return executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null);
             } catch (Exception e) {
-                LOGGER.errorf("Parallel agent turn failed for %s: %s", member.agentId(), e.getMessage());
-                return new TranscriptEntry(member.agentId(), member.displayName(), null, round, TranscriptEntryType.ERROR, Instant.now(),
-                        e.getMessage());
+                LOGGER.errorf("Parallel phase failed for %s: %s", speaker.agentId(), e.getMessage());
+                return errorEntry(speaker, phaseIdx, phase, e.getMessage());
             }
         }, executorService)).toList();
 
-        int timeoutSeconds = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : 60;
-
+        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : 60;
         for (CompletableFuture<TranscriptEntry> future : futures) {
             try {
-                TranscriptEntry entry = future.get(timeoutSeconds, TimeUnit.SECONDS);
-                gc.getTranscript().add(entry);
+                gc.getTranscript().add(future.get(timeout, TimeUnit.SECONDS));
             } catch (TimeoutException e) {
                 future.cancel(true);
-                gc.getTranscript().add(new TranscriptEntry("unknown", "Unknown", null, round, TranscriptEntryType.SKIPPED, Instant.now(), "Timeout"));
+                gc.getTranscript().add(new TranscriptEntry("unknown", "Unknown", null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                        Instant.now(), "Timeout", null));
             } catch (Exception e) {
-                gc.getTranscript()
-                        .add(new TranscriptEntry("unknown", "Unknown", null, round, TranscriptEntryType.ERROR, Instant.now(), e.getMessage()));
+                gc.getTranscript().add(errorEntry(null, phaseIdx, phase, e.getMessage()));
             }
         }
     }
 
-    private TranscriptEntry executeAgentTurn(GroupMember member, GroupConversation gc, String input, ProtocolConfig protocol, int round)
-            throws GroupDiscussionException {
+    /**
+     * Peer-targeted phase: each speaker addresses each OTHER speaker individually
+     * (N×(N-1) turns). Used for CRITIQUE style.
+     */
+    private void executePeerTargetedPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
+            ProtocolConfig protocol, String question, int phaseIdx) throws GroupDiscussionException {
 
-        // Check if agent is deployed
+        // Collect all non-moderator members as targets
+        List<GroupMember> allMembers = config.getMembers().stream()
+                .sorted(Comparator.comparing(m -> m.speakingOrder() != null ? m.speakingOrder() : Integer.MAX_VALUE)).toList();
+
+        for (GroupMember speaker : speakers) {
+            for (GroupMember target : allMembers) {
+                if (speaker.agentId().equals(target.agentId())) {
+                    continue; // Don't critique yourself
+                }
+                String input = buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, target);
+                TranscriptEntry entry = executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, target.agentId());
+                gc.getTranscript().add(entry);
+            }
+        }
+    }
+
+    // =================================================================
+    // Agent turn execution
+    // =================================================================
+
+    private TranscriptEntry executeAgentTurn(GroupMember member, GroupConversation gc, String input, ProtocolConfig protocol, int phaseIdx,
+            DiscussionPhase phase, String targetAgentId) throws GroupDiscussionException {
+
+        TranscriptEntryType entryType = mapPhaseToEntryType(phase.type());
+
+        // Check agent availability
         try {
             var agent = agentFactory.getLatestReadyAgent(DEFAULT_ENV, member.agentId());
             if (agent == null) {
                 if (protocol.onMemberUnavailable() == ProtocolConfig.MemberUnavailablePolicy.FAIL) {
                     throw new GroupDiscussionException("Agent %s is not deployed and onMemberUnavailable=FAIL".formatted(member.agentId()));
                 }
-                return new TranscriptEntry(member.agentId(), member.displayName(), null, round, TranscriptEntryType.SKIPPED, Instant.now(),
-                        "Agent not deployed");
+                return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                        Instant.now(), "Agent not deployed", targetAgentId);
             }
         } catch (GroupDiscussionException e) {
             throw e;
@@ -314,8 +328,8 @@ public class GroupConversationService implements IGroupConversationService {
             if (protocol.onMemberUnavailable() == ProtocolConfig.MemberUnavailablePolicy.FAIL) {
                 throw new GroupDiscussionException("Cannot reach agent %s: %s".formatted(member.agentId(), e.getMessage()), e);
             }
-            return new TranscriptEntry(member.agentId(), member.displayName(), null, round, TranscriptEntryType.SKIPPED, Instant.now(),
-                    "Agent unavailable: " + e.getMessage());
+            return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                    Instant.now(), "Agent unavailable: " + e.getMessage(), targetAgentId);
         }
 
         // Get or create private conversation
@@ -325,16 +339,15 @@ public class GroupConversationService implements IGroupConversationService {
                 Map<String, Context> groupContext = new LinkedHashMap<>();
                 groupContext.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
                 groupContext.put("groupDepth", new Context(Context.ContextType.string, String.valueOf(gc.getDepth())));
-
                 var result = conversationService.startConversation(DEFAULT_ENV, member.agentId(), gc.getUserId(), groupContext);
                 privateConvId = result.conversationId();
                 gc.getMemberConversationIds().put(member.agentId(), privateConvId);
             } catch (Exception e) {
-                return handleAgentFailure(member, round, protocol, e, "Failed to start conversation");
+                return handleAgentFailure(member, phaseIdx, phase, protocol, e, "Failed to start conversation", targetAgentId);
             }
         }
 
-        // Build InputData with group context
+        // Build InputData with context
         InputData inputData = new InputData();
         inputData.setInput(input);
         Map<String, Context> context = new LinkedHashMap<>();
@@ -343,7 +356,7 @@ public class GroupConversationService implements IGroupConversationService {
         context.put("groupDepth", new Context(Context.ContextType.string, String.valueOf(gc.getDepth())));
         inputData.setContext(context);
 
-        // Call through ConversationService
+        // Call through ConversationService with retry
         int retries = 0;
         int maxRetries = protocol.maxRetries() > 0 ? protocol.maxRetries() : 2;
         int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : 60;
@@ -360,7 +373,8 @@ public class GroupConversationService implements IGroupConversationService {
 
                 String response = responseFuture.get(timeout, TimeUnit.SECONDS);
 
-                return new TranscriptEntry(member.agentId(), member.displayName(), response, round, TranscriptEntryType.OPINION, Instant.now(), null);
+                return new TranscriptEntry(member.agentId(), member.displayName(), response, phaseIdx, phase.name(), entryType, Instant.now(), null,
+                        targetAgentId);
 
             } catch (TimeoutException e) {
                 if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY && retries < maxRetries) {
@@ -371,8 +385,8 @@ public class GroupConversationService implements IGroupConversationService {
                 if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
                     throw new GroupDiscussionException("Agent %s timed out and onAgentFailure=ABORT".formatted(member.agentId()));
                 }
-                return new TranscriptEntry(member.agentId(), member.displayName(), null, round, TranscriptEntryType.SKIPPED, Instant.now(),
-                        "Timeout after " + timeout + "s");
+                return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                        Instant.now(), "Timeout after " + timeout + "s", targetAgentId);
 
             } catch (Exception e) {
                 Throwable cause = e instanceof ExecutionException ? e.getCause() : e;
@@ -381,171 +395,248 @@ public class GroupConversationService implements IGroupConversationService {
                     LOGGER.warnf("Agent %s failed (attempt %d/%d): %s", member.agentId(), retries, maxRetries, cause.getMessage());
                     continue;
                 }
-                return handleAgentFailure(member, round, protocol, cause, "Agent execution failed");
+                return handleAgentFailure(member, phaseIdx, phase, protocol, cause, "Agent execution failed", targetAgentId);
             }
         }
     }
 
-    private String executeSynthesis(GroupConversation gc, AgentGroupConfiguration config, ContextConfig contextConfig, String question)
-            throws GroupDiscussionException {
+    // =================================================================
+    // Phase-specific input construction
+    // =================================================================
 
-        String moderatorId = config.getModeratorAgentId();
-        String template = contextConfig.inputTemplateSynthesis() != null ? contextConfig.inputTemplateSynthesis() : DEFAULT_SYNTHESIS_TEMPLATE;
+    private String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
+            GroupMember target) {
 
-        String input;
+        String template = phase.inputTemplate() != null ? phase.inputTemplate() : selectDefaultTemplate(phase, transcript, phaseIdx);
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("question", question);
+        data.put("displayName", speaker.displayName());
+        data.put("phaseIndex", phaseIdx);
+        data.put("phaseName", phase.name());
+
+        // Phase-type specific variables
+        switch (phase.type()) {
+            case OPINION -> {
+                List<Map<String, Object>> prev = filterByScope(transcript, phase.contextScope(), phaseIdx, speaker);
+                data.put("previousResponses", prev);
+            }
+            case CRITIQUE -> {
+                if (target != null) {
+                    data.put("targetName", target.displayName());
+                    String targetResponse = findLatestResponse(transcript, target.agentId());
+                    data.put("targetResponse", targetResponse != null ? targetResponse : "(no response)");
+                }
+            }
+            case REVISION -> {
+                String originalResponse = findLatestResponse(transcript, speaker.agentId());
+                data.put("originalResponse", originalResponse != null ? originalResponse : "(no response)");
+                // Feedback addressed TO this speaker
+                List<Map<String, Object>> feedback = transcript.stream()
+                        .filter(e -> e.type() == TranscriptEntryType.CRITIQUE && speaker.agentId().equals(e.targetAgentId())).map(e -> {
+                            Map<String, Object> fb = new LinkedHashMap<>();
+                            fb.put("reviewer", e.speakerDisplayName());
+                            fb.put("content", e.content());
+                            return fb;
+                        }).collect(Collectors.toList());
+                data.put("feedbackReceived", feedback);
+            }
+            case CHALLENGE -> {
+                List<Map<String, Object>> opinions = transcript.stream().filter(e -> e.type() == TranscriptEntryType.OPINION && e.content() != null)
+                        .map(e -> {
+                            Map<String, Object> o = new LinkedHashMap<>();
+                            o.put("speaker", e.speakerDisplayName());
+                            o.put("content", e.content());
+                            return o;
+                        }).collect(Collectors.toList());
+                data.put("allOpinions", opinions);
+            }
+            case DEFENSE -> {
+                String originalResponse = findLatestResponse(transcript, speaker.agentId());
+                data.put("originalResponse", originalResponse != null ? originalResponse : "(no response)");
+                List<Map<String, Object>> challenges = transcript.stream()
+                        .filter(e -> e.type() == TranscriptEntryType.CHALLENGE && e.content() != null).map(e -> {
+                            Map<String, Object> c = new LinkedHashMap<>();
+                            c.put("speaker", e.speakerDisplayName());
+                            c.put("content", e.content());
+                            return c;
+                        }).collect(Collectors.toList());
+                data.put("challenges", challenges);
+            }
+            case ARGUE, REBUTTAL -> {
+                String role = speaker.role();
+                data.put("teamSide", "PRO".equalsIgnoreCase(role) ? "FOR" : "AGAINST");
+                // Opposing arguments
+                String opposingRole = "PRO".equalsIgnoreCase(role) ? "CON" : "PRO";
+                List<Map<String, Object>> opposing = transcript.stream()
+                        .filter(e -> (e.type() == TranscriptEntryType.ARGUMENT || e.type() == TranscriptEntryType.REBUTTAL) && e.content() != null)
+                        .filter(e -> !e.speakerAgentId().equals(speaker.agentId())).map(e -> {
+                            Map<String, Object> a = new LinkedHashMap<>();
+                            a.put("speaker", e.speakerDisplayName());
+                            a.put("content", e.content());
+                            return a;
+                        }).collect(Collectors.toList());
+                data.put("opposingArguments", opposing);
+            }
+            case SYNTHESIS -> {
+                List<Map<String, Object>> fullTranscript = transcript.stream()
+                        .filter(e -> e.content() != null && e.type() != TranscriptEntryType.ERROR && e.type() != TranscriptEntryType.SKIPPED
+                                && e.type() != TranscriptEntryType.QUESTION)
+                        .map(e -> {
+                            Map<String, Object> t = new LinkedHashMap<>();
+                            t.put("speaker", e.speakerDisplayName());
+                            t.put("content", e.content());
+                            t.put("phaseName", e.phaseName() != null ? e.phaseName() : "");
+                            return t;
+                        }).collect(Collectors.toList());
+                data.put("transcript", fullTranscript);
+                data.put("totalPhases", phaseIdx);
+            }
+        }
+
         try {
-            Map<String, Object> templateData = buildSynthesisTemplateData(gc, question);
-            input = templatingEngine.processTemplate(template, templateData, ITemplatingEngine.TemplateMode.TEXT);
+            return templatingEngine.processTemplate(template, data, ITemplatingEngine.TemplateMode.TEXT);
         } catch (ITemplatingEngine.TemplateEngineException e) {
-            LOGGER.warnf("Template processing failed for synthesis, using plain text: %s", e.getMessage());
-            input = buildPlainTextSynthesisInput(gc, question);
+            LOGGER.warnf("Template processing failed for phase '%s', " + "using plain text: %s", phase.name(), e.getMessage());
+            return buildPlainTextFallback(phase, speaker, question, transcript);
         }
-
-        // Create a fake GroupMember for the moderator
-        GroupMember moderator = new GroupMember(moderatorId, "Moderator", null, false, false);
-
-        ProtocolConfig defaultProtocol = config.getProtocol() != null
-                ? config.getProtocol()
-                : new ProtocolConfig(ProtocolConfig.ProtocolType.SEQUENTIAL, 2, 120, ProtocolConfig.MemberFailurePolicy.ABORT, 1,
-                        ProtocolConfig.MemberUnavailablePolicy.FAIL);
-
-        TranscriptEntry entry = executeAgentTurn(moderator, gc, input, defaultProtocol, -1);
-
-        gc.getTranscript().add(entry);
-
-        if (entry.type() == TranscriptEntryType.ERROR || entry.type() == TranscriptEntryType.SKIPPED) {
-            LOGGER.warnf("Synthesis failed: %s", entry.errorReason());
-            return null;
-        }
-
-        return entry.content();
     }
 
-    private String buildInput(AgentGroupConfiguration config, ContextConfig contextConfig, GroupMember member, String question,
-            List<TranscriptEntry> transcript, int round) {
-
-        String template;
-        Map<String, Object> templateData = new LinkedHashMap<>();
-        templateData.put("question", question);
-        templateData.put("displayName", member.displayName());
-        templateData.put("round", round);
-
-        if (round == 1) {
-            template = contextConfig.inputTemplateRound1() != null ? contextConfig.inputTemplateRound1() : DEFAULT_ROUND1_TEMPLATE;
-        } else {
-            template = contextConfig.inputTemplateRoundN() != null ? contextConfig.inputTemplateRoundN() : DEFAULT_ROUNDN_TEMPLATE;
-
-            // Build previous responses based on history strategy
-            List<Map<String, Object>> previousResponses = buildContextEntries(transcript, contextConfig, round);
-            templateData.put("previousResponses", previousResponses);
+    private String selectDefaultTemplate(DiscussionPhase phase, List<TranscriptEntry> transcript, int phaseIdx) {
+        if (phase.type() == PhaseType.OPINION) {
+            // Use independent template if no context, or context template if
+            // there are prior responses
+            if (phase.contextScope() == ContextScope.NONE) {
+                return DiscussionStylePresets.TEMPLATE_OPINION_INDEPENDENT;
+            }
+            if (phase.contextScope() == ContextScope.ANONYMOUS) {
+                return DiscussionStylePresets.TEMPLATE_OPINION_ANONYMOUS;
+            }
+            return DiscussionStylePresets.TEMPLATE_OPINION_WITH_CONTEXT;
         }
-
-        try {
-            return templatingEngine.processTemplate(template, templateData, ITemplatingEngine.TemplateMode.TEXT);
-        } catch (ITemplatingEngine.TemplateEngineException e) {
-            LOGGER.warnf("Template processing failed, using plain text fallback: %s", e.getMessage());
-            return buildPlainTextInput(member, question, transcript, round);
-        }
+        return DiscussionStylePresets.defaultTemplate(phase.type());
     }
 
-    private List<Map<String, Object>> buildContextEntries(List<TranscriptEntry> transcript, ContextConfig contextConfig, int currentRound) {
+    // =================================================================
+    // Context filtering by scope
+    // =================================================================
 
-        ContextConfig.HistoryStrategy strategy = contextConfig.historyStrategy() != null
-                ? contextConfig.historyStrategy()
-                : ContextConfig.HistoryStrategy.FULL;
+    private List<Map<String, Object>> filterByScope(List<TranscriptEntry> transcript, ContextScope scope, int currentPhaseIdx, GroupMember speaker) {
+        if (scope == null || scope == ContextScope.NONE) {
+            return List.of();
+        }
 
-        return transcript.stream().filter(e -> e.type() == TranscriptEntryType.OPINION || e.type() == TranscriptEntryType.QUESTION)
-                .filter(e -> switch (strategy) {
+        return transcript.stream().filter(e -> e.content() != null && e.type() != TranscriptEntryType.ERROR && e.type() != TranscriptEntryType.SKIPPED
+                && e.type() != TranscriptEntryType.QUESTION).filter(e -> switch (scope) {
                     case FULL -> true;
-                    case LAST_ROUND -> e.round() >= currentRound - 1;
-                    case WINDOW -> {
-                        int windowSize = contextConfig.windowSize() != null ? contextConfig.windowSize() : 3;
-                        yield e.round() >= currentRound - windowSize;
-                    }
+                    case LAST_PHASE -> e.phaseIndex() >= currentPhaseIdx - 1;
+                    case ANONYMOUS -> true; // Content included, attribution stripped
+                    case OWN_FEEDBACK -> speaker.agentId().equals(e.targetAgentId());
+                    case NONE -> false;
                 }).map(e -> {
                     Map<String, Object> entry = new LinkedHashMap<>();
-                    entry.put("speaker", e.speakerDisplayName());
+                    if (scope == ContextScope.ANONYMOUS) {
+                        entry.put("speaker", "Anonymous");
+                    } else {
+                        entry.put("speaker", e.speakerDisplayName());
+                    }
                     entry.put("content", e.content());
-                    entry.put("round", e.round());
+                    entry.put("phaseName", e.phaseName() != null ? e.phaseName() : "");
                     return entry;
                 }).collect(Collectors.toList());
     }
 
-    private Map<String, Object> buildSynthesisTemplateData(GroupConversation gc, String question) {
+    // =================================================================
+    // Helpers
+    // =================================================================
 
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("question", question);
-        data.put("totalRounds", gc.getCurrentRound());
-        data.put("transcript", gc.getTranscript().stream().filter(e -> e.type() == TranscriptEntryType.OPINION).map(e -> {
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("speaker", e.speakerDisplayName());
-            entry.put("content", e.content());
-            entry.put("round", e.round());
-            return entry;
-        }).collect(Collectors.toList()));
-        return data;
+    private GroupConversation createGroupConversation(String groupId, String question, String userId, int depth)
+            throws IResourceStore.ResourceStoreException {
+
+        GroupConversation gc = new GroupConversation();
+        gc.setGroupId(groupId);
+        gc.setUserId(userId);
+        gc.setState(GroupConversationState.IN_PROGRESS);
+        gc.setOriginalQuestion(question);
+        gc.setCurrentPhaseIndex(0);
+        gc.setDepth(depth);
+        gc.setCreated(Instant.now());
+        gc.setLastModified(Instant.now());
+
+        gc.getTranscript().add(new TranscriptEntry("user", "User", question, 0, "Question", TranscriptEntryType.QUESTION, Instant.now(), null, null));
+
+        String id = conversationStore.create(gc);
+        gc.setId(id);
+        return gc;
     }
 
-    private TranscriptEntry handleAgentFailure(GroupMember member, int round, ProtocolConfig protocol, Throwable cause, String prefix)
-            throws GroupDiscussionException {
+    private String findLatestResponse(List<TranscriptEntry> transcript, String agentId) {
+        return transcript.stream()
+                .filter(e -> agentId.equals(e.speakerAgentId()) && e.content() != null && e.type() != TranscriptEntryType.ERROR
+                        && e.type() != TranscriptEntryType.SKIPPED)
+                .reduce((first, second) -> second) // last match
+                .map(TranscriptEntry::content).orElse(null);
+    }
+
+    private TranscriptEntryType mapPhaseToEntryType(PhaseType type) {
+        return switch (type) {
+            case OPINION -> TranscriptEntryType.OPINION;
+            case CRITIQUE -> TranscriptEntryType.CRITIQUE;
+            case REVISION -> TranscriptEntryType.REVISION;
+            case CHALLENGE -> TranscriptEntryType.CHALLENGE;
+            case DEFENSE -> TranscriptEntryType.DEFENSE;
+            case ARGUE -> TranscriptEntryType.ARGUMENT;
+            case REBUTTAL -> TranscriptEntryType.REBUTTAL;
+            case SYNTHESIS -> TranscriptEntryType.SYNTHESIS;
+        };
+    }
+
+    private TranscriptEntry handleAgentFailure(GroupMember member, int phaseIdx, DiscussionPhase phase, ProtocolConfig protocol, Throwable cause,
+            String prefix, String targetAgentId) throws GroupDiscussionException {
 
         if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
             throw new GroupDiscussionException(
                     "%s for agent %s and onAgentFailure=ABORT: %s".formatted(prefix, member.agentId(), cause.getMessage()));
         }
-        return new TranscriptEntry(member.agentId(), member.displayName(), null, round, TranscriptEntryType.SKIPPED, Instant.now(),
-                prefix + ": " + cause.getMessage());
+        return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED, Instant.now(),
+                prefix + ": " + cause.getMessage(), targetAgentId);
+    }
+
+    private TranscriptEntry errorEntry(GroupMember member, int phaseIdx, DiscussionPhase phase, String message) {
+        String agentId = member != null ? member.agentId() : "unknown";
+        String displayName = member != null ? member.displayName() : "Unknown";
+        return new TranscriptEntry(agentId, displayName, null, phaseIdx, phase.name(), TranscriptEntryType.ERROR, Instant.now(), message, null);
+    }
+
+    private void failConversation(GroupConversation gc) {
+        gc.setState(GroupConversationState.FAILED);
+        gc.setLastModified(Instant.now());
+        try {
+            conversationStore.update(gc);
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to update group conversation state to FAILED: %s", e.getMessage());
+        }
+        counterGroupFailure.increment();
     }
 
     private String extractResponse(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
         if (snapshot == null || snapshot.getConversationOutputs() == null) {
             return "";
         }
-        // Extract the last output from the conversation
         var outputs = snapshot.getConversationOutputs();
         if (outputs.isEmpty()) {
             return "";
         }
         var lastOutput = outputs.get(outputs.size() - 1);
-        if (lastOutput == null) {
-            return "";
-        }
-        // Try to get the output string
-        return lastOutput.toString();
+        return lastOutput != null ? lastOutput.toString() : "";
     }
 
-    // --- Plain text fallbacks ---
-
-    private String buildPlainTextInput(GroupMember member, String question, List<TranscriptEntry> transcript, int round) {
-
+    private String buildPlainTextFallback(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript) {
         var sb = new StringBuilder();
-        if (round == 1) {
-            sb.append("A panel of experts is discussing: \"").append(question).append("\"\n\n");
-            sb.append("As ").append(member.displayName()).append(", please share your professional perspective.");
-        } else {
-            sb.append("The discussion continues (Round ").append(round).append(").\n\n");
-            sb.append("Previous responses:\n");
-            for (TranscriptEntry e : transcript) {
-                if (e.type() == TranscriptEntryType.OPINION && e.content() != null) {
-                    sb.append("— ").append(e.speakerDisplayName()).append(" (Round ").append(e.round()).append("): \"").append(e.content())
-                            .append("\"\n");
-                }
-            }
-            sb.append("\nAs ").append(member.displayName()).append(", please respond to the others' perspectives.");
-        }
-        return sb.toString();
-    }
-
-    private String buildPlainTextSynthesisInput(GroupConversation gc, String question) {
-        var sb = new StringBuilder();
-        sb.append("The panel discussed this question for ").append(gc.getCurrentRound()).append(" rounds:\n\"").append(question)
-                .append("\"\n\nFull transcript:\n");
-        for (TranscriptEntry e : gc.getTranscript()) {
-            if (e.type() == TranscriptEntryType.OPINION && e.content() != null) {
-                sb.append("[Round ").append(e.round()).append("] ").append(e.speakerDisplayName()).append(": \"").append(e.content()).append("\"\n");
-            }
-        }
-        sb.append("\nSynthesize a balanced conclusion with clear recommendation.");
+        sb.append("Discussion phase: ").append(phase.name()).append("\n\n");
+        sb.append("Question: \"").append(question).append("\"\n\n");
+        sb.append("As ").append(speaker.displayName());
+        sb.append(", please contribute to this phase of the discussion.");
         return sb.toString();
     }
 }

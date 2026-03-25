@@ -19,11 +19,11 @@ public final class GroupConversationEventSink {
     // --- Event type constants ---
 
     public static final String EVENT_GROUP_START = "group_start";
-    public static final String EVENT_ROUND_START = "round_start";
+    public static final String EVENT_PHASE_START = "phase_start";
     public static final String EVENT_SPEAKER_START = "speaker_start";
     public static final String EVENT_TOKEN = "token";
     public static final String EVENT_SPEAKER_COMPLETE = "speaker_complete";
-    public static final String EVENT_ROUND_COMPLETE = "round_complete";
+    public static final String EVENT_PHASE_COMPLETE = "phase_complete";
     public static final String EVENT_SYNTHESIS_START = "synthesis_start";
     public static final String EVENT_SYNTHESIS_COMPLETE = "synthesis_complete";
     public static final String EVENT_GROUP_COMPLETE = "group_complete";
@@ -31,22 +31,23 @@ public final class GroupConversationEventSink {
 
     // --- Event payloads ---
 
-    public record GroupStartEvent(String groupConversationId, String groupId, String question, int maxRounds, List<String> memberAgentIds) {
+    public record GroupStartEvent(String groupConversationId, String groupId, String question, String style, int totalPhases,
+            List<String> memberAgentIds) {
     }
 
-    public record RoundStartEvent(int round, int totalRounds) {
+    public record PhaseStartEvent(int phaseIndex, String phaseName, String phaseType, String participants) {
     }
 
-    public record SpeakerStartEvent(String agentId, String displayName, int round) {
+    public record SpeakerStartEvent(String agentId, String displayName, int phaseIndex, String phaseName) {
     }
 
     public record TokenEvent(String agentId, String token) {
     }
 
-    public record SpeakerCompleteEvent(String agentId, String displayName, String response, int round) {
+    public record SpeakerCompleteEvent(String agentId, String displayName, String response, int phaseIndex, String phaseName) {
     }
 
-    public record RoundCompleteEvent(int round) {
+    public record PhaseCompleteEvent(int phaseIndex, String phaseName) {
     }
 
     public record SynthesisStartEvent(String moderatorAgentId) {
