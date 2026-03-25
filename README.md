@@ -25,15 +25,6 @@ Documentation: [here](https://docs.labs.ai/)
 
 [![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade)
 
-EDDI Dashboard:
-![EDDI Screenshot Dashboard](/screenshots/EDDI-Screenshot-Dashboard-Interface.png)
-
-EDDI Chat:
-![EDDI Screenshot Chat](/screenshots/EDDI-Screenshot-Chat-Interface.png)
-
-EDDI Manager:
-![EDDI Screenshot Manager](/screenshots/EDDI-Screenshot-Manager-Interface.png)
-
 ## Quick Start
 
 **Linux / macOS / WSL2:**
