@@ -53,6 +53,28 @@ New multi-agent group conversation system enabling structured debates between ag
 
 **Testing:** ✅ `./mvnw compile` + `./mvnw test` — all pass.
 
+### Phase 10.5: Discussion Styles (2026-03-25)
+
+Redesigned flat round-based orchestration into a **phase-based execution engine** supporting 5 preset discussion styles (+ fully custom).
+
+| Style | Flow |
+|---|---|
+| `ROUND_TABLE` | Opinion × N → Synthesis |
+| `PEER_REVIEW` | Opinion → Critique (each→each) → Revision → Synthesis |
+| `DEVIL_ADVOCATE` | Opinion → Challenge (by devil) → Defense → Synthesis |
+| `DELPHI` | Anonymous opinion rounds → convergence → Synthesis |
+| `DEBATE` | Pro argues → Con argues → Pro rebuttal → Con rebuttal → Judge |
+
+**Key additions:**
+- `DiscussionPhase` record: PhaseType, TurnOrder, ContextScope (NONE/FULL/LAST_PHASE/ANONYMOUS/OWN_FEEDBACK), targetEachPeer
+- `DiscussionStylePresets`: 5 preset expansions + 10 default Thymeleaf templates
+- `GroupMember.role`: "DEVIL_ADVOCATE", "PRO", "CON" for role-filtered phases
+- `TranscriptEntry`: added `phaseName`, `targetAgentId` for peer-targeted critiques
+- MCP `create_group`: new `style` parameter
+- SSE events: round-based → phase-based (phase_start/phase_complete)
+
+**Files:** 1 new (`DiscussionStylePresets.java`), 5 modified.
+
 ---
 
 ## v6 API Endpoint Simplification (2026-03-25)
