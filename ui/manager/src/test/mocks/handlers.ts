@@ -547,8 +547,8 @@ export const handlers = [
 
   // --- Chat / Agent Engine ---
 
-  // Start conversation (v6: POST /agents/:agentId)
-  http.post("*/agents/:agentId", () => {
+  // Start conversation (v6: POST /agents/:agentId/start)
+  http.post("*/agents/:agentId/start", () => {
     return new HttpResponse(null, {
       status: 201,
       headers: {
