@@ -1,8 +1,0 @@
-{
-  "resource" : "eddi://ai.labs.agent/agentstore/agents/6740832b2b0f614abcaee7ca?version=1",
-  "createdOn" : 1732281131643,
-  "lastModifiedOn" : 1764675697996,
-  "deleted" : false,
-  "name" : "Agent Father",
-  "description" : "AI-powered Agent Creator with LangChain Tools integration. Creates and manages EDDI chatagents through natural conversation. Supports OpenAI, Claude, Gemini, Ollama, and HuggingFace. Features 8 built-in tools for agent lifecycle management.\nv4.0.0"
-}

@@ -1,8 +1,0 @@
-{
-  "resource" : "eddi://ai.labs.output/outputstore/outputsets/6740832a2b0f614abcaee7a9?version=1",
-  "createdOn" : 1732281130789,
-  "lastModifiedOn" : 1764675697996,
-  "deleted" : false,
-  "name" : "Create Hugging Face Connector Agent",
-  "description" : ""
-}

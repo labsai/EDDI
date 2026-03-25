@@ -1,7 +1,0 @@
-{
-  "packageExtensions" : [ {
-    "type" : "eddi://ai.labs.templating",
-    "extensions" : { },
-    "config" : { }
-  } ]
-}

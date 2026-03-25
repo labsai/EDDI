@@ -1,8 +1,0 @@
-{
-  "resource" : "eddi://ai.labs.property/propertysetterstore/propertysetters/6740832a2b0f614abcaee7a2?version=1",
-  "createdOn" : 1732281130609,
-  "lastModifiedOn" : 1764675697996,
-  "deleted" : false,
-  "name" : "Create OpenAI Connector Agent",
-  "description" : ""
-}
