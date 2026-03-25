@@ -54,6 +54,7 @@ fabric.properties
 docker/data/
 /tmp/
 
+# Build & test outputs
 build-clean-compile.txt
 build-full.txt
 build-package-clean.txt
@@ -62,3 +63,8 @@ build-test-output.txt
 build-xlint-output.txt
 build-xlint.txt
 build-warnings.txt
+orphan-test.txt
+test-output.txt
+
+# AI session files (keep locally, don't push)
+.gemini/

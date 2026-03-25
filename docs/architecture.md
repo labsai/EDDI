@@ -1,6 +1,6 @@
 # EDDI Architecture
 
-**Version: ≥5.6.x**
+**Version: 6.0.0**
 
 This document provides a comprehensive overview of EDDI's architecture, design principles, and internal workflow.
 
@@ -37,7 +37,7 @@ E.D.D.I. (Enhanced Dialog Driven Interface) is a **multi-agent orchestration mid
 ### EDDI Is Not:
 
 - **Not a standalone LLM**: It doesn't train or run machine learning models
-- **Not a chatagent platform**: It's the infrastructure that powers chatagents
+- **Not a chatbot platform**: It's the infrastructure that powers conversational agents
 - **Not just a proxy**: It provides orchestration, state management, and complex behavior rules beyond simple API forwarding
 
 ---
@@ -511,19 +511,22 @@ See the [Security documentation](security.md) for details.
 - **AsyncResponse**: Non-blocking, scalable request handling
 - **JSON-B**: JSON binding for serialization/deserialization
 
-### Database
+### Database (DB-Agnostic)
 
-- **MongoDB 6.0+**: Document store for agent configurations and conversation logs
-  - Stores agent, package, and extension configurations
-  - Persists conversation history
-  - Enables version control of agent components
+- **MongoDB 6.0+** (default): Document store for agent configurations and conversation logs
+- **PostgreSQL** (alternative): JDBC + JSONB storage, switchable via `eddi.datastore.type=postgres`
+- Both backends support:
+  - Agent, workflow, and extension configuration storage
+  - Conversation history persistence
+  - Version control of agent components
+  - Automatic schema migration on startup
 
 ### Caching
 
-- **Infinispan**: Distributed in-memory cache
-  - Caches conversation state for fast retrieval
-  - Reduces database load
-  - Enables horizontal scaling
+- **Caffeine**: High-performance in-memory cache (replaced Infinispan in v6)
+  - Caches conversation state and agent configurations
+  - Configurable size limits per cache type
+  - Zero external dependencies — provided transitively by `quarkus-cache`
 
 ### LLM Integration
 
@@ -693,7 +696,7 @@ Agent Father isn't special code—it's a **regular EDDI agent** that uses:
 - HTTP Calls to invoke EDDI's REST API
 - Output templates to guide the user
 
-This demonstrates EDDI's power: **the same architecture that powers chatagents can orchestrate complex, multi-step workflows**, even self-modifying the system itself.
+This demonstrates EDDI's power: **the same architecture that powers conversational agents can orchestrate complex, multi-step workflows**, even self-modifying the system itself.
 
 **See the [Agent Father Deep Dive](agent-father-deep-dive.md) for complete implementation details, code examples, and real-world applications.**
 
@@ -701,7 +704,7 @@ This demonstrates EDDI's power: **the same architecture that powers chatagents c
 
 ## Summary
 
-EDDI's architecture is built on principles of **modularity**, **composability**, and **orchestration**. It's not a chatagent—it's the **infrastructure for building sophisticated conversational AI systems** that can:
+EDDI's architecture is built on principles of **modularity**, **composability**, and **orchestration**. It's not a chatbot—it's the **infrastructure for building sophisticated conversational AI systems** that can:
 
 - Orchestrate multiple APIs and LLMs
 - Apply complex business logic through configurable rules
@@ -713,6 +716,102 @@ The **Lifecycle Pipeline** is the heart of this architecture, providing a flexib
 
 ---
 
+## Configuration Model Deep Dive
+
+EDDI's configuration model is a 4-level tree:
+
+```mermaid
+graph TD
+    Agent["🤖 Agent (.agent.json)"] --> P1["📦 Workflow 1"]
+    Agent --> P2["📦 Workflow 2"]
+    Agent --> PN["📦 Workflow N"]
+    P1 --> Parser1["🔤 Parser (dictionaries)"]
+    P1 --> Behavior1["🧠 Behavior Rules"]
+    P1 --> Property1["📝 Property Setter"]
+    P1 --> Output1["💬 Output Templates"]
+    P2 --> Parser2["🔤 Parser"]
+    P2 --> Behavior2["🧠 Behavior Rules"]
+    P2 --> HttpCalls2["🌐 HTTP Calls"]
+    P2 --> Property2["📝 Property Setter"]
+    P2 --> Output2["💬 Output Templates"]
+```
+
+### Agent → Workflows → Extensions
+
+| Level          | Purpose                                                                                                                        |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **Agent**      | List of workflow URIs + channels. The top-level container.                                                                      |
+| **Workflow**   | Ordered list of workflow extensions — each extension = one lifecycle task type. **Order matters**: tasks execute sequentially. |
+| **Extension**  | The actual configuration that drives each `ILifecycleTask`. Referenced by URI from the workflow.                                |
+| **Descriptor** | Metadata (name, description, timestamps) for any resource. Not functional, purely for UI/management.                           |
+
+### URI-Based References
+
+Every resource references its dependencies by `eddi://` URI:
+
+```
+Agent → Workflow: "eddi://ai.labs.workflow/workflowstore/workflows/{id}?version=1"
+Workflow → Rules: "eddi://ai.labs.rules/rulestore/rulesets/{id}?version=1"
+Workflow → ApiCalls: "eddi://ai.labs.apicalls/apicallstore/apicalls/{id}?version=1"
+Workflow → LLM: "eddi://ai.labs.llm/llmstore/llmconfigs/{id}?version=1"
+```
+
+### Extension Types & Their Pipeline Role
+
+Each workflow runs its extensions in order: **Parser → Behavior → Property → HttpCalls → LLM → Output** (typical order).
+
+| Extension Type | Input | Output | Key Feature |
+|---|---|---|---|
+| **Parser** | Raw user text | Expressions (semantic representation) | `expressionsAsActions: true` — parser expressions become actions |
+| **Behavior Rules** | Actions and expressions | New actions that drive subsequent tasks | IF-THEN condition engine — the routing logic |
+| **Property Setter** | Current memory data | Stored properties (conversation-scoped or long-term) | Slot-filling using `[[${memory.current.input}]]` templates |
+| **HTTP Calls** | Actions, template variables | Response data stored in memory | Pre/post request property instructions, retry support |
+| **LLM** | Conversation memory, system prompt, tools | LLM response text | Legacy chat (simple) or Agent mode (tool-calling loop) |
+| **Output Templates** | Actions from current step | Text responses + quickReplies | Template variables, response variation via `valueAlternatives` |
+
+### Parser & Expression System
+
+The parser uses a recursive expression model with Prolog heritage:
+
+```
+greeting                         → simple expression (no args)
+greeting(hello)                  → expression with sub-expression
+intent(weather, location(NYC))   → nested sub-expressions
+*                                → wildcard (matches anything)
+```
+
+**QuickReply → Expression → Action flow**: When a user clicks a quickReply, the parser matches the text against the previous step's quickReply `value` fields, extracts the corresponding `expressions`, and (if `expressionsAsActions` is enabled) converts them to actions that drive behavior rules.
+
+### Available NLP Extensions
+
+| Type                 | Extensions                                                                                               |
+| -------------------- | -------------------------------------------------------------------------------------------------------- |
+| **Dictionaries** (7) | `RegularDictionary`, `IntegerDictionary`, `DecimalDictionary`, `EmailDictionary`, `TimeExpressionDictionary`, `OrdinalNumbersDictionary`, `PunctuationDictionary` |
+| **Normalizers** (4)  | `ContractedWordNormalizer`, `ConvertSpecialCharacterNormalizer`, `PunctuationNormalizer`, `RemoveUndefinedCharacterNormalizer` |
+| **Corrections** (3)  | `DamerauLevenshteinCorrection`, `MergedTermsCorrection`, `PhoneticCorrection` |
+
+---
+
+## Database Architecture
+
+EDDI's data layer is fully DB-agnostic via the `IResourceStorageFactory` SPI:
+
+```
+REST API → Store Interface (IResourceStore<T>)
+         → HistorizedResourceStore<T> (versioning, history, soft-delete)
+         → IResourceStorage<T> (SPI — Storage Provider Interface)
+         ├── MongoResourceStorage<T> (MongoDB implementation)
+         └── PostgresResourceStorage<T> (PostgreSQL + JSONB implementation)
+```
+
+Switching databases requires only a config change:
+```properties
+eddi.datastore.type=mongodb   # default
+# eddi.datastore.type=postgres  # alternative
+```
+
+---
+
 ## Related Documentation
 
 - [Getting Started](getting-started.md) - Setup and installation
@@ -720,6 +819,9 @@ The **Lifecycle Pipeline** is the heart of this architecture, providing a flexib
 - [Agent Father: A Deep Dive](agent-father-deep-dive.md) - Complete walkthrough of a real-world example
 - [Behavior Rules](behavior-rules.md) - Configure decision logic
 - [HTTP Calls](httpcalls.md) - External API integration
-- [LangChain Integration](langchain.md) - Connect to LLM APIs
+- [LLM Integration](langchain.md) - Connect to LLM APIs
 - [Extensions](extensions.md) - Available agent components
-- [Workflow Configuration](creating-your-first-chatagent/) - Building your first agent
+- [Security](security.md) - Authentication, authorization, and tool security
+- [Secrets Vault](secrets-vault.md) - Encrypted secret management
+- [Audit Ledger](audit-ledger.md) - EU AI Act compliance
+- [MCP Server](mcp-server.md) - Model Context Protocol integration

@@ -8,15 +8,14 @@
 
 EDDI is a **config-driven engine**, not a monolithic application. Agent behavior lives in JSON configurations; Java code builds the _components_ and _infrastructure_ (the "engine") that reads and executes those configurations.
 
-### Ecosystem (5 repos, all under `c:\dev\git\`)
+### Ecosystem
 
 | Repo                       | Tech                      | Purpose                                                  |
 | -------------------------- | ------------------------- | -------------------------------------------------------- |
 | **EDDI** (this repo)       | Java 25, Quarkus, MongoDB | Backend engine, REST API, lifecycle pipeline             |
 | **EDDI-Manager**           | React 19, Vite, Tailwind  | Admin dashboard (served from EDDI at `/chat/production`) |
 | **eddi-chat-ui**           | React, TypeScript         | Standalone chat widget                                   |
-| **eddi-website**           | HTML → migrating to Astro | Marketing site at eddi.labs.ai                           |
-| **EDDI-integration-tests** | Java                      | End-to-end API tests                                     |
+| **eddi-website**           | Astro, Starlight          | Marketing site + documentation at eddi.labs.ai           |
 
 ### Key Architecture
 
@@ -32,12 +31,11 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 ### Before Starting Any Work
 
-1. **Read the planning docs**:
+1. **Read the key docs**:
    - [`docs/project-philosophy.md`](docs/project-philosophy.md) — **Supreme directive.** 7 architectural pillars governing all EDDI development
    - [`docs/changelog.md`](docs/changelog.md) — **READ FIRST.** Running log of all changes, decisions, and reasoning across ALL repos and sessions
-   - [`docs/v6-planning/implementation_plan.md`](docs/v6-planning/implementation_plan.md) — Full architecture audit (14 appendices, A-N) and phased roadmap
-   - [`docs/v6-planning/business-logic-analysis.md`](docs/v6-planning/business-logic-analysis.md) — Configuration model, Agent Father, parser/expression deep dive
-   - If working on **EDDI-Manager**: also read `c:\dev\git\EDDI-Manager\HANDOFF.md` and `c:\dev\git\EDDI-Manager\AGENTS.md`
+   - [`docs/architecture.md`](docs/architecture.md) — Architecture overview, configuration model, pipeline, and DB-agnostic design
+   - If working on **EDDI-Manager**: also read `EDDI-Manager/AGENTS.md` in the Manager repo
 2. **Check git status**: Run `git status` and `git log -5 --oneline` to see current branch state and recent work.
 
 ### During Work
@@ -63,141 +61,40 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 ---
 
-## 3. Development Order (Master Plan)
+## 3. Development Roadmap
 
 Follow this order unless the user explicitly requests something different.
 **Backend first, then testing, then frontend. Website last.**
 
-```
-Phase 0: Security Quick Wins (6 SP) ✅
-  0a. Restrict CORS origins                          1 SP
-  0b. Create PathNavigator (replace OGNL calls)      5 SP
+### Completed ✅
 
-Phase 1: Backend Foundation (20 SP) ✅
-  1. Extract ConversationService from RestAgentEngine   5 SP
-  2. Decompose LangchainTask into focused classes     5 SP
-  3. Add SSE streaming API endpoint                   5 SP
-  4. Typed memory accessors (MemoryKey<T>)            3 SP
-  5. Extract ConfigurationLoader utility              2 SP
+| Phase | Area | Highlights |
+|---|---|---|
+| 0 | Security Quick Wins | CORS lockdown, PathNavigator (replaced OGNL) |
+| 1 | Backend Foundation | ConversationService extraction, SSE streaming, typed memory, LangchainTask decomposition |
+| 2 | Testing Infrastructure | Integration tests migrated to main repo, Testcontainers, API contract tests |
+| 3 | Manager UI | Greenfield React 19 + Vite + Tailwind rewrite |
+| 4 | Chat-UI | CRA→Vite, SSE streaming, Keycloak auth |
+| 5 | NATS JetStream | Event bus abstraction, async processing, coordinator dashboard |
+| 6 | DB-Agnostic Architecture | PostgreSQL adapter, MongoDB sync driver, Caffeine cache, Lombok removal, langchain4j core migration |
+| 7 | Security & Compliance | Secrets Vault, Audit Ledger (EU AI Act), tenant quota stub |
+| 8 | MCP Integration | MCP Server (33 tools), MCP Client, agent discovery, managed conversations |
 
-Phase 2: Testing Infrastructure (14 SP) ✅
-  6. Migrate integration tests to main repo (JUnit5) 3 SP
-  7. Add @QuarkusTest + Testcontainers component tests 3 SP
-  8. Fill unit test gaps (SizeMatcher, tasks, etc.)   3 SP
-  9. API contract tests (JSON Schema)                 2 SP
-  10. Langchain/agent integration test (WireMock)     3 SP
+### In Progress / Upcoming
 
-Phase 3: Manager (Greenfield Rewrite) (36 SP) ✅
-  11-20. Full Manager UI rewrite (3.1-3.21)
+| Phase | Area | Description |
+|---|---|---|
+| 8c | RAG Foundation | Config-driven vector store retrieval via langchain4j |
+| 9 | DAG Pipeline | Parallel tasks, circuit breakers, OpenTelemetry tracing |
+| 9b | HITL Framework | Human-in-the-loop pause/resume/approve |
+| 10 | Group Conversations | Multi-agent orchestration, debate rounds, NATS-backed |
+| 11a | Persistent Memory | Cross-conversation user memory, scheduled triggers |
+| 11b | Multi-Channel | WhatsApp, Telegram, Slack adapters |
+| 12 | CI/CD | GitHub Actions migration (from CircleCI) |
+| 13 | Debugging & Visualization | Time-traveling debugger, visual pipeline builder |
+| 14 | Website | Astro + Starlight documentation site |
 
-Phase 4: Chat-UI Rewrite + Hardening ✅
-  21. CRA → Vite migration                            2 SP
-  22. SSE streaming support                           3 SP
-  23. Manager chat panel SSE + undo/redo              3 SP
-  24. Keycloak Auth, E2E tests, integration tests     8 SP
-  25. JSON Schema Enrichment                          2 SP  ✅
-  26. Production Build + Dashboard Replacement          3 SP  ✅
 
-Phase 5: NATS JetStream Message Queue ✅
-  27. Event bus abstraction over current in-process    3 SP  ✅
-  28. NATS JetStream adapter                           5 SP  ✅
-  29. Async conversation processing                    3 SP  ✅
-  30. Coordinator Dashboard + Dead-Letter Admin         5 SP  ✅
-
-Phase 6: PostgreSQL / DB-Agnostic Architecture ✅
-  30. Repository interface abstraction                 5 SP  ✅
-  31. PostgreSQL adapter (Panache or JDBC)              8 SP  ✅
-  32. Migration tooling (MongoDB → PostgreSQL)          5 SP  ✅
-  6A. MongoDB sync driver migration                    5 SP
-      (replace reactive+blocking with sync driver, 13 files)
-  6B. PostgreSQL integration test parity               3 SP
-      (run all 48 ITs against agenth MongoDB and PostgreSQL)
-
-Phase 6C: Infinispan → Caffeine (2 SP)   [QUICK WIN]  ✅
-  6C. Replace Infinispan with Caffeine (2 files, POM cleanup)   2 SP
-
-Phase 6E: quarkus-langchain4j → langchain4j Core (2 SP)   [QUICK WIN]  ✅
-  6E. Remove io.quarkiverse.langchain4j, migrate 3 builders to core   2 SP
-      + ObservableChatModel decorator (provider-agnostic timeout + logging)
-
-Phase 6F: Contextual Logging — MDC + Manager Log Panel (5 SP)   [QUICK WIN]  ✅
-  6F-1. MDC context (agentId, conversationId) in ConversationService   1 SP
-  6F-2. BoundedLogStore — ring buffer log handler with MDC tags      2 SP
-  6F-3. REST + SSE endpoint for log streaming/filtering              1 SP
-  6F-4. Manager UI: Logs panel (live tail, agent/conversation filter)  1 SP
-
-Phase 6D: Lombok Removal (5 SP)   [QUICK WIN]  ✅
-  6D. Delombok 114 files, explicit getters/setters, JBoss Logger    5 SP
-
-Phase 7: Secrets, Audit + Tenant Foundation (12 SP) ✅
-  33. Secrets Vault — ${vault:key} references, export sanitization  5 SP  ✅
-  33b. Chat UI password field + Manager vault integration           2 SP  ✅
-  34. Immutable Audit Ledger — write-once trail, EU AI Act          5 SP  ✅
-  34b. Tenant Quota Stub — per-tenant rate limits, usage metering   2 SP  ✅
-
-Phase 8a: MCP Servers (8 SP) ✅
-  35. MCP Server: Agent Conversations (11 tools)                      5 SP  ✅
-  36. MCP Server: Admin API (13 tools)                              3 SP  ✅
-  8a.2. MCP Resource CRUD + Batch Cascade (5 tools)                 3 SP  ✅
-  8a.3. Agent Discovery & Managed Conversations (6 tools)             3 SP  ✅
-  37. MCP Resources: EDDI Documentation (docs as MCP resources)     2 SP  ✅
-
-Phase 8b: MCP Client (5 SP) ✅
-  38. MCP Client — agents consume external MCP tools                  5 SP  ✅
-
-Phase 8c: RAG Foundation (3 SP)
-  38b. RAG Lifecycle Task — config-driven vector store retrieval    3 SP
-      (langchain4j EmbeddingStore/EmbeddingModel abstractions)
-
-Phase 9: DAG Pipeline + Governance (10 SP)
-  39. 3-Tier State Architecture (CQRS memory partitioning)         5 SP
-  40. DAG Pipeline (parallel tasks, circuit breakers, budget)       5 SP
-  40b. OpenTelemetry Tracing (distributed traces through pipeline)
-
-Phase 9b: HITL Framework (5 SP)
-  41. HITL Framework (pause/resume/approve for MCP + budget)       3 SP
-  42. Workspace AI Operator — system agent with admin API access     2 SP
-
-Phase 10: Group Conversations + Multi-Agent Orchestration (13 SP)
-  10.1 Group Config + Store (AgentGroupConfiguration, CRUD REST)  3 SP
-  10.2 Group Orchestration (rounds, NATS-backed, depth control)   5 SP
-  10.3 REST + SSE + MCP (live debate streaming, 7 MCP tools)      3 SP
-  10.4 Integration Testing (e2e, failures, depth, streaming)      2 SP
-       Full spec: docs/v6-planning/group-conversations.md
-
-Phase 11a: Persistent Memory + Heartbeat (8 SP)
-  47. Cross-conversation persistent user memory                    5 SP
-  48. Heartbeat / Scheduled Triggers (cluster-safe via NATS,       3 SP
-      exactly-once, agent self-scheduling via tool)
-
-Phase 11b: Multi-Channel Adapters (5 SP)
-  49. Multi-channel adapters (WhatsApp/Telegram/Slack)             5 SP
-
-Phase 12: CI/CD — GitHub Actions Migration (8 SP)
-  50. GitHub Actions for EDDI (migrate from CircleCI)              3 SP
-  51. GitHub Actions for Manager + Chat-UI + Website               5 SP
-
-Phase 13a: Time-Traveling Debugger (5 SP)
-  52. Time-Traveling Debugger (audit ledger replay)                5 SP
-
-Phase 13b: Visual Pipeline Builder + Taint Tracking (8 SP)
-  53. Visual Pipeline Builder (Linear/Block Hybrid)                5 SP
-  54. Visual Taint Tracking (data provenance indicators)           3 SP
-
-Phase 14a: Website — Astro Setup (5 SP)
-  55. Scaffold Astro + Tailwind + i18n                             2 SP
-  56. Dark/light + RTL                                             3 SP
-
-Phase 14b: Website — Content + Deployment (9 SP)
-  57. Migrate content into components                              3 SP
-  58. Documentation pages (Content Collections)                    5 SP
-  59. GitHub Actions deployment                                    1 SP
-
-Deferred (post v6.0):
-  - Redis distributed cache
-  - Helm chart
-  - Self-improving skills (agents that learn from interactions)
-```
 
 ---
 
@@ -517,23 +414,23 @@ When implementing a new feature, provide:
 
 ---
 
-## 5. Handoff Protocol
+## 5. Session Protocol
 
 **If picking up from a previous session:**
 
-1. Read `HANDOFF.md` — it has the current status, what's done, and what's next
-2. Run `git log -5 --oneline` on `feature/version-6.0.0` to see recent commits
-3. Run `git status` to check for uncommitted changes
-4. Check which phase/item from Section 3 is currently in progress
+1. Run `git log -5 --oneline` on `feature/version-6.0.0` to see recent commits
+2. Run `git status` to check for uncommitted changes
+3. Check which phase/item from Section 3 is currently in progress
+4. Read [`docs/changelog.md`](docs/changelog.md) for latest changes and decisions
 
 **If ending a session (or at a natural break point):**
 
 1. Commit all working code (even partial) with `wip:` prefix if incomplete
-2. Update `HANDOFF.md` with:
+2. Update [`docs/changelog.md`](docs/changelog.md) with:
    - What was completed (with commit hashes)
    - What's next (the specific Phase/Item from Section 3)
    - Any open questions or decisions needed
-3. **Tell the user it's a good time for a new conversation** if:
+3. **Suggest a new conversation** if:
    - A phase is complete
    - A major item (3+ SP) is done and tests pass
    - Context is getting long (many files explored)
