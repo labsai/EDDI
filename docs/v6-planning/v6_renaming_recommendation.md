@@ -9,7 +9,7 @@
 
 EDDI is an AI orchestration platform. Its terminology dates from the chatagent era (2017–2018). For v6, the surface-level naming is modernized to align with the 2026 AI/LLM industry while keeping full backwards compatibility with existing MongoDB databases and ZIP config exports/imports.
 
-**Repository**: `c:\dev\git\EDDI` (Java 21, Quarkus, Maven)
+**Repository**: `c:\dev\git\EDDI` (Java 25, Quarkus, Maven)
 **Base package**: `ai.labs.eddi`
 
 ---

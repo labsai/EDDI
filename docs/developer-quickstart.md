@@ -42,7 +42,7 @@ Agent (list of packages)
 
 ### Prerequisites
 
-- Java 21
+- Java 25
 - Maven 3.8.4
 - MongoDB 6.0+
 - Docker (optional, recommended)

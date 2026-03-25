@@ -14,7 +14,7 @@ While competitors (n8n, LangGraph, CrewAI, Flowise) were built for rapid prototy
 
 EDDI's competitive moat is structural, not feature-based. It emerges from the combination of:
 
-- **Java 21 / Quarkus** — true concurrency without GIL or single-threaded event loops
+- **Java 25 / Quarkus** — true concurrency without GIL or single-threaded event loops
 - **Configuration-driven logic** — agent behavior is JSON, not compiled code
 - **Strict pipeline architecture** — deterministic execution of probabilistic components
 - **Enterprise security by default** — no eval(), no sandbox escapes, no plaintext secrets
@@ -120,7 +120,7 @@ New Feature Idea -> Configuration POJO -> IResourceStore -> REST API
 
 > _"Java's concurrency model is our unfair structural advantage."_
 
-**The Principle:** Python's GIL and Node.js's single-threaded event loop are fundamental barriers to scaling multi-agent AI workloads. EDDI leverages Java 21 Virtual Threads and Quarkus's reactive stack to achieve true parallelism without blocking, without heartbeat starvation, and without the serialization panics that plague competitors.
+**The Principle:** Python's GIL and Node.js's single-threaded event loop are fundamental barriers to scaling multi-agent AI workloads. EDDI leverages Java 25 Virtual Threads and Quarkus's reactive stack to achieve true parallelism without blocking, without heartbeat starvation, and without the serialization panics that plague competitors.
 
 **Concrete Architecture:**
 

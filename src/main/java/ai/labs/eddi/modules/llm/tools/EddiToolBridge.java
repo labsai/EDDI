@@ -22,12 +22,16 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * A CDI bean that provides a generic @Tool for Langchain4j agents.
- * This tool acts as a bridge, allowing AI agents to execute pre-configured EDDI httpcalls.
+ * This tool acts as a bridge, allowing AI agents to execute pre-configured EDDI
+ * httpcalls.
  * <p>
- * The conversationId is injected via {@link #setCurrentConversationId(String)} before
- * the tool-calling loop — the LLM only needs to provide the {@code httpCallUri}.
+ * The conversationId is injected via {@link #setCurrentConversationId(String)}
+ * before
+ * the tool-calling loop — the LLM only needs to provide the
+ * {@code httpCallUri}.
  * <p>
- * Security: the agent can ONLY call httpcalls that have been explicitly configured
+ * Security: the agent can ONLY call httpcalls that have been explicitly
+ * configured
  * and granted to it, not arbitrary APIs.
  *
  * @author ginccc
@@ -38,7 +42,8 @@ public class EddiToolBridge {
 
     /**
      * ThreadLocal to hold the current conversationId during a tool-calling loop.
-     * Set by {@link ai.labs.eddi.modules.llm.impl.AgentOrchestrator} before execution,
+     * Set by {@link ai.labs.eddi.modules.llm.impl.AgentOrchestrator} before
+     * execution,
      * cleared after the loop completes.
      */
     private static final ThreadLocal<String> CURRENT_CONVERSATION_ID = new ThreadLocal<>();
@@ -84,14 +89,14 @@ public class EddiToolBridge {
      * is injected automatically by the system.
      *
      * @param httpCallUri URI of the httpcall configuration
-     *                    (e.g., "eddi://ai.labs.apicalls/apicallstore/apicalls/abc123?version=1")
+     *                    (e.g.,
+     *                    "eddi://ai.labs.apicalls/apicallstore/apicalls/abc123?version=1")
      * @return JSON string with the API call result
      */
     @Tool("Executes a pre-configured EDDI API call to fetch real data. " +
             "Pass the exact httpCallUri that was provided to you.")
     public String executeApiCall(
-            @P("The httpcall URI to execute, e.g. eddi://ai.labs.apicalls/apicallstore/apicalls/ID?version=1")
-            String httpCallUri) {
+            @P("The httpcall URI to execute, e.g. eddi://ai.labs.apicalls/apicallstore/apicalls/ID?version=1") String httpCallUri) {
 
         String conversationId = CURRENT_CONVERSATION_ID.get();
         if (conversationId == null) {
@@ -100,6 +105,9 @@ public class EddiToolBridge {
 
         try {
             LOGGER.info("Agent executing httpcall: " + httpCallUri + " for conversation: " + conversationId);
+
+            // Clear cache to pick up any config updates
+            configCache.remove(httpCallUri);
 
             // Parse the URI to extract the httpcall configuration reference
             URI uri = URI.create(httpCallUri);
@@ -110,6 +118,9 @@ public class EddiToolBridge {
                 return errorResult("ApiCalls configuration not found: " + httpCallUri);
             }
 
+            LOGGER.info("Loaded config: httpCalls=" + config.getHttpCalls().size() +
+                    " targetServer=" + config.getTargetServerUrl());
+
             // Find the first ApiCall in the configuration
             ApiCall httpCall = config.getHttpCalls().stream()
                     .findFirst()
@@ -117,6 +128,13 @@ public class EddiToolBridge {
 
             if (httpCall == null) {
                 return errorResult("No httpcalls found in configuration: " + httpCallUri);
+            }
+
+            // Force saveResponse=true so ApiCallExecutor captures the response body
+            // (default is false, which causes empty result maps)
+            httpCall.setSaveResponse(true);
+            if (httpCall.getResponseObjectName() == null || httpCall.getResponseObjectName().isEmpty()) {
+                httpCall.setResponseObjectName(httpCall.getName() + "Response");
             }
 
             // Load the conversation memory snapshot for template data
@@ -130,7 +148,12 @@ public class EddiToolBridge {
             Map<String, Object> result = httpCallExecutor.execute(
                     httpCall, memory, templateData, config.getTargetServerUrl());
 
-            return jsonSerialization.serialize(result);
+            String serialized = jsonSerialization.serialize(result);
+            LOGGER.info("Tool result for " + httpCall.getName() + ": keys=" + result.keySet() +
+                    " httpCode=" + result.get("httpCode") + " bodySize=" +
+                    (result.get("body") != null ? result.get("body").toString().length() : 0));
+
+            return serialized;
 
         } catch (IResourceStore.ResourceNotFoundException e) {
             LOGGER.error("ApiCall configuration not found: " + httpCallUri, e);

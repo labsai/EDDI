@@ -104,6 +104,12 @@ public record LlmConfiguration(List<Task> tasks) {
         private Boolean enableBuiltInTools = false;
 
         /**
+         * Auto-discover httpcall extensions from the workflow and expose them as tools.
+         * Default: true — agents automatically get tools for all httpcalls in their workflow.
+         */
+        private Boolean enableHttpCallTools = true;
+
+        /**
          * Whitelist of specific built-in tools to enable.
          * Options: "calculator", "datetime", "websearch", "dataformatter",
          * "webscraper", "textsummarizer", "pdfreader", "weather"
@@ -162,6 +168,7 @@ public record LlmConfiguration(List<Task> tasks) {
         public boolean isAgentMode() {
             return (tools != null && !tools.isEmpty()) ||
                     (enableBuiltInTools != null && enableBuiltInTools) ||
+                    (enableHttpCallTools != null && enableHttpCallTools) ||
                     (mcpServers != null && !mcpServers.isEmpty());
         }
 
@@ -266,6 +273,14 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setEnableBuiltInTools(Boolean enableBuiltInTools) {
             this.enableBuiltInTools = enableBuiltInTools;
+        }
+
+        public Boolean getEnableHttpCallTools() {
+            return enableHttpCallTools;
+        }
+
+        public void setEnableHttpCallTools(Boolean enableHttpCallTools) {
+            this.enableHttpCallTools = enableHttpCallTools;
         }
 
         public List<String> getBuiltInToolsWhitelist() {

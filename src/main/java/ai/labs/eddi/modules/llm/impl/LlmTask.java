@@ -14,7 +14,7 @@ import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
-import ai.labs.eddi.modules.llm.tools.EddiToolBridge;
+import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.modules.llm.tools.impl.*;
@@ -97,7 +97,7 @@ public class LlmTask implements ILifecycleTask {
             TextSummarizerTool textSummarizerTool,
             PdfReaderTool pdfReaderTool,
             WeatherTool weatherTool,
-            EddiToolBridge eddiToolBridge,
+            IApiCallExecutor apiCallExecutor,
             ToolExecutionService toolExecutionService,
             McpToolProviderManager mcpToolProviderManager) {
         this.resourceClientLibrary = resourceClientLibrary;
@@ -114,7 +114,8 @@ public class LlmTask implements ILifecycleTask {
         this.agentOrchestrator = new AgentOrchestrator(
                 calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
-                eddiToolBridge, toolExecutionService, mcpToolProviderManager);
+                toolExecutionService, mcpToolProviderManager,
+                resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter);
     }
 
     @Override

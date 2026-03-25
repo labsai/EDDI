@@ -497,7 +497,7 @@ See the [Security documentation](security.md) for details.
 
 ### Language & Runtime
 
-- **Java 21**: Latest LTS with modern language features
+- **Java 25**: Latest LTS with modern language features
 - **GraalVM**: Optional native compilation for even faster startup
 
 ### Dependency Injection

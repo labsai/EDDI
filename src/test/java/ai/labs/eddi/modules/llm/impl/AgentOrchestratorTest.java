@@ -1,7 +1,10 @@
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
-import ai.labs.eddi.modules.llm.tools.EddiToolBridge;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,8 +46,9 @@ class AgentOrchestratorTest {
         orchestrator = new AgentOrchestrator(
                 calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
-                mock(EddiToolBridge.class), mock(ToolExecutionService.class),
-                mock(McpToolProviderManager.class));
+                mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class),
+                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
     }
 
     // ==================== Tool Collection Tests ====================
@@ -167,6 +171,7 @@ class AgentOrchestratorTest {
     void testIsAgentMode_False() {
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(false);
+        task.setEnableHttpCallTools(false);
         task.setTools(null);
 
         assertFalse(task.isAgentMode());

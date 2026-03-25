@@ -14,7 +14,7 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
-import ai.labs.eddi.modules.llm.tools.EddiToolBridge;
+import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -87,7 +87,7 @@ class LlmTaskTest {
                 var textSummarizerTool = mock(TextSummarizerTool.class);
                 var pdfReaderTool = mock(PdfReaderTool.class);
                 var weatherTool = mock(WeatherTool.class);
-                var eddiToolBridge = mock(EddiToolBridge.class);
+                var apiCallExecutor = mock(IApiCallExecutor.class);
                 var toolExecutionService = mock(ToolExecutionService.class);
                 var secretResolver = mock(SecretResolver.class);
                 when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -109,7 +109,7 @@ class LlmTaskTest {
                                 textSummarizerTool,
                                 pdfReaderTool,
                                 weatherTool,
-                                eddiToolBridge,
+                                apiCallExecutor,
                                 toolExecutionService,
                                 mock(McpToolProviderManager.class));
         }

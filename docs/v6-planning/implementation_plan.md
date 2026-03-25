@@ -730,7 +730,7 @@ Step-by-step wizard for new users:
 ## Appendix A: Project Structure & Repos
 
 ```
-c:\dev\git\EDDI\                    ← Backend (Quarkus, Java 21)
+c:\dev\git\EDDI\                    ← Backend (Quarkus, Java 25)
 c:\dev\git\EDDI-Manager\            ← Manager UI (React 18, Redux, Webpack)
 c:\dev\git\EDDI-integration-tests\  ← Integration tests
 c:\dev\git\eddi-chat-ui\            ← Chat widget (React 18, CRA)

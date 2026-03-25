@@ -1,6 +1,6 @@
 Based on the exhaustive backend and distributed systems research report, the industry is discovering a harsh reality: scaling AI orchestration from single-machine experimental Python/Node.js scripts into highly concurrent, multi-tenant cloud environments causes massive architectural fracturing.
 
-The most critical takeaway for you is this: **EDDI’s choice of Java 21 and Quarkus gives you an unfair structural advantage over the competition.** Python (with its Global Interpreter Lock) and Node.js (with its single-threaded event loop) fundamentally struggle with the heavy I/O, multithreading, and state-locking required to scale multi-agent Directed Acyclic Graphs (DAGs).
+The most critical takeaway for you is this: **EDDI’s choice of Java 25 and Quarkus gives you an unfair structural advantage over the competition.** Python (with its Global Interpreter Lock) and Node.js (with its single-threaded event loop) fundamentally struggle with the heavy I/O, multithreading, and state-locking required to scale multi-agent Directed Acyclic Graphs (DAGs).
 
 If you enforce strict memory boundaries and leverage Java's native concurrency models, EDDI v6.0 can completely bypass the fatal crashes crippling platforms like n8n, LangGraph, and CrewAI.
 
@@ -16,7 +16,7 @@ Here is an analysis of the core research conclusions, translated into **concrete
 
 **Recommendations for EDDI:**
 
-- **Virtual Thread Offloading:** This is your silver bullet. When your NATS/RabbitMQ consumer receives a message, it must do nothing but acknowledge the pull. Immediately hand off the actual LifecycleManager.execute() pipeline to a Java 21 Virtual Thread (using the Quarkus @RunOnVirtualThread annotation). This guarantees the primary messaging heartbeat thread is _never_ blocked by a slow LLM response or a heavy InputParserTask dictionary lookup.
+- **Virtual Thread Offloading:** This is your silver bullet. When your NATS/RabbitMQ consumer receives a message, it must do nothing but acknowledge the pull. Immediately hand off the actual LifecycleManager.execute() pipeline to a Java 25 Virtual Thread (using the Quarkus @RunOnVirtualThread annotation). This guarantees the primary messaging heartbeat thread is _never_ blocked by a slow LLM response or a heavy InputParserTask dictionary lookup.
 - **State-First Idempotent Retries:** Competitors lose data when they hit an LLM rate limit (HTTP 429\) because the state is held in volatile memory. Before LangchainTask makes a network call to OpenAI/Anthropic, the pre-execution ConversationStep must be saved to MongoDB. If a 429 occurs, explicitly NACK (negative acknowledge) the message to the dead-letter queue (DLQ) with a backoff header. The Virtual Thread dies cleanly, and the worker can process other conversations while waiting.
 
 ### **2\. DAG Parallelism: Preventing Serialization Panics**

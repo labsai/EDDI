@@ -1,10 +1,18 @@
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.apicalls.model.ApiCall;
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
-import ai.labs.eddi.modules.llm.tools.EddiToolBridge;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
@@ -18,10 +26,9 @@ import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.io.IOException;
+import java.net.URI;
+import java.util.*;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -40,6 +47,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  */
 class AgentOrchestrator {
     private static final Logger LOGGER = Logger.getLogger(AgentOrchestrator.class);
+    private static final String HTTPCALLS_TYPE = "eddi://ai.labs.httpcalls";
 
     // Built-in tools
     private final CalculatorTool calculatorTool;
@@ -50,9 +58,14 @@ class AgentOrchestrator {
     private final TextSummarizerTool textSummarizerTool;
     private final PdfReaderTool pdfReaderTool;
     private final WeatherTool weatherTool;
-    private final EddiToolBridge eddiToolBridge;
     private final ToolExecutionService toolExecutionService;
     private final McpToolProviderManager mcpToolProviderManager;
+
+    // For httpcall auto-discovery from workflow
+    private final IResourceClientLibrary resourceClientLibrary;
+    private final IApiCallExecutor apiCallExecutor;
+    private final IJsonSerialization jsonSerialization;
+    private final IMemoryItemConverter memoryItemConverter;
 
     AgentOrchestrator(CalculatorTool calculatorTool,
             DateTimeTool dateTimeTool,
@@ -62,9 +75,12 @@ class AgentOrchestrator {
             TextSummarizerTool textSummarizerTool,
             PdfReaderTool pdfReaderTool,
             WeatherTool weatherTool,
-            EddiToolBridge eddiToolBridge,
             ToolExecutionService toolExecutionService,
-            McpToolProviderManager mcpToolProviderManager) {
+            McpToolProviderManager mcpToolProviderManager,
+            IResourceClientLibrary resourceClientLibrary,
+            IApiCallExecutor apiCallExecutor,
+            IJsonSerialization jsonSerialization,
+            IMemoryItemConverter memoryItemConverter) {
         this.calculatorTool = calculatorTool;
         this.dateTimeTool = dateTimeTool;
         this.webSearchTool = webSearchTool;
@@ -73,9 +89,12 @@ class AgentOrchestrator {
         this.textSummarizerTool = textSummarizerTool;
         this.pdfReaderTool = pdfReaderTool;
         this.weatherTool = weatherTool;
-        this.eddiToolBridge = eddiToolBridge;
         this.toolExecutionService = toolExecutionService;
         this.mcpToolProviderManager = mcpToolProviderManager;
+        this.resourceClientLibrary = resourceClientLibrary;
+        this.apiCallExecutor = apiCallExecutor;
+        this.jsonSerialization = jsonSerialization;
+        this.memoryItemConverter = memoryItemConverter;
     }
 
     /**
@@ -103,11 +122,6 @@ class AgentOrchestrator {
         // Collect enabled built-in tools
         List<Object> enabledTools = collectEnabledTools(task);
 
-        // Add custom tools (EddiToolBridge) if configured
-        if (task.getTools() != null && !task.getTools().isEmpty()) {
-            enabledTools.add(eddiToolBridge);
-        }
-
         // Discover MCP server tools (if configured)
         McpToolProviderManager.McpToolsResult mcpTools = null;
         List<McpServerConfig> mcpServers = task.getMcpServers();
@@ -116,43 +130,28 @@ class AgentOrchestrator {
         }
         boolean hasMcpTools = mcpTools != null && !mcpTools.toolSpecs().isEmpty();
 
+        // Discover httpcall tools from workflow (auto-discovery)
+        boolean enableHttpCallTools = task.getEnableHttpCallTools() == null || task.getEnableHttpCallTools();
+        HttpCallToolsResult httpCallTools = null;
+        if (enableHttpCallTools) {
+            httpCallTools = discoverHttpCallTools(memory);
+        }
+        boolean hasHttpCallTools = httpCallTools != null && !httpCallTools.toolSpecs().isEmpty();
+
         // No tools? Return null — caller should use legacy mode
-        if (enabledTools.isEmpty() && !hasMcpTools) {
+        if (enabledTools.isEmpty() && !hasMcpTools && !hasHttpCallTools) {
             return null;
         }
 
-        // Append tool instructions to system message if custom tools are configured
-        String effectiveSystemMessage = systemMessage;
-        if (task.getTools() != null && !task.getTools().isEmpty()) {
-            StringBuilder toolInstructions = new StringBuilder(
-                    "\n\nYou have access to the following external tools via the 'executeApiCall' function:\n");
-            for (String toolUri : task.getTools()) {
-                toolInstructions.append("- ").append(toolUri).append("\n");
-            }
-            toolInstructions
-                    .append("When using 'executeApiCall', pass the exact URI as the 'httpCallUri' argument.\n");
-
-            if (isNullOrEmpty(effectiveSystemMessage)) {
-                effectiveSystemMessage = toolInstructions.toString();
-            } else {
-                effectiveSystemMessage += toolInstructions.toString();
-            }
-        }
-
-        int totalTools = enabledTools.size() + (mcpTools != null ? mcpTools.toolSpecs().size() : 0);
+        int totalTools = enabledTools.size()
+                + (mcpTools != null ? mcpTools.toolSpecs().size() : 0)
+                + (httpCallTools != null ? httpCallTools.toolSpecs().size() : 0);
         LOGGER.info("Executing with " + totalTools + " enabled tools" +
-                (mcpTools != null && !mcpTools.toolSpecs().isEmpty()
-                        ? " (" + mcpTools.toolSpecs().size() + " from MCP servers)"
-                        : ""));
+                (hasHttpCallTools ? " (" + httpCallTools.toolSpecs().size() + " from workflow httpcalls)" : "") +
+                (hasMcpTools ? " (" + mcpTools.toolSpecs().size() + " from MCP servers)" : ""));
 
-        // Set conversation context for EddiToolBridge before tool-calling loop
-        EddiToolBridge.setCurrentConversationId(memory.getConversationId());
-        try {
-            return executeWithTools(chatModel, effectiveSystemMessage, chatMessages, enabledTools, mcpTools, task,
-                    memory);
-        } finally {
-            EddiToolBridge.clearCurrentConversationId();
-        }
+        return executeWithTools(chatModel, systemMessage, chatMessages, enabledTools,
+                mcpTools, httpCallTools, task, memory);
     }
 
     /**
@@ -161,6 +160,7 @@ class AgentOrchestrator {
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage,
             List<ChatMessage> chatMessages, List<Object> tools,
             McpToolProviderManager.McpToolsResult mcpTools,
+            HttpCallToolsResult httpCallTools,
             LlmConfiguration.Task task, IConversationMemory memory)
             throws LifecycleException {
 
@@ -193,6 +193,12 @@ class AgentOrchestrator {
         if (mcpTools != null && !mcpTools.toolSpecs().isEmpty()) {
             toolSpecs.addAll(mcpTools.toolSpecs());
             toolExecutors.putAll(mcpTools.executors());
+        }
+
+        // Merge httpcall tools discovered from workflow (if any)
+        if (httpCallTools != null && !httpCallTools.toolSpecs().isEmpty()) {
+            toolSpecs.addAll(httpCallTools.toolSpecs());
+            toolExecutors.putAll(httpCallTools.executors());
         }
 
         // Build message list with system message if provided
@@ -344,5 +350,134 @@ class AgentOrchestrator {
 
         LOGGER.info("Enabled " + tools.size() + " built-in tools for agent");
         return tools;
+    }
+
+    // --- Httpcall auto-discovery from workflow ---
+
+    /**
+     * Result of httpcall tool discovery.
+     */
+    record HttpCallToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors) {
+    }
+
+    /**
+     * Holder for an ApiCall and its parent configuration's target server URL.
+     */
+    private record HttpCallToolEntry(ApiCall apiCall, String targetServerUrl) {
+    }
+
+    /**
+     * Discovers httpcall configurations from the workflow and creates
+     * ToolSpecification + ToolExecutor for each ApiCall.
+     * <p>
+     * Traverses: memory → agentId/version → AgentConfiguration → workflows → WorkflowConfiguration
+     * → filter httpcall steps → load ApiCallsConfiguration → create tools from each ApiCall.
+     */
+    HttpCallToolsResult discoverHttpCallTools(IConversationMemory memory) {
+        List<ToolSpecification> toolSpecs = new ArrayList<>();
+        Map<String, ToolExecutor> executors = new HashMap<>();
+
+        try {
+            // Load the agent configuration
+            String agentId = memory.getAgentId();
+            Integer agentVersion = memory.getAgentVersion();
+            if (agentId == null || agentVersion == null) {
+                LOGGER.debug("No agent context in memory — skipping httpcall tool discovery");
+                return new HttpCallToolsResult(toolSpecs, executors);
+            }
+            URI agentUri = URI.create("eddi://ai.labs.agent/agentstore/agents/" + agentId + "?version=" + agentVersion);
+            AgentConfiguration agentConfig = resourceClientLibrary.getResource(agentUri, AgentConfiguration.class);
+
+            if (agentConfig.getWorkflows() == null || agentConfig.getWorkflows().isEmpty()) {
+                return new HttpCallToolsResult(toolSpecs, executors);
+            }
+
+            // Load each workflow and discover httpcall extensions
+            List<HttpCallToolEntry> entries = new ArrayList<>();
+            for (URI workflowUri : agentConfig.getWorkflows()) {
+                WorkflowConfiguration workflowConfig = resourceClientLibrary.getResource(workflowUri, WorkflowConfiguration.class);
+                for (var step : workflowConfig.getWorkflowSteps()) {
+                    if (step.getType() != null && HTTPCALLS_TYPE.equals(step.getType().toString())) {
+                        String uri = (String) step.getConfig().get("uri");
+                        if (uri != null) {
+                            try {
+                                ApiCallsConfiguration httpCallsConfig =
+                                        resourceClientLibrary.getResource(URI.create(uri), ApiCallsConfiguration.class);
+                                for (ApiCall apiCall : httpCallsConfig.getHttpCalls()) {
+                                    entries.add(new HttpCallToolEntry(apiCall, httpCallsConfig.getTargetServerUrl()));
+                                }
+                            } catch (ServiceException e) {
+                                LOGGER.warn("Failed to load httpcall config: " + uri, e);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Create ToolSpecification + ToolExecutor for each ApiCall
+            for (HttpCallToolEntry entry : entries) {
+                ApiCall apiCall = entry.apiCall();
+                String targetServerUrl = entry.targetServerUrl();
+
+                if (apiCall.getName() == null || apiCall.getName().isBlank()) {
+                    continue;
+                }
+
+                ToolSpecification.Builder specBuilder = ToolSpecification.builder()
+                        .name(apiCall.getName())
+                        .description(apiCall.getDescription() != null
+                                ? apiCall.getDescription()
+                                : "Execute " + apiCall.getName());
+
+                // Add parameters if defined
+                if (apiCall.getParameters() != null && !apiCall.getParameters().isEmpty()) {
+                    var schemaBuilder = dev.langchain4j.model.chat.request.json.JsonObjectSchema.builder();
+                    for (var param : apiCall.getParameters().entrySet()) {
+                        schemaBuilder.addStringProperty(
+                                param.getKey(),
+                                param.getValue() != null ? param.getValue() : param.getKey());
+                    }
+                    schemaBuilder.required(new ArrayList<>(apiCall.getParameters().keySet()));
+                    specBuilder.parameters(schemaBuilder.build());
+                }
+
+                toolSpecs.add(specBuilder.build());
+
+                // Create executor that uses real conversation memory
+                executors.put(apiCall.getName(), (toolRequest, memoryId) -> {
+                    try {
+                        Map<String, Object> templateData = memoryItemConverter.convert(memory);
+
+                        // Merge LLM-provided arguments into template data
+                        if (toolRequest.arguments() != null && !toolRequest.arguments().isBlank()) {
+                            try {
+                                @SuppressWarnings("unchecked")
+                                Map<String, Object> args = jsonSerialization.deserialize(toolRequest.arguments(), Map.class);
+                                templateData.putAll(args);
+                            } catch (IOException e) {
+                                LOGGER.warn("Failed to parse tool arguments: " + toolRequest.arguments(), e);
+                            }
+                        }
+
+                        Map<String, Object> result = apiCallExecutor.execute(
+                                apiCall, memory, templateData, targetServerUrl);
+
+                        String serialized = jsonSerialization.serialize(result);
+                        LOGGER.info("Httpcall tool '" + apiCall.getName() + "' result: keys=" +
+                                result.keySet() + " size=" + serialized.length());
+                        return serialized;
+                    } catch (Exception e) {
+                        LOGGER.error("Error executing httpcall tool '" + apiCall.getName() + "'", e);
+                        return "{\"error\": \"" + e.getMessage().replace("\"", "'") + "\"}";
+                    }
+                });
+            }
+
+            LOGGER.info("Discovered " + toolSpecs.size() + " httpcall tools from workflow");
+        } catch (ServiceException e) {
+            LOGGER.warn("Failed to discover httpcall tools from workflow", e);
+        }
+
+        return new HttpCallToolsResult(toolSpecs, executors);
     }
 }

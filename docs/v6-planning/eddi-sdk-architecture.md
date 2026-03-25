@@ -427,7 +427,7 @@ jobs:
 - [ ] Quarkus 3.33 LTS + latest
 - [ ] EDDI with MongoDB backend
 - [ ] EDDI with PostgreSQL backend
-- [ ] Java 21+ (matching EDDI's floor)
+- [ ] Java 25+ (matching EDDI's floor)
 - [ ] Native image verified
 
 ---
