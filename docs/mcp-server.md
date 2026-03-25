@@ -10,7 +10,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | --------------------------- | ------------------------------------- |
 | `http://localhost:7070/mcp` | MCP server endpoint (default + admin) |
 
-## Available Tools (39)
+## Available Tools (48)
 
 ### Conversation Tools (11)
 
@@ -80,6 +80,22 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `delete_schedule`       | Delete a scheduled agent trigger                                                                                                                                                                    |
 | `fire_schedule_now`     | Manually trigger a schedule fire immediately. Useful for testing or one-off executions                                                                                                              |
 | `retry_failed_schedule` | Re-queue a dead-lettered schedule for another fire attempt after fixing the cause of failure                                                                                                        |
+
+### Group Conversation Tools (9)
+
+| Tool                        | Description                                                                                                                                                |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `describe_discussion_styles` | Rich descriptions of all 5 discussion styles with phase flows, member roles, and use cases                                                                |
+| `list_groups`               | List all group configurations with name, style, member count                                                                                               |
+| `read_group`                | Read a group configuration's full details                                                                                                                  |
+| `create_group`              | Create a group (members, moderator, style, roles, member types). Supports nested groups via `memberTypes=GROUP`                                           |
+| `update_group`              | Update a group configuration (full JSON replacement)                                                                                                       |
+| `delete_group`              | Delete a group configuration                                                                                                                               |
+| `discuss_with_group`        | Start a multi-agent discussion on a question. Returns full transcript + synthesized answer                                                                 |
+| `read_group_conversation`   | Read a group conversation transcript                                                                                                                       |
+| `list_group_conversations`  | List past group discussions for a group, with state and timestamps                                                                                         |
+
+See [Group Conversations](group-conversations.md) for full style details, custom phases, and nested groups.
 
 ## MCP Resources
 
@@ -174,6 +190,18 @@ Add to `claude_desktop_config.json`:
    # Heartbeats default to: persistent conversation, "heartbeat" message, drift-proof scheduling
 2. read_schedule(scheduleId: "hb-1") → check next fire time and conversation ID
 3. retry_failed_schedule(scheduleId: "hb-1") → requeue if dead-lettered
+```
+
+### Running a Multi-Agent Discussion
+
+```
+1. describe_discussion_styles → see all available styles with examples
+2. create_group(name: "Architecture Review", memberAgentIds: "expert-1,expert-2",
+     moderatorAgentId: "moderator", style: "PEER_REVIEW")
+   → { groupId: "g1" }
+3. discuss_with_group(groupId: "g1", question: "Should we use microservices?")
+   → { transcript: [...], synthesizedAnswer: "Based on all perspectives..." }
+4. list_group_conversations(groupId: "g1") → browse past discussions
 ```
 
 ---
@@ -429,7 +457,7 @@ eddi.docs.path=docs
 
 EDDI uses a **whitelist-based `ToolFilter`** (`McpToolFilter.java`) to control which tools are exposed via MCP.
 
-**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The filter ensures only the 33 intended tools are visible.
+**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The filter ensures only the 48 intended tools are visible.
 
 To add a new MCP tool: add it to the `MCP_TOOLS` set in `McpToolFilter.java`.
 
@@ -444,8 +472,8 @@ To add a new MCP tool: add it to the `MCP_TOOLS` set in `McpToolFilter.java`.
 
 | Role        | Tools                                                                                                                                                                                                            |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mcp-user`  | `list_agents`, `discover_agents`, `create_conversation`, `talk_to_agent`, `chat_with_agent`, `chat_managed`, `read_conversation*`, `list_agent_triggers`, `read_agent_logs`, `read_audit_trail`                  |
-| `mcp-admin` | All user tools + `deploy_agent`, `undeploy_agent`, `create_agent`, `delete_agent`, `update_agent`, `setup_agent`, `create_api_agent`, resource CRUD, `apply_agent_changes`, `list_agent_resources`, trigger CRUD |
+| `mcp-user`  | `list_agents`, `discover_agents`, `create_conversation`, `talk_to_agent`, `chat_with_agent`, `chat_managed`, `read_conversation*`, `list_agent_triggers`, `read_agent_logs`, `read_audit_trail`, `describe_discussion_styles`, `discuss_with_group`, `read_group_conversation`, `list_group_conversations` |
+| `mcp-admin` | All user tools + `deploy_agent`, `undeploy_agent`, `create_agent`, `delete_agent`, `update_agent`, `setup_agent`, `create_api_agent`, resource CRUD, `apply_agent_changes`, `list_agent_resources`, trigger CRUD, group CRUD (`create_group`, `update_group`, `delete_group`) |
 
 ## Sentiment Monitoring
 

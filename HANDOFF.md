@@ -548,6 +548,36 @@ All hooks are **non-fatal** — if schedule operations fail, the primary agent o
 
 **EDDI Manager:** No schedule UI yet. Backend REST API + MCP tools are the only interfaces.
 
+### Phase 10: Group Conversations — Multi-Agent Debate Orchestration ✅
+
+Phase-based orchestration engine enabling structured multi-agent discussions with 5 preset styles, nested group-of-groups support, and moderator synthesis.
+
+| Sub-Phase | Deliverables |
+|---|---|
+| **10.1** Data Models + Stores | `AgentGroupConfiguration`, `GroupConversation`, group/conversation stores (DB-agnostic) |
+| **10.2** Orchestration Service | `GroupConversationService` (~680 lines) — phases, context scoping, templates |
+| **10.3** REST + SSE + MCP | REST endpoints, SSE streaming, `McpGroupTools` (9 tools) |
+| **10.5** Discussion Styles | `DiscussionPhase`, `DiscussionStylePresets` — 5 styles + custom phases |
+| **10.5b** MCP/REST Usability | `describe_discussion_styles`, `list_group_conversations`, `GET /styles` |
+| **10.6** Group-of-Groups | `MemberType.GROUP`, recursive `executeGroupMemberTurn()`, `memberTypes` param |
+
+**Discussion styles:** `ROUND_TABLE`, `PEER_REVIEW`, `DEVIL_ADVOCATE`, `DELPHI`, `DEBATE` (+ fully custom phases)
+
+**Group-of-Groups:** Members can be other groups — sub-group synthesized answer becomes member's response. Depth tracking prevents infinite recursion (`eddi.groups.max-depth`, default: 3).
+
+**Tests:** 58 total
+- `GroupConversationServiceTest` (17) — orchestration, all styles, recursion, error handling
+- `McpGroupToolsTest` (22) — MCP tool layer
+- `DiscussionStylePresetsTest` (19) — style expansion
+
+**Key files:**
+- `src/main/java/ai/labs/eddi/configs/groups/model/AgentGroupConfiguration.java`
+- `src/main/java/ai/labs/eddi/configs/groups/model/GroupConversation.java`
+- `src/main/java/ai/labs/eddi/configs/groups/model/DiscussionStylePresets.java`
+- `src/main/java/ai/labs/eddi/engine/internal/GroupConversationService.java`
+- `src/main/java/ai/labs/eddi/engine/mcp/McpGroupTools.java`
+- `src/test/java/ai/labs/eddi/engine/internal/GroupConversationServiceTest.java`
+
 ## Next Up
 
 ### Quick Wins

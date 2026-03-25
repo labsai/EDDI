@@ -100,8 +100,20 @@ Members can now be other groups (`MemberType.GROUP`). The sub-group runs its own
 
 **Files:** 3 modified (`AgentGroupConfiguration`, `GroupConversationService`, `McpGroupTools`)
 
+### Phase 10.7: Orchestration Unit Tests (2026-03-26)
 
----
+17 tests in `GroupConversationServiceTest` covering the core orchestration engine:
+
+- **MainFlow (5):** round-table transcript, synthesized answer extraction, depth limit, null config, unavailable agent skip
+- **Styles (4):** PEER_REVIEW (critiques+revisions), DEVIL_ADVOCATE (challenges), DEBATE (arguments+rebuttals), CUSTOM phases
+- **NestedGroups (2):** GROUP member delegation, depth-exceeded graceful skip
+- **ErrorHandling (2):** ABORT policy → FAILED state, startConversation failure → SKIPPED
+- **Lifecycle (4):** read, delete (cascade end), list delegates
+
+**Total group conversation tests:** 58 (17 orchestration + 22 MCP + 19 style presets)
+
+**Documentation:** Created `docs/group-conversations.md` (user-facing). Updated `docs/mcp-server.md` (9 group tools, 39→48 total). Updated `HANDOFF.md`. Removed obsolete `docs/v6-planning/group-conversations.md`.
+
 
 ## v6 API Endpoint Simplification (2026-03-25)
 
