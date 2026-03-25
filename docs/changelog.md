@@ -13,6 +13,48 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Phase 10: Group Conversations — Multi-Agent Debate Orchestration (2026-03-25)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+New multi-agent group conversation system enabling structured debates between agents with moderator synthesis. Agents participate through their normal pipelines via `IConversationService.say()`, remaining group-unaware by default with optional context injection.
+
+| Phase | SP | Deliverables |
+|---|---|---|
+| **10.1** Data Models + Stores | 3 | `AgentGroupConfiguration`, `GroupConversation`, `IAgentGroupStore`/`AgentGroupStore`, `IGroupConversationStore`/`GroupConversationStore`, `IRestAgentGroupStore`/`RestAgentGroupStore` |
+| **10.2** Orchestration Service | 5 | `IGroupConversationService`, `GroupConversationService` (~550 lines) |
+| **10.3** REST + SSE + MCP | 3 | `IRestGroupConversation`/`RestGroupConversation`, `GroupConversationEventSink`, `McpGroupTools` (7 tools), `McpToolFilter` update |
+
+**Architecture highlights:**
+
+- **DB-agnostic stores** — both `AgentGroupStore` and `GroupConversationStore` use `IResourceStorageFactory`/`AbstractResourceStore`
+- **Sequential + parallel rounds** — `ProtocolConfig.ProtocolType` controls agent turn ordering
+- **Thymeleaf templates** — Customizable input templates for round 1, round N, and synthesis
+- **Depth control** — `eddi.groups.max-depth` prevents recursive group explosion (default: 3)
+- **Failure policies** — `MemberFailurePolicy` (RETRY/SKIP/ABORT) + `MemberUnavailablePolicy` (SKIP/FAIL)
+- **Moderator synthesis** — Optional moderator agent produces balanced conclusion from transcript
+- **Context injection** — `groupTranscript`, `groupConversationId`, `groupDepth` available in conversation context
+- **7 MCP tools** — `list_groups`, `read_group`, `create_group`, `update_group`, `delete_group`, `discuss_with_group`, `read_group_conversation` (whitelist total: 40)
+- **Micrometer metrics** — `eddi_group_discussion_duration`, `_count`, `_failure_count`
+
+**REST API:**
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/groups/{groupId}/conversations` | Start a group discussion |
+| `GET` | `/groups/{groupId}/conversations/{id}` | Read transcript |
+| `DELETE` | `/groups/{groupId}/conversations/{id}` | Delete + cascade member conversations |
+| `GET` | `/groups/{groupId}/conversations` | List group conversations |
+| `GET/POST/PUT/DELETE` | `/groupstore/groups/*` | Group config CRUD |
+
+**Files:** 15 new, 1 modified (`McpToolFilter.java`). Total: ~1600 lines of new code.
+
+**Testing:** ✅ `./mvnw compile` + `./mvnw test` — all pass.
+
+---
+
 ## v6 API Endpoint Simplification (2026-03-25)
 
 **Repos:** EDDI, EDDI-Manager, eddi-chat-ui (`feature/version-6.0.0`)
