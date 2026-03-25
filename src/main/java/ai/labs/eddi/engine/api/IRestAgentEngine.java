@@ -18,152 +18,112 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * @author ginccc
+ * v6 simplified conversation API. Start uses agentId; all other operations use
+ * only conversationId.
  */
-// @Api(value = "Agent Engine", authorizations = {@Authorization(value =
-// "eddi_auth")})
 @Path("/agents")
 @Tag(name = "09. Talk to Agents", description = "Communicate with agents")
 public interface IRestAgentEngine {
 
-    /**
-     * create new conversation
-     *
-     * @param environment
-     *            [production|production|test]
-     * @param agentId
-     *            String
-     * @return Response HTTP 201 URI conversation ID
-     */
-    @POST
-    @Path("/{environment}/{agentId}")
-    @Operation(description = "Start conversation.")
-    Response startConversation(@PathParam("environment") Deployment.Environment environment, @PathParam("agentId") String agentId,
-            @QueryParam("userId") String userId);
+    // --- Start conversation (still needs agentId) ---
 
-    /**
-     * create new conversation
-     *
-     * @param environment
-     *            [production|production|test]
-     * @param agentId
-     *            String
-     * @param context
-     *            json context Map<String, Context>
-     * @return Response HTTP 201 URI conversation ID
-     */
     @POST
-    @Path("/{environment}/{agentId}")
+    @Path("/{agentId}/start")
+    @Operation(description = "Start conversation.")
+    Response startConversation(@PathParam("agentId") String agentId,
+            @QueryParam("environment") @DefaultValue("production") Deployment.Environment environment, @QueryParam("userId") String userId);
+
+    @POST
+    @Path("/{agentId}/start")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Start conversation with context.")
-    Response startConversationWithContext(@PathParam("environment") Deployment.Environment environment, @PathParam("agentId") String agentId,
-            @QueryParam("userId") String userId, Map<String, Context> context);
+    Response startConversationWithContext(@PathParam("agentId") String agentId,
+            @QueryParam("environment") @DefaultValue("production") Deployment.Environment environment, @QueryParam("userId") String userId,
+            Map<String, Context> context);
+
+    // --- End conversation ---
 
     @POST
     @Path("/{conversationId}/endConversation")
     @Operation(description = "End conversation.")
     Response endConversation(@PathParam("conversationId") String conversationId);
 
+    // --- Read / Log ---
+
     @GET
     @NoCache
     @Path("/{conversationId}/log")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Read conversation. outputType=text || json")
+    @Operation(description = "Read conversation log. outputType=text || json")
     Response readConversationLog(@PathParam("conversationId") String conversationId,
             @QueryParam("outputType") @DefaultValue("json") String outputType, @QueryParam("logSize") @DefaultValue("-1") Integer logSize);
 
     @GET
     @NoCache
-    @Path("/{environment}/{agentId}/{conversationId}")
+    @Path("/{conversationId}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read conversation.")
-    SimpleConversationMemorySnapshot readConversation(@PathParam("environment") Deployment.Environment environment,
-            @PathParam("agentId") String agentId, @PathParam("conversationId") String conversationId,
+    SimpleConversationMemorySnapshot readConversation(@PathParam("conversationId") String conversationId,
             @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
             @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
             @QueryParam("returningFields") List<String> returningFields);
 
     @GET
-    @Path("/{environment}/conversationstatus/{conversationId}")
+    @Path("/{conversationId}/status")
     @Operation(description = "Get conversation state.")
-    ConversationState getConversationState(@PathParam("environment") Deployment.Environment environment,
-            @PathParam("conversationId") String conversationId);
+    ConversationState getConversationState(@PathParam("conversationId") String conversationId);
+
+    // --- Talk (say) ---
 
     @POST
-    @Path("/{environment}/{agentId}/{conversationId}/rerun")
+    @Path("/{conversationId}/rerun")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Read conversation.")
-    void rerunLastConversationStep(@PathParam("environment") Deployment.Environment environment, @PathParam("agentId") String agentId,
-            @PathParam("conversationId") String conversationId, @QueryParam("language") String language,
+    @Operation(description = "Rerun last conversation step.")
+    void rerunLastConversationStep(@PathParam("conversationId") String conversationId, @QueryParam("language") String language,
             @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
             @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
             @QueryParam("returningFields") List<String> returningFields, @Suspended final AsyncResponse response);
 
-    /**
-     * talk to agent
-     *
-     * @param environment
-     * @param agentId
-     * @param conversationId
-     * @param message
-     * @return
-     * @throws Exception
-     */
     @POST
-    @Path("/{environment}/{agentId}/{conversationId}")
+    @Path("/{conversationId}")
     @Consumes(MediaType.TEXT_PLAIN)
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Talk to agent.")
-    void say(@PathParam("environment") Deployment.Environment environment, @PathParam("agentId") String agentId,
-            @PathParam("conversationId") String conversationId, @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
+    void say(@PathParam("conversationId") String conversationId, @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
             @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
             @QueryParam("returningFields") List<String> returningFields, @DefaultValue("") String message, @Suspended final AsyncResponse response);
 
-    /**
-     * talk to Agent with adding context information to it
-     *
-     * @param environment
-     * @param agentId
-     * @param conversationId
-     * @param returningFields
-     * @param inputData
-     *            of type ai.labs.models.InputData
-     * @return
-     * @throws Exception
-     */
     @POST
-    @Path("/{environment}/{agentId}/{conversationId}")
+    @Path("/{conversationId}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Talk to Agent with context.")
-    void sayWithinContext(@PathParam("environment") Deployment.Environment environment, @PathParam("agentId") String agentId,
-            @PathParam("conversationId") String conversationId, @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
+    @Operation(description = "Talk to agent with context.")
+    void sayWithinContext(@PathParam("conversationId") String conversationId,
+            @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
             @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
             @QueryParam("returningFields") List<String> returningFields, InputData inputData, @Suspended final AsyncResponse response);
 
+    // --- Undo / Redo ---
+
     @GET
-    @Path("/{environment}/{agentId}/undo/{conversationId}")
+    @Path("/{conversationId}/undo")
     @Produces(MediaType.TEXT_PLAIN)
     @Operation(description = "Is UNDO available?")
-    Boolean isUndoAvailable(@PathParam("environment") Deployment.Environment environment, @PathParam("agentId") String agentId,
-            @PathParam("conversationId") String conversationId);
+    Boolean isUndoAvailable(@PathParam("conversationId") String conversationId);
 
     @POST
-    @Path("/{environment}/{agentId}/undo/{conversationId}")
+    @Path("/{conversationId}/undo")
     @Operation(description = "UNDO last conversation step.")
-    Response undo(@PathParam("environment") Deployment.Environment environment, @PathParam("agentId") String agentId,
-            @PathParam("conversationId") String conversationId);
+    Response undo(@PathParam("conversationId") String conversationId);
 
     @GET
-    @Path("/{environment}/{agentId}/redo/{conversationId}")
+    @Path("/{conversationId}/redo")
     @Produces(MediaType.TEXT_PLAIN)
     @Operation(description = "Is REDO available?")
-    Boolean isRedoAvailable(@PathParam("environment") Deployment.Environment environment, @PathParam("agentId") String agentId,
-            @PathParam("conversationId") String conversationId);
+    Boolean isRedoAvailable(@PathParam("conversationId") String conversationId);
 
     @POST
-    @Path("/{environment}/{agentId}/redo/{conversationId}")
+    @Path("/{conversationId}/redo")
     @Operation(description = "REDO last conversation step.")
-    Response redo(@PathParam("environment") Deployment.Environment environment, @PathParam("agentId") String agentId,
-            @PathParam("conversationId") String conversationId);
+    Response redo(@PathParam("conversationId") String conversationId);
 }

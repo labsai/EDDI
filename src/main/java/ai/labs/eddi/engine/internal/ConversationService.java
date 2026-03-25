@@ -515,6 +515,99 @@ public class ConversationService implements IConversationService {
         }
     }
 
+    // --- Conversation-only overloads (resolve agentId + environment from stored
+    // record) ---
+
+    @Override
+    public SimpleConversationMemorySnapshot readConversation(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+            List<String> returningFields) throws ResourceStoreException, ResourceNotFoundException {
+
+        long startTime = System.nanoTime();
+        checkNotNull(conversationId, "conversationId");
+
+        try {
+            var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            var loggingContext = contextLogger.createLoggingContext(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId,
+                    snapshot.getUserId());
+            contextLogger.setLoggingContext(loggingContext);
+
+            return convertSimpleConversationMemorySnapshot(snapshot, returnDetailed, returnCurrentStepOnly, returningFields);
+        } finally {
+            recordMetrics(timerConversationLoad, counterConversationLoad, startTime);
+        }
+    }
+
+    @Override
+    public ConversationState getConversationState(String conversationId) {
+        checkNotNull(conversationId, "conversationId");
+
+        ConversationState conversationState = conversationStateCache.get(conversationId);
+        if (conversationState == null) {
+            conversationState = conversationMemoryStore.getConversationState(conversationId);
+            cacheConversationState(conversationId, conversationState);
+        }
+
+        if (conversationState == null) {
+            String message = "No conversation found! (conversationId=%s)";
+            message = String.format(message, conversationId);
+            throw new ConversationNotFoundException(message);
+        }
+
+        return conversationState;
+    }
+
+    @Override
+    public void say(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields, InputData inputData,
+            boolean rerunOnly, ConversationResponseHandler responseHandler) throws Exception {
+
+        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        say(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
+                rerunOnly, responseHandler);
+    }
+
+    @Override
+    public void sayStreaming(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields,
+            InputData inputData, StreamingResponseHandler streamingHandler) throws Exception {
+
+        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        sayStreaming(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
+                inputData, streamingHandler);
+    }
+
+    @Override
+    public Boolean isUndoAvailable(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
+        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        return isUndoAvailable(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId);
+    }
+
+    @Override
+    public boolean undo(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
+        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        try {
+            return undo(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId);
+        } catch (AgentMismatchException e) {
+            // Cannot happen when agentId comes from the stored snapshot
+            throw new ResourceStoreException("Unexpected agent mismatch", e);
+        }
+    }
+
+    @Override
+    public Boolean isRedoAvailable(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
+        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        return isRedoAvailable(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId);
+    }
+
+    @Override
+    public boolean redo(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
+        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        try {
+            return redo(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId);
+        } catch (AgentMismatchException e) {
+            // Cannot happen when agentId comes from the stored snapshot
+            throw new ResourceStoreException("Unexpected agent mismatch", e);
+        }
+    }
+
     // --- Internal helpers ---
 
     IPropertiesHandler createPropertiesHandler(final String userId) {

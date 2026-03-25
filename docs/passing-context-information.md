@@ -57,7 +57,7 @@ Once passed to EDDI, context can be:
 ### Example Flow
 
 ```
-Your App → POST /agents/production/agent123/conv456
+Your App → POST /agents/conv456
 {
   "input": "What's my account balance?",
   "context": {
@@ -83,16 +83,14 @@ Your App → POST /agents/production/agent123/conv456
 
 In this section we will explain how **EDDI** handles the context of a conversation and which data can be passed within the scope of a conversation.
 
-In order to talk to **EDDI** with context, send a **`POST`** request to `/agents/{environment}/`**`{agentId}`**`/`**`{conversationId}`** (same way as interacting in a normal conversation in EDDI), but this time provide context parameters:
+In order to talk to **EDDI** with context, send a **`POST`** request to `/agents/`**`{conversationId}`** (same way as interacting in a normal conversation in EDDI), but this time provide context parameters:
 
 ### Send message in a conversation with a Chatagent REST API Endpoint
 
 | Element                          | Tags                                                                                                                                                                                                                                                                                    |
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | HTTP Method                      | `POST`                                                                                                                                                                                                                                                                                  |
-| API endpoint                     | `/agents/{environment}/{agentId}/{conversationId}`                                                                                                                                                                                                                                      |
-| {environment}                    | (`Path` **parameter**):`String` Deployment environment (e.g: `production,production,test`)                                                                                                                                                                                              |
-| {agentId}                        | (`Path` **parameter**):`String Id` of the agent that you wish to **continue a conversation with.**                                                                                                                                                                                      |
+| API endpoint                     | `/agents/{conversationId}`                                                                                                                                                                                                                                      |
 | {conversationId}                 | (`Path` **parameter**): `String Id` of the **conversation** that you wish to **send** the message to.                                                                                                                                                                                   |
 | returnDetailed (Optional)        | (`Query` **parameter**):`Boolean` - Default : `false` Will return all sub results of the entire `conversation steps`, otherwise only public ones such as `input, action, output & quickReplies`.                                                                                        |
 | returnCurrentStepOnly (Optional) | (`Query` **parameter**):`Boolean` - Default : `true` Will return only the latest `conversationStep` that has just been processed, otherwise returns all `conversationSteps` since the beginning of this `conversation`.                                                                 |

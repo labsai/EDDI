@@ -34,7 +34,7 @@ Deployment management provides:
    → Agent becomes active and can handle conversations
 
 3. USE Agent
-   POST /agents/production/agent123
+   POST /agents/agent123/start
    → Users can now interact with the agent
 
 4. UPDATE Agent

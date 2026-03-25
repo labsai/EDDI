@@ -240,7 +240,7 @@ curl -X POST "http://localhost:7070/administration/production/deploy/agent-abc-1
 
 ```bash
 # Start conversation
-curl -X POST http://localhost:7070/agents/production/agent-abc-123 \
+curl -X POST http://localhost:7070/agents/agent-abc-123/start \
   -H "Content-Type: application/json" \
   -d '{"input": "hello"}'
 
@@ -254,7 +254,7 @@ curl -X POST http://localhost:7070/agents/production/agent-abc-123 \
 # }
 
 # Continue conversation
-curl -X POST http://localhost:7070/agents/production/agent-abc-123/conv-123 \
+curl -X POST http://localhost:7070/agents/conv-123 \
   -H "Content-Type: application/json" \
   -d '{"input": "hi"}'
 ```
@@ -326,7 +326,7 @@ Let's trace what happens when a user says "hello":
 ### 1. API Request
 
 ```json
-POST /agents/production/agent-abc-123
+POST /agents/agent-abc-123/start
 {"input": "hello"}
 ```
 
@@ -486,7 +486,7 @@ The LLM receives the API response in memory and can format it naturally.
 Use context passed from your app:
 
 ```bash
-curl -X POST http://localhost:7070/agents/production/agent-abc-123 \
+curl -X POST http://localhost:7070/agents/agent-abc-123/start \
   -d '{
     "input": "What is my name?",
     "context": {

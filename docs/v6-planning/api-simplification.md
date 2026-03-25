@@ -14,7 +14,7 @@ Simplify all conversation-scoped REST and MCP endpoints by removing redundant `e
 
 ```
 # Current (v5/early v6)
-POST /agents/{environment}/{agentId}/{conversationId}
+POST /agents/{conversationId}
 
 # Proposed (v6 final)
 POST /agents/{conversationId}

@@ -1,6 +1,5 @@
 package ai.labs.eddi.engine.api;
 
-import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -29,12 +28,11 @@ import java.util.List;
 public interface IRestAgentEngineStreaming {
 
     @POST
-    @Path("/{environment}/{agentId}/{conversationId}/stream")
+    @Path("/{conversationId}/stream")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.SERVER_SENT_EVENTS)
     @Operation(description = "Send user input and receive streaming SSE response with workflow events and LLM tokens.")
-    void sayStreaming(@PathParam("environment") Deployment.Environment environment, @PathParam("agentId") String agentId,
-            @PathParam("conversationId") String conversationId, @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
+    void sayStreaming(@PathParam("conversationId") String conversationId, @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
             @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
             @QueryParam("returningFields") List<String> returningFields, InputData inputData, @Context SseEventSink eventSink, @Context Sse sse);
 }

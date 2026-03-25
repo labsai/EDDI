@@ -145,8 +145,7 @@ public class McpConversationTools {
         if (message == null || message.isBlank())
             return errorJson("message is required");
         try {
-            var env = parseEnvironment(environment);
-            var snapshot = sendMessageAndWait(env, agentId, conversationId, message);
+            var snapshot = sendMessageAndWait(conversationId, message);
             var result = buildConversationResponse(snapshot, null);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
@@ -178,7 +177,7 @@ public class McpConversationTools {
             }
 
             // Step 2: Send the message
-            var snapshot = sendMessageAndWait(env, agentId, convId, message);
+            var snapshot = sendMessageAndWait(convId, message);
 
             // Step 3: Return AI-agent-friendly summary + full snapshot
             var result = buildConversationResponse(snapshot, convId);
@@ -195,15 +194,14 @@ public class McpConversationTools {
     @Tool(name = "read_conversation", description = "Read conversation history and memory. "
             + "Returns the conversation memory snapshot. Use returningFields to limit "
             + "output size, or use read_conversation_log for a human-readable summary.")
-    public String readConversation(@ToolArg(description = "Agent ID (required)") String agentId,
+    public String readConversation(@ToolArg(description = "Agent ID (deprecated — ignored, resolved from conversation)") String agentId,
             @ToolArg(description = "Conversation ID (required)") String conversationId,
-            @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment,
+            @ToolArg(description = "Deprecated — ignored, resolved from conversation") String environment,
             @ToolArg(description = "Return only the current (latest) step? (default: true)") Boolean currentStepOnly,
             @ToolArg(description = "Return detailed internal data? (default: false)") Boolean returnDetailed,
             @ToolArg(description = "Comma-separated list of fields to return (e.g. 'input,output,actions'). "
                     + "Empty = all fields.") String returningFields) {
         try {
-            var env = parseEnvironment(environment);
             boolean stepOnly = currentStepOnly != null ? currentStepOnly : true;
             boolean detailed = returnDetailed != null ? returnDetailed : false;
 
@@ -212,7 +210,7 @@ public class McpConversationTools {
                 fields = List.of(returningFields.split(","));
             }
 
-            var snapshot = conversationService.readConversation(env, agentId, conversationId, detailed, stepOnly, fields);
+            var snapshot = conversationService.readConversation(conversationId, detailed, stepOnly, fields);
             return jsonSerialization.serialize(snapshot);
         } catch (Exception e) {
             LOGGER.error("MCP read_conversation failed for conversation " + conversationId, e);
@@ -459,8 +457,7 @@ public class McpConversationTools {
             var userConversation = getOrCreateManagedConversation(intent, userId, env);
 
             // Step 2: Send the message using the existing sendMessageAndWait helper
-            var snapshot = sendMessageAndWait(userConversation.getEnvironment(), userConversation.getAgentId(), userConversation.getConversationId(),
-                    message);
+            var snapshot = sendMessageAndWait(userConversation.getConversationId(), message);
 
             // Step 3: Build response
             var result = buildConversationResponse(snapshot, userConversation.getConversationId());
@@ -492,7 +489,7 @@ public class McpConversationTools {
 
         if (existing != null) {
             // Check if conversation has ended
-            ConversationState state = restAgentEngine.getConversationState(existing.getEnvironment(), existing.getConversationId());
+            ConversationState state = restAgentEngine.getConversationState(existing.getConversationId());
             if (!ConversationState.ENDED.equals(state)) {
                 return existing;
             }
@@ -513,7 +510,7 @@ public class McpConversationTools {
 
         // Start a new conversation
         var initialContext = new HashMap<>(deployment.getInitialContext());
-        jakarta.ws.rs.core.Response agentResponse = restAgentEngine.startConversationWithContext(usedEnv, agentId, userId, initialContext);
+        jakarta.ws.rs.core.Response agentResponse = restAgentEngine.startConversationWithContext(agentId, usedEnv, userId, initialContext);
 
         if (agentResponse.getStatus() != 201) {
             throw new RuntimeException(
@@ -535,8 +532,7 @@ public class McpConversationTools {
      * Send a message to a Agent synchronously and wait for the response. Bridges
      * the async callback pattern to a blocking call.
      */
-    private SimpleConversationMemorySnapshot sendMessageAndWait(Deployment.Environment env, String agentId, String conversationId, String message)
-            throws Exception {
+    private SimpleConversationMemorySnapshot sendMessageAndWait(String conversationId, String message) throws Exception {
 
         var inputData = new InputData();
         inputData.setInput(message);
@@ -544,7 +540,7 @@ public class McpConversationTools {
 
         var responseFuture = new CompletableFuture<SimpleConversationMemorySnapshot>();
 
-        conversationService.say(env, agentId, conversationId, false, true, Collections.emptyList(), inputData, false, snapshot -> {
+        conversationService.say(conversationId, false, true, Collections.emptyList(), inputData, false, snapshot -> {
             if (snapshot != null) {
                 responseFuture.complete(snapshot);
             } else {

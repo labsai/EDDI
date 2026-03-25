@@ -8,16 +8,16 @@
 
 **Without Managed Agents** (manual approach):
 
-1. Your app creates a conversation: `POST /agents/production/agent123`
+1. Your app creates a conversation: `POST /agents/agent123/start`
 2. EDDI returns conversation ID: `conv-456`
 3. Your app stores this ID
-4. Your app sends messages: `POST /agents/production/agent123/conv-456`
+4. Your app sends messages: `POST /agents/conv-456`
 5. Your app manages conversation lifecycle
 
 **With Managed Agents** (automatic approach):
 
 1. You define a agent trigger with an intent keyword
-2. Your app sends: `POST /managedagents/weather_help/user123`
+2. Your app sends: `POST /agents/managed/weather_help/user123`
 3. EDDI automatically:
    - Creates conversation (if none exists for this user/intent)
    - Routes to correct agent
@@ -51,7 +51,7 @@
    Intent: "weather_help" → Agent: weather-agent-v2 (production)
 
 2. User Requests:
-   POST /managedagents/weather_help/user-123
+   POST /agents/managed/weather_help/user-123
    {"input": "What's the weather?"}
 
 3. EDDI Logic:
@@ -62,7 +62,7 @@
    - Returns response
 
 4. Subsequent Requests:
-   POST /managedagents/weather_help/user-123
+   POST /agents/managed/weather_help/user-123
    {"input": "What about tomorrow?"}
    → Continues same conversation
 ```
@@ -200,7 +200,7 @@ server: Apache/2.4.29 (Ubuntu)
 
 _Request URL:_
 
-`POST` `http://localhost:7070/managedagents/weather_trigger/myUserId`
+`POST` `http://localhost:7070/agents/managed/weather_trigger/myUserId`
 
 _Request Body_
 

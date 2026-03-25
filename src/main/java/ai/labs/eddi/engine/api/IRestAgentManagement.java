@@ -13,7 +13,7 @@ import jakarta.ws.rs.core.Response;
 import java.util.List;
 
 // @Api(value = "Agent Management", authorizations = {@Authorization(value = "eddi_auth")})
-@Path("/managedagents")
+@Path("/agents/managed")
 @Tag(name = "09. Talk to Agents", description = "Communicate with agents")
 public interface IRestAgentManagement {
 

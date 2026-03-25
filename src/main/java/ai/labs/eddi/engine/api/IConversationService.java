@@ -134,6 +134,42 @@ public interface IConversationService {
     boolean redo(Environment environment, String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException;
 
+    // --- Conversation-only overloads (resolve agentId + env from stored
+    // conversation) ---
+
+    /**
+     * Read a conversation memory snapshot — resolves agentId + environment from the
+     * stored record.
+     */
+    SimpleConversationMemorySnapshot readConversation(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+            List<String> returningFields) throws ResourceStoreException, ResourceNotFoundException;
+
+    /**
+     * Get the conversation state — no environment needed.
+     */
+    ConversationState getConversationState(String conversationId);
+
+    /**
+     * Process user input — resolves agentId + environment from the stored record.
+     */
+    void say(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields, InputData inputData,
+            boolean rerunOnly, ConversationResponseHandler responseHandler) throws Exception;
+
+    /**
+     * Process user input with SSE streaming — resolves agentId + environment from
+     * the stored record.
+     */
+    void sayStreaming(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields, InputData inputData,
+            StreamingResponseHandler streamingHandler) throws Exception;
+
+    Boolean isUndoAvailable(String conversationId) throws ResourceStoreException, ResourceNotFoundException;
+
+    boolean undo(String conversationId) throws ResourceStoreException, ResourceNotFoundException;
+
+    Boolean isRedoAvailable(String conversationId) throws ResourceStoreException, ResourceNotFoundException;
+
+    boolean redo(String conversationId) throws ResourceStoreException, ResourceNotFoundException;
+
     // --- Domain exceptions (no JAX-RS dependency) ---
 
     class AgentNotReadyException extends Exception {

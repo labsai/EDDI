@@ -13,6 +13,55 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## v6 API Endpoint Simplification (2026-03-25)
+
+**Repos:** EDDI, EDDI-Manager, eddi-chat-ui (`feature/version-6.0.0`)
+
+**Breaking change:** Conversation-scoped REST endpoints no longer require `environment` or `agentId` path parameters. The `conversationId` is the sole identifier — the service layer resolves context from the stored conversation snapshot.
+
+**New URL structure:**
+
+| Operation | Old Path | New Path |
+|-----------|----------|----------|
+| Start conversation | `POST /agents/{env}/{agentId}` | `POST /agents/{agentId}/start` |
+| Send message | `POST /agents/{env}/{agentId}/{convId}` | `POST /agents/{conversationId}` |
+| Read conversation | `GET /agents/{env}/{agentId}/{convId}` | `GET /agents/{conversationId}` |
+| Stream | `POST /agents/{env}/{agentId}/{convId}/stream` | `POST /agents/{conversationId}/stream` |
+| End conversation | — | `POST /agents/{conversationId}/endConversation` |
+| Undo/Redo | `POST /agents/{env}/{agentId}/{convId}/undo` | `POST /agents/{conversationId}/undo` |
+| Managed agents | `POST /managedagents/{intent}/{userId}` | `POST /agents/managed/{intent}/{userId}` |
+
+**Critical bug fixed:** Added `/start` sub-path to conversation initiation to prevent JAX-RS route conflict between `POST /agents/{agentId}` (start) and `POST /agents/{conversationId}` (say) — identical path patterns that JAX-RS cannot disambiguate.
+
+**Backend changes:**
+
+| File | Change |
+|------|--------|
+| `IConversationService.java` | 10 conversation-only method overloads (read, say, stream, undo, redo, state) |
+| `ConversationService.java` | Implementation: loads snapshot → extracts agentId + environment → delegates |
+| `IRestAgentEngine.java` | Simplified paths with `/{agentId}/start` and `/{conversationId}/*` |
+| `RestAgentEngine.java` | Uses conv-only service methods |
+| `IRestAgentEngineStreaming.java` | `/{conversationId}/stream` |
+| `RestAgentEngineStreaming.java` | Uses conv-only `sayStreaming` |
+| `IRestAgentManagement.java` | `/managedagents` → `/agents/managed` |
+| `McpConversationTools.java` | `talk_to_agent`, `read_conversation` use conv-only service methods |
+
+**Frontend changes:**
+
+| File | Change |
+|------|--------|
+| Manager `chat.ts` | All URLs simplified; underscore-prefixed unused params |
+| Manager `handlers.ts` | MSW handlers updated to `/agents/{agentId}/start` |
+| Chat UI `chat-api.ts` | All URLs simplified |
+| Chat UI `demo-api.ts` | Code examples updated |
+| Chat UI `main.tsx` | `/chat/managedagents` → `/chat/managed` |
+
+**Documentation:** Updated `conversations.md`, `developer-quickstart.md`, `putting-it-all-together.md`, `passing-context-information.md`, `managed-agents.md`, `deployment-management-of-agents.md`, `agent-father-deep-dive.md`, `creating-your-first-agent` docs. Removed stale `{environment}` and `{agentId}` path parameter descriptions from API tables.
+
+**Testing:** ✅ Backend `./mvnw compile` + `./mvnw test`, Manager `tsc -b`, Chat UI `tsc` — all pass.
+
+---
+
 ## Test Fixes & Install Script Local Build Support (2026-03-25)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
@@ -1323,7 +1372,7 @@ Introduced a factory-based abstraction layer so that the datastore can support m
 **Key decisions:**
 
 - Conversations page uses low-level `/conversationstore/conversations` API for browsing/inspecting
-- Chat Panel (future Phase 3.9) will use `/managedagents/{intent}/{userId}` (managed) or `/agents/{env}/{agentId}` (direct)
+- Chat Panel (future Phase 3.9) will use `/agents/managed/{intent}/{userId}` (managed) or `/agents/{env}/{agentId}` (direct)
 
 ---
 

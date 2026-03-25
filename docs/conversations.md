@@ -43,9 +43,9 @@ In this section we will explain how to **send/receive messages** from a Chatagen
 | Element           | Tags                                                                                           |
 | ----------------- | ---------------------------------------------------------------------------------------------- |
 | **HTTP Method**   | `POST`                                                                                         |
-| **API endpoint**  | `/agents/{environment}/{agentId}`                                                              |
-| **{environment}** | (`Path` **parameter**):`String` Deployment environment (e.g: `production`,`production`,`test`) |
+| **API endpoint**  | `/agents/{agentId}/start`                                                                     |
 | {**agentId**}     | (`Path` **parameter**):`String Id` of the agent that you wish to **start conversation with**.  |
+| environment       | (`Query` **parameter**, optional):`String` Deployment environment. **Default**: `production`.  |
 
 ### Response Model
 
@@ -266,7 +266,7 @@ The `conversationId` will be provided through the **`location`** **HTTP Header**
 
 _Request URL:_
 
-`http://localhost:7070/agents/production/5ad2ab182de29719b44a792a`
+`http://localhost:7070/agents/5ad2ab182de29719b44a792a/start`
 
 _Response Body_
 
@@ -300,10 +300,8 @@ _Response Headers_
 | Element               | Tags                                                                                                                                                                                                                                                                   |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | HTTP Method           | `POST`                                                                                                                                                                                                                                                                 |
-| API endpoint          | `/agents/{environment}/{agentId}/{conversationId}`                                                                                                                                                                                                                     |
-| {environment}         | (`Path` **parameter**):`String` Deployment environment (e.g: `production`,`production`,`test`)                                                                                                                                                                         |
-| agentId               | (`Path` **parameter**):`String Id` of the agent that you wish to **continue a conversation with.**                                                                                                                                                                     |
-| conversationId        | (`Path` **parameter**): `String Id` of the **conversation** that you wish to **send** the message to.                                                                                                                                                                  |
+| API endpoint          | `/agents/{conversationId}`                                                                                                                                                                                                                     |
+| {conversationId}      | (`Path` **parameter**): `String Id` of the **conversation** that you wish to **send** the message to.                                                                                                                                                                  |
 | returnDetailed        | (`Query` **parameter**):`Boolean` - **Default** : `false`                                                                                                                                                                                                              |
 | returnCurrentStepOnly | (`Query` **parameter**):`Boolean` - **Default** : `true`                                                                                                                                                                                                               |
 | Request Body          | <p>JSON Object , example : <code>{ "input": "the message", "context": {} }</code></p><p>The <code>context</code> here is where you pass context variables that can be evaluated by EDDI, we will be explaining this in more details in Passing Context Information</p> |
@@ -312,7 +310,7 @@ _Response Headers_
 
 _Request URL_
 
-`http://localhost:7070/agents/production/5aaf90e29f7dd421ac3c7dd4/5add1fe8a081a228a0588d1c?returnDetailed=false&returnCurrentStepOnly=true`
+`http://localhost:7070/agents/5add1fe8a081a228a0588d1c?returnDetailed=false&returnCurrentStepOnly=true`
 
 _Request Body_
 
@@ -370,9 +368,7 @@ Response Headers
 | Element          | Tags                                                                                                         |
 | ---------------- | ------------------------------------------------------------------------------------------------------------ |
 | HTTP Method      | `GET`                                                                                                        |
-| API endpoint     | `/agents/{environment}/{agentId}/{conversationId}`                                                           |
-| {environment}    | (`Path` **parameter**):`String` Deployment environment (e.g: `production,production,test`)                   |
-| {agentId}        | (`Path` **parameter**):`String Id` of the agent that you wish to **continue a conversation** **with**.       |
+| API endpoint     | `/agents/{conversationId}`                                                           |
 | {conversationId} | (`Path` **parameter**): `String Id` of the **conversation** that you wish to **receive** a the message from. |
 | returnDetailed   | (`Query` **parameter**):`Boolean` - **Default** : `false`                                                    |
 |                  |                                                                                                              |
@@ -381,7 +377,7 @@ Response Headers
 
 _Request URL:_
 
-`http://localhost:7070/agents/production/5aaf90e29f7dd421ac3c7dd4/5add1fe8a081a228a0588d1c?returnDetailed=false`
+`http://localhost:7070/agents/5add1fe8a081a228a0588d1c?returnDetailed=false`
 
 _Response Body_
 
@@ -485,13 +481,13 @@ Step 1 → Step 2 → Step 3 (current)
 | Element      | Value                                                   |
 | ------------ | ------------------------------------------------------- |
 | HTTP Method  | `GET`                                                   |
-| API Endpoint | `/agents/{environment}/{agentId}/undo/{conversationId}` |
+| API Endpoint | `/agents/{conversationId}/undo` |
 | Response     | `true` if undo is available, `false` otherwise          |
 
 **Example:**
 
 ```bash
-curl -X GET "http://localhost:7070/agents/production/AGENT_ID/undo/CONV_ID"
+curl -X GET "http://localhost:7070/agents/CONV_ID/undo"
 ```
 
 **Response:**
@@ -505,13 +501,13 @@ true
 | Element      | Value                                                   |
 | ------------ | ------------------------------------------------------- |
 | HTTP Method  | `POST`                                                  |
-| API Endpoint | `/agents/{environment}/{agentId}/undo/{conversationId}` |
+| API Endpoint | `/agents/{conversationId}/undo` |
 | Response     | HTTP 200 (no content)                                   |
 
 **Example:**
 
 ```bash
-curl -X POST "http://localhost:7070/agents/production/AGENT_ID/undo/CONV_ID"
+curl -X POST "http://localhost:7070/agents/CONV_ID/undo"
 ```
 
 **Response:** HTTP 200 (No Content)
@@ -525,13 +521,13 @@ curl -X POST "http://localhost:7070/agents/production/AGENT_ID/undo/CONV_ID"
 | Element      | Value                                                   |
 | ------------ | ------------------------------------------------------- |
 | HTTP Method  | `GET`                                                   |
-| API Endpoint | `/agents/{environment}/{agentId}/redo/{conversationId}` |
+| API Endpoint | `/agents/{conversationId}/redo` |
 | Response     | `true` if redo is available, `false` otherwise          |
 
 **Example:**
 
 ```bash
-curl -X GET "http://localhost:7070/agents/production/AGENT_ID/redo/CONV_ID"
+curl -X GET "http://localhost:7070/agents/CONV_ID/redo"
 ```
 
 **Response:**
@@ -545,13 +541,13 @@ true
 | Element      | Value                                                   |
 | ------------ | ------------------------------------------------------- |
 | HTTP Method  | `POST`                                                  |
-| API Endpoint | `/agents/{environment}/{agentId}/redo/{conversationId}` |
+| API Endpoint | `/agents/{conversationId}/redo` |
 | Response     | HTTP 200 (no content)                                   |
 
 **Example:**
 
 ```bash
-curl -X POST "http://localhost:7070/agents/production/AGENT_ID/redo/CONV_ID"
+curl -X POST "http://localhost:7070/agents/CONV_ID/redo"
 ```
 
 **Response:** HTTP 200 (No Content)
@@ -562,33 +558,33 @@ curl -X POST "http://localhost:7070/agents/production/AGENT_ID/redo/CONV_ID"
 
 ```bash
 # 1. Start conversation
-curl -X POST "http://localhost:7070/agents/production/AGENT_ID" -d '{}'
+curl -X POST "http://localhost:7070/agents/AGENT_ID/start" -d '{}'
 # Returns: {"conversationId": "CONV_ID"}
 
 # 2. Send message
-curl -X POST "http://localhost:7070/agents/production/AGENT_ID/CONV_ID" \
+curl -X POST "http://localhost:7070/agents/CONV_ID" \
   -H "Content-Type: application/json" \
   -d '{"input": "Hello"}'
 # Agent responds: "Hi! How can I help?"
 
 # 3. Send another message
-curl -X POST "http://localhost:7070/agents/production/AGENT_ID/CONV_ID" \
+curl -X POST "http://localhost:7070/agents/CONV_ID" \
   -H "Content-Type: application/json" \
   -d '{"input": "Book a flight"}'
 # Agent responds: "Where would you like to go?"
 
 # 4. Oops, user meant hotel not flight! Undo last step
-curl -X POST "http://localhost:7070/agents/production/AGENT_ID/undo/CONV_ID"
+curl -X POST "http://localhost:7070/agents/CONV_ID/undo"
 # Now back to: "Hi! How can I help?"
 
 # 5. Try again with correct input
-curl -X POST "http://localhost:7070/agents/production/AGENT_ID/CONV_ID" \
+curl -X POST "http://localhost:7070/agents/CONV_ID" \
   -H "Content-Type: application/json" \
   -d '{"input": "Book a hotel"}'
 # Agent responds: "Which city?"
 
 # 6. Wait, maybe flight was right. Check if redo is available
-curl -X GET "http://localhost:7070/agents/production/AGENT_ID/redo/CONV_ID"
+curl -X GET "http://localhost:7070/agents/CONV_ID/redo"
 # Returns: false (because we sent a new message, clearing redo cache)
 ```
 
@@ -673,13 +669,13 @@ Developer tests:
 
 ## Related API Endpoints
 
-- `POST /agents/{environment}/{agentId}` - Start conversation
-- `POST /agents/{environment}/{agentId}/{conversationId}` - Send message
-- `GET /agents/{environment}/{agentId}/{conversationId}` - Get conversation state
-- `POST /agents/{environment}/{agentId}/undo/{conversationId}` - Undo last step
-- `POST /agents/{environment}/{agentId}/redo/{conversationId}` - Redo last step
-- `GET /agents/{environment}/{agentId}/undo/{conversationId}` - Check undo availability
-- `GET /agents/{environment}/{agentId}/redo/{conversationId}` - Check redo availability
+- `POST /agents/{agentId}/start` - Start conversation
+- `POST /agents/{conversationId}` - Send message
+- `GET /agents/{conversationId}` - Get conversation state
+- `POST /agents/{conversationId}/undo` - Undo last step
+- `POST /agents/{conversationId}/redo` - Redo last step
+- `GET /agents/{conversationId}/undo` - Check undo availability
+- `GET /agents/{conversationId}/redo` - Check redo availability
 
 ## Sample Agent
 

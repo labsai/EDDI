@@ -163,7 +163,7 @@ Here's what happens when a user sends a message to an EDDI agent:
 #### 1. API Request
 
 ```
-POST /agents/{environment}/{agentId}/{conversationId}
+POST /agents/{conversationId}
 Body: { "input": "Hello, what's the weather?", "context": {...} }
 ```
 

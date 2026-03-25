@@ -163,11 +163,12 @@ class McpConversationToolsTest {
     @Test
     void talkToAgent_sendsMessageAndReturnsResponse() throws Exception {
         doAnswer(invocation -> {
-            // ConversationResponseHandler is arg index 8 (0-indexed)
-            ConversationResponseHandler handler = invocation.getArgument(8);
+            // ConversationResponseHandler is arg index 6 (0-indexed) in conversation-only
+            // overload
+            ConversationResponseHandler handler = invocation.getArgument(6);
             handler.onComplete(new SimpleConversationMemorySnapshot());
             return null;
-        }).when(conversationService).say(any(), eq(AGENT_ID), eq(CONV_ID), anyBoolean(), anyBoolean(), anyList(), any(InputData.class), anyBoolean(),
+        }).when(conversationService).say(eq(CONV_ID), anyBoolean(), anyBoolean(), anyList(), any(InputData.class), anyBoolean(),
                 any(ConversationResponseHandler.class));
 
         when(jsonSerialization.serialize(any(LinkedHashMap.class)))
@@ -180,8 +181,7 @@ class McpConversationToolsTest {
 
         // Verify the message was sent correctly
         ArgumentCaptor<InputData> inputCaptor = ArgumentCaptor.forClass(InputData.class);
-        verify(conversationService).say(eq(Environment.production), eq(AGENT_ID), eq(CONV_ID), eq(false), eq(true), eq(Collections.emptyList()),
-                inputCaptor.capture(), eq(false), any());
+        verify(conversationService).say(eq(CONV_ID), eq(false), eq(true), eq(Collections.emptyList()), inputCaptor.capture(), eq(false), any());
 
         assertEquals("Hello agent!", inputCaptor.getValue().getInput());
     }
@@ -189,11 +189,10 @@ class McpConversationToolsTest {
     @Test
     void talkToAgent_nullSnapshot_returnsError() throws Exception {
         doAnswer(invocation -> {
-            ConversationResponseHandler handler = invocation.getArgument(8);
+            ConversationResponseHandler handler = invocation.getArgument(6);
             handler.onComplete(null); // null snapshot triggers completeExceptionally
             return null;
-        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), anyList(), any(), anyBoolean(),
-                any(ConversationResponseHandler.class));
+        }).when(conversationService).say(any(), anyBoolean(), anyBoolean(), anyList(), any(), anyBoolean(), any(ConversationResponseHandler.class));
 
         String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null);
 
@@ -203,8 +202,8 @@ class McpConversationToolsTest {
 
     @Test
     void talkToAgent_handlesServiceException() throws Exception {
-        doThrow(new RuntimeException("Connection lost")).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), anyList(),
-                any(), anyBoolean(), any());
+        doThrow(new RuntimeException("Connection lost")).when(conversationService).say(any(), anyBoolean(), anyBoolean(), anyList(), any(),
+                anyBoolean(), any());
 
         String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null);
 
@@ -220,12 +219,12 @@ class McpConversationToolsTest {
         when(conversationService.startConversation(eq(Environment.production), eq(AGENT_ID), isNull(), anyMap()))
                 .thenReturn(new ConversationResult(CONV_ID, URI.create("eddi://conv/" + CONV_ID)));
 
-        // Mock say
+        // Mock say — conversation-only overload (7 args)
         doAnswer(invocation -> {
-            ConversationResponseHandler handler = invocation.getArgument(8);
+            ConversationResponseHandler handler = invocation.getArgument(6);
             handler.onComplete(new SimpleConversationMemorySnapshot());
             return null;
-        }).when(conversationService).say(any(), eq(AGENT_ID), eq(CONV_ID), anyBoolean(), anyBoolean(), anyList(), any(InputData.class), anyBoolean(),
+        }).when(conversationService).say(eq(CONV_ID), anyBoolean(), anyBoolean(), anyList(), any(InputData.class), anyBoolean(),
                 any(ConversationResponseHandler.class));
 
         when(jsonSerialization.serialize(any(Map.class))).thenReturn("{\"conversationId\":\"test-conv-id\",\"response\":{}}");
@@ -235,16 +234,16 @@ class McpConversationToolsTest {
         assertNotNull(result);
         assertTrue(result.contains("test-conv-id"));
         verify(conversationService).startConversation(any(), eq(AGENT_ID), isNull(), anyMap());
-        verify(conversationService).say(any(), eq(AGENT_ID), eq(CONV_ID), anyBoolean(), anyBoolean(), anyList(), any(), anyBoolean(), any());
+        verify(conversationService).say(eq(CONV_ID), anyBoolean(), anyBoolean(), anyList(), any(), anyBoolean(), any());
     }
 
     @Test
     void chatWithAgent_reusesExistingConversation() throws Exception {
         doAnswer(invocation -> {
-            ConversationResponseHandler handler = invocation.getArgument(8);
+            ConversationResponseHandler handler = invocation.getArgument(6);
             handler.onComplete(new SimpleConversationMemorySnapshot());
             return null;
-        }).when(conversationService).say(any(), eq(AGENT_ID), eq(CONV_ID), anyBoolean(), anyBoolean(), anyList(), any(InputData.class), anyBoolean(),
+        }).when(conversationService).say(eq(CONV_ID), anyBoolean(), anyBoolean(), anyList(), any(InputData.class), anyBoolean(),
                 any(ConversationResponseHandler.class));
 
         when(jsonSerialization.serialize(any(Map.class))).thenReturn("{\"conversationId\":\"test-conv-id\"}");
@@ -254,7 +253,7 @@ class McpConversationToolsTest {
         // Should NOT create a new conversation
         verify(conversationService, never()).startConversation(any(), any(), any(), anyMap());
         // Should send message to existing conversation
-        verify(conversationService).say(any(), eq(AGENT_ID), eq(CONV_ID), anyBoolean(), anyBoolean(), anyList(), any(), anyBoolean(), any());
+        verify(conversationService).say(eq(CONV_ID), anyBoolean(), anyBoolean(), anyList(), any(), anyBoolean(), any());
     }
 
     // --- readConversation ---
@@ -262,8 +261,7 @@ class McpConversationToolsTest {
     @Test
     void readConversation_defaultsToCurrentStepOnly() throws Exception {
         var snapshot = new SimpleConversationMemorySnapshot();
-        when(conversationService.readConversation(eq(Environment.production), eq(AGENT_ID), eq(CONV_ID), eq(false), eq(true),
-                eq(Collections.emptyList()))).thenReturn(snapshot);
+        when(conversationService.readConversation(eq(CONV_ID), eq(false), eq(true), eq(Collections.emptyList()))).thenReturn(snapshot);
         when(jsonSerialization.serialize(snapshot)).thenReturn("{\"agentId\":\"test-agent-id\"}");
 
         String result = tools.readConversation(AGENT_ID, CONV_ID, "production", null, null, null);
@@ -271,24 +269,23 @@ class McpConversationToolsTest {
         assertNotNull(result);
         assertTrue(result.contains("test-agent-id"));
         // Verify currentStepOnly defaults to true
-        verify(conversationService).readConversation(any(), any(), any(), eq(false), eq(true), anyList());
+        verify(conversationService).readConversation(any(), eq(false), eq(true), anyList());
     }
 
     @Test
     void readConversation_withReturningFields() throws Exception {
         var snapshot = new SimpleConversationMemorySnapshot();
-        when(conversationService.readConversation(eq(Environment.production), eq(AGENT_ID), eq(CONV_ID), eq(false), eq(false),
-                eq(List.of("input", "output")))).thenReturn(snapshot);
+        when(conversationService.readConversation(eq(CONV_ID), eq(false), eq(false), eq(List.of("input", "output")))).thenReturn(snapshot);
         when(jsonSerialization.serialize(snapshot)).thenReturn("{}");
 
         tools.readConversation(AGENT_ID, CONV_ID, "production", false, false, "input,output");
 
-        verify(conversationService).readConversation(any(), any(), any(), eq(false), eq(false), eq(List.of("input", "output")));
+        verify(conversationService).readConversation(any(), eq(false), eq(false), eq(List.of("input", "output")));
     }
 
     @Test
     void readConversation_notFound_returnsError() throws Exception {
-        when(conversationService.readConversation(any(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
+        when(conversationService.readConversation(any(), anyBoolean(), anyBoolean(), anyList()))
                 .thenThrow(new ResourceNotFoundException("Not found"));
 
         String result = tools.readConversation(AGENT_ID, "unknown-id", null, null, null, null);

@@ -55,7 +55,7 @@ When OIDC is enabled, the following permission rules apply (see `application.pro
 
 | Path Pattern                                                                                    | Policy                                   |
 | ----------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `/q/metrics/*`, `/q/health/*`, `/chat/production/*`, `/agents/production/*`, `/managedagents/*` | **Permit** (no auth)                     |
+| `/q/metrics/*`, `/q/health/*`, `/chat/production/*`, `/agents/production/*`, `/agents/managed/*` | **Permit** (no auth)                     |
 | `/`, `/*`                                                                                       | **Authenticated** (valid token required) |
 
 ### RestAgentManagement Gate
