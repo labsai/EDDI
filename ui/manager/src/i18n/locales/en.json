@@ -23,6 +23,7 @@
     "secrets": "Secrets",
     "audit": "Audit Trail",
     "quotas": "Quotas",
+    "groups": "Groups",
     "chat": "Chat",
     "resources": "Resources",
     "sectionManagement": "Management",
@@ -75,6 +76,10 @@
     "resources": {
       "title": "Resources",
       "subtitle": "Manage behavior rules, dictionaries, outputs, and more"
+    },
+    "groups": {
+      "title": "Groups",
+      "subtitle": "Multi-agent discussion groups for structured debate and collaboration"
     },
     "chat": {
       "title": "Chat",

@@ -1,8 +1,8 @@
 # EDDI Manager — Handoff Document
 
-> **Last updated**: 2026-03-25  
+> **Last updated**: 2026-03-26  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Agent Setup Wizard + LangChain editor tooling fix
+> **Last commit**: Group Discussion UI — groups page, detail, wizard, orchestration components
 
 ---
 
@@ -15,6 +15,7 @@
 **Phase 7.34 (Audit Ledger)**: Manager Audit Trail UI complete.
 **Phase 7.34b (Tenant Quotas)**: Backend engine + REST API + Manager Quotas admin page complete.
 **Agent Setup Wizard**: Two-mode wizard (Standard + API Agent) with backend setup endpoints. LangChain editor updated with enableHttpCallTools + MCP servers.
+**Group Discussion UI**: Groups page (card/list views), Group Detail (3-panel), Group Wizard (4-step), 7 components, API layer, hooks, 5 templates.
 
 ### What's Done
 
@@ -47,6 +48,7 @@
 | —     | **Dashboard replacement**: old Bootstrap/jQuery `index.html` → redirect to `/manage`. OpenAPI + Docs external links in sidebar. Branded loading indicator. Removed bootstrap, jQuery, moment, KaTeX, Slick, old webpack bundles    | latest    |
 | —     | **Agent Setup Wizard**: Two-mode wizard (Standard Agent + API Agent) with `/administration/agents/setup` and `/setup-api` endpoints. OpenAPI spec input (URL/file/paste), LLM provider picker, feature toggles. 90+ i18n keys | `9a568ac` |
 | —     | **LangChain Editor Tooling**: `enableHttpCallTools` toggle, `mcpServers` editor (URL/name/transport/apiKey), updated agent mode detection | `0b527fe` |
+| —     | **Group Discussion UI**: Groups page, Group Detail, Group Wizard, 7 components, API layer, TanStack Query hooks, 5 preset templates | pending |
 
 ### Test Status
 
@@ -89,6 +91,7 @@
 - **Audit Trail**: `audit.tsx` (timeline-based page at `/manage/audit`), `api/audit.ts` (API module), `use-audit.ts` (TanStack hooks), `audit.test.tsx` (13 tests)
 - **Chat Panel Secrets**: `SecretInputField` + `ChatInputWithSecretToggle` inline components in `chat-panel.tsx`, `extractInputField()` in `conversations.ts`
 - **Tenant Quotas**: `quotas.tsx` (admin page at `/manage/quotas`), `api/quotas.ts` (API module), `use-quotas.ts` (TanStack hooks with 10s usage polling), `quotas.test.tsx` (8 tests)
+- **Groups UI**: `groups.tsx`, `group-detail.tsx`, `group-wizard.tsx` (pages); `group-card.tsx`, `agent-response-card.tsx`, `group-config-panel.tsx`, `discussion-transcript.tsx`, `discussion-input.tsx`, `phase-header.tsx`, `create-group-dialog.tsx` (components); `api/groups.ts`, `group-templates.ts`, `use-groups.ts`
 
 ---
 

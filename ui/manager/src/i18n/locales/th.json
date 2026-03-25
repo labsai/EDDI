@@ -27,7 +27,8 @@
     "sectionOperations": "Operations",
     "secrets": "Secrets",
     "audit": "Audit Trail",
-    "quotas": "Quotas"
+    "quotas": "Quotas",
+    "groups": "กลุ่ม"
   },
   "theme": {
     "light": "สว่าง",
@@ -79,6 +80,10 @@
     "chat": {
       "title": "แชท",
       "subtitle": "คุยกับบอทที่ปรับใช้แล้ว"
+    },
+    "groups": {
+      "title": "กลุ่ม",
+      "subtitle": "กลุ่มสนทนาหลายตัวแทนสำหรับการอภิปรายเชิงโครงสร้างและการทำงานร่วมกัน"
     }
   },
   "common": {

@@ -27,7 +27,8 @@
     "sectionOperations": "Operations",
     "secrets": "Secrets",
     "audit": "Audit Trail",
-    "quotas": "Quotas"
+    "quotas": "Quotas",
+    "groups": "群组"
   },
   "theme": {
     "light": "浅色",
@@ -79,6 +80,10 @@
     "chat": {
       "title": "聊天",
       "subtitle": "与已部署的机器人对话"
+    },
+    "groups": {
+      "title": "群组",
+      "subtitle": "用于结构化辩论和协作的多代理讨论群组"
     }
   },
   "common": {

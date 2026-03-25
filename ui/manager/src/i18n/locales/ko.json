@@ -27,7 +27,8 @@
     "sectionOperations": "Operations",
     "secrets": "Secrets",
     "audit": "Audit Trail",
-    "quotas": "Quotas"
+    "quotas": "Quotas",
+    "groups": "그룹"
   },
   "theme": {
     "light": "라이트",
@@ -79,6 +80,10 @@
     "chat": {
       "title": "채팅",
       "subtitle": "배포된 봇과 대화하세요"
+    },
+    "groups": {
+      "title": "그룹",
+      "subtitle": "구조화된 토론 및 협업을 위한 다중 에이전트 토론 그룹"
     }
   },
   "common": {

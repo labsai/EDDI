@@ -27,7 +27,8 @@
     "sectionOperations": "Operations",
     "secrets": "Secrets",
     "audit": "Audit Trail",
-    "quotas": "Quotas"
+    "quotas": "Quotas",
+    "groups": "مجموعات"
   },
   "theme": {
     "light": "فاتح",
@@ -79,6 +80,10 @@
     "chat": {
       "title": "الدردشة",
       "subtitle": "تحدث مع الروبوتات المنشورة"
+    },
+    "groups": {
+      "title": "مجموعات",
+      "subtitle": "مجموعات نقاش متعددة الوكلاء للنقاش المنظم والتعاون"
     }
   },
   "common": {

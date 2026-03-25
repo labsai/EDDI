@@ -27,7 +27,8 @@
     "sectionOperations": "Operations",
     "secrets": "Secrets",
     "audit": "Audit Trail",
-    "quotas": "Quotas"
+    "quotas": "Quotas",
+    "groups": "समूह"
   },
   "theme": {
     "light": "लाइट",
@@ -79,6 +80,10 @@
     "chat": {
       "title": "चैट",
       "subtitle": "अपने तैनात बॉट से बात करें"
+    },
+    "groups": {
+      "title": "समूह",
+      "subtitle": "संरचित बहस और सहयोग के लिए बहु-एजेंट चर्चा समूह"
     }
   },
   "common": {

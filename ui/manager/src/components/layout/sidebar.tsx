@@ -20,6 +20,7 @@ import {
   KeyRound,
   ShieldCheck,
   Gauge,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -31,6 +32,7 @@ const navSections = [
       { path: "/manage", icon: LayoutDashboard, labelKey: "nav.dashboard" },
       { path: "/manage/agents", icon: Bot, labelKey: "nav.agents" },
       { path: "/manage/workflows", icon: Workflow, labelKey: "nav.packages" },
+      { path: "/manage/groups", icon: Users, labelKey: "nav.groups" },
     ],
   },
   {

@@ -19,6 +19,9 @@ import { LogsPage } from "@/pages/logs";
 import { SecretsPage } from "@/pages/secrets";
 import { AuditPage } from "@/pages/audit";
 import { QuotasPage } from "@/pages/quotas";
+import { GroupsPage } from "@/pages/groups";
+import { GroupDetailPage } from "@/pages/group-detail";
+import { GroupWizardPage } from "@/pages/group-wizard";
 
 export function App() {
   return (
@@ -38,6 +41,9 @@ export function App() {
         <Route path="/manage/secrets" element={<SecretsPage />} />
         <Route path="/manage/audit" element={<AuditPage />} />
         <Route path="/manage/quotas" element={<QuotasPage />} />
+        <Route path="/manage/groups" element={<GroupsPage />} />
+        <Route path="/manage/groups/wizard" element={<GroupWizardPage />} />
+        <Route path="/manage/groups/:id" element={<GroupDetailPage />} />
         <Route
           path="/manage/conversationview/:id"
           element={<ConversationDetailPage />}

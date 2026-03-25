@@ -27,7 +27,8 @@
     "sectionOperations": "Operations",
     "secrets": "Secrets",
     "audit": "Audit Trail",
-    "quotas": "Quotas"
+    "quotas": "Quotas",
+    "groups": "Grupos"
   },
   "theme": {
     "light": "Claro",
@@ -79,6 +80,10 @@
     "chat": {
       "title": "Chat",
       "subtitle": "Converse com seus agents implantados"
+    },
+    "groups": {
+      "title": "Grupos",
+      "subtitle": "Grupos de discussão multi-agente para debate estruturado e colaboração"
     }
   },
   "common": {

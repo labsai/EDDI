@@ -1573,4 +1573,166 @@ export const scheduleHandlers = [
       { status: 201 },
     );
   }),
+
+  // ==========================================
+  // === Group Config & Conversation Mocks ===
+  // ==========================================
+
+  // Group descriptors
+  http.get("*/groupstore/groups/descriptors", () => {
+    return HttpResponse.json([
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/group1?version=1",
+        name: "Advisory Board (Beraterstab)",
+        description: "15-member panel for strategic advisory discussions",
+        createdOn: Date.now() - 86400000,
+        lastModifiedOn: Date.now(),
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/group2?version=1",
+        name: "Code Review Panel",
+        description: "Peer review for architecture decisions",
+        createdOn: Date.now() - 172800000,
+        lastModifiedOn: Date.now() - 3600000,
+      },
+    ]);
+  }),
+
+  // Group config
+  http.get("*/groupstore/groups/:id", ({ request }) => {
+    const url = new URL(request.url);
+    if (url.pathname.endsWith("/descriptors") || url.pathname.endsWith("/styles") || url.pathname.endsWith("/jsonSchema")) return;
+    return HttpResponse.json({
+      name: "Advisory Board (Beraterstab)",
+      description: "A panel of expert advisors consulting on strategic decisions.",
+      members: [
+        { agentId: "agent1", displayName: "Marketing Expert", speakingOrder: 1, role: null, memberType: "AGENT" },
+        { agentId: "agent2", displayName: "Sales Strategist", speakingOrder: 2, role: null, memberType: "AGENT" },
+        { agentId: "agent3", displayName: "Product Manager", speakingOrder: 3, role: null, memberType: "AGENT" },
+        { agentId: "agent4", displayName: "Tech Lead", speakingOrder: 4, role: null, memberType: "AGENT" },
+        { agentId: "agent5", displayName: "Legal Counsel", speakingOrder: 5, role: null, memberType: "AGENT" },
+      ],
+      moderatorAgentId: "agent-mod",
+      style: "ROUND_TABLE",
+      maxRounds: 2,
+      phases: null,
+      protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+    });
+  }),
+
+  // Discussion styles
+  http.get("*/groupstore/groups/styles", () => {
+    return HttpResponse.json({
+      ROUND_TABLE: { description: "All members share opinions, then discuss, then synthesize", phases: ["OPINION", "ARGUE", "SYNTHESIS"] },
+      PEER_REVIEW: { description: "Independent opinions, peer critique, revision, synthesis", phases: ["OPINION", "CRITIQUE", "REVISION", "SYNTHESIS"] },
+      DEVIL_ADVOCATE: { description: "Opinions challenged by designated devil's advocate", phases: ["OPINION", "CHALLENGE", "DEFENSE", "SYNTHESIS"] },
+      DELPHI: { description: "Anonymous rounds to reduce groupthink", phases: ["OPINION", "REVISION", "SYNTHESIS"] },
+      DEBATE: { description: "Formal pro/con debate with rebuttals", phases: ["ARGUE", "REBUTTAL", "SYNTHESIS"] },
+    });
+  }),
+
+  // Group JSON schema
+  http.get("*/groupstore/groups/jsonSchema", () => {
+    return HttpResponse.json({ type: "object", properties: { name: { type: "string" }, members: { type: "array" } } });
+  }),
+
+  // Create group
+  http.post("*/groupstore/groups", () => {
+    return new HttpResponse(null, { status: 201, headers: { Location: `/groupstore/groups/new-group-${Date.now()}?version=1` } });
+  }),
+
+  // Update group
+  http.put("*/groupstore/groups/:id", ({ params }) => {
+    return new HttpResponse(null, { status: 200, headers: { Location: `/groupstore/groups/${params.id}?version=2` } });
+  }),
+
+  // Duplicate group
+  http.post("*/groupstore/groups/:id", () => {
+    return new HttpResponse(null, { status: 201, headers: { Location: `/groupstore/groups/dup-${Date.now()}?version=1` } });
+  }),
+
+  // Delete group
+  http.delete("*/groupstore/groups/:id", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // List group conversations
+  http.get("*/groups/:groupId/conversations", ({ request }) => {
+    const url = new URL(request.url);
+    const pathParts = url.pathname.split("/");
+    // Don't match specific conversation GETs (which have an extra path segment)
+    if (pathParts.length > 4 && !url.pathname.endsWith("/conversations")) return;
+    return HttpResponse.json([
+      {
+        id: "gconv1",
+        groupId: "group1",
+        userId: "manager-user",
+        state: "COMPLETED",
+        originalQuestion: "Should we expand into the European market this quarter?",
+        transcript: [],
+        memberConversationIds: {},
+        currentPhaseIndex: 2,
+        currentPhaseName: "Synthesis",
+        synthesizedAnswer: "After careful consideration, the panel recommends a phased European market expansion starting in Q3.",
+        depth: 0,
+        created: new Date(Date.now() - 3600000).toISOString(),
+        lastModified: new Date(Date.now() - 1800000).toISOString(),
+      },
+    ]);
+  }),
+
+  // Get single group conversation (detailed transcript)
+  http.get("*/groups/:groupId/conversations/:convId", () => {
+    const now = new Date();
+    return HttpResponse.json({
+      id: "gconv1",
+      groupId: "group1",
+      userId: "manager-user",
+      state: "COMPLETED",
+      originalQuestion: "Should we expand into the European market this quarter?",
+      transcript: [
+        { speakerAgentId: "user", speakerDisplayName: "User", content: "Should we expand into the European market this quarter?", phaseIndex: -1, phaseName: null, type: "QUESTION", timestamp: new Date(now.getTime() - 600000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent1", speakerDisplayName: "Marketing Expert", content: "From a marketing perspective, Europe presents significant opportunities. Brand awareness campaigns could leverage our existing digital presence. However, we need to consider GDPR compliance and localization of marketing materials.", phaseIndex: 0, phaseName: "Initial Opinions", type: "OPINION", timestamp: new Date(now.getTime() - 540000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent2", speakerDisplayName: "Sales Strategist", content: "The sales pipeline data suggests strong demand in Germany and France. I recommend starting with these markets due to existing partner relationships. Timeline should be 6–8 months for meaningful traction.", phaseIndex: 0, phaseName: "Initial Opinions", type: "OPINION", timestamp: new Date(now.getTime() - 480000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent3", speakerDisplayName: "Product Manager", content: "Our product needs localization work for European markets — currency support, language packs, and compliance features. I estimate 3 months of engineering effort before we can launch.", phaseIndex: 0, phaseName: "Initial Opinions", type: "OPINION", timestamp: new Date(now.getTime() - 420000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent4", speakerDisplayName: "Tech Lead", content: "Infrastructure-wise, we'd need EU-based data centers for GDPR. AWS eu-west-1 is ready, but we need to provision new clusters. Budget estimate: $50k/month additional hosting.", phaseIndex: 0, phaseName: "Initial Opinions", type: "OPINION", timestamp: new Date(now.getTime() - 360000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent5", speakerDisplayName: "Legal Counsel", content: "GDPR compliance is mandatory and non-trivial. We need a DPO appointment, privacy impact assessments, and updated Terms of Service. I strongly advise against rushing this.", phaseIndex: 0, phaseName: "Initial Opinions", type: "OPINION", timestamp: new Date(now.getTime() - 300000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent1", speakerDisplayName: "Marketing Expert", content: "I agree with Sales on starting with Germany and France. Marketing can run preliminary campaigns while Legal handles compliance. Let's plan for a Q3 soft launch.", phaseIndex: 1, phaseName: "Discussion", type: "ARGUMENT", timestamp: new Date(now.getTime() - 240000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent5", speakerDisplayName: "Legal Counsel", content: "A Q3 timeline is realistic for compliance if we start immediately. I'd recommend engaging a European law firm for local expertise.", phaseIndex: 1, phaseName: "Discussion", type: "ARGUMENT", timestamp: new Date(now.getTime() - 180000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent-mod", speakerDisplayName: "Moderator", content: "After careful consideration, the panel recommends a phased European market expansion starting in Q3, with Germany and France as initial targets. Key prerequisites: (1) GDPR compliance and DPO appointment — start immediately, (2) Product localization — 3 month engineering sprint, (3) EU infrastructure provisioning — $50k/month incremental, (4) Local legal counsel engagement. The consensus is to proceed, but not to rush. A well-prepared Q3 soft launch balances opportunity with risk management.", phaseIndex: 2, phaseName: "Synthesis", type: "SYNTHESIS", timestamp: new Date(now.getTime() - 120000).toISOString(), errorReason: null, targetAgentId: null },
+      ],
+      memberConversationIds: { agent1: "mc1", agent2: "mc2", agent3: "mc3", agent4: "mc4", agent5: "mc5" },
+      currentPhaseIndex: 2,
+      currentPhaseName: "Synthesis",
+      synthesizedAnswer: "After careful consideration, the panel recommends a phased European market expansion starting in Q3, with Germany and France as initial targets. Key prerequisites: (1) GDPR compliance and DPO appointment — start immediately, (2) Product localization — 3 month engineering sprint, (3) EU infrastructure provisioning — $50k/month incremental, (4) Local legal counsel engagement. The consensus is to proceed, but not to rush. A well-prepared Q3 soft launch balances opportunity with risk management.",
+      depth: 0,
+      created: new Date(now.getTime() - 600000).toISOString(),
+      lastModified: new Date(now.getTime() - 120000).toISOString(),
+    });
+  }),
+
+  // Start group discussion
+  http.post("*/groups/:groupId/conversations", () => {
+    return HttpResponse.json({
+      id: `gconv-${Date.now()}`,
+      groupId: "group1",
+      userId: "manager-user",
+      state: "IN_PROGRESS",
+      originalQuestion: "New discussion started",
+      transcript: [],
+      memberConversationIds: {},
+      currentPhaseIndex: 0,
+      currentPhaseName: "Initial Opinions",
+      synthesizedAnswer: null,
+      depth: 0,
+      created: new Date().toISOString(),
+      lastModified: new Date().toISOString(),
+    }, { status: 201 });
+  }),
+
+  // Delete group conversation
+  http.delete("*/groups/:groupId/conversations/:convId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
 ];
+
