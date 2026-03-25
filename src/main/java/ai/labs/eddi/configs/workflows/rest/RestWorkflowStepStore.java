@@ -15,19 +15,16 @@ public class RestWorkflowStepStore implements IRestWorkflowStepStore {
     private final Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider;
 
     @Inject
-    public RestWorkflowStepStore(
-            @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider) {
+    public RestWorkflowStepStore(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider) {
 
         this.lifecycleExtensionsProvider = lifecycleExtensionsProvider;
     }
 
     @Override
     public List<ExtensionDescriptor> getWorkflowSteps(String filter) {
-        return lifecycleExtensionsProvider.keySet().stream().
-                filter(type -> filter.isEmpty() || type.contains(filter)).
-                map(type -> {
-                    Provider<ILifecycleTask> taskProvider = lifecycleExtensionsProvider.get(type);
-                    return taskProvider.get().getExtensionDescriptor();
-                }).toList();
+        return lifecycleExtensionsProvider.keySet().stream().filter(type -> filter.isEmpty() || type.contains(filter)).map(type -> {
+            Provider<ILifecycleTask> taskProvider = lifecycleExtensionsProvider.get(type);
+            return taskProvider.get().getExtensionDescriptor();
+        }).toList();
     }
 }

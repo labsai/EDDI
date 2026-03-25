@@ -83,27 +83,13 @@ public class LlmTask implements ILifecycleTask {
     private static final Logger LOGGER = Logger.getLogger(LlmTask.class);
 
     @Inject
-    public LlmTask(IResourceClientLibrary resourceClientLibrary,
-            IDataFactory dataFactory,
-            IMemoryItemConverter memoryItemConverter,
-            ITemplatingEngine templatingEngine,
-            IJsonSerialization jsonSerialization,
-            PrePostUtils prePostUtils,
-            Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders,
-            SecretResolver secretResolver,
-            CalculatorTool calculatorTool,
-            DateTimeTool dateTimeTool,
-            WebSearchTool webSearchTool,
-            DataFormatterTool dataFormatterTool,
-            WebScraperTool webScraperTool,
-            TextSummarizerTool textSummarizerTool,
-            PdfReaderTool pdfReaderTool,
-            WeatherTool weatherTool,
-            IApiCallExecutor apiCallExecutor,
-            ToolExecutionService toolExecutionService,
-            McpToolProviderManager mcpToolProviderManager,
-            IRestAgentStore restAgentStore,
-            IRestWorkflowStore restWorkflowStore) {
+    public LlmTask(IResourceClientLibrary resourceClientLibrary, IDataFactory dataFactory, IMemoryItemConverter memoryItemConverter,
+            ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, PrePostUtils prePostUtils,
+            Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders, SecretResolver secretResolver,
+            CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
+            WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
+            IApiCallExecutor apiCallExecutor, ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager,
+            IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -115,11 +101,8 @@ public class LlmTask implements ILifecycleTask {
         this.conversationHistoryBuilder = new ConversationHistoryBuilder();
         this.legacyChatExecutor = new LegacyChatExecutor();
         this.streamingLegacyChatExecutor = new StreamingLegacyChatExecutor();
-        this.agentOrchestrator = new AgentOrchestrator(
-                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
-                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
-                toolExecutionService, mcpToolProviderManager,
-                restAgentStore, restWorkflowStore,
+        this.agentOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
+                textSummarizerTool, pdfReaderTool, weatherTool, toolExecutionService, mcpToolProviderManager, restAgentStore, restWorkflowStore,
                 resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter);
     }
 
@@ -151,14 +134,12 @@ public class LlmTask implements ILifecycleTask {
             }
 
             for (var task : llmConfig.tasks()) {
-                if (task.getActions().contains(MATCH_ALL_OPERATOR) ||
-                        task.getActions().stream().anyMatch(actions::contains)) {
+                if (task.getActions().contains(MATCH_ALL_OPERATOR) || task.getActions().stream().anyMatch(actions::contains)) {
                     executeTask(memory, task, currentStep, templateDataObjects);
                 }
             }
 
-        } catch (ITemplatingEngine.TemplateEngineException | ChatModelRegistry.UnsupportedLlmTaskException
-                | IOException | LifecycleException e) {
+        } catch (ITemplatingEngine.TemplateEngineException | ChatModelRegistry.UnsupportedLlmTaskException | IOException | LifecycleException e) {
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
     }
@@ -166,11 +147,8 @@ public class LlmTask implements ILifecycleTask {
     /**
      * Execute a single task — delegates to LegacyChatExecutor or AgentOrchestrator.
      */
-    private void executeTask(IConversationMemory memory, Task task,
-            IWritableConversationStep currentStep,
-            Map<String, Object> templateDataObjects)
-            throws ITemplatingEngine.TemplateEngineException, ChatModelRegistry.UnsupportedLlmTaskException,
-            IOException, LifecycleException {
+    private void executeTask(IConversationMemory memory, Task task, IWritableConversationStep currentStep, Map<String, Object> templateDataObjects)
+            throws ITemplatingEngine.TemplateEngineException, ChatModelRegistry.UnsupportedLlmTaskException, IOException, LifecycleException {
 
         var processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects);
 
@@ -184,8 +162,8 @@ public class LlmTask implements ILifecycleTask {
                 || Boolean.parseBoolean(processedParams.get(KEY_INCLUDE_FIRST_AGENT_MESSAGE));
 
         // Build conversation messages
-        List<ChatMessage> messages = conversationHistoryBuilder.buildMessages(
-                memory, systemMessage, processedParams.get(KEY_PROMPT), logSizeLimit, includeFirstAgentMessage);
+        List<ChatMessage> messages = conversationHistoryBuilder.buildMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), logSizeLimit,
+                includeFirstAgentMessage);
 
         if (messages.isEmpty()) {
             return;
@@ -204,12 +182,10 @@ public class LlmTask implements ILifecycleTask {
 
         // Build chat messages without system message for agent mode
         // (agent orchestrator adds system message internally)
-        List<ChatMessage> chatMessagesWithoutSystem = messages.stream()
-                .filter(m -> !(m instanceof dev.langchain4j.data.message.SystemMessage))
+        List<ChatMessage> chatMessagesWithoutSystem = messages.stream().filter(m -> !(m instanceof dev.langchain4j.data.message.SystemMessage))
                 .toList();
 
-        var agentResult = agentOrchestrator.executeIfToolsEnabled(
-                chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task, memory);
+        var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task, memory);
 
         if (agentResult != null) {
             // Agent mode — tools execute synchronously, stream final response if sink
@@ -260,16 +236,13 @@ public class LlmTask implements ILifecycleTask {
             templateDataObjects.put(responseObjectName, responseContent);
         }
 
-        var langchainData = dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(),
-                responseContent);
+        var langchainData = dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), responseContent);
         currentStep.storeData(langchainData);
 
         // Write audit:* memory keys for the audit ledger (only if auditing is enabled)
         if (memory.getAuditCollector() != null) {
             var compiledPrompt = dataFactory.createData("audit:compiled_prompt",
-                    systemMessage + "\n---\n" + (processedParams.get(KEY_PROMPT) != null
-                            ? processedParams.get(KEY_PROMPT)
-                            : ""));
+                    systemMessage + "\n---\n" + (processedParams.get(KEY_PROMPT) != null ? processedParams.get(KEY_PROMPT) : ""));
             currentStep.storeData(compiledPrompt);
 
             if (responseContent != null) {
@@ -284,19 +257,16 @@ public class LlmTask implements ILifecycleTask {
 
         // Store tool trace if available
         if (!toolTrace.isEmpty()) {
-            var traceData = dataFactory.createData(KEY_LANGCHAIN + ":trace:" + task.getType() + ":" + task.getId(),
-                    toolTrace);
+            var traceData = dataFactory.createData(KEY_LANGCHAIN + ":trace:" + task.getType() + ":" + task.getId(), toolTrace);
             currentStep.storeData(traceData);
         }
 
         // Add to output if configured (or if in agent mode with tools)
-        boolean shouldAddToOutput = agentResult != null ||
-                (!isNullOrEmpty(processedParams.get(KEY_ADD_TO_OUTPUT)) &&
-                        Boolean.parseBoolean(processedParams.get(KEY_ADD_TO_OUTPUT)));
+        boolean shouldAddToOutput = agentResult != null
+                || (!isNullOrEmpty(processedParams.get(KEY_ADD_TO_OUTPUT)) && Boolean.parseBoolean(processedParams.get(KEY_ADD_TO_OUTPUT)));
 
         if (shouldAddToOutput) {
-            var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(),
-                    responseContent);
+            var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(), responseContent);
             currentStep.storeData(outputData);
             var outputItem = new TextOutputItem(responseContent, 0);
             currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
@@ -305,8 +275,7 @@ public class LlmTask implements ILifecycleTask {
         prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, 200, false);
     }
 
-    private HashMap<String, String> runTemplateEngineOnParams(Map<String, String> parameters,
-            Map<String, Object> templateDataObjects) {
+    private HashMap<String, String> runTemplateEngineOnParams(Map<String, String> parameters, Map<String, Object> templateDataObjects) {
 
         var processedParams = new HashMap<>(parameters);
         processedParams.forEach((key, value) -> {
@@ -322,8 +291,7 @@ public class LlmTask implements ILifecycleTask {
     }
 
     @Override
-    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws WorkflowConfigurationException {
+    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions) throws WorkflowConfigurationException {
 
         Object uriObj = configuration.get(KEY_URI);
         if (!isNullOrEmpty(uriObj)) {

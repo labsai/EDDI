@@ -40,8 +40,7 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
     UriInfo uriInfo;
 
     @Inject
-    public DocumentDescriptorFilter(IDocumentDescriptorStore documentDescriptorStore,
-                                    IConversationDescriptorStore conversationDescriptorStore) {
+    public DocumentDescriptorFilter(IDocumentDescriptorStore documentDescriptorStore, IConversationDescriptorStore conversationDescriptorStore) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
     }
@@ -57,8 +56,7 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
             }
 
             var invokedHttpMethod = contextRequest.getMethod();
-            if ((isPUT(invokedHttpMethod) || isPATCH(invokedHttpMethod) ||
-                    isPOST(invokedHttpMethod) || isDELETE(invokedHttpMethod))) {
+            if ((isPUT(invokedHttpMethod) || isPATCH(invokedHttpMethod) || isPOST(invokedHttpMethod) || isDELETE(invokedHttpMethod))) {
 
                 String resourceLocationUri = contextResponse.getHeaderString(HttpHeaders.LOCATION);
                 if (resourceLocationUri != null) {
@@ -69,8 +67,7 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
                         if (isPOST(invokedHttpMethod)) {
                             // the resource was created successfully
                             if (httpStatus == 201) {
-                                if (isResourceIdValid(resourceId) &&
-                                        !resourceLocationUri.startsWith("eddi://ai.labs.conversation")) {
+                                if (isResourceIdValid(resourceId) && !resourceLocationUri.startsWith("eddi://ai.labs.conversation")) {
                                     try {
                                         documentDescriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion());
                                     } catch (IResourceStore.ResourceNotFoundException e) {
@@ -83,15 +80,13 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
                             return;
                         }
 
-                        if ((isPUT(invokedHttpMethod) || isPATCH(invokedHttpMethod))
-                                && !isDescriptorStore(uriInfo.getPath())
+                        if ((isPUT(invokedHttpMethod) || isPATCH(invokedHttpMethod)) && !isDescriptorStore(uriInfo.getPath())
                                 && isResourceIdValid(resourceId)) {
                             var descriptorStore = getDescriptorStore(resourceLocationUri);
-                            var resourceDescriptor = (ResourceDescriptor)
-                                    descriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion() - 1);
+                            var resourceDescriptor = (ResourceDescriptor) descriptorStore.readDescriptor(resourceId.getId(),
+                                    resourceId.getVersion() - 1);
                             resourceDescriptor.setLastModifiedOn(new Date(System.currentTimeMillis()));
-                            resourceDescriptor.setResource(
-                                    createNewVersionOfResource(resourceDescriptor.getResource(), resourceId.getVersion()));
+                            resourceDescriptor.setResource(createNewVersionOfResource(resourceDescriptor.getResource(), resourceId.getVersion()));
                             descriptorStore.updateDescriptor(resourceId.getId(), resourceId.getVersion() - 1, resourceDescriptor);
                         }
                     }
@@ -102,7 +97,8 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
                     var descriptorStore = getDescriptorStore(currentResourceURI);
                     IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create(currentResourceURI));
                     if (isResourceIdValid(resourceId)) {
-                        ResourceDescriptor resourceDescriptor = (ResourceDescriptor) descriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion());
+                        ResourceDescriptor resourceDescriptor = (ResourceDescriptor) descriptorStore.readDescriptor(resourceId.getId(),
+                                resourceId.getVersion());
                         resourceDescriptor.setDeleted(true);
                         descriptorStore.setDescriptor(resourceId.getId(), resourceId.getVersion(), resourceDescriptor);
                     }

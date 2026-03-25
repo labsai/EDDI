@@ -46,20 +46,12 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
 
     /**
      * Store types to scan for orphans. Each entry is {descriptorType,
-     * descriptorTypeLabel}.
-     * The descriptor type is used to query
+     * descriptorTypeLabel}. The descriptor type is used to query
      * IDocumentDescriptorStore.readDescriptors().
      */
-    private static final String[][] SCANNABLE_STORE_TYPES = {
-            { "ai.labs.package", "Workflow" },
-            { "ai.labs.rules", "Rules" },
-            { "ai.labs.apicalls", "API Calls" },
-            { "ai.labs.output", "Output Set" },
-            { "ai.labs.llm", "LLM" },
-            { "ai.labs.property", "Property Setter" },
-            { "ai.labs.dictionary", "Dictionary" },
-            { "ai.labs.parser", "Parser" },
-    };
+    private static final String[][] SCANNABLE_STORE_TYPES = {{"ai.labs.package", "Workflow"}, {"ai.labs.rules", "Rules"},
+            {"ai.labs.apicalls", "API Calls"}, {"ai.labs.output", "Output Set"}, {"ai.labs.llm", "LLM"}, {"ai.labs.property", "Property Setter"},
+            {"ai.labs.dictionary", "Dictionary"}, {"ai.labs.parser", "Parser"},};
 
     private static final int BATCH_SIZE = 200;
 
@@ -69,9 +61,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
     private final IResourceClientLibrary resourceClientLibrary;
 
     @Inject
-    public RestOrphanAdmin(IAgentStore agentStore,
-            IWorkflowStore workflowStore,
-            IDocumentDescriptorStore documentDescriptorStore,
+    public RestOrphanAdmin(IAgentStore agentStore, IWorkflowStore workflowStore, IDocumentDescriptorStore documentDescriptorStore,
             IResourceClientLibrary resourceClientLibrary) {
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
@@ -120,10 +110,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                 for (DocumentDescriptor descriptor : descriptors) {
                     URI resourceUri = descriptor.getResource();
                     if (resourceUri != null && !referencedUris.contains(resourceUri.toString())) {
-                        orphans.add(new OrphanInfo(
-                                resourceUri,
-                                type,
-                                descriptor.getName() != null ? descriptor.getName() : "(unnamed)",
+                        orphans.add(new OrphanInfo(resourceUri, type, descriptor.getName() != null ? descriptor.getName() : "(unnamed)",
                                 descriptor.isDeleted()));
                     }
                 }
@@ -152,8 +139,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                     if (resourceId == null || resourceId.getId() == null)
                         continue;
 
-                    AgentConfiguration agentConfig = agentStore.read(
-                            resourceId.getId(), resourceId.getVersion());
+                    AgentConfiguration agentConfig = agentStore.read(resourceId.getId(), resourceId.getVersion());
                     if (agentConfig.getWorkflows() != null) {
                         for (URI workflowUri : agentConfig.getWorkflows()) {
                             referencedUris.add(workflowUri.toString());
@@ -174,8 +160,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                     if (resourceId == null || resourceId.getId() == null)
                         continue;
 
-                    WorkflowConfiguration pkgConfig = workflowStore.read(
-                            resourceId.getId(), resourceId.getVersion());
+                    WorkflowConfiguration pkgConfig = workflowStore.read(resourceId.getId(), resourceId.getVersion());
                     collectExtensionUris(pkgConfig, referencedUris);
                 } catch (IResourceStore.ResourceNotFoundException e) {
                     // Workflow descriptor exists but resource doesn't — skip
@@ -192,8 +177,8 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
     }
 
     /**
-     * Extract all extension resource URIs from a workflow configuration.
-     * Follows the same traversal as RestWorkflowStore.deleteWorkflowCascade().
+     * Extract all extension resource URIs from a workflow configuration. Follows
+     * the same traversal as RestWorkflowStore.deleteWorkflowCascade().
      */
     private void collectExtensionUris(WorkflowConfiguration pkgConfig, Set<String> referencedUris) {
         for (WorkflowStep ext : pkgConfig.getWorkflowSteps()) {

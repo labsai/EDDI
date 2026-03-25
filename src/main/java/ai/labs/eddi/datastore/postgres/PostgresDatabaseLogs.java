@@ -50,9 +50,9 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
     }
 
     private synchronized void ensureSchema() {
-        if (schemaInitialized) return;
-        try (Connection conn = dataSource.getConnection();
-             Statement stmt = conn.createStatement()) {
+        if (schemaInitialized)
+            return;
+        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -67,24 +67,22 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
     }
 
     @Override
-    public List<DatabaseLog> getLogs(Environment environment, String agentId, Integer agentVersion,
-                                     String conversationId, String userId, String instanceId,
-                                     Integer skip, Integer limit) {
+    public List<DatabaseLog> getLogs(Environment environment, String agentId, Integer agentVersion, String conversationId, String userId,
+            String instanceId, Integer skip, Integer limit) {
         ensureSchema();
-        return getLogsInternal(environment != null ? environment.toString() : null,
-                agentId, agentVersion, conversationId, userId, instanceId, skip, limit);
+        return getLogsInternal(environment != null ? environment.toString() : null, agentId, agentVersion, conversationId, userId, instanceId, skip,
+                limit);
     }
 
     @Override
-    public void addLogs(String environment, String agentId, Integer agentVersion,
-                        String conversationId, String userId, String instanceId, String message) {
+    public void addLogs(String environment, String agentId, Integer agentVersion, String conversationId, String userId, String instanceId,
+            String message) {
         ensureSchema();
         String sql = """
                 INSERT INTO database_logs (message, timestamp, environment, AGENT_ID, AGENT_VERSION, conversation_id, user_id, instance_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """;
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, message);
             ps.setTimestamp(2, new Timestamp(System.currentTimeMillis()));
             ps.setString(3, environment);
@@ -105,15 +103,16 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
 
     @Override
     public void addLogsBatch(List<LogEntry> entries) {
-        if (entries == null || entries.isEmpty()) return;
+        if (entries == null || entries.isEmpty())
+            return;
         ensureSchema();
 
         String sql = """
-                INSERT INTO database_logs (message, level, logger_name, timestamp, environment, AGENT_ID, AGENT_VERSION, conversation_id, user_id, instance_id)
+                INSERT INTO database_logs (message, level, logger_name, timestamp, environment,
+                 AGENT_ID, AGENT_VERSION, conversation_id, user_id, instance_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             for (LogEntry entry : entries) {
                 ps.setString(1, entry.message());
                 ps.setString(2, entry.level());
@@ -137,9 +136,8 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
         }
     }
 
-    private List<DatabaseLog> getLogsInternal(String environment, String agentId, Integer agentVersion,
-                                               String conversationId, String userId, String instanceId,
-                                               Integer skip, Integer limit) {
+    private List<DatabaseLog> getLogsInternal(String environment, String agentId, Integer agentVersion, String conversationId, String userId,
+            String instanceId, Integer skip, Integer limit) {
         List<DatabaseLog> logs = new ArrayList<>();
         StringBuilder sql = new StringBuilder("SELECT * FROM database_logs WHERE 1=1");
         List<Object> params = new ArrayList<>();
@@ -176,8 +174,7 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
             sql.append(" OFFSET ").append(skip);
         }
 
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql.toString())) {
             for (int i = 0; i < params.size(); i++) {
                 ps.setObject(i + 1, params.get(i));
             }

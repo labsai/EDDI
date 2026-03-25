@@ -11,17 +11,11 @@ import java.util.List;
  */
 public interface IDeploymentStore {
 
-    DeploymentInfo getDeploymentInfo(String environment,
-                                     String agentId,
-                                     Integer agentVersion) throws IResourceStore.ResourceStoreException;
+    DeploymentInfo getDeploymentInfo(String environment, String agentId, Integer agentVersion) throws IResourceStore.ResourceStoreException;
 
-    void setDeploymentInfo(String environment,
-                           String agentId,
-                           Integer agentVersion,
-                           DeploymentStatus deploymentStatus);
+    void setDeploymentInfo(String environment, String agentId, Integer agentVersion, DeploymentStatus deploymentStatus);
 
     List<DeploymentInfo> readDeploymentInfos() throws IResourceStore.ResourceStoreException;
 
-    List<DeploymentInfo> readDeploymentInfos(DeploymentStatus deploymentStatus)
-            throws IResourceStore.ResourceStoreException;
+    List<DeploymentInfo> readDeploymentInfos(DeploymentStatus deploymentStatus) throws IResourceStore.ResourceStoreException;
 }

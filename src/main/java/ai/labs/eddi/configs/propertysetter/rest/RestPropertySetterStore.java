@@ -26,8 +26,7 @@ public class RestPropertySetterStore implements IRestPropertySetterStore {
     private final RestVersionInfo<PropertySetterConfiguration> restVersionInfo;
 
     @Inject
-    public RestPropertySetterStore(IPropertySetterStore propertySetterStore,
-            IDocumentDescriptorStore documentDescriptorStore,
+    public RestPropertySetterStore(IPropertySetterStore propertySetterStore, IDocumentDescriptorStore documentDescriptorStore,
             IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, propertySetterStore, documentDescriptorStore);
         this.propertySetterStore = propertySetterStore;
@@ -54,8 +53,7 @@ public class RestPropertySetterStore implements IRestPropertySetterStore {
     }
 
     @Override
-    public Response updatePropertySetter(String id, Integer version,
-            PropertySetterConfiguration propertySetterConfiguration) {
+    public Response updatePropertySetter(String id, Integer version, PropertySetterConfiguration propertySetterConfiguration) {
         return restVersionInfo.update(id, version, propertySetterConfiguration);
     }
 

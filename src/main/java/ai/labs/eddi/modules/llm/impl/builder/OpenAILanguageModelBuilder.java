@@ -25,8 +25,7 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        var builder = OpenAiChatModel.builder()
-                .httpClientBuilder(JdkHttpClient.builder());
+        var builder = OpenAiChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
             builder.apiKey(parameters.get(KEY_API_KEY));
         }
@@ -53,8 +52,7 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
-        var builder = OpenAiStreamingChatModel.builder()
-                .httpClientBuilder(JdkHttpClient.builder());
+        var builder = OpenAiStreamingChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
             builder.apiKey(parameters.get(KEY_API_KEY));
         }

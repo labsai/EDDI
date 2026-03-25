@@ -19,19 +19,11 @@ public class JsonSchemaCreator implements IJsonSchemaCreator {
 
     @Override
     public String generateSchema(Class<?> clazz) throws Exception {
-        JacksonModule jacksonModule = new JacksonModule(
-                JacksonOption.RESPECT_JSONPROPERTY_ORDER,
-                JacksonOption.RESPECT_JSONPROPERTY_REQUIRED,
-                JacksonOption.FLATTENED_ENUMS_FROM_JSONVALUE
-        );
+        JacksonModule jacksonModule = new JacksonModule(JacksonOption.RESPECT_JSONPROPERTY_ORDER, JacksonOption.RESPECT_JSONPROPERTY_REQUIRED,
+                JacksonOption.FLATTENED_ENUMS_FROM_JSONVALUE);
 
-        SchemaGeneratorConfigBuilder configBuilder = new SchemaGeneratorConfigBuilder(
-                objectMapper,
-                SchemaVersion.DRAFT_2020_12,
-                OptionPreset.PLAIN_JSON
-        ).with(jacksonModule)
-         .with(Option.DEFINITIONS_FOR_ALL_OBJECTS)
-         .with(Option.NULLABLE_FIELDS_BY_DEFAULT);
+        SchemaGeneratorConfigBuilder configBuilder = new SchemaGeneratorConfigBuilder(objectMapper, SchemaVersion.DRAFT_2020_12,
+                OptionPreset.PLAIN_JSON).with(jacksonModule).with(Option.DEFINITIONS_FOR_ALL_OBJECTS).with(Option.NULLABLE_FIELDS_BY_DEFAULT);
 
         SchemaGeneratorConfig config = configBuilder.build();
         SchemaGenerator generator = new SchemaGenerator(config);

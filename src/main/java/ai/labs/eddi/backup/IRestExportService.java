@@ -18,6 +18,5 @@ public interface IRestExportService {
 
     @POST
     @Path("{agentId}")
-    Response exportAgent(@PathParam("agentId") String agentId,
-            @QueryParam("agentVersion") @DefaultValue("1") Integer agentVersion);
+    Response exportAgent(@PathParam("agentId") String agentId, @QueryParam("agentVersion") @DefaultValue("1") Integer agentVersion);
 }

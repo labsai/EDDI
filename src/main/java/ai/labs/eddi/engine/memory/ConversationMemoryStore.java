@@ -25,9 +25,8 @@ import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
 /**
  * MongoDB implementation of {@link IConversationMemoryStore}.
  * <p>
- * Annotated {@code @DefaultBean} so that future database backends
- * (e.g., PostgreSQL) can provide an alternative implementation
- * activated via
+ * Annotated {@code @DefaultBean} so that future database backends (e.g.,
+ * PostgreSQL) can provide an alternative implementation activated via
  * {@code @LookupIfProperty(name = "eddi.datastore.type", stringValue = "postgres")}.
  *
  * @author ginccc
@@ -49,8 +48,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     @Inject
     public ConversationMemoryStore(MongoDatabase database) {
         this.conversationCollectionDocument = database.getCollection(CONVERSATION_COLLECTION, Document.class);
-        this.conversationCollectionObject = database.getCollection(CONVERSATION_COLLECTION,
-                ConversationMemorySnapshot.class);
+        this.conversationCollectionObject = database.getCollection(CONVERSATION_COLLECTION, ConversationMemorySnapshot.class);
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_CONVERSATION_STATE));
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_AGENT_ID));
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_AGENT_VERSION));
@@ -60,8 +58,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) {
         String conversationId = snapshot.getConversationId();
         if (conversationId != null) {
-            conversationCollectionObject.replaceOne(
-                    new Document(OBJECT_ID, new ObjectId(conversationId)), snapshot);
+            conversationCollectionObject.replaceOne(new Document(OBJECT_ID, new ObjectId(conversationId)), snapshot);
         } else {
             snapshot.setId(new ObjectId().toString());
             conversationCollectionObject.insertOne(snapshot);
@@ -72,8 +69,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId) {
-        var memorySnapshot = conversationCollectionObject.find(
-                new Document(OBJECT_ID, new ObjectId(conversationId))).first();
+        var memorySnapshot = conversationCollectionObject.find(new Document(OBJECT_ID, new ObjectId(conversationId))).first();
 
         if (memorySnapshot == null) {
             return null;
@@ -120,23 +116,19 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public void setConversationState(String conversationId, ConversationState conversationState) {
-        var updateConversationStateField = new Document("$set",
-                new Document(KEY_CONVERSATION_STATE, conversationState.name()));
+        var updateConversationStateField = new Document("$set", new Document(KEY_CONVERSATION_STATE, conversationState.name()));
 
-        conversationCollectionDocument.updateOne(
-                new Document(OBJECT_ID, new ObjectId(conversationId)), updateConversationStateField);
+        conversationCollectionDocument.updateOne(new Document(OBJECT_ID, new ObjectId(conversationId)), updateConversationStateField);
     }
 
     @Override
     public void deleteConversationMemorySnapshot(String conversationId) {
-        conversationCollectionDocument.deleteOne(
-                new Document(OBJECT_ID, new ObjectId(conversationId)));
+        conversationCollectionDocument.deleteOne(new Document(OBJECT_ID, new ObjectId(conversationId)));
     }
 
     @Override
     public ConversationState getConversationState(String conversationId) {
-        Document conversationMemoryDocument = conversationCollectionDocument.find(
-                new Document(OBJECT_ID, new ObjectId(conversationId)))
+        Document conversationMemoryDocument = conversationCollectionDocument.find(new Document(OBJECT_ID, new ObjectId(conversationId)))
                 .projection(new Document(KEY_CONVERSATION_STATE, 1).append(OBJECT_ID, 0)).first();
         if (conversationMemoryDocument == null) {
             return null;

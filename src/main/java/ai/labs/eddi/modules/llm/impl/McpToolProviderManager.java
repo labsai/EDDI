@@ -43,8 +43,8 @@ public class McpToolProviderManager {
     private final SecretResolver secretResolver;
 
     /**
-     * Cache of active MCP clients, keyed by server URL.
-     * Connections are reused across conversation turns to avoid reconnect overhead.
+     * Cache of active MCP clients, keyed by server URL. Connections are reused
+     * across conversation turns to avoid reconnect overhead.
      */
     private final Map<String, McpClient> clientCache = new ConcurrentHashMap<>();
 
@@ -56,8 +56,10 @@ public class McpToolProviderManager {
     /**
      * Result of discovering tools from MCP servers.
      *
-     * @param toolSpecs list of tool specifications discovered
-     * @param executors map of tool name → executor for each discovered tool
+     * @param toolSpecs
+     *            list of tool specifications discovered
+     * @param executors
+     *            map of tool name → executor for each discovered tool
      */
     record McpToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors) {
     }
@@ -69,7 +71,8 @@ public class McpToolProviderManager {
      * Failed connections log a warning but don't prevent other servers from being
      * used.
      *
-     * @param mcpServers list of MCP server configurations
+     * @param mcpServers
+     *            list of MCP server configurations
      * @return combined tools from all reachable servers
      */
     McpToolsResult discoverTools(List<McpServerConfig> mcpServers) {
@@ -88,14 +91,10 @@ public class McpToolProviderManager {
 
             try {
                 McpClient client = getOrCreateClient(serverConfig);
-                String serverName = serverConfig.getName() != null
-                        ? serverConfig.getName()
-                        : serverConfig.getUrl();
+                String serverName = serverConfig.getName() != null ? serverConfig.getName() : serverConfig.getUrl();
 
                 // Use McpToolProvider to discover tools from this server
-                McpToolProvider toolProvider = McpToolProvider.builder()
-                        .mcpClients(List.of(client))
-                        .build();
+                McpToolProvider toolProvider = McpToolProvider.builder().mcpClients(List.of(client)).build();
 
                 // Discover tools — McpToolProvider returns ToolProviderResult
                 ToolProviderResult result = toolProvider.provideTools(null);
@@ -108,16 +107,12 @@ public class McpToolProviderManager {
                         allSpecs.add(spec);
                         allExecutors.put(spec.name(), executor);
                     }
-                    LOGGER.infof("Discovered %d tools from MCP server '%s'",
-                            result.tools().size(), serverName);
+                    LOGGER.infof("Discovered %d tools from MCP server '%s'", result.tools().size(), serverName);
                 }
 
             } catch (Exception e) {
-                String serverName = serverConfig.getName() != null
-                        ? serverConfig.getName()
-                        : serverConfig.getUrl();
-                LOGGER.warnf(e, "Failed to connect to MCP server '%s': %s",
-                        serverName, e.getMessage());
+                String serverName = serverConfig.getName() != null ? serverConfig.getName() : serverConfig.getUrl();
+                LOGGER.warnf(e, "Failed to connect to MCP server '%s': %s", serverName, e.getMessage());
             }
         }
 
@@ -125,24 +120,18 @@ public class McpToolProviderManager {
     }
 
     /**
-     * Get or create an MCP client for the given server configuration.
-     * Clients are cached by URL for connection reuse.
+     * Get or create an MCP client for the given server configuration. Clients are
+     * cached by URL for connection reuse.
      */
     private McpClient getOrCreateClient(McpServerConfig config) {
         return clientCache.computeIfAbsent(config.getUrl(), url -> {
-            LOGGER.infof("Creating MCP client for '%s' (%s transport)",
-                    config.getName() != null ? config.getName() : url,
-                    config.getTransport());
+            LOGGER.infof("Creating MCP client for '%s' (%s transport)", config.getName() != null ? config.getName() : url, config.getTransport());
 
-            Duration timeout = Duration.ofMillis(
-                    config.getTimeoutMs() != null ? config.getTimeoutMs() : 30000L);
+            Duration timeout = Duration.ofMillis(config.getTimeoutMs() != null ? config.getTimeoutMs() : 30000L);
 
             McpTransport transport = createTransport(config, timeout);
 
-            return new DefaultMcpClient.Builder()
-                    .transport(transport)
-                    .clientName("eddi-mcp-client")
-                    .build();
+            return new DefaultMcpClient.Builder().transport(transport).clientName("eddi-mcp-client").build();
         });
     }
 
@@ -158,9 +147,7 @@ public class McpToolProviderManager {
 
         // StreamableHttpMcpTransport (recommended, replaces deprecated
         // HttpMcpTransport)
-        var transportBuilder = StreamableHttpMcpTransport.builder()
-                .url(config.getUrl())
-                .timeout(timeout);
+        var transportBuilder = StreamableHttpMcpTransport.builder().url(config.getUrl()).timeout(timeout);
 
         // Add API key as Authorization header if configured
         if (!isNullOrEmpty(apiKey)) {
@@ -187,8 +174,7 @@ public class McpToolProviderManager {
     }
 
     /**
-     * Close all cached MCP client connections.
-     * Called on application shutdown.
+     * Close all cached MCP client connections. Called on application shutdown.
      */
     @PreDestroy
     void shutdown() {

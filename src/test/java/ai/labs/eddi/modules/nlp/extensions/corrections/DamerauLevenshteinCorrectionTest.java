@@ -30,63 +30,56 @@ public class DamerauLevenshteinCorrectionTest {
 
     @Test
     public void testLookupTermDistanceOfOne() {
-        //setup
+        // setup
         TestDictionary testDictionary = new TestDictionary();
         DamerauLevenshteinCorrection levenshteinCorrection = new DamerauLevenshteinCorrection(); // max distance of 2
         levenshteinCorrection.init(Arrays.asList(new IDictionary[]{testDictionary}));
 
-        //test
+        // test
         List<IDictionary.IFoundWord> foundWords = levenshteinCorrection.correctWord("helo", DEFAULT_LANGUAGE);
 
-        //assert
+        // assert
         assertEquals(1, foundWords.size());
     }
 
     @Test
     public void testLookupTermDistanceOfTwo() {
-        //setup
+        // setup
         TestDictionary testDictionary = new TestDictionary();
         DamerauLevenshteinCorrection levenshteinCorrection = new DamerauLevenshteinCorrection(); // max distance of 2
         levenshteinCorrection.init(Arrays.asList(new IDictionary[]{testDictionary}));
 
-        //test
+        // test
         List<IDictionary.IFoundWord> foundWords = levenshteinCorrection.correctWord("heo", DEFAULT_LANGUAGE);
 
-        //assert
+        // assert
         assertEquals(1, foundWords.size());
     }
 
     @Test
     public void testLookupTermDistanceOfThree() {
-        //setup
+        // setup
         TestDictionary testDictionary = new TestDictionary();
         DamerauLevenshteinCorrection levenshteinCorrection = new DamerauLevenshteinCorrection(); // max distance of 2
         levenshteinCorrection.init(Arrays.asList(new IDictionary[]{testDictionary}));
 
-        //test
+        // test
         List<IDictionary.IFoundWord> foundWords = levenshteinCorrection.correctWord("he", DEFAULT_LANGUAGE);
 
-        //assert
+        // assert
         assertEquals(0, foundWords.size());
     }
 
     private class TestDictionary implements IDictionary {
         @Override
         public List<IWord> getWords() {
-            return Arrays.asList(new IWord[]
-                    {
-                            new Word("hello", new Expressions(), "", 0, false),
-                            new Word("world", new Expressions(), "", 0, false)
-                    });
+            return Arrays.asList(new IWord[]{new Word("hello", new Expressions(), "", 0, false), new Word("world", new Expressions(), "", 0, false)});
         }
 
         @Override
         public List<IPhrase> getPhrases() {
-            return Arrays.asList(new IPhrase[]
-                    {
-                            new Phrase("good morning", expressionUtilities.parseExpressions("good morning"), ""),
-                            new Phrase("day after tomorrow", expressionUtilities.parseExpressions("day after tomorrow"), "")
-                    });
+            return Arrays.asList(new IPhrase[]{new Phrase("good morning", expressionUtilities.parseExpressions("good morning"), ""),
+                    new Phrase("day after tomorrow", expressionUtilities.parseExpressions("day after tomorrow"), "")});
         }
 
         @Override

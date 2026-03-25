@@ -7,9 +7,8 @@ import java.net.UnknownHostException;
 
 /**
  * URL validation utilities to prevent SSRF (Server-Side Request Forgery)
- * attacks.
- * Validates that URLs use allowed schemes and do not target private/internal
- * networks.
+ * attacks. Validates that URLs use allowed schemes and do not target
+ * private/internal networks.
  */
 public final class UrlValidationUtils {
 
@@ -18,15 +17,14 @@ public final class UrlValidationUtils {
     }
 
     /**
-     * Validates that the given URL is safe for server-side fetching.
-     * Checks:
-     * 1. URL is syntactically valid
-     * 2. Scheme is http or https only
-     * 3. Hostname does not resolve to a private/loopback/link-local address
+     * Validates that the given URL is safe for server-side fetching. Checks: 1. URL
+     * is syntactically valid 2. Scheme is http or https only 3. Hostname does not
+     * resolve to a private/loopback/link-local address
      *
-     * @param url the URL to validate
-     * @throws IllegalArgumentException if the URL is invalid or targets a
-     *                                  production address
+     * @param url
+     *            the URL to validate
+     * @throws IllegalArgumentException
+     *             if the URL is invalid or targets a production address
      */
     public static void validateUrl(String url) {
         if (url == null || url.isBlank()) {
@@ -43,8 +41,7 @@ public final class UrlValidationUtils {
         // 1. Scheme check
         String scheme = uri.getScheme();
         if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
-            throw new IllegalArgumentException(
-                    "Only http and https URLs are allowed. Got: " + (scheme != null ? scheme : "<no scheme>"));
+            throw new IllegalArgumentException("Only http and https URLs are allowed. Got: " + (scheme != null ? scheme : "<no scheme>"));
         }
 
         // 2. Host check
@@ -64,8 +61,7 @@ public final class UrlValidationUtils {
             InetAddress[] addresses = InetAddress.getAllByName(host);
             for (InetAddress addr : addresses) {
                 if (isPrivateAddress(addr)) {
-                    throw new IllegalArgumentException(
-                            "URL resolves to a private/internal address which is not allowed: " + host);
+                    throw new IllegalArgumentException("URL resolves to a private/internal address which is not allowed: " + host);
                 }
             }
         } catch (UnknownHostException e) {
@@ -78,25 +74,16 @@ public final class UrlValidationUtils {
      * blocked.
      */
     static boolean isBlockedHostname(String host) {
-        return host.equals("localhost") ||
-                host.equals("127.0.0.1") ||
-                host.equals("[::1]") ||
-                host.equals("::1") ||
-                host.endsWith(".local") ||
-                host.endsWith(".internal") ||
-                host.equals("metadata.google.internal") ||
-                host.equals("169.254.169.254"); // Cloud metadata endpoint
+        return host.equals("localhost") || host.equals("127.0.0.1") || host.equals("[::1]") || host.equals("::1") || host.endsWith(".local")
+                || host.endsWith(".internal") || host.equals("metadata.google.internal") || host.equals("169.254.169.254"); // Cloud metadata endpoint
     }
 
     /**
      * Checks whether an InetAddress is a private, loopback, or link-local address.
      */
     static boolean isPrivateAddress(InetAddress address) {
-        return address.isLoopbackAddress() ||
-                address.isSiteLocalAddress() ||
-                address.isLinkLocalAddress() ||
-                address.isAnyLocalAddress() ||
-                isCloudMetadataAddress(address);
+        return address.isLoopbackAddress() || address.isSiteLocalAddress() || address.isLinkLocalAddress() || address.isAnyLocalAddress()
+                || isCloudMetadataAddress(address);
     }
 
     /**
@@ -106,8 +93,7 @@ public final class UrlValidationUtils {
         byte[] bytes = address.getAddress();
         if (bytes.length == 4) {
             // 169.254.169.254 - AWS/GCP/Azure metadata endpoint
-            return (bytes[0] & 0xFF) == 169 && (bytes[1] & 0xFF) == 254 &&
-                    (bytes[2] & 0xFF) == 169 && (bytes[3] & 0xFF) == 254;
+            return (bytes[0] & 0xFF) == 169 && (bytes[1] & 0xFF) == 254 && (bytes[2] & 0xFF) == 169 && (bytes[3] & 0xFF) == 254;
         }
         return false;
     }
@@ -116,7 +102,8 @@ public final class UrlValidationUtils {
      * Checks if the URL is a valid http(s) URL without performing DNS resolution.
      * Use this for quick validation when DNS resolution is not desired.
      *
-     * @param url the URL to check
+     * @param url
+     *            the URL to check
      * @return true if the URL has a valid http/https scheme and hostname
      */
     public static boolean isValidHttpUrl(String url) {
@@ -127,9 +114,7 @@ public final class UrlValidationUtils {
             URI uri = new URI(url);
             String scheme = uri.getScheme();
             String host = uri.getHost();
-            return scheme != null &&
-                    (scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https")) &&
-                    host != null && !host.isBlank();
+            return scheme != null && (scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https")) && host != null && !host.isBlank();
         } catch (URISyntaxException e) {
             return false;
         }

@@ -33,8 +33,7 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
     private final IExpressionProvider expressionProvider;
 
     @Inject
-    public RegularDictionaryProvider(IResourceClientLibrary resourceClientLibrary,
-                                     IExpressionProvider expressionProvider) {
+    public RegularDictionaryProvider(IResourceClientLibrary resourceClientLibrary, IExpressionProvider expressionProvider) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.expressionProvider = expressionProvider;
     }
@@ -63,8 +62,7 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
         try {
             Object uriObj = config.get(KEY_URI);
             if (!RuntimeUtilities.isNullOrEmpty(uriObj) && uriObj.toString().startsWith("eddi")) {
-                DictionaryConfiguration regularDictionaryConfiguration =
-                        fetchRegularDictionaryConfiguration(URI.create(uriObj.toString()));
+                DictionaryConfiguration regularDictionaryConfiguration = fetchRegularDictionaryConfiguration(URI.create(uriObj.toString()));
                 return addConfigsToDictionary(regularDictionaryConfiguration);
             } else {
                 throw new ServiceException("No resource URI has been defined! [DictionaryConfiguration]");
@@ -82,8 +80,7 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
         regularDictionaryConfiguration.getWords().forEach(wordConfig -> {
             String word = wordConfig.getWord();
             if (word != null) {
-                regularDictionary.addWord(word.trim(),
-                        createDefaultExpressionIfNull(word, wordConfig.getExpressions()), wordConfig.getFrequency());
+                regularDictionary.addWord(word.trim(), createDefaultExpressionIfNull(word, wordConfig.getExpressions()), wordConfig.getFrequency());
             } else {
                 log.warn("Value of 'word' in dictionary was null. Skipped it.");
             }
@@ -102,8 +99,7 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
         regularDictionaryConfiguration.getPhrases().forEach(phraseConfig -> {
             String phrase = phraseConfig.getPhrase();
             if (phrase != null) {
-                regularDictionary.addPhrase(phrase.trim(),
-                        createDefaultExpressionIfNull(phrase, phraseConfig.getExpressions()));
+                regularDictionary.addPhrase(phrase.trim(), createDefaultExpressionIfNull(phrase, phraseConfig.getExpressions()));
             } else {
                 log.warn("Value of 'phrase' in dictionary was null. Skipped it.");
             }
@@ -120,8 +116,7 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
         return expressionProvider.parseExpressions(exp);
     }
 
-    private DictionaryConfiguration fetchRegularDictionaryConfiguration(URI resourceURI)
-            throws ServiceException {
+    private DictionaryConfiguration fetchRegularDictionaryConfiguration(URI resourceURI) throws ServiceException {
         return resourceClientLibrary.getResource(resourceURI, DictionaryConfiguration.class);
     }
 

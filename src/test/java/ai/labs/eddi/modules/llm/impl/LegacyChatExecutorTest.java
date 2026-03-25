@@ -49,9 +49,7 @@ class LegacyChatExecutorTest {
             ChatModel model = new ChatModel() {
                 @Override
                 public ChatResponse chat(List<ChatMessage> messages) {
-                    return ChatResponse.builder()
-                            .aiMessage(AiMessage.from("Response"))
-                            .build();
+                    return ChatResponse.builder().aiMessage(AiMessage.from("Response")).build();
                 }
             };
             var task = createTask();
@@ -82,8 +80,7 @@ class LegacyChatExecutorTest {
             retryConfig.setMaxAttempts(1);
             task.setRetry(retryConfig);
 
-            assertThrows(LifecycleException.class,
-                    () -> executor.execute(failingModel, createMessages("Hi"), task));
+            assertThrows(LifecycleException.class, () -> executor.execute(failingModel, createMessages("Hi"), task));
         }
 
         @Test
@@ -92,9 +89,7 @@ class LegacyChatExecutorTest {
             ChatModel model = new ChatModel() {
                 @Override
                 public ChatResponse chat(List<ChatMessage> messages) {
-                    return ChatResponse.builder()
-                            .aiMessage(AiMessage.from(""))
-                            .build();
+                    return ChatResponse.builder().aiMessage(AiMessage.from("")).build();
                 }
             };
             var task = createTask();
@@ -137,9 +132,7 @@ class LegacyChatExecutorTest {
         return new ChatModel() {
             @Override
             public ChatResponse chat(List<ChatMessage> messages) {
-                return ChatResponse.builder()
-                        .aiMessage(AiMessage.from(response))
-                        .build();
+                return ChatResponse.builder().aiMessage(AiMessage.from(response)).build();
             }
         };
     }

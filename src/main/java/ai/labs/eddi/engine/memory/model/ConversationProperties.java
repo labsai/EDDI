@@ -9,9 +9,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-public class ConversationProperties
-        extends HashMap<String, Property>
-        implements IConversationMemory.IConversationProperties {
+public class ConversationProperties extends HashMap<String, Property> implements IConversationMemory.IConversationProperties {
 
     private static final String KEY_PROPERTIES = "properties";
     private final Map<String, Object> propertiesMap = new LinkedHashMap<>();

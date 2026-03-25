@@ -25,8 +25,10 @@ public class ApplicationLinkOutputItem extends OutputItem {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         ApplicationLinkOutputItem that = (ApplicationLinkOutputItem) o;
         return Objects.equals(path, that.path) && Objects.equals(label, that.label) && delay == that.delay;
     }

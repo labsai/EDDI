@@ -14,19 +14,17 @@ import java.util.Map;
  *
  * <p>
  * ILifecycleTask represents a single processing step in EDDI's configurable
- * Agent workflow.
- * Each agent's behavior is defined by a sequence of lifecycle tasks that
- * execute in order,
- * transforming the conversation memory at each step.
+ * Agent workflow. Each agent's behavior is defined by a sequence of lifecycle
+ * tasks that execute in order, transforming the conversation memory at each
+ * step.
  * </p>
  *
  * <h2>Lifecycle Workflow Concept</h2>
  * <p>
  * Instead of hard-coded Agent logic, EDDI processes user interactions through a
- * sequential
- * workflow of pluggable tasks:
+ * sequential workflow of pluggable tasks:
  * </p>
- * 
+ *
  * <pre>
  * User Input → Parser → Behavior Rules → API/LLM Calls → Output Generation → Save
  * </pre>
@@ -34,16 +32,13 @@ import java.util.Map;
  * <h2>Key Architectural Principles</h2>
  * <ul>
  * <li><strong>Stateless Tasks</strong>: Tasks don't maintain state; they
- * transform the
- * IConversationMemory object passed to them</li>
+ * transform the IConversationMemory object passed to them</li>
  * <li><strong>Sequential Execution</strong>: Tasks execute in order, each
- * building on
- * the previous task's results</li>
+ * building on the previous task's results</li>
  * <li><strong>Pluggable</strong>: New task types can be added without modifying
  * core code</li>
  * <li><strong>Configurable</strong>: Task behavior is defined in JSON
- * configurations,
- * not Java code</li>
+ * configurations, not Java code</li>
  * </ul>
  *
  * <h2>Standard Task Types</h2>
@@ -62,7 +57,7 @@ import java.util.Map;
  * </ul>
  *
  * <h2>Example Implementation</h2>
- * 
+ *
  * <pre>{@code
  * public class MyCustomTask implements ILifecycleTask {
  *     @Override
@@ -74,8 +69,7 @@ import java.util.Map;
  *         String processed = process(input);
  *
  *         // 3. Write back to memory
- *         memory.getCurrentStep().storeData(
- *                 dataFactory.createData("myResult", processed));
+ *         memory.getCurrentStep().storeData(dataFactory.createData("myResult", processed));
  *     }
  * }
  * }</pre>
@@ -108,8 +102,7 @@ public interface ILifecycleTask {
      *
      * <p>
      * Types correspond to the stage in the lifecycle workflow where this task
-     * executes.
-     * Common types include:
+     * executes. Common types include:
      * </p>
      * <ul>
      * <li><code>input</code> - Raw input processing</li>
@@ -146,15 +139,14 @@ public interface ILifecycleTask {
      *
      * <p>
      * <strong>Important:</strong> Tasks must be thread-safe and stateless. All
-     * state
-     * should be stored in the {@code memory} parameter, which is passed through the
-     * entire workflow.
+     * state should be stored in the {@code memory} parameter, which is passed
+     * through the entire workflow.
      * </p>
      *
      * <p>
      * <strong>Example:</strong>
      * </p>
-     * 
+     *
      * <pre>{@code
      * @Override
      * public void execute(IConversationMemory memory, Object component) {
@@ -171,11 +163,14 @@ public interface ILifecycleTask {
      * }
      * }</pre>
      *
-     * @param memory    the conversation memory containing all conversation state
-     *                  and history
-     * @param component task-specific configuration/resources loaded from package
-     *                  extensions
-     * @throws LifecycleException if an error occurs during task execution
+     * @param memory
+     *            the conversation memory containing all conversation state and
+     *            history
+     * @param component
+     *            task-specific configuration/resources loaded from package
+     *            extensions
+     * @throws LifecycleException
+     *             if an error occurs during task execution
      */
     void execute(IConversationMemory memory, Object component) throws LifecycleException;
 
@@ -185,8 +180,7 @@ public interface ILifecycleTask {
      * <p>
      * This method is called during Agent initialization to set up task-specific
      * configurations from package extensions. The default implementation returns
-     * null,
-     * indicating no configuration is needed.
+     * null, indicating no configuration is needed.
      * </p>
      *
      * <p>
@@ -202,32 +196,31 @@ public interface ILifecycleTask {
      * <p>
      * <strong>Example:</strong>
      * </p>
-     * 
+     *
      * <pre>{@code
      * @Override
-     * public Object configure(Map<String, Object> configuration,
-     *         Map<String, Object> extensions)
-     *         throws WorkflowConfigurationException {
+     * public Object configure(Map<String, Object> configuration, Map<String, Object> extensions) throws WorkflowConfigurationException {
      *     String uri = (String) extensions.get("uri");
      *     MyConfig config = configStore.load(uri);
      *     return config;
      * }
      * }</pre>
      *
-     * @param configuration task-specific configuration parameters from package
-     *                      config
-     * @param extensions    extension URIs and metadata from package definition
+     * @param configuration
+     *            task-specific configuration parameters from package config
+     * @param extensions
+     *            extension URIs and metadata from package definition
      * @return configured component object to be passed to execute(), or null if no
      *         configuration needed
-     * @throws WorkflowConfigurationException         if configuration is invalid
-     * @throws IllegalExtensionConfigurationException if extension configuration is
-     *                                                malformed
-     * @throws UnrecognizedExtensionException         if the extension type is not
-     *                                                supported
+     * @throws WorkflowConfigurationException
+     *             if configuration is invalid
+     * @throws IllegalExtensionConfigurationException
+     *             if extension configuration is malformed
+     * @throws UnrecognizedExtensionException
+     *             if the extension type is not supported
      */
     default Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws WorkflowConfigurationException, IllegalExtensionConfigurationException,
-            UnrecognizedExtensionException {
+            throws WorkflowConfigurationException, IllegalExtensionConfigurationException, UnrecognizedExtensionException {
 
         // to be overridden if needed
         return null;
@@ -248,8 +241,7 @@ public interface ILifecycleTask {
      * <p>
      * The default implementation returns a basic descriptor with just the task ID.
      * Tasks can override this to provide richer metadata (display name,
-     * description,
-     * configuration options, etc.).
+     * description, configuration options, etc.).
      * </p>
      *
      * @return extension descriptor containing metadata about this task

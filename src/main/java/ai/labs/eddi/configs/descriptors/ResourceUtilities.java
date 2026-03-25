@@ -23,8 +23,7 @@ public class ResourceUtilities {
         if (resourceUriString.startsWith("eddi://")) {
             URI resourceUri = URI.create(resourceUriString);
             IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(resourceUri);
-            if (!isNullOrEmpty(resourceId.getId()) && !isNullOrEmpty(resourceId.getVersion()) &&
-                    resourceId.getVersion() > 0) {
+            if (!isNullOrEmpty(resourceId.getId()) && !isNullOrEmpty(resourceId.getVersion()) && resourceId.getVersion() > 0) {
                 return resourceId;
             }
         }
@@ -33,17 +32,14 @@ public class ResourceUtilities {
     }
 
     public static List<DocumentDescriptor> createMalFormattedResourceUriException(String containingResourceUri) {
-        String message = String.format("Bad resource uri. Needs to be of this format: " +
-                "eddi://ai.labs.<type>/<path>/<ID>?version=<VERSION>" +
-                "\n actual: '%s'", containingResourceUri);
+        String message = String.format(
+                "Bad resource uri. Needs to be of this format: " + "eddi://ai.labs.<type>/<path>/<ID>?version=<VERSION>" + "\n actual: '%s'",
+                containingResourceUri);
         throw new BadRequestException(Response.status(BAD_REQUEST).entity(message).type(MediaType.TEXT_PLAIN).build());
     }
 
-    public static void createDocumentDescriptorForDuplicate(IDocumentDescriptorStore documentDescriptorStore,
-            String oldId,
-            Integer oldVersion,
-            URI newResourceLocation)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public static void createDocumentDescriptorForDuplicate(IDocumentDescriptorStore documentDescriptorStore, String oldId, Integer oldVersion,
+            URI newResourceLocation) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         var oldDescriptor = documentDescriptorStore.readDescriptor(oldId, oldVersion);
 
@@ -58,10 +54,7 @@ public class ResourceUtilities {
         oldDescriptor.setCreatedOn(currentTime);
         oldDescriptor.setLastModifiedOn(currentTime);
 
-        documentDescriptorStore.createDescriptor(
-                newResourceId.getId(),
-                newResourceId.getVersion(),
-                oldDescriptor);
+        documentDescriptorStore.createDescriptor(newResourceId.getId(), newResourceId.getVersion(), oldDescriptor);
 
     }
 
@@ -78,8 +71,7 @@ public class ResourceUtilities {
         return descriptor;
     }
 
-    public static ConversationDescriptor createConversationDescriptorDocument(URI resource, URI agentResourceURI,
-            String userId) {
+    public static ConversationDescriptor createConversationDescriptorDocument(URI resource, URI agentResourceURI, String userId) {
         ConversationDescriptor conversationDescriptor = new ConversationDescriptor();
         conversationDescriptor.setResource(resource);
         conversationDescriptor.setUserId(userId);

@@ -1,6 +1,5 @@
 package ai.labs.eddi.engine.triggermanagement.model;
 
-
 import ai.labs.eddi.engine.model.Deployment;
 
 public class UserConversation {

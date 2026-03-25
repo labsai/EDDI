@@ -41,10 +41,9 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Unit tests for McpAdminTools Phase 8a.2 —
- * update_resource, create_resource, delete_resource, apply_agent_changes,
- * list_agent_resources.
- * Phase 8a.3 — list_agent_triggers, create_agent_trigger, update_agent_trigger,
+ * Unit tests for McpAdminTools Phase 8a.2 — update_resource, create_resource,
+ * delete_resource, apply_agent_changes, list_agent_resources. Phase 8a.3 —
+ * list_agent_triggers, create_agent_trigger, update_agent_trigger,
  * delete_agent_trigger.
  */
 class McpAdminToolsCrudTest {
@@ -101,8 +100,7 @@ class McpAdminToolsCrudTest {
         scheduleStore = mock(IScheduleStore.class);
         scheduleFireExecutor = mock(ScheduleFireExecutor.class);
         schedulePollerService = mock(SchedulePollerService.class);
-        tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization,
-                scheduleStore, scheduleFireExecutor, schedulePollerService);
+        tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization, scheduleStore, scheduleFireExecutor, schedulePollerService);
     }
 
     // ==================== update_resource ====================
@@ -112,8 +110,7 @@ class McpAdminToolsCrudTest {
         var config = new LlmConfiguration(List.of());
         when(jsonSerialization.deserialize("{\"tasks\":[]}", LlmConfiguration.class)).thenReturn(config);
         when(llmStore.updateLlm(RESOURCE_ID, 1, config))
-                .thenReturn(Response.ok().header("Location",
-                        "/llmstore/llms/" + RESOURCE_ID + "?version=2").build());
+                .thenReturn(Response.ok().header("Location", "/llmstore/llms/" + RESOURCE_ID + "?version=2").build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"updated\",\"newVersion\":2}");
 
         String result = tools.updateResource("langchain", RESOURCE_ID, 1, "{\"tasks\":[]}");
@@ -128,8 +125,7 @@ class McpAdminToolsCrudTest {
         var config = new RuleSetConfiguration();
         when(jsonSerialization.deserialize("{}", RuleSetConfiguration.class)).thenReturn(config);
         when(behaviorStore.updateRuleSet(RESOURCE_ID, 1, config))
-                .thenReturn(Response.ok().header("Location",
-                        "/rulestore/rulesets/" + RESOURCE_ID + "?version=2").build());
+                .thenReturn(Response.ok().header("Location", "/rulestore/rulesets/" + RESOURCE_ID + "?version=2").build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"updated\"}");
 
         String result = tools.updateResource("behavior", RESOURCE_ID, 1, "{}");
@@ -174,9 +170,7 @@ class McpAdminToolsCrudTest {
     void createResource_httpcalls_success() throws IOException {
         var config = new ApiCallsConfiguration();
         when(jsonSerialization.deserialize("{}", ApiCallsConfiguration.class)).thenReturn(config);
-        when(httpCallsStore.createApiCalls(config))
-                .thenReturn(Response.created(URI.create(
-                        "/apicallstore/apicalls/new-id?version=1")).build());
+        when(httpCallsStore.createApiCalls(config)).thenReturn(Response.created(URI.create("/apicallstore/apicalls/new-id?version=1")).build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\",\"resourceId\":\"new-id\"}");
 
         String result = tools.createResource("httpcalls", "{}");
@@ -190,9 +184,7 @@ class McpAdminToolsCrudTest {
     void createResource_output_success() throws IOException {
         var config = new OutputConfigurationSet();
         when(jsonSerialization.deserialize("{}", OutputConfigurationSet.class)).thenReturn(config);
-        when(outputStore.createOutputSet(config))
-                .thenReturn(Response.created(URI.create(
-                        "/outputstore/outputsets/new-id?version=1")).build());
+        when(outputStore.createOutputSet(config)).thenReturn(Response.created(URI.create("/outputstore/outputsets/new-id?version=1")).build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\"}");
 
         String result = tools.createResource("output", "{}");
@@ -219,8 +211,7 @@ class McpAdminToolsCrudTest {
 
     @Test
     void deleteResource_httpcalls_success() throws IOException {
-        when(httpCallsStore.deleteApiCalls(RESOURCE_ID, 1, false))
-                .thenReturn(Response.ok().build());
+        when(httpCallsStore.deleteApiCalls(RESOURCE_ID, 1, false)).thenReturn(Response.ok().build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deleted\"}");
 
         String result = tools.deleteResource("httpcalls", RESOURCE_ID, 1, false);
@@ -232,8 +223,7 @@ class McpAdminToolsCrudTest {
 
     @Test
     void deleteResource_permanent_success() throws IOException {
-        when(behaviorStore.deleteRuleSet(RESOURCE_ID, 2, true))
-                .thenReturn(Response.ok().build());
+        when(behaviorStore.deleteRuleSet(RESOURCE_ID, 2, true)).thenReturn(Response.ok().build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deleted\",\"permanent\":true}");
 
         String result = tools.deleteResource("behavior", RESOURCE_ID, 2, true);
@@ -262,8 +252,7 @@ class McpAdminToolsCrudTest {
     void applyAgentChanges_singleWorkflow_success() throws IOException {
         // Set up Agent with 1 package
         var agentConfig = new AgentConfiguration();
-        agentConfig.setWorkflows(List.of(
-                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1")));
+        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1")));
         when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
         // Set up package with one extension containing the old URI
@@ -278,18 +267,15 @@ class McpAdminToolsCrudTest {
 
         // Mock updates
         when(WorkflowStore.updateWorkflow(eq(PKG_ID), eq(1), any()))
-                .thenReturn(Response.ok().header("Location",
-                        "/workflowstore/workflows/" + PKG_ID + "?version=2").build());
+                .thenReturn(Response.ok().header("Location", "/workflowstore/workflows/" + PKG_ID + "?version=2").build());
         when(AgentStore.updateAgent(eq(AGENT_ID), eq(1), any()))
-                .thenReturn(Response.ok().header("Location",
-                        "/agentstore/agents/" + AGENT_ID + "?version=2").build());
+                .thenReturn(Response.ok().header("Location", "/agentstore/agents/" + AGENT_ID + "?version=2").build());
 
         // Parse mappings JSON
-        String mappingsJson = "[{\"oldUri\":\"eddi://ai.labs.llm/llmstore/llms/lc1?version=1\"," +
-                "\"newUri\":\"eddi://ai.labs.llm/llmstore/llms/lc1?version=2\"}]";
-        List<Map<String, String>> mappings = List.of(Map.of(
-                "oldUri", "eddi://ai.labs.llm/llmstore/llms/lc1?version=1",
-                "newUri", "eddi://ai.labs.llm/llmstore/llms/lc1?version=2"));
+        String mappingsJson = "[{\"oldUri\":\"eddi://ai.labs.llm/llmstore/llms/lc1?version=1\","
+                + "\"newUri\":\"eddi://ai.labs.llm/llmstore/llms/lc1?version=2\"}]";
+        List<Map<String, String>> mappings = List
+                .of(Map.of("oldUri", "eddi://ai.labs.llm/llmstore/llms/lc1?version=1", "newUri", "eddi://ai.labs.llm/llmstore/llms/lc1?version=2"));
         when(jsonSerialization.deserialize(mappingsJson, List.class)).thenReturn(mappings);
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"updatedWorkflows\":1}");
 
@@ -304,8 +290,7 @@ class McpAdminToolsCrudTest {
     @Test
     void applyAgentChanges_noMatchingUris_noUpdates() throws IOException {
         var agentConfig = new AgentConfiguration();
-        agentConfig.setWorkflows(List.of(
-                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1")));
+        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1")));
         when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
         var ext = new WorkflowConfiguration.WorkflowStep();
@@ -319,9 +304,8 @@ class McpAdminToolsCrudTest {
 
         // Mappings don't match any existing URIs
         String mappingsJson = "[{\"oldUri\":\"eddi://different/resource?version=1\",\"newUri\":\"eddi://different/resource?version=2\"}]";
-        List<Map<String, String>> mappings = List.of(Map.of(
-                "oldUri", "eddi://different/resource?version=1",
-                "newUri", "eddi://different/resource?version=2"));
+        List<Map<String, String>> mappings = List
+                .of(Map.of("oldUri", "eddi://different/resource?version=1", "newUri", "eddi://different/resource?version=2"));
         when(jsonSerialization.deserialize(mappingsJson, List.class)).thenReturn(mappings);
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"updatedWorkflows\":0}");
 
@@ -335,8 +319,7 @@ class McpAdminToolsCrudTest {
     @Test
     void applyAgentChanges_withRedeploy_success() throws IOException {
         var agentConfig = new AgentConfiguration();
-        agentConfig.setWorkflows(List.of(
-                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1")));
+        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1")));
         when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
         var ext = new WorkflowConfiguration.WorkflowStep();
@@ -349,19 +332,15 @@ class McpAdminToolsCrudTest {
         when(WorkflowStore.readWorkflow(PKG_ID, 1)).thenReturn(pkgConfig);
 
         when(WorkflowStore.updateWorkflow(eq(PKG_ID), eq(1), any()))
-                .thenReturn(Response.ok().header("Location",
-                        "/workflowstore/workflows/" + PKG_ID + "?version=2").build());
+                .thenReturn(Response.ok().header("Location", "/workflowstore/workflows/" + PKG_ID + "?version=2").build());
         when(AgentStore.updateAgent(eq(AGENT_ID), eq(1), any()))
-                .thenReturn(Response.ok().header("Location",
-                        "/agentstore/agents/" + AGENT_ID + "?version=2").build());
-        when(agentAdmin.deployAgent(Environment.production, AGENT_ID, 2, true, true))
-                .thenReturn(Response.ok().build());
+                .thenReturn(Response.ok().header("Location", "/agentstore/agents/" + AGENT_ID + "?version=2").build());
+        when(agentAdmin.deployAgent(Environment.production, AGENT_ID, 2, true, true)).thenReturn(Response.ok().build());
 
-        String mappingsJson = "[{\"oldUri\":\"eddi://ai.labs.rules/rulestore/rulesets/b1?version=1\"," +
-                "\"newUri\":\"eddi://ai.labs.rules/rulestore/rulesets/b1?version=2\"}]";
-        List<Map<String, String>> mappings = List.of(Map.of(
-                "oldUri", "eddi://ai.labs.rules/rulestore/rulesets/b1?version=1",
-                "newUri", "eddi://ai.labs.rules/rulestore/rulesets/b1?version=2"));
+        String mappingsJson = "[{\"oldUri\":\"eddi://ai.labs.rules/rulestore/rulesets/b1?version=1\","
+                + "\"newUri\":\"eddi://ai.labs.rules/rulestore/rulesets/b1?version=2\"}]";
+        List<Map<String, String>> mappings = List.of(Map.of("oldUri", "eddi://ai.labs.rules/rulestore/rulesets/b1?version=1", "newUri",
+                "eddi://ai.labs.rules/rulestore/rulesets/b1?version=2"));
         when(jsonSerialization.deserialize(mappingsJson, List.class)).thenReturn(mappings);
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"redeployed\":true}");
 
@@ -407,8 +386,7 @@ class McpAdminToolsCrudTest {
     void listAgentResources_success() throws IOException {
         // Set up Agent with 1 package
         var agentConfig = new AgentConfiguration();
-        agentConfig.setWorkflows(List.of(
-                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1")));
+        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1")));
         when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
         // Agent descriptor
@@ -427,8 +405,7 @@ class McpAdminToolsCrudTest {
         pkgConfig.setWorkflowSteps(List.of(ext1, ext2));
         when(WorkflowStore.readWorkflow(PKG_ID, 1)).thenReturn(pkgConfig);
 
-        when(jsonSerialization.serialize(any())).thenReturn(
-                "{\"agentId\":\"test-agent-id\",\"agentName\":\"Test Agent\",\"packageCount\":1}");
+        when(jsonSerialization.serialize(any())).thenReturn("{\"agentId\":\"test-agent-id\",\"agentName\":\"Test Agent\",\"packageCount\":1}");
 
         String result = tools.listAgentResources(AGENT_ID, 1);
 
@@ -458,12 +435,10 @@ class McpAdminToolsCrudTest {
     @Test
     void listAgentResources_packageReadFailure_includesError() throws IOException {
         var agentConfig = new AgentConfiguration();
-        agentConfig.setWorkflows(List.of(
-                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1")));
+        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1")));
         when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
 
-        when(WorkflowStore.readWorkflow(PKG_ID, 1))
-                .thenThrow(new RuntimeException("Workflow corrupted"));
+        when(WorkflowStore.readWorkflow(PKG_ID, 1)).thenThrow(new RuntimeException("Workflow corrupted"));
         when(jsonSerialization.serialize(any())).thenReturn("{\"packages\":[{\"error\":\"Failed to read package\"}]}");
 
         String result = tools.listAgentResources(AGENT_ID, 1);

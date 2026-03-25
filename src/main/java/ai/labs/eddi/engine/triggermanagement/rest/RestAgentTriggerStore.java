@@ -25,8 +25,7 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
     private final ICache<String, AgentTriggerConfiguration> agentTriggersCache;
 
     @Inject
-    public RestAgentTriggerStore(IAgentTriggerStore agentTriggerStore,
-            ICacheFactory cacheFactory) {
+    public RestAgentTriggerStore(IAgentTriggerStore agentTriggerStore, ICacheFactory cacheFactory) {
         this.agentTriggerStore = agentTriggerStore;
         agentTriggersCache = cacheFactory.getCache(CACHE_NAME);
     }

@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.rules.impl;
 
-
 import java.util.LinkedList;
 import java.util.List;
 
@@ -13,8 +12,7 @@ public class RuleGroup {
     private List<Rule> behaviorRules = new LinkedList<>();
 
     public enum ExecutionStrategy {
-        executeAll,
-        executeUntilFirstSuccess
+        executeAll, executeUntilFirstSuccess
     }
 
     public RuleGroup() {

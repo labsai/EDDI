@@ -22,9 +22,10 @@ class LegacyChatExecutor {
     /**
      * Result of a legacy chat execution.
      *
-     * @param response         the LLM's text response
-     * @param responseMetadata metadata about the response (finish reason, token
-     *                         usage)
+     * @param response
+     *            the LLM's text response
+     * @param responseMetadata
+     *            metadata about the response (finish reason, token usage)
      */
     record ChatResult(String response, Map<String, Object> responseMetadata) {
     }
@@ -32,13 +33,15 @@ class LegacyChatExecutor {
     /**
      * Execute a simple chat completion with retry logic.
      *
-     * @param chatModel the model to chat with
-     * @param messages  the full message list (system + history + user)
-     * @param task      task configuration (for retry settings)
+     * @param chatModel
+     *            the model to chat with
+     * @param messages
+     *            the full message list (system + history + user)
+     * @param task
+     *            task configuration (for retry settings)
      * @return result containing response text and metadata
      */
-    ChatResult execute(ChatModel chatModel, List<ChatMessage> messages, LlmConfiguration.Task task)
-            throws LifecycleException {
+    ChatResult execute(ChatModel chatModel, List<ChatMessage> messages, LlmConfiguration.Task task) throws LifecycleException {
 
         LOGGER.debug("Executing without tools (legacy mode)");
         var messageResponse = AgentExecutionHelper.executeChatWithRetry(chatModel, messages, task);
@@ -51,10 +54,8 @@ class LegacyChatExecutor {
                 responseMetadata.put("finishReason", metadata.finishReason().toString());
             }
             if (metadata.tokenUsage() != null) {
-                responseMetadata.put("tokenUsage", Map.of(
-                        "inputTokens", metadata.tokenUsage().inputTokenCount(),
-                        "outputTokens", metadata.tokenUsage().outputTokenCount(),
-                        "totalTokens", metadata.tokenUsage().totalTokenCount()));
+                responseMetadata.put("tokenUsage", Map.of("inputTokens", metadata.tokenUsage().inputTokenCount(), "outputTokens",
+                        metadata.tokenUsage().outputTokenCount(), "totalTokens", metadata.tokenUsage().totalTokenCount()));
             }
         }
 

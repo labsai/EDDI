@@ -59,9 +59,7 @@ public class OutputGenerationTask implements ILifecycleTask {
     private final ObjectMapper objectMapper;
 
     @Inject
-    public OutputGenerationTask(IResourceClientLibrary resourceClientLibrary,
-            IDataFactory dataFactory,
-            ObjectMapper objectMapper) {
+    public OutputGenerationTask(IResourceClientLibrary resourceClientLibrary, IDataFactory dataFactory, ObjectMapper objectMapper) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.objectMapper = objectMapper;
@@ -107,8 +105,7 @@ public class OutputGenerationTask implements ILifecycleTask {
     }
 
     private boolean checkLanguage(String outputLanguage, IConversationProperties conversationProperties) {
-        return outputLanguage == null ||
-                outputLanguage.equalsIgnoreCase(retrieveContextLanguageFromLongTermMemory(conversationProperties));
+        return outputLanguage == null || outputLanguage.equalsIgnoreCase(retrieveContextLanguageFromLongTermMemory(conversationProperties));
     }
 
     private void storeContextOutput(IWritableConversationStep currentStep, List<IData<Context>> contextDataList) {
@@ -117,8 +114,7 @@ public class OutputGenerationTask implements ILifecycleTask {
             Context context = contextData.getResult();
             String key = contextKey.substring((CONTEXT_IDENTIFIER + ":").length());
             if (key.startsWith(MEMORY_OUTPUT_IDENTIFIER) && context.getType().equals(Context.ContextType.object)) {
-                List<OutputValue> outputList = convertOutputMap(
-                        convertObjectToListOfMapsWithObjects(context.getValue()));
+                List<OutputValue> outputList = convertOutputMap(convertObjectToListOfMapsWithObjects(context.getValue()));
                 selectAndStoreOutput(currentStep, CONTEXT_IDENTIFIER, outputList);
             }
         });
@@ -136,8 +132,7 @@ public class OutputGenerationTask implements ILifecycleTask {
                     quickRepliesKey = contextKey.substring(contextQuickReplyKey.length());
                 }
 
-                List<QuickReply> quickReplies = convertQuickReplyMap(
-                        convertObjectToListOfMapsWithStrings(context.getValue()));
+                List<QuickReply> quickReplies = convertQuickReplyMap(convertObjectToListOfMapsWithStrings(context.getValue()));
                 storeQuickReplies(currentStep, quickReplies, quickRepliesKey);
             }
         });
@@ -154,18 +149,17 @@ public class OutputGenerationTask implements ILifecycleTask {
     }
 
     private List<OutputValue> convertOutputMap(List<Map<String, Object>> outputMapList) {
-        return outputMapList.stream().map(map -> new OutputValue(
-                objectMapper.convertValue(map.get(KEY_VALUE_ALTERNATIVES), new TypeReference<>() {
-                }))).toList();
+        return outputMapList.stream().map(map -> new OutputValue(objectMapper.convertValue(map.get(KEY_VALUE_ALTERNATIVES), new TypeReference<>() {
+        }))).toList();
     }
 
     private List<QuickReply> convertQuickReplyMap(List<Map<String, String>> quickRepliesMapList) {
-        return quickRepliesMapList.stream().map(map -> new QuickReply(map.get(KEY_VALUE), map.get(KEY_EXPRESSIONS),
-                Boolean.parseBoolean(map.getOrDefault(KEY_IS_DEFAULT, "false")))).toList();
+        return quickRepliesMapList.stream().map(
+                map -> new QuickReply(map.get(KEY_VALUE), map.get(KEY_EXPRESSIONS), Boolean.parseBoolean(map.getOrDefault(KEY_IS_DEFAULT, "false"))))
+                .toList();
     }
 
-    private void selectAndStoreOutput(IWritableConversationStep currentStep, String action,
-            List<OutputValue> outputValues) {
+    private void selectAndStoreOutput(IWritableConversationStep currentStep, String action, List<OutputValue> outputValues) {
         List<QuickReply> quickReplies = new LinkedList<>();
         IntStream.range(0, outputValues.size()).forEach(index -> {
             OutputValue outputValue = outputValues.get(index);
@@ -182,8 +176,7 @@ public class OutputGenerationTask implements ILifecycleTask {
                     var outputData = dataFactory.createData(outputKey, randomValue, possibleValueAlternatives);
                     outputData.setPublic(true);
                     currentStep.storeData(outputData);
-                    currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER,
-                            Collections.singletonList(randomValue));
+                    currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, Collections.singletonList(randomValue));
                 }
             }
         });
@@ -193,8 +186,7 @@ public class OutputGenerationTask implements ILifecycleTask {
         }
     }
 
-    private void storeQuickReplies(IWritableConversationStep currentStep, List<QuickReply> quickReplies,
-            String action) {
+    private void storeQuickReplies(IWritableConversationStep currentStep, List<QuickReply> quickReplies, String action) {
         if (!quickReplies.isEmpty()) {
             String outputQuickReplyKey = StringUtilities.joinStrings(":", MEMORY_QUICK_REPLIES_IDENTIFIER, action);
             var outputQuickReplies = dataFactory.createData(outputQuickReplyKey, quickReplies);
@@ -205,14 +197,12 @@ public class OutputGenerationTask implements ILifecycleTask {
     }
 
     private LinkedList<IOutputFilter> createOutputFilters(IConversationMemory memory, List<String> actions) {
-        return actions.stream()
-                .map(action -> new OutputFilter(action, countActionOccurrences(memory.getPreviousSteps(), action)))
+        return actions.stream().map(action -> new OutputFilter(action, countActionOccurrences(memory.getPreviousSteps(), action)))
                 .collect(Collectors.toCollection(LinkedList::new));
     }
 
     @Override
-    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws WorkflowConfigurationException {
+    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions) throws WorkflowConfigurationException {
         try {
             Object uriObj = configuration.get(OUTPUT_SET_CONFIG_URI);
             if (uriObj != null) {
@@ -230,11 +220,9 @@ public class OutputGenerationTask implements ILifecycleTask {
                 });
 
                 var outputGeneration = new OutputGeneration(outputLanguage);
-                outputSet.forEach(outputConfig -> outputGeneration.addOutputEntry(
-                        new OutputEntry(outputConfig.getAction(),
-                                outputConfig.getTimesOccurred(),
-                                convertOutputTypesConfig(outputConfig.getOutputs()),
-                                convertQuickRepliesConfig(outputConfig.getQuickReplies()))));
+                outputSet.forEach(
+                        outputConfig -> outputGeneration.addOutputEntry(new OutputEntry(outputConfig.getAction(), outputConfig.getTimesOccurred(),
+                                convertOutputTypesConfig(outputConfig.getOutputs()), convertQuickRepliesConfig(outputConfig.getQuickReplies()))));
 
                 return outputGeneration;
             } else {
@@ -248,11 +236,9 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     private String createOutputKey(String action, List<OutputValue> outputValues, String outputType, int idx) {
         if (outputValues.size() > 1) {
-            return StringUtilities.joinStrings(":", MEMORY_OUTPUT_IDENTIFIER,
-                    outputType, action, idx);
+            return StringUtilities.joinStrings(":", MEMORY_OUTPUT_IDENTIFIER, outputType, action, idx);
         } else {
-            return StringUtilities.joinStrings(":", MEMORY_OUTPUT_IDENTIFIER,
-                    outputType, action);
+            return StringUtilities.joinStrings(":", MEMORY_OUTPUT_IDENTIFIER, outputType, action);
         }
     }
 
@@ -260,8 +246,7 @@ public class OutputGenerationTask implements ILifecycleTask {
         return possibleValues.get(new Random().nextInt(possibleValues.size()));
     }
 
-    private int countActionOccurrences(IConversationStepStack conversationStepStack,
-            String action) {
+    private int countActionOccurrences(IConversationStepStack conversationStepStack, String action) {
 
         int count = 0;
         for (int i = 0; i < conversationStepStack.size(); i++) {
@@ -280,8 +265,9 @@ public class OutputGenerationTask implements ILifecycleTask {
     /**
      * helper method to convert from OutputConfiguration to internal Output Value
      *
-     * @param configOutputs List<OutputConfiguration.OutputType> as it comes from
-     *                      the configuration repository
+     * @param configOutputs
+     *            List<OutputConfiguration.OutputType> as it comes from the
+     *            configuration repository
      * @return List<OutputValue> as it is used in the internal system
      */
     private List<OutputValue> convertOutputTypesConfig(List<OutputConfiguration.Output> configOutputs) {
@@ -295,8 +281,9 @@ public class OutputGenerationTask implements ILifecycleTask {
     /**
      * helper method to convert from OutputConfiguration to internal QuickReply
      *
-     * @param configQuickReplies List<OutputConfiguration.QuickReply> as it comes
-     *                           from the configuration repository
+     * @param configQuickReplies
+     *            List<OutputConfiguration.QuickReply> as it comes from the
+     *            configuration repository
      * @return List<QuickReply> as it is used in the internal system
      */
     private List<QuickReply> convertQuickRepliesConfig(List<QuickReply> configQuickReplies) {

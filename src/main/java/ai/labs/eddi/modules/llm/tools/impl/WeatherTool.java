@@ -20,9 +20,9 @@ import java.time.Duration;
 import java.util.Optional;
 
 /**
- * Weather service tool for retrieving current weather information.
- * Supports OpenWeatherMap API (free tier available).
- * Uses IJsonSerialization for proper JSON parsing.
+ * Weather service tool for retrieving current weather information. Supports
+ * OpenWeatherMap API (free tier available). Uses IJsonSerialization for proper
+ * JSON parsing.
  */
 @ApplicationScoped
 public class WeatherTool {
@@ -36,15 +36,11 @@ public class WeatherTool {
     Optional<String> openWeatherMapApiKey;
 
     public WeatherTool() {
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
+        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
 
     @Tool("Gets current weather information for a city. Returns temperature, conditions, humidity, and wind speed.")
-    public String getCurrentWeather(
-            @P("city") String city,
-            @P("units") String units) {
+    public String getCurrentWeather(@P("city") String city, @P("units") String units) {
 
         if (openWeatherMapApiKey.isEmpty()) {
             return "Error: Weather API key not configured. Please set eddi.tools.weather.openweathermap.api-key in application.properties";
@@ -58,16 +54,10 @@ public class WeatherTool {
             LOGGER.info("Getting weather for: " + city);
 
             String encodedCity = URLEncoder.encode(city, StandardCharsets.UTF_8);
-            String url = String.format(
-                "https://api.openweathermap.org/data/2.5/weather?q=%s&appid=%s&units=%s",
-                encodedCity, openWeatherMapApiKey.get(), units
-            );
+            String url = String.format("https://api.openweathermap.org/data/2.5/weather?q=%s&appid=%s&units=%s", encodedCity,
+                    openWeatherMapApiKey.get(), units);
 
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(10))
-                    .GET()
-                    .build();
+            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(10)).GET().build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -88,10 +78,7 @@ public class WeatherTool {
     }
 
     @Tool("Gets weather forecast for the next few days")
-    public String getWeatherForecast(
-            @P("city") String city,
-            @P("days") Integer days,
-            @P("units") String units) {
+    public String getWeatherForecast(@P("city") String city, @P("days") Integer days, @P("units") String units) {
 
         if (openWeatherMapApiKey.isEmpty()) {
             return "Error: Weather API key not configured.";
@@ -112,16 +99,10 @@ public class WeatherTool {
             LOGGER.info("Getting " + days + "-day forecast for: " + city);
 
             String encodedCity = URLEncoder.encode(city, StandardCharsets.UTF_8);
-            String url = String.format(
-                "https://api.openweathermap.org/data/2.5/forecast?q=%s&appid=%s&units=%s&cnt=%d",
-                encodedCity, openWeatherMapApiKey.get(), units, days * 8
-            );
+            String url = String.format("https://api.openweathermap.org/data/2.5/forecast?q=%s&appid=%s&units=%s&cnt=%d", encodedCity,
+                    openWeatherMapApiKey.get(), units, days * 8);
 
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(10))
-                    .GET()
-                    .build();
+            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(10)).GET().build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -201,13 +182,15 @@ public class WeatherTool {
             int count = 0;
 
             for (JsonNode forecast : list) {
-                if (count >= days) break;
+                if (count >= days)
+                    break;
 
                 String dateTime = forecast.get("dt_txt").asText();
                 String date = dateTime.substring(0, 10);
 
                 if (!date.equals(lastDate)) {
-                    if (count > 0) result.append("\n");
+                    if (count > 0)
+                        result.append("\n");
 
                     JsonNode main = forecast.get("main");
                     JsonNode weather = forecast.get("weather");
@@ -232,4 +215,3 @@ public class WeatherTool {
         }
     }
 }
-

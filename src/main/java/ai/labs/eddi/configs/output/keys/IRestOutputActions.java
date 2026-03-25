@@ -9,14 +9,13 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3) Output", authorizations = {@Authorization(value = "eddi_auth")})
+// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3)
+// Output", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/outputstore/actions")
 @Tag(name = "05. Output", description = "lifecycle extension for LLM configurations")
 public interface IRestOutputActions {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    List<String> readOutputActions(@QueryParam("workflowId") String workflowId,
-                                   @QueryParam("packageVersion") Integer packageVersion,
-                                   @QueryParam("filter") @DefaultValue("") String filter,
-                                   @QueryParam("limit") @DefaultValue("20") Integer limit);
+    List<String> readOutputActions(@QueryParam("workflowId") String workflowId, @QueryParam("packageVersion") Integer packageVersion,
+            @QueryParam("filter") @DefaultValue("") String filter, @QueryParam("limit") @DefaultValue("20") Integer limit);
 }

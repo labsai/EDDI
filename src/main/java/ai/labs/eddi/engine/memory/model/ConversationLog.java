@@ -1,6 +1,5 @@
 package ai.labs.eddi.engine.memory.model;
 
-
 import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -10,9 +9,7 @@ public class ConversationLog {
 
     @Override
     public String toString() {
-        return messages.
-                stream().map(part -> part.getRole() + ": " + part.getContent()).
-                collect(Collectors.joining("\n"));
+        return messages.stream().map(part -> part.getRole() + ": " + part.getContent()).collect(Collectors.joining("\n"));
     }
 
     public Object toObject() {
@@ -53,8 +50,10 @@ public class ConversationLog {
 
             @Override
             public boolean equals(Object o) {
-                if (this == o) return true;
-                if (o == null || getClass() != o.getClass()) return false;
+                if (this == o)
+                    return true;
+                if (o == null || getClass() != o.getClass())
+                    return false;
                 Content that = (Content) o;
                 return java.util.Objects.equals(type, that.type) && java.util.Objects.equals(value, that.value);
             }
@@ -71,11 +70,7 @@ public class ConversationLog {
         }
 
         public enum ContentType {
-            text,
-            image,
-            pdf,
-            audio,
-            video
+            text, image, pdf, audio, video
         }
 
         public ConversationPart() {
@@ -104,8 +99,10 @@ public class ConversationLog {
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
             ConversationPart that = (ConversationPart) o;
             return java.util.Objects.equals(role, that.role) && java.util.Objects.equals(content, that.content);
         }
@@ -138,8 +135,10 @@ public class ConversationLog {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         ConversationLog that = (ConversationLog) o;
         return java.util.Objects.equals(messages, that.messages);
     }

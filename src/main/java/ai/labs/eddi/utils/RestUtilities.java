@@ -62,7 +62,6 @@ public class RestUtilities {
             relativeUriString = relativeUriString.substring(0, relativeUriString.length() - 1);
         }
 
-
         String[] split = relativeUriString.split("/");
         String lastPartOfUri = split.length > 2 ? split[split.length - 1].split("\\?")[0] : null;
         final String id = isValidId(lastPartOfUri) ? lastPartOfUri : null;

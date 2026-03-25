@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.rules.model;
 
-
 import java.util.LinkedList;
 import java.util.List;
 
@@ -42,10 +41,13 @@ public class RuleConfiguration {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         RuleConfiguration that = (RuleConfiguration) o;
-        return java.util.Objects.equals(name, that.name) && java.util.Objects.equals(actions, that.actions) && java.util.Objects.equals(conditions, that.conditions);
+        return java.util.Objects.equals(name, that.name) && java.util.Objects.equals(actions, that.actions)
+                && java.util.Objects.equals(conditions, that.conditions);
     }
 
     @Override

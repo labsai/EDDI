@@ -38,9 +38,7 @@ public class Conversation implements IConversation {
     private final IPropertiesHandler propertiesHandler;
     private final IConversation.IConversationOutputRenderer outputProvider;
 
-    Conversation(List<IExecutableWorkflow> executableWorkflows,
-            IConversationMemory conversationMemory,
-            IPropertiesHandler propertiesHandler,
+    Conversation(List<IExecutableWorkflow> executableWorkflows, IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
             IConversationOutputRenderer outputProvider) {
         this.executableWorkflows = executableWorkflows;
         this.conversationMemory = conversationMemory;
@@ -97,8 +95,7 @@ public class Conversation implements IConversation {
                 if (userInfo instanceof Map<?, ?>) {
                     @SuppressWarnings("unchecked")
                     var userInfoMap = (Map<String, Object>) userInfo;
-                    conversationMemory.getConversationProperties().put(KEY_USER_INFO,
-                            new Property(KEY_USER_INFO, userInfoMap, Scope.conversation));
+                    conversationMemory.getConversationProperties().put(KEY_USER_INFO, new Property(KEY_USER_INFO, userInfoMap, Scope.conversation));
                 }
             }
 
@@ -120,13 +117,11 @@ public class Conversation implements IConversation {
     }
 
     @Override
-    public void say(final String message, final Map<String, Context> contexts)
-            throws LifecycleException, ConversationNotReadyException {
+    public void say(final String message, final Map<String, Context> contexts) throws LifecycleException, ConversationNotReadyException {
         runStep(message, contexts, true, new LinkedList<>());
     }
 
-    private void runStep(String message, Map<String, Context> contexts, boolean startNewStep,
-            List<String> lifecycleTaskTypes)
+    private void runStep(String message, Map<String, Context> contexts, boolean startNewStep, List<String> lifecycleTaskTypes)
             throws ConversationNotReadyException, LifecycleException {
 
         checkIfConversationInProgress();
@@ -177,8 +172,7 @@ public class Conversation implements IConversation {
         ((ConversationMemory) conversationMemory).startNextStep();
     }
 
-    private List<IData<?>> prepareLifecycleData(String message, Map<String, Context> contexts,
-            List<String> taskTypeResultsToBeRemoved) {
+    private List<IData<?>> prepareLifecycleData(String message, Map<String, Context> contexts, List<String> taskTypeResultsToBeRemoved) {
 
         List<IData<Context>> contextData = createContextData(contexts);
         List<IData<?>> lifecycleData = new LinkedList<>(contextData);
@@ -194,8 +188,7 @@ public class Conversation implements IConversation {
         return lifecycleData;
     }
 
-    private void removedTaskTypeResultsFromPreviousRuns(IWritableConversationStep currentStep,
-            List<String> taskTypeResultsToBeRemoved) {
+    private void removedTaskTypeResultsFromPreviousRuns(IWritableConversationStep currentStep, List<String> taskTypeResultsToBeRemoved) {
 
         if (!isNullOrEmpty(taskTypeResultsToBeRemoved)) {
             taskTypeResultsToBeRemoved.forEach(type -> {
@@ -205,8 +198,7 @@ public class Conversation implements IConversation {
         }
     }
 
-    private void addContextToConversationOutput(IWritableConversationStep currentStep,
-            List<IData<Context>> contextData) {
+    private void addContextToConversationOutput(IWritableConversationStep currentStep, List<IData<Context>> contextData) {
 
         if (!contextData.isEmpty()) {
             var context = ConversationMemoryUtilities.prepareContext(contextData);
@@ -215,9 +207,9 @@ public class Conversation implements IConversation {
     }
 
     /**
-     * Check if the client flagged this input as a secret via the context map.
-     * The client sends:
-     * {@code { "secretInput": { "type": "string", "value": "true" } }}
+     * Check if the client flagged this input as a secret via the context map. The
+     * client sends: {@code { "secretInput": { "type": "string", "value": "true" }
+     * }}
      */
     private static boolean isSecretInputFlagged(Map<String, Context> contexts) {
         if (contexts == null || !contexts.containsKey(KEY_SECRET_INPUT)) {
@@ -243,8 +235,7 @@ public class Conversation implements IConversation {
         }
     }
 
-    private void executeConversationStep(List<IData<?>> lifecycleData, List<String> lifecycleTaskTypes)
-            throws LifecycleException {
+    private void executeConversationStep(List<IData<?>> lifecycleData, List<String> lifecycleTaskTypes) throws LifecycleException {
         try {
             executeWorkflows(lifecycleData, lifecycleTaskTypes);
         } catch (ConversationStopException unused) {
@@ -269,40 +260,35 @@ public class Conversation implements IConversation {
     }
 
     private Map<String, Property> convertProperties(Properties properties) {
-        return properties.keySet().stream().collect(
-                Collectors.toMap(name -> name,
-                        name -> {
-                            Object value = properties.get(name);
-                            if (value instanceof String) {
-                                return new Property(name, value.toString(), Scope.longTerm);
-                            } else if (value instanceof Map<?, ?>) {
-                                @SuppressWarnings("unchecked")
-                                var valueMap = (Map<String, Object>) value;
-                                return new Property(name, valueMap, Scope.longTerm);
-                            } else if (value instanceof Integer valueInt) {
-                                return new Property(name, valueInt, Scope.longTerm);
-                            } else if (value instanceof Float valueFloat) {
-                                return new Property(name, valueFloat, Scope.longTerm);
-                            } else {
-                                return new Property(name, (String) null, Scope.longTerm);
-                            }
-                        },
-                        (a, b) -> b, LinkedHashMap::new));
+        return properties.keySet().stream().collect(Collectors.toMap(name -> name, name -> {
+            Object value = properties.get(name);
+            if (value instanceof String) {
+                return new Property(name, value.toString(), Scope.longTerm);
+            } else if (value instanceof Map<?, ?>) {
+                @SuppressWarnings("unchecked")
+                var valueMap = (Map<String, Object>) value;
+                return new Property(name, valueMap, Scope.longTerm);
+            } else if (value instanceof Integer valueInt) {
+                return new Property(name, valueInt, Scope.longTerm);
+            } else if (value instanceof Float valueFloat) {
+                return new Property(name, valueFloat, Scope.longTerm);
+            } else {
+                return new Property(name, (String) null, Scope.longTerm);
+            }
+        }, (a, b) -> b, LinkedHashMap::new));
 
     }
 
     private void removeOldInvalidProperties() {
         IConversationProperties conversationProperties = conversationMemory.getConversationProperties();
         Map<String, Property> filteredConversationProperties = conversationProperties.entrySet().stream()
-                .filter(property -> property.getValue().getScope() != Scope.step)
-                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+                .filter(property -> property.getValue().getScope() != Scope.step).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
         conversationProperties.clear();
         conversationProperties.putAll(filteredConversationProperties);
     }
 
-    private void storePropertiesPermanently()
-            throws IResourceStore.ResourceStoreException {
+    private void storePropertiesPermanently() throws IResourceStore.ResourceStoreException {
 
         Properties longTermConversationProperties = new Properties();
         for (Property property : conversationMemory.getConversationProperties().values()) {
@@ -337,12 +323,10 @@ public class Conversation implements IConversation {
         return contextData;
     }
 
-    private void executeWorkflows(List<IData<?>> data, List<String> lifecycleTaskTypes)
-            throws LifecycleException, ConversationStopException {
+    private void executeWorkflows(List<IData<?>> data, List<String> lifecycleTaskTypes) throws LifecycleException, ConversationStopException {
         for (IExecutableWorkflow executableWorkflow : executableWorkflows) {
             conversationMemory.getCurrentStep().setCurrentWorkflowId(executableWorkflow.getWorkflowId());
-            data.stream().filter(Objects::nonNull)
-                    .forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
+            data.stream().filter(Objects::nonNull).forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
             ILifecycleManager lifecycleManager = executableWorkflow.getLifecycleManager();
             lifecycleManager.executeLifecycle(conversationMemory, lifecycleTaskTypes);
         }

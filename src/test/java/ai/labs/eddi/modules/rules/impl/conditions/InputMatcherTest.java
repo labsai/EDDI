@@ -26,170 +26,152 @@ import static org.mockito.Mockito.*;
  * @author ginccc
  */
 public class InputMatcherTest extends BaseMatcherTest {
-        private static final String KEY_EXPRESSIONS = "expressions";
-        private final String inputExpressions = "someExpression(someValue),someOtherExpression(SomeOtherValue),someThirdExpression(someNotNeededValue)";
-        private final String expressionsValue = "someExpression(someValue),someOtherExpression(SomeOtherValue)";
-        private Expressions expectedExpressions;
-        private IExpressionProvider expressionProvider;
+    private static final String KEY_EXPRESSIONS = "expressions";
+    private final String inputExpressions = "someExpression(someValue),someOtherExpression(SomeOtherValue),someThirdExpression(someNotNeededValue)";
+    private final String expressionsValue = "someExpression(someValue),someOtherExpression(SomeOtherValue)";
+    private Expressions expectedExpressions;
+    private IExpressionProvider expressionProvider;
 
-        @BeforeEach
-        public void setUp() {
-                expressionProvider = mock(IExpressionProvider.class);
-                expectedExpressions = new Expressions(
-                                new Expression("someExpression", new Value("someValue")),
-                                new Expression("someOtherExpression", new Value("someOtherValue")));
-                when(expressionProvider.parseExpressions(eq(expressionsValue)))
-                                .thenAnswer(invocation -> expectedExpressions);
-                matcher = new InputMatcher(expressionProvider);
-        }
+    @BeforeEach
+    public void setUp() {
+        expressionProvider = mock(IExpressionProvider.class);
+        expectedExpressions = new Expressions(new Expression("someExpression", new Value("someValue")),
+                new Expression("someOtherExpression", new Value("someOtherValue")));
+        when(expressionProvider.parseExpressions(eq(expressionsValue))).thenAnswer(invocation -> expectedExpressions);
+        matcher = new InputMatcher(expressionProvider);
+    }
 
-        @Test
-        public void setValues_expressions() {
-                // setup
-                Map<String, String> values = new HashMap<>();
-                values.put(KEY_EXPRESSIONS, expressionsValue);
+    @Test
+    public void setValues_expressions() {
+        // setup
+        Map<String, String> values = new HashMap<>();
+        values.put(KEY_EXPRESSIONS, expressionsValue);
 
-                // test
-                matcher.setConfigs(values);
+        // test
+        matcher.setConfigs(values);
 
-                // assert
-                Assertions.assertEquals(expectedExpressions, ((InputMatcher) matcher).getExpressions());
-        }
+        // assert
+        Assertions.assertEquals(expectedExpressions, ((InputMatcher) matcher).getExpressions());
+    }
 
-        @Test
-        public void execute_occurrence_currentStep() throws Exception {
-                // setup
-                Map<String, String> values = new HashMap<>();
-                values.put(KEY_EXPRESSIONS, expressionsValue);
-                values.put(KEY_OCCURRENCE, ConversationStepOccurrence.currentStep.toString());
-                matcher.setConfigs(values);
-                IConversationMemory memory = mock(IConversationMemory.class);
-                IWritableConversationStep currentConversationStep = mock(IWritableConversationStep.class);
-                when(currentConversationStep.getLatestData(eq(EXPRESSIONS_PARSED)))
-                                .thenAnswer(invocation -> new Data<>("expressions", inputExpressions));
-                when(memory.getCurrentStep()).thenAnswer(invocation -> currentConversationStep);
-                Expressions expectedInputExpressions = new Expressions(
-                                new Expression("someExpression", new Value("someValue")),
-                                new Expression("someOtherExpression", new Value("someOtherValue")),
-                                new Expression("someThirdExpression", new Value("someNotNeededValue")));
-                when(expressionProvider.parseExpressions(eq(inputExpressions)))
-                                .thenAnswer(invocation -> expectedInputExpressions);
+    @Test
+    public void execute_occurrence_currentStep() throws Exception {
+        // setup
+        Map<String, String> values = new HashMap<>();
+        values.put(KEY_EXPRESSIONS, expressionsValue);
+        values.put(KEY_OCCURRENCE, ConversationStepOccurrence.currentStep.toString());
+        matcher.setConfigs(values);
+        IConversationMemory memory = mock(IConversationMemory.class);
+        IWritableConversationStep currentConversationStep = mock(IWritableConversationStep.class);
+        when(currentConversationStep.getLatestData(eq(EXPRESSIONS_PARSED))).thenAnswer(invocation -> new Data<>("expressions", inputExpressions));
+        when(memory.getCurrentStep()).thenAnswer(invocation -> currentConversationStep);
+        Expressions expectedInputExpressions = new Expressions(new Expression("someExpression", new Value("someValue")),
+                new Expression("someOtherExpression", new Value("someOtherValue")),
+                new Expression("someThirdExpression", new Value("someNotNeededValue")));
+        when(expressionProvider.parseExpressions(eq(inputExpressions))).thenAnswer(invocation -> expectedInputExpressions);
 
-                // test
-                ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
+        // test
+        ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
-                // assert
-                Assertions.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
-                verify(memory).getCurrentStep();
-                verify(currentConversationStep).getLatestData(EXPRESSIONS_PARSED);
-        }
+        // assert
+        Assertions.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
+        verify(memory).getCurrentStep();
+        verify(currentConversationStep).getLatestData(EXPRESSIONS_PARSED);
+    }
 
-        @Test
-        public void execute_occurrence_lastStep() throws Exception {
-                // setup
-                Map<String, String> values = new HashMap<>();
-                values.put(KEY_EXPRESSIONS, expressionsValue);
-                values.put(KEY_OCCURRENCE, ConversationStepOccurrence.lastStep.toString());
-                matcher.setConfigs(values);
-                IConversationMemory memory = mock(IConversationMemory.class);
-                IConversationStep previousConversationStep = mock(IConversationStep.class);
-                when(previousConversationStep.getLatestData(eq(EXPRESSIONS_PARSED)))
-                                .thenAnswer(invocation -> new Data<>("expressions", inputExpressions));
-                when(memory.getPreviousSteps()).thenAnswer(invocation -> new ConversationMemory.ConversationStepStack(
-                                Collections.singletonList(previousConversationStep)));
-                Expressions expectedInputExpressions = new Expressions(
-                                new Expression("someExpression", new Value("someValue")),
-                                new Expression("someOtherExpression", new Value("someOtherValue")),
-                                new Expression("someThirdExpression", new Value("someNotNeededValue")));
-                when(expressionProvider.parseExpressions(eq(inputExpressions)))
-                                .thenAnswer(invocation -> expectedInputExpressions);
+    @Test
+    public void execute_occurrence_lastStep() throws Exception {
+        // setup
+        Map<String, String> values = new HashMap<>();
+        values.put(KEY_EXPRESSIONS, expressionsValue);
+        values.put(KEY_OCCURRENCE, ConversationStepOccurrence.lastStep.toString());
+        matcher.setConfigs(values);
+        IConversationMemory memory = mock(IConversationMemory.class);
+        IConversationStep previousConversationStep = mock(IConversationStep.class);
+        when(previousConversationStep.getLatestData(eq(EXPRESSIONS_PARSED))).thenAnswer(invocation -> new Data<>("expressions", inputExpressions));
+        when(memory.getPreviousSteps())
+                .thenAnswer(invocation -> new ConversationMemory.ConversationStepStack(Collections.singletonList(previousConversationStep)));
+        Expressions expectedInputExpressions = new Expressions(new Expression("someExpression", new Value("someValue")),
+                new Expression("someOtherExpression", new Value("someOtherValue")),
+                new Expression("someThirdExpression", new Value("someNotNeededValue")));
+        when(expressionProvider.parseExpressions(eq(inputExpressions))).thenAnswer(invocation -> expectedInputExpressions);
 
-                // test
-                ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
+        // test
+        ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
-                // assert
-                Assertions.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
-                verify(memory).getPreviousSteps();
-                verify(previousConversationStep).getLatestData(EXPRESSIONS_PARSED);
-        }
+        // assert
+        Assertions.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
+        verify(memory).getPreviousSteps();
+        verify(previousConversationStep).getLatestData(EXPRESSIONS_PARSED);
+    }
 
-        @Test
-        public void execute_occurrence_anyStep() throws Exception {
-                // setup
-                Map<String, String> values = new HashMap<>();
-                values.put(KEY_EXPRESSIONS, expressionsValue);
-                values.put(KEY_OCCURRENCE, ConversationStepOccurrence.anyStep.toString());
-                matcher.setConfigs(values);
-                IConversationMemory memory = mock(IConversationMemory.class);
-                IConversationStep previousConversationStep1 = mock(IConversationStep.class);
-                IConversationStep previousConversationStep2 = mock(IConversationStep.class);
-                when(previousConversationStep1.getLatestData(eq(EXPRESSIONS_PARSED.key())))
-                                .thenAnswer(invocation -> new Data<>("expressions", "someNonMatchingExpression"));
-                when(previousConversationStep2.getLatestData(eq(EXPRESSIONS_PARSED.key())))
-                                .thenAnswer(invocation -> new Data<>("expressions", inputExpressions));
-                when(memory.getAllSteps()).thenAnswer(invocation -> new ConversationMemory.ConversationStepStack(
-                                Arrays.asList(previousConversationStep1,
-                                                previousConversationStep2)));
-                Expressions expectedInputExpressions = new Expressions(
-                                new Expression("someExpression", new Value("someValue")),
-                                new Expression("someOtherExpression", new Value("someOtherValue")),
-                                new Expression("someThirdExpression", new Value("someNotNeededValue")));
-                when(expressionProvider.parseExpressions(eq(inputExpressions)))
-                                .thenAnswer(invocation -> expectedInputExpressions);
-                when(expressionProvider.parseExpressions(not(eq(inputExpressions))))
-                                .thenAnswer(invocation -> new Expressions());
+    @Test
+    public void execute_occurrence_anyStep() throws Exception {
+        // setup
+        Map<String, String> values = new HashMap<>();
+        values.put(KEY_EXPRESSIONS, expressionsValue);
+        values.put(KEY_OCCURRENCE, ConversationStepOccurrence.anyStep.toString());
+        matcher.setConfigs(values);
+        IConversationMemory memory = mock(IConversationMemory.class);
+        IConversationStep previousConversationStep1 = mock(IConversationStep.class);
+        IConversationStep previousConversationStep2 = mock(IConversationStep.class);
+        when(previousConversationStep1.getLatestData(eq(EXPRESSIONS_PARSED.key())))
+                .thenAnswer(invocation -> new Data<>("expressions", "someNonMatchingExpression"));
+        when(previousConversationStep2.getLatestData(eq(EXPRESSIONS_PARSED.key())))
+                .thenAnswer(invocation -> new Data<>("expressions", inputExpressions));
+        when(memory.getAllSteps()).thenAnswer(
+                invocation -> new ConversationMemory.ConversationStepStack(Arrays.asList(previousConversationStep1, previousConversationStep2)));
+        Expressions expectedInputExpressions = new Expressions(new Expression("someExpression", new Value("someValue")),
+                new Expression("someOtherExpression", new Value("someOtherValue")),
+                new Expression("someThirdExpression", new Value("someNotNeededValue")));
+        when(expressionProvider.parseExpressions(eq(inputExpressions))).thenAnswer(invocation -> expectedInputExpressions);
+        when(expressionProvider.parseExpressions(not(eq(inputExpressions)))).thenAnswer(invocation -> new Expressions());
 
-                // test
-                ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
+        // test
+        ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
-                // assert
-                Assertions.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
-                verify(memory).getAllSteps();
-                verify(previousConversationStep1).getLatestData(EXPRESSIONS_PARSED.key());
-                verify(previousConversationStep2).getLatestData(EXPRESSIONS_PARSED.key());
-        }
+        // assert
+        Assertions.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
+        verify(memory).getAllSteps();
+        verify(previousConversationStep1).getLatestData(EXPRESSIONS_PARSED.key());
+        verify(previousConversationStep2).getLatestData(EXPRESSIONS_PARSED.key());
+    }
 
-        @Test
-        public void execute_occurrence_never() throws Exception {
-                // setup
-                Map<String, String> values = new HashMap<>();
-                String expectedExpressionValue = "nonMatchingExpression(nonMatchingValue)";
-                values.put(KEY_EXPRESSIONS, expectedExpressionValue);
-                values.put(KEY_OCCURRENCE, ConversationStepOccurrence.never.toString());
-                IConversationMemory memory = mock(IConversationMemory.class);
-                IConversationStep previousConversationStep1 = mock(IConversationStep.class);
-                IConversationStep previousConversationStep2 = mock(IConversationStep.class);
-                when(expressionProvider.parseExpressions(eq(expectedExpressionValue)))
-                                .thenAnswer(invocation -> new Expressions(
-                                                new Expression("nonMatchingExpression",
-                                                                new Value("nonMatchingValue"))));
-                matcher.setConfigs(values);
+    @Test
+    public void execute_occurrence_never() throws Exception {
+        // setup
+        Map<String, String> values = new HashMap<>();
+        String expectedExpressionValue = "nonMatchingExpression(nonMatchingValue)";
+        values.put(KEY_EXPRESSIONS, expectedExpressionValue);
+        values.put(KEY_OCCURRENCE, ConversationStepOccurrence.never.toString());
+        IConversationMemory memory = mock(IConversationMemory.class);
+        IConversationStep previousConversationStep1 = mock(IConversationStep.class);
+        IConversationStep previousConversationStep2 = mock(IConversationStep.class);
+        when(expressionProvider.parseExpressions(eq(expectedExpressionValue)))
+                .thenAnswer(invocation -> new Expressions(new Expression("nonMatchingExpression", new Value("nonMatchingValue"))));
+        matcher.setConfigs(values);
 
-                when(expressionProvider.parseExpressions(eq("someNonMatchingExpression"))).thenAnswer(
-                                invocation -> Collections.singletonList(new Expression("someNonMatchingExpression")));
-                when(previousConversationStep1.getLatestData(eq(EXPRESSIONS_PARSED.key())))
-                                .thenAnswer(invocation -> new Data<>("expressions", "someNonMatchingExpression"));
-                when(previousConversationStep2.getLatestData(eq(EXPRESSIONS_PARSED.key())))
-                                .thenAnswer(invocation -> new Data<>("expressions", inputExpressions));
-                when(memory.getAllSteps()).thenAnswer(invocation -> new ConversationMemory.ConversationStepStack(
-                                Arrays.asList(previousConversationStep1,
-                                                previousConversationStep2)));
-                Expressions expectedInputExpressions = new Expressions(
-                                new Expression("someExpression", new Value("someValue")),
-                                new Expression("someOtherExpression", new Value("someOtherValue")),
-                                new Expression("someThirdExpression", new Value("someNotNeededValue")));
-                when(expressionProvider.parseExpressions(eq(inputExpressions)))
-                                .thenAnswer(invocation -> expectedInputExpressions);
-                when(expressionProvider.parseExpressions(not(eq(inputExpressions))))
-                                .thenAnswer(invocation -> new Expressions());
+        when(expressionProvider.parseExpressions(eq("someNonMatchingExpression")))
+                .thenAnswer(invocation -> Collections.singletonList(new Expression("someNonMatchingExpression")));
+        when(previousConversationStep1.getLatestData(eq(EXPRESSIONS_PARSED.key())))
+                .thenAnswer(invocation -> new Data<>("expressions", "someNonMatchingExpression"));
+        when(previousConversationStep2.getLatestData(eq(EXPRESSIONS_PARSED.key())))
+                .thenAnswer(invocation -> new Data<>("expressions", inputExpressions));
+        when(memory.getAllSteps()).thenAnswer(
+                invocation -> new ConversationMemory.ConversationStepStack(Arrays.asList(previousConversationStep1, previousConversationStep2)));
+        Expressions expectedInputExpressions = new Expressions(new Expression("someExpression", new Value("someValue")),
+                new Expression("someOtherExpression", new Value("someOtherValue")),
+                new Expression("someThirdExpression", new Value("someNotNeededValue")));
+        when(expressionProvider.parseExpressions(eq(inputExpressions))).thenAnswer(invocation -> expectedInputExpressions);
+        when(expressionProvider.parseExpressions(not(eq(inputExpressions)))).thenAnswer(invocation -> new Expressions());
 
-                // test
-                ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
+        // test
+        ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
 
-                // assert
-                Assertions.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
-                verify(memory).getAllSteps();
-                verify(previousConversationStep1).getLatestData(EXPRESSIONS_PARSED.key());
-                verify(previousConversationStep2).getLatestData(EXPRESSIONS_PARSED.key());
-        }
+        // assert
+        Assertions.assertEquals(ExecutionState.SUCCESS, actualExecutionState);
+        verify(memory).getAllSteps();
+        verify(previousConversationStep1).getLatestData(EXPRESSIONS_PARSED.key());
+        verify(previousConversationStep2).getLatestData(EXPRESSIONS_PARSED.key());
+    }
 }

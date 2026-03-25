@@ -43,11 +43,8 @@ public class RestAgentStore implements IRestAgentStore {
     private static final Logger log = Logger.getLogger(RestAgentStore.class);
 
     @Inject
-    public RestAgentStore(IAgentStore agentStore,
-            IRestWorkflowStore restWorkflowStore,
-            IDocumentDescriptorStore documentDescriptorStore,
-            IJsonSchemaCreator jsonSchemaCreator,
-            IScheduleStore scheduleStore) {
+    public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
+            IJsonSchemaCreator jsonSchemaCreator, IScheduleStore scheduleStore) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, agentStore, documentDescriptorStore);
         this.documentDescriptorStore = documentDescriptorStore;
         this.agentStore = agentStore;
@@ -71,8 +68,8 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     @Override
-    public List<DocumentDescriptor> readAgentDescriptors(String filter, Integer index, Integer limit,
-            String containingWorkflowUri, Boolean includePreviousVersions) {
+    public List<DocumentDescriptor> readAgentDescriptors(String filter, Integer index, Integer limit, String containingWorkflowUri,
+            Boolean includePreviousVersions) {
 
         IResourceId validatedResourceId = validateUri(containingWorkflowUri);
         if (validatedResourceId == null || !containingWorkflowUri.startsWith(WORKFLOW_URI)) {
@@ -80,8 +77,8 @@ public class RestAgentStore implements IRestAgentStore {
         }
 
         try {
-            return agentStore.getAgentDescriptorsContainingWorkflow(
-                    validatedResourceId.getId(), validatedResourceId.getVersion(), includePreviousVersions);
+            return agentStore.getAgentDescriptorsContainingWorkflow(validatedResourceId.getId(), validatedResourceId.getVersion(),
+                    includePreviousVersions);
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
@@ -136,16 +133,14 @@ public class RestAgentStore implements IRestAgentStore {
                 for (int i = 0; i < packages.size(); i++) {
                     URI workflowUri = packages.get(i);
                     IResourceId resourceId = RestUtilities.extractResourceId(workflowUri);
-                    Response duplicateResourceResponse = restWorkflowStore.duplicateWorkflow(resourceId.getId(),
-                            resourceId.getVersion(), true);
+                    Response duplicateResourceResponse = restWorkflowStore.duplicateWorkflow(resourceId.getId(), resourceId.getVersion(), true);
                     URI newResourceLocation = duplicateResourceResponse.getLocation();
                     packages.set(i, newResourceLocation);
                 }
             }
 
             Response createAgentResponse = restVersionInfo.create(agentConfig);
-            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version,
-                    createAgentResponse.getLocation());
+            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createAgentResponse.getLocation());
 
             return createAgentResponse;
         } catch (Exception e) {
@@ -172,23 +167,17 @@ public class RestAgentStore implements IRestAgentStore {
                     IResourceId resourceId = RestUtilities.extractResourceId(workflowUri);
                     try {
                         // Check if this package is referenced by other agents
-                        var referencingAgents = agentStore.getAgentDescriptorsContainingWorkflow(
-                                resourceId.getId(), resourceId.getVersion(), false);
+                        var referencingAgents = agentStore.getAgentDescriptorsContainingWorkflow(resourceId.getId(), resourceId.getVersion(), false);
                         if (referencingAgents.size() > 1) {
-                            log.infof("Skipping cascade-delete of package %s (v%d) — " +
-                                    "still referenced by %d other agent(s)",
-                                    resourceId.getId(), resourceId.getVersion(),
-                                    referencingAgents.size() - 1);
+                            log.infof("Skipping cascade-delete of package %s (v%d) — " + "still referenced by %d other agent(s)", resourceId.getId(),
+                                    resourceId.getVersion(), referencingAgents.size() - 1);
                             continue;
                         }
 
-                        restWorkflowStore.deleteWorkflow(
-                                resourceId.getId(), resourceId.getVersion(), permanent, true);
-                        log.infof("Cascade-deleted package %s (v%d) for Agent %s",
-                                resourceId.getId(), resourceId.getVersion(), id);
+                        restWorkflowStore.deleteWorkflow(resourceId.getId(), resourceId.getVersion(), permanent, true);
+                        log.infof("Cascade-deleted package %s (v%d) for Agent %s", resourceId.getId(), resourceId.getVersion(), id);
                     } catch (Exception e) {
-                        log.warnf("Failed to cascade-delete package %s: %s",
-                                resourceId.getId(), e.getMessage());
+                        log.warnf("Failed to cascade-delete package %s: %s", resourceId.getId(), e.getMessage());
                     }
                 }
             } catch (IResourceStore.ResourceNotFoundException e) {

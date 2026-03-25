@@ -38,13 +38,11 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
     public MongoDeploymentStorage(MongoDatabase database, IDocumentBuilder documentBuilder) {
         this.deploymentsCollection = database.getCollection(COLLECTION_DEPLOYMENTS);
         this.documentBuilder = documentBuilder;
-        deploymentsCollection.createIndex(
-                Indexes.ascending(FIELD_DEPLOYMENT_STATUS, FIELD_ENVIRONMENT, FIELD_AGENT_ID, FIELD_AGENT_VERSION));
+        deploymentsCollection.createIndex(Indexes.ascending(FIELD_DEPLOYMENT_STATUS, FIELD_ENVIRONMENT, FIELD_AGENT_ID, FIELD_AGENT_VERSION));
     }
 
     @Override
-    public void setDeploymentInfo(String environment, String agentId, Integer agentVersion,
-                                   DeploymentInfo.DeploymentStatus deploymentStatus) {
+    public void setDeploymentInfo(String environment, String agentId, Integer agentVersion, DeploymentInfo.DeploymentStatus deploymentStatus) {
         Document filter = createFilter(environment, agentId, agentVersion);
         Document newDeploymentInfo = new Document(filter);
         newDeploymentInfo.put(FIELD_DEPLOYMENT_STATUS, deploymentStatus.toString());
@@ -56,11 +54,9 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
     }
 
     @Override
-    public DeploymentInfo readDeploymentInfo(String environment, String agentId, Integer agentVersion)
-            throws IResourceStore.ResourceStoreException {
+    public DeploymentInfo readDeploymentInfo(String environment, String agentId, Integer agentVersion) throws IResourceStore.ResourceStoreException {
         try {
-            var document = deploymentsCollection.find(
-                    createFilter(environment, agentId, agentVersion)).first();
+            var document = deploymentsCollection.find(createFilter(environment, agentId, agentVersion)).first();
             if (document == null) {
                 return null;
             }
@@ -76,13 +72,12 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
     }
 
     @Override
-    public List<DeploymentInfo> readDeploymentInfos(String deploymentStatus)
-            throws IResourceStore.ResourceStoreException {
+    public List<DeploymentInfo> readDeploymentInfos(String deploymentStatus) throws IResourceStore.ResourceStoreException {
         List<DeploymentInfo> deploymentInfos = new ArrayList<>();
         try {
-            var iterable = deploymentStatus != null ?
-                    deploymentsCollection.find(eq(FIELD_DEPLOYMENT_STATUS, deploymentStatus)) :
-                    deploymentsCollection.find();
+            var iterable = deploymentStatus != null
+                    ? deploymentsCollection.find(eq(FIELD_DEPLOYMENT_STATUS, deploymentStatus))
+                    : deploymentsCollection.find();
             for (var document : iterable) {
                 deploymentInfos.add(documentBuilder.build(document, DeploymentInfo.class));
             }

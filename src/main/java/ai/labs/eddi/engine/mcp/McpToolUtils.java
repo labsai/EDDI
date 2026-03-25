@@ -16,14 +16,17 @@ final class McpToolUtils {
     }
 
     /**
-     * Get a REST interface proxy via IRestInterfaceFactory.
-     * These proxies make HTTP calls that go through the full JAX-RS workflow,
-     * including DocumentDescriptorFilter which auto-creates descriptors.
+     * Get a REST interface proxy via IRestInterfaceFactory. These proxies make HTTP
+     * calls that go through the full JAX-RS workflow, including
+     * DocumentDescriptorFilter which auto-creates descriptors.
      *
-     * @param factory the REST interface factory
-     * @param clazz   the REST interface class to proxy
+     * @param factory
+     *            the REST interface factory
+     * @param clazz
+     *            the REST interface class to proxy
      * @return the proxy instance
-     * @throws RuntimeException if the proxy cannot be created
+     * @throws RuntimeException
+     *             if the proxy cannot be created
      */
     static <T> T getRestStore(IRestInterfaceFactory factory, Class<T> clazz) {
         try {
@@ -34,8 +37,8 @@ final class McpToolUtils {
     }
 
     /**
-     * Parse an environment string to the corresponding enum value.
-     * Defaults to {@link Environment#production} if null, blank, or unrecognized.
+     * Parse an environment string to the corresponding enum value. Defaults to
+     * {@link Environment#production} if null, blank, or unrecognized.
      */
     static Environment parseEnvironment(String environment) {
         if (environment == null || environment.isBlank()) {
@@ -73,16 +76,16 @@ final class McpToolUtils {
     }
 
     /**
-     * Build an error JSON response with proper escaping.
-     * Uses manual construction to avoid serialization dependency in error paths.
+     * Build an error JSON response with proper escaping. Uses manual construction
+     * to avoid serialization dependency in error paths.
      */
     static String errorJson(String message) {
         return "{\"error\":\"" + escapeJsonString(message) + "\"}";
     }
 
     /**
-     * Escape a string for safe inclusion in a JSON string value.
-     * Handles all JSON-special characters per RFC 8259.
+     * Escape a string for safe inclusion in a JSON string value. Handles all
+     * JSON-special characters per RFC 8259.
      */
     static String escapeJsonString(String input) {
         if (input == null) {
@@ -112,7 +115,8 @@ final class McpToolUtils {
     }
 
     /**
-     * Extract the resource ID from a Location header like "/store/resources/{id}?version=1".
+     * Extract the resource ID from a Location header like
+     * "/store/resources/{id}?version=1".
      */
     static String extractIdFromLocation(String location) {
         if (location == null || location.isBlank()) {
@@ -120,14 +124,12 @@ final class McpToolUtils {
         }
         String path = location.contains("?") ? location.substring(0, location.indexOf('?')) : location;
         int lastSlash = path.lastIndexOf('/');
-        return lastSlash >= 0 && lastSlash < path.length() - 1
-                ? path.substring(lastSlash + 1)
-                : null;
+        return lastSlash >= 0 && lastSlash < path.length() - 1 ? path.substring(lastSlash + 1) : null;
     }
 
     /**
-     * Extract the version from a Location header like "/store/resources/{id}?version=1".
-     * Returns 1 if not found.
+     * Extract the version from a Location header like
+     * "/store/resources/{id}?version=1". Returns 1 if not found.
      */
     static int extractVersionFromLocation(String location) {
         if (location == null || !location.contains("version=")) {

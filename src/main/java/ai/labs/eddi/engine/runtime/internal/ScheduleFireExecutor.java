@@ -18,14 +18,14 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Executes a scheduled fire by resolving the conversation strategy
- * and calling {@link IConversationService#say}.
+ * Executes a scheduled fire by resolving the conversation strategy and calling
+ * {@link IConversationService#say}.
  * <p>
  * All existing guards apply automatically:
  * <ul>
- *   <li>{@code TenantQuotaService} — API call and cost quotas</li>
- *   <li>{@code AuditLedgerService} — HMAC-SHA256 audit trail</li>
- *   <li>{@code ConversationCoordinator} — ordered processing</li>
+ * <li>{@code TenantQuotaService} — API call and cost quotas</li>
+ * <li>{@code AuditLedgerService} — HMAC-SHA256 audit trail</li>
+ * <li>{@code ConversationCoordinator} — ordered processing</li>
  * </ul>
  *
  * @author ginccc
@@ -45,10 +45,13 @@ public class ScheduleFireExecutor {
     /**
      * Execute a schedule fire. Returns the fire log entry.
      *
-     * @param schedule      the schedule to fire
-     * @param instanceId    this cluster instance's ID
-     * @param attemptNumber which retry attempt (1-based), passed by caller
-     *                      to avoid stale snapshot issues
+     * @param schedule
+     *            the schedule to fire
+     * @param instanceId
+     *            this cluster instance's ID
+     * @param attemptNumber
+     *            which retry attempt (1-based), passed by caller to avoid stale
+     *            snapshot issues
      * @return the completed fire log
      */
     public ScheduleFireLog fire(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
@@ -69,17 +72,12 @@ public class ScheduleFireExecutor {
             InputData inputData = buildInputData(schedule);
 
             // 3. Execute via ConversationService.say()
-            //    This enforces tenant quotas, audit trail, conversation ordering
+            // This enforces tenant quotas, audit trail, conversation ordering
             var latch = new CountDownLatch(1);
-            conversationService.say(
-                    env,
-                    schedule.getAgentId(),
-                    conversationId,
-                    false,         // returnDetailed
-                    true,          // returnCurrentStepOnly
-                    List.of(),     // returningFields (empty = all)
-                    inputData,
-                    false,         // rerunOnly
+            conversationService.say(env, schedule.getAgentId(), conversationId, false, // returnDetailed
+                    true, // returnCurrentStepOnly
+                    List.of(), // returningFields (empty = all)
+                    inputData, false, // rerunOnly
                     snapshot -> latch.countDown() // responseHandler
             );
 
@@ -89,32 +87,18 @@ public class ScheduleFireExecutor {
             }
 
             status = ScheduleConfiguration.FireStatus.COMPLETED.name();
-            LOGGER.infof("[SCHEDULE] Fired schedule '%s' (id=%s, type=%s) for Agent %s → conversation %s",
-                    schedule.getName(), schedule.getId(), schedule.getTriggerType(),
-                    schedule.getAgentId(), conversationId);
+            LOGGER.infof("[SCHEDULE] Fired schedule '%s' (id=%s, type=%s) for Agent %s → conversation %s", schedule.getName(), schedule.getId(),
+                    schedule.getTriggerType(), schedule.getAgentId(), conversationId);
 
         } catch (Exception e) {
             status = ScheduleConfiguration.FireStatus.FAILED.name();
             errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
-            LOGGER.warnf(e, "[SCHEDULE] Fire failed for schedule '%s' (id=%s): %s",
-                    schedule.getName(), schedule.getId(), errorMessage);
+            LOGGER.warnf(e, "[SCHEDULE] Fire failed for schedule '%s' (id=%s): %s", schedule.getName(), schedule.getId(), errorMessage);
         }
 
         // 4. Log the fire attempt (Fix #4: use caller-provided attemptNumber)
-        ScheduleFireLog fireLog = new ScheduleFireLog(
-                fireLogId,
-                schedule.getId(),
-                schedule.getFireId(),
-                schedule.getNextFire(),
-                startedAt,
-                Instant.now(),
-                status,
-                instanceId,
-                conversationId,
-                errorMessage,
-                attemptNumber,
-                cost
-        );
+        ScheduleFireLog fireLog = new ScheduleFireLog(fireLogId, schedule.getId(), schedule.getFireId(), schedule.getNextFire(), startedAt,
+                Instant.now(), status, instanceId, conversationId, errorMessage, attemptNumber, cost);
 
         try {
             scheduleStore.logFire(fireLog);
@@ -139,15 +123,9 @@ public class ScheduleFireExecutor {
     }
 
     private String createNewConversation(ScheduleConfiguration schedule, Environment env) throws Exception {
-        var userId = schedule.getUserId() != null
-                ? schedule.getUserId() : "system:scheduler";
+        var userId = schedule.getUserId() != null ? schedule.getUserId() : "system:scheduler";
 
-        var result = conversationService.startConversation(
-                env,
-                schedule.getAgentId(),
-                userId,
-                Collections.emptyMap()
-        );
+        var result = conversationService.startConversation(env, schedule.getAgentId(), userId, Collections.emptyMap());
 
         return result.conversationId();
     }
@@ -158,16 +136,10 @@ public class ScheduleFireExecutor {
         if (conversationId != null && !conversationId.isBlank()) {
             // Validate conversation still exists and is usable
             try {
-                conversationService.readConversation(
-                        env,
-                        schedule.getAgentId(),
-                        conversationId,
-                        false, true, List.of()
-                );
+                conversationService.readConversation(env, schedule.getAgentId(), conversationId, false, true, List.of());
                 return conversationId;
             } catch (Exception e) {
-                LOGGER.infof("[SCHEDULE] Persistent conversation %s no longer valid for schedule %s, creating new",
-                        conversationId, schedule.getId());
+                LOGGER.infof("[SCHEDULE] Persistent conversation %s no longer valid for schedule %s, creating new", conversationId, schedule.getId());
             }
         }
 
@@ -177,8 +149,7 @@ public class ScheduleFireExecutor {
         try {
             scheduleStore.updateSchedule(schedule.getId(), schedule);
         } catch (Exception e) {
-            LOGGER.warnf(e, "[SCHEDULE] Failed to update persistent conversation ID on schedule %s",
-                    schedule.getId());
+            LOGGER.warnf(e, "[SCHEDULE] Failed to update persistent conversation ID on schedule %s", schedule.getId());
         }
         return newConversationId;
     }
@@ -188,8 +159,7 @@ public class ScheduleFireExecutor {
 
         // For heartbeats, default message to "heartbeat" if unset
         String message = schedule.getMessage();
-        if ((message == null || message.isBlank())
-                && schedule.getTriggerType() == TriggerType.HEARTBEAT) {
+        if ((message == null || message.isBlank()) && schedule.getTriggerType() == TriggerType.HEARTBEAT) {
             message = "heartbeat";
         }
         inputData.setInput(message);
@@ -198,8 +168,7 @@ public class ScheduleFireExecutor {
 
         // Inject schedule context so the Agent knows this is a scheduled trigger
         Map<String, Object> scheduleContext = new LinkedHashMap<>();
-        scheduleContext.put("trigger", schedule.getTriggerType() == TriggerType.HEARTBEAT
-                ? "heartbeat" : "scheduled");
+        scheduleContext.put("trigger", schedule.getTriggerType() == TriggerType.HEARTBEAT ? "heartbeat" : "scheduled");
         scheduleContext.put("triggerType", schedule.getTriggerType().name());
         scheduleContext.put("scheduleId", schedule.getId());
         scheduleContext.put("scheduleName", schedule.getName());

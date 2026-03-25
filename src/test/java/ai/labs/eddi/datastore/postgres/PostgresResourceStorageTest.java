@@ -5,7 +5,6 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-
 import javax.sql.DataSource;
 import java.sql.*;
 
@@ -40,8 +39,7 @@ class PostgresResourceStorageTest {
         when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
 
-        storage = new PostgresResourceStorage<>(
-                dataSource, "test_collection", jsonSerialization, TestConfig.class);
+        storage = new PostgresResourceStorage<>(dataSource, "test_collection", jsonSerialization, TestConfig.class);
     }
 
     @Test

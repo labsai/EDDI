@@ -28,8 +28,7 @@ class ToolRateLimiterTest {
     @Test
     void testTryAcquire_Default_AllowsWithinLimit() {
         for (int i = 0; i < 100; i++) {
-            assertTrue(rateLimiter.tryAcquire("testTool"),
-                    "Should allow call " + (i + 1) + " within default limit");
+            assertTrue(rateLimiter.tryAcquire("testTool"), "Should allow call " + (i + 1) + " within default limit");
         }
     }
 
@@ -38,19 +37,16 @@ class ToolRateLimiterTest {
         for (int i = 0; i < 100; i++) {
             rateLimiter.tryAcquire("testTool");
         }
-        assertFalse(rateLimiter.tryAcquire("testTool"),
-                "Should deny call 101 (exceeds default limit of 100)");
+        assertFalse(rateLimiter.tryAcquire("testTool"), "Should deny call 101 (exceeds default limit of 100)");
     }
 
     @Test
     void testTryAcquire_CustomLimit_RespectsLimit() {
         // Set a custom limit of 5
         for (int i = 0; i < 5; i++) {
-            assertTrue(rateLimiter.tryAcquire("limitedTool", 5),
-                    "Should allow call " + (i + 1) + " within custom limit of 5");
+            assertTrue(rateLimiter.tryAcquire("limitedTool", 5), "Should allow call " + (i + 1) + " within custom limit of 5");
         }
-        assertFalse(rateLimiter.tryAcquire("limitedTool", 5),
-                "Should deny call 6 (exceeds custom limit of 5)");
+        assertFalse(rateLimiter.tryAcquire("limitedTool", 5), "Should deny call 6 (exceeds custom limit of 5)");
     }
 
     @Test
@@ -59,16 +55,14 @@ class ToolRateLimiterTest {
         for (int i = 0; i < 3; i++) {
             assertTrue(rateLimiter.tryAcquire("updatedTool", 3));
         }
-        assertFalse(rateLimiter.tryAcquire("updatedTool", 3),
-                "Should deny at limit of 3");
+        assertFalse(rateLimiter.tryAcquire("updatedTool", 3), "Should deny at limit of 3");
 
         // Reset and re-create with higher limit
         rateLimiter.reset("updatedTool");
 
         // Now use a higher limit of 10
         for (int i = 0; i < 10; i++) {
-            assertTrue(rateLimiter.tryAcquire("updatedTool", 10),
-                    "Should allow call " + (i + 1) + " with updated limit of 10");
+            assertTrue(rateLimiter.tryAcquire("updatedTool", 10), "Should allow call " + (i + 1) + " with updated limit of 10");
         }
         assertFalse(rateLimiter.tryAcquire("updatedTool", 10));
     }
@@ -81,8 +75,7 @@ class ToolRateLimiterTest {
         // Update to limit 2 - next call with limit 2 should update the bucket limit
         rateLimiter.tryAcquire("dynamicTool", 2);
         // After 2 total calls (1 + 1), with limit now 2, next should fail
-        assertFalse(rateLimiter.tryAcquire("dynamicTool", 2),
-                "After updating limit to 2, 3rd call should be denied");
+        assertFalse(rateLimiter.tryAcquire("dynamicTool", 2), "After updating limit to 2, 3rd call should be denied");
     }
 
     @Test
@@ -132,8 +125,7 @@ class ToolRateLimiterTest {
         assertFalse(rateLimiter.tryAcquire("resetTool", 5));
 
         rateLimiter.reset("resetTool");
-        assertTrue(rateLimiter.tryAcquire("resetTool", 5),
-                "Should allow after reset");
+        assertTrue(rateLimiter.tryAcquire("resetTool", 5), "Should allow after reset");
     }
 
     @Test

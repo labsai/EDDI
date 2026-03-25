@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.nlp.extensions.normalizers;
 
-
 import ai.labs.eddi.utils.CharacterUtilities;
 
 public class RemoveUndefinedCharacterNormalizer implements INormalizer {

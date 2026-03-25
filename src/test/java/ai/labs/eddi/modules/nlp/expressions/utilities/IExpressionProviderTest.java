@@ -12,14 +12,14 @@ public class IExpressionProviderTest {
 
     @Test
     public void parseExpressions() {
-        //setup
+        // setup
         IExpressionProvider expressionProvider = new ExpressionProvider(new ExpressionFactory());
 
-        //test
+        // test
         String expressions = "property(community_id(3243-23432-1-2121-12313)), property(topic_id(12w-21213211-122112-12121))";
         List<Expression> result = expressionProvider.parseExpressions(expressions);
 
-        //assert
+        // assert
         assertEquals("community_id", result.get(0).getSubExpressions()[0].getExpressionName());
         assertEquals("3243-23432-1-2121-12313", result.get(0).getSubExpressions()[0].getSubExpressions()[0].getExpressionName());
 

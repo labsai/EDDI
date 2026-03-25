@@ -52,13 +52,10 @@ class AgentOrchestratorTest {
         pdfReaderTool = mock(PdfReaderTool.class);
         weatherTool = mock(WeatherTool.class);
 
-        orchestrator = new AgentOrchestrator(
-                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
-                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
-                mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
-                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
-                mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class),
-                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
+        orchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool, textSummarizerTool,
+                pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class), mock(IRestAgentStore.class),
+                mock(IRestWorkflowStore.class), mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
+                mock(IMemoryItemConverter.class));
     }
 
     // ==================== Tool Collection Tests ====================
@@ -151,9 +148,8 @@ class AgentOrchestratorTest {
     void testCollectEnabledTools_AllToolsInWhitelist() {
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
-        task.setBuiltInToolsWhitelist(List.of(
-                "calculator", "datetime", "websearch", "dataformatter",
-                "webscraper", "textsummarizer", "pdfreader", "weather"));
+        task.setBuiltInToolsWhitelist(
+                List.of("calculator", "datetime", "websearch", "dataformatter", "webscraper", "textsummarizer", "pdfreader", "weather"));
 
         List<Object> tools = orchestrator.collectEnabledTools(task);
 
@@ -300,7 +296,8 @@ class AgentOrchestratorTest {
         assertEquals("You are a helpful assistant", task.getSystemMessage());
     }
 
-    // ==================== CDI Proxy Tool Spec Extraction Tests ====================
+    // ==================== CDI Proxy Tool Spec Extraction Tests
+    // ====================
     // Regression tests for: CDI proxy classes don't carry @Tool annotations,
     // so ToolSpecifications.toolSpecificationsFrom() returns empty list.
     // The fix resolves proxy classes to their superclass before extraction.
@@ -343,13 +340,11 @@ class AgentOrchestratorTest {
         Class<?> toolClass = proxy.getClass();
 
         // Proxy class should match the detection pattern
-        assertTrue(toolClass.getName().contains("_ClientProxy"),
-                "Test setup: proxy class name must contain '_ClientProxy'");
+        assertTrue(toolClass.getName().contains("_ClientProxy"), "Test setup: proxy class name must contain '_ClientProxy'");
 
         // Without the fix: extracting from proxy class returns empty
         var specsFromProxy = dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationsFrom(toolClass);
-        assertTrue(specsFromProxy.isEmpty(),
-                "CDI proxy class should NOT have @Tool annotations (this is the bug scenario)");
+        assertTrue(specsFromProxy.isEmpty(), "CDI proxy class should NOT have @Tool annotations (this is the bug scenario)");
 
         // With the fix: resolve to superclass first
         if (toolClass.getName().contains("_ClientProxy") || toolClass.getName().contains("$$")) {
@@ -357,8 +352,7 @@ class AgentOrchestratorTest {
         }
 
         var specsFromSuperclass = dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationsFrom(toolClass);
-        assertEquals(1, specsFromSuperclass.size(),
-                "Superclass should have @Tool annotations after proxy resolution");
+        assertEquals(1, specsFromSuperclass.size(), "Superclass should have @Tool annotations after proxy resolution");
         assertEquals("sampleAction", specsFromSuperclass.get(0).name());
     }
 
@@ -387,8 +381,7 @@ class AgentOrchestratorTest {
 
         // Execute via the proxy instance — method should be callable on the proxy
         String result = (String) toolMethod.invoke(proxy, "test-input");
-        assertEquals("result: test-input", result,
-                "Method from superclass should be invocable on proxy instance");
+        assertEquals("result: test-input", result, "Method from superclass should be invocable on proxy instance");
     }
 
     @Test
@@ -398,20 +391,17 @@ class AgentOrchestratorTest {
         Class<?> mockClass = mockTool.getClass();
 
         // Mockito creates a subclass — its superclass IS the original class
-        assertEquals(SampleToolBean.class, mockClass.getSuperclass(),
-                "Mockito mock superclass should be the original bean class");
+        assertEquals(SampleToolBean.class, mockClass.getSuperclass(), "Mockito mock superclass should be the original bean class");
 
         // The proxy resolution logic should work for any proxy pattern
         // Simulate the resolution: if name matches, use superclass
         Class<?> resolvedClass = mockClass;
-        if (resolvedClass.getName().contains("_ClientProxy")
-                || resolvedClass.getName().contains("$$")
+        if (resolvedClass.getName().contains("_ClientProxy") || resolvedClass.getName().contains("$$")
                 || resolvedClass.getName().contains("MockitoMock")) {
             resolvedClass = resolvedClass.getSuperclass();
         }
 
-        assertEquals(SampleToolBean.class, resolvedClass,
-                "Proxy resolution should resolve to the original bean class");
+        assertEquals(SampleToolBean.class, resolvedClass, "Proxy resolution should resolve to the original bean class");
 
         // Verify tool specs can be extracted from resolved class
         var specs = dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationsFrom(resolvedClass);
@@ -454,12 +444,9 @@ class AgentOrchestratorTest {
         var restWorkflowStore = mock(IRestWorkflowStore.class);
         var resourceClientLibrary = mock(IResourceClientLibrary.class);
 
-        var testOrchestrator = new AgentOrchestrator(
-                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
-                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
-                mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
-                restAgentStore, restWorkflowStore, resourceClientLibrary,
-                mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
+        var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
+                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class), restAgentStore,
+                restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
                 mock(IMemoryItemConverter.class));
 
         var memory = mock(IConversationMemory.class);
@@ -483,12 +470,9 @@ class AgentOrchestratorTest {
         var restWorkflowStore = mock(IRestWorkflowStore.class);
         var resourceClientLibrary = mock(IResourceClientLibrary.class);
 
-        var testOrchestrator = new AgentOrchestrator(
-                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
-                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
-                mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
-                restAgentStore, restWorkflowStore, resourceClientLibrary,
-                mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
+        var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
+                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class), restAgentStore,
+                restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
                 mock(IMemoryItemConverter.class));
 
         var memory = mock(IConversationMemory.class);
@@ -505,8 +489,7 @@ class AgentOrchestratorTest {
 
         // Build agent config with workflow URI
         var agentConfig = new AgentConfiguration();
-        agentConfig.setWorkflows(List.of(
-                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
+        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
         when(restAgentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
         when(restWorkflowStore.readWorkflow("wf-1", 1)).thenReturn(workflowConfig);
 
@@ -519,8 +502,7 @@ class AgentOrchestratorTest {
         httpCallsConfig.setTargetServerUrl("https://api.weather.com");
         httpCallsConfig.setHttpCalls(List.of(apiCall));
 
-        when(resourceClientLibrary.getResource(
-                URI.create("eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/hc-1?version=1"),
+        when(resourceClientLibrary.getResource(URI.create("eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/hc-1?version=1"),
                 ApiCallsConfiguration.class)).thenReturn(httpCallsConfig);
 
         var result = testOrchestrator.discoverHttpCallTools(memory);
@@ -538,12 +520,9 @@ class AgentOrchestratorTest {
         var restWorkflowStore = mock(IRestWorkflowStore.class);
         var resourceClientLibrary = mock(IResourceClientLibrary.class);
 
-        var testOrchestrator = new AgentOrchestrator(
-                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
-                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
-                mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
-                restAgentStore, restWorkflowStore, resourceClientLibrary,
-                mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
+        var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
+                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class), restAgentStore,
+                restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
                 mock(IMemoryItemConverter.class));
 
         var memory = mock(IConversationMemory.class);
@@ -558,8 +537,7 @@ class AgentOrchestratorTest {
         workflowConfig.setWorkflowSteps(List.of(step));
 
         var agentConfig = new AgentConfiguration();
-        agentConfig.setWorkflows(List.of(
-                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
+        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
         when(restAgentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
         when(restWorkflowStore.readWorkflow("wf-1", 1)).thenReturn(workflowConfig);
 
@@ -572,8 +550,7 @@ class AgentOrchestratorTest {
         httpCallsConfig.setTargetServerUrl("https://api.example.com");
         httpCallsConfig.setHttpCalls(List.of(apiCall));
 
-        when(resourceClientLibrary.getResource(any(URI.class), eq(ApiCallsConfiguration.class)))
-                .thenReturn(httpCallsConfig);
+        when(resourceClientLibrary.getResource(any(URI.class), eq(ApiCallsConfiguration.class))).thenReturn(httpCallsConfig);
 
         var result = testOrchestrator.discoverHttpCallTools(memory);
 
@@ -587,13 +564,10 @@ class AgentOrchestratorTest {
     void testDiscoverHttpCallTools_MalformedWorkflowUri() {
         var restAgentStore = mock(IRestAgentStore.class);
 
-        var testOrchestrator = new AgentOrchestrator(
-                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
-                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
-                mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
-                restAgentStore, mock(IRestWorkflowStore.class),
-                mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class),
-                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
+        var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
+                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class), restAgentStore,
+                mock(IRestWorkflowStore.class), mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
+                mock(IMemoryItemConverter.class));
 
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");
@@ -601,8 +575,7 @@ class AgentOrchestratorTest {
 
         var agentConfig = new AgentConfiguration();
         // URI without ?version= query
-        agentConfig.setWorkflows(List.of(
-                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1")));
+        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1")));
         when(restAgentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
 
         // Should not throw, should return empty
@@ -619,12 +592,9 @@ class AgentOrchestratorTest {
         var restWorkflowStore = mock(IRestWorkflowStore.class);
         var resourceClientLibrary = mock(IResourceClientLibrary.class);
 
-        var testOrchestrator = new AgentOrchestrator(
-                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
-                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
-                mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
-                restAgentStore, restWorkflowStore, resourceClientLibrary,
-                mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
+        var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
+                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class), restAgentStore,
+                restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
                 mock(IMemoryItemConverter.class));
 
         var memory = mock(IConversationMemory.class);
@@ -639,8 +609,7 @@ class AgentOrchestratorTest {
         workflowConfig.setWorkflowSteps(List.of(step));
 
         var agentConfig = new AgentConfiguration();
-        agentConfig.setWorkflows(List.of(
-                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
+        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
         when(restAgentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
         when(restWorkflowStore.readWorkflow("wf-1", 1)).thenReturn(workflowConfig);
 
@@ -652,8 +621,7 @@ class AgentOrchestratorTest {
         httpCallsConfig.setTargetServerUrl("https://api.example.com");
         httpCallsConfig.setHttpCalls(List.of(apiCall));
 
-        when(resourceClientLibrary.getResource(any(URI.class), eq(ApiCallsConfiguration.class)))
-                .thenReturn(httpCallsConfig);
+        when(resourceClientLibrary.getResource(any(URI.class), eq(ApiCallsConfiguration.class))).thenReturn(httpCallsConfig);
 
         var result = testOrchestrator.discoverHttpCallTools(memory);
 

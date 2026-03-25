@@ -17,8 +17,7 @@ import java.util.stream.Collectors;
  * @author ginccc
  */
 @ApplicationScoped
-public class ApiCallsStore extends AbstractResourceStore<ApiCallsConfiguration>
-        implements IApiCallsStore {
+public class ApiCallsStore extends AbstractResourceStore<ApiCallsConfiguration> implements IApiCallsStore {
 
     @Inject
     public ApiCallsStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
@@ -29,8 +28,8 @@ public class ApiCallsStore extends AbstractResourceStore<ApiCallsConfiguration>
     public List<String> readActions(String id, Integer version, String filter, Integer limit)
             throws ResourceNotFoundException, ResourceStoreException {
 
-        List<String> actions = read(id, version).getHttpCalls().stream().map(ApiCall::getActions)
-                .flatMap(Collection::stream).collect(Collectors.toList());
+        List<String> actions = read(id, version).getHttpCalls().stream().map(ApiCall::getActions).flatMap(Collection::stream)
+                .collect(Collectors.toList());
 
         return limit > 0 ? actions.subList(0, limit) : actions;
     }

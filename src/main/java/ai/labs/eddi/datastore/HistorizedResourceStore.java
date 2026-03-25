@@ -9,14 +9,15 @@ import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
  * <p>
  * Manages the current/history lifecycle:
  * <ul>
- *     <li>Create - store as version 1</li>
- *     <li>Update - archive current to history, create new version</li>
- *     <li>Delete - archive with deleted flag, remove current</li>
- *     <li>Read - try current, fall back to history</li>
+ * <li>Create - store as version 1</li>
+ * <li>Update - archive current to history, create new version</li>
+ * <li>Delete - archive with deleted flag, remove current</li>
+ * <li>Read - try current, fall back to history</li>
  * </ul>
  * This class has <b>zero</b> database-specific dependencies.
  *
- * @param <T> the resource document type
+ * @param <T>
+ *            the resource document type
  */
 public class HistorizedResourceStore<T> implements IResourceStore<T> {
 
@@ -39,8 +40,7 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
     }
 
     @Override
-    public Integer update(String id, Integer version, T content)
-            throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
+    public Integer update(String id, Integer version, T content) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
 
         checkNotNull(id, "id");
         checkNotNull(version, "version");
@@ -55,8 +55,7 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
 
         try {
             Integer newVersion = resource.getVersion() + 1;
-            var newResource =
-                    resourceStorage.newResource(resource.getId(), newVersion, content);
+            var newResource = resourceStorage.newResource(resource.getId(), newVersion, content);
             resourceStorage.store(newResource);
             return newVersion;
         } catch (IOException e) {
@@ -79,8 +78,7 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
     }
 
     @Override
-    public synchronized void delete(String id, Integer version)
-            throws ResourceModifiedException, ResourceNotFoundException {
+    public synchronized void delete(String id, Integer version) throws ResourceModifiedException, ResourceNotFoundException {
 
         checkNotNull(id, "id");
         checkNotNull(version, "version");
@@ -89,8 +87,7 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
 
         checkIfFoundAndLatest(id, version, resource);
 
-        var historyResource =
-                resourceStorage.newHistoryResourceFor(resource, true);
+        var historyResource = resourceStorage.newHistoryResourceFor(resource, true);
         resourceStorage.store(historyResource);
 
         resourceStorage.remove(id);
@@ -116,8 +113,7 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
     }
 
     @Override
-    public IResourceStore.IResourceId getCurrentResourceId(final String id)
-            throws ResourceNotFoundException {
+    public IResourceStore.IResourceId getCurrentResourceId(final String id) throws ResourceNotFoundException {
 
         checkNotNull(id, "id");
 
@@ -141,8 +137,7 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
     }
 
     @Override
-    public T read(String id, Integer version)
-            throws ResourceNotFoundException, ResourceStoreException {
+    public T read(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
 
         checkNotNull(id, "id");
         checkNotNull(version, "version");
@@ -169,8 +164,7 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
     }
 
     @Override
-    public T readIncludingDeleted(String id, Integer version)
-            throws ResourceNotFoundException, ResourceStoreException {
+    public T readIncludingDeleted(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
 
         checkNotNull(id, "id");
         checkNotNull(version, "version");

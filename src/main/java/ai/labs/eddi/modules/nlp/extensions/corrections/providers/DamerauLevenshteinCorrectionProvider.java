@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.nlp.extensions.corrections.providers;
 
-
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.modules.nlp.extensions.corrections.DamerauLevenshteinCorrection;
 import ai.labs.eddi.modules.nlp.extensions.corrections.ICorrection;

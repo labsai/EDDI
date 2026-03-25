@@ -27,8 +27,7 @@ public interface IRestAgentTriggerStore {
     @PUT
     @Path("/{intent}")
     @Consumes(MediaType.APPLICATION_JSON)
-    Response updateAgentTrigger(@PathParam("intent") String intent,
-            AgentTriggerConfiguration agentTriggerConfiguration);
+    Response updateAgentTrigger(@PathParam("intent") String intent, AgentTriggerConfiguration agentTriggerConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)

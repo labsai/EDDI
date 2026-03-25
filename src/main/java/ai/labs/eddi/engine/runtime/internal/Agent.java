@@ -36,21 +36,17 @@ public class Agent implements IAgent {
     }
 
     @Override
-    public IConversation startConversation(final String userId,
-                                           final Map<String, Context> context,
-                                           IPropertiesHandler propertiesHandler,
-                                           final IConversation.IConversationOutputRenderer outputProvider)
-            throws LifecycleException, IllegalAccessException {
-        Conversation conversation = new Conversation(executableWorkflows,
-                new ConversationMemory(agentId, agentVersion, userId), propertiesHandler, outputProvider);
+    public IConversation startConversation(final String userId, final Map<String, Context> context, IPropertiesHandler propertiesHandler,
+            final IConversation.IConversationOutputRenderer outputProvider) throws LifecycleException, IllegalAccessException {
+        Conversation conversation = new Conversation(executableWorkflows, new ConversationMemory(agentId, agentVersion, userId), propertiesHandler,
+                outputProvider);
         conversation.init(context);
         return conversation;
     }
 
     @Override
-    public IConversation continueConversation(final IConversationMemory conversationMemory,
-                                              final IPropertiesHandler propertiesHandler,
-                                              final IConversation.IConversationOutputRenderer outputProvider) throws IllegalAccessException {
+    public IConversation continueConversation(final IConversationMemory conversationMemory, final IPropertiesHandler propertiesHandler,
+            final IConversation.IConversationOutputRenderer outputProvider) throws IllegalAccessException {
         return new Conversation(executableWorkflows, conversationMemory, propertiesHandler, outputProvider);
     }
 

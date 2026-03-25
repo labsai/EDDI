@@ -5,13 +5,14 @@ import ai.labs.eddi.utils.RuntimeUtilities;
 import java.io.IOException;
 
 /**
- * Extended version of {@link HistorizedResourceStore} that supports
- * in-place modification (set) and explicit ID creation.
+ * Extended version of {@link HistorizedResourceStore} that supports in-place
+ * modification (set) and explicit ID creation.
  * <p>
- * Used by descriptor stores and other stores that need to update
- * specific versions without creating a new version.
+ * Used by descriptor stores and other stores that need to update specific
+ * versions without creating a new version.
  *
- * @param <T> the resource document type
+ * @param <T>
+ *            the resource document type
  */
 public class ModifiableHistorizedResourceStore<T> extends HistorizedResourceStore<T> {
     public ModifiableHistorizedResourceStore(IResourceStorage<T> resourceStore) {
@@ -33,13 +34,15 @@ public class ModifiableHistorizedResourceStore<T> extends HistorizedResourceStor
                     throw createResourceNotFoundException(id, version);
                 }
 
-                //it's a update request for a historized resource, so we update the history resource
+                // it's a update request for a historized resource, so we update the history
+                // resource
                 IResourceStorage.IResource<T> updatedResource = resourceStorage.newResource(id, version, content);
                 IResourceStorage.IHistoryResource<T> updatedHistorizedResource = resourceStorage.newHistoryResourceFor(updatedResource, false);
                 resourceStorage.store(updatedHistorizedResource);
                 return version;
             } else {
-                //it's a update request for the current resource, so we update the current resource
+                // it's a update request for the current resource, so we update the current
+                // resource
                 IResourceStorage.IResource<T> updatedResource = resourceStorage.newResource(id, version, content);
                 resourceStorage.store(updatedResource);
                 return version;
@@ -76,6 +79,5 @@ public class ModifiableHistorizedResourceStore<T> extends HistorizedResourceStor
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
         }
     }
-
 
 }

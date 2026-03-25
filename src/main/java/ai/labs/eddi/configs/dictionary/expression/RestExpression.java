@@ -26,11 +26,8 @@ public class RestExpression implements IRestExpression {
     private final IWorkflowStore workflowStore;
     private final IDictionaryStore regularDictionaryStore;
 
-
-
     @Inject
-    public RestExpression(IWorkflowStore workflowStore,
-                          IDictionaryStore regularDictionaryStore) {
+    public RestExpression(IWorkflowStore workflowStore, IDictionaryStore regularDictionaryStore) {
         this.workflowStore = workflowStore;
         this.regularDictionaryStore = regularDictionaryStore;
     }
@@ -42,7 +39,8 @@ public class RestExpression implements IRestExpression {
             WorkflowConfiguration workflowConfig = workflowStore.read(workflowId, packageVersion);
             List<IResourceStore.IResourceId> resourceIds = readDictionaryResourceIds(workflowConfig);
             for (IResourceStore.IResourceId resourceId : resourceIds) {
-                List<String> expressions = regularDictionaryStore.readExpressions(resourceId.getId(), resourceId.getVersion(), filter, "asc", 0, limit);
+                List<String> expressions = regularDictionaryStore.readExpressions(resourceId.getId(), resourceId.getVersion(), filter, "asc", 0,
+                        limit);
                 CollectionUtilities.addAllWithoutDuplicates(retExpressions, expressions);
             }
             return retExpressions;
@@ -70,7 +68,8 @@ public class RestExpression implements IRestExpression {
                 @SuppressWarnings("unchecked")
                 var extensions = (List<Map<String, Object>>) extensionTypes.get(extensionKey);
                 for (Map<String, Object> extension : extensions) {
-                    if (!extension.containsKey("type") || !extension.get("type").toString().startsWith("eddi://ai.labs.parser.dictionaries.regular")) {
+                    if (!extension.containsKey("type")
+                            || !extension.get("type").toString().startsWith("eddi://ai.labs.parser.dictionaries.regular")) {
                         continue;
                     }
 

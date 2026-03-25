@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.admin.model;
 
-
 import java.util.List;
 
 /**
@@ -8,7 +7,7 @@ import java.util.List;
  */
 public class OrphanReport {
     private int totalOrphans;
-    private int deletedCount;          // only set after purge
+    private int deletedCount; // only set after purge
     private List<OrphanInfo> orphans;
 
     public OrphanReport() {

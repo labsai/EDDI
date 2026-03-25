@@ -26,9 +26,7 @@ public class RestRuleSetStore implements IRestRuleSetStore {
     private final RestVersionInfo<RuleSetConfiguration> restVersionInfo;
 
     @Inject
-    public RestRuleSetStore(IRuleSetStore behaviorStore,
-            IDocumentDescriptorStore documentDescriptorStore,
-            IJsonSchemaCreator jsonSchemaCreator) {
+    public RestRuleSetStore(IRuleSetStore behaviorStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, behaviorStore, documentDescriptorStore);
         this.behaviorStore = behaviorStore;
         this.jsonSchemaCreator = jsonSchemaCreator;

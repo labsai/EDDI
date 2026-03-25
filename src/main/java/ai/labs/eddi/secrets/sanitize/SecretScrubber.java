@@ -14,14 +14,18 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * AST-based JSON scrubber that replaces secret values with vault-redacted placeholders.
- * Used during Agent export to prevent plaintext secrets from leaking into ZIP archives.
+ * AST-based JSON scrubber that replaces secret values with vault-redacted
+ * placeholders. Used during Agent export to prevent plaintext secrets from
+ * leaking into ZIP archives.
  * <p>
  * Detection strategy (defense-in-depth):
  * <ol>
- *   <li><b>Field name heuristics</b>: known secret field names (apiKey, password, token, etc.)</li>
- *   <li><b>Shannon entropy</b>: high-entropy strings (>3.5 bits/char) that look like API keys</li>
- *   <li><b>Vault references</b>: existing ${eddivault:...} references are left untouched</li>
+ * <li><b>Field name heuristics</b>: known secret field names (apiKey, password,
+ * token, etc.)</li>
+ * <li><b>Shannon entropy</b>: high-entropy strings (>3.5 bits/char) that look
+ * like API keys</li>
+ * <li><b>Vault references</b>: existing ${eddivault:...} references are left
+ * untouched</li>
  * </ol>
  */
 @ApplicationScoped
@@ -30,26 +34,24 @@ public class SecretScrubber {
     private static final Logger LOGGER = Logger.getLogger(SecretScrubber.class);
     private static final String REDACTED = "${eddivault:REDACTED}";
 
-    /** Minimum length for entropy analysis (short strings are less likely to be secrets) */
+    /**
+     * Minimum length for entropy analysis (short strings are less likely to be
+     * secrets)
+     */
     private static final int MIN_ENTROPY_LENGTH = 14;
 
-    /** Shannon entropy threshold — API keys typically have entropy > 3.5 bits/char */
+    /**
+     * Shannon entropy threshold — API keys typically have entropy > 3.5 bits/char
+     */
     private static final double ENTROPY_THRESHOLD = 3.5;
 
     /** Pattern matching strings that look like API keys / tokens */
-    private static final Pattern KEY_LIKE_PATTERN =
-            Pattern.compile("[a-zA-Z0-9_.+/~$\\-]{14,1022}");
+    private static final Pattern KEY_LIKE_PATTERN = Pattern.compile("[a-zA-Z0-9_.+/~$\\-]{14,1022}");
 
     /** Known secret field names (case-insensitive matching) */
-    private static final Set<String> SECRET_FIELD_NAMES = Set.of(
-            "apikey", "api_key", "apitoken", "api_token",
-            "password", "passwd", "secret", "secretkey", "secret_key",
-            "token", "accesstoken", "access_token",
-            "authorization", "auth",
-            "credential", "credentials",
-            "privatekey", "private_key",
-            "clientsecret", "client_secret"
-    );
+    private static final Set<String> SECRET_FIELD_NAMES = Set.of("apikey", "api_key", "apitoken", "api_token", "password", "passwd", "secret",
+            "secretkey", "secret_key", "token", "accesstoken", "access_token", "authorization", "auth", "credential", "credentials", "privatekey",
+            "private_key", "clientsecret", "client_secret");
 
     private final ObjectMapper objectMapper;
 
@@ -59,10 +61,11 @@ public class SecretScrubber {
     }
 
     /**
-     * Scrub potential plaintext secrets from a JSON string.
-     * Returns the sanitized JSON, or the original string if parsing fails.
+     * Scrub potential plaintext secrets from a JSON string. Returns the sanitized
+     * JSON, or the original string if parsing fails.
      *
-     * @param json the JSON string to scrub
+     * @param json
+     *            the JSON string to scrub
      * @return sanitized JSON with secrets replaced by ${eddivault:REDACTED}
      */
     public String scrubJson(String json) {
@@ -104,8 +107,7 @@ public class SecretScrubber {
                     }
 
                     // Check 2: Shannon entropy on key-like strings
-                    if (textValue.length() >= MIN_ENTROPY_LENGTH
-                            && KEY_LIKE_PATTERN.matcher(textValue).matches()
+                    if (textValue.length() >= MIN_ENTROPY_LENGTH && KEY_LIKE_PATTERN.matcher(textValue).matches()
                             && shannonEntropy(textValue) > ENTROPY_THRESHOLD) {
                         objectNode.set(fieldName, new TextNode(REDACTED));
                         continue;
@@ -126,11 +128,12 @@ public class SecretScrubber {
     }
 
     /**
-     * Calculate Shannon entropy of a string (bits per character).
-     * Higher entropy = more randomness = more likely to be an API key / secret.
+     * Calculate Shannon entropy of a string (bits per character). Higher entropy =
+     * more randomness = more likely to be an API key / secret.
      */
     static double shannonEntropy(String s) {
-        if (s == null || s.isEmpty()) return 0.0;
+        if (s == null || s.isEmpty())
+            return 0.0;
 
         int[] freq = new int[256];
         for (int i = 0; i < s.length(); i++) {

@@ -10,7 +10,6 @@ import ai.labs.eddi.utils.CharacterUtilities;
 import java.util.Collections;
 import java.util.List;
 
-
 /**
  * @author ginccc
  */

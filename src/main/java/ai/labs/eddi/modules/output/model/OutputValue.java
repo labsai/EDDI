@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.output.model;
 
-
 import java.util.List;
 
 /**
@@ -26,8 +25,10 @@ public class OutputValue {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         OutputValue that = (OutputValue) o;
         return java.util.Objects.equals(valueAlternatives, that.valueAlternatives);
     }

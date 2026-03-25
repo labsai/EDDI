@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.output.model;
 
-
 import java.util.List;
 
 /**
@@ -59,10 +58,13 @@ public class OutputEntry implements Comparable<OutputEntry> {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         OutputEntry that = (OutputEntry) o;
-        return java.util.Objects.equals(action, that.action) && occurred == that.occurred && java.util.Objects.equals(outputs, that.outputs) && java.util.Objects.equals(quickReplies, that.quickReplies);
+        return java.util.Objects.equals(action, that.action) && occurred == that.occurred && java.util.Objects.equals(outputs, that.outputs)
+                && java.util.Objects.equals(quickReplies, that.quickReplies);
     }
 
     @Override

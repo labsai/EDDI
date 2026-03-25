@@ -17,7 +17,7 @@ public class ExpressionFactory implements IExpressionFactory {
     private final Hashtable<String, Expression> expressions = new Hashtable<>();
 
     public ExpressionFactory() {
-        //		expressions.put("", new Parentheses());
+        // expressions.put("", new Parentheses());
         expressions.put("*", new AnyValue());
         expressions.put("all", new AllValue());
         expressions.put("ignored", new Ignored());

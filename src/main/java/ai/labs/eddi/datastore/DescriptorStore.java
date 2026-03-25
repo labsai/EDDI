@@ -8,9 +8,9 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * Database-agnostic descriptor store. Uses {@link IResourceStorageFactory}
- * to obtain the underlying storage, and {@link IResourceStorage#findResources}
- * for filter/pagination queries.
+ * Database-agnostic descriptor store. Uses {@link IResourceStorageFactory} to
+ * obtain the underlying storage, and {@link IResourceStorage#findResources} for
+ * filter/pagination queries.
  *
  * @author ginccc
  */
@@ -26,8 +26,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     private final ModifiableHistorizedResourceStore<T> descriptorResourceStore;
     private final IResourceStorage<T> resourceStorage;
 
-    public DescriptorStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder,
-            Class<T> documentType) {
+    public DescriptorStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder, Class<T> documentType) {
         this.resourceStorage = storageFactory.create("descriptors", documentBuilder, documentType);
         this.descriptorResourceStore = new ModifiableHistorizedResourceStore<>(resourceStorage);
     }
@@ -57,16 +56,15 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
 
         IResourceFilter.QueryFilters[] allFilters;
         if (!queryFiltersOptional.isEmpty()) {
-            IResourceFilter.QueryFilters optional = new IResourceFilter.QueryFilters(
-                    IResourceFilter.QueryFilters.ConnectingType.OR, queryFiltersOptional);
-            allFilters = new IResourceFilter.QueryFilters[] { required, optional };
+            IResourceFilter.QueryFilters optional = new IResourceFilter.QueryFilters(IResourceFilter.QueryFilters.ConnectingType.OR,
+                    queryFiltersOptional);
+            allFilters = new IResourceFilter.QueryFilters[]{required, optional};
         } else {
-            allFilters = new IResourceFilter.QueryFilters[] { required };
+            allFilters = new IResourceFilter.QueryFilters[]{required};
         }
 
         // Use the storage-level findResources for database-agnostic querying
-        List<IResourceStore.IResourceId> matchingIds = resourceStorage.findResources(allFilters, FIELD_LAST_MODIFIED,
-                skip, effectiveLimit);
+        List<IResourceStore.IResourceId> matchingIds = resourceStorage.findResources(allFilters, FIELD_LAST_MODIFIED, skip, effectiveLimit);
 
         // Read each matching resource
         List<T> ret = new LinkedList<>();
@@ -90,8 +88,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
 
     @Override
     public Integer updateDescriptor(String resourceId, Integer version, T documentDescriptor)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException,
-            IResourceStore.ResourceNotFoundException {
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         return descriptorResourceStore.update(resourceId, version, documentDescriptor);
     }
 
@@ -102,8 +99,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     }
 
     @Override
-    public void createDescriptor(String resourceId, Integer version, T documentDescriptor)
-            throws IResourceStore.ResourceStoreException {
+    public void createDescriptor(String resourceId, Integer version, T documentDescriptor) throws IResourceStore.ResourceStoreException {
         descriptorResourceStore.createNew(resourceId, version, documentDescriptor);
     }
 
@@ -118,22 +114,20 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         descriptorResourceStore.deleteAllPermanently(resourceId);
     }
 
-    public IResourceStore.IResourceId getCurrentResourceId(String id)
-            throws IResourceStore.ResourceNotFoundException {
+    public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return descriptorResourceStore.getCurrentResourceId(id);
     }
 
     @Override
-    public List<T> findByOriginId(String originId)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public List<T> findByOriginId(String originId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         List<IResourceFilter.QueryFilter> queryFilters = new LinkedList<>();
         queryFilters.add(new IResourceFilter.QueryFilter("originId", originId));
         queryFilters.add(new IResourceFilter.QueryFilter(FIELD_DELETED, false));
         IResourceFilter.QueryFilters required = new IResourceFilter.QueryFilters(queryFilters);
 
-        List<IResourceStore.IResourceId> matchingIds = resourceStorage
-                .findResources(new IResourceFilter.QueryFilters[] { required }, FIELD_LAST_MODIFIED, 0, 10);
+        List<IResourceStore.IResourceId> matchingIds = resourceStorage.findResources(new IResourceFilter.QueryFilters[]{required},
+                FIELD_LAST_MODIFIED, 0, 10);
 
         List<T> ret = new LinkedList<>();
         for (IResourceStore.IResourceId resourceId : matchingIds) {

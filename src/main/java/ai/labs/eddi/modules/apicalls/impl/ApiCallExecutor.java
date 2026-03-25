@@ -52,11 +52,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private final SecretResolver secretResolver;
 
     @Inject
-    public ApiCallExecutor(IHttpClient httpClient,
-                            IJsonSerialization jsonSerialization,
-                            IRuntime runtime,
-                            PrePostUtils prePostUtils,
-                            SecretResolver secretResolver) {
+    public ApiCallExecutor(IHttpClient httpClient, IJsonSerialization jsonSerialization, IRuntime runtime, PrePostUtils prePostUtils,
+            SecretResolver secretResolver) {
         this.httpClient = httpClient;
         this.jsonSerialization = jsonSerialization;
         this.runtime = runtime;
@@ -65,10 +62,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     @Override
-    public Map<String, Object> execute(ApiCall call,
-                                        IConversationMemory memory,
-                                        Map<String, Object> templateDataObjects,
-                                        String targetServerUrl) throws LifecycleException {
+    public Map<String, Object> execute(ApiCall call, IConversationMemory memory, Map<String, Object> templateDataObjects, String targetServerUrl)
+            throws LifecycleException {
         if (call == null) {
             throw new IllegalArgumentException("call cannot be null");
         }
@@ -86,12 +81,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
             IWritableConversationStep currentStep = memory.getCurrentStep();
 
             var preRequest = call.getPreRequest();
-            templateDataObjects = prePostUtils.executePreRequestPropertyInstructions(
-                    memory, templateDataObjects, preRequest);
+            templateDataObjects = prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, preRequest);
 
             if (call.getFireAndForget()) {
-                executeFireAndForgetCalls(targetServerUrl, call.getRequest(), preRequest,
-                        templateDataObjects, call.getName());
+                executeFireAndForgetCalls(targetServerUrl, call.getRequest(), preRequest, templateDataObjects, call.getName());
                 return Collections.emptyMap();
             } else {
                 IRequest request;
@@ -106,8 +99,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         request = buildRequest(targetServerUrl, call.getRequest(), templateDataObjects);
                         var objectName = call.getName() + "Request";
                         var requestMap = request.toMap();
-                        // Scrub resolved secrets from request map before persisting to conversation memory.
-                        // The actual request (with secrets) was already built — this only affects the debug record.
+                        // Scrub resolved secrets from request map before persisting to conversation
+                        // memory.
+                        // The actual request (with secrets) was already built — this only affects the
+                        // debug record.
                         scrubSensitiveHeaders(requestMap);
                         prePostUtils.createMemoryEntry(currentStep, requestMap, objectName, KEY_HTTP_CALLS);
                         response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
@@ -123,8 +118,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         if (!isNullOrEmpty(responseHeaderObjectName)) {
                             var responseObjectHeader = requireNonNullElse(response.getHttpHeader(), new HashMap<>());
                             templateDataObjects.put(responseHeaderObjectName, responseObjectHeader);
-                            prePostUtils.createMemoryEntry(currentStep, responseObjectHeader,
-                                    responseHeaderObjectName, KEY_HTTP_CALLS);
+                            prePostUtils.createMemoryEntry(currentStep, responseObjectHeader, responseHeaderObjectName, KEY_HTTP_CALLS);
                             result.put("headers", responseObjectHeader);
                         }
 
@@ -141,10 +135,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
                             if (CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
                                 responseObject = jsonSerialization.deserialize(responseBody, Object.class);
                             } else {
-                                if (!actualContentType.startsWith("<not-present>") &&
-                                        !actualContentType.startsWith("text")) {
-                                    var message = "ApiCall (%s) didn't return application/json, text/plain nor text/html " +
-                                            "as content-type, instead was (%s)";
+                                if (!actualContentType.startsWith("<not-present>") && !actualContentType.startsWith("text")) {
+                                    var message = "ApiCall (%s) didn't return application/json, text/plain nor text/html "
+                                            + "as content-type, instead was (%s)";
                                     LOGGER.warn(format(message, call.getName(), actualContentType));
                                 }
                                 responseObject = responseBody;
@@ -158,15 +151,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         }
 
                         amountOfExecutions++;
-                        retryCall = retryCall(call.getPostResponse(), templateDataObjects, amountOfExecutions,
-                                response.getHttpCode(), response.getContentAsString());
+                        retryCall = retryCall(call.getPostResponse(), templateDataObjects, amountOfExecutions, response.getHttpCode(),
+                                response.getContentAsString());
                     } while (retryCall);
                 } catch (ApiCallsValidationException e) {
                     validationError = true;
                 }
 
-                prePostUtils.runPostResponse(memory, call.getPostResponse(), templateDataObjects,
-                        response != null ? response.getHttpCode() : 500, validationError);
+                prePostUtils.runPostResponse(memory, call.getPostResponse(), templateDataObjects, response != null ? response.getHttpCode() : 500,
+                        validationError);
 
                 return result;
             }
@@ -179,8 +172,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private IResponse executeAndMeasureRequest(ApiCall call, IRequest request, boolean retryCall, int amountOfExecutions)
             throws IRequest.HttpRequestException, ExecutionException, InterruptedException {
 
-        LOGGER.info(call.getName() + " Request: " +
-                (amountOfExecutions > 0 ? amountOfExecutions + ". retry - " : "") + request.toString());
+        LOGGER.info(call.getName() + " Request: " + (amountOfExecutions > 0 ? amountOfExecutions + ". retry - " : "") + request.toString());
         int delayInMillis = getDelayInMillis(call, retryCall, amountOfExecutions);
 
         long executionStart = currentTimeMillis();
@@ -189,17 +181,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
         long duration = executionEnd - executionStart;
 
         LOGGER.info(call.getName() + " Response: " + response.toString());
-        LOGGER.info(call.getName() + format(" Execution time: Duration: %sms Delay: %sms Total: %sms\n",
-                duration, delayInMillis, duration + delayInMillis));
+        LOGGER.info(call.getName()
+                + format(" Execution time: Duration: %sms Delay: %sms Total: %sms\n", duration, delayInMillis, duration + delayInMillis));
 
         return response;
     }
 
-    private void executeFireAndForgetCalls(String targetServerUrl,
-                                           Request callRequest,
-                                           HttpPreRequest preRequest,
-                                           Map<String, Object> templateDataObjects,
-                                           String callName) throws ITemplatingEngine.TemplateEngineException, IRequest.HttpRequestException {
+    private void executeFireAndForgetCalls(String targetServerUrl, Request callRequest, HttpPreRequest preRequest,
+            Map<String, Object> templateDataObjects, String callName)
+            throws ITemplatingEngine.TemplateEngineException, IRequest.HttpRequestException {
 
         if (preRequest != null && preRequest.getBatchRequests() != null) {
             BatchRequestBuildingInstruction batchRequest = preRequest.getBatchRequests();
@@ -208,9 +198,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
             }
 
             runtime.submitCallable(() -> {
-                List<Object> batchIterationList = prePostUtils.buildListFromJson(
-                        batchRequest.getIterationObjectName(), batchRequest.getPathToTargetArray(),
-                        batchRequest.getTemplateFilterExpression(), null, templateDataObjects);
+                List<Object> batchIterationList = prePostUtils.buildListFromJson(batchRequest.getIterationObjectName(),
+                        batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), null, templateDataObjects);
 
                 IRequest request;
                 for (Object iterationObject : batchIterationList) {
@@ -233,16 +222,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
     }
 
-    private static void executeFireAndForgetCall(IRequest request, String httpCallsName)
-            throws IRequest.HttpRequestException {
+    private static void executeFireAndForgetCall(IRequest request, String httpCallsName) throws IRequest.HttpRequestException {
 
         LOGGER.info(httpCallsName + " Request (f'n'f): " + request);
         long executionStart = currentTimeMillis();
         request.send(res -> logExecutionResponse(res, httpCallsName, executionStart, currentTimeMillis(), true));
     }
 
-    private static void logExecutionResponse(IResponse response, String httpCallsName,
-                                             long executionStart, long executionEnd, boolean fireAndForget) {
+    private static void logExecutionResponse(IResponse response, String httpCallsName, long executionStart, long executionEnd,
+            boolean fireAndForget) {
 
         long duration = executionEnd - executionStart;
         LOGGER.info(httpCallsName + " Response " + (fireAndForget ? "(f'n'f)" : "") + ": " + response.toString());
@@ -253,9 +241,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         int delayInMillis = 0;
 
         if (retryCall) {
-            Integer exponentialBackoffDelay = call.getPostResponse().
-                    getRetryApiCallInstruction().
-                    getExponentialBackoffDelayInMillis();
+            Integer exponentialBackoffDelay = call.getPostResponse().getRetryApiCallInstruction().getExponentialBackoffDelayInMillis();
             if (exponentialBackoffDelay != null) {
                 delayInMillis = exponentialBackoffDelay * amountOfExecutions;
             }
@@ -269,22 +255,17 @@ public class ApiCallExecutor implements IApiCallExecutor {
         return delayInMillis;
     }
 
-    private IResponse executeRequest(IRequest request, int delay)
-            throws IRequest.HttpRequestException, ExecutionException, InterruptedException {
+    private IResponse executeRequest(IRequest request, int delay) throws IRequest.HttpRequestException, ExecutionException, InterruptedException {
 
         if (delay > 0) {
-            return runtime.getScheduledExecutorService().schedule(
-                    (Callable<IResponse>) request::send,
-                    delay, TimeUnit.MILLISECONDS).get();
+            return runtime.getScheduledExecutorService().schedule((Callable<IResponse>) request::send, delay, TimeUnit.MILLISECONDS).get();
         } else {
             return request.send();
         }
     }
 
-    private boolean retryCall(HttpPostResponse postResponse,
-                              Map<String, Object> conversationValues,
-                              int amountOfExecutions, int httpCode, String contentAsString)
-            throws ApiCallsValidationException {
+    private boolean retryCall(HttpPostResponse postResponse, Map<String, Object> conversationValues, int amountOfExecutions, int httpCode,
+            String contentAsString) throws ApiCallsValidationException {
 
         if (isNullOrEmpty(postResponse)) {
             return false;
@@ -306,10 +287,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             var valuePathMatchers = retryApiCallInstruction.getResponseValuePathMatchers();
             if (!isNullOrEmpty(contentAsString) && !isNullOrEmpty(valuePathMatchers)) {
                 for (var valuePathMatcher : valuePathMatchers) {
-                    boolean success = executeValuePath(
-                            conversationValues,
-                            valuePathMatcher.getValuePath(),
-                            valuePathMatcher.getEquals(),
+                    boolean success = executeValuePath(conversationValues, valuePathMatcher.getValuePath(), valuePathMatcher.getEquals(),
                             valuePathMatcher.getContains());
 
                     if (valuePathMatcher.getTrueIfNoMatch() != success) {
@@ -322,8 +300,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         return false;
     }
 
-    private IRequest buildRequest(String targetServerUrl, Request requestConfig,
-                                   Map<String, Object> templateDataObjects)
+    private IRequest buildRequest(String targetServerUrl, Request requestConfig, Map<String, Object> templateDataObjects)
             throws ITemplatingEngine.TemplateEngineException {
 
         String path = requestConfig.getPath().trim();
@@ -332,7 +309,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
         var targetDestination = !path.startsWith("http") ? targetServerUrl + path : path;
         var targetUriStr = prePostUtils.templateValues(targetDestination, templateDataObjects);
-        // Resolve vault references in URL (e.g., target server with embedded credentials)
+        // Resolve vault references in URL (e.g., target server with embedded
+        // credentials)
         targetUriStr = secretResolver.resolveValue(targetUriStr);
         var targetUri = URI.create(targetUriStr);
         var requestBody = prePostUtils.templateValues(requestConfig.getBody(), templateDataObjects);
@@ -349,7 +327,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
         Map<String, String> headers = requestConfig.getHeaders();
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
-            // Resolve vault references in headers (e.g., Authorization: Bearer ${eddivault:...})
+            // Resolve vault references in headers (e.g., Authorization: Bearer
+            // ${eddivault:...})
             headerValue = secretResolver.resolveValue(headerValue);
             request.setHttpHeader(headerName, headerValue);
         }
@@ -365,8 +344,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     /**
-     * Scrub sensitive header values from the request map before it is stored in conversation memory.
-     * This prevents resolved secrets (API keys, bearer tokens) from being persisted to the database.
+     * Scrub sensitive header values from the request map before it is stored in
+     * conversation memory. This prevents resolved secrets (API keys, bearer tokens)
+     * from being persisted to the database.
      */
     @SuppressWarnings("unchecked")
     private static void scrubSensitiveHeaders(Map<String, Object> requestMap) {
@@ -376,14 +356,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
             var scrubbed = new HashMap<>(headers);
             for (var entry : scrubbed.entrySet()) {
                 String headerName = entry.getKey().toLowerCase();
-                if (headerName.contains("authorization") ||
-                        headerName.contains("api-key") ||
-                        headerName.contains("api_key") ||
-                        headerName.contains("apikey") ||
-                        headerName.contains("x-api-key") ||
-                        headerName.contains("token") ||
-                        headerName.contains("secret") ||
-                        headerName.contains("credential")) {
+                if (headerName.contains("authorization") || headerName.contains("api-key") || headerName.contains("api_key")
+                        || headerName.contains("apikey") || headerName.contains("x-api-key") || headerName.contains("token")
+                        || headerName.contains("secret") || headerName.contains("credential")) {
                     entry.setValue("<REDACTED>");
                 } else if (entry.getValue() instanceof String val && val.contains("${eddivault:")) {
                     entry.setValue("<REDACTED>");
@@ -396,4 +371,3 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private static class ApiCallsValidationException extends Exception {
     }
 }
-

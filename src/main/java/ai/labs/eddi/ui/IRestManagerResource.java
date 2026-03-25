@@ -15,8 +15,7 @@ public interface IRestManagerResource {
     @Cache(noCache = true)
     @Path("/manage")
     @Produces(MediaType.TEXT_HTML)
-    Response
-    fetchManagerResources();
+    Response fetchManagerResources();
 
     @GET
     @Cache(noCache = true)

@@ -8,15 +8,14 @@ import java.util.List;
 /**
  * Database-agnostic storage interface for deployment information.
  * <p>
- * Implementations: MongoDeploymentStorage (@DefaultBean), PostgresDeploymentStorage (@LookupIfProperty).
+ * Implementations: MongoDeploymentStorage (@DefaultBean),
+ * PostgresDeploymentStorage (@LookupIfProperty).
  */
 public interface IDeploymentStorage {
 
-    void setDeploymentInfo(String environment, String agentId, Integer agentVersion,
-                           DeploymentInfo.DeploymentStatus deploymentStatus);
+    void setDeploymentInfo(String environment, String agentId, Integer agentVersion, DeploymentInfo.DeploymentStatus deploymentStatus);
 
-    DeploymentInfo readDeploymentInfo(String environment, String agentId, Integer agentVersion)
-            throws IResourceStore.ResourceStoreException;
+    DeploymentInfo readDeploymentInfo(String environment, String agentId, Integer agentVersion) throws IResourceStore.ResourceStoreException;
 
     List<DeploymentInfo> readDeploymentInfos() throws IResourceStore.ResourceStoreException;
 

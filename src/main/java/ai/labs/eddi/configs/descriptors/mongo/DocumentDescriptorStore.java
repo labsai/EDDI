@@ -25,23 +25,20 @@ public class DocumentDescriptorStore implements IDocumentDescriptorStore {
     }
 
     @Override
-    public List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index,
-                                                    Integer limit, boolean includeDeleted)
+    public List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted)
             throws ResourceStoreException, ResourceNotFoundException {
 
         return descriptorStore.readDescriptors(type, filter, index, limit, includeDeleted);
     }
 
     @Override
-    public DocumentDescriptor readDescriptor(String resourceId, Integer version)
-            throws ResourceStoreException, ResourceNotFoundException {
+    public DocumentDescriptor readDescriptor(String resourceId, Integer version) throws ResourceStoreException, ResourceNotFoundException {
 
         return descriptorStore.readDescriptor(resourceId, version);
     }
 
     @Override
-    public DocumentDescriptor readDescriptorWithHistory(String resourceId, Integer version)
-            throws ResourceStoreException, ResourceNotFoundException {
+    public DocumentDescriptor readDescriptorWithHistory(String resourceId, Integer version) throws ResourceStoreException, ResourceNotFoundException {
 
         return descriptorStore.readDescriptorWithHistory(resourceId, version);
     }
@@ -61,8 +58,7 @@ public class DocumentDescriptorStore implements IDocumentDescriptorStore {
     }
 
     @Override
-    public void createDescriptor(String resourceId, Integer version, DocumentDescriptor descriptor)
-            throws ResourceStoreException {
+    public void createDescriptor(String resourceId, Integer version, DocumentDescriptor descriptor) throws ResourceStoreException {
 
         descriptorStore.createDescriptor(resourceId, version, descriptor);
     }
@@ -73,8 +69,7 @@ public class DocumentDescriptorStore implements IDocumentDescriptorStore {
     }
 
     @Override
-    public void deleteDescriptor(String resourceId, Integer version)
-            throws ResourceNotFoundException, ResourceModifiedException {
+    public void deleteDescriptor(String resourceId, Integer version) throws ResourceNotFoundException, ResourceModifiedException {
 
         descriptorStore.deleteDescriptor(resourceId, version);
     }
@@ -85,8 +80,7 @@ public class DocumentDescriptorStore implements IDocumentDescriptorStore {
     }
 
     @Override
-    public List<DocumentDescriptor> findByOriginId(String originId)
-            throws ResourceStoreException, ResourceNotFoundException {
+    public List<DocumentDescriptor> findByOriginId(String originId) throws ResourceStoreException, ResourceNotFoundException {
         return descriptorStore.findByOriginId(originId);
     }
 }

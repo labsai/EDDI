@@ -17,8 +17,8 @@ import java.time.Duration;
 import java.util.Optional;
 
 /**
- * Web search tool that integrates with search APIs.
- * Supports Google Custom Search, DuckDuckGo, and other search providers.
+ * Web search tool that integrates with search APIs. Supports Google Custom
+ * Search, DuckDuckGo, and other search providers.
  */
 @ApplicationScoped
 public class WebSearchTool {
@@ -35,15 +35,11 @@ public class WebSearchTool {
     String searchProvider;
 
     public WebSearchTool() {
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
+        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
 
     @Tool("Searches the web for current information on any topic. Returns relevant search results with titles and snippets.")
-    public String searchWeb(
-            @P("query") String query,
-            @P("maxResults") Integer maxResults) {
+    public String searchWeb(@P("query") String query, @P("maxResults") Integer maxResults) {
 
         if (maxResults == null || maxResults < 1) {
             maxResults = 5;
@@ -74,16 +70,10 @@ public class WebSearchTool {
 
     private String searchWithGoogle(String query, int maxResults) throws IOException, InterruptedException {
         String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
-        String url = String.format(
-            "https://www.googleapis.com/customsearch/v1?key=%s&cx=%s&q=%s&num=%d",
-            googleApiKey.get(), googleCx.get(), encodedQuery, maxResults
-        );
+        String url = String.format("https://www.googleapis.com/customsearch/v1?key=%s&cx=%s&q=%s&num=%d", googleApiKey.get(), googleCx.get(),
+                encodedQuery, maxResults);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(15))
-                .GET()
-                .build();
+        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15)).GET().build();
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -99,12 +89,8 @@ public class WebSearchTool {
         String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
         String url = "https://api.duckduckgo.com/?q=" + encodedQuery + "&format=json&no_html=1";
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(15))
-                .header("User-Agent", "EDDI-Agent/1.0")
-                .GET()
-                .build();
+        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15)).header("User-Agent", "EDDI-Agent/1.0")
+                .GET().build();
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -217,11 +203,13 @@ public class WebSearchTool {
         try {
             String searchKey = "\"" + key + "\":\"";
             int start = json.indexOf(searchKey);
-            if (start == -1) return "";
+            if (start == -1)
+                return "";
 
             start += searchKey.length();
             int end = json.indexOf("\"", start);
-            if (end == -1) return "";
+            if (end == -1)
+                return "";
 
             return json.substring(start, end);
         } catch (Exception e) {
@@ -230,36 +218,25 @@ public class WebSearchTool {
     }
 
     private String unescapeJson(String text) {
-        return text.replace("\\n", "\n")
-                   .replace("\\\"", "\"")
-                   .replace("\\\\", "\\")
-                   .replace("\\/", "/");
+        return text.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\").replace("\\/", "/");
     }
 
     @Tool("Searches for news articles on a specific topic")
-    public String searchNews(
-            @P("query") String query,
-            @P("maxResults") Integer maxResults) {
+    public String searchNews(@P("query") String query, @P("maxResults") Integer maxResults) {
 
         // Add "news" keyword to regular search for better results
         return searchWeb(query + " news", maxResults);
     }
 
     @Tool("Searches Wikipedia for information on a topic")
-    public String searchWikipedia(
-            @P("query") String query) {
+    public String searchWikipedia(@P("query") String query) {
 
         try {
             String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
-            String url = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=" +
-                        encodedQuery + "&format=json&srlimit=3";
+            String url = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=" + encodedQuery + "&format=json&srlimit=3";
 
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(15))
-                    .header("User-Agent", "EDDI-Agent/1.0")
-                    .GET()
-                    .build();
+            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15)).header("User-Agent", "EDDI-Agent/1.0")
+                    .GET().build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -293,8 +270,7 @@ public class WebSearchTool {
                     int snippetEnd = searchResults[i].indexOf("\"", snippetStart);
                     String snippet = searchResults[i].substring(snippetStart, snippetEnd);
 
-                    String wikiUrl = "https://en.wikipedia.org/wiki/" +
-                                   URLEncoder.encode(title.replace(" ", "_"), StandardCharsets.UTF_8);
+                    String wikiUrl = "https://en.wikipedia.org/wiki/" + URLEncoder.encode(title.replace(" ", "_"), StandardCharsets.UTF_8);
 
                     results.append(++count).append(". ").append(unescapeJson(title)).append("\n");
                     results.append("   ").append(unescapeJson(snippet).replaceAll("<[^>]*>", "")).append("\n");
@@ -317,4 +293,3 @@ public class WebSearchTool {
         return results.toString();
     }
 }
-

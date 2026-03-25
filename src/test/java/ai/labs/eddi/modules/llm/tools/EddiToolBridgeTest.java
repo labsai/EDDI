@@ -22,8 +22,8 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Unit tests for EddiToolBridge.
- * Tests the bridge between LangChain agents and EDDI's httpcall system.
+ * Unit tests for EddiToolBridge. Tests the bridge between LangChain agents and
+ * EDDI's httpcall system.
  */
 class EddiToolBridgeTest {
 
@@ -72,13 +72,10 @@ class EddiToolBridgeTest {
             httpCall.setName("Get Weather");
             config.setHttpCalls(List.of(httpCall));
 
-            when(resourceClientLibrary.getResource(URI.create(httpCallUri), ApiCallsConfiguration.class))
-                    .thenReturn(config);
-            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-123"))
-                    .thenReturn(new ConversationMemorySnapshot());
+            when(resourceClientLibrary.getResource(URI.create(httpCallUri), ApiCallsConfiguration.class)).thenReturn(config);
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-123")).thenReturn(new ConversationMemorySnapshot());
             Map<String, Object> executionResult = Map.of("temperature", 20, "humidity", 65);
-            when(httpCallExecutor.execute(eq(httpCall), any(), anyMap(), eq("http://localhost:8080")))
-                    .thenReturn(executionResult);
+            when(httpCallExecutor.execute(eq(httpCall), any(), anyMap(), eq("http://localhost:8080"))).thenReturn(executionResult);
             when(jsonSerialization.serialize(executionResult)).thenReturn("{\"temperature\": 20, \"humidity\": 65}");
 
             String result = eddiToolBridge.executeApiCall(httpCallUri);
@@ -98,8 +95,7 @@ class EddiToolBridgeTest {
         void testExecuteApiCall_NoConversationContext() throws Exception {
             EddiToolBridge.clearCurrentConversationId();
 
-            when(jsonSerialization.serialize(anyMap()))
-                    .thenReturn("{\"error\": true, \"message\": \"No conversation context\"}");
+            when(jsonSerialization.serialize(anyMap())).thenReturn("{\"error\": true, \"message\": \"No conversation context\"}");
 
             String result = eddiToolBridge.executeApiCall("eddi://ai.labs.apicalls/test?version=1");
 
@@ -111,12 +107,9 @@ class EddiToolBridgeTest {
         void testExecuteApiCall_ConfigNotFound() throws Exception {
             String httpCallUri = "eddi://ai.labs.apicalls/unknown?version=1";
 
-            when(resourceClientLibrary.getResource(URI.create(httpCallUri), ApiCallsConfiguration.class))
-                    .thenReturn(null);
-            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-123"))
-                    .thenReturn(new ConversationMemorySnapshot());
-            when(jsonSerialization.serialize(anyMap()))
-                    .thenReturn("{\"error\": true, \"message\": \"ApiCalls configuration not found\"}");
+            when(resourceClientLibrary.getResource(URI.create(httpCallUri), ApiCallsConfiguration.class)).thenReturn(null);
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-123")).thenReturn(new ConversationMemorySnapshot());
+            when(jsonSerialization.serialize(anyMap())).thenReturn("{\"error\": true, \"message\": \"ApiCalls configuration not found\"}");
 
             String result = eddiToolBridge.executeApiCall(httpCallUri);
 
@@ -132,15 +125,12 @@ class EddiToolBridgeTest {
             config.setTargetServerUrl("http://localhost:8080");
             config.setHttpCalls(List.of());
 
-            when(resourceClientLibrary.getResource(any(), eq(ApiCallsConfiguration.class)))
-                    .thenReturn(config);
-            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-123"))
-                    .thenReturn(new ConversationMemorySnapshot());
-            when(jsonSerialization.serialize(anyMap()))
-                    .thenAnswer(inv -> {
-                        Map<String, Object> map = inv.getArgument(0);
-                        return "{\"error\": true, \"message\": \"" + map.get("message") + "\"}";
-                    });
+            when(resourceClientLibrary.getResource(any(), eq(ApiCallsConfiguration.class))).thenReturn(config);
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-123")).thenReturn(new ConversationMemorySnapshot());
+            when(jsonSerialization.serialize(anyMap())).thenAnswer(inv -> {
+                Map<String, Object> map = inv.getArgument(0);
+                return "{\"error\": true, \"message\": \"" + map.get("message") + "\"}";
+            });
 
             String result = eddiToolBridge.executeApiCall(httpCallUri);
 
@@ -153,10 +143,8 @@ class EddiToolBridgeTest {
         void testExecuteApiCall_ServiceException() throws Exception {
             String httpCallUri = "eddi://ai.labs.apicalls/failing?version=1";
 
-            when(resourceClientLibrary.getResource(any(), eq(ApiCallsConfiguration.class)))
-                    .thenThrow(new ServiceException("Connection refused"));
-            when(jsonSerialization.serialize(anyMap()))
-                    .thenReturn("{\"error\": true, \"message\": \"Error loading configuration\"}");
+            when(resourceClientLibrary.getResource(any(), eq(ApiCallsConfiguration.class))).thenThrow(new ServiceException("Connection refused"));
+            when(jsonSerialization.serialize(anyMap())).thenReturn("{\"error\": true, \"message\": \"Error loading configuration\"}");
 
             String result = eddiToolBridge.executeApiCall(httpCallUri);
 
@@ -174,14 +162,10 @@ class EddiToolBridgeTest {
             httpCall.setName("Failing Call");
             config.setHttpCalls(List.of(httpCall));
 
-            when(resourceClientLibrary.getResource(any(), eq(ApiCallsConfiguration.class)))
-                    .thenReturn(config);
-            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-123"))
-                    .thenReturn(new ConversationMemorySnapshot());
-            when(httpCallExecutor.execute(any(), isNull(), anyMap(), anyString()))
-                    .thenThrow(new RuntimeException("Request timeout"));
-            when(jsonSerialization.serialize(anyMap()))
-                    .thenReturn("{\"error\": true, \"message\": \"Execution error: Request timeout\"}");
+            when(resourceClientLibrary.getResource(any(), eq(ApiCallsConfiguration.class))).thenReturn(config);
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-123")).thenReturn(new ConversationMemorySnapshot());
+            when(httpCallExecutor.execute(any(), isNull(), anyMap(), anyString())).thenThrow(new RuntimeException("Request timeout"));
+            when(jsonSerialization.serialize(anyMap())).thenReturn("{\"error\": true, \"message\": \"Execution error: Request timeout\"}");
 
             String result = eddiToolBridge.executeApiCall(httpCallUri);
 
@@ -204,12 +188,9 @@ class EddiToolBridgeTest {
             httpCall.setName("Cached Call");
             config.setHttpCalls(List.of(httpCall));
 
-            when(resourceClientLibrary.getResource(any(), eq(ApiCallsConfiguration.class)))
-                    .thenReturn(config);
-            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-123"))
-                    .thenReturn(new ConversationMemorySnapshot());
-            when(httpCallExecutor.execute(any(), isNull(), anyMap(), anyString()))
-                    .thenReturn(Map.of("result", "cached"));
+            when(resourceClientLibrary.getResource(any(), eq(ApiCallsConfiguration.class))).thenReturn(config);
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-123")).thenReturn(new ConversationMemorySnapshot());
+            when(httpCallExecutor.execute(any(), isNull(), anyMap(), anyString())).thenReturn(Map.of("result", "cached"));
             when(jsonSerialization.serialize(any())).thenReturn("{\"result\": \"cached\"}");
 
             // Call twice
@@ -235,12 +216,9 @@ class EddiToolBridgeTest {
             ApiCall httpCall = new ApiCall();
             config.setHttpCalls(List.of(httpCall));
 
-            when(resourceClientLibrary.getResource(any(), eq(ApiCallsConfiguration.class)))
-                    .thenReturn(config);
-            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-123"))
-                    .thenReturn(new ConversationMemorySnapshot());
-            when(httpCallExecutor.execute(any(), isNull(), anyMap(), anyString()))
-                    .thenReturn(Map.of("success", true));
+            when(resourceClientLibrary.getResource(any(), eq(ApiCallsConfiguration.class))).thenReturn(config);
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-123")).thenReturn(new ConversationMemorySnapshot());
+            when(httpCallExecutor.execute(any(), isNull(), anyMap(), anyString())).thenReturn(Map.of("success", true));
             when(jsonSerialization.serialize(any())).thenReturn("{\"success\": true}");
 
             String result = eddiToolBridge.executeApiCall(httpCallUri);

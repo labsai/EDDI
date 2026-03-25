@@ -106,8 +106,7 @@ class McpToolUtilsTest {
 
     @Test
     void escapeJsonString_specialChars() {
-        assertEquals("line1\\nline2\\ttab\\rreturn",
-                McpToolUtils.escapeJsonString("line1\nline2\ttab\rreturn"));
+        assertEquals("line1\\nline2\\ttab\\rreturn", McpToolUtils.escapeJsonString("line1\nline2\ttab\rreturn"));
     }
 
     @Test

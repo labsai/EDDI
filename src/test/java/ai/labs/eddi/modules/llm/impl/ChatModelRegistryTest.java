@@ -100,8 +100,7 @@ class ChatModelRegistryTest {
         @Test
         @DisplayName("getOrCreate throws for unknown type")
         void getOrCreate_unknownType_throwsException() {
-            assertThrows(ChatModelRegistry.UnsupportedLlmTaskException.class,
-                    () -> registry.getOrCreate("unknown", Map.of()));
+            assertThrows(ChatModelRegistry.UnsupportedLlmTaskException.class, () -> registry.getOrCreate("unknown", Map.of()));
         }
 
         @Test
@@ -152,8 +151,7 @@ class ChatModelRegistryTest {
         @Test
         @DisplayName("getOrCreateStreaming throws for unknown type")
         void getOrCreateStreaming_unknownType_throwsException() {
-            assertThrows(ChatModelRegistry.UnsupportedLlmTaskException.class,
-                    () -> registry.getOrCreateStreaming("unknown", Map.of()));
+            assertThrows(ChatModelRegistry.UnsupportedLlmTaskException.class, () -> registry.getOrCreateStreaming("unknown", Map.of()));
         }
 
         @Test
@@ -182,8 +180,7 @@ class ChatModelRegistryTest {
 
             ChatModel model = registry.getOrCreate("openai", params);
             assertNotNull(model);
-            assertInstanceOf(ObservableChatModel.class, model,
-                    "Model should be wrapped with ObservableChatModel when timeout is set");
+            assertInstanceOf(ObservableChatModel.class, model, "Model should be wrapped with ObservableChatModel when timeout is set");
         }
 
         @Test
@@ -234,8 +231,7 @@ class ChatModelRegistryTest {
             // Agenth should be cached under the same key (observability params filtered
             // out)
             // The first cached model (unwrapped) is returned since it was cached first
-            assertSame(first, second,
-                    "Observability params should be excluded from cache key");
+            assertSame(first, second, "Observability params should be excluded from cache key");
         }
     }
 }

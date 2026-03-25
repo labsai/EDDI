@@ -27,12 +27,12 @@ public class QuickReplyOutputItem extends OutputItem {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         QuickReplyOutputItem that = (QuickReplyOutputItem) o;
-        return Objects.equals(value, that.value) &&
-                Objects.equals(expressions, that.expressions) &&
-                Objects.equals(isDefault, that.isDefault);
+        return Objects.equals(value, that.value) && Objects.equals(expressions, that.expressions) && Objects.equals(isDefault, that.isDefault);
     }
 
     @Override

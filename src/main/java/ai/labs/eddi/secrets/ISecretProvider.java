@@ -6,8 +6,8 @@ import ai.labs.eddi.secrets.model.SecretReference;
 import java.util.List;
 
 /**
- * Service Provider Interface for secrets management.
- * Implementations handle the actual storage and retrieval of encrypted secrets.
+ * Service Provider Interface for secrets management. Implementations handle the
+ * actual storage and retrieval of encrypted secrets.
  * <p>
  * All implementations MUST ensure:
  * <ul>
@@ -19,13 +19,16 @@ import java.util.List;
 public interface ISecretProvider {
 
     /**
-     * Resolve a secret reference to its plaintext value.
-     * The plaintext MUST only be used ephemerally — never persisted.
+     * Resolve a secret reference to its plaintext value. The plaintext MUST only be
+     * used ephemerally — never persisted.
      *
-     * @param reference the secret reference to resolve
+     * @param reference
+     *            the secret reference to resolve
      * @return the plaintext secret value
-     * @throws SecretNotFoundException if the secret does not exist
-     * @throws SecretProviderException if resolution fails
+     * @throws SecretNotFoundException
+     *             if the secret does not exist
+     * @throws SecretProviderException
+     *             if resolution fails
      */
     String resolve(SecretReference reference) throws SecretNotFoundException, SecretProviderException;
 
@@ -33,39 +36,51 @@ public interface ISecretProvider {
      * Store a new secret. If a secret with the same reference already exists, it is
      * overwritten.
      *
-     * @param reference the secret reference (tenant/agent/keyName)
-     * @param plaintext the plaintext value to encrypt and store
-     * @throws SecretProviderException if storage fails
+     * @param reference
+     *            the secret reference (tenant/agent/keyName)
+     * @param plaintext
+     *            the plaintext value to encrypt and store
+     * @throws SecretProviderException
+     *             if storage fails
      */
     void store(SecretReference reference, String plaintext) throws SecretProviderException;
 
     /**
      * Delete a secret from the backend.
      *
-     * @param reference the secret reference to delete
-     * @throws SecretNotFoundException if the secret does not exist
-     * @throws SecretProviderException if deletion fails
+     * @param reference
+     *            the secret reference to delete
+     * @throws SecretNotFoundException
+     *             if the secret does not exist
+     * @throws SecretProviderException
+     *             if deletion fails
      */
     void delete(SecretReference reference) throws SecretNotFoundException, SecretProviderException;
 
     /**
-     * Get non-sensitive metadata about a secret (timestamps, checksum).
-     * Plaintext is NEVER returned through this method.
+     * Get non-sensitive metadata about a secret (timestamps, checksum). Plaintext
+     * is NEVER returned through this method.
      *
-     * @param reference the secret reference
+     * @param reference
+     *            the secret reference
      * @return metadata about the secret
-     * @throws SecretNotFoundException if the secret does not exist
-     * @throws SecretProviderException if the operation fails
+     * @throws SecretNotFoundException
+     *             if the secret does not exist
+     * @throws SecretProviderException
+     *             if the operation fails
      */
     SecretMetadata getMetadata(SecretReference reference) throws SecretNotFoundException, SecretProviderException;
 
     /**
      * List all secret keys for a given tenant and Agent namespace.
      *
-     * @param tenantId the tenant identifier
-     * @param agentId  the Agent identifier
+     * @param tenantId
+     *            the tenant identifier
+     * @param agentId
+     *            the Agent identifier
      * @return list of metadata for all secrets in the namespace
-     * @throws SecretProviderException if the operation fails
+     * @throws SecretProviderException
+     *             if the operation fails
      */
     List<SecretMetadata> listKeys(String tenantId, String agentId) throws SecretProviderException;
 

@@ -201,19 +201,9 @@ class CalculatorToolTest {
     // === SafeMathParser Security - Injection Attempts ===
 
     @ParameterizedTest
-    @ValueSource(strings = {
-            "java.lang.System.exit(0)",
-            "import java.io.*;",
-            "function() { return 1; }",
-            "new ProcessBuilder('ls').start()",
-            "this.constructor.constructor('return process')()",
-            "eval('1+1')",
-            "Runtime.getRuntime()",
-            "var x = 1",
-            "System.exit(0)",
-            "print(1)",
-            "fetch('http://evil.com')"
-    })
+    @ValueSource(strings = {"java.lang.System.exit(0)", "import java.io.*;", "function() { return 1; }", "new ProcessBuilder('ls').start()",
+            "this.constructor.constructor('return process')()", "eval('1+1')", "Runtime.getRuntime()", "var x = 1", "System.exit(0)", "print(1)",
+            "fetch('http://evil.com')"})
     void testCalculate_RejectsUnsafeExpressions(String expression) {
         String result = calculatorTool.calculate(expression);
         assertTrue(result.startsWith("Error"), "Should reject unsafe expression: " + expression);
@@ -300,27 +290,19 @@ class CalculatorToolTest {
 
     @Test
     void testSafeMathParser_ThrowsOnUnknownFunction() {
-        assertThrows(IllegalArgumentException.class,
-                () -> new CalculatorTool.SafeMathParser("eval(1)").parse());
+        assertThrows(IllegalArgumentException.class, () -> new CalculatorTool.SafeMathParser("eval(1)").parse());
     }
 
     @Test
     void testSafeMathParser_ThrowsOnExtraChars() {
-        assertThrows(IllegalArgumentException.class,
-                () -> new CalculatorTool.SafeMathParser("2 + 2 abc").parse());
+        assertThrows(IllegalArgumentException.class, () -> new CalculatorTool.SafeMathParser("2 + 2 abc").parse());
     }
 
     // === Unit Conversion Tests ===
 
     @ParameterizedTest
-    @CsvSource({
-            "0, celsius, fahrenheit",
-            "100, celsius, fahrenheit",
-            "32, fahrenheit, celsius",
-            "212, fahrenheit, celsius",
-            "0, celsius, kelvin",
-            "273.15, kelvin, celsius"
-    })
+    @CsvSource({"0, celsius, fahrenheit", "100, celsius, fahrenheit", "32, fahrenheit, celsius", "212, fahrenheit, celsius", "0, celsius, kelvin",
+            "273.15, kelvin, celsius"})
     void testConvertUnits_Temperature(double value, String fromUnit, String toUnit) {
         String result = calculatorTool.convertUnits(value, fromUnit, toUnit);
         assertNotNull(result);
@@ -328,32 +310,21 @@ class CalculatorToolTest {
     }
 
     @ParameterizedTest
-    @CsvSource({
-            "1, km, miles",
-            "1, miles, km",
-            "1, m, feet",
-            "1, feet, m"
-    })
+    @CsvSource({"1, km, miles", "1, miles, km", "1, m, feet", "1, feet, m"})
     void testConvertUnits_Distance(double value, String fromUnit, String toUnit) {
         String result = calculatorTool.convertUnits(value, fromUnit, toUnit);
         assertFalse(result.startsWith("Error"));
     }
 
     @ParameterizedTest
-    @CsvSource({
-            "1, kg, lb",
-            "1, lb, kg"
-    })
+    @CsvSource({"1, kg, lb", "1, lb, kg"})
     void testConvertUnits_Weight(double value, String fromUnit, String toUnit) {
         String result = calculatorTool.convertUnits(value, fromUnit, toUnit);
         assertFalse(result.startsWith("Error"));
     }
 
     @ParameterizedTest
-    @CsvSource({
-            "1, liters, gallons",
-            "1, gallons, liters"
-    })
+    @CsvSource({"1, liters, gallons", "1, gallons, liters"})
     void testConvertUnits_Volume(double value, String fromUnit, String toUnit) {
         String result = calculatorTool.convertUnits(value, fromUnit, toUnit);
         assertFalse(result.startsWith("Error"));
@@ -377,16 +348,13 @@ class CalculatorToolTest {
     void testConvertUnits_FreezingPointAccuracy() {
         String result = calculatorTool.convertUnits(0, "celsius", "fahrenheit");
         // Locale-independent check: result contains "32" and "fahrenheit"
-        assertTrue(result.contains("32") && result.contains("fahrenheit"),
-                "Expected 32 fahrenheit in: " + result);
+        assertTrue(result.contains("32") && result.contains("fahrenheit"), "Expected 32 fahrenheit in: " + result);
     }
 
     @Test
     void testConvertUnits_BoilingPointAccuracy() {
         String result = calculatorTool.convertUnits(100, "celsius", "fahrenheit");
         // Locale-independent check: result contains "212" and "fahrenheit"
-        assertTrue(result.contains("212") && result.contains("fahrenheit"),
-                "Expected 212 fahrenheit in: " + result);
+        assertTrue(result.contains("212") && result.contains("fahrenheit"), "Expected 212 fahrenheit in: " + result);
     }
 }
-

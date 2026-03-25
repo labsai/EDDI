@@ -36,8 +36,7 @@ public interface IRestPropertySetterStore extends IRestVersionInfo {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of propertySetter descriptors.")
     List<DocumentDescriptor> readPropertySetterDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index,
-            @QueryParam("limit") @DefaultValue("20") Integer limit);
+            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")

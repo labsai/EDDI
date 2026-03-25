@@ -1,15 +1,11 @@
 package ai.labs.eddi.engine.model;
 
-
 /**
  * @author ginccc
  */
 public class Context {
     public enum ContextType {
-        string,
-        expressions,
-        object,
-        array
+        string, expressions, object, array
     }
 
     private ContextType type;

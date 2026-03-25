@@ -8,8 +8,7 @@ import java.util.List;
  * Write-once, append-only contract for the immutable audit ledger.
  * <p>
  * Implementations <strong>MUST NOT</strong> provide update or delete
- * operations.
- * This is a deliberate design constraint for EU AI Act compliance:
+ * operations. This is a deliberate design constraint for EU AI Act compliance:
  * once an audit entry is persisted, it must remain unmodifiable.
  * <p>
  * Agenth MongoDB and PostgreSQL implementations enforce insert-only semantics.
@@ -22,23 +21,28 @@ public interface IAuditStore {
     /**
      * Append a single audit entry to the ledger.
      *
-     * @param entry the entry to persist (must have a non-null HMAC)
+     * @param entry
+     *            the entry to persist (must have a non-null HMAC)
      */
     void appendEntry(AuditEntry entry);
 
     /**
      * Append a batch of audit entries to the ledger in a single operation.
      *
-     * @param entries the entries to persist
+     * @param entries
+     *            the entries to persist
      */
     void appendBatch(List<AuditEntry> entries);
 
     /**
      * Retrieve audit entries for a conversation, ordered by timestamp descending.
      *
-     * @param conversationId the conversation to query
-     * @param skip           number of entries to skip (pagination)
-     * @param limit          maximum entries to return
+     * @param conversationId
+     *            the conversation to query
+     * @param skip
+     *            number of entries to skip (pagination)
+     * @param limit
+     *            maximum entries to return
      * @return list of audit entries, newest first
      */
     List<AuditEntry> getEntries(String conversationId, int skip, int limit);
@@ -47,10 +51,14 @@ public interface IAuditStore {
      * Retrieve audit entries for a specific Agent version, ordered by timestamp
      * descending.
      *
-     * @param agentId      the Agent identifier
-     * @param agentVersion the Agent version (null = all versions)
-     * @param skip         number of entries to skip
-     * @param limit        maximum entries to return
+     * @param agentId
+     *            the Agent identifier
+     * @param agentVersion
+     *            the Agent version (null = all versions)
+     * @param skip
+     *            number of entries to skip
+     * @param limit
+     *            maximum entries to return
      * @return list of audit entries, newest first
      */
     List<AuditEntry> getEntriesByAgent(String agentId, Integer agentVersion, int skip, int limit);
@@ -58,7 +66,8 @@ public interface IAuditStore {
     /**
      * Count the total number of audit entries for a conversation.
      *
-     * @param conversationId the conversation to count
+     * @param conversationId
+     *            the conversation to count
      * @return the number of entries
      */
     long countByConversation(String conversationId);

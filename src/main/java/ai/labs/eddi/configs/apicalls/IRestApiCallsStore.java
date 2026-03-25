@@ -36,8 +36,7 @@ public interface IRestApiCallsStore extends IRestVersionInfo {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of httpCalls descriptors.")
     List<DocumentDescriptor> readApiCallsDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index,
-            @QueryParam("limit") @DefaultValue("20") Integer limit);
+            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")

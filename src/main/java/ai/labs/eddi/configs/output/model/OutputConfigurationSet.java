@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.output.model;
 
-
 import java.util.ArrayList;
 import java.util.List;
 
@@ -30,8 +29,10 @@ public class OutputConfigurationSet {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         OutputConfigurationSet that = (OutputConfigurationSet) o;
         return java.util.Objects.equals(lang, that.lang) && java.util.Objects.equals(outputSet, that.outputSet);
     }

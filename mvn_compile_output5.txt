@@ -1,0 +1,23 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ----------------------------< ai.labs:eddi >----------------------------
+[INFO] Building eddi 6.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- checkstyle:3.6.0:check (default-cli) @ eddi ---
+[INFO] Starting audit...
+[INFO] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\memory\ConversationMemoryUtilities.java:259:17: switch without "default" clause. [MissingSwitchDefault]
+[INFO] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\modules\llm\impl\ConversationHistoryBuilder.java:72:21: switch without "default" clause. [MissingSwitchDefault]
+[INFO] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\modules\properties\impl\PropertySetter.java:68:13: switch without "default" clause. [MissingSwitchDefault]
+[INFO] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\modules\rules\impl\conditions\ActionMatcher.java:56:9: switch without "default" clause. [MissingSwitchDefault]
+[INFO] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\modules\rules\impl\conditions\InputMatcher.java:65:9: switch without "default" clause. [MissingSwitchDefault]
+[INFO] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\utils\CharacterUtilities.java:100:17: switch without "default" clause. [MissingSwitchDefault]
+Audit done.
+[INFO] You have 0 Checkstyle violations.
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  2.868 s
+[INFO] Finished at: 2026-03-25T18:23:55+01:00
+[INFO] ------------------------------------------------------------------------

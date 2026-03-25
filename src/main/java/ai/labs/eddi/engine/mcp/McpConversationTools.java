@@ -42,9 +42,9 @@ import java.util.concurrent.TimeUnit;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
 
 /**
- * MCP tools for conversing with EDDI agents.
- * Exposes Agent listing, conversation management, and messaging
- * as MCP-compliant tools via the Quarkus MCP Server extension.
+ * MCP tools for conversing with EDDI agents. Exposes Agent listing,
+ * conversation management, and messaging as MCP-compliant tools via the Quarkus
+ * MCP Server extension.
  *
  * <p>
  * Phase 8a — Item 35: Agent Conversations MCP Server (5 SP)
@@ -69,15 +69,9 @@ public class McpConversationTools {
     private final IRestAgentEngine restAgentEngine;
 
     @Inject
-    public McpConversationTools(IConversationService conversationService,
-            IRestAgentAdministration agentAdmin,
-            IRestAgentStore agentStore,
-            IRestInterfaceFactory restInterfaceFactory,
-            IJsonSerialization jsonSerialization,
-            BoundedLogStore boundedLogStore,
-            IRestAuditStore auditStore,
-            IRestAgentTriggerStore agentTriggerStore,
-            IUserConversationStore userConversationStore,
+    public McpConversationTools(IConversationService conversationService, IRestAgentAdministration agentAdmin, IRestAgentStore agentStore,
+            IRestInterfaceFactory restInterfaceFactory, IJsonSerialization jsonSerialization, BoundedLogStore boundedLogStore,
+            IRestAuditStore auditStore, IRestAgentTriggerStore agentTriggerStore, IUserConversationStore userConversationStore,
             IRestAgentEngine restAgentEngine) {
         this.conversationService = conversationService;
         this.agentAdmin = agentAdmin;
@@ -91,10 +85,9 @@ public class McpConversationTools {
         this.restAgentEngine = restAgentEngine;
     }
 
-    @Tool(name = "list_agents", description = "List all deployed agents with their status, version, and name. " +
-            "Returns a JSON array of Agent deployment statuses.")
-    public String listAgents(
-            @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
+    @Tool(name = "list_agents", description = "List all deployed agents with their status, version, and name. "
+            + "Returns a JSON array of Agent deployment statuses.")
+    public String listAgents(@ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         try {
             var env = parseEnvironment(environment);
             List<AgentDeploymentStatus> statuses = agentAdmin.getDeploymentStatuses(env);
@@ -106,10 +99,8 @@ public class McpConversationTools {
     }
 
     @Tool(name = "list_agent_configs", description = "List all Agent configurations (including those not yet deployed). "
-            +
-            "Returns a JSON array of Agent descriptors with name, description, and IDs.")
-    public String listAgentConfigs(
-            @ToolArg(description = "Optional filter string to search Agent names") String filter,
+            + "Returns a JSON array of Agent descriptors with name, description, and IDs.")
+    public String listAgentConfigs(@ToolArg(description = "Optional filter string to search Agent names") String filter,
             @ToolArg(description = "Maximum number of results (default 20)") Integer limit) {
         try {
             int limitInt = limit != null ? limit : 20;
@@ -122,23 +113,18 @@ public class McpConversationTools {
         }
     }
 
-    @Tool(name = "create_conversation", description = "Start a new conversation with a deployed agent. " +
-            "Returns the conversationId which you need for subsequent talk_to_agent calls. " +
-            "Tip: Use chat_with_agent instead if you want to send a message immediately.")
-    public String createConversation(
-            @ToolArg(description = "Agent ID (required)") String agentId,
+    @Tool(name = "create_conversation", description = "Start a new conversation with a deployed agent. "
+            + "Returns the conversationId which you need for subsequent talk_to_agent calls. "
+            + "Tip: Use chat_with_agent instead if you want to send a message immediately.")
+    public String createConversation(@ToolArg(description = "Agent ID (required)") String agentId,
             @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         try {
             var env = parseEnvironment(environment);
-            ConversationResult result = conversationService.startConversation(
-                    env, agentId, null, Collections.emptyMap());
-            return jsonSerialization.serialize(Map.of(
-                    "conversationId", result.conversationId(),
-                    "conversationUri", result.conversationUri().toString(),
-                    "agentId", agentId,
-                    "environment", env.name()));
+            ConversationResult result = conversationService.startConversation(env, agentId, null, Collections.emptyMap());
+            return jsonSerialization.serialize(Map.of("conversationId", result.conversationId(), "conversationUri",
+                    result.conversationUri().toString(), "agentId", agentId, "environment", env.name()));
         } catch (Exception e) {
             LOGGER.error("MCP create_conversation failed for Agent " + agentId, e);
             return errorJson("Failed to create conversation: " + e.getMessage());
@@ -147,11 +133,8 @@ public class McpConversationTools {
 
     @Blocking
     @Tool(name = "talk_to_agent", description = "Send a message to a Agent in an existing conversation and get the agent's response. "
-            +
-            "You must first call create_conversation to get a conversationId, " +
-            "or use chat_with_agent for a single-call alternative.")
-    public String talkToAgent(
-            @ToolArg(description = "Agent ID (required)") String agentId,
+            + "You must first call create_conversation to get a conversationId, " + "or use chat_with_agent for a single-call alternative.")
+    public String talkToAgent(@ToolArg(description = "Agent ID (required)") String agentId,
             @ToolArg(description = "Conversation ID from create_conversation (required)") String conversationId,
             @ToolArg(description = "The user message to send to the Agent (required)") String message,
             @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
@@ -174,12 +157,9 @@ public class McpConversationTools {
 
     @Blocking
     @Tool(name = "chat_with_agent", description = "Send a message to an agent, automatically creating a new conversation if needed. "
-            +
-            "This is the simplest way to interact with a Agent — combines create_conversation + " +
-            "talk_to_agent into a single call. Returns the Agent response and conversationId " +
-            "for follow-up messages.")
-    public String chatWithAgent(
-            @ToolArg(description = "Agent ID (required)") String agentId,
+            + "This is the simplest way to interact with a Agent — combines create_conversation + "
+            + "talk_to_agent into a single call. Returns the Agent response and conversationId " + "for follow-up messages.")
+    public String chatWithAgent(@ToolArg(description = "Agent ID (required)") String agentId,
             @ToolArg(description = "The user message to send to the Agent (required)") String message,
             @ToolArg(description = "Conversation ID to continue (optional — creates new if omitted)") String conversationId,
             @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
@@ -193,8 +173,7 @@ public class McpConversationTools {
             // Step 1: Create conversation if not provided
             String convId = conversationId;
             if (convId == null || convId.isBlank()) {
-                ConversationResult convResult = conversationService.startConversation(
-                        env, agentId, null, Collections.emptyMap());
+                ConversationResult convResult = conversationService.startConversation(env, agentId, null, Collections.emptyMap());
                 convId = convResult.conversationId();
             }
 
@@ -213,17 +192,16 @@ public class McpConversationTools {
         }
     }
 
-    @Tool(name = "read_conversation", description = "Read conversation history and memory. " +
-            "Returns the conversation memory snapshot. Use returningFields to limit " +
-            "output size, or use read_conversation_log for a human-readable summary.")
-    public String readConversation(
-            @ToolArg(description = "Agent ID (required)") String agentId,
+    @Tool(name = "read_conversation", description = "Read conversation history and memory. "
+            + "Returns the conversation memory snapshot. Use returningFields to limit "
+            + "output size, or use read_conversation_log for a human-readable summary.")
+    public String readConversation(@ToolArg(description = "Agent ID (required)") String agentId,
             @ToolArg(description = "Conversation ID (required)") String conversationId,
             @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment,
             @ToolArg(description = "Return only the current (latest) step? (default: true)") Boolean currentStepOnly,
             @ToolArg(description = "Return detailed internal data? (default: false)") Boolean returnDetailed,
-            @ToolArg(description = "Comma-separated list of fields to return (e.g. 'input,output,actions'). " +
-                    "Empty = all fields.") String returningFields) {
+            @ToolArg(description = "Comma-separated list of fields to return (e.g. 'input,output,actions'). "
+                    + "Empty = all fields.") String returningFields) {
         try {
             var env = parseEnvironment(environment);
             boolean stepOnly = currentStepOnly != null ? currentStepOnly : true;
@@ -234,8 +212,7 @@ public class McpConversationTools {
                 fields = List.of(returningFields.split(","));
             }
 
-            var snapshot = conversationService.readConversation(
-                    env, agentId, conversationId, detailed, stepOnly, fields);
+            var snapshot = conversationService.readConversation(env, agentId, conversationId, detailed, stepOnly, fields);
             return jsonSerialization.serialize(snapshot);
         } catch (Exception e) {
             LOGGER.error("MCP read_conversation failed for conversation " + conversationId, e);
@@ -243,15 +220,13 @@ public class McpConversationTools {
         }
     }
 
-    @Tool(name = "read_conversation_log", description = "Read conversation log as formatted text. " +
-            "Returns the conversation history in a human-readable format. " +
-            "This is the preferred tool for reviewing what was said in a conversation.")
-    public String readConversationLog(
-            @ToolArg(description = "Conversation ID (required)") String conversationId,
+    @Tool(name = "read_conversation_log", description = "Read conversation log as formatted text. "
+            + "Returns the conversation history in a human-readable format. "
+            + "This is the preferred tool for reviewing what was said in a conversation.")
+    public String readConversationLog(@ToolArg(description = "Conversation ID (required)") String conversationId,
             @ToolArg(description = "Number of recent steps to include (default: all)") Integer logSize) {
         try {
-            var result = conversationService.readConversationLog(
-                    conversationId, "text", logSize != null && logSize > 0 ? logSize : null);
+            var result = conversationService.readConversationLog(conversationId, "text", logSize != null && logSize > 0 ? logSize : null);
             return result.content().toString();
         } catch (Exception e) {
             LOGGER.error("MCP read_conversation_log failed for conversation " + conversationId, e);
@@ -259,11 +234,10 @@ public class McpConversationTools {
         }
     }
 
-    @Tool(name = "list_conversations", description = "List conversations for a specific agent. " +
-            "Returns conversation descriptors with IDs, creation time, and state. " +
-            "Useful for finding conversation IDs without knowing them beforehand.")
-    public String listConversations(
-            @ToolArg(description = "Agent ID (required)") String agentId,
+    @Tool(name = "list_conversations", description = "List conversations for a specific agent. "
+            + "Returns conversation descriptors with IDs, creation time, and state. "
+            + "Useful for finding conversation IDs without knowing them beforehand.")
+    public String listConversations(@ToolArg(description = "Agent ID (required)") String agentId,
             @ToolArg(description = "Agent version (default: latest)") Integer agentVersion,
             @ToolArg(description = "Filter by state: 'READY', 'IN_PROGRESS', 'ENDED', 'ERROR' (default: all)") String conversationState,
             @ToolArg(description = "Maximum number of results (default: 20, max: 100)") Integer limit) {
@@ -279,8 +253,7 @@ public class McpConversationTools {
                 try {
                     state = ConversationState.valueOf(conversationState.trim().toUpperCase());
                 } catch (IllegalArgumentException e) {
-                    return errorJson("Invalid conversationState: " + conversationState +
-                            ". Valid values: READY, IN_PROGRESS, ENDED, ERROR");
+                    return errorJson("Invalid conversationState: " + conversationState + ". Valid values: READY, IN_PROGRESS, ENDED, ERROR");
                 }
             }
 
@@ -291,8 +264,8 @@ public class McpConversationTools {
                 return errorJson("Failed to get conversation store: " + e.getMessage());
             }
 
-            List<ConversationDescriptor> descriptors = convStore.readConversationDescriptors(
-                    0, limitInt, null, null, agentId, ver == 0 ? null : ver, state, null);
+            List<ConversationDescriptor> descriptors = convStore.readConversationDescriptors(0, limitInt, null, null, agentId, ver == 0 ? null : ver,
+                    state, null);
 
             var result = new LinkedHashMap<String, Object>();
             result.put("agentId", agentId);
@@ -306,10 +279,8 @@ public class McpConversationTools {
     }
 
     @Tool(name = "get_agent", description = "Get an agent's full configuration including its packages, name, and description. "
-            +
-            "Returns the AgentConfiguration JSON with all package references.")
-    public String getAgent(
-            @ToolArg(description = "Agent ID (required)") String agentId,
+            + "Returns the AgentConfiguration JSON with all package references.")
+    public String getAgent(@ToolArg(description = "Agent ID (required)") String agentId,
             @ToolArg(description = "Version number (default: latest)") Integer version) {
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
@@ -325,8 +296,7 @@ public class McpConversationTools {
             result.put("agentId", agentId);
             result.put("version", ver);
             try {
-                DocumentDescriptor descriptor = McpToolUtils.getRestStore(
-                        restInterfaceFactory, IRestDocumentDescriptorStore.class)
+                DocumentDescriptor descriptor = McpToolUtils.getRestStore(restInterfaceFactory, IRestDocumentDescriptorStore.class)
                         .readDescriptor(agentId, ver);
                 if (descriptor != null) {
                     result.put("name", descriptor.getName());
@@ -345,12 +315,11 @@ public class McpConversationTools {
 
     // ==================== Phase 8a.2: Diagnostic Tools ====================
 
-    @Tool(name = "read_agent_logs", description = "Read recent server-side logs for a Agent or conversation. " +
-            "Returns workflow execution logs, LLM provider errors, timeouts, and internal diagnostics " +
-            "that are NOT visible in conversation memory. Essential for debugging 'why did the Agent fail?' " +
-            "Filter by agentId, conversationId, and/or log level.")
-    public String readAgentLogs(
-            @ToolArg(description = "Filter by Agent ID (optional)") String agentId,
+    @Tool(name = "read_agent_logs", description = "Read recent server-side logs for a Agent or conversation. "
+            + "Returns workflow execution logs, LLM provider errors, timeouts, and internal diagnostics "
+            + "that are NOT visible in conversation memory. Essential for debugging 'why did the Agent fail?' "
+            + "Filter by agentId, conversationId, and/or log level.")
+    public String readAgentLogs(@ToolArg(description = "Filter by Agent ID (optional)") String agentId,
             @ToolArg(description = "Filter by conversation ID (optional)") String conversationId,
             @ToolArg(description = "Filter by log level: 'ERROR', 'WARN', 'INFO', 'DEBUG' (optional)") String level,
             @ToolArg(description = "Maximum number of log entries to return (default: 50)") Integer limit) {
@@ -379,12 +348,11 @@ public class McpConversationTools {
         }
     }
 
-    @Tool(name = "read_audit_trail", description = "Read the audit trail for a conversation. " +
-            "Returns per-task execution records including: taskId, taskType, input/output data, " +
-            "LLM details (model, prompt, tokens, cost), tool calls, actions emitted, and timing. " +
-            "This shows EXACTLY what happened at each workflow step — essential for optimizing Agent behavior.")
-    public String readAuditTrail(
-            @ToolArg(description = "Conversation ID (required)") String conversationId,
+    @Tool(name = "read_audit_trail", description = "Read the audit trail for a conversation. "
+            + "Returns per-task execution records including: taskId, taskType, input/output data, "
+            + "LLM details (model, prompt, tokens, cost), tool calls, actions emitted, and timing. "
+            + "This shows EXACTLY what happened at each workflow step — essential for optimizing Agent behavior.")
+    public String readAuditTrail(@ToolArg(description = "Conversation ID (required)") String conversationId,
             @ToolArg(description = "Maximum number of entries to return (default: 20)") Integer limit) {
         if (conversationId == null || conversationId.isBlank())
             return errorJson("conversationId is required");
@@ -403,12 +371,11 @@ public class McpConversationTools {
         }
     }
 
-    @Tool(name = "discover_agents", description = "Discover deployed agents with their capabilities. " +
-            "Returns an enriched list of deployed agents, cross-referenced with intent mappings " +
-            "from Agent triggers. Each Agent entry includes: agentId, name, description, version, status, " +
-            "and any intents it serves. This is the best way to find agents by purpose.")
-    public String discoverAgents(
-            @ToolArg(description = "Optional filter string to search Agent names") String filter,
+    @Tool(name = "discover_agents", description = "Discover deployed agents with their capabilities. "
+            + "Returns an enriched list of deployed agents, cross-referenced with intent mappings "
+            + "from Agent triggers. Each Agent entry includes: agentId, name, description, version, status, "
+            + "and any intents it serves. This is the best way to find agents by purpose.")
+    public String discoverAgents(@ToolArg(description = "Optional filter string to search Agent names") String filter,
             @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         try {
             var env = parseEnvironment(environment);
@@ -420,8 +387,7 @@ public class McpConversationTools {
                 List<AgentTriggerConfiguration> triggers = agentTriggerStore.readAllAgentTriggers();
                 for (var trigger : triggers) {
                     for (var deployment : trigger.getAgentDeployments()) {
-                        agentIntents.computeIfAbsent(deployment.getAgentId(), k -> new ArrayList<>())
-                                .add(trigger.getIntent());
+                        agentIntents.computeIfAbsent(deployment.getAgentId(), k -> new ArrayList<>()).add(trigger.getIntent());
                     }
                 }
             } catch (Exception e) {
@@ -439,8 +405,8 @@ public class McpConversationTools {
 
                 // Apply name filter if provided
                 if (filter != null && !filter.isBlank()) {
-                    boolean matches = (name != null && name.toLowerCase().contains(filter.toLowerCase())) ||
-                            (desc != null && desc.toLowerCase().contains(filter.toLowerCase()));
+                    boolean matches = (name != null && name.toLowerCase().contains(filter.toLowerCase()))
+                            || (desc != null && desc.toLowerCase().contains(filter.toLowerCase()));
                     if (!matches)
                         continue;
                 }
@@ -469,14 +435,13 @@ public class McpConversationTools {
         }
     }
 
-    @Tool(name = "chat_managed", description = "Send a message to a Agent using intent-based managed conversations. " +
-            "Unlike chat_with_agent (which requires a agentId and creates multiple conversations), this " +
-            "tool uses an 'intent' to find the right Agent and maintains exactly ONE conversation " +
-            "per intent+userId — like a single chat window. The conversation is auto-created on " +
-            "first message and reused on subsequent calls. Requires a Agent trigger to be configured " +
-            "for the intent (see list_agent_triggers / create_agent_trigger).")
-    public String chatManaged(
-            @ToolArg(description = "Intent that maps to a Agent trigger (required). E.g. 'customer_support'") String intent,
+    @Tool(name = "chat_managed", description = "Send a message to a Agent using intent-based managed conversations. "
+            + "Unlike chat_with_agent (which requires a agentId and creates multiple conversations), this "
+            + "tool uses an 'intent' to find the right Agent and maintains exactly ONE conversation "
+            + "per intent+userId — like a single chat window. The conversation is auto-created on "
+            + "first message and reused on subsequent calls. Requires a Agent trigger to be configured "
+            + "for the intent (see list_agent_triggers / create_agent_trigger).")
+    public String chatManaged(@ToolArg(description = "Intent that maps to a Agent trigger (required). E.g. 'customer_support'") String intent,
             @ToolArg(description = "User ID for conversation management (required)") String userId,
             @ToolArg(description = "The user message to send (required)") String message,
             @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
@@ -494,10 +459,7 @@ public class McpConversationTools {
             var userConversation = getOrCreateManagedConversation(intent, userId, env);
 
             // Step 2: Send the message using the existing sendMessageAndWait helper
-            var snapshot = sendMessageAndWait(
-                    userConversation.getEnvironment(),
-                    userConversation.getAgentId(),
-                    userConversation.getConversationId(),
+            var snapshot = sendMessageAndWait(userConversation.getEnvironment(), userConversation.getAgentId(), userConversation.getConversationId(),
                     message);
 
             // Step 3: Build response
@@ -518,8 +480,7 @@ public class McpConversationTools {
      * Get an existing user conversation for the intent+userId, or create a new one.
      * Mirrors the logic from {@code RestAgentManagement.initUserConversation}.
      */
-    private UserConversation getOrCreateManagedConversation(
-            String intent, String userId, Deployment.Environment env) throws Exception {
+    private UserConversation getOrCreateManagedConversation(String intent, String userId, Deployment.Environment env) throws Exception {
 
         // Try to read existing conversation
         UserConversation existing = null;
@@ -531,8 +492,7 @@ public class McpConversationTools {
 
         if (existing != null) {
             // Check if conversation has ended
-            ConversationState state = restAgentEngine.getConversationState(
-                    existing.getEnvironment(), existing.getConversationId());
+            ConversationState state = restAgentEngine.getConversationState(existing.getEnvironment(), existing.getConversationId());
             if (!ConversationState.ENDED.equals(state)) {
                 return existing;
             }
@@ -553,12 +513,11 @@ public class McpConversationTools {
 
         // Start a new conversation
         var initialContext = new HashMap<>(deployment.getInitialContext());
-        jakarta.ws.rs.core.Response agentResponse = restAgentEngine.startConversationWithContext(
-                usedEnv, agentId, userId, initialContext);
+        jakarta.ws.rs.core.Response agentResponse = restAgentEngine.startConversationWithContext(usedEnv, agentId, userId, initialContext);
 
         if (agentResponse.getStatus() != 201) {
-            throw new RuntimeException("Failed to create conversation for intent=" + intent +
-                    ", agentId=" + agentId + ", status=" + agentResponse.getStatus());
+            throw new RuntimeException(
+                    "Failed to create conversation for intent=" + intent + ", agentId=" + agentId + ", status=" + agentResponse.getStatus());
         }
 
         var locationUri = URI.create(agentResponse.getHeaders().get("location").getFirst().toString());
@@ -573,11 +532,10 @@ public class McpConversationTools {
     }
 
     /**
-     * Send a message to a Agent synchronously and wait for the response.
-     * Bridges the async callback pattern to a blocking call.
+     * Send a message to a Agent synchronously and wait for the response. Bridges
+     * the async callback pattern to a blocking call.
      */
-    private SimpleConversationMemorySnapshot sendMessageAndWait(
-            Deployment.Environment env, String agentId, String conversationId, String message)
+    private SimpleConversationMemorySnapshot sendMessageAndWait(Deployment.Environment env, String agentId, String conversationId, String message)
             throws Exception {
 
         var inputData = new InputData();
@@ -586,28 +544,23 @@ public class McpConversationTools {
 
         var responseFuture = new CompletableFuture<SimpleConversationMemorySnapshot>();
 
-        conversationService.say(env, agentId, conversationId,
-                false, true, Collections.emptyList(),
-                inputData, false,
-                snapshot -> {
-                    if (snapshot != null) {
-                        responseFuture.complete(snapshot);
-                    } else {
-                        responseFuture.completeExceptionally(
-                                new RuntimeException("Agent returned null response"));
-                    }
-                });
+        conversationService.say(env, agentId, conversationId, false, true, Collections.emptyList(), inputData, false, snapshot -> {
+            if (snapshot != null) {
+                responseFuture.complete(snapshot);
+            } else {
+                responseFuture.completeExceptionally(new RuntimeException("Agent returned null response"));
+            }
+        });
 
         return responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }
 
     /**
-     * Build an AI-agent-friendly response from a conversation snapshot.
-     * Extracts top-level fields: agentResponse (text), quickReplies, actions,
+     * Build an AI-agent-friendly response from a conversation snapshot. Extracts
+     * top-level fields: agentResponse (text), quickReplies, actions,
      * conversationState — so AI agents don't need to dig into the raw snapshot.
      */
-    private LinkedHashMap<String, Object> buildConversationResponse(
-            SimpleConversationMemorySnapshot snapshot, String conversationId) {
+    private LinkedHashMap<String, Object> buildConversationResponse(SimpleConversationMemorySnapshot snapshot, String conversationId) {
 
         var result = new LinkedHashMap<String, Object>();
 

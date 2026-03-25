@@ -77,8 +77,7 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     @Override
     public void replaceConversationOutputObject(String key, Object valueToBeReplaced, Object replace) {
         @SuppressWarnings("unchecked")
-        var outputs = (List<Object>) conversationOutput.computeIfAbsent(key,
-                k -> new ArrayList<>());
+        var outputs = (List<Object>) conversationOutput.computeIfAbsent(key, k -> new ArrayList<>());
 
         IntStream.range(0, outputs.size()).forEach(i -> {
             var currentValue = outputs.get(i);
@@ -96,8 +95,7 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     @Override
     @SuppressWarnings("unchecked")
     public void addConversationOutputList(String key, List<?> list) {
-        var currentList = (List<Object>) conversationOutput.computeIfAbsent(key,
-                k -> new ArrayList<>());
+        var currentList = (List<Object>) conversationOutput.computeIfAbsent(key, k -> new ArrayList<>());
 
         currentList.addAll(list);
     }
@@ -105,8 +103,7 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     @Override
     public void addConversationOutputMap(String key, Map<String, Object> map) {
         @SuppressWarnings("unchecked")
-        var currentMap = (Map<String, Object>) conversationOutput.computeIfAbsent(key,
-                k -> new LinkedHashMap<String, Object>());
+        var currentMap = (Map<String, Object>) conversationOutput.computeIfAbsent(key, k -> new LinkedHashMap<String, Object>());
 
         currentMap.putAll(map);
     }
@@ -186,9 +183,6 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
 
     @Override
     public String toString() {
-        return "ConversationStep" +
-                "{input=" + getLatestData("input") +
-                ", output=" + getLatestData("output") +
-                '}';
+        return "ConversationStep" + "{input=" + getLatestData("input") + ", output=" + getLatestData("output") + '}';
     }
 }

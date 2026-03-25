@@ -9,15 +9,14 @@ import java.util.List;
 public interface IDatabaseLogs {
     List<DatabaseLog> getLogs(Integer skip, Integer limit);
 
-    List<DatabaseLog> getLogs(Deployment.Environment environment, String agentId, Integer agentVersion,
-                              String conversationId, String userId, String instanceId,
-                              Integer skip, Integer limit);
+    List<DatabaseLog> getLogs(Deployment.Environment environment, String agentId, Integer agentVersion, String conversationId, String userId,
+            String instanceId, Integer skip, Integer limit);
 
-    void addLogs(String environment, String agentId, Integer agentVersion,
-                 String conversationId, String userId, String instanceId, String message);
+    void addLogs(String environment, String agentId, Integer agentVersion, String conversationId, String userId, String instanceId, String message);
 
     /**
-     * Batch insert log entries. Used by the async DB writer in {@link BoundedLogStore}.
+     * Batch insert log entries. Used by the async DB writer in
+     * {@link BoundedLogStore}.
      */
     void addLogsBatch(List<LogEntry> entries);
 }

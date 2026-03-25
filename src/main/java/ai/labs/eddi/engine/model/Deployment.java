@@ -8,12 +8,11 @@ import com.fasterxml.jackson.annotation.JsonValue;
  */
 public class Deployment {
     public enum Environment {
-        production,
-        test;
+        production, test;
 
         /**
-         * Backwards-compatible deserialization:
-         * "production" → production, "production" → production
+         * Backwards-compatible deserialization: "production" → production, "production"
+         * → production
          */
         @JsonCreator
         public static Environment fromString(String value) {
@@ -35,9 +34,6 @@ public class Deployment {
     }
 
     public enum Status {
-        READY,
-        IN_PROGRESS,
-        NOT_FOUND,
-        ERROR
+        READY, IN_PROGRESS, NOT_FOUND, ERROR
     }
 }

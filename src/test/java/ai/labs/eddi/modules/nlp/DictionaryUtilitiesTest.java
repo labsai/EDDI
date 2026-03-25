@@ -29,37 +29,37 @@ public class DictionaryUtilitiesTest {
 
     @Test
     public void extractExpressions_NotFiltered() {
-        //setup
+        // setup
         final String expected = "someExp(someValue1), unused(someValue2), unknown(someValue3)";
 
-        //test
+        // test
         List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, true, true);
 
-        //assert
+        // assert
         Assertions.assertEquals(expected, actual.get(0).getExpressions().toString());
     }
 
     @Test
     public void extractExpressions_FilteredUnused() {
-        //setup
+        // setup
         final String expected = "someExp(someValue1), unknown(someValue3)";
 
-        //test
+        // test
         List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, false, true);
 
-        //assert
+        // assert
         Assertions.assertEquals(expected, actual.get(0).getExpressions().toString());
     }
 
     @Test
     public void extractExpressions_FilteredUnknown() {
-        //setup
+        // setup
         final String expected = "someExp(someValue1), unused(someValue2)";
 
-        //test
+        // test
         List<Solution> actual = DictionaryUtilities.extractExpressions(rawSolutions, true, false);
 
-        //assert
+        // assert
         Assertions.assertEquals(expected, actual.get(0).getExpressions().toString());
     }
 

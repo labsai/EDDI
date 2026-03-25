@@ -25,14 +25,15 @@ import java.util.Optional;
 /**
  * Polls the schedule store for due schedules and fires them.
  * <p>
- * Uses atomic CAS claiming to ensure exactly-once execution across
- * clustered EDDI instances. Implements exponential backoff on failure
- * with dead-lettering after max retries.
+ * Uses atomic CAS claiming to ensure exactly-once execution across clustered
+ * EDDI instances. Implements exponential backoff on failure with dead-lettering
+ * after max retries.
  * <p>
  * Supports two trigger types:
  * <ul>
- *   <li>{@code CRON} — wall-clock aligned via cron expression</li>
- *   <li>{@code HEARTBEAT} — interval-based, drift-proof (nextFire = lastFired + interval)</li>
+ * <li>{@code CRON} — wall-clock aligned via cron expression</li>
+ * <li>{@code HEARTBEAT} — interval-based, drift-proof (nextFire = lastFired +
+ * interval)</li>
  * </ul>
  *
  * @author ginccc
@@ -65,24 +66,14 @@ public class SchedulePollerService {
     private Timer fireDurationTimer;
 
     @Inject
-    public SchedulePollerService(
-            IScheduleStore scheduleStore,
-            ScheduleFireExecutor fireExecutor,
-            MeterRegistry meterRegistry,
-            @ConfigProperty(name = "eddi.schedule.enabled", defaultValue = "true")
-            boolean schedulingEnabled,
-            @ConfigProperty(name = "eddi.schedule.lease-timeout", defaultValue = "5m")
-            Duration leaseTimeout,
-            @ConfigProperty(name = "eddi.schedule.max-retries", defaultValue = "5")
-            int maxRetries,
-            @ConfigProperty(name = "eddi.schedule.backoff-base-seconds", defaultValue = "15")
-            int backoffBaseSeconds,
-            @ConfigProperty(name = "eddi.schedule.backoff-multiplier", defaultValue = "4")
-            int backoffMultiplier,
-            @ConfigProperty(name = "eddi.schedule.instance-id")
-            Optional<String> configuredInstanceId,
-            @ConfigProperty(name = "eddi.schedule.default-timezone", defaultValue = "UTC")
-            String defaultTimeZone) {
+    public SchedulePollerService(IScheduleStore scheduleStore, ScheduleFireExecutor fireExecutor, MeterRegistry meterRegistry,
+            @ConfigProperty(name = "eddi.schedule.enabled", defaultValue = "true") boolean schedulingEnabled,
+            @ConfigProperty(name = "eddi.schedule.lease-timeout", defaultValue = "5m") Duration leaseTimeout,
+            @ConfigProperty(name = "eddi.schedule.max-retries", defaultValue = "5") int maxRetries,
+            @ConfigProperty(name = "eddi.schedule.backoff-base-seconds", defaultValue = "15") int backoffBaseSeconds,
+            @ConfigProperty(name = "eddi.schedule.backoff-multiplier", defaultValue = "4") int backoffMultiplier,
+            @ConfigProperty(name = "eddi.schedule.instance-id") Optional<String> configuredInstanceId,
+            @ConfigProperty(name = "eddi.schedule.default-timezone", defaultValue = "UTC") String defaultTimeZone) {
         this.scheduleStore = scheduleStore;
         this.fireExecutor = fireExecutor;
         this.meterRegistry = meterRegistry;
@@ -117,16 +108,15 @@ public class SchedulePollerService {
         fireDurationTimer = meterRegistry.timer("eddi.schedule.fire.duration");
 
         if (schedulingEnabled) {
-            LOGGER.infof("Schedule poller initialized (instance=%s, leaseTimeout=%s, maxRetries=%d)",
-                    instanceId, leaseTimeout, maxRetries);
+            LOGGER.infof("Schedule poller initialized (instance=%s, leaseTimeout=%s, maxRetries=%d)", instanceId, leaseTimeout, maxRetries);
         } else {
             LOGGER.info("Schedule poller DISABLED (eddi.schedule.enabled=false)");
         }
     }
 
     /**
-     * Main poll loop — runs at the configured interval.
-     * Finds due schedules, claims them atomically, and fires.
+     * Main poll loop — runs at the configured interval. Finds due schedules, claims
+     * them atomically, and fires.
      */
     @Scheduled(every = "${eddi.schedule.poll-interval:15s}", identity = "schedule-poller")
     void pollDueSchedules() {
@@ -170,9 +160,7 @@ public class SchedulePollerService {
 
             // Fire the schedule
             fireCounter.increment();
-            ScheduleFireLog fireLog = fireDurationTimer.record(() ->
-                    fireExecutor.fire(schedule, instanceId, attemptNumber)
-            );
+            ScheduleFireLog fireLog = fireDurationTimer.record(() -> fireExecutor.fire(schedule, instanceId, attemptNumber));
 
             // Handle result
             if (FireStatus.COMPLETED.name().equals(fireLog.status())) {
@@ -194,15 +182,16 @@ public class SchedulePollerService {
         try {
             Instant nextFire = computeNextFire(schedule);
             scheduleStore.markCompleted(schedule.getId(), nextFire);
-            // Note: markCompleted with null nextFire auto-disables (fix #5 in MongoScheduleStore)
+            // Note: markCompleted with null nextFire auto-disables (fix #5 in
+            // MongoScheduleStore)
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Failed to mark completed: %s", schedule.getId());
         }
     }
 
     /**
-     * Compute next fire time based on trigger type.
-     * Fix #13: handle heartbeat and one-shot correctly.
+     * Compute next fire time based on trigger type. Fix #13: handle heartbeat and
+     * one-shot correctly.
      */
     private Instant computeNextFire(ScheduleConfiguration schedule) {
         TriggerType type = schedule.getTriggerType();
@@ -242,16 +231,15 @@ public class SchedulePollerService {
                 // Dead-letter
                 scheduleStore.markDeadLettered(schedule.getId());
                 deadLetterCounter.increment();
-                LOGGER.warnf("[SCHEDULE] Schedule '%s' (id=%s) dead-lettered after %d retries",
-                        schedule.getName(), schedule.getId(), newFailCount);
+                LOGGER.warnf("[SCHEDULE] Schedule '%s' (id=%s) dead-lettered after %d retries", schedule.getName(), schedule.getId(), newFailCount);
             } else {
                 // Exponential backoff
                 long delaySec = (long) (backoffBaseSeconds * Math.pow(backoffMultiplier, newFailCount - 1));
                 Instant nextRetry = Instant.now().plusSeconds(delaySec);
                 scheduleStore.markFailed(schedule.getId(), nextRetry);
                 fireFailedCounter.increment();
-                LOGGER.warnf("[SCHEDULE] Schedule '%s' (id=%s) failed (attempt %d/%d), retry at %s",
-                        schedule.getName(), schedule.getId(), newFailCount, maxRetries, nextRetry);
+                LOGGER.warnf("[SCHEDULE] Schedule '%s' (id=%s) failed (attempt %d/%d), retry at %s", schedule.getName(), schedule.getId(),
+                        newFailCount, maxRetries, nextRetry);
             }
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Error handling failure for schedule %s", schedule.getId());

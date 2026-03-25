@@ -20,8 +20,7 @@ public class DateTimeTool {
     private static final DateTimeFormatter READABLE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z");
 
     @Tool("Gets the current date and time in a specified timezone. Returns formatted date/time string.")
-    public String getCurrentDateTime(
-            @P("timezone") String timezone) {
+    public String getCurrentDateTime(@P("timezone") String timezone) {
 
         try {
             ZoneId zoneId = ZoneId.of(timezone);
@@ -38,10 +37,7 @@ public class DateTimeTool {
     }
 
     @Tool("Converts a date/time from one timezone to another")
-    public String convertTimezone(
-            @P("dateTime") String dateTime,
-            @P("fromTimezone") String fromTimezone,
-            @P("toTimezone") String toTimezone) {
+    public String convertTimezone(@P("dateTime") String dateTime, @P("fromTimezone") String fromTimezone, @P("toTimezone") String toTimezone) {
 
         try {
             ZoneId fromZone = ZoneId.of(fromTimezone);
@@ -62,10 +58,7 @@ public class DateTimeTool {
     }
 
     @Tool("Calculates the difference between two dates/times")
-    public String calculateDateDifference(
-            @P("startDateTime") String startDateTime,
-            @P("endDateTime") String endDateTime,
-            @P("unit") String unit) {
+    public String calculateDateDifference(@P("startDateTime") String startDateTime, @P("endDateTime") String endDateTime, @P("unit") String unit) {
 
         try {
             LocalDateTime start = LocalDateTime.parse(startDateTime, ISO_FORMATTER);
@@ -75,23 +68,23 @@ public class DateTimeTool {
             String unitName;
 
             switch (unit.toLowerCase()) {
-                case "days":
+                case "days" :
                     difference = ChronoUnit.DAYS.between(start, end);
                     unitName = "days";
                     break;
-                case "hours":
+                case "hours" :
                     difference = ChronoUnit.HOURS.between(start, end);
                     unitName = "hours";
                     break;
-                case "minutes":
+                case "minutes" :
                     difference = ChronoUnit.MINUTES.between(start, end);
                     unitName = "minutes";
                     break;
-                case "seconds":
+                case "seconds" :
                     difference = ChronoUnit.SECONDS.between(start, end);
                     unitName = "seconds";
                     break;
-                default:
+                default :
                     return "Error: Invalid unit. Use 'days', 'hours', 'minutes', or 'seconds'.";
             }
 
@@ -106,11 +99,7 @@ public class DateTimeTool {
     }
 
     @Tool("Adds or subtracts time from a date")
-    public String addTime(
-            @P("dateTime") String dateTime,
-            @P("amount") long amount,
-            @P("unit") String unit,
-            @P("timezone") String timezone) {
+    public String addTime(@P("dateTime") String dateTime, @P("amount") long amount, @P("unit") String unit, @P("timezone") String timezone) {
 
         try {
             LocalDateTime localDateTime = LocalDateTime.parse(dateTime, ISO_FORMATTER);
@@ -118,28 +107,28 @@ public class DateTimeTool {
 
             LocalDateTime result;
             switch (unit.toLowerCase()) {
-                case "years":
+                case "years" :
                     result = localDateTime.plusYears(amount);
                     break;
-                case "months":
+                case "months" :
                     result = localDateTime.plusMonths(amount);
                     break;
-                case "weeks":
+                case "weeks" :
                     result = localDateTime.plusWeeks(amount);
                     break;
-                case "days":
+                case "days" :
                     result = localDateTime.plusDays(amount);
                     break;
-                case "hours":
+                case "hours" :
                     result = localDateTime.plusHours(amount);
                     break;
-                case "minutes":
+                case "minutes" :
                     result = localDateTime.plusMinutes(amount);
                     break;
-                case "seconds":
+                case "seconds" :
                     result = localDateTime.plusSeconds(amount);
                     break;
-                default:
+                default :
                     return "Error: Invalid unit. Use 'years', 'months', 'weeks', 'days', 'hours', 'minutes', or 'seconds'.";
             }
 
@@ -155,10 +144,7 @@ public class DateTimeTool {
     }
 
     @Tool("Formats a date/time string into a different format")
-    public String formatDateTime(
-            @P("dateTime") String dateTime,
-            @P("pattern") String pattern,
-            @P("timezone") String timezone) {
+    public String formatDateTime(@P("dateTime") String dateTime, @P("pattern") String pattern, @P("timezone") String timezone) {
 
         try {
             LocalDateTime localDateTime = LocalDateTime.parse(dateTime, ISO_FORMATTER);
@@ -185,12 +171,9 @@ public class DateTimeTool {
         StringBuilder sb = new StringBuilder("Available timezones:\n");
 
         // Get major timezones
-        String[] majorTimezones = {
-            "UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
-            "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Rome",
-            "Asia/Tokyo", "Asia/Shanghai", "Asia/Hong_Kong", "Asia/Singapore",
-            "Australia/Sydney", "Pacific/Auckland"
-        };
+        String[] majorTimezones = {"UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "Europe/London",
+                "Europe/Paris", "Europe/Berlin", "Europe/Rome", "Asia/Tokyo", "Asia/Shanghai", "Asia/Hong_Kong", "Asia/Singapore", "Australia/Sydney",
+                "Pacific/Auckland"};
 
         for (String tz : majorTimezones) {
             ZoneId zoneId = ZoneId.of(tz);
@@ -202,4 +185,3 @@ public class DateTimeTool {
         return sb.toString();
     }
 }
-

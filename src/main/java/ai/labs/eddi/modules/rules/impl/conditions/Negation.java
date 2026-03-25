@@ -8,11 +8,9 @@ import java.util.List;
 
 import static ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.ExecutionState.NOT_EXECUTED;
 
-
 /**
  * @author ginccc
  */
-
 
 public class Negation implements IRuleCondition {
     public static final String ID = "negation";
@@ -29,8 +27,7 @@ public class Negation implements IRuleCondition {
     }
 
     @Override
-    public ExecutionState execute(IConversationMemory memory, List<Rule> trace)
-            throws Rule.InfiniteLoopException, Rule.RuntimeException {
+    public ExecutionState execute(IConversationMemory memory, List<Rule> trace) throws Rule.InfiniteLoopException, Rule.RuntimeException {
         ExecutionState state = NOT_EXECUTED;
         if (condition != null) {
             ExecutionState stateOfExecutable = condition.execute(memory, trace);
@@ -65,4 +62,3 @@ public class Negation implements IRuleCondition {
         this.condition = condition;
     }
 }
-

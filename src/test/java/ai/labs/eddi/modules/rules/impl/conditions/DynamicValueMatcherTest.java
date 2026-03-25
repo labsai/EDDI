@@ -38,78 +38,77 @@ public class DynamicValueMatcherTest {
     }
 
     private void initOutput(String nameKey, String name) {
-        when(memoryItemConverter.convert(any())).thenAnswer(invocation ->
-                new LinkedHashMap<>(createConversationOutput(nameKey, name)));
+        when(memoryItemConverter.convert(any())).thenAnswer(invocation -> new LinkedHashMap<>(createConversationOutput(nameKey, name)));
         when(currentStep.getConversationOutput()).then(invocation -> createConversationOutput(nameKey, name));
     }
 
     @Test
     public void dynamicValue_NothingDefined() {
-        //setup
+        // setup
         initOutput();
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
         dynamicValueMatcher.setConfigs(createValues(false, false, false));
 
-        //test
+        // test
         ExecutionState executionState = dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
 
-        //assert
+        // assert
         Assertions.assertEquals(ExecutionState.FAIL, executionState);
     }
 
     @Test
     public void dynamicValue_ValuePathOnly() {
-        //setup
+        // setup
         initOutput();
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
         dynamicValueMatcher.setConfigs(createValues(true, false, false));
 
-        //test
+        // test
         ExecutionState executionState = dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
 
-        //assert
+        // assert
         Assertions.assertEquals(ExecutionState.SUCCESS, executionState);
     }
 
     @Test
     public void dynamicValue_NothingEquals() {
-        //setup
+        // setup
         initOutput();
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
         dynamicValueMatcher.setConfigs(createValues(true, true, false));
 
-        //test
+        // test
         ExecutionState executionState = dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
 
-        //assert
+        // assert
         Assertions.assertEquals(ExecutionState.SUCCESS, executionState);
     }
 
     @Test
     public void dynamicValue_NothingContains() {
-        //setup
+        // setup
         initOutput();
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
         dynamicValueMatcher.setConfigs(createValues(true, false, true));
 
-        //test
+        // test
         ExecutionState executionState = dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
 
-        //assert
+        // assert
         Assertions.assertEquals(ExecutionState.SUCCESS, executionState);
     }
 
     @Test
     public void dynamicValue_propertyIsNull() {
-        //setup
+        // setup
         initOutput("name", "Tom");
         DynamicValueMatcher dynamicValueMatcher = new DynamicValueMatcher(memoryItemConverter);
         dynamicValueMatcher.setConfigs(createValues(true, false, false));
 
-        //test
+        // test
         ExecutionState executionState = dynamicValueMatcher.execute(conversationMemory, new LinkedList<>());
 
-        //assert
+        // assert
         Assertions.assertEquals(ExecutionState.FAIL, executionState);
     }
 

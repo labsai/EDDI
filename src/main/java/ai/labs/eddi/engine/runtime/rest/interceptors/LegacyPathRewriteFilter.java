@@ -36,17 +36,14 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
     private static final Logger LOGGER = Logger.getLogger(LegacyPathRewriteFilter.class);
 
     /**
-     * Store path rewrites: old prefix → new prefix.
-     * Order matters: longer prefixes should come first to avoid partial matches.
+     * Store path rewrites: old prefix → new prefix. Order matters: longer prefixes
+     * should come first to avoid partial matches.
      */
     private static final Map<String, String> PATH_REWRITES = Map.ofEntries(
             Map.entry("/regulardictionarystore/regulardictionaries", "/dictionarystore/dictionaries"),
-            Map.entry("/bottriggerstore/bottriggers", "/triggerstore/triggers"),
-            Map.entry("/behaviorstore/behaviorsets", "/rulestore/rulesets"),
-            Map.entry("/langchainstore/langchains", "/llmstore/llms"),
-            Map.entry("/httpcallsstore/httpcalls", "/apicallstore/apicalls"),
-            Map.entry("/packagestore/packages", "/workflowstore/workflows"),
-            Map.entry("/botstore/bots", "/agentstore/agents"),
+            Map.entry("/bottriggerstore/bottriggers", "/triggerstore/triggers"), Map.entry("/behaviorstore/behaviorsets", "/rulestore/rulesets"),
+            Map.entry("/langchainstore/langchains", "/llmstore/llms"), Map.entry("/httpcallsstore/httpcalls", "/apicallstore/apicalls"),
+            Map.entry("/packagestore/packages", "/workflowstore/workflows"), Map.entry("/botstore/bots", "/agentstore/agents"),
             Map.entry("/langchain/tools", "/llm/tools"));
 
     @Override
@@ -56,11 +53,8 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
 
         if (!rewritten.equals(path)) {
             LOGGER.debugv("Legacy path rewrite: {0} → {1}", path, rewritten);
-            requestContext.setRequestUri(
-                    requestContext.getUriInfo().getBaseUri(),
-                    UriBuilder.fromPath(rewritten)
-                            .replaceQuery(requestContext.getUriInfo().getRequestUri().getRawQuery())
-                            .build());
+            requestContext.setRequestUri(requestContext.getUriInfo().getBaseUri(),
+                    UriBuilder.fromPath(rewritten).replaceQuery(requestContext.getUriInfo().getRequestUri().getRawQuery()).build());
         }
     }
 

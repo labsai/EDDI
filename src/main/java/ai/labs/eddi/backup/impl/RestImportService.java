@@ -84,12 +84,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private static final Logger log = Logger.getLogger(RestImportService.class);
 
     @Inject
-    public RestImportService(IZipArchive zipArchive,
-            IJsonSerialization jsonSerialization,
-            IRestInterfaceFactory restInterfaceFactory,
-            IRestAgentAdministration restAgentAdministration,
-            IMigrationManager migrationManager,
-            IDeploymentListener deploymentListener,
+    public RestImportService(IZipArchive zipArchive, IJsonSerialization jsonSerialization, IRestInterfaceFactory restInterfaceFactory,
+            IRestAgentAdministration restAgentAdministration, IMigrationManager migrationManager, IDeploymentListener deploymentListener,
             IDocumentDescriptorStore documentDescriptorStore) {
         this.zipArchive = zipArchive;
         this.jsonSerialization = jsonSerialization;
@@ -107,27 +103,23 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             List<CompletableFuture<Void>> deploymentFutures = new ArrayList<>();
 
             for (var agentFileName : agentExampleFiles) {
-                importAgent(getResourceAsStream("/initial-agents/" + agentFileName),
-                        "create", null,
-                        new MockAsyncResponse() {
-                            @Override
-                            public boolean resume(Object responseObj) {
-                                if (responseObj instanceof Response response) {
-                                    var agentId = RestUtilities.extractResourceId(response.getLocation());
-                                    if (agentId != null) {
-                                        var deploymentFuture = deploymentListener
-                                                .registerAgentDeployment(agentId.getId(), agentId.getVersion());
-                                        deploymentFutures.add(deploymentFuture);
+                importAgent(getResourceAsStream("/initial-agents/" + agentFileName), "create", null, new MockAsyncResponse() {
+                    @Override
+                    public boolean resume(Object responseObj) {
+                        if (responseObj instanceof Response response) {
+                            var agentId = RestUtilities.extractResourceId(response.getLocation());
+                            if (agentId != null) {
+                                var deploymentFuture = deploymentListener.registerAgentDeployment(agentId.getId(), agentId.getVersion());
+                                deploymentFutures.add(deploymentFuture);
 
-                                        restAgentAdministration.deployAgent(
-                                                production, agentId.getId(), agentId.getVersion(), true, false);
+                                restAgentAdministration.deployAgent(production, agentId.getId(), agentId.getVersion(), true, false);
 
-                                        return true;
-                                    }
-                                }
-                                return false;
+                                return true;
                             }
-                        });
+                        }
+                        return false;
+                    }
+                });
             }
 
             // Wait for all deployments to complete
@@ -143,8 +135,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private List<String> getResourceFiles(String path) throws IOException {
         List<String> filenames = new ArrayList<>();
 
-        try (var in = getResourceAsStream(path);
-                var br = new BufferedReader(new InputStreamReader(in))) {
+        try (var in = getResourceAsStream(path); var br = new BufferedReader(new InputStreamReader(in))) {
 
             String resource;
             while ((resource = br.readLine()) != null) {
@@ -164,8 +155,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
             var targetDirPath = targetDir.getPath();
 
-            try (var directoryStream = Files.newDirectoryStream(Paths.get(targetDirPath),
-                    path -> path.toString().endsWith(AGENT_FILE_ENDING))) {
+            try (var directoryStream = Files.newDirectoryStream(Paths.get(targetDirPath), path -> path.toString().endsWith(AGENT_FILE_ENDING))) {
 
                 for (Path agentFilePath : directoryStream) {
                     String agentFileString = readFile(agentFilePath);
@@ -178,8 +168,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     diffs.add(buildResourceDiff(agentOriginId, "agent", agentName));
 
                     // Workflows & their extensions
-                    AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString,
-                            AgentConfiguration.class);
+                    AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString, AgentConfiguration.class);
                     for (URI workflowUri : agentConfig.getWorkflows()) {
                         IResourceId packageResourceId = RestUtilities.extractResourceId(workflowUri);
                         if (packageResourceId == null)
@@ -187,14 +176,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                         String workflowId = packageResourceId.getId();
                         String packageVersion = String.valueOf(packageResourceId.getVersion());
-                        String packageName = readNameFromDescriptor(
-                                Paths.get(targetDirPath, workflowId, packageVersion), workflowId);
+                        String packageName = readNameFromDescriptor(Paths.get(targetDirPath, workflowId, packageVersion), workflowId);
                         diffs.add(buildResourceDiff(workflowId, "package", packageName));
 
                         // Read package file to find extension URIs
                         var dir = Paths.get(FileUtilities.buildPath(targetDirPath, workflowId, packageVersion));
-                        try (var pkgStream = Files.newDirectoryStream(dir,
-                                p -> p.toString().endsWith(".package.json"))) {
+                        try (var pkgStream = Files.newDirectoryStream(dir, p -> p.toString().endsWith(".package.json"))) {
                             for (Path packageFilePath : pkgStream) {
                                 String packageFileString = readFile(packageFilePath);
                                 // Normalize legacy URIs from v5 ZIPs
@@ -226,8 +213,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         addDiffsForType(diffs, packageFileString, OUTPUT_URI_PATTERN, OUTPUT_EXT, packageDir);
     }
 
-    private void addDiffsForType(List<ResourceDiff> diffs, String packageFileString,
-            Pattern uriPattern, String ext, Path packageDir)
+    private void addDiffsForType(List<ResourceDiff> diffs, String packageFileString, Pattern uriPattern, String ext, Path packageDir)
             throws CallbackMatcher.CallbackMatcherException {
 
         List<URI> uris = extractResourcesUris(packageFileString, uriPattern);
@@ -247,8 +233,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 DocumentDescriptor desc = existing.getFirst();
                 IResourceId localResourceId = RestUtilities.extractResourceId(desc.getResource());
                 if (localResourceId != null) {
-                    return new ResourceDiff(originId, resourceType, name,
-                            DiffAction.UPDATE, localResourceId.getId(), localResourceId.getVersion());
+                    return new ResourceDiff(originId, resourceType, name, DiffAction.UPDATE, localResourceId.getId(), localResourceId.getVersion());
                 }
             }
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
@@ -279,8 +264,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     // ==================== Import ====================
 
     @Override
-    public void importAgent(InputStream zippedAgentConfigFiles, String strategy,
-            String selectedOriginIds, AsyncResponse response) {
+    public void importAgent(InputStream zippedAgentConfigFiles, String strategy, String selectedOriginIds, AsyncResponse response) {
         try {
             if (response != null)
                 response.setTimeout(60, TimeUnit.SECONDS);
@@ -301,24 +285,19 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private Set<String> parseSelectedResources(String selectedOriginIds) {
         if (isNullOrEmpty(selectedOriginIds))
             return null;
-        return Arrays.stream(selectedOriginIds.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .collect(Collectors.toSet());
+        return Arrays.stream(selectedOriginIds.split(",")).map(String::trim).filter(s -> !s.isEmpty()).collect(Collectors.toSet());
     }
 
     private boolean isSelected(Set<String> selectedSet, String originId) {
         return selectedSet == null || selectedSet.contains(originId);
     }
 
-    private void importAgentZipFile(InputStream zippedAgentConfigFiles, File targetDir,
-            AsyncResponse response, boolean isMerge, Set<String> selectedSet)
-            throws IOException {
+    private void importAgentZipFile(InputStream zippedAgentConfigFiles, File targetDir, AsyncResponse response, boolean isMerge,
+            Set<String> selectedSet) throws IOException {
 
         this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
         var targetDirPath = targetDir.getPath();
-        try (var directoryStream = Files.newDirectoryStream(Paths.get(targetDirPath),
-                path -> path.toString().endsWith(AGENT_FILE_ENDING))) {
+        try (var directoryStream = Files.newDirectoryStream(Paths.get(targetDirPath), path -> path.toString().endsWith(AGENT_FILE_ENDING))) {
             directoryStream.forEach(agentFilePath -> {
                 try {
                     String agentOriginId = extractIdFromAgentFilename(agentFilePath);
@@ -327,11 +306,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     // Normalize legacy eddi:// URIs from v5 ZIP exports to v6 canonical form
                     agentFileString = normalizeLegacyUris(agentFileString);
 
-                    AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString,
-                            AgentConfiguration.class);
+                    AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString, AgentConfiguration.class);
                     agentConfig.getWorkflows()
-                            .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig,
-                                    response, isMerge, selectedSet));
+                            .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, response, isMerge, selectedSet));
 
                     URI newAgentUri;
                     if (isMerge && isSelected(selectedSet, agentOriginId)) {
@@ -362,8 +339,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return URI.create(IRestAgentStore.resourceURI + oldAgentId + IRestAgentStore.versionQueryParam + "1");
     }
 
-    private void parseWorkflow(String targetDirPath, URI workflowUri, AgentConfiguration agentConfig,
-            AsyncResponse response, boolean isMerge, Set<String> selectedSet) {
+    private void parseWorkflow(String targetDirPath, URI workflowUri, AgentConfiguration agentConfig, AsyncResponse response, boolean isMerge,
+            Set<String> selectedSet) {
         try {
             IResourceId packageResourceId = RestUtilities.extractResourceId(workflowUri);
             if (packageResourceId == null) {
@@ -373,8 +350,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             String packageVersion = String.valueOf(packageResourceId.getVersion());
 
             var dir = Paths.get(FileUtilities.buildPath(targetDirPath, workflowId, packageVersion));
-            try (var directoryStream = Files.newDirectoryStream(dir,
-                    packageFilePath -> packageFilePath.toString().endsWith(".package.json"))) {
+            try (var directoryStream = Files.newDirectoryStream(dir, packageFilePath -> packageFilePath.toString().endsWith(".package.json"))) {
                 directoryStream.forEach(packageFilePath -> {
                     try {
                         Path packagePath = packageFilePath.getParent();
@@ -389,10 +365,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // ... for dictionaries
                         List<URI> dictionaryUris = extractResourcesUris(packageFileString, DICTIONARY_URI_PATTERN);
                         List<URI> newDictionaryUris = createOrUpdateResources(
-                                readResources(dictionaryUris, packagePath,
-                                        DICTIONARY_EXT, DictionaryConfiguration.class),
-                                dictionaryUris, isMerge, selectedSet,
-                                this::createNewDictionaries, this::updateDictionary);
+                                readResources(dictionaryUris, packagePath, DICTIONARY_EXT, DictionaryConfiguration.class), dictionaryUris, isMerge,
+                                selectedSet, this::createNewDictionaries, this::updateDictionary);
 
                         updateDocumentDescriptor(packagePath, dictionaryUris, newDictionaryUris);
                         packageFileString = replaceURIs(packageFileString, dictionaryUris, newDictionaryUris);
@@ -400,10 +374,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // ... for behavior
                         List<URI> behaviorUris = extractResourcesUris(packageFileString, BEHAVIOR_URI_PATTERN);
                         List<URI> newBehaviorUris = createOrUpdateResources(
-                                readResources(behaviorUris, packagePath,
-                                        BEHAVIOR_EXT, RuleSetConfiguration.class),
-                                behaviorUris, isMerge, selectedSet,
-                                this::createNewBehaviors, this::updateBehavior);
+                                readResources(behaviorUris, packagePath, BEHAVIOR_EXT, RuleSetConfiguration.class), behaviorUris, isMerge,
+                                selectedSet, this::createNewBehaviors, this::updateBehavior);
 
                         updateDocumentDescriptor(packagePath, behaviorUris, newBehaviorUris);
                         packageFileString = replaceURIs(packageFileString, behaviorUris, newBehaviorUris);
@@ -411,10 +383,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // ... for http calls
                         List<URI> httpCallsUris = extractResourcesUris(packageFileString, HTTPCALLS_URI_PATTERN);
                         List<URI> newApiCallsUris = createOrUpdateResources(
-                                readResources(httpCallsUris, packagePath,
-                                        HTTPCALLS_EXT, ApiCallsConfiguration.class),
-                                httpCallsUris, isMerge, selectedSet,
-                                this::createNewApiCalls, this::updateApiCalls);
+                                readResources(httpCallsUris, packagePath, HTTPCALLS_EXT, ApiCallsConfiguration.class), httpCallsUris, isMerge,
+                                selectedSet, this::createNewApiCalls, this::updateApiCalls);
 
                         updateDocumentDescriptor(packagePath, httpCallsUris, newApiCallsUris);
                         packageFileString = replaceURIs(packageFileString, httpCallsUris, newApiCallsUris);
@@ -422,9 +392,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // ... for langchain
                         List<URI> langchainUris = extractResourcesUris(packageFileString, LANGCHAIN_URI_PATTERN);
                         List<URI> newLangchainUris = createOrUpdateResources(
-                                readResources(langchainUris, packagePath,
-                                        LLM_EXT, LlmConfiguration.class),
-                                langchainUris, isMerge, selectedSet,
+                                readResources(langchainUris, packagePath, LLM_EXT, LlmConfiguration.class), langchainUris, isMerge, selectedSet,
                                 this::createNewLlm, this::updateLangchain);
 
                         updateDocumentDescriptor(packagePath, langchainUris, newLangchainUris);
@@ -433,10 +401,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // ... for property
                         List<URI> propertyUris = extractResourcesUris(packageFileString, PROPERTY_URI_PATTERN);
                         List<URI> newPropertyUris = createOrUpdateResources(
-                                readResources(propertyUris, packagePath,
-                                        PROPERTY_EXT, PropertySetterConfiguration.class),
-                                propertyUris, isMerge, selectedSet,
-                                this::createNewProperties, this::updateProperty);
+                                readResources(propertyUris, packagePath, PROPERTY_EXT, PropertySetterConfiguration.class), propertyUris, isMerge,
+                                selectedSet, this::createNewProperties, this::updateProperty);
 
                         updateDocumentDescriptor(packagePath, propertyUris, newPropertyUris);
                         packageFileString = replaceURIs(packageFileString, propertyUris, newPropertyUris);
@@ -444,9 +410,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // ... for output
                         List<URI> outputUris = extractResourcesUris(packageFileString, OUTPUT_URI_PATTERN);
                         List<URI> newOutputUris = createOrUpdateResources(
-                                readResources(outputUris, packagePath,
-                                        OUTPUT_EXT, OutputConfigurationSet.class),
-                                outputUris, isMerge, selectedSet,
+                                readResources(outputUris, packagePath, OUTPUT_EXT, OutputConfigurationSet.class), outputUris, isMerge, selectedSet,
                                 this::createNewOutputs, this::updateOutput);
 
                         updateDocumentDescriptor(packagePath, outputUris, newOutputUris);
@@ -464,12 +428,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         setOriginIdOnDescriptor(newWorkflowUri, workflowId);
 
                         updateDocumentDescriptor(packagePath, workflowUri, newWorkflowUri);
-                        agentConfig.setWorkflows(agentConfig.getWorkflows().stream()
-                                .map(uri -> uri.equals(workflowUri) ? newWorkflowUri : uri)
+                        agentConfig.setWorkflows(agentConfig.getWorkflows().stream().map(uri -> uri.equals(workflowUri) ? newWorkflowUri : uri)
                                 .collect(Collectors.toList()));
 
-                    } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException
-                            | CallbackMatcher.CallbackMatcherException e) {
+                    } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException | CallbackMatcher.CallbackMatcherException e) {
                         log.error(e.getLocalizedMessage(), e);
                         response.resume(new InternalServerErrorException());
                     }
@@ -492,15 +454,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     @FunctionalInterface
     private interface ResourceUpdater<T> {
-        URI update(T config, String localId, Integer localVersion)
-                throws RestInterfaceFactory.RestInterfaceFactoryException;
+        URI update(T config, String localId, Integer localVersion) throws RestInterfaceFactory.RestInterfaceFactoryException;
     }
 
-    private <T> List<URI> createOrUpdateResources(
-            List<T> configs, List<URI> originUris,
-            boolean isMerge, Set<String> selectedSet,
-            ResourceCreator<T> creator, ResourceUpdater<T> updater)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private <T> List<URI> createOrUpdateResources(List<T> configs, List<URI> originUris, boolean isMerge, Set<String> selectedSet,
+            ResourceCreator<T> creator, ResourceUpdater<T> updater) throws RestInterfaceFactory.RestInterfaceFactoryException {
 
         if (!isMerge) {
             // Original behavior: create everything new
@@ -575,13 +533,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             IResourceId localResId = RestUtilities.extractResourceId(existingUri);
             if (localResId != null) {
                 IRestAgentStore restAgentStore = getRestResourceStore(IRestAgentStore.class);
-                Response updateResponse = restAgentStore.updateAgent(
-                        localResId.getId(), localResId.getVersion(), agentConfiguration);
+                Response updateResponse = restAgentStore.updateAgent(localResId.getId(), localResId.getVersion(), agentConfiguration);
                 if (updateResponse.getStatus() == 200) {
                     // updated — new version = old version + 1
                     int newVersion = localResId.getVersion() + 1;
-                    return URI.create(IRestAgentStore.resourceURI + localResId.getId() +
-                            IRestAgentStore.versionQueryParam + newVersion);
+                    return URI.create(IRestAgentStore.resourceURI + localResId.getId() + IRestAgentStore.versionQueryParam + newVersion);
                 }
             }
         }
@@ -594,15 +550,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (existingUri != null) {
             IResourceId localResId = RestUtilities.extractResourceId(existingUri);
             if (localResId != null) {
-                WorkflowConfiguration workflowConfig = jsonSerialization.deserialize(packageFileString,
-                        WorkflowConfiguration.class);
+                WorkflowConfiguration workflowConfig = jsonSerialization.deserialize(packageFileString, WorkflowConfiguration.class);
                 IRestWorkflowStore restWorkflowStore = getRestResourceStore(IRestWorkflowStore.class);
-                Response updateResponse = restWorkflowStore.updateWorkflow(
-                        localResId.getId(), localResId.getVersion(), workflowConfig);
+                Response updateResponse = restWorkflowStore.updateWorkflow(localResId.getId(), localResId.getVersion(), workflowConfig);
                 if (updateResponse.getStatus() == 200) {
                     int newVersion = localResId.getVersion() + 1;
-                    return URI.create(IRestWorkflowStore.resourceURI + localResId.getId() +
-                            IRestWorkflowStore.versionQueryParam + newVersion);
+                    return URI.create(IRestWorkflowStore.resourceURI + localResId.getId() + IRestWorkflowStore.versionQueryParam + newVersion);
                 }
             }
         }
@@ -613,18 +566,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         try {
             IResourceId resourceId = RestUtilities.extractResourceId(resourceUri);
             if (resourceId != null) {
-                DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(resourceId.getId(),
-                        resourceId.getVersion());
+                DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion());
                 if (descriptor != null && !originId.equals(descriptor.getOriginId())) {
                     descriptor.setOriginId(originId);
                     PatchInstruction<DocumentDescriptor> patchInstruction = new PatchInstruction<>();
                     patchInstruction.setOperation(PatchInstruction.PatchOperation.SET);
                     patchInstruction.setDocument(descriptor);
 
-                    IRestDocumentDescriptorStore restDescriptorStore = getRestResourceStore(
-                            IRestDocumentDescriptorStore.class);
-                    restDescriptorStore.patchDescriptor(
-                            resourceId.getId(), resourceId.getVersion(), patchInstruction);
+                    IRestDocumentDescriptorStore restDescriptorStore = getRestResourceStore(IRestDocumentDescriptorStore.class);
+                    restDescriptorStore.patchDescriptor(resourceId.getId(), resourceId.getVersion(), patchInstruction);
                 }
             }
         } catch (Exception e) {
@@ -634,18 +584,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     // ==================== Resource Creation (original logic) ====================
 
-    private URI createNewAgent(AgentConfiguration agentConfiguration)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private URI createNewAgent(AgentConfiguration agentConfiguration) throws RestInterfaceFactory.RestInterfaceFactoryException {
         IRestAgentStore restWorkflowStore = getRestResourceStore(IRestAgentStore.class);
         Response agentResponse = restWorkflowStore.createAgent(agentConfiguration);
         checkIfCreatedResponse(agentResponse);
         return agentResponse.getLocation();
     }
 
-    private URI createNewWorkflow(String packageFileString)
-            throws RestInterfaceFactory.RestInterfaceFactoryException, IOException {
-        WorkflowConfiguration workflowConfig = jsonSerialization.deserialize(packageFileString,
-                WorkflowConfiguration.class);
+    private URI createNewWorkflow(String packageFileString) throws RestInterfaceFactory.RestInterfaceFactoryException, IOException {
+        WorkflowConfiguration workflowConfig = jsonSerialization.deserialize(packageFileString, WorkflowConfiguration.class);
         IRestWorkflowStore restWorkflowStore = getRestResourceStore(IRestWorkflowStore.class);
         Response packageResponse = restWorkflowStore.createWorkflow(workflowConfig);
         checkIfCreatedResponse(packageResponse);
@@ -682,8 +629,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }).toList();
     }
 
-    private List<URI> createNewLlm(List<LlmConfiguration> llmConfigurations)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private List<URI> createNewLlm(List<LlmConfiguration> llmConfigurations) throws RestInterfaceFactory.RestInterfaceFactoryException {
         IRestLlmStore restLlmStore = getRestResourceStore(IRestLlmStore.class);
         return llmConfigurations.stream().map(llmConfiguration -> {
             Response llmResponse = restLlmStore.createLlm(llmConfiguration);
@@ -702,8 +648,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }).toList();
     }
 
-    private List<URI> createNewOutputs(List<OutputConfigurationSet> outputConfigurations)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private List<URI> createNewOutputs(List<OutputConfigurationSet> outputConfigurations) throws RestInterfaceFactory.RestInterfaceFactoryException {
         IRestOutputStore restOutputStore = getRestResourceStore(IRestOutputStore.class);
         return outputConfigurations.stream().map(outputConfiguration -> {
             Response outputResponse = restOutputStore.createOutputSet(outputConfiguration);
@@ -719,8 +664,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         IRestDictionaryStore store = getRestResourceStore(IRestDictionaryStore.class);
         Response response = store.updateRegularDictionary(localId, localVersion, config);
         if (response.getStatus() == 200) {
-            return URI.create(IRestDictionaryStore.resourceURI + localId +
-                    IRestDictionaryStore.versionQueryParam + (localVersion + 1));
+            return URI.create(IRestDictionaryStore.resourceURI + localId + IRestDictionaryStore.versionQueryParam + (localVersion + 1));
         }
         // Fallback: create new
         Response createResp = store.createRegularDictionary(config);
@@ -733,8 +677,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         IRestRuleSetStore store = getRestResourceStore(IRestRuleSetStore.class);
         Response response = store.updateRuleSet(localId, localVersion, config);
         if (response.getStatus() == 200) {
-            return URI.create(IRestRuleSetStore.resourceURI + localId +
-                    IRestRuleSetStore.versionQueryParam + (localVersion + 1));
+            return URI.create(IRestRuleSetStore.resourceURI + localId + IRestRuleSetStore.versionQueryParam + (localVersion + 1));
         }
         Response createResp = store.createRuleSet(config);
         checkIfCreatedResponse(createResp);
@@ -746,8 +689,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         IRestApiCallsStore store = getRestResourceStore(IRestApiCallsStore.class);
         Response response = store.updateApiCalls(localId, localVersion, config);
         if (response.getStatus() == 200) {
-            return URI.create(IRestApiCallsStore.resourceURI + localId +
-                    IRestApiCallsStore.versionQueryParam + (localVersion + 1));
+            return URI.create(IRestApiCallsStore.resourceURI + localId + IRestApiCallsStore.versionQueryParam + (localVersion + 1));
         }
         Response createResp = store.createApiCalls(config);
         checkIfCreatedResponse(createResp);
@@ -759,8 +701,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         IRestLlmStore store = getRestResourceStore(IRestLlmStore.class);
         Response response = store.updateLlm(localId, localVersion, config);
         if (response.getStatus() == 200) {
-            return URI.create(IRestLlmStore.resourceURI + localId +
-                    IRestLlmStore.versionQueryParam + (localVersion + 1));
+            return URI.create(IRestLlmStore.resourceURI + localId + IRestLlmStore.versionQueryParam + (localVersion + 1));
         }
         Response createResp = store.createLlm(config);
         checkIfCreatedResponse(createResp);
@@ -772,8 +713,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         IRestPropertySetterStore store = getRestResourceStore(IRestPropertySetterStore.class);
         Response response = store.updatePropertySetter(localId, localVersion, config);
         if (response.getStatus() == 200) {
-            return URI.create(IRestPropertySetterStore.resourceURI + localId +
-                    IRestPropertySetterStore.versionQueryParam + (localVersion + 1));
+            return URI.create(IRestPropertySetterStore.resourceURI + localId + IRestPropertySetterStore.versionQueryParam + (localVersion + 1));
         }
         Response createResp = store.createPropertySetter(config);
         checkIfCreatedResponse(createResp);
@@ -785,8 +725,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         IRestOutputStore store = getRestResourceStore(IRestOutputStore.class);
         Response response = store.updateOutputSet(localId, localVersion, config);
         if (response.getStatus() == 200) {
-            return URI.create(IRestOutputStore.resourceURI + localId +
-                    IRestOutputStore.versionQueryParam + (localVersion + 1));
+            return URI.create(IRestOutputStore.resourceURI + localId + IRestOutputStore.versionQueryParam + (localVersion + 1));
         }
         Response createResp = store.createOutputSet(config);
         checkIfCreatedResponse(createResp);
@@ -795,16 +734,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     // ==================== Shared helpers ====================
 
-    private void updateDocumentDescriptor(Path directoryPath, URI oldUri, URI newUri)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private void updateDocumentDescriptor(Path directoryPath, URI oldUri, URI newUri) throws RestInterfaceFactory.RestInterfaceFactoryException {
         updateDocumentDescriptor(directoryPath, Collections.singletonList(oldUri), Collections.singletonList(newUri));
     }
 
     private void updateDocumentDescriptor(Path directoryPath, List<URI> oldUris, List<URI> newUris)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
 
-        IRestDocumentDescriptorStore restDocumentDescriptorStore = getRestResourceStore(
-                IRestDocumentDescriptorStore.class);
+        IRestDocumentDescriptorStore restDocumentDescriptorStore = getRestResourceStore(IRestDocumentDescriptorStore.class);
         IntStream.range(0, oldUris.size()).forEach(idx -> {
             try {
                 URI oldUri = oldUris.get(idx);
@@ -824,8 +761,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         patchInstruction.setOperation(PatchInstruction.PatchOperation.SET);
                         patchInstruction.setDocument(oldDocumentDescriptor);
 
-                        restDocumentDescriptorStore.patchDescriptor(newResourceId.getId(),
-                                newResourceId.getVersion(), patchInstruction);
+                        restDocumentDescriptorStore.patchDescriptor(newResourceId.getId(), newResourceId.getVersion(), patchInstruction);
                     }
                 }
             } catch (IOException e) {
@@ -834,16 +770,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         });
     }
 
-    private DocumentDescriptor readDocumentDescriptorFromFile(Path packagePath, IResourceId resourceId)
-            throws IOException {
-        Path filePath = Paths
-                .get(FileUtilities.buildPath(packagePath.toString(), resourceId.getId() + ".descriptor.json"));
+    private DocumentDescriptor readDocumentDescriptorFromFile(Path packagePath, IResourceId resourceId) throws IOException {
+        Path filePath = Paths.get(FileUtilities.buildPath(packagePath.toString(), resourceId.getId() + ".descriptor.json"));
         String oldDocumentDescriptorFile = readFile(filePath);
         return jsonSerialization.deserialize(oldDocumentDescriptorFile, DocumentDescriptor.class);
     }
 
-    private String replaceURIs(String resourceString, List<URI> oldUris, List<URI> newUris)
-            throws CallbackMatcher.CallbackMatcherException {
+    private String replaceURIs(String resourceString, List<URI> oldUris, List<URI> newUris) throws CallbackMatcher.CallbackMatcherException {
         Map<String, String> uriMap = toMap(oldUris, newUris);
         CallbackMatcher callbackMatcher = new CallbackMatcher(EDDI_URI_PATTERN);
         return callbackMatcher.replaceMatches(resourceString, matchResult -> {
@@ -879,16 +812,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 resourceContent = readFile(resourcePath);
                 if (uri.toString().startsWith(IRestPropertySetterStore.resourceBaseType)) {
                     var resourceAsMap = jsonSerialization.deserialize(resourceContent, Map.class);
-                    var migratedPropertySetterDocument = migrationManager.migratePropertySetter()
-                            .migrate(new Document(resourceAsMap));
+                    var migratedPropertySetterDocument = migrationManager.migratePropertySetter().migrate(new Document(resourceAsMap));
 
                     if (migratedPropertySetterDocument != null) {
                         resourceContent = jsonSerialization.serialize(migratedPropertySetterDocument);
                     }
                 } else if (uri.toString().startsWith(IRestApiCallsStore.resourceBaseType)) {
                     var resourceAsMap = jsonSerialization.deserialize(resourceContent, Map.class);
-                    var migratedApiCallsDocument = migrationManager.migrateApiCalls()
-                            .migrate(new Document(resourceAsMap));
+                    var migratedApiCallsDocument = migrationManager.migrateApiCalls().migrate(new Document(resourceAsMap));
 
                     if (migratedApiCallsDocument != null) {
                         resourceContent = jsonSerialization.serialize(migratedApiCallsDocument);
@@ -933,8 +864,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private void checkIfCreatedResponse(Response response) {
         int status = response.getStatus();
         if (status != 201) {
-            log.error(
-                    String.format("Http Response Code was not 201 when attempting resource creation, but %s", status));
+            log.error(String.format("Http Response Code was not 201 when attempting resource creation, but %s", status));
         }
     }
 

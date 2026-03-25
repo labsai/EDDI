@@ -92,7 +92,7 @@ class HistorizedResourceStoreTest {
 
         assertEquals(2, newVersion);
         verify(storage).store(historyResource); // archived old version
-        verify(storage).store(newResource);     // stored new version
+        verify(storage).store(newResource); // stored new version
     }
 
     @Test
@@ -105,8 +105,8 @@ class HistorizedResourceStoreTest {
 
         store.delete("id1", 1);
 
-        verify(storage).store(deletedHistory);  // archived with deleted flag
-        verify(storage).remove("id1");          // removed from current
+        verify(storage).store(deletedHistory); // archived with deleted flag
+        verify(storage).remove("id1"); // removed from current
     }
 
     @Test
@@ -123,8 +123,7 @@ class HistorizedResourceStoreTest {
     void shouldThrowNotFoundWhenNoCurrentVersion() {
         when(storage.getCurrentVersion("id1")).thenReturn(-1);
 
-        assertThrows(IResourceStore.ResourceNotFoundException.class,
-                () -> store.getCurrentResourceId("id1"));
+        assertThrows(IResourceStore.ResourceNotFoundException.class, () -> store.getCurrentResourceId("id1"));
     }
 
     @Test

@@ -22,34 +22,21 @@ class PdfReaderToolTest {
     // === SSRF Protection Tests ===
 
     @ParameterizedTest
-    @ValueSource(strings = {
-            "/etc/passwd",
-            "C:\\Windows\\System32\\config\\SAM",
-            "../../../etc/shadow",
-            "/tmp/secret.pdf"
-    })
+    @ValueSource(strings = {"/etc/passwd", "C:\\Windows\\System32\\config\\SAM", "../../../etc/shadow", "/tmp/secret.pdf"})
     void testExtractTextFromPdf_RejectsLocalFilePaths(String path) {
         String result = pdfReaderTool.extractTextFromPdf(path);
         assertTrue(result.contains("Error"), "Should reject local file path: " + path);
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {
-            "file:///etc/passwd",
-            "ftp://evil.com/malware.pdf",
-            "jar:file:///app.jar!/config"
-    })
+    @ValueSource(strings = {"file:///etc/passwd", "ftp://evil.com/malware.pdf", "jar:file:///app.jar!/config"})
     void testExtractTextFromPdf_RejectsNonHttpSchemes(String url) {
         String result = pdfReaderTool.extractTextFromPdf(url);
         assertTrue(result.contains("Error"), "Should reject non-HTTP scheme: " + url);
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {
-            "http://127.0.0.1/admin.pdf",
-            "http://localhost/secret.pdf",
-            "http://169.254.169.254/latest/meta-data/"
-    })
+    @ValueSource(strings = {"http://127.0.0.1/admin.pdf", "http://localhost/secret.pdf", "http://169.254.169.254/latest/meta-data/"})
     void testExtractTextFromPdf_RejectsInternalAddresses(String url) {
         String result = pdfReaderTool.extractTextFromPdf(url);
         assertTrue(result.contains("Error"), "Should reject internal URL: " + url);
@@ -107,7 +94,8 @@ class PdfReaderToolTest {
         assertTrue(result.contains("Error"));
     }
 
-    // === Valid URL format (DNS resolution may fail but URL validation succeeds) ===
+    // === Valid URL format (DNS resolution may fail but URL validation succeeds)
+    // ===
 
     @Test
     void testExtractTextFromPdf_AcceptsHttpsUrl() {
@@ -117,4 +105,3 @@ class PdfReaderToolTest {
         // Either succeeds or fails with download error, NOT validation error
     }
 }
-

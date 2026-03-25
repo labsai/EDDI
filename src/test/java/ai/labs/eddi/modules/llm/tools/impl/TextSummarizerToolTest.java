@@ -27,9 +27,8 @@ class TextSummarizerToolTest {
 
     @Test
     void testSummarizeText_LongText() {
-        String text = "This is a longer text. ".repeat(50) + 
-                     "It contains multiple sentences and paragraphs. " +
-                     "The summarizer should extract the most important information.";
+        String text = "This is a longer text. ".repeat(50) + "It contains multiple sentences and paragraphs. "
+                + "The summarizer should extract the most important information.";
         String result = textSummarizerTool.summarizeText(text, 100);
         assertNotNull(result);
         assertFalse(result.startsWith("Error"));
@@ -60,8 +59,7 @@ class TextSummarizerToolTest {
 
     @Test
     void testExtractKeywords_SimpleText() {
-        String text = "Java programming language is object-oriented. " +
-                     "Java is platform independent. Java runs on JVM.";
+        String text = "Java programming language is object-oriented. " + "Java is platform independent. Java runs on JVM.";
         String result = textSummarizerTool.extractKeywords(text, 5);
         assertNotNull(result);
         assertFalse(result.startsWith("Error"));
@@ -84,13 +82,10 @@ class TextSummarizerToolTest {
 
     @Test
     void testExtractKeywords_LongText() {
-        String text = "Natural language processing (NLP) is a branch of artificial intelligence. " +
-                     "NLP helps computers understand human language. " +
-                     "Machine learning algorithms are used in NLP. " +
-                     "Deep learning has improved NLP capabilities.";
+        String text = "Natural language processing (NLP) is a branch of artificial intelligence. " + "NLP helps computers understand human language. "
+                + "Machine learning algorithms are used in NLP. " + "Deep learning has improved NLP capabilities.";
         String result = textSummarizerTool.extractKeywords(text, 10);
         assertNotNull(result);
         assertFalse(result.startsWith("Error"));
     }
 }
-

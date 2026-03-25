@@ -43,10 +43,8 @@ public class OutputTemplateTask implements ILifecycleTask {
     private static final Logger log = Logger.getLogger(OutputTemplateTask.class);
 
     @Inject
-    public OutputTemplateTask(ITemplatingEngine templatingEngine,
-                              IMemoryItemConverter memoryItemConverter,
-                              IDataFactory dataFactory,
-                              ObjectMapper objectMapper) {
+    public OutputTemplateTask(ITemplatingEngine templatingEngine, IMemoryItemConverter memoryItemConverter, IDataFactory dataFactory,
+            ObjectMapper objectMapper) {
         this.templatingEngine = templatingEngine;
         this.memoryItemConverter = memoryItemConverter;
         this.dataFactory = dataFactory;
@@ -75,9 +73,7 @@ public class OutputTemplateTask implements ILifecycleTask {
         templatingQuickReplies(currentStep, quickReplyDataList, contextMap);
     }
 
-    private void templateOutputTexts(IWritableConversationStep currentStep,
-                                     List<IData<Object>> outputDataList,
-                                     Map<String, Object> contextMap) {
+    private void templateOutputTexts(IWritableConversationStep currentStep, List<IData<Object>> outputDataList, Map<String, Object> contextMap) {
         outputDataList.forEach(output -> {
             String outputKey = output.getKey();
             TemplateMode templateMode = outputKey.startsWith(KEY_OUTPUT) ? TemplateMode.TEXT : null;
@@ -150,12 +146,12 @@ public class OutputTemplateTask implements ILifecycleTask {
     }
 
     private Map<String, Object> convertObjectToMap(Object preTemplated) {
-        return objectMapper.convertValue(preTemplated, new TypeReference<>() {});
+        return objectMapper.convertValue(preTemplated, new TypeReference<>() {
+        });
     }
 
-    private void templatingQuickReplies(IWritableConversationStep currentStep,
-                                        List<IData<List<QuickReply>>> quickReplyDataList,
-                                        Map<String, Object> contextMap) {
+    private void templatingQuickReplies(IWritableConversationStep currentStep, List<IData<List<QuickReply>>> quickReplyDataList,
+            Map<String, Object> contextMap) {
         quickReplyDataList.forEach(quickReplyData -> {
             var preTemplating = quickReplyData.getResult();
             var postTemplating = copyQuickReplies(preTemplating).stream().map(quickReply -> {
@@ -180,26 +176,18 @@ public class OutputTemplateTask implements ILifecycleTask {
     }
 
     private List<QuickReply> copyQuickReplies(List<QuickReply> source) {
-        return source.stream().map(quickReply ->
-                        new QuickReply(quickReply.getValue(), quickReply.getExpressions(), quickReply.getIsDefault())).
-                collect(Collectors.toCollection(LinkedList::new));
+        return source.stream().map(quickReply -> new QuickReply(quickReply.getValue(), quickReply.getExpressions(), quickReply.getIsDefault()))
+                .collect(Collectors.toCollection(LinkedList::new));
     }
 
-    private void templateData(IWritableConversationStep currentStep,
-                              IData<?> dataText,
-                              String dataKey,
-                              Object preTemplated,
-                              Object postTemplated) {
+    private void templateData(IWritableConversationStep currentStep, IData<?> dataText, String dataKey, Object preTemplated, Object postTemplated) {
 
         storeTemplatedData(currentStep, dataKey, PRE_TEMPLATED, preTemplated);
         storeTemplatedData(currentStep, dataKey, POST_TEMPLATED, postTemplated);
         currentStep.storeData(dataText);
     }
 
-    private void storeTemplatedData(IWritableConversationStep currentStep,
-                                    String originalKey,
-                                    String templateAppendix,
-                                    Object dataValue) {
+    private void storeTemplatedData(IWritableConversationStep currentStep, String originalKey, String templateAppendix, Object dataValue) {
 
         String newOutputKey = joinStrings(":", originalKey, templateAppendix);
         IData<Object> processedData = dataFactory.createData(newOutputKey, dataValue);

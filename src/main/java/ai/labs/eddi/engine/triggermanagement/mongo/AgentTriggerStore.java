@@ -21,8 +21,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * MongoDB implementation of {@link IAgentTriggerStore}.
- * Annotated {@code @DefaultBean} so PostgreSQL can override.
+ * MongoDB implementation of {@link IAgentTriggerStore}. Annotated
+ * {@code @DefaultBean} so PostgreSQL can override.
  *
  * @author ginccc
  */
@@ -37,9 +37,7 @@ public class AgentTriggerStore implements IAgentTriggerStore {
     private final AgentTriggerResourceStore agentTriggerStore;
 
     @Inject
-    public AgentTriggerStore(MongoDatabase database,
-            IJsonSerialization jsonSerialization,
-            IDocumentBuilder documentBuilder) {
+    public AgentTriggerStore(MongoDatabase database, IJsonSerialization jsonSerialization, IDocumentBuilder documentBuilder) {
         this.jsonSerialization = jsonSerialization;
         RuntimeUtilities.checkNotNull(database, "database");
         this.collection = database.getCollection(COLLECTION_AGENT_TRIGGERS);
@@ -105,8 +103,7 @@ public class AgentTriggerStore implements IAgentTriggerStore {
             }
         }
 
-        List<AgentTriggerConfiguration> readAllAgentTriggers()
-                throws IResourceStore.ResourceStoreException {
+        List<AgentTriggerConfiguration> readAllAgentTriggers() throws IResourceStore.ResourceStoreException {
 
             List<AgentTriggerConfiguration> agentTriggers = new ArrayList<>();
             try {
@@ -135,8 +132,7 @@ public class AgentTriggerStore implements IAgentTriggerStore {
         void createAgentTrigger(AgentTriggerConfiguration agentTriggerConfiguration)
                 throws IResourceStore.ResourceStoreException, ResourceAlreadyExistsException {
 
-            Document existing = collection.find(
-                    new Document(INTENT_FIELD, agentTriggerConfiguration.getIntent())).first();
+            Document existing = collection.find(new Document(INTENT_FIELD, agentTriggerConfiguration.getIntent())).first();
             if (existing != null) {
                 String message = "AgentTriggerConfiguration with intent=%s already exists";
                 message = String.format(message, agentTriggerConfiguration.getIntent());
@@ -150,11 +146,9 @@ public class AgentTriggerStore implements IAgentTriggerStore {
             collection.deleteOne(new Document(INTENT_FIELD, intent));
         }
 
-        private Document createDocument(AgentTriggerConfiguration agentTriggerConfiguration)
-                throws IResourceStore.ResourceStoreException {
+        private Document createDocument(AgentTriggerConfiguration agentTriggerConfiguration) throws IResourceStore.ResourceStoreException {
             try {
-                return jsonSerialization.deserialize(jsonSerialization.serialize(agentTriggerConfiguration),
-                        Document.class);
+                return jsonSerialization.deserialize(jsonSerialization.serialize(agentTriggerConfiguration), Document.class);
             } catch (IOException e) {
                 throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
             }

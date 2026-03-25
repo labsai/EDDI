@@ -43,13 +43,8 @@ public class RestTenantQuota implements IRestTenantQuota {
     @Override
     public Response updateQuota(String tenantId, TenantQuota quota) {
         // Ensure tenantId consistency
-        var storedQuota = new TenantQuota(
-                tenantId,
-                quota.maxConversationsPerDay(),
-                quota.maxAgentsPerTenant(),
-                quota.maxApiCallsPerMinute(),
-                quota.maxMonthlyCostUsd(),
-                quota.enabled());
+        var storedQuota = new TenantQuota(tenantId, quota.maxConversationsPerDay(), quota.maxAgentsPerTenant(), quota.maxApiCallsPerMinute(),
+                quota.maxMonthlyCostUsd(), quota.enabled());
         quotaStore.setQuota(storedQuota);
         return Response.ok(storedQuota).build();
     }

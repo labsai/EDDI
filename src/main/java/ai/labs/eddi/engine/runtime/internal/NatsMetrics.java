@@ -11,13 +11,15 @@ import jakarta.inject.Inject;
 /**
  * Micrometer metrics for NATS JetStream operations.
  *
- * <p>Metrics exposed at {@code /q/metrics}:</p>
+ * <p>
+ * Metrics exposed at {@code /q/metrics}:
+ * </p>
  * <ul>
- *   <li>{@code eddi_nats_publish_count} — messages published to NATS</li>
- *   <li>{@code eddi_nats_publish_duration} — publish latency</li>
- *   <li>{@code eddi_nats_consume_count} — messages consumed from NATS</li>
- *   <li>{@code eddi_nats_consume_duration} — consume/processing latency</li>
- *   <li>{@code eddi_nats_dead_letter_count} — messages sent to dead-letter</li>
+ * <li>{@code eddi_nats_publish_count} — messages published to NATS</li>
+ * <li>{@code eddi_nats_publish_duration} — publish latency</li>
+ * <li>{@code eddi_nats_consume_count} — messages consumed from NATS</li>
+ * <li>{@code eddi_nats_consume_duration} — consume/processing latency</li>
+ * <li>{@code eddi_nats_dead_letter_count} — messages sent to dead-letter</li>
  * </ul>
  *
  * @author ginccc

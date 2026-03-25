@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.apicalls.bootstrap;
 
-
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.modules.apicalls.impl.ApiCallsTask;
@@ -22,8 +21,7 @@ public class ApiCallsModule {
     private final Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders;
     private final Instance<ILifecycleTask> instance;
 
-    public ApiCallsModule(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
-                           Instance<ILifecycleTask> instance) {
+    public ApiCallsModule(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders, Instance<ILifecycleTask> instance) {
         this.lifecycleTaskProviders = lifecycleTaskProviders;
         this.instance = instance;
     }

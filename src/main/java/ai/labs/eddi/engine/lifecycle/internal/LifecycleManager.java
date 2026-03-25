@@ -24,19 +24,16 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  *
  * <p>
  * The LifecycleManager is responsible for executing an agent's configured
- * sequence
- * of
- * {@link ILifecycleTask} components, passing conversation state through each
- * task in order.
+ * sequence of {@link ILifecycleTask} components, passing conversation state
+ * through each task in order.
  * </p>
  *
  * <h2>Lifecycle Workflow Concept</h2>
  * <p>
  * Instead of hard-coded Agent logic, EDDI processes conversations through a
- * configurable
- * workflow of tasks:
+ * configurable workflow of tasks:
  * </p>
- * 
+ *
  * <pre>
  * User Input → Parser → Behavior Rules → API Calls → LLM → Output Generation
  * </pre>
@@ -49,24 +46,19 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * <h2>Key Features</h2>
  * <ul>
  * <li><strong>Sequential Execution</strong>: Tasks execute in order, each
- * building on
- * previous results</li>
+ * building on previous results</li>
  * <li><strong>Stateless Design</strong>: Tasks don't maintain state; all state
- * is in
- * the memory object</li>
+ * is in the memory object</li>
  * <li><strong>Interruptible</strong>: Workflow can stop early if
- * STOP_CONVERSATION
- * action is triggered</li>
+ * STOP_CONVERSATION action is triggered</li>
  * <li><strong>Selective Execution</strong>: Can execute only a subset of tasks
- * starting
- * from a specific type</li>
+ * starting from a specific type</li>
  * <li><strong>Component-Based</strong>: Each task has an associated component
- * (config/resource)
- * loaded from the workflow</li>
+ * (config/resource) loaded from the workflow</li>
  * </ul>
  *
  * <h2>Example Flow</h2>
- * 
+ *
  * <pre>{@code
  * // 1. User sends message
  * memory.getCurrentStep().storeData("input", "What's the weather?");
@@ -92,8 +84,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 public class LifecycleManager implements ILifecycleManager {
 
     /**
-     * The ordered list of lifecycle tasks to execute.
-     * Tasks are added during Agent initialization based on package configuration.
+     * The ordered list of lifecycle tasks to execute. Tasks are added during Agent
+     * initialization based on package configuration.
      */
     private final List<ILifecycleTask> lifecycleTasks;
 
@@ -104,8 +96,8 @@ public class LifecycleManager implements ILifecycleManager {
     private final IComponentCache componentCache;
 
     /**
-     * Identifier of the workflow this lifecycle manager belongs to.
-     * Used for component cache lookups.
+     * Identifier of the workflow this lifecycle manager belongs to. Used for
+     * component cache lookups.
      */
     private final IResourceStore.IResourceId workflowId;
 
@@ -121,10 +113,8 @@ public class LifecycleManager implements ILifecycleManager {
      *
      * <p>
      * This method iterates through the configured lifecycle tasks, executing each
-     * one
-     * in sequence. Each task reads from and writes to the conversation memory,
-     * building
-     * up the conversation state progressively.
+     * one in sequence. Each task reads from and writes to the conversation memory,
+     * building up the conversation state progressively.
      * </p>
      *
      * <h3>Execution Flow</h3>
@@ -145,12 +135,11 @@ public class LifecycleManager implements ILifecycleManager {
      * <p>
      * If {@code lifecycleTaskTypes} is provided, only tasks starting from the first
      * matching type will be executed. This allows partial workflow execution,
-     * useful for
-     * debugging or specialized processing.
+     * useful for debugging or specialized processing.
      * </p>
      *
      * <h3>Example</h3>
-     * 
+     *
      * <pre>{@code
      * // Execute full workflow
      * lifecycleManager.executeLifecycle(memory, null);
@@ -159,10 +148,14 @@ public class LifecycleManager implements ILifecycleManager {
      * lifecycleManager.executeLifecycle(memory, List.of("behavior_rules"));
      * }</pre>
      *
-     * @param conversationMemory the conversation state to transform
-     * @param lifecycleTaskTypes optional filter to execute only specific task types
-     * @throws LifecycleException        if any task execution fails
-     * @throws ConversationStopException if STOP_CONVERSATION action is triggered
+     * @param conversationMemory
+     *            the conversation state to transform
+     * @param lifecycleTaskTypes
+     *            optional filter to execute only specific task types
+     * @throws LifecycleException
+     *             if any task execution fails
+     * @throws ConversationStopException
+     *             if STOP_CONVERSATION action is triggered
      */
     public void executeLifecycle(final IConversationMemory conversationMemory, List<String> lifecycleTaskTypes)
             throws LifecycleException, ConversationStopException {
@@ -219,8 +212,7 @@ public class LifecycleManager implements ILifecycleManager {
                 // Emit audit entry if audit collector is set
                 var auditCollector = conversationMemory.getAuditCollector();
                 if (auditCollector != null) {
-                    AuditEntry auditEntry = buildAuditEntry(
-                            conversationMemory, task, index, durationMs, summary);
+                    AuditEntry auditEntry = buildAuditEntry(conversationMemory, task, index, durationMs, summary);
                     auditCollector.collect(auditEntry);
                 }
 
@@ -233,12 +225,10 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     /**
-     * Build a summary map for the task_complete event.
-     * Includes emitted actions for behavior tasks so the Manager UI can display
-     * them.
+     * Build a summary map for the task_complete event. Includes emitted actions for
+     * behavior tasks so the Manager UI can display them.
      */
-    private Map<String, Object> buildTaskSummary(IConversationMemory conversationMemory,
-            ILifecycleTask task) {
+    private Map<String, Object> buildTaskSummary(IConversationMemory conversationMemory, ILifecycleTask task) {
         var summary = new HashMap<String, Object>();
         // If the task produced actions, include them in the summary
         IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(ACTIONS);
@@ -249,12 +239,10 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     /**
-     * Build an audit entry capturing a task's execution data.
-     * Maps memory data into input/output/llmDetail/toolCalls fields.
+     * Build an audit entry capturing a task's execution data. Maps memory data into
+     * input/output/llmDetail/toolCalls fields.
      */
-    private AuditEntry buildAuditEntry(IConversationMemory memory, ILifecycleTask task,
-            int taskIndex, long durationMs,
-            Map<String, Object> summary) {
+    private AuditEntry buildAuditEntry(IConversationMemory memory, ILifecycleTask task, int taskIndex, long durationMs, Map<String, Object> summary) {
         var currentStep = memory.getCurrentStep();
         int stepIndex = memory.size() - 1; // 0-based
 
@@ -291,30 +279,14 @@ public class LifecycleManager implements ILifecycleManager {
 
         // Actions
         @SuppressWarnings("unchecked")
-        List<String> actions = summary.containsKey("actions")
-                ? (List<String>) summary.get("actions")
-                : null;
+        List<String> actions = summary.containsKey("actions") ? (List<String>) summary.get("actions") : null;
 
-        return new AuditEntry(
-                UUID.randomUUID().toString(),
-                memory.getConversationId(),
-                memory.getAgentId(),
-                memory.getAgentVersion(),
-                memory.getUserId(),
-                null, // environment is set by ConversationService
-                stepIndex,
-                task.getId(),
-                task.getType(),
-                taskIndex,
-                durationMs,
-                input.isEmpty() ? null : input,
-                output.isEmpty() ? null : output,
-                llmDetail,
-                null, // toolCalls — set by LlmTask in memory
-                actions,
-                0.0, // cost — set by ToolCostTracker integration
-                Instant.now(),
-                null // HMAC computed by AuditLedgerService
+        return new AuditEntry(UUID.randomUUID().toString(), memory.getConversationId(), memory.getAgentId(), memory.getAgentVersion(),
+                memory.getUserId(), null, // environment is set by ConversationService
+                stepIndex, task.getId(), task.getType(), taskIndex, durationMs, input.isEmpty() ? null : input, output.isEmpty() ? null : output,
+                llmDetail, null, // toolCalls — set by LlmTask in memory
+                actions, 0.0, // cost — set by ToolCostTracker integration
+                Instant.now(), null // HMAC computed by AuditLedgerService
         );
     }
 
@@ -327,7 +299,8 @@ public class LifecycleManager implements ILifecycleManager {
      * but skip earlier tasks like parsing.
      * </p>
      *
-     * @param lifecycleTaskTypes list of task type prefixes to match
+     * @param lifecycleTaskTypes
+     *            list of task type prefixes to match
      * @return filtered list of tasks to execute
      */
     private List<ILifecycleTask> getLifecycleTasks(List<String> lifecycleTaskTypes) {
@@ -354,8 +327,7 @@ public class LifecycleManager implements ILifecycleManager {
      * <p>
      * STOP_CONVERSATION is a special action that can be triggered by behavior rules
      * to immediately halt the lifecycle workflow and end the conversation. This is
-     * useful
-     * for scenarios like:
+     * useful for scenarios like:
      * </p>
      * <ul>
      * <li>User explicitly says "goodbye" or "end conversation"</li>
@@ -364,11 +336,12 @@ public class LifecycleManager implements ILifecycleManager {
      * <li>Business logic determines conversation should end</li>
      * </ul>
      *
-     * @param conversationMemory the conversation memory to check
-     * @throws ConversationStopException if STOP_CONVERSATION action is found
+     * @param conversationMemory
+     *            the conversation memory to check
+     * @throws ConversationStopException
+     *             if STOP_CONVERSATION action is found
      */
-    private void checkIfStopConversationAction(IConversationMemory conversationMemory)
-            throws ConversationStopException {
+    private void checkIfStopConversationAction(IConversationMemory conversationMemory) throws ConversationStopException {
         // Retrieve actions from current step
         IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(ACTIONS);
         if (actionData != null) {
@@ -386,15 +359,13 @@ public class LifecycleManager implements ILifecycleManager {
      *
      * <p>
      * Tasks are executed in the order they are added. This method is typically
-     * called
-     * during Agent initialization, when the agent's package configuration is being
-     * loaded.
+     * called during Agent initialization, when the agent's package configuration is
+     * being loaded.
      * </p>
      *
      * <p>
      * <strong>Important:</strong> Tasks should be added in the correct order to
-     * ensure
-     * proper workflow flow. A typical order is:
+     * ensure proper workflow flow. A typical order is:
      * </p>
      * <ol>
      * <li>Input normalization/parsing</li>
@@ -405,8 +376,10 @@ public class LifecycleManager implements ILifecycleManager {
      * <li>Output generation</li>
      * </ol>
      *
-     * @param lifecycleTask the task to add to the workflow
-     * @throws IllegalArgumentException if lifecycleTask is null
+     * @param lifecycleTask
+     *            the task to add to the workflow
+     * @throws IllegalArgumentException
+     *             if lifecycleTask is null
      */
     @Override
     public void addLifecycleTask(ILifecycleTask lifecycleTask) {

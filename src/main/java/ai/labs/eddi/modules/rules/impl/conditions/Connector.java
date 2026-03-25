@@ -8,7 +8,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
-
 /**
  * @author ginccc
  */
@@ -54,8 +53,7 @@ public class Connector implements IRuleCondition {
         }
     }
 
-    public ExecutionState execute(IConversationMemory memory, List<Rule> trace)
-            throws Rule.InfiniteLoopException, Rule.RuntimeException {
+    public ExecutionState execute(IConversationMemory memory, List<Rule> trace) throws Rule.InfiniteLoopException, Rule.RuntimeException {
 
         ExecutionState state;
         if (operator == Operator.OR) {

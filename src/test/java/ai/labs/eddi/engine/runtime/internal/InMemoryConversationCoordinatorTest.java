@@ -17,8 +17,10 @@ import static org.mockito.Mockito.*;
 /**
  * Unit tests for {@link InMemoryConversationCoordinator}.
  *
- * <p>Tests verify ordering, retry/dead-letter logic, counters,
- * and dead-letter CRUD operations.</p>
+ * <p>
+ * Tests verify ordering, retry/dead-letter logic, counters, and dead-letter
+ * CRUD operations.
+ * </p>
  */
 class InMemoryConversationCoordinatorTest {
 
@@ -64,8 +66,7 @@ class InMemoryConversationCoordinatorTest {
         coordinator.submitInOrder("conv-1", task);
 
         // Capture the callback and simulate completion
-        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor =
-                ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
         verify(runtime).submitCallable(eq(task), callbackCaptor.capture(), isNull());
 
         callbackCaptor.getValue().onComplete(null);
@@ -81,8 +82,7 @@ class InMemoryConversationCoordinatorTest {
 
         // Simulate 3 failures (MAX_RETRIES = 3)
         for (int i = 0; i < 3; i++) {
-            ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor =
-                    ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+            ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
             verify(runtime, times(i + 1)).submitCallable(eq(task), callbackCaptor.capture(), isNull());
 
             List<IRuntime.IFinishedExecution<Void>> callbacks = callbackCaptor.getAllValues();
@@ -175,8 +175,7 @@ class InMemoryConversationCoordinatorTest {
 
         // Simulate MAX_RETRIES (3) failures
         for (int i = 0; i < 3; i++) {
-            ArgumentCaptor<IRuntime.IFinishedExecution<Void>> captor =
-                    ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+            ArgumentCaptor<IRuntime.IFinishedExecution<Void>> captor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
             verify(runtime, atLeast(1)).submitCallable(eq(task), captor.capture(), isNull());
 
             List<IRuntime.IFinishedExecution<Void>> callbacks = captor.getAllValues();

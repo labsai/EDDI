@@ -28,8 +28,7 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        var builder = GoogleAiGeminiChatModel.builder()
-                .httpClientBuilder(JdkHttpClient.builder());
+        var builder = GoogleAiGeminiChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
 
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
             builder.apiKey(parameters.get(KEY_API_KEY));
@@ -61,8 +60,7 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
-        var builder = GoogleAiGeminiStreamingChatModel.builder()
-                .httpClientBuilder(JdkHttpClient.builder());
+        var builder = GoogleAiGeminiStreamingChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
 
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
             builder.apiKey(parameters.get(KEY_API_KEY));

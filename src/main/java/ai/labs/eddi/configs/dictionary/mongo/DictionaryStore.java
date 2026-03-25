@@ -19,8 +19,7 @@ import java.util.List;
  * @author ginccc
  */
 @ApplicationScoped
-public class DictionaryStore extends AbstractResourceStore<DictionaryConfiguration>
-        implements IDictionaryStore {
+public class DictionaryStore extends AbstractResourceStore<DictionaryConfiguration> implements IDictionaryStore {
 
     private static final WordComparator WORD_COMPARATOR = new WordComparator();
     private static final PhraseComparator PHRASE_COMPARATOR = new PhraseComparator();
@@ -31,8 +30,7 @@ public class DictionaryStore extends AbstractResourceStore<DictionaryConfigurati
     }
 
     @Override
-    public IResourceStore.IResourceId create(DictionaryConfiguration regularDictionaryConfiguration)
-            throws IResourceStore.ResourceStoreException {
+    public IResourceStore.IResourceId create(DictionaryConfiguration regularDictionaryConfiguration) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkCollectionNoNullElements(regularDictionaryConfiguration.getWords(), "words");
         RuntimeUtilities.checkCollectionNoNullElements(regularDictionaryConfiguration.getPhrases(), "phrases");
         return super.create(regularDictionaryConfiguration);
@@ -41,8 +39,7 @@ public class DictionaryStore extends AbstractResourceStore<DictionaryConfigurati
     @Override
     @ConfigurationUpdate
     public Integer update(String id, Integer version, DictionaryConfiguration regularDictionaryConfiguration)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException,
-            IResourceStore.ResourceNotFoundException {
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkCollectionNoNullElements(regularDictionaryConfiguration.getWords(), "words");
         RuntimeUtilities.checkCollectionNoNullElements(regularDictionaryConfiguration.getPhrases(), "phrases");
 
@@ -50,8 +47,8 @@ public class DictionaryStore extends AbstractResourceStore<DictionaryConfigurati
     }
 
     @Override
-    public DictionaryConfiguration read(String id, Integer version, String filter, String order, Integer index,
-            Integer limit) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+    public DictionaryConfiguration read(String id, Integer version, String filter, String order, Integer index, Integer limit)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(filter, "filter");
         RuntimeUtilities.checkNotNull(order, "order");
         RuntimeUtilities.checkNotNull(index, "index");
@@ -62,10 +59,8 @@ public class DictionaryStore extends AbstractResourceStore<DictionaryConfigurati
 
         DictionaryConfiguration regularDictionary = read(id, version);
 
-        wordManipulator = new ResultManipulator<>(regularDictionary.getWords(),
-                DictionaryConfiguration.WordConfiguration.class);
-        phraseManipulator = new ResultManipulator<>(regularDictionary.getPhrases(),
-                DictionaryConfiguration.PhraseConfiguration.class);
+        wordManipulator = new ResultManipulator<>(regularDictionary.getWords(), DictionaryConfiguration.WordConfiguration.class);
+        phraseManipulator = new ResultManipulator<>(regularDictionary.getPhrases(), DictionaryConfiguration.PhraseConfiguration.class);
 
         try {
             wordManipulator.filterEntities(filter);
@@ -84,8 +79,8 @@ public class DictionaryStore extends AbstractResourceStore<DictionaryConfigurati
     }
 
     @Override
-    public List<String> readExpressions(String id, Integer version, String filter, String order, Integer index,
-            Integer limit) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public List<String> readExpressions(String id, Integer version, String filter, String order, Integer index, Integer limit)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         List<String> retExpressions = new LinkedList<>();
         for (int i = index;; i++) {
             DictionaryConfiguration regularDictionary = read(id, version, filter, order, i, limit);
@@ -120,16 +115,14 @@ public class DictionaryStore extends AbstractResourceStore<DictionaryConfigurati
 
     private static class WordComparator implements Comparator<DictionaryConfiguration.WordConfiguration> {
         @Override
-        public int compare(DictionaryConfiguration.WordConfiguration word1,
-                DictionaryConfiguration.WordConfiguration word2) {
+        public int compare(DictionaryConfiguration.WordConfiguration word1, DictionaryConfiguration.WordConfiguration word2) {
             return word1.getWord().compareTo(word2.getWord());
         }
     }
 
     private static class PhraseComparator implements Comparator<DictionaryConfiguration.PhraseConfiguration> {
         @Override
-        public int compare(DictionaryConfiguration.PhraseConfiguration phrase1,
-                DictionaryConfiguration.PhraseConfiguration phrase2) {
+        public int compare(DictionaryConfiguration.PhraseConfiguration phrase1, DictionaryConfiguration.PhraseConfiguration phrase2) {
             return phrase1.getPhrase().compareTo(phrase2.getPhrase());
         }
     }

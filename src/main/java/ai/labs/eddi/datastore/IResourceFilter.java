@@ -1,18 +1,17 @@
 package ai.labs.eddi.datastore;
 
-
 import java.util.List;
 
 /**
  * @author ginccc
  */
 public interface IResourceFilter<T> {
-    List<T> readResources(QueryFilters[] queryFilters, Integer index, Integer limit, String... sortTypes) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+    List<T> readResources(QueryFilters[] queryFilters, Integer index, Integer limit, String... sortTypes)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     class QueryFilters {
         public enum ConnectingType {
-            AND,
-            OR
+            AND, OR
         }
 
         private ConnectingType connectingType;

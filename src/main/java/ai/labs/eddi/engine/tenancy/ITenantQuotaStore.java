@@ -12,7 +12,8 @@ public interface ITenantQuotaStore {
     /**
      * Get quota configuration for a tenant.
      *
-     * @param tenantId tenant identifier
+     * @param tenantId
+     *            tenant identifier
      * @return the quota config, or null if not found
      */
     TenantQuota getQuota(String tenantId);
@@ -20,7 +21,8 @@ public interface ITenantQuotaStore {
     /**
      * Create or update quota configuration for a tenant.
      *
-     * @param quota the quota configuration to store
+     * @param quota
+     *            the quota configuration to store
      */
     void setQuota(TenantQuota quota);
 
@@ -34,7 +36,8 @@ public interface ITenantQuotaStore {
     /**
      * Delete quota configuration for a tenant.
      *
-     * @param tenantId tenant identifier
+     * @param tenantId
+     *            tenant identifier
      */
     void deleteQuota(String tenantId);
 }

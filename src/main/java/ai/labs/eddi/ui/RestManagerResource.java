@@ -46,15 +46,11 @@ public class RestManagerResource implements IRestManagerResource {
             }
 
             // Attempt to load the file from the resources folder
-            InputStream fileStream = Thread.currentThread()
-                    .getContextClassLoader()
-                    .getResourceAsStream(resourcePath.toString());
+            InputStream fileStream = Thread.currentThread().getContextClassLoader().getResourceAsStream(resourcePath.toString());
 
             // If the file doesn't exist, fallback to "manage.html"
             if (fileStream == null) {
-                fileStream = Thread.currentThread()
-                        .getContextClassLoader()
-                        .getResourceAsStream("META-INF/resources/manage.html");
+                fileStream = Thread.currentThread().getContextClassLoader().getResourceAsStream("META-INF/resources/manage.html");
 
                 if (fileStream == null) {
                     throw new FileNotFoundException("manage.html not found in META-INF/resources");

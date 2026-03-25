@@ -12,8 +12,7 @@ import jakarta.inject.Inject;
  * @author ginccc
  */
 @ApplicationScoped
-public class ParserStore extends AbstractResourceStore<ParserConfiguration>
-        implements IParserStore {
+public class ParserStore extends AbstractResourceStore<ParserConfiguration> implements IParserStore {
 
     @Inject
     public ParserStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {

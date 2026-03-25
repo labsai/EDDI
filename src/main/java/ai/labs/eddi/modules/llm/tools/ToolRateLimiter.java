@@ -12,8 +12,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Rate limiter for tool execution to prevent abuse.
- * Phase 4: Token bucket algorithm with per-tool limits and metrics.
+ * Rate limiter for tool execution to prevent abuse. Phase 4: Token bucket
+ * algorithm with per-tool limits and metrics.
  */
 @ApplicationScoped
 public class ToolRateLimiter {
@@ -54,8 +54,8 @@ public class ToolRateLimiter {
         }
 
         /**
-         * Update the rate limit for this bucket.
-         * Only updates if the new limit differs from the default.
+         * Update the rate limit for this bucket. Only updates if the new limit differs
+         * from the default.
          */
         synchronized void updateLimit(int newLimit) {
             if (this.limit != newLimit) {
@@ -101,7 +101,8 @@ public class ToolRateLimiter {
     /**
      * Try to acquire permission to execute a tool
      *
-     * @param toolName Name of the tool
+     * @param toolName
+     *            Name of the tool
      * @return true if allowed, false if rate limited
      */
     public boolean tryAcquire(String toolName) {
@@ -111,21 +112,20 @@ public class ToolRateLimiter {
     /**
      * Try to acquire permission with custom rate limit
      *
-     * @param toolName Name of the tool
-     * @param limit Calls per minute allowed
+     * @param toolName
+     *            Name of the tool
+     * @param limit
+     *            Calls per minute allowed
      * @return true if allowed, false if rate limited
      */
     public boolean tryAcquire(String toolName, int limit) {
-        RateLimitBucket bucket = buckets.compute(
-            toolName,
-            (k, existing) -> {
-                if (existing == null) {
-                    return new RateLimitBucket(limit);
-                }
-                existing.updateLimit(limit);
-                return existing;
+        RateLimitBucket bucket = buckets.compute(toolName, (k, existing) -> {
+            if (existing == null) {
+                return new RateLimitBucket(limit);
             }
-        );
+            existing.updateLimit(limit);
+            return existing;
+        });
 
         boolean acquired = bucket.tryAcquire();
 
@@ -138,15 +138,11 @@ public class ToolRateLimiter {
 
             long resetTime = bucket.getResetTimeMs();
             long waitTimeMs = resetTime - System.currentTimeMillis();
-            LOGGER.warn(String.format(
-                "Rate limit exceeded for tool '%s'. Reset in %d seconds.",
-                toolName, waitTimeMs / 1000
-            ));
+            LOGGER.warn(String.format("Rate limit exceeded for tool '%s'. Reset in %d seconds.", toolName, waitTimeMs / 1000));
         }
 
         // Update gauge for current usage
-        meterRegistry.gauge("eddi.tool.ratelimit.remaining",
-            bucket, b -> (double) b.getRemaining());
+        meterRegistry.gauge("eddi.tool.ratelimit.remaining", bucket, b -> (double) b.getRemaining());
 
         return acquired;
     }
@@ -189,15 +185,10 @@ public class ToolRateLimiter {
     public RateLimitInfo getInfo(String toolName) {
         RateLimitBucket bucket = buckets.get(toolName);
         if (bucket == null) {
-            return new RateLimitInfo(DEFAULT_RATE_LIMIT, DEFAULT_RATE_LIMIT,
-                System.currentTimeMillis() + WINDOW_MS);
+            return new RateLimitInfo(DEFAULT_RATE_LIMIT, DEFAULT_RATE_LIMIT, System.currentTimeMillis() + WINDOW_MS);
         }
 
-        return new RateLimitInfo(
-            bucket.limit,
-            bucket.getRemaining(),
-            bucket.getResetTimeMs()
-        );
+        return new RateLimitInfo(bucket.limit, bucket.getRemaining(), bucket.getResetTimeMs());
     }
 
     /**
@@ -217,9 +208,7 @@ public class ToolRateLimiter {
         @Override
         public String toString() {
             long waitSec = (resetTimeMs - System.currentTimeMillis()) / 1000;
-            return String.format("Rate Limit: %d/%d remaining, resets in %ds",
-                remaining, limit, waitSec);
+            return String.format("Rate Limit: %d/%d remaining, resets in %ds", remaining, limit, waitSec);
         }
     }
 }
-

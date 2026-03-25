@@ -8,11 +8,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Conversation coordinator — ensures sequential message processing per conversation.
- * Extends {@link IEventBus} to inherit the pluggable event bus contract.
+ * Conversation coordinator — ensures sequential message processing per
+ * conversation. Extends {@link IEventBus} to inherit the pluggable event bus
+ * contract.
  *
- * <p>Also provides status introspection and dead-letter management for the
- * Coordinator Dashboard (Item 5.30).</p>
+ * <p>
+ * Also provides status introspection and dead-letter management for the
+ * Coordinator Dashboard (Item 5.30).
+ * </p>
  *
  * @author ginccc
  */
@@ -43,7 +46,8 @@ public interface IConversationCoordinator extends IEventBus {
     }
 
     /**
-     * @return per-conversation queue depths (conversationId → number of queued tasks)
+     * @return per-conversation queue depths (conversationId → number of queued
+     *         tasks)
      */
     default Map<String, Integer> getQueueDepths() {
         return Collections.emptyMap();
@@ -67,15 +71,8 @@ public interface IConversationCoordinator extends IEventBus {
      * @return full status snapshot
      */
     default CoordinatorStatus getStatus() {
-        return new CoordinatorStatus(
-                getCoordinatorType(),
-                isConnected(),
-                getConnectionStatus(),
-                getQueueDepths().size(),
-                getTotalProcessed(),
-                getTotalDeadLettered(),
-                getQueueDepths()
-        );
+        return new CoordinatorStatus(getCoordinatorType(), isConnected(), getConnectionStatus(), getQueueDepths().size(), getTotalProcessed(),
+                getTotalDeadLettered(), getQueueDepths());
     }
 
     // ==================== Dead-Letter Methods ====================
@@ -90,7 +87,8 @@ public interface IConversationCoordinator extends IEventBus {
     /**
      * Replay a dead-letter entry (re-inject into the main processing workflow).
      *
-     * @param entryId the dead-letter entry ID
+     * @param entryId
+     *            the dead-letter entry ID
      * @return true if the entry was found and replayed
      */
     default boolean replayDeadLetter(String entryId) {
@@ -100,7 +98,8 @@ public interface IConversationCoordinator extends IEventBus {
     /**
      * Discard (acknowledge/remove) a dead-letter entry.
      *
-     * @param entryId the dead-letter entry ID
+     * @param entryId
+     *            the dead-letter entry ID
      * @return true if the entry was found and discarded
      */
     default boolean discardDeadLetter(String entryId) {

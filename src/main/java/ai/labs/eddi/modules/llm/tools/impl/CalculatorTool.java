@@ -11,19 +11,18 @@ import java.util.function.DoubleBinaryOperator;
 import java.util.function.DoubleUnaryOperator;
 
 /**
- * Calculator tool for performing mathematical operations.
- * Uses a safe recursive descent parser for expression evaluation.
- * No external scripting engine required - pure Java implementation.
+ * Calculator tool for performing mathematical operations. Uses a safe recursive
+ * descent parser for expression evaluation. No external scripting engine
+ * required - pure Java implementation.
  */
 @ApplicationScoped
 public class CalculatorTool {
     private static final Logger LOGGER = Logger.getLogger(CalculatorTool.class);
 
-    @Tool("Performs mathematical calculations. Supports basic operations (+, -, *, /, ^, %), " +
-          "functions (sqrt, pow, abs, ceil, floor, round, min, max, sin, cos, tan, atan, log, exp), " +
-          "and constants (PI, E). Returns the numeric result.")
-    public String calculate(
-            @P("expression") String expression) {
+    @Tool("Performs mathematical calculations. Supports basic operations (+, -, *, /, ^, %), "
+            + "functions (sqrt, pow, abs, ceil, floor, round, min, max, sin, cos, tan, atan, log, exp), "
+            + "and constants (PI, E). Returns the numeric result.")
+    public String calculate(@P("expression") String expression) {
 
         try {
             LOGGER.debug("Calculating expression: " + expression);
@@ -61,10 +60,7 @@ public class CalculatorTool {
     }
 
     @Tool("Converts between different units of measurement")
-    public String convertUnits(
-            @P("value") double value,
-            @P("fromUnit") String fromUnit,
-            @P("toUnit") String toUnit) {
+    public String convertUnits(@P("value") double value, @P("fromUnit") String fromUnit, @P("toUnit") String toUnit) {
 
         try {
             double result = performConversion(value, fromUnit.toLowerCase(), toUnit.toLowerCase());
@@ -123,17 +119,14 @@ public class CalculatorTool {
     }
 
     /**
-     * Safe recursive descent math expression parser.
-     * Supports: +, -, *, /, %, ^, parentheses, Math functions, and constants.
-     * No code injection possible - only evaluates mathematical expressions.
+     * Safe recursive descent math expression parser. Supports: +, -, *, /, %, ^,
+     * parentheses, Math functions, and constants. No code injection possible - only
+     * evaluates mathematical expressions.
      *
-     * Grammar:
-     *   expression := term (('+' | '-') term)*
-     *   term       := power (('*' | '/' | '%') power)*
-     *   power      := unary ('^' power)?
-     *   unary      := '-' unary | '+' unary | primary
-     *   primary    := NUMBER | CONSTANT | FUNCTION '(' args ')' | '(' expression ')'
-     *   args       := expression (',' expression)*
+     * Grammar: expression := term (('+' | '-') term)* term := power (('*' | '/' |
+     * '%') power)* power := unary ('^' power)? unary := '-' unary | '+' unary |
+     * primary primary := NUMBER | CONSTANT | FUNCTION '(' args ')' | '(' expression
+     * ')' args := expression (',' expression)*
      */
     static class SafeMathParser {
         private final String expression;
@@ -148,8 +141,7 @@ public class CalculatorTool {
             double result = parseExpression();
             skipWhitespace();
             if (pos < expression.length()) {
-                throw new IllegalArgumentException(
-                        "Unexpected character '" + expression.charAt(pos) + "' at position " + pos);
+                throw new IllegalArgumentException("Unexpected character '" + expression.charAt(pos) + "' at position " + pos);
             }
             return result;
         }
@@ -303,8 +295,7 @@ public class CalculatorTool {
 
         private double parseNumber() {
             int start = pos;
-            while (pos < expression.length() &&
-                    (Character.isDigit(expression.charAt(pos)) || expression.charAt(pos) == '.')) {
+            while (pos < expression.length() && (Character.isDigit(expression.charAt(pos)) || expression.charAt(pos) == '.')) {
                 pos++;
             }
             String numStr = expression.substring(start, pos);
@@ -317,13 +308,11 @@ public class CalculatorTool {
 
         private String parseName() {
             int start = pos;
-            while (pos < expression.length() &&
-                    (Character.isLetterOrDigit(expression.charAt(pos)) || expression.charAt(pos) == '.')) {
+            while (pos < expression.length() && (Character.isLetterOrDigit(expression.charAt(pos)) || expression.charAt(pos) == '.')) {
                 pos++;
             }
             if (pos == start) {
-                throw new IllegalArgumentException(
-                        "Expected function name or constant at position " + pos);
+                throw new IllegalArgumentException("Expected function name or constant at position " + pos);
             }
             return expression.substring(start, pos);
         }
@@ -331,8 +320,7 @@ public class CalculatorTool {
         private void expect(char c) {
             skipWhitespace();
             if (pos >= expression.length() || expression.charAt(pos) != c) {
-                throw new IllegalArgumentException(
-                        "Expected '" + c + "' at position " + pos);
+                throw new IllegalArgumentException("Expected '" + c + "' at position " + pos);
             }
             pos++;
         }
@@ -344,4 +332,3 @@ public class CalculatorTool {
         }
     }
 }
-

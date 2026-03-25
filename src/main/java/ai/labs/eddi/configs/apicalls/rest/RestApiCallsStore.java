@@ -26,9 +26,7 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     private final RestVersionInfo<ApiCallsConfiguration> restVersionInfo;
 
     @Inject
-    public RestApiCallsStore(IApiCallsStore httpCallsStore,
-            IDocumentDescriptorStore documentDescriptorStore,
-            IJsonSchemaCreator jsonSchemaCreator) {
+    public RestApiCallsStore(IApiCallsStore httpCallsStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, httpCallsStore, documentDescriptorStore);
         this.httpCallsStore = httpCallsStore;
         this.jsonSchemaCreator = jsonSchemaCreator;

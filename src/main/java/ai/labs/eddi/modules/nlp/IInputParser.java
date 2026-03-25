@@ -57,8 +57,10 @@ public interface IInputParser {
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
             Config that = (Config) o;
             return appendExpressions == that.appendExpressions && includeUnused == that.includeUnused && includeUnknown == that.includeUnknown;
         }
@@ -70,7 +72,8 @@ public interface IInputParser {
 
         @Override
         public String toString() {
-            return "Config(" + "appendExpressions=" + appendExpressions + ", includeUnused=" + includeUnused + ", includeUnknown=" + includeUnknown + ")";
+            return "Config(" + "appendExpressions=" + appendExpressions + ", includeUnused=" + includeUnused + ", includeUnknown=" + includeUnknown
+                    + ")";
         }
     }
 }

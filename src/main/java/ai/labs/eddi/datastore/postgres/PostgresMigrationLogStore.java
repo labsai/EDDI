@@ -11,8 +11,8 @@ import jakarta.inject.Inject;
 import java.sql.*;
 
 /**
- * PostgreSQL implementation of {@link IMigrationLogStore}.
- * Tracks migration status in a simple table.
+ * PostgreSQL implementation of {@link IMigrationLogStore}. Tracks migration
+ * status in a simple table.
  */
 @ApplicationScoped
 @IfBuildProfile("postgres")
@@ -37,9 +37,9 @@ public class PostgresMigrationLogStore implements IMigrationLogStore {
     }
 
     private synchronized void ensureSchema() {
-        if (schemaInitialized) return;
-        try (Connection conn = dataSource.getConnection();
-             Statement stmt = conn.createStatement()) {
+        if (schemaInitialized)
+            return;
+        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -51,8 +51,7 @@ public class PostgresMigrationLogStore implements IMigrationLogStore {
     public MigrationLog readMigrationLog(String name) {
         ensureSchema();
         String sql = "SELECT name, created_at FROM migration_log WHERE name = ?";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, name);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
@@ -69,8 +68,7 @@ public class PostgresMigrationLogStore implements IMigrationLogStore {
     public void createMigrationLog(MigrationLog migrationLog) {
         ensureSchema();
         String sql = "INSERT INTO migration_log (name) VALUES (?) ON CONFLICT (name) DO NOTHING";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, migrationLog.getName());
             ps.executeUpdate();
         } catch (SQLException e) {

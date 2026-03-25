@@ -98,13 +98,9 @@ public class RestScheduleStore implements IRestScheduleStore {
             schedule.setId(id);
             enrichCronDescription(schedule);
 
-            return Response.created(URI.create("/schedulestore/schedules/" + id))
-                    .entity(schedule)
-                    .build();
+            return Response.created(URI.create("/schedulestore/schedules/" + id)).entity(schedule).build();
         } catch (IllegalArgumentException e) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(e.getMessage())
-                    .build();
+            return Response.status(Response.Status.BAD_REQUEST).entity(e.getMessage()).build();
         } catch (Exception e) {
             LOGGER.error("Failed to create schedule", e);
             throw new InternalServerErrorException("Failed to create schedule: " + e.getMessage());
@@ -124,9 +120,7 @@ public class RestScheduleStore implements IRestScheduleStore {
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException("Schedule not found: " + scheduleId);
         } catch (IllegalArgumentException e) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(e.getMessage())
-                    .build();
+            return Response.status(Response.Status.BAD_REQUEST).entity(e.getMessage()).build();
         } catch (Exception e) {
             LOGGER.error("Failed to update schedule " + scheduleId, e);
             throw new InternalServerErrorException("Failed to update schedule: " + e.getMessage());
@@ -257,8 +251,7 @@ public class RestScheduleStore implements IRestScheduleStore {
         }
         if (schedule.getConversationStrategy() == null || schedule.getConversationStrategy().isBlank()) {
             // Heartbeats default to persistent, cron to new
-            schedule.setConversationStrategy(
-                    schedule.getTriggerType() == TriggerType.HEARTBEAT ? "persistent" : "new");
+            schedule.setConversationStrategy(schedule.getTriggerType() == TriggerType.HEARTBEAT ? "persistent" : "new");
         }
         if (schedule.getTimeZone() == null || schedule.getTimeZone().isBlank()) {
             schedule.setTimeZone(defaultTimeZone);
@@ -267,15 +260,13 @@ public class RestScheduleStore implements IRestScheduleStore {
             schedule.setFireStatus(FireStatus.PENDING);
         }
         // Heartbeat: default message if unset
-        if (schedule.getTriggerType() == TriggerType.HEARTBEAT
-                && (schedule.getMessage() == null || schedule.getMessage().isBlank())) {
+        if (schedule.getTriggerType() == TriggerType.HEARTBEAT && (schedule.getMessage() == null || schedule.getMessage().isBlank())) {
             schedule.setMessage("heartbeat");
         }
     }
 
     private void computeInitialNextFire(ScheduleConfiguration schedule) {
-        if (schedule.getTriggerType() == TriggerType.HEARTBEAT
-                && schedule.getHeartbeatIntervalSeconds() != null) {
+        if (schedule.getTriggerType() == TriggerType.HEARTBEAT && schedule.getHeartbeatIntervalSeconds() != null) {
             // Heartbeat: first fire = now + interval
             schedule.setNextFire(Instant.now().plusSeconds(schedule.getHeartbeatIntervalSeconds()));
         } else if (schedule.getCronExpression() != null && !schedule.getCronExpression().isBlank()) {
@@ -288,13 +279,11 @@ public class RestScheduleStore implements IRestScheduleStore {
     }
 
     private Instant computeNextFireForSchedule(ScheduleConfiguration schedule) {
-        if (schedule.getTriggerType() == TriggerType.HEARTBEAT
-                && schedule.getHeartbeatIntervalSeconds() != null) {
+        if (schedule.getTriggerType() == TriggerType.HEARTBEAT && schedule.getHeartbeatIntervalSeconds() != null) {
             return Instant.now().plusSeconds(schedule.getHeartbeatIntervalSeconds());
         }
         if (schedule.getCronExpression() != null && !schedule.getCronExpression().isBlank()) {
-            ZoneId zoneId = ZoneId.of(
-                    schedule.getTimeZone() != null ? schedule.getTimeZone() : defaultTimeZone);
+            ZoneId zoneId = ZoneId.of(schedule.getTimeZone() != null ? schedule.getTimeZone() : defaultTimeZone);
             return CronParser.computeNextFire(schedule.getCronExpression(), Instant.now(), zoneId);
         }
         return null;
@@ -324,13 +313,11 @@ public class RestScheduleStore implements IRestScheduleStore {
         if (type == TriggerType.HEARTBEAT) {
             // Heartbeat: must have interval
             if (schedule.getHeartbeatIntervalSeconds() == null || schedule.getHeartbeatIntervalSeconds() <= 0) {
-                throw new IllegalArgumentException(
-                        "heartbeatIntervalSeconds is required and must be > 0 for HEARTBEAT triggers");
+                throw new IllegalArgumentException("heartbeatIntervalSeconds is required and must be > 0 for HEARTBEAT triggers");
             }
             // Enforce minimum interval
             if (schedule.getHeartbeatIntervalSeconds() < minIntervalSeconds) {
-                throw new IllegalArgumentException(String.format(
-                        "Heartbeat interval (%ds) is below minimum allowed (%ds)",
+                throw new IllegalArgumentException(String.format("Heartbeat interval (%ds) is below minimum allowed (%ds)",
                         schedule.getHeartbeatIntervalSeconds(), minIntervalSeconds));
             }
             // Message is optional for heartbeats (will default to "heartbeat")
@@ -355,13 +342,12 @@ public class RestScheduleStore implements IRestScheduleStore {
                 CronParser.validate(schedule.getCronExpression());
 
                 // Enforce minimum interval
-                ZoneId zoneId = ZoneId.of(
-                        schedule.getTimeZone() != null ? schedule.getTimeZone() : defaultTimeZone);
+                ZoneId zoneId = ZoneId.of(schedule.getTimeZone() != null ? schedule.getTimeZone() : defaultTimeZone);
                 long intervalSec = CronParser.computeMinIntervalSeconds(schedule.getCronExpression(), zoneId);
                 if (intervalSec < minIntervalSeconds) {
                     throw new IllegalArgumentException(String.format(
-                            "Cron interval (%ds) is below minimum allowed (%ds). " +
-                                    "Use a less frequent schedule or contact admin to adjust eddi.schedule.min-interval-seconds",
+                            "Cron interval (%ds) is below minimum allowed (%ds). "
+                                    + "Use a less frequent schedule or contact admin to adjust eddi.schedule.min-interval-seconds",
                             intervalSec, minIntervalSeconds));
                 }
             }
@@ -369,18 +355,15 @@ public class RestScheduleStore implements IRestScheduleStore {
 
         // Validate conversation strategy
         String strategy = schedule.getConversationStrategy();
-        if (strategy != null && !strategy.isBlank()
-                && !strategy.equals("new") && !strategy.equals("persistent")) {
-            throw new IllegalArgumentException(
-                    "conversationStrategy must be 'new' or 'persistent', got: " + strategy);
+        if (strategy != null && !strategy.isBlank() && !strategy.equals("new") && !strategy.equals("persistent")) {
+            throw new IllegalArgumentException("conversationStrategy must be 'new' or 'persistent', got: " + strategy);
         }
     }
 
     private void enrichCronDescription(ScheduleConfiguration schedule) {
         if (schedule.getCronExpression() != null && !schedule.getCronExpression().isBlank()) {
             schedule.setCronDescription(CronDescriber.describe(schedule.getCronExpression()));
-        } else if (schedule.getTriggerType() == TriggerType.HEARTBEAT
-                && schedule.getHeartbeatIntervalSeconds() != null) {
+        } else if (schedule.getTriggerType() == TriggerType.HEARTBEAT && schedule.getHeartbeatIntervalSeconds() != null) {
             schedule.setCronDescription(describeHeartbeat(schedule.getHeartbeatIntervalSeconds()));
         }
     }

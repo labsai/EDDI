@@ -23,8 +23,7 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        var builder = AnthropicChatModel.builder()
-                .httpClientBuilder(JdkHttpClient.builder());
+        var builder = AnthropicChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
 
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
             builder.apiKey(parameters.get(KEY_API_KEY));
@@ -36,8 +35,7 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
             builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
         }
         if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(
-                    Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
+            builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
         }
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
@@ -51,8 +49,7 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
-        var builder = AnthropicStreamingChatModel.builder()
-                .httpClientBuilder(JdkHttpClient.builder());
+        var builder = AnthropicStreamingChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
 
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
             builder.apiKey(parameters.get(KEY_API_KEY));
@@ -64,8 +61,7 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
             builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
         }
         if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(
-                    Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
+            builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
         }
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));

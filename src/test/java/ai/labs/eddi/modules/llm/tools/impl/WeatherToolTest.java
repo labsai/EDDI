@@ -9,8 +9,8 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Unit tests for WeatherTool.
- * Note: Tests expect API key to NOT be configured, so they verify error handling.
+ * Unit tests for WeatherTool. Note: Tests expect API key to NOT be configured,
+ * so they verify error handling.
  */
 class WeatherToolTest {
 
@@ -76,4 +76,3 @@ class WeatherToolTest {
         assertTrue(result.contains("Error") || result.contains("API key not configured"));
     }
 }
-

@@ -17,8 +17,10 @@ import static org.mockito.Mockito.*;
 /**
  * Unit tests for {@link RestCoordinatorAdmin}.
  *
- * <p>Verifies REST delegation to the {@link IConversationCoordinator},
- * including status, dead-letter CRUD, and error handling.</p>
+ * <p>
+ * Verifies REST delegation to the {@link IConversationCoordinator}, including
+ * status, dead-letter CRUD, and error handling.
+ * </p>
  */
 class RestCoordinatorAdminTest {
 
@@ -35,9 +37,7 @@ class RestCoordinatorAdminTest {
 
     @Test
     void shouldReturnCoordinatorStatus() {
-        CoordinatorStatus expected = new CoordinatorStatus(
-                "in-memory", true, "CONNECTED", 3, 100L, 2L,
-                Map.of("conv-1", 2, "conv-2", 1));
+        CoordinatorStatus expected = new CoordinatorStatus("in-memory", true, "CONNECTED", 3, 100L, 2L, Map.of("conv-1", 2, "conv-2", 1));
         when(coordinator.getStatus()).thenReturn(expected);
 
         CoordinatorStatus result = admin.getStatus();
@@ -53,9 +53,7 @@ class RestCoordinatorAdminTest {
 
     @Test
     void shouldReturnNatsStatus() {
-        CoordinatorStatus nats = new CoordinatorStatus(
-                "nats", true, "CONNECTED", 0, 500L, 0L,
-                Collections.emptyMap());
+        CoordinatorStatus nats = new CoordinatorStatus("nats", true, "CONNECTED", 0, 500L, 0L, Collections.emptyMap());
         when(coordinator.getStatus()).thenReturn(nats);
 
         CoordinatorStatus result = admin.getStatus();
@@ -69,10 +67,8 @@ class RestCoordinatorAdminTest {
 
     @Test
     void shouldReturnDeadLetters() {
-        List<DeadLetterEntry> entries = List.of(
-                new DeadLetterEntry("1", "conv-fail-1", "timeout", 1000L, "{}"),
-                new DeadLetterEntry("2", "conv-fail-2", "NPE", 2000L, "{}")
-        );
+        List<DeadLetterEntry> entries = List.of(new DeadLetterEntry("1", "conv-fail-1", "timeout", 1000L, "{}"),
+                new DeadLetterEntry("2", "conv-fail-2", "NPE", 2000L, "{}"));
         when(coordinator.getDeadLetters()).thenReturn(entries);
 
         List<DeadLetterEntry> result = admin.getDeadLetters();

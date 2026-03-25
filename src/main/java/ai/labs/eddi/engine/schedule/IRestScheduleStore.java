@@ -14,8 +14,8 @@ import java.util.List;
 /**
  * REST API for managing scheduled Agent triggers.
  * <p>
- * Provides CRUD operations for schedules, plus admin endpoints
- * for managing fire history and dead-lettered schedules.
+ * Provides CRUD operations for schedules, plus admin endpoints for managing
+ * fire history and dead-lettered schedules.
  *
  * @author ginccc
  * @since 6.0.0
@@ -74,10 +74,7 @@ public interface IRestScheduleStore {
     @Path("/{scheduleId}/fires")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read fire history for a schedule.")
-    List<ScheduleFireLog> readFireLogs(
-            @PathParam("scheduleId") String scheduleId,
-            @QueryParam("limit") @DefaultValue("20") int limit
-    );
+    List<ScheduleFireLog> readFireLogs(@PathParam("scheduleId") String scheduleId, @QueryParam("limit") @DefaultValue("20") int limit);
 
     // --- Admin ---
 

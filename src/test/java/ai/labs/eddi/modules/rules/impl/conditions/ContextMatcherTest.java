@@ -117,14 +117,12 @@ public class ContextMatcherTest {
         final HashMap<String, String> values = setupValuesWithExpressions();
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
-            ret.add(new MockData<>("context:someContextKey",
-                    new Context(Context.ContextType.expressions, values.get("expressions"))));
+            ret.add(new MockData<>("context:someContextKey", new Context(Context.ContextType.expressions, values.get("expressions"))));
             return ret;
         });
 
         // test
-        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
-                new LinkedList<>());
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
 
         // assert
         verify(currentStep).getAllData("context");
@@ -140,15 +138,13 @@ public class ContextMatcherTest {
         final String otherExpressions = "someOtherExpressions(than_expected)";
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
-            ret.add(new MockData<>("context:someContextKey",
-                    new Context(Context.ContextType.expressions, otherExpressions)));
+            ret.add(new MockData<>("context:someContextKey", new Context(Context.ContextType.expressions, otherExpressions)));
             return ret;
         });
         when(expressionProvider.parseExpressions(anyString())).thenAnswer(invocation -> new Expressions());
 
         // test
-        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
-                new LinkedList<>());
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
 
         // assert
         verify(currentStep).getAllData("context");
@@ -168,14 +164,12 @@ public class ContextMatcherTest {
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
             ret.add(new MockData<>("context:someContextKey",
-                    new Context(Context.ContextType.object,
-                            jsonSerialization.deserialize(contextJson, Object.class))));
+                    new Context(Context.ContextType.object, jsonSerialization.deserialize(contextJson, Object.class))));
             return ret;
         });
 
         // test
-        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
-                new LinkedList<>());
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
 
         // assert
         verify(currentStep).getAllData("context");
@@ -195,14 +189,12 @@ public class ContextMatcherTest {
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
             ret.add(new MockData<>("context:someContextKey",
-                    new Context(Context.ContextType.object,
-                            jsonSerialization.deserialize(contextJson, Object.class))));
+                    new Context(Context.ContextType.object, jsonSerialization.deserialize(contextJson, Object.class))));
             return ret;
         });
 
         // test
-        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
-                new LinkedList<>());
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
 
         // assert
         verify(currentStep).getAllData("context");
@@ -222,14 +214,12 @@ public class ContextMatcherTest {
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
             ret.add(new MockData<>("context:someContextKey",
-                    new Context(Context.ContextType.object,
-                            jsonSerialization.deserialize(contextJson, Object.class))));
+                    new Context(Context.ContextType.object, jsonSerialization.deserialize(contextJson, Object.class))));
             return ret;
         });
 
         // test
-        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
-                new LinkedList<>());
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
 
         // assert
         verify(currentStep).getAllData("context");
@@ -249,14 +239,12 @@ public class ContextMatcherTest {
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
             ret.add(new MockData<>("context:someContextKey",
-                    new Context(Context.ContextType.object,
-                            jsonSerialization.deserialize(contextJson, Object.class))));
+                    new Context(Context.ContextType.object, jsonSerialization.deserialize(contextJson, Object.class))));
             return ret;
         });
 
         // test
-        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
-                new LinkedList<>());
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
 
         // assert
         verify(currentStep).getAllData("context");
@@ -271,14 +259,12 @@ public class ContextMatcherTest {
         setupValuesWithString();
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
-            ret.add(new MockData<>("context:someContextKey",
-                    new Context(Context.ContextType.string, "someString")));
+            ret.add(new MockData<>("context:someContextKey", new Context(Context.ContextType.string, "someString")));
             return ret;
         });
 
         // test
-        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
-                new LinkedList<>());
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
 
         // assert
         Assertions.assertEquals(IRuleCondition.ExecutionState.SUCCESS, actualExecutionState);
@@ -290,14 +276,12 @@ public class ContextMatcherTest {
         setupValuesWithString();
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
-            ret.add(new MockData<>("context:someContextKey",
-                    new Context(Context.ContextType.string, "someStringOtherString")));
+            ret.add(new MockData<>("context:someContextKey", new Context(Context.ContextType.string, "someStringOtherString")));
             return ret;
         });
 
         // test
-        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory,
-                new LinkedList<>());
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
 
         // assert
         Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);

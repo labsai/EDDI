@@ -30,8 +30,7 @@ public interface IRestParserStore extends IRestVersionInfo {
     @APIResponse(responseCode = "200", description = "Array of DocumentDescriptors")
     @Operation(description = "Read list of parser descriptors.")
     List<DocumentDescriptor> readParserDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index,
-            @QueryParam("limit") @DefaultValue("20") Integer limit);
+            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
@@ -52,50 +51,22 @@ public interface IRestParserStore extends IRestVersionInfo {
     /**
      * example parser json config:
      * <p>
-     * {
-     * "extensions": {
-     * "dictionaries": [
-     * {
-     * "type": "eddi://ai.labs.parser.dictionaries.integer"
-     * },
-     * {
-     * "type": "eddi://ai.labs.parser.dictionaries.decimal"
-     * },
-     * {
-     * "type": "eddi://ai.labs.parser.dictionaries.punctuation"
-     * },
-     * {
-     * "type": "eddi://ai.labs.parser.dictionaries.email"
-     * },
-     * {
-     * "type": "eddi://ai.labs.parser.dictionaries.time"
-     * },
-     * {
-     * "type": "eddi://ai.labs.parser.dictionaries.ordinalNumber"
-     * },
-     * {
-     * "type": "eddi://ai.labs.parser.dictionaries.regular",
-     * "config": {
-     * "uri":
+     * { "extensions": { "dictionaries": [ { "type":
+     * "eddi://ai.labs.parser.dictionaries.integer" }, { "type":
+     * "eddi://ai.labs.parser.dictionaries.decimal" }, { "type":
+     * "eddi://ai.labs.parser.dictionaries.punctuation" }, { "type":
+     * "eddi://ai.labs.parser.dictionaries.email" }, { "type":
+     * "eddi://ai.labs.parser.dictionaries.time" }, { "type":
+     * "eddi://ai.labs.parser.dictionaries.ordinalNumber" }, { "type":
+     * "eddi://ai.labs.parser.dictionaries.regular", "config": { "uri":
      * "eddi://ai.labs.dictionary/regulardictionarystore/regulardictionaries/<INSERT_ID_OF_DICTIONARY>?version=<VERSION_NUMBER>"
-     * }
-     * }
-     * ],
-     * "corrections": [
-     * {
-     * "type": "eddi://ai.labs.parser.corrections.levenshtein",
-     * "config": {
-     * "distance": "2"
-     * }
-     * },
-     * {
-     * "type": "eddi://ai.labs.parser.corrections.mergedTerms"
-     * }
-     * ]}
-     * }
+     * } } ], "corrections": [ { "type":
+     * "eddi://ai.labs.parser.corrections.levenshtein", "config": { "distance": "2"
+     * } }, { "type": "eddi://ai.labs.parser.corrections.mergedTerms" } ]} }
      *
-     * @param parserConfiguration configuration of parser (which dictionaries and
-     *                            which corrections algorithms in which order)
+     * @param parserConfiguration
+     *            configuration of parser (which dictionaries and which corrections
+     *            algorithms in which order)
      * @return an array of expressions representing the found solutions
      */
     @POST

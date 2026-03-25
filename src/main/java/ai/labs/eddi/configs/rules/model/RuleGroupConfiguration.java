@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.rules.model;
 
-
 import java.util.LinkedList;
 import java.util.List;
 
@@ -40,4 +39,3 @@ public class RuleGroupConfiguration {
         this.behaviorRules = behaviorRules;
     }
 }
-

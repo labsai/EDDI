@@ -48,8 +48,7 @@ class RestAgentEngineTest {
         void startConversation_success() throws Exception {
             var convUri = URI.create("eddi://ai.labs.conversation/conv123?version=1");
             var result = new IConversationService.ConversationResult("conv123", convUri);
-            when(conversationService.startConversation(any(), eq("agent1"), eq("user1"), anyMap()))
-                    .thenReturn(result);
+            when(conversationService.startConversation(any(), eq("agent1"), eq("user1"), anyMap())).thenReturn(result);
 
             Response response = RestAgentEngine.startConversation(production, "agent1", "user1");
 
@@ -71,11 +70,9 @@ class RestAgentEngineTest {
         @Test
         @DisplayName("should throw InternalServerError on ResourceStoreException")
         void startConversation_storeError() throws Exception {
-            when(conversationService.startConversation(any(), eq("agent1"), eq("user1"), anyMap()))
-                    .thenThrow(new ResourceStoreException("DB error"));
+            when(conversationService.startConversation(any(), eq("agent1"), eq("user1"), anyMap())).thenThrow(new ResourceStoreException("DB error"));
 
-            assertThrows(InternalServerErrorException.class,
-                    () -> RestAgentEngine.startConversation(production, "agent1", "user1"));
+            assertThrows(InternalServerErrorException.class, () -> RestAgentEngine.startConversation(production, "agent1", "user1"));
         }
     }
 
@@ -105,13 +102,9 @@ class RestAgentEngineTest {
         @DisplayName("should delegate to conversationService and return snapshot")
         void readConversation_success() throws Exception {
             var snapshot = new SimpleConversationMemorySnapshot();
-            when(conversationService.readConversation(
-                    eq(production), eq("agent1"), eq("conv1"),
-                    eq(true), eq(false), isNull()))
-                    .thenReturn(snapshot);
+            when(conversationService.readConversation(eq(production), eq("agent1"), eq("conv1"), eq(true), eq(false), isNull())).thenReturn(snapshot);
 
-            SimpleConversationMemorySnapshot result = RestAgentEngine.readConversation(
-                    production, "agent1", "conv1", true, false, null);
+            SimpleConversationMemorySnapshot result = RestAgentEngine.readConversation(production, "agent1", "conv1", true, false, null);
 
             assertNotNull(result);
             assertSame(snapshot, result);
@@ -129,14 +122,11 @@ class RestAgentEngineTest {
         void say_delegatesToService() throws Exception {
             AsyncResponse asyncResponse = mock(AsyncResponse.class);
 
-            RestAgentEngine.say(production, "agent1", "conv1",
-                    false, false, null, "Hello", asyncResponse);
+            RestAgentEngine.say(production, "agent1", "conv1", false, false, null, "Hello", asyncResponse);
 
             verify(asyncResponse).setTimeout(60, java.util.concurrent.TimeUnit.SECONDS);
-            verify(conversationService).say(
-                    eq(production), eq("agent1"), eq("conv1"),
-                    eq(false), eq(false), isNull(),
-                    any(InputData.class), eq(false), any());
+            verify(conversationService).say(eq(production), eq("agent1"), eq("conv1"), eq(false), eq(false), isNull(), any(InputData.class),
+                    eq(false), any());
         }
 
         @Test
@@ -144,13 +134,10 @@ class RestAgentEngineTest {
         void say_conversationEnded() throws Exception {
             AsyncResponse asyncResponse = mock(AsyncResponse.class);
 
-            doThrow(new ConversationEndedException("Conversation has ended!"))
-                    .when(conversationService).say(
-                            any(), any(), any(), any(), any(), any(),
-                            any(), anyBoolean(), any());
+            doThrow(new ConversationEndedException("Conversation has ended!")).when(conversationService).say(any(), any(), any(), any(), any(), any(),
+                    any(), anyBoolean(), any());
 
-            RestAgentEngine.say(production, "agent1", "conv1",
-                    false, false, null, "Hello", asyncResponse);
+            RestAgentEngine.say(production, "agent1", "conv1", false, false, null, "Hello", asyncResponse);
 
             // Capture the argument passed to resume
             ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
@@ -165,13 +152,10 @@ class RestAgentEngineTest {
         void say_agentMismatch() throws Exception {
             AsyncResponse asyncResponse = mock(AsyncResponse.class);
 
-            doThrow(new AgentMismatchException("wrong agent"))
-                    .when(conversationService).say(
-                            any(), any(), any(), any(), any(), any(),
-                            any(), anyBoolean(), any());
+            doThrow(new AgentMismatchException("wrong agent")).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(),
+                    anyBoolean(), any());
 
-            RestAgentEngine.say(production, "agent1", "conv1",
-                    false, false, null, "Hello", asyncResponse);
+            RestAgentEngine.say(production, "agent1", "conv1", false, false, null, "Hello", asyncResponse);
 
             ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
             verify(asyncResponse).resume(captor.capture());
@@ -190,8 +174,7 @@ class RestAgentEngineTest {
         @Test
         @DisplayName("isUndoAvailable should delegate to service")
         void isUndoAvailable() throws Exception {
-            when(conversationService.isUndoAvailable(production, "agent1", "conv1"))
-                    .thenReturn(true);
+            when(conversationService.isUndoAvailable(production, "agent1", "conv1")).thenReturn(true);
 
             assertTrue(RestAgentEngine.isUndoAvailable(production, "agent1", "conv1"));
         }
@@ -229,8 +212,7 @@ class RestAgentEngineTest {
         @Test
         @DisplayName("isRedoAvailable should delegate to service")
         void isRedoAvailable() throws Exception {
-            when(conversationService.isRedoAvailable(production, "agent1", "conv1"))
-                    .thenReturn(false);
+            when(conversationService.isRedoAvailable(production, "agent1", "conv1")).thenReturn(false);
 
             assertFalse(RestAgentEngine.isRedoAvailable(production, "agent1", "conv1"));
         }
@@ -245,11 +227,9 @@ class RestAgentEngineTest {
         @Test
         @DisplayName("should delegate to conversationService")
         void getConversationState() {
-            when(conversationService.getConversationState(production, "conv1"))
-                    .thenReturn(ConversationState.READY);
+            when(conversationService.getConversationState(production, "conv1")).thenReturn(ConversationState.READY);
 
-            assertEquals(ConversationState.READY,
-                    RestAgentEngine.getConversationState(production, "conv1"));
+            assertEquals(ConversationState.READY, RestAgentEngine.getConversationState(production, "conv1"));
         }
     }
 }

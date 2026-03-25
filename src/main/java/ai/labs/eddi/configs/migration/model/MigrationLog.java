@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.migration.model;
 
-
 import java.util.Date;
 
 public class MigrationLog {

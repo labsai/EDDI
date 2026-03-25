@@ -30,8 +30,10 @@ public class TextOutputItem extends OutputItem {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         TextOutputItem that = (TextOutputItem) o;
         return Objects.equals(text, that.text) && delay == that.delay;
     }

@@ -17,8 +17,8 @@ public interface ILifecycleManager {
      * Execute the lifecycle workflow with an optional event sink for SSE streaming.
      * The sink receives task_start/task_complete events for each lifecycle task.
      */
-    default void executeLifecycle(final IConversationMemory conversationMemory, List<String> lifecycleTaskTypes,
-            ConversationEventSink eventSink) throws LifecycleException, ConversationStopException {
+    default void executeLifecycle(final IConversationMemory conversationMemory, List<String> lifecycleTaskTypes, ConversationEventSink eventSink)
+            throws LifecycleException, ConversationStopException {
         // Default: set sink on memory and delegate to standard method
         if (eventSink != null) {
             conversationMemory.setEventSink(eventSink);

@@ -16,7 +16,6 @@ import java.util.regex.Pattern;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
-
 /**
  * @author ginccc
  */
@@ -65,8 +64,8 @@ public class InputParser implements IInputParser {
     }
 
     @Override
-    public List<RawSolution> parse(final String sentence, String userLanguage,
-                                   final List<IDictionary> temporaryDictionaries) throws InterruptedException {
+    public List<RawSolution> parse(final String sentence, String userLanguage, final List<IDictionary> temporaryDictionaries)
+            throws InterruptedException {
 
         userLanguage = getLanguageOrDefault(userLanguage);
 
@@ -99,10 +98,7 @@ public class InputParser implements IInputParser {
         return sentence;
     }
 
-    private void iterateDictionaries(InputHolder holder,
-                                     String currentInputPart,
-                                     String userLanguage,
-                                     List<IDictionary> dictionaries)
+    private void iterateDictionaries(InputHolder holder, String currentInputPart, String userLanguage, List<IDictionary> dictionaries)
             throws InterruptedException {
         for (IDictionary dictionary : dictionaries) {
             throwExceptionIfInterrupted("dictionaries");
@@ -111,30 +107,26 @@ public class InputParser implements IInputParser {
                 continue;
             }
 
-            //lookup input part in dictionary
+            // lookup input part in dictionary
             List<IDictionary.IFoundWord> dictionaryEntries = dictionary.lookupTerm(currentInputPart);
             if (dictionaryEntries.size() > 0) {
-                //add dictionary entries to final result list
+                // add dictionary entries to final result list
                 addDictionaryEntriesTo(holder, currentInputPart, dictionaryEntries);
             }
         }
     }
 
-    private void iterateCorrections(InputHolder holder,
-                                    String currentInputPart,
-                                    String userLanguage,
-                                    List<IDictionary> temporaryDictionaries)
+    private void iterateCorrections(InputHolder holder, String currentInputPart, String userLanguage, List<IDictionary> temporaryDictionaries)
             throws InterruptedException {
 
         for (ICorrection correction : corrections) {
             throwExceptionIfInterrupted("corrections");
             if (!correction.lookupIfKnown() && holder.getMatchingResultSize(holder.index) != 0) {
-                //skipped corrections because input part is already known.
+                // skipped corrections because input part is already known.
                 continue;
             }
 
-            var correctedWords =
-                    correction.correctWord(currentInputPart, userLanguage, temporaryDictionaries);
+            var correctedWords = correction.correctWord(currentInputPart, userLanguage, temporaryDictionaries);
             if (correctedWords.size() > 0) {
                 addDictionaryEntriesTo(holder, currentInputPart, correctedWords);
             }
@@ -153,8 +145,7 @@ public class InputParser implements IInputParser {
         }
     }
 
-    private void addDictionaryEntriesTo(InputHolder holder, String matchedInputValue,
-                                        List<IDictionary.IFoundWord> foundWords) {
+    private void addDictionaryEntriesTo(InputHolder holder, String matchedInputValue, List<IDictionary.IFoundWord> foundWords) {
         for (IDictionary.IFoundWord foundWord : foundWords) {
             var matchingResult = new MatchingResult();
             matchingResult.addResult(foundWord);
@@ -162,8 +153,7 @@ public class InputParser implements IInputParser {
         }
     }
 
-    private List<RawSolution> lookupPhrases(InputHolder holder,
-                                            Map<IDictionary.IWord, List<IDictionary.IPhrase>> tmpPhrasesMap)
+    private List<RawSolution> lookupPhrases(InputHolder holder, Map<IDictionary.IWord, List<IDictionary.IPhrase>> tmpPhrasesMap)
             throws InterruptedException {
 
         List<RawSolution> possibleSolutions = new LinkedList<>();
@@ -173,13 +163,13 @@ public class InputParser implements IInputParser {
             throwExceptionIfInterrupted("phrases");
             Suggestion suggestion = suggestionIterator.next();
             List<IDictionary.IFoundWord> foundWords = suggestion.build();
-            List<IDictionary.IPhrase> phrasesContainingFoundWords =
-                    getPhrasesContainingFoundWords(foundWords, Arrays.asList(phrasesMap, tmpPhrasesMap));
+            List<IDictionary.IPhrase> phrasesContainingFoundWords = getPhrasesContainingFoundWords(foundWords,
+                    Arrays.asList(phrasesMap, tmpPhrasesMap));
 
             RawSolution rawSolution = null;
             boolean matchingCompleted = false;
 
-            //first try: look for full matches (one/more phrases)
+            // first try: look for full matches (one/more phrases)
             for (IDictionary.IPhrase phrase : phrasesContainingFoundWords) {
                 if (isInterrupted()) {
                     break;
@@ -198,14 +188,14 @@ public class InputParser implements IInputParser {
                 }
             }
 
-            //if we could match ALL the foundWords to phrase(s) we return
+            // if we could match ALL the foundWords to phrase(s) we return
             if (rawSolution != null && matchingCompleted) {
                 rawSolution.setDictionaryEntries(foundWords);
                 possibleSolutions.add(rawSolution);
                 return possibleSolutions;
             }
 
-            //second try: look for incomplete matches
+            // second try: look for incomplete matches
             for (IDictionary.IPhrase phrase : phrasesContainingFoundWords) {
                 if (isInterrupted()) {
                     break;
@@ -238,13 +228,15 @@ public class InputParser implements IInputParser {
                     return possibleSolutions;
                 }
             } else if (!foundWords.isEmpty()) {
-                // if we end up here, we know that in this iteration it is not a phrase (fully or partly matching)
+                // if we end up here, we know that in this iteration it is not a phrase (fully
+                // or partly matching)
                 if (foundWords.stream().anyMatch(word -> word.getFoundWord().isPartOfPhrase())) {
                     rawSolution = new RawSolution(RawSolution.Match.NOTHING);
                     rawSolution.setDictionaryEntries(foundWords);
                     addIfAbsent(possibleSolutions, rawSolution);
                 } else {
-                    //found no words which are part of a known phrase, but found words in the defined dictionaries,
+                    // found no words which are part of a known phrase, but found words in the
+                    // defined dictionaries,
                     // so we treat it more prominently
                     rawSolution = new RawSolution(RawSolution.Match.PARTLY);
                     rawSolution.setDictionaryEntries(foundWords);
@@ -293,17 +285,19 @@ public class InputParser implements IInputParser {
     }
 
     /**
-     * @param foundWords all inputEntries
-     * @param phrase     to be checked for a match with foundWords
-     * @return the list of IDictionaryEntry which does NOT FULLY match the phrase, will be returned for further lookup.
-     * In case a phrase has been found, it will be substituted with the range of matching foundWords
+     * @param foundWords
+     *            all inputEntries
+     * @param phrase
+     *            to be checked for a match with foundWords
+     * @return the list of IDictionaryEntry which does NOT FULLY match the phrase,
+     *         will be returned for further lookup. In case a phrase has been found,
+     *         it will be substituted with the range of matching foundWords
      */
-    private List<IDictionary.IFoundWord> lookForMatch(List<IDictionary.IFoundWord> foundWords,
-                                                      IDictionary.IPhrase phrase) {
+    private List<IDictionary.IFoundWord> lookForMatch(List<IDictionary.IFoundWord> foundWords, IDictionary.IPhrase phrase) {
         var words = convert(foundWords);
         int startOfMatch = Collections.indexOfSubList(words, phrase.getWords());
         if (startOfMatch > -1) {
-            //does match
+            // does match
             List<IDictionary.IFoundWord> ret = new LinkedList<>();
             if (startOfMatch > 0) {
                 ret.addAll(foundWords.subList(0, startOfMatch));
@@ -322,20 +316,18 @@ public class InputParser implements IInputParser {
     }
 
     private List<IDictionary.IWord> convert(List<IDictionary.IFoundWord> foundWords) {
-        return foundWords.stream().
-                map(IDictionary.IFoundWord::getFoundWord).toList();
+        return foundWords.stream().map(IDictionary.IFoundWord::getFoundWord).toList();
     }
 
     private IDictionary.IFoundWord createPhrase(IDictionary.IPhrase phrase, double matchingAccuracy) {
         return new FoundPhrase(phrase, false, matchingAccuracy);
     }
 
-    private List<IDictionary.IFoundWord> lookForPartlyMatch(List<IDictionary.IFoundWord> dictionaryEntries,
-                                                            IDictionary.IPhrase phrase) {
+    private List<IDictionary.IFoundWord> lookForPartlyMatch(List<IDictionary.IFoundWord> dictionaryEntries, IDictionary.IPhrase phrase) {
         List<IDictionary.IWord> phraseWords = phrase.getWords();
         int startOfMatch = Collections.indexOfSubList(phraseWords, dictionaryEntries);
         if (startOfMatch > -1) {
-            //does match
+            // does match
             List<IDictionary.IFoundWord> ret = new LinkedList<>();
             if (startOfMatch > 0) {
                 ret.addAll(dictionaryEntries.subList(0, startOfMatch - 1));
@@ -355,13 +347,10 @@ public class InputParser implements IInputParser {
 
     private Map<IDictionary.IWord, List<IDictionary.IPhrase>> preparePhrases(List<IDictionary> dictionaries) {
         Map<IDictionary.IWord, List<IDictionary.IPhrase>> phrasesMap = new HashMap<>();
-        dictionaries.stream().map(IDictionary::getPhrases).flatMap(Collection::stream).
-                forEach(phrase -> phrase.getWords().stream().
-                        map(wordOfPhrase -> phrasesMap.computeIfAbsent(wordOfPhrase, k -> new LinkedList<>())).
-                        forEach(phrases -> phrases.add(phrase)));
+        dictionaries.stream().map(IDictionary::getPhrases).flatMap(Collection::stream).forEach(phrase -> phrase.getWords().stream()
+                .map(wordOfPhrase -> phrasesMap.computeIfAbsent(wordOfPhrase, k -> new LinkedList<>())).forEach(phrases -> phrases.add(phrase)));
 
-        phrasesMap.keySet().stream().map(phrasesMap::get).
-                filter(phrases -> phrases.size() > 1).forEach(this::orderPhrasesByLength);
+        phrasesMap.keySet().stream().map(phrasesMap::get).filter(phrases -> phrases.size() > 1).forEach(this::orderPhrasesByLength);
 
         return phrasesMap;
     }
@@ -378,16 +367,13 @@ public class InputParser implements IInputParser {
         }));
     }
 
-    private List<IDictionary.IPhrase> getPhrasesContainingFoundWords(
-            List<IDictionary.IFoundWord> foundWords,
+    private List<IDictionary.IPhrase> getPhrasesContainingFoundWords(List<IDictionary.IFoundWord> foundWords,
             List<Map<IDictionary.IWord, List<IDictionary.IPhrase>>> phrasesMaps) {
 
         List<IDictionary.IPhrase> ret = new LinkedList<>();
-        foundWords.stream().filter(foundWord -> !foundWord.isPhrase()).
-                forEach(foundWord -> phrasesMaps.stream().
-                        map(phrasesMap -> phrasesMap.get(foundWord.getFoundWord())).
-                        filter(Objects::nonNull).flatMap(Collection::stream).
-                        filter(phrase -> !ret.contains(phrase)).forEach(ret::add));
+        foundWords.stream().filter(foundWord -> !foundWord.isPhrase())
+                .forEach(foundWord -> phrasesMaps.stream().map(phrasesMap -> phrasesMap.get(foundWord.getFoundWord())).filter(Objects::nonNull)
+                        .flatMap(Collection::stream).filter(phrase -> !ret.contains(phrase)).forEach(ret::add));
 
         return ret;
     }

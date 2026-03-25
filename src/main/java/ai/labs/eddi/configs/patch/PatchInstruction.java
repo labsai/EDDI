@@ -1,14 +1,12 @@
 package ai.labs.eddi.configs.patch;
 
-
 /**
  * @author ginccc
  */
 
 public class PatchInstruction<T> {
     public enum PatchOperation {
-        SET,
-        DELETE
+        SET, DELETE
     }
 
     private PatchOperation operation;

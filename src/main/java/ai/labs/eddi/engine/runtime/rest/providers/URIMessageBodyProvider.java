@@ -14,7 +14,6 @@ import java.lang.annotation.Annotation;
 import java.lang.reflect.Type;
 import java.net.URI;
 
-
 @Provider
 public class URIMessageBodyProvider implements MessageBodyReader<URI>, MessageBodyWriter<URI> {
     @Override
@@ -23,7 +22,8 @@ public class URIMessageBodyProvider implements MessageBodyReader<URI>, MessageBo
     }
 
     @Override
-    public URI readFrom(Class<URI> type, Type genericType, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, String> httpHeaders, InputStream entityStream) throws IOException, WebApplicationException {
+    public URI readFrom(Class<URI> type, Type genericType, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, String> httpHeaders,
+            InputStream entityStream) throws IOException, WebApplicationException {
         String stringUri = new String(entityStream.readAllBytes());
         return URI.create(stringUri.trim());
     }
@@ -34,7 +34,8 @@ public class URIMessageBodyProvider implements MessageBodyReader<URI>, MessageBo
     }
 
     @Override
-    public void writeTo(URI uri, Class<?> type, Type genericType, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, Object> httpHeaders, OutputStream entityStream) throws IOException, WebApplicationException {
+    public void writeTo(URI uri, Class<?> type, Type genericType, Annotation[] annotations, MediaType mediaType,
+            MultivaluedMap<String, Object> httpHeaders, OutputStream entityStream) throws IOException, WebApplicationException {
         entityStream.write(uri.toString().getBytes());
     }
 }

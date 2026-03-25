@@ -22,13 +22,9 @@ public interface IAgent {
 
     void addWorkflow(IExecutableWorkflow executableWorkflow) throws IllegalAccessException;
 
-    IConversation startConversation(String userId, Map<String, Context> context,
-                                    IPropertiesHandler propertiesHandler,
-                                    IConversationOutputRenderer outputProvider)
-            throws InstantiationException, IllegalAccessException, LifecycleException;
+    IConversation startConversation(String userId, Map<String, Context> context, IPropertiesHandler propertiesHandler,
+            IConversationOutputRenderer outputProvider) throws InstantiationException, IllegalAccessException, LifecycleException;
 
-    IConversation continueConversation(IConversationMemory conversationMemory,
-                                       IPropertiesHandler propertiesHandler,
-                                       IConversationOutputRenderer outputProvider)
-            throws InstantiationException, IllegalAccessException;
+    IConversation continueConversation(IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
+            IConversationOutputRenderer outputProvider) throws InstantiationException, IllegalAccessException;
 }

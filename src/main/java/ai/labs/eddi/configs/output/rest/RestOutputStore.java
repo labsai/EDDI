@@ -10,7 +10,6 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -29,12 +28,8 @@ public class RestOutputStore implements IRestOutputStore {
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<OutputConfigurationSet> restVersionInfo;
 
-
-
     @Inject
-    public RestOutputStore(IOutputStore outputStore,
-            IDocumentDescriptorStore documentDescriptorStore,
-            IJsonSchemaCreator jsonSchemaCreator) {
+    public RestOutputStore(IOutputStore outputStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, outputStore, documentDescriptorStore);
         this.outputStore = outputStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
@@ -55,8 +50,7 @@ public class RestOutputStore implements IRestOutputStore {
     }
 
     @Override
-    public OutputConfigurationSet readOutputSet(String id, Integer version,
-            String filter, String order, Integer index, Integer limit) {
+    public OutputConfigurationSet readOutputSet(String id, Integer version, String filter, String order, Integer index, Integer limit) {
         try {
             return outputStore.read(id, version, filter, order, index, limit);
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
@@ -89,12 +83,10 @@ public class RestOutputStore implements IRestOutputStore {
     }
 
     @Override
-    public Response patchOutputSet(String id, Integer version,
-            List<PatchInstruction<OutputConfigurationSet>> patchInstructions) {
+    public Response patchOutputSet(String id, Integer version, List<PatchInstruction<OutputConfigurationSet>> patchInstructions) {
         try {
             OutputConfigurationSet currentOutputConfigurationSet = outputStore.read(id, version);
-            OutputConfigurationSet patchedOutputConfigurationSet = patchDocument(currentOutputConfigurationSet,
-                    patchInstructions);
+            OutputConfigurationSet patchedOutputConfigurationSet = patchDocument(currentOutputConfigurationSet, patchInstructions);
 
             return updateOutputSet(id, version, patchedOutputConfigurationSet);
 
@@ -104,8 +96,7 @@ public class RestOutputStore implements IRestOutputStore {
     }
 
     private OutputConfigurationSet patchDocument(OutputConfigurationSet currentOutputConfigurationSet,
-            List<PatchInstruction<OutputConfigurationSet>> patchInstructions)
-            throws IResourceStore.ResourceStoreException {
+            List<PatchInstruction<OutputConfigurationSet>> patchInstructions) throws IResourceStore.ResourceStoreException {
 
         for (var patchInstruction : patchInstructions) {
             var outputConfigurationSetPatch = patchInstruction.getDocument();
@@ -114,10 +105,8 @@ public class RestOutputStore implements IRestOutputStore {
                     currentOutputConfigurationSet.getOutputSet().removeAll(outputConfigurationSetPatch.getOutputSet());
                     currentOutputConfigurationSet.getOutputSet().addAll(outputConfigurationSetPatch.getOutputSet());
                 }
-                case DELETE ->
-                    currentOutputConfigurationSet.getOutputSet().removeAll(outputConfigurationSetPatch.getOutputSet());
-                default ->
-                    throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");
+                case DELETE -> currentOutputConfigurationSet.getOutputSet().removeAll(outputConfigurationSetPatch.getOutputSet());
+                default -> throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");
             }
         }
 

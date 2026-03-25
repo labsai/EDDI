@@ -34,8 +34,8 @@ public class DeploymentListener implements IDeploymentListener {
             String key = createKey(event.agentId(), event.version());
             CompletableFuture<Void> future = deploymentFutures.remove(key);
             if (future != null) {
-                future.completeExceptionally(new IllegalStateException(
-                        "Deployment failed for agentId: " + event.agentId() + ", Version: " + event.version()));
+                future.completeExceptionally(
+                        new IllegalStateException("Deployment failed for agentId: " + event.agentId() + ", Version: " + event.version()));
             }
         }
     }

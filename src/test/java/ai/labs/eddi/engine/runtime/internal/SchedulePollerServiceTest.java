@@ -19,8 +19,8 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Unit tests for {@link SchedulePollerService}.
- * Tests the poll → claim → fire → complete/fail/dead-letter flow.
+ * Unit tests for {@link SchedulePollerService}. Tests the poll → claim → fire →
+ * complete/fail/dead-letter flow.
  */
 class SchedulePollerServiceTest {
 
@@ -33,11 +33,7 @@ class SchedulePollerServiceTest {
         scheduleStore = mock(IScheduleStore.class);
         fireExecutor = mock(ScheduleFireExecutor.class);
 
-        poller = new SchedulePollerService(
-                scheduleStore,
-                fireExecutor,
-                new SimpleMeterRegistry(),
-                true, // enabled
+        poller = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true, // enabled
                 Duration.ofMinutes(5), // leaseTimeout
                 5, // maxRetries
                 15, // backoffBaseSeconds
@@ -62,18 +58,16 @@ class SchedulePollerServiceTest {
 
     @Test
     void init_disabledScheduler() {
-        var disabled = new SchedulePollerService(
-                scheduleStore, fireExecutor, new SimpleMeterRegistry(),
-                false, Duration.ofMinutes(5), 5, 15, 4, Optional.empty(), "UTC");
+        var disabled = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), false, Duration.ofMinutes(5), 5, 15, 4,
+                Optional.empty(), "UTC");
         disabled.init();
         assertFalse(disabled.isEnabled());
     }
 
     @Test
     void init_autoDetectsHostnameIfNotConfigured() {
-        var autoId = new SchedulePollerService(
-                scheduleStore, fireExecutor, new SimpleMeterRegistry(),
-                true, Duration.ofMinutes(5), 5, 15, 4, Optional.empty(), "UTC");
+        var autoId = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true, Duration.ofMinutes(5), 5, 15, 4,
+                Optional.empty(), "UTC");
         autoId.init();
         assertNotNull(autoId.getInstanceId());
         assertFalse(autoId.getInstanceId().isBlank());
@@ -83,9 +77,8 @@ class SchedulePollerServiceTest {
 
     @Test
     void poll_skipsWhenDisabled() throws Exception {
-        var disabled = new SchedulePollerService(
-                scheduleStore, fireExecutor, new SimpleMeterRegistry(),
-                false, Duration.ofMinutes(5), 5, 15, 4, Optional.empty(), "UTC");
+        var disabled = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), false, Duration.ofMinutes(5), 5, 15, 4,
+                Optional.empty(), "UTC");
         disabled.init();
 
         disabled.pollDueSchedules();
@@ -109,8 +102,7 @@ class SchedulePollerServiceTest {
         var schedule = makeCronSchedule("sched-1", "0 9 * * *", "Hello");
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
         when(scheduleStore.tryClaim(eq("sched-1"), eq("test-instance"), any())).thenReturn(true);
-        when(fireExecutor.fire(eq(schedule), eq("test-instance"), eq(1)))
-                .thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
+        when(fireExecutor.fire(eq(schedule), eq("test-instance"), eq(1))).thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
         poller.pollDueSchedules();
 
@@ -137,8 +129,7 @@ class SchedulePollerServiceTest {
         schedule.setFailCount(0);
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
         when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
-        when(fireExecutor.fire(any(), any(), anyInt()))
-                .thenReturn(makeFireLog("sched-1", FireStatus.FAILED.name()));
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-1", FireStatus.FAILED.name()));
 
         poller.pollDueSchedules();
 
@@ -153,8 +144,7 @@ class SchedulePollerServiceTest {
         schedule.setFailCount(4); // 4 previous failures, this is attempt 5 = maxRetries
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
         when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
-        when(fireExecutor.fire(any(), any(), anyInt()))
-                .thenReturn(makeFireLog("sched-1", FireStatus.FAILED.name()));
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-1", FireStatus.FAILED.name()));
 
         poller.pollDueSchedules();
 
@@ -169,8 +159,7 @@ class SchedulePollerServiceTest {
         var schedule = makeHeartbeatSchedule("hb-1", 300L, "check");
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
         when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
-        when(fireExecutor.fire(any(), any(), anyInt()))
-                .thenReturn(makeFireLog("hb-1", FireStatus.COMPLETED.name()));
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("hb-1", FireStatus.COMPLETED.name()));
 
         poller.pollDueSchedules();
 
@@ -188,8 +177,7 @@ class SchedulePollerServiceTest {
         schedule.setOneTimeAt(Instant.now().minusSeconds(60).toString());
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
         when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
-        when(fireExecutor.fire(any(), any(), anyInt()))
-                .thenReturn(makeFireLog("one-1", FireStatus.COMPLETED.name()));
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("one-1", FireStatus.COMPLETED.name()));
 
         poller.pollDueSchedules();
 
@@ -230,10 +218,7 @@ class SchedulePollerServiceTest {
     }
 
     private static ScheduleFireLog makeFireLog(String scheduleId, String status) {
-        return new ScheduleFireLog(
-                "log-1", scheduleId, "fire-1",
-                Instant.now(), Instant.now(), Instant.now(),
-                status, "test-instance", "conv-1",
+        return new ScheduleFireLog("log-1", scheduleId, "fire-1", Instant.now(), Instant.now(), Instant.now(), status, "test-instance", "conv-1",
                 null, 1, 0.0);
     }
 }

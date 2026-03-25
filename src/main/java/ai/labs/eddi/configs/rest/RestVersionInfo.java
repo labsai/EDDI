@@ -21,8 +21,7 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
     private final IResourceStore<T> resourceStore;
     protected final IDocumentDescriptorStore documentDescriptorStore;
 
-    public RestVersionInfo(String resourceURI, IResourceStore<T> resourceStore,
-            IDocumentDescriptorStore documentDescriptorStore) {
+    public RestVersionInfo(String resourceURI, IResourceStore<T> resourceStore, IDocumentDescriptorStore documentDescriptorStore) {
         this.resourceURI = resourceURI;
         this.resourceStore = resourceStore;
         this.documentDescriptorStore = documentDescriptorStore;
@@ -41,8 +40,7 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
 
         try {
             IResourceStore.IResourceId resourceId = resourceStore.create(document);
-            URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam,
-                    resourceId.getVersion());
+            URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
             return Response.created(createdUri).location(createdUri).build();
         } catch (IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
@@ -69,8 +67,7 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
             Integer newVersion = resourceStore.update(id, version, document);
             URI newResourceUri = RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
             return Response.ok().location(newResourceUri).build();
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException
-                | IResourceStore.ResourceNotFoundException e) {
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException | IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
     }
@@ -89,8 +86,7 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
                 resourceStore.delete(id, version);
             }
             return Response.ok().build();
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException
-                | IResourceStore.ResourceNotFoundException e) {
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException | IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
     }

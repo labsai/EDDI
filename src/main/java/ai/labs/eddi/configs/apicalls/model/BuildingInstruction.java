@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.apicalls.model;
 
-
 public class BuildingInstruction {
     private String pathToTargetArray;
     private String iterationObjectName = "obj";

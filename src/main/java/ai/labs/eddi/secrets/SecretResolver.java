@@ -16,14 +16,16 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Resolves {@code ${eddivault:tenantId/agentId/keyName}} references in parameter maps.
+ * Resolves {@code ${eddivault:tenantId/agentId/keyName}} references in
+ * parameter maps.
  * <p>
- * This is the central integration point between the vault and the execution workflow.
- * It is called <b>after</b> Thymeleaf template processing and <b>before</b> the final
- * API call (late-binding resolution).
+ * This is the central integration point between the vault and the execution
+ * workflow. It is called <b>after</b> Thymeleaf template processing and
+ * <b>before</b> the final API call (late-binding resolution).
  * <p>
- * Includes a Caffeine cache with configurable TTL to avoid repeated decryption/vault calls.
- * Cache is invalidated on secret rotation via {@link #invalidateCache(SecretReference)}.
+ * Includes a Caffeine cache with configurable TTL to avoid repeated
+ * decryption/vault calls. Cache is invalidated on secret rotation via
+ * {@link #invalidateCache(SecretReference)}.
  */
 @ApplicationScoped
 public class SecretResolver {
@@ -38,8 +40,7 @@ public class SecretResolver {
     private Cache<String, String> cache;
 
     @Inject
-    public SecretResolver(
-            ISecretProvider secretProvider,
+    public SecretResolver(ISecretProvider secretProvider,
             @ConfigProperty(name = "eddi.vault.cache-ttl-minutes", defaultValue = "5") int cacheTtlMinutes,
             @ConfigProperty(name = "eddi.vault.cache-max-size", defaultValue = "1000") int cacheMaxSize) {
         this.secretProvider = secretProvider;
@@ -49,27 +50,24 @@ public class SecretResolver {
 
     @PostConstruct
     void init() {
-        this.cache = Caffeine.newBuilder()
-                .expireAfterWrite(Duration.ofMinutes(cacheTtlMinutes))
-                .maximumSize(cacheMaxSize)
-                .build();
+        this.cache = Caffeine.newBuilder().expireAfterWrite(Duration.ofMinutes(cacheTtlMinutes)).maximumSize(cacheMaxSize).build();
 
         if (secretProvider.isAvailable()) {
-            LOGGER.infov("SecretResolver initialized (cache TTL={0}min, maxSize={1})",
-                    cacheTtlMinutes, cacheMaxSize);
+            LOGGER.infov("SecretResolver initialized (cache TTL={0}min, maxSize={1})", cacheTtlMinutes, cacheMaxSize);
         } else {
             LOGGER.info("SecretResolver initialized in passthrough mode (vault not configured)");
         }
     }
 
     /**
-     * Resolve all vault references in a parameter map.
-     * Values not containing vault references pass through unchanged.
+     * Resolve all vault references in a parameter map. Values not containing vault
+     * references pass through unchanged.
      * <p>
-     * If the vault is not available, all values pass through unchanged
-     * (backward compatibility with plaintext configs).
+     * If the vault is not available, all values pass through unchanged (backward
+     * compatibility with plaintext configs).
      *
-     * @param params the parameter map (may contain ${eddivault:...} values)
+     * @param params
+     *            the parameter map (may contain ${eddivault:...} values)
      * @return a new map with vault references replaced by plaintext values
      */
     public Map<String, String> resolveSecrets(Map<String, String> params) {
@@ -87,12 +85,13 @@ public class SecretResolver {
     }
 
     /**
-     * Resolve vault references in a single string value.
-     * Supports multiple vault references within the same string.
+     * Resolve vault references in a single string value. Supports multiple vault
+     * references within the same string.
      * <p>
      * If the vault is not available, the value passes through unchanged.
      *
-     * @param value the value that may contain ${eddivault:...} references
+     * @param value
+     *            the value that may contain ${eddivault:...} references
      * @return the value with vault references replaced by plaintext
      */
     public String resolveValue(String value) {

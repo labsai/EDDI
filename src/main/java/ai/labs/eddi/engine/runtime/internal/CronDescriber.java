@@ -8,10 +8,10 @@ import java.util.Set;
  * <p>
  * Examples:
  * <ul>
- *   <li>{@code * * * * *} -&gt; "Every minute"</li>
- *   <li>{@code 0 9 * * MON-FRI} -&gt; "At 09:00 on every weekday"</li>
- *   <li>{@code 0 0 1 * *} -&gt; "At midnight on the 1st of every month"</li>
- *   <li>{@code *}{@code /15 * * * *} -&gt; "Every 15 minutes"</li>
+ * <li>{@code * * * * *} -&gt; "Every minute"</li>
+ * <li>{@code 0 9 * * MON-FRI} -&gt; "At 09:00 on every weekday"</li>
+ * <li>{@code 0 0 1 * *} -&gt; "At midnight on the 1st of every month"</li>
+ * <li>{@code *}{@code /15 * * * *} -&gt; "Every 15 minutes"</li>
  * </ul>
  *
  * @author ginccc
@@ -19,14 +19,10 @@ import java.util.Set;
  */
 public final class CronDescriber {
 
-    private static final String[] MONTH_LABELS = {
-            "", "January", "February", "March", "April", "May", "June",
-            "July", "August", "September", "October", "November", "December"
-    };
+    private static final String[] MONTH_LABELS = {"", "January", "February", "March", "April", "May", "June", "July", "August", "September",
+            "October", "November", "December"};
 
-    private static final String[] DOW_LABELS = {
-            "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
-    };
+    private static final String[] DOW_LABELS = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 
     private CronDescriber() {
     }
@@ -34,7 +30,8 @@ public final class CronDescriber {
     /**
      * Convert a 5-field cron expression to a human-readable string.
      *
-     * @param cronExpression 5-field cron (min hour dom month dow)
+     * @param cronExpression
+     *            5-field cron (min hour dom month dow)
      * @return human-readable description
      */
     public static String describe(String cronExpression) {
@@ -93,7 +90,8 @@ public final class CronDescriber {
         // Month
         if (!month.equals("*")) {
             Set<Integer> monthValues = CronParser.parseField(month, 1, 12);
-            if (dom.equals("*")) sb.append(" in");
+            if (dom.equals("*"))
+                sb.append(" in");
             sb.append(" ").append(formatSet(monthValues, MONTH_LABELS));
         } else if (!dom.equals("*")) {
             sb.append(" every month");
@@ -127,7 +125,8 @@ public final class CronDescriber {
     private static String ordinal(String num) {
         try {
             int n = Integer.parseInt(num);
-            if (n >= 11 && n <= 13) return n + "th";
+            if (n >= 11 && n <= 13)
+                return n + "th";
             return switch (n % 10) {
                 case 1 -> n + "st";
                 case 2 -> n + "nd";
@@ -140,9 +139,7 @@ public final class CronDescriber {
     }
 
     private static boolean isWeekdays(Set<Integer> dows) {
-        return dows.size() == 5
-                && dows.contains(1) && dows.contains(2) && dows.contains(3)
-                && dows.contains(4) && dows.contains(5);
+        return dows.size() == 5 && dows.contains(1) && dows.contains(2) && dows.contains(3) && dows.contains(4) && dows.contains(5);
     }
 
     private static boolean isWeekends(Set<Integer> dows) {
@@ -154,9 +151,7 @@ public final class CronDescriber {
             int v = values.iterator().next();
             return v < labels.length ? labels[v] : String.valueOf(v);
         }
-        return values.stream()
-                .map(v -> v < labels.length ? labels[v] : String.valueOf(v))
-                .collect(java.util.stream.Collectors.joining(", "));
+        return values.stream().map(v -> v < labels.length ? labels[v] : String.valueOf(v)).collect(java.util.stream.Collectors.joining(", "));
     }
 
     private static String substituteNames(String field, Map<String, String> names) {

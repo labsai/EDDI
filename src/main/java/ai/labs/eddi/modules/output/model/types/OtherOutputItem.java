@@ -74,8 +74,10 @@ public class OtherOutputItem extends OutputItem implements Map<String, String> {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         OtherOutputItem that = (OtherOutputItem) o;
         return Objects.equals(internalMap, that.internalMap);
     }

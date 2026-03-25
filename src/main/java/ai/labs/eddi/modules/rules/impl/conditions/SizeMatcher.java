@@ -73,8 +73,7 @@ public class SizeMatcher implements IRuleCondition {
     }
 
     @Override
-    public ExecutionState execute(final IConversationMemory memory, final List<Rule> trace)
-            throws Rule.RuntimeException {
+    public ExecutionState execute(final IConversationMemory memory, final List<Rule> trace) throws Rule.RuntimeException {
         if (min == -1 && max == -1 && equal == -1) {
             return ExecutionState.NOT_EXECUTED;
         }

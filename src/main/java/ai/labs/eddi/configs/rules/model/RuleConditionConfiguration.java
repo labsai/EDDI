@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.rules.model;
 
-
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.util.List;

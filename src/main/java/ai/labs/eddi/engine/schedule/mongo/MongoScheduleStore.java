@@ -34,8 +34,8 @@ import static com.mongodb.client.model.Updates.*;
  * <p>
  * Annotated {@code @DefaultBean} so PostgreSQL can override.
  * <p>
- * All {@link Instant} values are stored as epoch-millisecond {@code Long}
- * for consistent BSON comparison in filter queries.
+ * All {@link Instant} values are stored as epoch-millisecond {@code Long} for
+ * consistent BSON comparison in filter queries.
  *
  * @author ginccc
  * @since 6.0.0
@@ -72,9 +72,7 @@ public class MongoScheduleStore implements IScheduleStore {
     private final IJsonSerialization jsonSerialization;
 
     @Inject
-    public MongoScheduleStore(MongoDatabase database,
-            IJsonSerialization jsonSerialization,
-            IDocumentBuilder documentBuilder) {
+    public MongoScheduleStore(MongoDatabase database, IJsonSerialization jsonSerialization, IDocumentBuilder documentBuilder) {
         this.jsonSerialization = jsonSerialization;
         this.documentBuilder = documentBuilder;
         this.scheduleCollection = database.getCollection(COLLECTION_SCHEDULES);
@@ -82,29 +80,16 @@ public class MongoScheduleStore implements IScheduleStore {
 
         // Indexes for efficient polling
         scheduleCollection.createIndex(
-                Indexes.compoundIndex(
-                        Indexes.ascending(ENABLED),
-                        Indexes.ascending(NEXT_FIRE),
-                        Indexes.ascending(FIRE_STATUS)),
+                Indexes.compoundIndex(Indexes.ascending(ENABLED), Indexes.ascending(NEXT_FIRE), Indexes.ascending(FIRE_STATUS)),
                 new IndexOptions().name("idx_schedules_due"));
-        scheduleCollection.createIndex(
-                Indexes.ascending(AGENT_ID),
-                new IndexOptions().name("idx_schedules_agentId"));
-        scheduleCollection.createIndex(
-                Indexes.ascending(TENANT_ID),
-                new IndexOptions().name("idx_schedules_tenantId"));
+        scheduleCollection.createIndex(Indexes.ascending(AGENT_ID), new IndexOptions().name("idx_schedules_agentId"));
+        scheduleCollection.createIndex(Indexes.ascending(TENANT_ID), new IndexOptions().name("idx_schedules_tenantId"));
 
         // Fire log indexes
-        fireLogCollection.createIndex(
-                Indexes.compoundIndex(
-                        Indexes.ascending(SCHEDULE_ID),
-                        Indexes.descending(STARTED_AT)),
+        fireLogCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(SCHEDULE_ID), Indexes.descending(STARTED_AT)),
                 new IndexOptions().name("idx_fire_logs_schedule"));
         // Fix #14: index on status for readFailedFireLogs()
-        fireLogCollection.createIndex(
-                Indexes.compoundIndex(
-                        Indexes.ascending(STATUS),
-                        Indexes.descending(STARTED_AT)),
+        fireLogCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(STATUS), Indexes.descending(STARTED_AT)),
                 new IndexOptions().name("idx_fire_logs_status"));
     }
 
@@ -125,8 +110,8 @@ public class MongoScheduleStore implements IScheduleStore {
             // Fix #6: Store Instants as epoch-millis for consistent BSON comparison
             storeInstantsAsLong(doc);
             scheduleCollection.insertOne(doc);
-            LOGGER.infof("Created schedule '%s' (id=%s, type=%s) for Agent %s",
-                    schedule.getName(), id, schedule.getTriggerType(), schedule.getAgentId());
+            LOGGER.infof("Created schedule '%s' (id=%s, type=%s) for Agent %s", schedule.getName(), id, schedule.getTriggerType(),
+                    schedule.getAgentId());
             return id;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to create schedule", e);
@@ -139,8 +124,7 @@ public class MongoScheduleStore implements IScheduleStore {
         try {
             Document doc = scheduleCollection.find(eq(ID, scheduleId)).first();
             if (doc == null) {
-                throw new IResourceStore.ResourceNotFoundException(
-                        "Schedule with id=" + scheduleId + " not found");
+                throw new IResourceStore.ResourceNotFoundException("Schedule with id=" + scheduleId + " not found");
             }
             return fromDocument(doc);
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -162,8 +146,7 @@ public class MongoScheduleStore implements IScheduleStore {
 
             var result = scheduleCollection.replaceOne(eq(ID, scheduleId), doc);
             if (result.getMatchedCount() == 0) {
-                throw new IResourceStore.ResourceNotFoundException(
-                        "Schedule with id=" + scheduleId + " not found");
+                throw new IResourceStore.ResourceNotFoundException("Schedule with id=" + scheduleId + " not found");
             }
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw e;
@@ -191,8 +174,7 @@ public class MongoScheduleStore implements IScheduleStore {
 
             UpdateResult result = scheduleCollection.updateOne(eq(ID, scheduleId), combine(updates));
             if (result.getMatchedCount() == 0) {
-                throw new IResourceStore.ResourceNotFoundException(
-                        "Schedule with id=" + scheduleId + " not found");
+                throw new IResourceStore.ResourceNotFoundException("Schedule with id=" + scheduleId + " not found");
             }
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw e;
@@ -232,8 +214,7 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId)
-            throws IResourceStore.ResourceStoreException {
+    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException {
         return readSchedulesWithFilter(new Document(AGENT_ID, agentId), 500);
     }
 
@@ -250,18 +231,10 @@ public class MongoScheduleStore implements IScheduleStore {
             // (PENDING OR (CLAIMED + lease expired) OR (FAILED + retry due + under max
             // retries))
             Bson pendingFilter = eq(FIRE_STATUS, FireStatus.PENDING.name());
-            Bson leaseExpiredFilter = and(
-                    eq(FIRE_STATUS, FireStatus.CLAIMED.name()),
-                    lte(CLAIMED_AT, leaseMs));
-            Bson retryDueFilter = and(
-                    eq(FIRE_STATUS, FireStatus.FAILED.name()),
-                    lte(NEXT_RETRY_AT, nowMs),
-                    lt(FAIL_COUNT, maxRetries));
+            Bson leaseExpiredFilter = and(eq(FIRE_STATUS, FireStatus.CLAIMED.name()), lte(CLAIMED_AT, leaseMs));
+            Bson retryDueFilter = and(eq(FIRE_STATUS, FireStatus.FAILED.name()), lte(NEXT_RETRY_AT, nowMs), lt(FAIL_COUNT, maxRetries));
 
-            Bson filter = and(
-                    eq(ENABLED, true),
-                    lte(NEXT_FIRE, nowMs),
-                    or(pendingFilter, leaseExpiredFilter, retryDueFilter));
+            Bson filter = and(eq(ENABLED, true), lte(NEXT_FIRE, nowMs), or(pendingFilter, leaseExpiredFilter, retryDueFilter));
 
             return readSchedulesWithFilter(filter, 100);
         } catch (Exception e) {
@@ -270,31 +243,21 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public boolean tryClaim(String scheduleId, String instanceId, Instant now)
-            throws IResourceStore.ResourceStoreException {
+    public boolean tryClaim(String scheduleId, String instanceId, Instant now) throws IResourceStore.ResourceStoreException {
         try {
             long nowMs = epochMillis(now);
 
             // Fix #2: Atomic CAS with complete guards
             // Only claim if PENDING, or FAILED with retry due + under max retries
-            Bson filter = and(
-                    eq(ID, scheduleId),
-                    or(
-                            eq(FIRE_STATUS, FireStatus.PENDING.name()),
-                            and(
-                                    eq(FIRE_STATUS, FireStatus.FAILED.name()),
-                                    lte(NEXT_RETRY_AT, nowMs)
-                            // Note: maxRetries guard is in findDueSchedules —
-                            // we trust the poller already filtered, but adding
-                            // the retryAt guard prevents premature claiming
-                            )));
+            Bson filter = and(eq(ID, scheduleId),
+                    or(eq(FIRE_STATUS, FireStatus.PENDING.name()), and(eq(FIRE_STATUS, FireStatus.FAILED.name()), lte(NEXT_RETRY_AT, nowMs)
+                    // Note: maxRetries guard is in findDueSchedules —
+                    // we trust the poller already filtered, but adding
+                    // the retryAt guard prevents premature claiming
+                    )));
 
-            Bson update = combine(
-                    set(FIRE_STATUS, FireStatus.CLAIMED.name()),
-                    set(CLAIMED_BY, instanceId),
-                    set(CLAIMED_AT, nowMs),
-                    set(FIRE_ID, scheduleId + "_" + now.toString()),
-                    set(UPDATED_AT, nowMs));
+            Bson update = combine(set(FIRE_STATUS, FireStatus.CLAIMED.name()), set(CLAIMED_BY, instanceId), set(CLAIMED_AT, nowMs),
+                    set(FIRE_ID, scheduleId + "_" + now.toString()), set(UPDATED_AT, nowMs));
 
             Document result = scheduleCollection.findOneAndUpdate(filter, update);
             if (result != null) {
@@ -339,13 +302,8 @@ public class MongoScheduleStore implements IScheduleStore {
     public void markFailed(String scheduleId, Instant nextRetryAt) throws IResourceStore.ResourceStoreException {
         try {
             long nowMs = epochMillis(Instant.now());
-            Bson update = combine(
-                    set(FIRE_STATUS, FireStatus.FAILED.name()),
-                    set(NEXT_RETRY_AT, epochMillis(nextRetryAt)),
-                    set(CLAIMED_BY, null),
-                    set(CLAIMED_AT, null),
-                    inc(FAIL_COUNT, 1),
-                    set(UPDATED_AT, nowMs));
+            Bson update = combine(set(FIRE_STATUS, FireStatus.FAILED.name()), set(NEXT_RETRY_AT, epochMillis(nextRetryAt)), set(CLAIMED_BY, null),
+                    set(CLAIMED_AT, null), inc(FAIL_COUNT, 1), set(UPDATED_AT, nowMs));
             scheduleCollection.updateOne(eq(ID, scheduleId), update);
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to mark failed: " + scheduleId, e);
@@ -356,10 +314,7 @@ public class MongoScheduleStore implements IScheduleStore {
     public void markDeadLettered(String scheduleId) throws IResourceStore.ResourceStoreException {
         try {
             long nowMs = epochMillis(Instant.now());
-            Bson update = combine(
-                    set(FIRE_STATUS, FireStatus.DEAD_LETTERED.name()),
-                    set(CLAIMED_BY, null),
-                    set(CLAIMED_AT, null),
+            Bson update = combine(set(FIRE_STATUS, FireStatus.DEAD_LETTERED.name()), set(CLAIMED_BY, null), set(CLAIMED_AT, null),
                     set(UPDATED_AT, nowMs));
             scheduleCollection.updateOne(eq(ID, scheduleId), update);
             LOGGER.warnf("Schedule %s dead-lettered after max retries", scheduleId);
@@ -369,25 +324,16 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public void requeueDeadLetter(String scheduleId)
-            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+    public void requeueDeadLetter(String scheduleId) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         try {
             long nowMs = epochMillis(Instant.now());
-            Bson filter = and(
-                    eq(ID, scheduleId),
-                    eq(FIRE_STATUS, FireStatus.DEAD_LETTERED.name()));
-            Bson update = combine(
-                    set(FIRE_STATUS, FireStatus.PENDING.name()),
-                    set(FAIL_COUNT, 0),
-                    set(NEXT_RETRY_AT, null),
-                    set(CLAIMED_BY, null),
-                    set(CLAIMED_AT, null),
-                    set(NEXT_FIRE, nowMs), // fire immediately on next poll
+            Bson filter = and(eq(ID, scheduleId), eq(FIRE_STATUS, FireStatus.DEAD_LETTERED.name()));
+            Bson update = combine(set(FIRE_STATUS, FireStatus.PENDING.name()), set(FAIL_COUNT, 0), set(NEXT_RETRY_AT, null), set(CLAIMED_BY, null),
+                    set(CLAIMED_AT, null), set(NEXT_FIRE, nowMs), // fire immediately on next poll
                     set(UPDATED_AT, nowMs));
             UpdateResult result = scheduleCollection.updateOne(filter, update);
             if (result.getMatchedCount() == 0) {
-                throw new IResourceStore.ResourceNotFoundException(
-                        "Schedule " + scheduleId + " not found or not in DEAD_LETTERED state");
+                throw new IResourceStore.ResourceNotFoundException("Schedule " + scheduleId + " not found or not in DEAD_LETTERED state");
             }
             LOGGER.infof("Requeued dead-lettered schedule %s", scheduleId);
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -412,14 +358,10 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public List<ScheduleFireLog> readFireLogs(String scheduleId, int limit)
-            throws IResourceStore.ResourceStoreException {
+    public List<ScheduleFireLog> readFireLogs(String scheduleId, int limit) throws IResourceStore.ResourceStoreException {
         try {
             List<ScheduleFireLog> logs = new ArrayList<>();
-            for (var doc : fireLogCollection
-                    .find(eq(SCHEDULE_ID, scheduleId))
-                    .sort(new Document(STARTED_AT, -1))
-                    .limit(limit)) {
+            for (var doc : fireLogCollection.find(eq(SCHEDULE_ID, scheduleId)).sort(new Document(STARTED_AT, -1)).limit(limit)) {
                 logs.add(fireLogFromDocument(doc));
             }
             return logs;
@@ -432,13 +374,8 @@ public class MongoScheduleStore implements IScheduleStore {
     public List<ScheduleFireLog> readFailedFireLogs(int limit) throws IResourceStore.ResourceStoreException {
         try {
             List<ScheduleFireLog> logs = new ArrayList<>();
-            Bson filter = or(
-                    eq(STATUS, FireStatus.FAILED.name()),
-                    eq(STATUS, FireStatus.DEAD_LETTERED.name()));
-            for (var doc : fireLogCollection
-                    .find(filter)
-                    .sort(new Document(STARTED_AT, -1))
-                    .limit(limit)) {
+            Bson filter = or(eq(STATUS, FireStatus.FAILED.name()), eq(STATUS, FireStatus.DEAD_LETTERED.name()));
+            for (var doc : fireLogCollection.find(filter).sort(new Document(STARTED_AT, -1)).limit(limit)) {
                 logs.add(fireLogFromDocument(doc));
             }
             return logs;
@@ -449,8 +386,7 @@ public class MongoScheduleStore implements IScheduleStore {
 
     // ========================= Helpers =========================
 
-    private List<ScheduleConfiguration> readSchedulesWithFilter(Bson filter, int limit)
-            throws IResourceStore.ResourceStoreException {
+    private List<ScheduleConfiguration> readSchedulesWithFilter(Bson filter, int limit) throws IResourceStore.ResourceStoreException {
         try {
             List<ScheduleConfiguration> result = new ArrayList<>();
             for (var doc : scheduleCollection.find(filter).limit(limit)) {
@@ -464,10 +400,8 @@ public class MongoScheduleStore implements IScheduleStore {
 
     /**
      * Fix #6: Convert known Instant fields to epoch-millis Long for BSON comparison
-     * consistency.
-     * Jackson with write-dates-as-timestamps=true serializes Instants as longs, but
-     * we
-     * must ensure the filter queries also use longs consistently.
+     * consistency. Jackson with write-dates-as-timestamps=true serializes Instants
+     * as longs, but we must ensure the filter queries also use longs consistently.
      */
     private static void storeInstantsAsLong(Document doc) {
         convertInstantField(doc, "nextFire");

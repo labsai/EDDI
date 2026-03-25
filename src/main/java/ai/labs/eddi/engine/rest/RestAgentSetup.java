@@ -12,8 +12,8 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 /**
- * REST implementation for one-command agent setup.
- * Thin adapter that delegates to {@link AgentSetupService}.
+ * REST implementation for one-command agent setup. Thin adapter that delegates
+ * to {@link AgentSetupService}.
  *
  * @author ginccc
  */
@@ -36,13 +36,10 @@ public class RestAgentSetup implements IRestAgentSetup {
             return Response.status(Response.Status.CREATED).entity(result).build();
         } catch (AgentSetupException e) {
             LOGGER.warnf("Agent setup validation failed: %s", e.getMessage());
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(java.util.Map.of("error", e.getMessage()))
-                    .build();
+            return Response.status(Response.Status.BAD_REQUEST).entity(java.util.Map.of("error", e.getMessage())).build();
         } catch (Exception e) {
             LOGGER.error("Agent setup failed", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                    .entity(java.util.Map.of("error", "Agent setup failed: " + e.getMessage()))
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(java.util.Map.of("error", "Agent setup failed: " + e.getMessage()))
                     .build();
         }
     }
@@ -54,14 +51,11 @@ public class RestAgentSetup implements IRestAgentSetup {
             return Response.status(Response.Status.CREATED).entity(result).build();
         } catch (AgentSetupException e) {
             LOGGER.warnf("API agent setup validation failed: %s", e.getMessage());
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(java.util.Map.of("error", e.getMessage()))
-                    .build();
+            return Response.status(Response.Status.BAD_REQUEST).entity(java.util.Map.of("error", e.getMessage())).build();
         } catch (Exception e) {
             LOGGER.error("API agent setup failed", e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                    .entity(java.util.Map.of("error", "API agent setup failed: " + e.getMessage()))
-                    .build();
+                    .entity(java.util.Map.of("error", "API agent setup failed: " + e.getMessage())).build();
         }
     }
 }

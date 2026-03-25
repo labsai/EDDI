@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.output.model;
 
-
 /**
  * @author ginccc
  */
@@ -11,11 +10,7 @@ public class QuickReply {
 
     @Override
     public String toString() {
-        return "QuickReply{" +
-                "value='" + value + '\'' +
-                ", expressions='" + expressions + '\'' +
-                ", isDefault=" + isDefault +
-                '}';
+        return "QuickReply{" + "value='" + value + '\'' + ", expressions='" + expressions + '\'' + ", isDefault=" + isDefault + '}';
     }
 
     public QuickReply() {
@@ -53,10 +48,13 @@ public class QuickReply {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         QuickReply that = (QuickReply) o;
-        return java.util.Objects.equals(value, that.value) && java.util.Objects.equals(expressions, that.expressions) && java.util.Objects.equals(isDefault, that.isDefault);
+        return java.util.Objects.equals(value, that.value) && java.util.Objects.equals(expressions, that.expressions)
+                && java.util.Objects.equals(isDefault, that.isDefault);
     }
 
     @Override

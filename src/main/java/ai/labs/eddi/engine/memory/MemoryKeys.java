@@ -7,9 +7,8 @@ import java.util.List;
  * workflow.
  * <p>
  * Tasks should import these constants instead of declaring local string
- * constants.
- * Keys that are task-internal (e.g., "langchain:trace") can remain as local
- * {@code MemoryKey<T>} constants within the task itself.
+ * constants. Keys that are task-internal (e.g., "langchain:trace") can remain
+ * as local {@code MemoryKey<T>} constants within the task itself.
  *
  * @see MemoryKey
  * @see IConversationMemory.IConversationStep

@@ -13,12 +13,13 @@ import javax.sql.DataSource;
 /**
  * PostgreSQL implementation of {@link IResourceStorageFactory}.
  * <p>
- * Activated when {@code eddi.datastore.type=postgres} is set.
- * Creates {@link PostgresResourceStorage} instances backed by the
- * Quarkus-managed {@link DataSource} (Agroal connection pool).
+ * Activated when {@code eddi.datastore.type=postgres} is set. Creates
+ * {@link PostgresResourceStorage} instances backed by the Quarkus-managed
+ * {@link DataSource} (Agroal connection pool).
  * <p>
- * This overrides the default {@link ai.labs.eddi.datastore.mongo.MongoResourceStorageFactory}
- * when the PostgreSQL profile is active.
+ * This overrides the default
+ * {@link ai.labs.eddi.datastore.mongo.MongoResourceStorageFactory} when the
+ * PostgreSQL profile is active.
  *
  * @see ai.labs.eddi.datastore.mongo.MongoResourceStorageFactory
  */
@@ -30,19 +31,17 @@ public class PostgresResourceStorageFactory implements IResourceStorageFactory {
     private final IJsonSerialization jsonSerialization;
 
     @Inject
-    public PostgresResourceStorageFactory(DataSource dataSource,
-                                          IJsonSerialization jsonSerialization) {
+    public PostgresResourceStorageFactory(DataSource dataSource, IJsonSerialization jsonSerialization) {
         this.dataSource = dataSource;
         this.jsonSerialization = jsonSerialization;
     }
 
     @Override
-    public <T> IResourceStorage<T> create(String collectionName,
-                                          IDocumentBuilder documentBuilder,
-                                          Class<T> documentType,
-                                          String... indexes) {
-        // PostgreSQL storage uses IJsonSerialization directly for clean JSON↔object conversion.
-        // The documentBuilder parameter is accepted for interface compatibility but not used.
+    public <T> IResourceStorage<T> create(String collectionName, IDocumentBuilder documentBuilder, Class<T> documentType, String... indexes) {
+        // PostgreSQL storage uses IJsonSerialization directly for clean JSON↔object
+        // conversion.
+        // The documentBuilder parameter is accepted for interface compatibility but not
+        // used.
         return new PostgresResourceStorage<>(dataSource, collectionName, jsonSerialization, documentType);
     }
 

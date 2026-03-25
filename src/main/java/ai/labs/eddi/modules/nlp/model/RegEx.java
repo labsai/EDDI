@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.nlp.model;
 
-
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
 

@@ -6,8 +6,8 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Unit tests for WebSearchTool.
- * Note: These tests focus on the tool's behavior without making actual HTTP calls.
+ * Unit tests for WebSearchTool. Note: These tests focus on the tool's behavior
+ * without making actual HTTP calls.
  */
 class WebSearchToolTest {
 
@@ -92,4 +92,3 @@ class WebSearchToolTest {
         assertNotNull(result);
     }
 }
-

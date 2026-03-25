@@ -6,15 +6,14 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
  * Generic, database-agnostic base class for configuration stores.
  * <p>
  * Encapsulates the shared constructor pattern ({@link IResourceStorageFactory}
- * to
- * {@link IResourceStorage} to {@link HistorizedResourceStore})
- * and the 7 CRUD delegation methods that are identical across all configuration
- * stores.
+ * to {@link IResourceStorage} to {@link HistorizedResourceStore}) and the 7
+ * CRUD delegation methods that are identical across all configuration stores.
  * <p>
  * Subclasses only need to provide the collection name, document type, and any
  * domain-specific methods (e.g., readActions, filtering, custom queries).
  *
- * @param <T> the configuration document type
+ * @param <T>
+ *            the configuration document type
  */
 public abstract class AbstractResourceStore<T> implements IResourceStore<T> {
 
@@ -32,17 +31,13 @@ public abstract class AbstractResourceStore<T> implements IResourceStore<T> {
 
     /**
      * Standard constructor - creates storage via factory, wraps in
-     * HistorizedResourceStore.
-     * Used by most stores (LangChain, Parser, PropertySetter, ApiCalls, Behavior,
-     * Output, RegularDictionary, Agent, Workflow).
+     * HistorizedResourceStore. Used by most stores (LangChain, Parser,
+     * PropertySetter, ApiCalls, Behavior, Output, RegularDictionary, Agent,
+     * Workflow).
      */
-    protected AbstractResourceStore(IResourceStorageFactory storageFactory,
-            String collectionName,
-            IDocumentBuilder documentBuilder,
-            Class<T> documentType,
-            String... indexes) {
-        this.resourceStorage = storageFactory.create(
-                collectionName, documentBuilder, documentType, indexes);
+    protected AbstractResourceStore(IResourceStorageFactory storageFactory, String collectionName, IDocumentBuilder documentBuilder,
+            Class<T> documentType, String... indexes) {
+        this.resourceStorage = storageFactory.create(collectionName, documentBuilder, documentType, indexes);
         this.resourceStore = new HistorizedResourceStore<>(resourceStorage);
     }
 
@@ -56,8 +51,7 @@ public abstract class AbstractResourceStore<T> implements IResourceStore<T> {
     }
 
     @Override
-    public T readIncludingDeleted(String id, Integer version)
-            throws ResourceNotFoundException, ResourceStoreException {
+    public T readIncludingDeleted(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
         return resourceStore.readIncludingDeleted(id, version);
     }
 
@@ -67,22 +61,19 @@ public abstract class AbstractResourceStore<T> implements IResourceStore<T> {
     }
 
     @Override
-    public T read(String id, Integer version)
-            throws ResourceNotFoundException, ResourceStoreException {
+    public T read(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
         return resourceStore.read(id, version);
     }
 
     @Override
     @ConfigurationUpdate
-    public Integer update(String id, Integer version, T content)
-            throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
+    public Integer update(String id, Integer version, T content) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         return resourceStore.update(id, version, content);
     }
 
     @Override
     @ConfigurationUpdate
-    public void delete(String id, Integer version)
-            throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
+    public void delete(String id, Integer version) throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
         resourceStore.delete(id, version);
     }
 

@@ -20,12 +20,8 @@ public abstract class BaseMatcher implements IRuleCondition {
 
     private final String conversationOccurrenceQualifier = KEY_OCCURRENCE;
 
-
     enum ConversationStepOccurrence {
-        currentStep,
-        lastStep,
-        anyStep,
-        never
+        currentStep, lastStep, anyStep, never
     }
 
     @Override
@@ -45,17 +41,17 @@ public abstract class BaseMatcher implements IRuleCondition {
         if (configs.containsKey(conversationOccurrenceQualifier)) {
             String conversationOccurrence = configs.get(conversationOccurrenceQualifier);
             switch (conversationOccurrence) {
-                case "lastStep":
+                case "lastStep" :
                     occurrence = ConversationStepOccurrence.lastStep;
                     break;
-                case "anyStep":
+                case "anyStep" :
                     occurrence = ConversationStepOccurrence.anyStep;
                     break;
-                case "never":
+                case "never" :
                     occurrence = ConversationStepOccurrence.never;
                     break;
-                case "currentStep":
-                default:
+                case "currentStep" :
+                default :
                     occurrence = ConversationStepOccurrence.currentStep;
             }
         }

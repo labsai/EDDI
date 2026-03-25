@@ -39,9 +39,12 @@ public class FoundDictionaryEntry extends DictionaryEntry {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        if (!super.equals(o)) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
+        if (!super.equals(o))
+            return false;
         FoundDictionaryEntry that = (FoundDictionaryEntry) o;
         return isCorrected == that.isCorrected && Double.compare(that.matchingAccuracy, matchingAccuracy) == 0;
     }

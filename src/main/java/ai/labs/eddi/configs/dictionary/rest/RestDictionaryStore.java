@@ -10,7 +10,6 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -29,11 +28,8 @@ public class RestDictionaryStore implements IRestDictionaryStore {
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<DictionaryConfiguration> restVersionInfo;
 
-
-
     @Inject
-    public RestDictionaryStore(IDictionaryStore regularDictionaryStore,
-            IDocumentDescriptorStore documentDescriptorStore,
+    public RestDictionaryStore(IDictionaryStore regularDictionaryStore, IDocumentDescriptorStore documentDescriptorStore,
             IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, regularDictionaryStore, documentDescriptorStore);
         this.regularDictionaryStore = regularDictionaryStore;
@@ -55,14 +51,12 @@ public class RestDictionaryStore implements IRestDictionaryStore {
     }
 
     @Override
-    public DictionaryConfiguration readRegularDictionary(String id, Integer version, String filter,
-            String order, Integer index, Integer limit) {
+    public DictionaryConfiguration readRegularDictionary(String id, Integer version, String filter, String order, Integer index, Integer limit) {
         return restVersionInfo.read(id, version);
     }
 
     @Override
-    public List<String> readExpressions(String id, Integer version, String filter, String order, Integer index,
-            Integer limit) {
+    public List<String> readExpressions(String id, Integer version, String filter, String order, Integer index, Integer limit) {
         try {
             return regularDictionaryStore.readExpressions(id, version, filter, order, index, limit);
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
@@ -71,8 +65,7 @@ public class RestDictionaryStore implements IRestDictionaryStore {
     }
 
     @Override
-    public Response updateRegularDictionary(String id, Integer version,
-            DictionaryConfiguration regularDictionaryConfiguration) {
+    public Response updateRegularDictionary(String id, Integer version, DictionaryConfiguration regularDictionaryConfiguration) {
         return restVersionInfo.update(id, version, regularDictionaryConfiguration);
     }
 
@@ -87,12 +80,10 @@ public class RestDictionaryStore implements IRestDictionaryStore {
     }
 
     @Override
-    public Response patchRegularDictionary(String id, Integer version,
-            List<PatchInstruction<DictionaryConfiguration>> patchInstructions) {
+    public Response patchRegularDictionary(String id, Integer version, List<PatchInstruction<DictionaryConfiguration>> patchInstructions) {
         try {
             var currentDictionaryConfiguration = regularDictionaryStore.read(id, version);
-            var patchedDictionaryConfiguration = patchDocument(currentDictionaryConfiguration,
-                    patchInstructions);
+            var patchedDictionaryConfiguration = patchDocument(currentDictionaryConfiguration, patchInstructions);
 
             return updateRegularDictionary(id, version, patchedDictionaryConfiguration);
 
@@ -101,10 +92,8 @@ public class RestDictionaryStore implements IRestDictionaryStore {
         }
     }
 
-    private DictionaryConfiguration patchDocument(
-            DictionaryConfiguration currentDictionaryConfig,
-            List<PatchInstruction<DictionaryConfiguration>> patchInstructions)
-            throws IResourceStore.ResourceStoreException {
+    private DictionaryConfiguration patchDocument(DictionaryConfiguration currentDictionaryConfig,
+            List<PatchInstruction<DictionaryConfiguration>> patchInstructions) throws IResourceStore.ResourceStoreException {
 
         for (var patchInstruction : patchInstructions) {
             var regularConfigPatch = patchInstruction.getDocument();
@@ -119,8 +108,7 @@ public class RestDictionaryStore implements IRestDictionaryStore {
                     currentDictionaryConfig.getWords().removeAll(regularConfigPatch.getWords());
                     currentDictionaryConfig.getPhrases().removeAll(regularConfigPatch.getPhrases());
                 }
-                default ->
-                    throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");
+                default -> throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");
             }
         }
 

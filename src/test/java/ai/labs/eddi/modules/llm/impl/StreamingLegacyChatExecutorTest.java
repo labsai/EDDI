@@ -40,9 +40,7 @@ class StreamingLegacyChatExecutorTest {
                 handler.onPartialResponse("Hello");
                 handler.onPartialResponse(" ");
                 handler.onPartialResponse("world");
-                handler.onCompleteResponse(ChatResponse.builder()
-                        .aiMessage(AiMessage.from("Hello world"))
-                        .build());
+                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("Hello world")).build());
             }
         };
 
@@ -63,9 +61,7 @@ class StreamingLegacyChatExecutorTest {
         StreamingChatModel streamingModel = new StreamingChatModel() {
             @Override
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
-                handler.onCompleteResponse(ChatResponse.builder()
-                        .aiMessage(AiMessage.from(""))
-                        .build());
+                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("")).build());
             }
         };
 
@@ -100,9 +96,7 @@ class StreamingLegacyChatExecutorTest {
             @Override
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
                 handler.onPartialResponse("OK");
-                handler.onCompleteResponse(ChatResponse.builder()
-                        .aiMessage(AiMessage.from("OK"))
-                        .build());
+                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("OK")).build());
             }
         };
 
@@ -122,9 +116,7 @@ class StreamingLegacyChatExecutorTest {
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
                 handler.onPartialResponse("Hello");
                 handler.onPartialResponse(" world");
-                handler.onCompleteResponse(ChatResponse.builder()
-                        .aiMessage(AiMessage.from("Hello world"))
-                        .build());
+                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("Hello world")).build());
             }
         };
 

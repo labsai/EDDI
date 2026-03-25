@@ -22,25 +22,15 @@ class WebScraperToolTest {
     // === SSRF Protection Tests ===
 
     @ParameterizedTest
-    @ValueSource(strings = {
-            "http://127.0.0.1/admin",
-            "http://localhost/secret",
-            "http://localhost:7070/",
-            "http://169.254.169.254/latest/meta-data/",
-            "http://metadata.google.internal/computeMetadata/v1/"
-    })
+    @ValueSource(strings = {"http://127.0.0.1/admin", "http://localhost/secret", "http://localhost:7070/", "http://169.254.169.254/latest/meta-data/",
+            "http://metadata.google.internal/computeMetadata/v1/"})
     void testExtractWebPageText_RejectsInternalAddresses(String url) {
         String result = webScraperTool.extractWebPageText(url);
         assertTrue(result.contains("Error"), "Should reject internal URL: " + url);
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {
-            "file:///etc/passwd",
-            "ftp://example.com/",
-            "gopher://example.com:25/",
-            "ldap://example.com/"
-    })
+    @ValueSource(strings = {"file:///etc/passwd", "ftp://example.com/", "gopher://example.com:25/", "ldap://example.com/"})
     void testExtractWebPageText_RejectsNonHttpSchemes(String url) {
         String result = webScraperTool.extractWebPageText(url);
         assertTrue(result.contains("Error"), "Should reject non-HTTP scheme: " + url);
@@ -129,4 +119,3 @@ class WebScraperToolTest {
         assertNotNull(result);
     }
 }
-

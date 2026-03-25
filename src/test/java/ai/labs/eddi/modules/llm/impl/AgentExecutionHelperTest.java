@@ -22,13 +22,10 @@ class AgentExecutionHelperTest {
         var task = new LlmConfiguration.Task();
         AtomicInteger attempts = new AtomicInteger(0);
 
-        String result = AgentExecutionHelper.executeWithRetry(
-                () -> {
-                    attempts.incrementAndGet();
-                    return "success";
-                },
-                task,
-                "Test action");
+        String result = AgentExecutionHelper.executeWithRetry(() -> {
+            attempts.incrementAndGet();
+            return "success";
+        }, task, "Test action");
 
         assertEquals("success", result);
         assertEquals(1, attempts.get(), "Should only attempt once on success");
@@ -45,16 +42,13 @@ class AgentExecutionHelperTest {
 
         AtomicInteger attempts = new AtomicInteger(0);
 
-        String result = AgentExecutionHelper.executeWithRetry(
-                () -> {
-                    int attempt = attempts.incrementAndGet();
-                    if (attempt < 3) {
-                        throw new RuntimeException("Connection timeout");
-                    }
-                    return "success";
-                },
-                task,
-                "Test action");
+        String result = AgentExecutionHelper.executeWithRetry(() -> {
+            int attempt = attempts.incrementAndGet();
+            if (attempt < 3) {
+                throw new RuntimeException("Connection timeout");
+            }
+            return "success";
+        }, task, "Test action");
 
         assertEquals("success", result);
         assertEquals(3, attempts.get(), "Should retry until success");
@@ -71,14 +65,10 @@ class AgentExecutionHelperTest {
 
         AtomicInteger attempts = new AtomicInteger(0);
 
-        LifecycleException exception = assertThrows(LifecycleException.class,
-                () -> AgentExecutionHelper.executeWithRetry(
-                        () -> {
-                            attempts.incrementAndGet();
-                            throw new RuntimeException("Connection timeout");
-                        },
-                        task,
-                        "Test action"));
+        LifecycleException exception = assertThrows(LifecycleException.class, () -> AgentExecutionHelper.executeWithRetry(() -> {
+            attempts.incrementAndGet();
+            throw new RuntimeException("Connection timeout");
+        }, task, "Test action"));
 
         assertEquals(2, attempts.get(), "Should attempt max times");
         assertTrue(exception.getMessage().contains("failed after 2 attempts"));
@@ -94,14 +84,10 @@ class AgentExecutionHelperTest {
 
         AtomicInteger attempts = new AtomicInteger(0);
 
-        LifecycleException exception = assertThrows(LifecycleException.class,
-                () -> AgentExecutionHelper.executeWithRetry(
-                        () -> {
-                            attempts.incrementAndGet();
-                            throw new RuntimeException("Invalid API key");
-                        },
-                        task,
-                        "Test action"));
+        LifecycleException exception = assertThrows(LifecycleException.class, () -> AgentExecutionHelper.executeWithRetry(() -> {
+            attempts.incrementAndGet();
+            throw new RuntimeException("Invalid API key");
+        }, task, "Test action"));
 
         assertEquals(1, attempts.get(), "Should fail on first attempt for non-retryable error");
         assertTrue(exception.getMessage().contains("Invalid API key"));
@@ -113,10 +99,7 @@ class AgentExecutionHelperTest {
         var task = new LlmConfiguration.Task();
         // retry is null - should use defaults
 
-        String result = AgentExecutionHelper.executeWithRetry(
-                () -> "success",
-                task,
-                "Test action");
+        String result = AgentExecutionHelper.executeWithRetry(() -> "success", task, "Test action");
 
         assertEquals("success", result);
     }
@@ -132,16 +115,13 @@ class AgentExecutionHelperTest {
 
         AtomicInteger attempts = new AtomicInteger(0);
 
-        String result = AgentExecutionHelper.executeWithRetry(
-                () -> {
-                    int attempt = attempts.incrementAndGet();
-                    if (attempt < 2) {
-                        throw new RuntimeException("Rate limit exceeded");
-                    }
-                    return "success";
-                },
-                task,
-                "Test action");
+        String result = AgentExecutionHelper.executeWithRetry(() -> {
+            int attempt = attempts.incrementAndGet();
+            if (attempt < 2) {
+                throw new RuntimeException("Rate limit exceeded");
+            }
+            return "success";
+        }, task, "Test action");
 
         assertEquals("success", result);
         assertEquals(2, attempts.get());

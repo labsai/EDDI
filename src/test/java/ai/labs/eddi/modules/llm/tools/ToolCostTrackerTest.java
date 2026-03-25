@@ -182,8 +182,7 @@ class ToolCostTrackerTest {
         }
         // All 100 conversations should still exist
         for (int i = 0; i < 100; i++) {
-            assertNotNull(costTracker.getConversationCosts("conv-" + i),
-                    "Conversation conv-" + i + " should still exist");
+            assertNotNull(costTracker.getConversationCosts("conv-" + i), "Conversation conv-" + i + " should still exist");
         }
     }
 
@@ -203,10 +202,8 @@ class ToolCostTrackerTest {
                 remaining++;
             }
         }
-        assertTrue(remaining <= limit,
-                "Should have evicted some entries: remaining=" + remaining);
-        assertTrue(remaining >= (int) (limit * 0.9) - 1,
-                "Should keep about 90% of entries: remaining=" + remaining);
+        assertTrue(remaining <= limit, "Should have evicted some entries: remaining=" + remaining);
+        assertTrue(remaining >= (int) (limit * 0.9) - 1, "Should keep about 90% of entries: remaining=" + remaining);
     }
 
     @Test

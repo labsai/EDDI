@@ -3,7 +3,6 @@ package ai.labs.eddi.modules.nlp.model;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 
-
 /**
  * @author ginccc
  */

@@ -41,10 +41,8 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     private static final Logger log = Logger.getLogger(RestWorkflowStore.class);
 
     @Inject
-    public RestWorkflowStore(IWorkflowStore workflowStore,
-            ResourceClientLibrary resourceClientLibrary,
-            IDocumentDescriptorStore documentDescriptorStore,
-            IJsonSchemaCreator jsonSchemaCreator) {
+    public RestWorkflowStore(IWorkflowStore workflowStore, ResourceClientLibrary resourceClientLibrary,
+            IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, workflowStore, documentDescriptorStore);
         this.documentDescriptorStore = documentDescriptorStore;
         this.workflowStore = workflowStore;
@@ -67,10 +65,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     }
 
     @Override
-    public List<DocumentDescriptor> readWorkflowDescriptors(String filter,
-            Integer index,
-            Integer limit,
-            String containingResourceUri,
+    public List<DocumentDescriptor> readWorkflowDescriptors(String filter, Integer index, Integer limit, String containingResourceUri,
             Boolean includePreviousVersions) {
 
         if (validateUri(containingResourceUri) == null) {
@@ -78,9 +73,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         }
 
         try {
-            return workflowStore.getWorkflowDescriptorsContainingResource(
-                    containingResourceUri,
-                    includePreviousVersions);
+            return workflowStore.getWorkflowDescriptorsContainingResource(containingResourceUri, includePreviousVersions);
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
@@ -187,8 +180,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         if (!isNullOrEmpty(dictionaries)) {
             for (var dictionary : dictionaries) {
                 var dictType = dictionary.get("type");
-                if (dictType != null
-                        && "ai.labs.parser.dictionaries.regular".equals(URI.create(dictType.toString()).getHost())) {
+                if (dictType != null && "ai.labs.parser.dictionaries.regular".equals(URI.create(dictType.toString()).getHost())) {
                     var config = (Map<String, Object>) dictionary.get("config");
                     if (!isNullOrEmpty(config)) {
                         Object dictionaryUriObj = config.get(KEY_URI);
@@ -204,11 +196,9 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     private void deleteResourceSafely(URI resourceUri, boolean permanent) {
         try {
             // Check if this resource is referenced by other packages
-            var referencingWorkflows = workflowStore.getWorkflowDescriptorsContainingResource(
-                    resourceUri.toString(), false);
+            var referencingWorkflows = workflowStore.getWorkflowDescriptorsContainingResource(resourceUri.toString(), false);
             if (referencingWorkflows.size() > 1) {
-                log.infof("Skipping cascade-delete of resource %s — " +
-                        "still referenced by %d other package(s)", resourceUri,
+                log.infof("Skipping cascade-delete of resource %s — " + "still referenced by %d other package(s)", resourceUri,
                         referencingWorkflows.size() - 1);
                 return;
             }
@@ -244,8 +234,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
             }
 
             Response createWorkflowResponse = restVersionInfo.create(workflowConfig);
-            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version,
-                    createWorkflowResponse.getLocation());
+            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createWorkflowResponse.getLocation());
 
             return createWorkflowResponse;
         } catch (Exception e) {
@@ -287,21 +276,14 @@ public class RestWorkflowStore implements IRestWorkflowStore {
                 newResourceLocation = duplicateResourceResponse.getLocation();
 
                 var oldResourceId = RestUtilities.extractResourceId(oldResourceUri);
-                createDocumentDescriptorForDuplicate(
-                        documentDescriptorStore,
-                        oldResourceId.getId(),
-                        oldResourceId.getVersion(),
-                        newResourceLocation);
+                createDocumentDescriptorForDuplicate(documentDescriptorStore, oldResourceId.getId(), oldResourceId.getVersion(), newResourceLocation);
             }
         } catch (Exception e) {
             throw new ServiceException(e.getLocalizedMessage(), e);
         }
 
         if (isNullOrEmpty(newResourceLocation)) {
-            String errorMsg = String.format(
-                    "New resource for %s could not be created. " +
-                            "Mission Location Header.",
-                    resourceUriObj);
+            String errorMsg = String.format("New resource for %s could not be created. " + "Mission Location Header.", resourceUriObj);
             throw new ServiceException(errorMsg);
         }
 

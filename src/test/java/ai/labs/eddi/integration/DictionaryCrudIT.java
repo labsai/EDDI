@@ -51,9 +51,7 @@ public class DictionaryCrudIT extends BaseIntegrationIT {
     @Order(3)
     @DisplayName("Update regular dictionary")
     void updateDictionary() {
-        assertUpdate(TEST_JSON2, ROOT_PATH, RESOURCE_URI, resourceId)
-                .then().assertThat()
-                .body("words[0].word", equalTo("testword2"));
+        assertUpdate(TEST_JSON2, ROOT_PATH, RESOURCE_URI, resourceId).then().assertThat().body("words[0].word", equalTo("testword2"));
     }
 
     @Test

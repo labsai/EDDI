@@ -29,8 +29,10 @@ public class ResourceId implements IResourceStore.IResourceId {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         ResourceId that = (ResourceId) o;
         return java.util.Objects.equals(id, that.id) && java.util.Objects.equals(version, that.version);
     }

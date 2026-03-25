@@ -14,12 +14,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Executes streaming chat completion — tokens are emitted in real-time
- * via the {@link ConversationEventSink}.
+ * Executes streaming chat completion — tokens are emitted in real-time via the
+ * {@link ConversationEventSink}.
  * <p>
- * This class blocks until the full response is received (via CountDownLatch)
- * so that the lifecycle workflow can proceed synchronously while tokens
- * stream to the client.
+ * This class blocks until the full response is received (via CountDownLatch) so
+ * that the lifecycle workflow can proceed synchronously while tokens stream to
+ * the client.
  */
 class StreamingLegacyChatExecutor {
     private static final Logger LOGGER = Logger.getLogger(StreamingLegacyChatExecutor.class);
@@ -28,13 +28,15 @@ class StreamingLegacyChatExecutor {
     /**
      * Execute a streaming chat completion, emitting tokens via the event sink.
      *
-     * @param streamingModel the streaming-capable chat model
-     * @param messages       the full message list (system + history + user)
-     * @param eventSink      the sink to emit token events to
+     * @param streamingModel
+     *            the streaming-capable chat model
+     * @param messages
+     *            the full message list (system + history + user)
+     * @param eventSink
+     *            the sink to emit token events to
      * @return the full accumulated response text (for memory storage)
      */
-    String execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
-            ConversationEventSink eventSink) {
+    String execute(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink) {
 
         LOGGER.debug("Executing with streaming (legacy mode)");
 
@@ -42,9 +44,7 @@ class StreamingLegacyChatExecutor {
         var fullResponse = new StringBuilder();
         var errorRef = new AtomicReference<Throwable>();
 
-        var chatRequest = ChatRequest.builder()
-                .messages(messages)
-                .build();
+        var chatRequest = ChatRequest.builder().messages(messages).build();
 
         streamingModel.chat(chatRequest, new StreamingChatResponseHandler() {
             @Override

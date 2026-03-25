@@ -129,7 +129,6 @@ public class Expression implements Cloneable {
         return getDomain() == null || getDomain().equals(exp.getDomain());
     }
 
-
     public Boolean containsExpressionWithName(String expressionName) {
         return getAllExpressionsWithNames(expressionName).size() > 0;
     }
@@ -183,14 +182,20 @@ public class Expression implements Cloneable {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof Expression)) return false;
+        if (this == o)
+            return true;
+        if (!(o instanceof Expression))
+            return false;
 
         Expression that = (Expression) o;
 
-        return expressionName.equals("*") || that.getExpressionName().equals("*") ||
-                (expressionName.equals(that.getExpressionName()) && getSubExpressions().length == that.getSubExpressions().length &&
-                        Arrays.equals(getSubExpressions(), that.getSubExpressions()));
+        return expressionName.equals("*") || that.getExpressionName().equals("*") || (expressionName.equals(that.getExpressionName())
+                && getSubExpressions().length == that.getSubExpressions().length && Arrays.equals(getSubExpressions(), that.getSubExpressions()));
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(expressionName, Arrays.hashCode(getSubExpressions()));
     }
 
     @Override

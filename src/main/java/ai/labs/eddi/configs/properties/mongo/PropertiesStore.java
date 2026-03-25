@@ -14,8 +14,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 /**
- * MongoDB implementation of {@link IPropertiesStore}.
- * Annotated {@code @DefaultBean} so PostgreSQL can override.
+ * MongoDB implementation of {@link IPropertiesStore}. Annotated
+ * {@code @DefaultBean} so PostgreSQL can override.
  *
  * @author ginccc
  */

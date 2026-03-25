@@ -201,8 +201,7 @@ class TenantQuotaServiceTest {
         // Second call — denied
         quotaService.checkConversationQuota();
 
-        double denied = meterRegistry.find("eddi.tenant.quota.denied")
-                .counters().stream().mapToDouble(c -> c.count()).sum();
+        double denied = meterRegistry.find("eddi.tenant.quota.denied").counters().stream().mapToDouble(c -> c.count()).sum();
         assertTrue(denied >= 1.0, "Expected at least 1 denied metric, got " + denied);
     }
 
@@ -212,10 +211,8 @@ class TenantQuotaServiceTest {
         quotaService.recordApiCall();
         quotaService.recordCost(TENANT_ID, 5.0);
 
-        double convCount = meterRegistry.find("eddi.tenant.usage.conversations")
-                .counter().count();
-        double apiCount = meterRegistry.find("eddi.tenant.usage.api_calls")
-                .counter().count();
+        double convCount = meterRegistry.find("eddi.tenant.usage.conversations").counter().count();
+        double apiCount = meterRegistry.find("eddi.tenant.usage.api_calls").counter().count();
 
         assertEquals(1.0, convCount);
         assertEquals(1.0, apiCount);

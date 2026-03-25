@@ -28,11 +28,12 @@ public class ButtonOutputItem extends OutputItem {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         ButtonOutputItem that = (ButtonOutputItem) o;
-        return Objects.equals(buttonType, that.buttonType) && Objects.equals(label, that.label) &&
-                Objects.equals(onPress, that.onPress);
+        return Objects.equals(buttonType, that.buttonType) && Objects.equals(label, that.label) && Objects.equals(onPress, that.onPress);
     }
 
     @Override

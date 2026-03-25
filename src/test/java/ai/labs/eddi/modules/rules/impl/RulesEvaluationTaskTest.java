@@ -44,9 +44,7 @@ class RulesEvaluationTaskTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        task = new RulesEvaluationTask(
-                resourceClientLibrary, jsonSerialization,
-                behaviorSerialization, expressionProvider);
+        task = new RulesEvaluationTask(resourceClientLibrary, jsonSerialization, behaviorSerialization, expressionProvider);
     }
 
     // ==================== Identity Tests ====================
@@ -78,8 +76,7 @@ class RulesEvaluationTaskTest {
         @DisplayName("should evaluate rules and store success results in memory")
         void execute_successRules_storesResults() throws Exception {
             IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(
-                    IConversationMemory.IWritableConversationStep.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
 
             Rule successRule = new Rule("Greeting");
@@ -102,8 +99,7 @@ class RulesEvaluationTaskTest {
         @DisplayName("should store dropped success rules in memory")
         void execute_droppedSuccessRules_storesResults() throws Exception {
             IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(
-                    IConversationMemory.IWritableConversationStep.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
 
             Rule droppedRule = new Rule("DroppedRule");
@@ -126,8 +122,7 @@ class RulesEvaluationTaskTest {
         @DisplayName("should not store actions when no rules succeed")
         void execute_noSuccessRules_noActionsStored() throws Exception {
             IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(
-                    IConversationMemory.IWritableConversationStep.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
 
             var results = new RuleSetResult();
@@ -148,8 +143,7 @@ class RulesEvaluationTaskTest {
             IConversationMemory memory = mock(IConversationMemory.class);
 
             var evaluator = mock(RulesEvaluator.class);
-            doThrow(new RulesEvaluator.RuleExecutionException("test error",
-                    new RuntimeException("cause"))).when(evaluator).evaluate(memory);
+            doThrow(new RulesEvaluator.RuleExecutionException("test error", new RuntimeException("cause"))).when(evaluator).evaluate(memory);
 
             assertThrows(LifecycleException.class, () -> task.execute(memory, evaluator));
         }
@@ -158,8 +152,7 @@ class RulesEvaluationTaskTest {
         @DisplayName("should collect actions from multiple success rules")
         void execute_multipleSuccessRules_collectsAllActions() throws Exception {
             IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(
-                    IConversationMemory.IWritableConversationStep.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
 
             Rule rule1 = new Rule("Rule1");
@@ -195,8 +188,7 @@ class RulesEvaluationTaskTest {
             config.put("uri", "http://example.com/behavior");
 
             var behaviorConfig = new RuleSetConfiguration();
-            when(resourceClientLibrary.getResource(any(URI.class), eq(RuleSetConfiguration.class)))
-                    .thenReturn(behaviorConfig);
+            when(resourceClientLibrary.getResource(any(URI.class), eq(RuleSetConfiguration.class))).thenReturn(behaviorConfig);
             when(jsonSerialization.serialize(behaviorConfig)).thenReturn("{}");
 
             var behaviorSet = new RuleSet();
@@ -213,11 +205,9 @@ class RulesEvaluationTaskTest {
             Map<String, Object> config = new HashMap<>();
             config.put("uri", "http://example.com/behavior");
 
-            when(resourceClientLibrary.getResource(any(URI.class), eq(RuleSetConfiguration.class)))
-                    .thenThrow(new ServiceException("not found"));
+            when(resourceClientLibrary.getResource(any(URI.class), eq(RuleSetConfiguration.class))).thenThrow(new ServiceException("not found"));
 
-            assertThrows(WorkflowConfigurationException.class,
-                    () -> task.configure(config, Collections.emptyMap()));
+            assertThrows(WorkflowConfigurationException.class, () -> task.configure(config, Collections.emptyMap()));
         }
 
         @Test
@@ -228,8 +218,7 @@ class RulesEvaluationTaskTest {
             config.put("appendActions", "false");
 
             var behaviorConfig = new RuleSetConfiguration();
-            when(resourceClientLibrary.getResource(any(URI.class), eq(RuleSetConfiguration.class)))
-                    .thenReturn(behaviorConfig);
+            when(resourceClientLibrary.getResource(any(URI.class), eq(RuleSetConfiguration.class))).thenReturn(behaviorConfig);
             when(jsonSerialization.serialize(behaviorConfig)).thenReturn("{}");
 
             var behaviorSet = new RuleSet();
@@ -261,10 +250,8 @@ class RulesEvaluationTaskTest {
             assertTrue(descriptor.getConfigs().containsKey("appendActions"));
             assertTrue(descriptor.getConfigs().containsKey("expressionsAsActions"));
 
-            assertEquals(ExtensionDescriptor.FieldType.URI,
-                    descriptor.getConfigs().get("uri").getFieldType());
-            assertEquals(ExtensionDescriptor.FieldType.BOOLEAN,
-                    descriptor.getConfigs().get("appendActions").getFieldType());
+            assertEquals(ExtensionDescriptor.FieldType.URI, descriptor.getConfigs().get("uri").getFieldType());
+            assertEquals(ExtensionDescriptor.FieldType.BOOLEAN, descriptor.getConfigs().get("appendActions").getFieldType());
         }
     }
 }

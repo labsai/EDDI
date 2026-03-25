@@ -10,7 +10,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 
-
 /**
  * @author ginccc
  */
@@ -32,13 +31,11 @@ public class PhoneticCorrection implements ICorrection {
 
     @Override
     public void init(List<IDictionary> dictionaries) {
-        dictionaries.forEach(dictionary -> dictionary.getWords().
-                forEach(word -> {
-                    List<IDictionary.IFoundWord> foundWords =
-                            Collections.singletonList(new FoundWord(word, true, 0.3));
-                    soundexCodes.put(calculateSoundexCode(word.getValue()), foundWords);
-                    metaphoneCodes.put(calculateMetaphoneCode(word.getValue()), foundWords);
-                }));
+        dictionaries.forEach(dictionary -> dictionary.getWords().forEach(word -> {
+            List<IDictionary.IFoundWord> foundWords = Collections.singletonList(new FoundWord(word, true, 0.3));
+            soundexCodes.put(calculateSoundexCode(word.getValue()), foundWords);
+            metaphoneCodes.put(calculateMetaphoneCode(word.getValue()), foundWords);
+        }));
     }
 
     private String calculateMetaphoneCode(String word) {

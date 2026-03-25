@@ -76,12 +76,8 @@ public class InputMatcher extends BaseMatcher {
                     state = FAIL;
                 }
             }
-            case anyStep ->
-                state = occurredInAnyStep(memory, EXPRESSIONS_PARSED.key(), this::evaluateInputExpressions) ? SUCCESS
-                        : FAIL;
-            case never ->
-                state = occurredInAnyStep(memory, EXPRESSIONS_PARSED.key(), this::evaluateInputExpressions) ? FAIL
-                        : SUCCESS;
+            case anyStep -> state = occurredInAnyStep(memory, EXPRESSIONS_PARSED.key(), this::evaluateInputExpressions) ? SUCCESS : FAIL;
+            case never -> state = occurredInAnyStep(memory, EXPRESSIONS_PARSED.key(), this::evaluateInputExpressions) ? FAIL : SUCCESS;
         }
 
         return state;
@@ -93,8 +89,7 @@ public class InputMatcher extends BaseMatcher {
             inputExpressions = expressionProvider.parseExpressions(data.getResult());
         }
 
-        if (isInputEmpty(inputExpressions) ||
-                Collections.indexOfSubList(inputExpressions, expressions) > -1) {
+        if (isInputEmpty(inputExpressions) || Collections.indexOfSubList(inputExpressions, expressions) > -1) {
             return SUCCESS;
         } else {
             return FAIL;
@@ -102,9 +97,7 @@ public class InputMatcher extends BaseMatcher {
     }
 
     private boolean isInputEmpty(Expressions inputExpressions) {
-        return expressions.size() == 1 &&
-                expressions.get(0).getExpressionName().equals(KEY_EMPTY) &&
-                inputExpressions.size() == 0;
+        return expressions.size() == 1 && expressions.get(0).getExpressionName().equals(KEY_EMPTY) && inputExpressions.size() == 0;
     }
 
     @Override

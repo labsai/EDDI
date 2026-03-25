@@ -16,8 +16,7 @@ import java.util.*;
  * <p>
  * Uses a dedicated {@code audit_ledger} collection with insert-only semantics.
  * No {@code updateOne()}, {@code replaceOne()}, or {@code deleteOne()}
- * operations
- * are ever called — this enforces the write-once contract.
+ * operations are ever called — this enforces the write-once contract.
  * <p>
  * Annotated {@code @DefaultBean} so PostgreSQL can provide an alternative.
  *
@@ -105,8 +104,7 @@ public class AuditStore implements IAuditStore {
 
     private List<AuditEntry> query(Document filter, int skip, int limit) {
         List<AuditEntry> result = new ArrayList<>();
-        var iterable = collection.find(filter)
-                .sort(new Document(F_TIMESTAMP, -1));
+        var iterable = collection.find(filter).sort(new Document(F_TIMESTAMP, -1));
 
         if (skip > 0)
             iterable.skip(skip);
@@ -151,25 +149,14 @@ public class AuditStore implements IAuditStore {
     }
 
     private static AuditEntry fromDocument(Document doc) {
-        return new AuditEntry(
-                doc.getString(F_ID),
-                doc.getString(F_CONVERSATION_ID),
-                doc.getString(F_AGENT_ID),
-                doc.getInteger(F_AGENT_VERSION),
-                doc.getString(F_USER_ID),
-                doc.getString(F_ENVIRONMENT),
-                doc.getInteger(F_STEP_INDEX, 0),
-                doc.getString(F_TASK_ID),
-                doc.getString(F_TASK_TYPE),
-                doc.getInteger(F_TASK_INDEX, 0),
-                doc.getLong(F_DURATION_MS) != null ? doc.getLong(F_DURATION_MS) : 0L,
+        return new AuditEntry(doc.getString(F_ID), doc.getString(F_CONVERSATION_ID), doc.getString(F_AGENT_ID), doc.getInteger(F_AGENT_VERSION),
+                doc.getString(F_USER_ID), doc.getString(F_ENVIRONMENT), doc.getInteger(F_STEP_INDEX, 0), doc.getString(F_TASK_ID),
+                doc.getString(F_TASK_TYPE), doc.getInteger(F_TASK_INDEX, 0), doc.getLong(F_DURATION_MS) != null ? doc.getLong(F_DURATION_MS) : 0L,
                 doc.get(F_INPUT) instanceof Document d ? new LinkedHashMap<>(d) : null,
                 doc.get(F_OUTPUT) instanceof Document d ? new LinkedHashMap<>(d) : null,
                 doc.get(F_LLM_DETAIL) instanceof Document d ? new LinkedHashMap<>(d) : null,
-                doc.get(F_TOOL_CALLS) instanceof Document d ? new LinkedHashMap<>(d) : null,
-                doc.getList(F_ACTIONS, String.class),
+                doc.get(F_TOOL_CALLS) instanceof Document d ? new LinkedHashMap<>(d) : null, doc.getList(F_ACTIONS, String.class),
                 doc.getDouble(F_COST) != null ? doc.getDouble(F_COST) : 0.0,
-                doc.getDate(F_TIMESTAMP) != null ? doc.getDate(F_TIMESTAMP).toInstant() : null,
-                doc.getString(F_HMAC));
+                doc.getDate(F_TIMESTAMP) != null ? doc.getDate(F_TIMESTAMP).toInstant() : null, doc.getString(F_HMAC));
     }
 }

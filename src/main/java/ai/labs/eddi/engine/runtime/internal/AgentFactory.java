@@ -34,9 +34,7 @@ public class AgentFactory implements IAgentFactory {
     private static final Logger log = Logger.getLogger(AgentFactory.class);
 
     @Inject
-    public AgentFactory(IAgentStoreClientLibrary agentStoreClientLibrary,
-                      IDeploymentListener deploymentListener,
-                      MeterRegistry meterRegistry) {
+    public AgentFactory(IAgentStoreClientLibrary agentStoreClientLibrary, IDeploymentListener deploymentListener, MeterRegistry meterRegistry) {
         this.agentStoreClientLibrary = agentStoreClientLibrary;
         this.deploymentListener = deploymentListener;
         this.deployedAgents = new LinkedList<>();
@@ -45,8 +43,7 @@ public class AgentFactory implements IAgentFactory {
     }
 
     private Map<Deployment.Environment, ConcurrentHashMap<AgentId, IAgent>> createEmptyEnvironments() {
-        Map<Deployment.Environment, ConcurrentHashMap<AgentId, IAgent>> environments =
-                new HashMap<>(Deployment.Environment.values().length);
+        Map<Deployment.Environment, ConcurrentHashMap<AgentId, IAgent>> environments = new HashMap<>(Deployment.Environment.values().length);
         environments.put(Deployment.Environment.production, new ConcurrentHashMap<>());
         environments.put(Deployment.Environment.test, new ConcurrentHashMap<>());
         return environments;
@@ -64,10 +61,8 @@ public class AgentFactory implements IAgentFactory {
 
     private IAgent findLatestAgent(Deployment.Environment environment, String agentId, Deployment.Status requiredStatus) {
         Map<AgentId, IAgent> agents = getAgentEnvironment(environment);
-        List<AgentId> agentVersions = agents.keySet().stream()
-                .filter(id -> id.getId().equals(agentId))
-                .sorted(Collections.reverseOrder(Comparator.comparingInt(AgentId::getVersion)))
-                .toList();
+        List<AgentId> agentVersions = agents.keySet().stream().filter(id -> id.getId().equals(agentId))
+                .sorted(Collections.reverseOrder(Comparator.comparingInt(AgentId::getVersion))).toList();
 
         for (AgentId agentVersion : agentVersions) {
             IAgent agent = agents.get(agentVersion);
@@ -147,10 +142,8 @@ public class AgentFactory implements IAgentFactory {
         }
     }
 
-
     @Override
-    public void deployAgent(Deployment.Environment environment, final String agentId, final Integer version,
-                          DeploymentProcess deploymentProcess) {
+    public void deployAgent(Deployment.Environment environment, final String agentId, final Integer version, DeploymentProcess deploymentProcess) {
         var finalDeploymentProcess = defaultIfNull(deploymentProcess);
 
         AgentId id = new AgentId(agentId, version);
@@ -166,7 +159,8 @@ public class AgentFactory implements IAgentFactory {
                 }
 
                 if (existingAgent.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
-                    log.debug(String.format("Agent deployment is already in progress: %s (environment=%s, version=%d)", agentId, environment, version));
+                    log.debug(
+                            String.format("Agent deployment is already in progress: %s (environment=%s, version=%d)", agentId, environment, version));
                     return existingAgent; // Keep the IN_PROGRESS state
                 }
             }
@@ -228,20 +222,15 @@ public class AgentFactory implements IAgentFactory {
             }
 
             @Override
-            public IConversation startConversation(String userId,
-                                                   Map<String, Context> context,
-                                                   IPropertiesHandler propertiesHandler,
-                                                   IConversationOutputRenderer outputProvider)
-                    throws IllegalAccessException {
+            public IConversation startConversation(String userId, Map<String, Context> context, IPropertiesHandler propertiesHandler,
+                    IConversationOutputRenderer outputProvider) throws IllegalAccessException {
 
                 throw createAgentInProgressException();
             }
 
             @Override
-            public IConversation continueConversation(IConversationMemory conversationMemory,
-                                                      IPropertiesHandler propertiesHandler,
-                                                      IConversationOutputRenderer outputProvider)
-                    throws IllegalAccessException {
+            public IConversation continueConversation(IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
+                    IConversationOutputRenderer outputProvider) throws IllegalAccessException {
 
                 throw createAgentInProgressException();
             }
@@ -257,11 +246,10 @@ public class AgentFactory implements IAgentFactory {
 
     private void logAgentDeployment(String environment, String agentId, Integer agentVersion, Deployment.Status status) {
         if (status == Deployment.Status.IN_PROGRESS) {
-            log.info(String.format("Deploying agent... (environment=%s, agentId=%s, version=%s)",
-                    environment, agentId, agentVersion));
+            log.info(String.format("Deploying agent... (environment=%s, agentId=%s, version=%s)", environment, agentId, agentVersion));
         } else {
-            log.info(String.format("Agent deployed with status: %s (environment=%s, agentId=%s, version=%s)", status,
-                    environment, agentId, agentVersion));
+            log.info(String.format("Agent deployed with status: %s (environment=%s, agentId=%s, version=%s)", status, environment, agentId,
+                    agentVersion));
         }
     }
 
@@ -289,8 +277,10 @@ public class AgentFactory implements IAgentFactory {
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
             AgentId that = (AgentId) o;
             return java.util.Objects.equals(id, that.id) && java.util.Objects.equals(version, that.version);
         }

@@ -19,10 +19,7 @@ class AgentExecutionHelper {
     /**
      * Executes a generic action with retry logic based on configuration.
      */
-    static <T> T executeWithRetry(
-            Callable<T> action,
-            LlmConfiguration.Task task,
-            String actionDescription) throws LifecycleException {
+    static <T> T executeWithRetry(Callable<T> action, LlmConfiguration.Task task, String actionDescription) throws LifecycleException {
 
         LlmConfiguration.RetryConfiguration retryConfig = task.getRetry();
         if (retryConfig == null) {
@@ -31,8 +28,7 @@ class AgentExecutionHelper {
 
         int maxAttempts = retryConfig.getMaxAttempts() != null ? retryConfig.getMaxAttempts() : 3;
         long backoffDelay = retryConfig.getBackoffDelayMs() != null ? retryConfig.getBackoffDelayMs() : 1000L;
-        double backoffMultiplier = retryConfig.getBackoffMultiplier() != null ? retryConfig.getBackoffMultiplier()
-                : 2.0;
+        double backoffMultiplier = retryConfig.getBackoffMultiplier() != null ? retryConfig.getBackoffMultiplier() : 2.0;
         long maxBackoffDelay = retryConfig.getMaxBackoffDelayMs() != null ? retryConfig.getMaxBackoffDelayMs() : 10000L;
 
         int attempt = 0;
@@ -55,8 +51,8 @@ class AgentExecutionHelper {
 
                 if (attempt < maxAttempts) {
                     if (isRetryableError(e)) {
-                        LOGGER.warn(actionDescription + " failed (attempt " + attempt + "/" + maxAttempts
-                                + "), retrying after " + currentBackoff + "ms: " + e.getMessage());
+                        LOGGER.warn(actionDescription + " failed (attempt " + attempt + "/" + maxAttempts + "), retrying after " + currentBackoff
+                                + "ms: " + e.getMessage());
 
                         try {
                             Thread.sleep(currentBackoff);
@@ -82,25 +78,18 @@ class AgentExecutionHelper {
     /**
      * Executes chat model with retry logic based on configuration.
      */
-    static ChatResponse executeChatWithRetry(
-            ChatModel chatModel,
-            java.util.List<dev.langchain4j.data.message.ChatMessage> messages,
+    static ChatResponse executeChatWithRetry(ChatModel chatModel, java.util.List<dev.langchain4j.data.message.ChatMessage> messages,
             LlmConfiguration.Task task) throws LifecycleException {
 
-        return executeWithRetry(
-                () -> chatModel.chat(messages),
-                task,
-                "Chat model execution");
+        return executeWithRetry(() -> chatModel.chat(messages), task, "Chat model execution");
     }
 
     /**
      * Enum of known retryable error types.
      */
     private enum RetryableErrorType {
-        SOCKET_TIMEOUT(java.net.SocketTimeoutException.class),
-        TIMEOUT(java.util.concurrent.TimeoutException.class),
-        CONNECT_EXCEPTION(java.net.ConnectException.class),
-        UNKNOWN_HOST(java.net.UnknownHostException.class);
+        SOCKET_TIMEOUT(java.net.SocketTimeoutException.class), TIMEOUT(java.util.concurrent.TimeoutException.class), CONNECT_EXCEPTION(
+                java.net.ConnectException.class), UNKNOWN_HOST(java.net.UnknownHostException.class);
 
         private final Class<? extends Throwable> exceptionClass;
 
@@ -129,14 +118,8 @@ class AgentExecutionHelper {
 
             String message = current.getMessage() != null ? current.getMessage().toLowerCase() : "";
 
-            if (message.contains("timeout") ||
-                    message.contains("rate limit") ||
-                    message.contains("too many requests") ||
-                    message.contains("503") ||
-                    message.contains("502") ||
-                    message.contains("504") ||
-                    message.contains("connection") ||
-                    message.contains("temporary")) {
+            if (message.contains("timeout") || message.contains("rate limit") || message.contains("too many requests") || message.contains("503")
+                    || message.contains("502") || message.contains("504") || message.contains("connection") || message.contains("temporary")) {
                 return true;
             }
 

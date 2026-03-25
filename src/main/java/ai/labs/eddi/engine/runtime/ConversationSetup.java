@@ -18,39 +18,34 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
 public class ConversationSetup implements IConversationSetup {
-        private final IConversationDescriptorStore conversationDescriptorStore;
-        private final IDocumentDescriptorStore documentDescriptorStore;
+    private final IConversationDescriptorStore conversationDescriptorStore;
+    private final IDocumentDescriptorStore documentDescriptorStore;
 
-        @Inject
-        public ConversationSetup(IConversationDescriptorStore conversationDescriptorStore,
-                        IDocumentDescriptorStore documentDescriptorStore) {
-                this.conversationDescriptorStore = conversationDescriptorStore;
-                this.documentDescriptorStore = documentDescriptorStore;
-        }
+    @Inject
+    public ConversationSetup(IConversationDescriptorStore conversationDescriptorStore, IDocumentDescriptorStore documentDescriptorStore) {
+        this.conversationDescriptorStore = conversationDescriptorStore;
+        this.documentDescriptorStore = documentDescriptorStore;
+    }
 
-        @Override
-        public void createConversationDescriptor(String agentId, IAgent latestAgent, String userId,
-                        String conversationId, URI conversationUri)
-                        throws ResourceStoreException, ResourceNotFoundException {
+    @Override
+    public void createConversationDescriptor(String agentId, IAgent latestAgent, String userId, String conversationId, URI conversationUri)
+            throws ResourceStoreException, ResourceNotFoundException {
 
-                var agentVersion = latestAgent.getAgentVersion();
-                var agentResourceUri = createURI(IRestAgentStore.resourceURI, agentId,
-                                IRestAgentStore.versionQueryParam, agentVersion);
-                var conversationDescriptor = createConversationDescriptorDocument(conversationUri, agentResourceUri,
-                                userId);
-                var agentDescriptor = documentDescriptorStore.readDescriptor(latestAgent.getAgentId(),
-                                latestAgent.getAgentVersion());
+        var agentVersion = latestAgent.getAgentVersion();
+        var agentResourceUri = createURI(IRestAgentStore.resourceURI, agentId, IRestAgentStore.versionQueryParam, agentVersion);
+        var conversationDescriptor = createConversationDescriptorDocument(conversationUri, agentResourceUri, userId);
+        var agentDescriptor = documentDescriptorStore.readDescriptor(latestAgent.getAgentId(), latestAgent.getAgentVersion());
 
-                conversationDescriptor.setAgentName(agentDescriptor.getName());
-                conversationDescriptorStore.createDescriptor(conversationId, 0, conversationDescriptor);
-        }
+        conversationDescriptor.setAgentName(agentDescriptor.getName());
+        conversationDescriptorStore.createDescriptor(conversationId, 0, conversationDescriptor);
+    }
 
-        @Override
-        public String computeAnonymousUserIdIfEmpty(String userId, Context userIdContext) {
-                return isNullOrEmpty(userId)
-                                ? (userIdContext != null && userIdContext.getValue() instanceof String
-                                                ? userIdContext.getValue().toString()
-                                                : "anonymous-" + UUID.randomUUID().toString().replace("-", ""))
-                                : userId;
-        }
+    @Override
+    public String computeAnonymousUserIdIfEmpty(String userId, Context userIdContext) {
+        return isNullOrEmpty(userId)
+                ? (userIdContext != null && userIdContext.getValue() instanceof String
+                        ? userIdContext.getValue().toString()
+                        : "anonymous-" + UUID.randomUUID().toString().replace("-", ""))
+                : userId;
+    }
 }

@@ -10,9 +10,7 @@ import java.util.List;
  */
 public class RawSolution {
     public enum Match {
-        FULLY,
-        PARTLY,
-        NOTHING
+        FULLY, PARTLY, NOTHING
     }
 
     private Match match;

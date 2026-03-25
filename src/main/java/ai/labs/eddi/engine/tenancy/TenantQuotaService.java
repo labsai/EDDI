@@ -19,8 +19,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Tenant quota enforcement engine.
  * <p>
- * Checks quotas before conversation start and API calls,
- * tracks usage counters, and exposes Micrometer metrics.
+ * Checks quotas before conversation start and API calls, tracks usage counters,
+ * and exposes Micrometer metrics.
  * <p>
  * In single-tenant mode, all operations use the default tenant ID.
  */
@@ -87,7 +87,8 @@ public class TenantQuotaService {
     /**
      * Check whether a new conversation is allowed for a specific tenant.
      */
-    // TODO: Phase 7.1 — make check+record atomic for multi-tenant SaaS (TOCTOU race under concurrency)
+    // TODO: Phase 7.1 — make check+record atomic for multi-tenant SaaS (TOCTOU race
+    // under concurrency)
     public QuotaCheckResult checkConversationQuota(String tenantId) {
         TenantQuota quota = quotaStore.getQuota(tenantId);
         if (quota == null || !quota.enabled()) {
@@ -112,7 +113,8 @@ public class TenantQuotaService {
     }
 
     /**
-     * Check whether an API call (say/sayStreaming) is allowed for the default tenant.
+     * Check whether an API call (say/sayStreaming) is allowed for the default
+     * tenant.
      */
     public QuotaCheckResult checkApiCallQuota() {
         return checkApiCallQuota(defaultTenantId);
@@ -121,7 +123,8 @@ public class TenantQuotaService {
     /**
      * Check whether an API call is allowed for a specific tenant.
      */
-    // TODO: Phase 7.1 — make check+record atomic for multi-tenant SaaS (TOCTOU race under concurrency)
+    // TODO: Phase 7.1 — make check+record atomic for multi-tenant SaaS (TOCTOU race
+    // under concurrency)
     public QuotaCheckResult checkApiCallQuota(String tenantId) {
         TenantQuota quota = quotaStore.getQuota(tenantId);
         if (quota == null || !quota.enabled()) {

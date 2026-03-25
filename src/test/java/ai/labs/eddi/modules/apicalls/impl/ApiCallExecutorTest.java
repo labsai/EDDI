@@ -12,7 +12,6 @@ import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-
 import java.net.URI;
 import java.util.*;
 
@@ -22,9 +21,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 /**
- * Tests for ApiCallExecutor, focusing on:
- * - L1 fix: content-type equality check (equals vs startsWith)
- * - L2 fix: retryCall returns false instead of throwing
+ * Tests for ApiCallExecutor, focusing on: - L1 fix: content-type equality check
+ * (equals vs startsWith) - L2 fix: retryCall returns false instead of throwing
  */
 class ApiCallExecutorTest {
 
@@ -59,10 +57,8 @@ class ApiCallExecutorTest {
         when(mockRequest.toMap()).thenReturn(new HashMap<>());
 
         // Default: let prePostUtils pass through template objects
-        when(prePostUtils.executePreRequestPropertyInstructions(any(), any(), any()))
-                .thenAnswer(inv -> inv.getArgument(1));
-        when(prePostUtils.templateValues(anyString(), any()))
-                .thenAnswer(inv -> inv.getArgument(0));
+        when(prePostUtils.executePreRequestPropertyInstructions(any(), any(), any())).thenAnswer(inv -> inv.getArgument(1));
+        when(prePostUtils.templateValues(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
         // Default HTTP client returns mock request
         when(httpClient.newRequest(any(URI.class), any())).thenReturn(mockRequest);
@@ -183,7 +179,8 @@ class ApiCallExecutorTest {
         postResponse.setRetryApiCallInstruction(retryInstruction);
         call.setPostResponse(postResponse);
 
-        // First call returns 503 (retry), second returns 503 (retry), third time maxRetries exceeded
+        // First call returns 503 (retry), second returns 503 (retry), third time
+        // maxRetries exceeded
         when(mockResponse.getHttpCode()).thenReturn(503);
         when(mockResponse.getContentAsString()).thenReturn("Service Unavailable");
         when(mockResponse.getHttpCodeMessage()).thenReturn("Service Unavailable");
@@ -220,26 +217,22 @@ class ApiCallExecutorTest {
 
     @Test
     void execute_nullCall_throwsIllegalArgument() {
-        assertThrows(IllegalArgumentException.class,
-                () -> executor.execute(null, memory, new HashMap<>(), "http://example.com"));
+        assertThrows(IllegalArgumentException.class, () -> executor.execute(null, memory, new HashMap<>(), "http://example.com"));
     }
 
     @Test
     void execute_nullMemory_throwsIllegalArgument() {
-        assertThrows(IllegalArgumentException.class,
-                () -> executor.execute(new ApiCall(), null, new HashMap<>(), "http://example.com"));
+        assertThrows(IllegalArgumentException.class, () -> executor.execute(new ApiCall(), null, new HashMap<>(), "http://example.com"));
     }
 
     @Test
     void execute_nullTemplateData_throwsIllegalArgument() {
-        assertThrows(IllegalArgumentException.class,
-                () -> executor.execute(new ApiCall(), memory, null, "http://example.com"));
+        assertThrows(IllegalArgumentException.class, () -> executor.execute(new ApiCall(), memory, null, "http://example.com"));
     }
 
     @Test
     void execute_emptyServerUrl_throwsIllegalArgument() {
-        assertThrows(IllegalArgumentException.class,
-                () -> executor.execute(new ApiCall(), memory, new HashMap<>(), "  "));
+        assertThrows(IllegalArgumentException.class, () -> executor.execute(new ApiCall(), memory, new HashMap<>(), "  "));
     }
 
     // ==================== Helpers ====================

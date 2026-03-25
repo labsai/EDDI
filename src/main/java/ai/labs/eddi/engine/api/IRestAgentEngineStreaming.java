@@ -33,13 +33,8 @@ public interface IRestAgentEngineStreaming {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.SERVER_SENT_EVENTS)
     @Operation(description = "Send user input and receive streaming SSE response with workflow events and LLM tokens.")
-    void sayStreaming(@PathParam("environment") Deployment.Environment environment,
-            @PathParam("agentId") String agentId,
-            @PathParam("conversationId") String conversationId,
-            @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
+    void sayStreaming(@PathParam("environment") Deployment.Environment environment, @PathParam("agentId") String agentId,
+            @PathParam("conversationId") String conversationId, @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
             @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
-            @QueryParam("returningFields") List<String> returningFields,
-            InputData inputData,
-            @Context SseEventSink eventSink,
-            @Context Sse sse);
+            @QueryParam("returningFields") List<String> returningFields, InputData inputData, @Context SseEventSink eventSink, @Context Sse sse);
 }

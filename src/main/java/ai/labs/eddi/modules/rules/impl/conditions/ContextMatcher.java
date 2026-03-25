@@ -27,9 +27,7 @@ public class ContextMatcher implements IRuleCondition {
     private static final String CONTEXT = "context";
 
     enum ContextType {
-        expressions,
-        object,
-        string
+        expressions, object, string
     }
 
     private String contextKey;
@@ -49,8 +47,7 @@ public class ContextMatcher implements IRuleCondition {
 
     private static final Logger log = Logger.getLogger(ContextMatcher.class);
 
-    public ContextMatcher(IExpressionProvider expressionProvider,
-                          IJsonSerialization jsonSerialization) {
+    public ContextMatcher(IExpressionProvider expressionProvider, IJsonSerialization jsonSerialization) {
         this.expressionProvider = expressionProvider;
         this.jsonSerialization = jsonSerialization;
     }
@@ -111,19 +108,17 @@ public class ContextMatcher implements IRuleCondition {
             Context context = contextDatum.getResult();
             if (contextDatum.getKey().equals(CONTEXT + ":" + contextKey)) {
                 switch (context.getType()) {
-                    case expressions:
-                        Expressions contextExpressions = expressionProvider.
-                                parseExpressions(context.getValue().toString());
+                    case expressions :
+                        Expressions contextExpressions = expressionProvider.parseExpressions(context.getValue().toString());
                         success = Collections.indexOfSubList(contextExpressions, expressions) != -1;
                         break;
-                    case object:
+                    case object :
                         try {
                             if (object.getObjectKeyPath() != null) {
                                 final String contextObjectAsJson = jsonSerialization.serialize(context.getValue());
                                 Object foundObjectValue = findObjectValue(contextObjectAsJson);
                                 if (foundObjectValue != null) { // key exists in context, so we continue
-                                    success = object.getObjectValue() == null ||
-                                            object.getObjectValue().equals(foundObjectValue.toString());
+                                    success = object.getObjectValue() == null || object.getObjectValue().equals(foundObjectValue.toString());
                                 }
                             }
                         } catch (IOException e) {
@@ -132,8 +127,8 @@ public class ContextMatcher implements IRuleCondition {
                         }
                         break;
 
-                    default:
-                    case string:
+                    default :
+                    case string :
                         success = string.equals(context.getValue().toString());
                         break;
                 }
@@ -186,8 +181,10 @@ public class ContextMatcher implements IRuleCondition {
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
             ObjectValue that = (ObjectValue) o;
             return java.util.Objects.equals(objectKeyPath, that.objectKeyPath) && java.util.Objects.equals(objectValue, that.objectValue);
         }

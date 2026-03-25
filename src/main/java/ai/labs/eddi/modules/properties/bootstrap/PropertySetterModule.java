@@ -25,7 +25,7 @@ public class PropertySetterModule {
     private final Instance<ILifecycleTask> instance;
 
     public PropertySetterModule(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
-                                Instance<ILifecycleTask> instance) {
+            Instance<ILifecycleTask> instance) {
         this.lifecycleTaskProviders = lifecycleTaskProviders;
         this.instance = instance;
     }

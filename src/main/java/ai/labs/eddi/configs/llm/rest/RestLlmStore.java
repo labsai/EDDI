@@ -26,9 +26,7 @@ public class RestLlmStore implements IRestLlmStore {
     private final RestVersionInfo<LlmConfiguration> restVersionInfo;
 
     @Inject
-    public RestLlmStore(ILlmStore httpCallsStore,
-            IDocumentDescriptorStore documentDescriptorStore,
-            IJsonSchemaCreator jsonSchemaCreator) {
+    public RestLlmStore(ILlmStore httpCallsStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, httpCallsStore, documentDescriptorStore);
         this.httpCallsStore = httpCallsStore;
         this.jsonSchemaCreator = jsonSchemaCreator;

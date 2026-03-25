@@ -23,7 +23,7 @@ public class ConversationStepTest {
 
     @Test
     public void testPlain() {
-        //assert
+        // assert
         Assertions.assertNull(conversationStep.getData("whatever"));
         final List<IData<Void>> allData = conversationStep.getAllData("void");
         Assertions.assertNotNull(allData);
@@ -38,27 +38,27 @@ public class ConversationStepTest {
 
     @Test
     public void testGetData() {
-        //setup
+        // setup
         final var data = new Data<>("testKey", new LinkedList<>());
         conversationStep.storeData(data);
 
-        //assert
+        // assert
         Assertions.assertNotNull(conversationStep.getData("testKey"));
         Assertions.assertEquals(data, conversationStep.getData("testKey"));
     }
 
     @Test
     public void testGetAllData() {
-        //setup
+        // setup
         final var data1 = new Data<>("testKey1", new LinkedList<>());
         final var data2 = new Data<>("testKey2", new LinkedList<>());
         conversationStep.storeData(data1);
         conversationStep.storeData(data2);
 
-        //test
+        // test
         final var allData = conversationStep.getAllData("testKey");
 
-        //assert
+        // assert
         Assertions.assertNotNull(allData);
         Assertions.assertEquals(2, allData.size());
         Assertions.assertEquals(data1, allData.get(0));
@@ -67,16 +67,16 @@ public class ConversationStepTest {
 
     @Test
     public void testGetAllKeys() {
-        //setup
+        // setup
         final var data1 = new Data<>("testKey1", new LinkedList<>());
         final var data2 = new Data<>("testKey2", new LinkedList<>());
         conversationStep.storeData(data1);
         conversationStep.storeData(data2);
 
-        //test
+        // test
         final Set<String> allKeys = conversationStep.getAllKeys();
 
-        //assert
+        // assert
         Assertions.assertNotNull(allKeys);
         Assertions.assertEquals("testKey1", allKeys.toArray()[0]);
         Assertions.assertEquals("testKey2", allKeys.toArray()[1]);
@@ -85,16 +85,16 @@ public class ConversationStepTest {
 
     @Test
     public void testGetAllElements() {
-        //setup
+        // setup
         final var data1 = new Data<>("testKey1", "testData1");
         final var data2 = new Data<>("testKey2", "testData2");
         conversationStep.storeData(data1);
         conversationStep.storeData(data2);
 
-        //test
+        // test
         final var allData = conversationStep.getAllElements();
 
-        //assert
+        // assert
         Assertions.assertNotNull(allData);
         Assertions.assertEquals("testData1", allData.toArray(new IData[2])[0].getResult());
         Assertions.assertEquals("testData2", allData.toArray(new IData[2])[1].getResult());
@@ -102,33 +102,33 @@ public class ConversationStepTest {
 
     @Test
     public void testSize() {
-        //setup
+        // setup
         final var data1 = new Data<>("testKey1", new LinkedList<>());
         conversationStep.storeData(data1);
 
-        //assert
+        // assert
         Assertions.assertEquals(1, conversationStep.size());
     }
 
     @Test
     public void testIsEmpty() {
-        //setup
+        // setup
         final var data1 = new Data<>("testKey1", new LinkedList<>());
         conversationStep.storeData(data1);
 
-        //assert
+        // assert
         Assertions.assertFalse(conversationStep.isEmpty());
     }
 
     @Test
     public void testEquals() {
-        //setup
+        // setup
         final var data = new Data<>("testKey", new LinkedList<>());
         conversationStep.storeData(data);
         ConversationStep conversationStep = new ConversationStep(new ConversationOutput());
         conversationStep.storeData(data);
 
-        //assert
+        // assert
         Assertions.assertEquals(conversationStep, conversationStep);
     }
 }

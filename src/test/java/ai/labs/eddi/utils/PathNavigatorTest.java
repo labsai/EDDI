@@ -54,10 +54,8 @@ class PathNavigatorTest {
     @Test
     void shouldGetNestedPathWithArrayIndex() {
         var weather = Map.of("description", "sunny");
-        var map = Map.of("httpCalls", Map.of("currentWeather",
-                Map.of("weather", List.of(weather))));
-        assertEquals("sunny",
-                PathNavigator.getValue("httpCalls.currentWeather.weather[0].description", map));
+        var map = Map.of("httpCalls", Map.of("currentWeather", Map.of("weather", List.of(weather))));
+        assertEquals("sunny", PathNavigator.getValue("httpCalls.currentWeather.weather[0].description", map));
     }
 
     @Test
@@ -134,13 +132,10 @@ class PathNavigatorTest {
         // Integration test:
         // "memory.current.httpCalls.currentWeather.weather[0].description"
         var weather = Map.of("description", "light rain", "id", 500);
-        Map<String, Object> map = Map.of("memory", Map.of("current",
-                Map.of("httpCalls", Map.of("currentWeather",
-                        Map.of("weather", List.of(weather), "main", Map.of("temp", 72.5))))));
-        assertEquals("light rain",
-                PathNavigator.getValue("memory.current.httpCalls.currentWeather.weather[0].description", map));
-        assertEquals(72.5,
-                PathNavigator.getValue("memory.current.httpCalls.currentWeather.main.temp", map));
+        Map<String, Object> map = Map.of("memory",
+                Map.of("current", Map.of("httpCalls", Map.of("currentWeather", Map.of("weather", List.of(weather), "main", Map.of("temp", 72.5))))));
+        assertEquals("light rain", PathNavigator.getValue("memory.current.httpCalls.currentWeather.weather[0].description", map));
+        assertEquals(72.5, PathNavigator.getValue("memory.current.httpCalls.currentWeather.main.temp", map));
     }
 
     @Test

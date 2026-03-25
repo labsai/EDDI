@@ -7,14 +7,12 @@ import java.util.regex.Pattern;
 
 /**
  * Safe navigation utility for dot-separated paths through Map/List structures.
- * Replaces explicit OGNL calls (Ognl.getValue/Ognl.setValue) to eliminate
- * the security surface from arbitrary method invocation.
+ * Replaces explicit OGNL calls (Ognl.getValue/Ognl.setValue) to eliminate the
+ * security surface from arbitrary method invocation.
  * <p>
- * Supports:
- * - Dot-path navigation: "a.b.c"
- * - Array index access: "items[0].name"
- * - Simple arithmetic on final value: "properties.count+1"
- * - String concatenation: "properties.first+' '+properties.last"
+ * Supports: - Dot-path navigation: "a.b.c" - Array index access:
+ * "items[0].name" - Simple arithmetic on final value: "properties.count+1" -
+ * String concatenation: "properties.first+' '+properties.last"
  * <p>
  * Does NOT support method invocation, static class access, or object
  * instantiation.
@@ -32,9 +30,11 @@ public class PathNavigator {
      * Navigate a dot-separated path through a Map/List structure and return the
      * value.
      *
-     * @param path dot-separated path, e.g.
-     *             "memory.current.httpCalls.weather[0].temp"
-     * @param root the root Map to navigate
+     * @param path
+     *            dot-separated path, e.g.
+     *            "memory.current.httpCalls.weather[0].temp"
+     * @param root
+     *            the root Map to navigate
      * @return the value at the path, or null if not found
      */
     public static Object getValue(String path, Object root) {
@@ -73,9 +73,12 @@ public class PathNavigator {
     /**
      * Set a value at a dot-separated path in a Map structure.
      *
-     * @param path  dot-separated path to set the value at
-     * @param root  the root Map
-     * @param value the value to set
+     * @param path
+     *            dot-separated path to set the value at
+     * @param root
+     *            the root Map
+     * @param value
+     *            the value to set
      */
     @SuppressWarnings("unchecked")
     public static void setValue(String path, Object root, Object value) {
@@ -165,8 +168,7 @@ public class PathNavigator {
 
         // Agenth are numbers — do arithmetic
         if (left instanceof Number leftNum && right instanceof Number rightNum) {
-            if (left instanceof Double || left instanceof Float ||
-                    right instanceof Double || right instanceof Float) {
+            if (left instanceof Double || left instanceof Float || right instanceof Double || right instanceof Float) {
                 double result = switch (operator) {
                     case "+" -> leftNum.doubleValue() + rightNum.doubleValue();
                     case "-" -> leftNum.doubleValue() - rightNum.doubleValue();

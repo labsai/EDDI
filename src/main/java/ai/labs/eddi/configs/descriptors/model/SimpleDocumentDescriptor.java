@@ -1,13 +1,11 @@
 package ai.labs.eddi.configs.descriptors.model;
 
-
 /**
  * @author ginccc
  */
 public class SimpleDocumentDescriptor {
     private String name;
     private String description;
-
 
     public SimpleDocumentDescriptor() {
     }

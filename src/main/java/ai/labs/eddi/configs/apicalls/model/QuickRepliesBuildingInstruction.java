@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.apicalls.model;
 
-
 public class QuickRepliesBuildingInstruction extends BuildingInstruction {
     private String quickReplyValue;
     private String quickReplyExpressions;

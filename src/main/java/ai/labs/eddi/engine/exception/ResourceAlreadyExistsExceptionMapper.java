@@ -7,13 +7,9 @@ import jakarta.ws.rs.ext.ExceptionMapper;
 import jakarta.ws.rs.ext.Provider;
 
 @Provider
-public class ResourceAlreadyExistsExceptionMapper
-        implements ExceptionMapper<IResourceStore.ResourceAlreadyExistsException> {
+public class ResourceAlreadyExistsExceptionMapper implements ExceptionMapper<IResourceStore.ResourceAlreadyExistsException> {
     @Override
     public Response toResponse(IResourceStore.ResourceAlreadyExistsException exception) {
-        return Response.status(Response.Status.CONFLICT)
-                .type(MediaType.TEXT_PLAIN)
-                .entity(exception.getLocalizedMessage())
-                .build();
+        return Response.status(Response.Status.CONFLICT).type(MediaType.TEXT_PLAIN).entity(exception.getLocalizedMessage()).build();
     }
 }

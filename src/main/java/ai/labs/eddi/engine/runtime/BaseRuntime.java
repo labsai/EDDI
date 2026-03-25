@@ -28,16 +28,15 @@ public class BaseRuntime implements IRuntime {
 
     @Inject
     public BaseRuntime(@ConfigProperty(name = "systemRuntime.projectName") String projectName,
-                       @ConfigProperty(name = "systemRuntime.projectVersion") String projectVersion) {
+            @ConfigProperty(name = "systemRuntime.projectVersion") String projectVersion) {
 
         this.projectName = projectName;
         this.projectVersion = projectVersion;
-        this.scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(
-                r -> {
-                    Thread t = new Thread(r, "eddi-scheduler");
-                    t.setDaemon(true);
-                    return t;
-                });
+        this.scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "eddi-scheduler");
+            t.setDaemon(true);
+            return t;
+        });
 
         init();
     }
@@ -97,9 +96,7 @@ public class BaseRuntime implements IRuntime {
     }
 
     @Override
-    public <T> Future<T> submitCallable(final Callable<T> callable,
-                                        final IFinishedExecution<T> callback,
-                                        final Map<Object, Object> threadBindings) {
+    public <T> Future<T> submitCallable(final Callable<T> callable, final IFinishedExecution<T> callback, final Map<Object, Object> threadBindings) {
 
         return getExecutorService().submit(() -> {
             try {
@@ -123,12 +120,12 @@ public class BaseRuntime implements IRuntime {
     private static class IgnoredCallableResult<T> implements IFinishedExecution<T> {
         @Override
         public void onComplete(T result) {
-            //ignored result
+            // ignored result
         }
 
         @Override
         public void onFailure(Throwable t) {
-            //ignored result
+            // ignored result
         }
     }
 }

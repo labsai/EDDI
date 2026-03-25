@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.apicalls.model;
 
-
 import java.util.Arrays;
 import java.util.List;
 
@@ -52,7 +51,8 @@ public class RetryApiCallInstruction {
     public RetryApiCallInstruction() {
     }
 
-    public RetryApiCallInstruction(Integer maxRetries, Integer exponentialBackoffDelayInMillis, List<Integer> retryOnHttpCodes, List<MatchingInfo> responseValuePathMatchers) {
+    public RetryApiCallInstruction(Integer maxRetries, Integer exponentialBackoffDelayInMillis, List<Integer> retryOnHttpCodes,
+            List<MatchingInfo> responseValuePathMatchers) {
         this.maxRetries = maxRetries;
         this.exponentialBackoffDelayInMillis = exponentialBackoffDelayInMillis;
         this.retryOnHttpCodes = retryOnHttpCodes;

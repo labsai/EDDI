@@ -38,7 +38,6 @@ public class AgentConfiguration {
         }
     }
 
-
     public List<URI> getWorkflows() {
         return workflows;
     }

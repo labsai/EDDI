@@ -40,11 +40,11 @@ class RulesEvaluator {
 
                     boolean continueLoopingOnSuccess;
                     switch (behaviorGroup.getExecutionStrategy()) {
-                        case executeAll:
+                        case executeAll :
                             continueLoopingOnSuccess = true;
                             break;
-                        default:
-                        case executeUntilFirstSuccess:
+                        default :
+                        case executeUntilFirstSuccess :
                             continueLoopingOnSuccess = false;
                     }
 
@@ -52,8 +52,7 @@ class RulesEvaluator {
                         break;
                     }
                 } else if (state == IRuleCondition.ExecutionState.ERROR) {
-                    String msg = String.format("An Error has occurred while evaluating Behavior Rule: %s",
-                            behaviorRule.getName());
+                    String msg = String.format("An Error has occurred while evaluating Behavior Rule: %s", behaviorRule.getName());
                     throw new RuleExecutionException(msg);
                 } else {
                     resultSet.getFailRules().add(behaviorRule);

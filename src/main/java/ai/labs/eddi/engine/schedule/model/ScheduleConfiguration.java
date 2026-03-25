@@ -31,8 +31,8 @@ public class ScheduleConfiguration {
         /** Wall-clock aligned cron expression. Default conversation strategy: "new". */
         CRON,
         /**
-         * Fixed-interval heartbeat. Default conversation strategy: "persistent".
-         * After fire, nextFire = lastFired + interval (drift-proof).
+         * Fixed-interval heartbeat. Default conversation strategy: "persistent". After
+         * fire, nextFire = lastFired + interval (drift-proof).
          */
         HEARTBEAT
     }

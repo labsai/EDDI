@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.llm.bootstrap;
 
-
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.modules.llm.impl.LlmTask;
@@ -41,8 +40,7 @@ public class LlmModule {
     }
 
     public LlmModule(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
-                           Instance<ILifecycleTask> lifecycleTaskInstance,
-                           Instance<ILanguageModelBuilder> langModelBuilderInstance) {
+            Instance<ILifecycleTask> lifecycleTaskInstance, Instance<ILanguageModelBuilder> langModelBuilderInstance) {
 
         this.lifecycleTaskProviders = lifecycleTaskProviders;
         this.lifecycleTaskInstance = lifecycleTaskInstance;
@@ -52,20 +50,15 @@ public class LlmModule {
     @PostConstruct
     @Inject
     protected void configure() {
-        languageModelApiConnectorBuilders.put(LLM_TYPE_OPENAI, () ->
-                langModelBuilderInstance.select(OpenAILanguageModelBuilder.class).get());
-        languageModelApiConnectorBuilders.put(LLM_TYPE_HUGGING_FACE, () ->
-                langModelBuilderInstance.select(HuggingFaceLanguageModelBuilder.class).get());
-        languageModelApiConnectorBuilders.put(LLM_TYPE_ANTHROPIC, () ->
-                langModelBuilderInstance.select(AnthropicLanguageModelBuilder.class).get());
-        languageModelApiConnectorBuilders.put(LLM_TYPE_GEMINI_VERTEX, () ->
-                langModelBuilderInstance.select(VertexGeminiLanguageModelBuilder.class).get());
-        languageModelApiConnectorBuilders.put(LLM_TYPE_GEMINI, () ->
-                langModelBuilderInstance.select(GeminiLanguageModelBuilder.class).get());
-        languageModelApiConnectorBuilders.put(LLM_TYPE_OLLAMA, () ->
-                langModelBuilderInstance.select(OllamaLanguageModelBuilder.class).get());
-        languageModelApiConnectorBuilders.put(LLM_TYPE_JLAMA, () ->
-                langModelBuilderInstance.select(JlamaLanguageModelBuilder.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_OPENAI, () -> langModelBuilderInstance.select(OpenAILanguageModelBuilder.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_HUGGING_FACE,
+                () -> langModelBuilderInstance.select(HuggingFaceLanguageModelBuilder.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_ANTHROPIC, () -> langModelBuilderInstance.select(AnthropicLanguageModelBuilder.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_GEMINI_VERTEX,
+                () -> langModelBuilderInstance.select(VertexGeminiLanguageModelBuilder.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_GEMINI, () -> langModelBuilderInstance.select(GeminiLanguageModelBuilder.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_OLLAMA, () -> langModelBuilderInstance.select(OllamaLanguageModelBuilder.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_JLAMA, () -> langModelBuilderInstance.select(JlamaLanguageModelBuilder.class).get());
 
         lifecycleTaskProviders.put(LlmTask.ID, () -> lifecycleTaskInstance.select(LlmTask.class).get());
         LOGGER.debug("Added LLM Module, current size of lifecycle modules " + lifecycleTaskProviders.size());

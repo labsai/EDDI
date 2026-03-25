@@ -1,12 +1,15 @@
 package ai.labs.eddi.secrets.model;
 
 /**
- * Immutable reference to a secret stored in the vault.
- * Parsed from the {@code ${eddivault:tenantId/agentId/keyName}} syntax.
+ * Immutable reference to a secret stored in the vault. Parsed from the
+ * {@code ${eddivault:tenantId/agentId/keyName}} syntax.
  *
- * @param tenantId the tenant namespace (default: "default" for single-tenant)
- * @param agentId  the Agent identifier
- * @param keyName  the secret key name
+ * @param tenantId
+ *            the tenant namespace (default: "default" for single-tenant)
+ * @param agentId
+ *            the Agent identifier
+ * @param keyName
+ *            the secret key name
  */
 public record SecretReference(String tenantId, String agentId, String keyName) {
 
@@ -18,18 +21,17 @@ public record SecretReference(String tenantId, String agentId, String keyName) {
     /**
      * Parse a vault reference string into a SecretReference.
      *
-     * @param reference the full reference string, e.g.
-     *                  "${eddivault:default/myAgent/openaiKey}"
+     * @param reference
+     *            the full reference string, e.g.
+     *            "${eddivault:default/myAgent/openaiKey}"
      * @return the parsed SecretReference
-     * @throws IllegalArgumentException if the string doesn't match the expected
-     *                                  format
+     * @throws IllegalArgumentException
+     *             if the string doesn't match the expected format
      */
     public static SecretReference parse(String reference) {
         var matcher = java.util.regex.Pattern.compile(VAULT_PATTERN).matcher(reference);
         if (!matcher.find()) {
-            throw new IllegalArgumentException(
-                    "Invalid vault reference: " + reference +
-                            ". Expected format: ${eddivault:tenantId/agentId/keyName}");
+            throw new IllegalArgumentException("Invalid vault reference: " + reference + ". Expected format: ${eddivault:tenantId/agentId/keyName}");
         }
         return new SecretReference(matcher.group(1), matcher.group(2), matcher.group(3));
     }

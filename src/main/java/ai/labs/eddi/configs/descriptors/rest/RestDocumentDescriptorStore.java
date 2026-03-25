@@ -9,7 +9,6 @@ import ai.labs.eddi.configs.descriptors.model.SimpleDocumentDescriptor;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.jboss.logging.Logger;
 
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;

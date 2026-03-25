@@ -64,15 +64,9 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private final List<DeploymentInfo> deploymentInfos = new LinkedList<>();
 
     @Inject
-    public AgentDeploymentManagement(IDeploymentStore deploymentStore,
-            IAgentFactory agentFactory,
-            IAgentStore agentStore,
-            IAgentsReadiness agentsReadiness,
-            IConversationMemoryStore conversationMemoryStore,
-            IDocumentDescriptorStore documentDescriptorStore,
-            IMigrationManager migrationManager,
-            V6RenameMigration v6RenameMigration,
-            IRuntime runtime,
+    public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
+            IAgentsReadiness agentsReadiness, IConversationMemoryStore conversationMemoryStore, IDocumentDescriptorStore documentDescriptorStore,
+            IMigrationManager migrationManager, V6RenameMigration v6RenameMigration, IRuntime runtime,
             @ConfigProperty(name = "eddi.conversations.maximumLifeTimeOfIdleConversationsInDays") int maximumLifeTimeOfIdleConversationsInDays) {
         this.deploymentStore = deploymentStore;
         this.agentFactory = agentFactory;
@@ -114,14 +108,10 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     public void checkDeployments() {
         try {
             deploymentStore.readDeploymentInfos(deployed).stream()
-                    .filter(deploymentInfo -> deploymentInfo.getAgentId() != null
-                            && deploymentInfo.getAgentVersion() != null)
-                    .filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo))
-                    .forEach(deploymentInfo -> {
+                    .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null)
+                    .filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo)).forEach(deploymentInfo -> {
                         try {
-                            agentFactory.deployAgent(deploymentInfo.getEnvironment(),
-                                    deploymentInfo.getAgentId(),
-                                    deploymentInfo.getAgentVersion(),
+                            agentFactory.deployAgent(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(),
                                     null);
 
                             this.deploymentInfos.add(deploymentInfo);
@@ -130,23 +120,15 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                         } catch (Exception e) {
                             // Catch any other exception (e.g. IllegalStateException wrapping
                             // ResourceNotFoundException) so one broken Agent doesn't block all others
-                            LOGGER.error(format(
-                                    "Failed to deploy Agent (id=%s, version=%d, environment=%s), skipping. Cause: %s",
-                                    deploymentInfo.getAgentId(),
-                                    deploymentInfo.getAgentVersion(),
-                                    deploymentInfo.getEnvironment(),
-                                    e.getMessage()));
+                            LOGGER.error(format("Failed to deploy Agent (id=%s, version=%d, environment=%s), skipping. Cause: %s",
+                                    deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(), deploymentInfo.getEnvironment(), e.getMessage()));
 
                             // If the root cause is a missing resource, auto-clean the stale record
                             if (isCausedByResourceNotFound(e)) {
-                                LOGGER.warn(format(
-                                        "Agent config not found for id=%s version=%d — marking deployment as undeployed",
+                                LOGGER.warn(format("Agent config not found for id=%s version=%d — marking deployment as undeployed",
                                         deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion()));
-                                deploymentStore.setDeploymentInfo(
-                                        deploymentInfo.getEnvironment().toString(),
-                                        deploymentInfo.getAgentId(),
-                                        deploymentInfo.getAgentVersion(),
-                                        undeployed);
+                                deploymentStore.setDeploymentInfo(deploymentInfo.getEnvironment().toString(), deploymentInfo.getAgentId(),
+                                        deploymentInfo.getAgentVersion(), undeployed);
                             }
                         }
                     });
@@ -171,8 +153,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             if (lastDeploymentCheck == null || lastDeploymentCheck.isBefore(oneHourAgo)) {
                 lastDeploymentCheck = Instant.now();
                 var postUndeloymentAttempts = deploymentStore.readDeploymentInfos(deployed).stream()
-                        .filter(deploymentInfo -> deploymentInfo.getAgentId() != null
-                                && deploymentInfo.getAgentVersion() != null)
+                        .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null)
                         .map(deploymentInfo -> {
                             var environmentName = deploymentInfo.getEnvironment().toString();
                             var environment = Environment.valueOf(environmentName);
@@ -202,15 +183,13 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                                             endOldConversationsWithOldAgents(agentId, agentVersion);
 
                                             manageDeploymentOfOldAgent(environment, agentId, agentVersion);
-                                        } catch (ResourceStoreException | ResourceNotFoundException | ServiceException
-                                                | IllegalAccessException e) {
+                                        } catch (ResourceStoreException | ResourceNotFoundException | ServiceException | IllegalAccessException e) {
                                             LOGGER.error(e.getLocalizedMessage(), e);
                                         }
                                     };
                                 }
                             } catch (ServiceException | IllegalAccessException | IllegalArgumentException e) {
-                                var message = "Error while deployment management of Agent " +
-                                        "(environment=%s, agentId=%s, version=%s)!\n";
+                                var message = "Error while deployment management of Agent " + "(environment=%s, agentId=%s, version=%s)!\n";
 
                                 LOGGER.error(format(message, environment, agentId, agentVersion));
                                 LOGGER.error(e.getLocalizedMessage(), e);
@@ -247,33 +226,27 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
     }
 
-    private void endOldConversationsWithOldAgents(String agentId, Integer agentVersion)
-            throws ResourceStoreException, ResourceNotFoundException {
+    private void endOldConversationsWithOldAgents(String agentId, Integer agentVersion) throws ResourceStoreException, ResourceNotFoundException {
 
-        var conversationMemorySnapshots = conversationMemoryStore.loadActiveConversationMemorySnapshot(agentId,
-                agentVersion);
+        var conversationMemorySnapshots = conversationMemoryStore.loadActiveConversationMemorySnapshot(agentId, agentVersion);
 
         for (var conversationMemory : conversationMemorySnapshots) {
-            var documentDescriptor = documentDescriptorStore.readDescriptor(
-                    conversationMemory.getAgentId(), conversationMemory.getAgentVersion());
+            var documentDescriptor = documentDescriptorStore.readDescriptor(conversationMemory.getAgentId(), conversationMemory.getAgentVersion());
 
             var timeOfLastInteractionInConversation = documentDescriptor.getLastModifiedOn();
 
             var isOlderThanMaximumAmountOfDays = isOlderThanDays(
-                    Instant.ofEpochMilli(timeOfLastInteractionInConversation.getTime()).atZone(ZoneId.systemDefault())
-                            .toLocalDate(),
+                    Instant.ofEpochMilli(timeOfLastInteractionInConversation.getTime()).atZone(ZoneId.systemDefault()).toLocalDate(),
                     maximumLifeTimeOfIdleConversationsInDays);
 
             if (isOlderThanMaximumAmountOfDays) {
                 String conversationId = conversationMemory.getId();
-                conversationMemoryStore.setConversationState(
-                        conversationId, ConversationState.ENDED);
+                conversationMemoryStore.setConversationState(conversationId, ConversationState.ENDED);
                 var message = format(
-                        "Ended conversation (id: %s) with Agent (name: %s, id: %s, version: %d) " +
-                                "because it is %d days older than the maximum idle time of %d days",
+                        "Ended conversation (id: %s) with Agent (name: %s, id: %s, version: %d) "
+                                + "because it is %d days older than the maximum idle time of %d days",
                         conversationId, documentDescriptor.getName(), agentId, agentVersion,
-                        DAYS.between(timeOfLastInteractionInConversation.toInstant(), Instant.now()),
-                        maximumLifeTimeOfIdleConversationsInDays);
+                        DAYS.between(timeOfLastInteractionInConversation.toInstant(), Instant.now()), maximumLifeTimeOfIdleConversationsInDays);
 
                 LOGGER.info(message);
             }

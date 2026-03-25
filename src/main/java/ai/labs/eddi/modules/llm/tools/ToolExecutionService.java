@@ -16,8 +16,9 @@ import java.util.concurrent.*;
 import java.util.function.Supplier;
 
 /**
- * Wrapper for tool execution with caching, rate limiting, cost tracking, and parallel execution.
- * Phase 4: Complete tool execution orchestration with metrics.
+ * Wrapper for tool execution with caching, rate limiting, cost tracking, and
+ * parallel execution. Phase 4: Complete tool execution orchestration with
+ * metrics.
  */
 @ApplicationScoped
 public class ToolExecutionService {
@@ -66,8 +67,7 @@ public class ToolExecutionService {
     /**
      * Execute a tool with all Phase 4 features
      */
-    public String executeTool(Object toolInstance, Method method, Object[] args,
-                             String conversationId, ToolExecutionTrace trace) {
+    public String executeTool(Object toolInstance, Method method, Object[] args, String conversationId, ToolExecutionTrace trace) {
         String toolName = method.getDeclaringClass().getSimpleName();
         String arguments = serializeArguments(args);
 
@@ -119,17 +119,16 @@ public class ToolExecutionService {
                 // 7. Record success metrics
                 toolExecutionSuccessCounter.increment();
                 meterRegistry.counter("eddi.tool.execution.success", "tool", toolName).increment();
-                meterRegistry.timer("eddi.tool.execution.duration", "tool", toolName)
-                    .record(executionTime, TimeUnit.MILLISECONDS);
+                meterRegistry.timer("eddi.tool.execution.duration", "tool", toolName).record(executionTime, TimeUnit.MILLISECONDS);
 
-                LOGGER.info(String.format("Tool '%s' executed successfully (%dms, $%.4f)",
-                    toolName, executionTime, cost));
+                LOGGER.info(String.format("Tool '%s' executed successfully (%dms, $%.4f)", toolName, executionTime, cost));
 
                 return resultString;
 
             } catch (Exception e) {
                 long executionTime = System.currentTimeMillis() - startTime;
-                // Cost was already tracked in step 3 above (if we got past rate limit and cache)
+                // Cost was already tracked in step 3 above (if we got past rate limit and
+                // cache)
                 String error = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
 
                 trace.addFailedToolCall(toolName, arguments, error, executionTime, 0.0);
@@ -138,8 +137,7 @@ public class ToolExecutionService {
                 toolExecutionFailureCounter.increment();
                 meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
 
-                LOGGER.error(String.format("Tool '%s' failed (%dms): %s",
-                    toolName, executionTime, error), e);
+                LOGGER.error(String.format("Tool '%s' failed (%dms): %s", toolName, executionTime, error), e);
 
                 return "Error executing tool: " + error;
             }
@@ -147,26 +145,29 @@ public class ToolExecutionService {
     }
 
     /**
-     * Execute a tool with optional rate limiting, caching, and cost tracking.
-     * This method wraps a tool execution supplier with the configured controls.
+     * Execute a tool with optional rate limiting, caching, and cost tracking. This
+     * method wraps a tool execution supplier with the configured controls.
      *
-     * @param toolName          name of the tool being executed
-     * @param arguments         serialized arguments (used as cache key)
-     * @param conversationId    conversation ID for cost tracking
-     * @param toolExecution     the actual tool execution logic
-     * @param enableRateLimiting whether to check rate limits
-     * @param enableCaching     whether to check/store cache
-     * @param enableCostTracking whether to track costs
-     * @param rateLimit         rate limit (calls per minute)
+     * @param toolName
+     *            name of the tool being executed
+     * @param arguments
+     *            serialized arguments (used as cache key)
+     * @param conversationId
+     *            conversation ID for cost tracking
+     * @param toolExecution
+     *            the actual tool execution logic
+     * @param enableRateLimiting
+     *            whether to check rate limits
+     * @param enableCaching
+     *            whether to check/store cache
+     * @param enableCostTracking
+     *            whether to track costs
+     * @param rateLimit
+     *            rate limit (calls per minute)
      * @return the tool execution result
      */
-    public String executeToolWrapped(String toolName, String arguments,
-                                     String conversationId,
-                                     Supplier<String> toolExecution,
-                                     boolean enableRateLimiting,
-                                     boolean enableCaching,
-                                     boolean enableCostTracking,
-                                     int rateLimit) {
+    public String executeToolWrapped(String toolName, String arguments, String conversationId, Supplier<String> toolExecution,
+            boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking, int rateLimit) {
 
         long startTime = System.currentTimeMillis();
 
@@ -204,8 +205,7 @@ public class ToolExecutionService {
             long executionTime = System.currentTimeMillis() - startTime;
             toolExecutionSuccessCounter.increment();
             meterRegistry.counter("eddi.tool.execution.success", "tool", toolName).increment();
-            meterRegistry.timer("eddi.tool.execution.duration", "tool", toolName)
-                    .record(executionTime, TimeUnit.MILLISECONDS);
+            meterRegistry.timer("eddi.tool.execution.duration", "tool", toolName).record(executionTime, TimeUnit.MILLISECONDS);
 
             return result;
 
@@ -224,9 +224,8 @@ public class ToolExecutionService {
     /**
      * Execute multiple tools in parallel
      */
-    public CompletableFuture<String>[] executeToolsParallel(
-            Object[] toolInstances, Method[] methods, Object[][] args,
-            String conversationId, ToolExecutionTrace trace) {
+    public CompletableFuture<String>[] executeToolsParallel(Object[] toolInstances, Method[] methods, Object[][] args, String conversationId,
+            ToolExecutionTrace trace) {
 
         if (toolInstances.length != methods.length || methods.length != args.length) {
             throw new IllegalArgumentException("Arrays must have same length");
@@ -241,10 +240,8 @@ public class ToolExecutionService {
 
         for (int i = 0; i < toolInstances.length; i++) {
             final int index = i;
-            futures[i] = CompletableFuture.supplyAsync(() ->
-                executeTool(toolInstances[index], methods[index], args[index], conversationId, trace),
-                executorService
-            );
+            futures[i] = CompletableFuture.supplyAsync(() -> executeTool(toolInstances[index], methods[index], args[index], conversationId, trace),
+                    executorService);
         }
 
         LOGGER.info(String.format("Executing %d tools in parallel", toolInstances.length));
@@ -255,15 +252,12 @@ public class ToolExecutionService {
     /**
      * Execute tools in parallel and wait for all to complete
      */
-    public String[] executeToolsParallelAndWait(
-            Object[] toolInstances, Method[] methods, Object[][] args,
-            String conversationId, ToolExecutionTrace trace, long timeoutMs) {
+    public String[] executeToolsParallelAndWait(Object[] toolInstances, Method[] methods, Object[][] args, String conversationId,
+            ToolExecutionTrace trace, long timeoutMs) {
 
         long startTime = System.currentTimeMillis();
 
-        CompletableFuture<String>[] futures = executeToolsParallel(
-            toolInstances, methods, args, conversationId, trace
-        );
+        CompletableFuture<String>[] futures = executeToolsParallel(toolInstances, methods, args, conversationId, trace);
 
         try {
             CompletableFuture.allOf(futures).get(timeoutMs, TimeUnit.MILLISECONDS);
@@ -274,8 +268,7 @@ public class ToolExecutionService {
             }
 
             long executionTime = System.currentTimeMillis() - startTime;
-            meterRegistry.timer("eddi.tool.execution.parallel.duration")
-                .record(executionTime, TimeUnit.MILLISECONDS);
+            meterRegistry.timer("eddi.tool.execution.parallel.duration").record(executionTime, TimeUnit.MILLISECONDS);
 
             return results;
 
@@ -304,7 +297,8 @@ public class ToolExecutionService {
             // Fallback to simple toString
             StringBuilder sb = new StringBuilder("[");
             for (int i = 0; i < args.length; i++) {
-                if (i > 0) sb.append(", ");
+                if (i > 0)
+                    sb.append(", ");
                 sb.append(args[i] != null ? args[i].toString() : "null");
             }
             sb.append("]");
@@ -328,4 +322,3 @@ public class ToolExecutionService {
         }
     }
 }
-

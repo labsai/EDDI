@@ -8,9 +8,9 @@ import java.net.InetAddress;
 import java.util.UUID;
 
 /**
- * Produces a stable instance identifier for this EDDI process.
- * Format: {@code hostname-xxxx} where xxxx is a short UUID suffix.
- * Used to tag log entries for multi-instance disambiguation.
+ * Produces a stable instance identifier for this EDDI process. Format:
+ * {@code hostname-xxxx} where xxxx is a short UUID suffix. Used to tag log
+ * entries for multi-instance disambiguation.
  *
  * @author ginccc
  * @since 6.0.0

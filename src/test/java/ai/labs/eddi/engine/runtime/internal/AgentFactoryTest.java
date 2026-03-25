@@ -88,14 +88,12 @@ class AgentFactoryTest {
         @Test
         @DisplayName("should set ERROR status when agentStoreClientLibrary throws")
         void deployAgent_storeError_setsErrorStatus() throws Exception {
-            when(agentStoreClientLibrary.getAgent("agent1", 1))
-                    .thenThrow(new ServiceException("DB connection failed"));
+            when(agentStoreClientLibrary.getAgent("agent1", 1)).thenThrow(new ServiceException("DB connection failed"));
 
             DeploymentProcess process = mock(DeploymentProcess.class);
             // AgentFactory.deployAgent() catches ServiceException inside compute() lambda
             // and sets ERROR status — it does NOT propagate the exception
-            assertDoesNotThrow(
-                    () -> AgentFactory.deployAgent(production, "agent1", 1, process));
+            assertDoesNotThrow(() -> AgentFactory.deployAgent(production, "agent1", 1, process));
 
             verify(process).completed(ERROR);
 
@@ -244,9 +242,7 @@ class AgentFactoryTest {
         void environments_isolated() throws Exception {
             Agent productionAgent = createReadyAgent("agent1", 1);
             Agent testAgent = createReadyAgent("agent1", 1);
-            when(agentStoreClientLibrary.getAgent("agent1", 1))
-                    .thenReturn(productionAgent)
-                    .thenReturn(testAgent);
+            when(agentStoreClientLibrary.getAgent("agent1", 1)).thenReturn(productionAgent).thenReturn(testAgent);
 
             AgentFactory.deployAgent(production, "agent1", 1, null);
             AgentFactory.deployAgent(Deployment.Environment.test, "agent1", 1, null);

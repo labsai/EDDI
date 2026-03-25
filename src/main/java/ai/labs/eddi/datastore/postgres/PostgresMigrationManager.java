@@ -9,8 +9,8 @@ import org.jboss.logging.Logger;
 /**
  * No-op PostgreSQL implementation of {@link IMigrationManager}.
  * <p>
- * PostgreSQL starts with a clean schema (tables created on first use),
- * so document-level migrations from the MongoDB era are not applicable.
+ * PostgreSQL starts with a clean schema (tables created on first use), so
+ * document-level migrations from the MongoDB era are not applicable.
  */
 @ApplicationScoped
 @IfBuildProfile("postgres")

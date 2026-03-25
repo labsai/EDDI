@@ -51,18 +51,16 @@ public class OutputCrudIT extends BaseIntegrationIT {
     @Order(3)
     @DisplayName("Update output set")
     void updateOutput() {
-        assertUpdate(TEST_JSON2, ROOT_PATH, RESOURCE_URI, resourceId)
-                .then().assertThat()
-                .body("outputSet[0].outputs[0].valueAlternatives[0].text", endsWith("--changed!"));
+        assertUpdate(TEST_JSON2, ROOT_PATH, RESOURCE_URI, resourceId).then().assertThat().body("outputSet[0].outputs[0].valueAlternatives[0].text",
+                endsWith("--changed!"));
     }
 
     @Test
     @Order(4)
     @DisplayName("Patch output set")
     void patchOutput() {
-        assertPatch(PATCH_JSON, ROOT_PATH, RESOURCE_URI, resourceId)
-                .then().assertThat()
-                .body("outputSet[5].outputs[0].valueAlternatives[0].text", endsWith("--changed-again!"));
+        assertPatch(PATCH_JSON, ROOT_PATH, RESOURCE_URI, resourceId).then().assertThat().body("outputSet[5].outputs[0].valueAlternatives[0].text",
+                endsWith("--changed-again!"));
     }
 
     @Test

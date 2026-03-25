@@ -9,10 +9,10 @@ import java.util.Map;
  * <p>
  * Activates the {@code postgres} Quarkus profile which:
  * <ul>
- *   <li>Sets {@code eddi.datastore.type=postgres}</li>
- *   <li>Enables PostgreSQL DevServices (Testcontainers)</li>
- *   <li>Disables MongoDB DevServices</li>
- *   <li>Disables authentication</li>
+ * <li>Sets {@code eddi.datastore.type=postgres}</li>
+ * <li>Enables PostgreSQL DevServices (Testcontainers)</li>
+ * <li>Disables MongoDB DevServices</li>
+ * <li>Disables authentication</li>
  * </ul>
  */
 public class PostgresIntegrationTestProfile implements QuarkusTestProfile {
@@ -23,20 +23,16 @@ public class PostgresIntegrationTestProfile implements QuarkusTestProfile {
                 // Datastore type
                 "eddi.datastore.type", "postgres",
                 // PostgreSQL DevServices
-                "quarkus.datasource.db-kind", "postgresql",
-                "quarkus.datasource.active", "true",
-                "quarkus.datasource.devservices.enabled", "true",
+                "quarkus.datasource.db-kind", "postgresql", "quarkus.datasource.active", "true", "quarkus.datasource.devservices.enabled", "true",
                 // Disable MongoDB
                 "quarkus.mongodb.devservices.enabled", "false",
                 // Auth disabled
-                "quarkus.oidc.tenant-enabled", "false",
-                "authorization.enabled", "false",
+                "quarkus.oidc.tenant-enabled", "false", "authorization.enabled", "false",
                 // Test HTTP port — different from MongoDB ITs (8081)
                 "quarkus.http.test-port", "8082",
                 // Must also set quarkus.http.port so RestInterfaceFactory
                 // (used by /backup/import) connects to the correct port
-                "quarkus.http.port", "8082"
-        );
+                "quarkus.http.port", "8082");
     }
 
     @Override

@@ -96,8 +96,7 @@ class ConversationHistoryBuilderTest {
             output.put("input", "Hi");
             when(memory.getConversationOutputs()).thenReturn(List.of(output));
 
-            List<ChatMessage> messages = builder.buildMessages(
-                    memory, "You are helpful", null, -1, true);
+            List<ChatMessage> messages = builder.buildMessages(memory, "You are helpful", null, -1, true);
 
             assertFalse(messages.isEmpty());
             assertInstanceOf(SystemMessage.class, messages.getFirst());
@@ -113,8 +112,7 @@ class ConversationHistoryBuilderTest {
             output.put("input", "Hi");
             when(memory.getConversationOutputs()).thenReturn(List.of(output));
 
-            List<ChatMessage> messages = builder.buildMessages(
-                    memory, null, null, -1, true);
+            List<ChatMessage> messages = builder.buildMessages(memory, null, null, -1, true);
 
             assertFalse(messages.isEmpty());
             // First message should NOT be SystemMessage
@@ -130,8 +128,7 @@ class ConversationHistoryBuilderTest {
             output.put("input", "Hi");
             when(memory.getConversationOutputs()).thenReturn(List.of(output));
 
-            List<ChatMessage> messages = builder.buildMessages(
-                    memory, "", null, -1, true);
+            List<ChatMessage> messages = builder.buildMessages(memory, "", null, -1, true);
 
             assertFalse(messages.isEmpty());
             assertInstanceOf(UserMessage.class, messages.getFirst());
@@ -146,8 +143,7 @@ class ConversationHistoryBuilderTest {
             output.put("input", "Original user message");
             when(memory.getConversationOutputs()).thenReturn(List.of(output));
 
-            List<ChatMessage> messages = builder.buildMessages(
-                    memory, null, "Custom prompt", -1, true);
+            List<ChatMessage> messages = builder.buildMessages(memory, null, "Custom prompt", -1, true);
 
             // The last message should be the custom prompt, not the original input
             var lastMessage = messages.getLast();
@@ -162,8 +158,7 @@ class ConversationHistoryBuilderTest {
             IConversationMemory memory = mock(IConversationMemory.class);
             when(memory.getConversationOutputs()).thenReturn(new ArrayList<>());
 
-            List<ChatMessage> messages = builder.buildMessages(
-                    memory, "System", null, -1, true);
+            List<ChatMessage> messages = builder.buildMessages(memory, "System", null, -1, true);
 
             // Should have just the system message
             assertEquals(1, messages.size());
@@ -181,8 +176,7 @@ class ConversationHistoryBuilderTest {
             output2.put("input", "How are you?");
             when(memory.getConversationOutputs()).thenReturn(List.of(output1, output2));
 
-            List<ChatMessage> messages = builder.buildMessages(
-                    memory, "System", null, 0, true);
+            List<ChatMessage> messages = builder.buildMessages(memory, "System", null, 0, true);
 
             // logSize=0 means no history entries, only system message
             assertEquals(1, messages.size());
@@ -202,8 +196,7 @@ class ConversationHistoryBuilderTest {
             }
             when(memory.getConversationOutputs()).thenReturn(outputs);
 
-            List<ChatMessage> messages = builder.buildMessages(
-                    memory, null, null, 2, true);
+            List<ChatMessage> messages = builder.buildMessages(memory, null, null, 2, true);
 
             // With logSizeLimit=2, should only have last 2 conversation entries
             // Each entry could produce 1-2 messages (user + optional assistant)

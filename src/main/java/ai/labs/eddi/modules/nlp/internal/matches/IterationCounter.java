@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.nlp.internal.matches;
 
-
 import java.util.*;
 
 /**
@@ -158,8 +157,10 @@ public class IterationCounter implements Iterator<IterationCounter.IterationPlan
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
             IterationPlan that = (IterationPlan) o;
             return java.util.Objects.equals(indexes, that.indexes);
         }

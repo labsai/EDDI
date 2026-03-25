@@ -31,12 +31,13 @@ public class InputFieldOutputItem extends OutputItem {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         InputFieldOutputItem that = (InputFieldOutputItem) o;
-        return Objects.equals(subType, that.subType) && Objects.equals(placeholder, that.placeholder) &&
-                Objects.equals(label, that.label) && Objects.equals(defaultValue, that.defaultValue) &&
-                Objects.equals(validation, that.validation);
+        return Objects.equals(subType, that.subType) && Objects.equals(placeholder, that.placeholder) && Objects.equals(label, that.label)
+                && Objects.equals(defaultValue, that.defaultValue) && Objects.equals(validation, that.validation);
     }
 
     @Override

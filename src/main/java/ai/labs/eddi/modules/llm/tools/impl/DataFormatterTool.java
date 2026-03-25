@@ -14,7 +14,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Data formatting tool for parsing and converting between different data formats.
+ * Data formatting tool for parsing and converting between different data
+ * formats.
  */
 @ApplicationScoped
 public class DataFormatterTool {
@@ -24,8 +25,7 @@ public class DataFormatterTool {
     private final CsvMapper csvMapper = new CsvMapper();
 
     @Tool("Validates and formats JSON data. Returns formatted JSON or error message.")
-    public String formatJson(
-            @P("jsonString") String jsonString) {
+    public String formatJson(@P("jsonString") String jsonString) {
 
         try {
             JsonNode jsonNode = jsonMapper.readTree(jsonString);
@@ -40,8 +40,7 @@ public class DataFormatterTool {
     }
 
     @Tool("Converts JSON to XML format")
-    public String jsonToXml(
-            @P("jsonString") String jsonString) {
+    public String jsonToXml(@P("jsonString") String jsonString) {
 
         try {
             JsonNode jsonNode = jsonMapper.readTree(jsonString);
@@ -56,8 +55,7 @@ public class DataFormatterTool {
     }
 
     @Tool("Converts XML to JSON format")
-    public String xmlToJson(
-            @P("xmlString") String xmlString) {
+    public String xmlToJson(@P("xmlString") String xmlString) {
 
         try {
             JsonNode jsonNode = xmlMapper.readTree(xmlString);
@@ -72,16 +70,12 @@ public class DataFormatterTool {
     }
 
     @Tool("Parses CSV data and converts it to JSON format")
-    public String csvToJson(
-            @P("csvString") String csvString) {
+    public String csvToJson(@P("csvString") String csvString) {
 
         try {
             CsvSchema schema = CsvSchema.emptySchema().withHeader();
             List<?> data;
-            try (var iterator = csvMapper
-                    .readerFor(Map.class)
-                    .with(schema)
-                    .readValues(csvString)) {
+            try (var iterator = csvMapper.readerFor(Map.class).with(schema).readValues(csvString)) {
                 data = iterator.readAll();
             }
 
@@ -96,9 +90,7 @@ public class DataFormatterTool {
     }
 
     @Tool("Extracts a value from JSON using a JSONPath-like expression")
-    public String extractJsonValue(
-            @P("jsonString") String jsonString,
-            @P("path") String path) {
+    public String extractJsonValue(@P("jsonString") String jsonString, @P("path") String path) {
 
         try {
             JsonNode valueNode = jsonMapper.readTree(jsonString);
@@ -131,8 +123,7 @@ public class DataFormatterTool {
     }
 
     @Tool("Validates XML against basic well-formedness rules")
-    public String validateXml(
-            @P("xmlString") String xmlString) {
+    public String validateXml(@P("xmlString") String xmlString) {
 
         try {
             xmlMapper.readTree(xmlString);
@@ -146,8 +137,7 @@ public class DataFormatterTool {
     }
 
     @Tool("Minifies JSON by removing whitespace and formatting")
-    public String minifyJson(
-            @P("jsonString") String jsonString) {
+    public String minifyJson(@P("jsonString") String jsonString) {
 
         try {
             JsonNode jsonNode = jsonMapper.readTree(jsonString);
@@ -161,4 +151,3 @@ public class DataFormatterTool {
         }
     }
 }
-

@@ -2,7 +2,7 @@
 
 > **Scope:** This document specifies the complete design for the EDDI SDK, split across **three repos**. It is linked from the main [implementation_plan.md](file:///c:/dev/git/EDDI/docs/v6-planning/implementation_plan.md) as Appendix O.
 >
-> **Prerequisite:** The v6 renaming (see [v6_renaming_recommendation.md](file:///c:/dev/git/EDDI/docs/v6-planning/v6_renaming_recommendation.md)) must be substantially complete before the SDK is started, so the SDK ships with v6 terminology from day one.
+> **Prerequisite:** The v6 renaming must be substantially complete before the SDK is started, so the SDK ships with v6 terminology from day one.
 >
 > **Timing:** Post v6.0 GA, once the API surface is stable.
 

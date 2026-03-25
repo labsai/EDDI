@@ -80,14 +80,11 @@ class ConversationServiceTest {
         MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
         doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
-        when(contextLogger.createLoggingContext(any(), any(), any(), any()))
-                .thenReturn(new HashMap<>());
+        when(contextLogger.createLoggingContext(any(), any(), any(), any())).thenReturn(new HashMap<>());
 
-        conversationService = new ConversationService(
-                AgentFactory, conversationMemoryStore, conversationDescriptorStore,
-                propertiesStore, conversationCoordinator, conversationSetup,
-                cacheFactory, runtime, contextLogger, auditLedgerService,
-                tenantQuotaService, meterRegistry, AGENT_TIMEOUT);
+        conversationService = new ConversationService(AgentFactory, conversationMemoryStore, conversationDescriptorStore, propertiesStore,
+                conversationCoordinator, conversationSetup, cacheFactory, runtime, contextLogger, auditLedgerService, tenantQuotaService,
+                meterRegistry, AGENT_TIMEOUT);
     }
 
     // --- startConversation tests ---
@@ -123,16 +120,14 @@ class ConversationServiceTest {
         assertNotNull(result.conversationUri());
         verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
         verify(conversationStateCache).put(CONVERSATION_ID, ConversationState.READY);
-        verify(conversationSetup).createConversationDescriptor(eq(AGENT_ID), eq(mockAgent), eq(USER_ID),
-                eq(CONVERSATION_ID), any());
+        verify(conversationSetup).createConversationDescriptor(eq(AGENT_ID), eq(mockAgent), eq(USER_ID), eq(CONVERSATION_ID), any());
     }
 
     @Test
     void startConversation_noAgentReady_throwsAgentNotReadyException() throws Exception {
         when(AgentFactory.getLatestReadyAgent(ENV, AGENT_ID)).thenReturn(null);
 
-        assertThrows(AgentNotReadyException.class,
-                () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, null));
+        assertThrows(AgentNotReadyException.class, () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, null));
     }
 
     @Test
@@ -200,8 +195,7 @@ class ConversationServiceTest {
         when(conversationStateCache.get(CONVERSATION_ID)).thenReturn(null);
         when(conversationMemoryStore.getConversationState(CONVERSATION_ID)).thenReturn(null);
 
-        assertThrows(ConversationNotFoundException.class,
-                () -> conversationService.getConversationState(ENV, CONVERSATION_ID));
+        assertThrows(ConversationNotFoundException.class, () -> conversationService.getConversationState(ENV, CONVERSATION_ID));
     }
 
     // --- readConversation tests ---
@@ -214,8 +208,7 @@ class ConversationServiceTest {
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
 
         assertThrows(AgentMismatchException.class,
-                () -> conversationService.readConversation(ENV, AGENT_ID, CONVERSATION_ID,
-                        false, false, List.of()));
+                () -> conversationService.readConversation(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of()));
     }
 
     @Test
@@ -228,8 +221,7 @@ class ConversationServiceTest {
 
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
 
-        var result = conversationService.readConversation(ENV, AGENT_ID, CONVERSATION_ID,
-                false, false, List.of());
+        var result = conversationService.readConversation(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of());
 
         assertNotNull(result);
         assertEquals(ConversationState.READY, result.getConversationState());
@@ -260,8 +252,7 @@ class ConversationServiceTest {
 
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
 
-        assertThrows(AgentMismatchException.class,
-                () -> conversationService.undo(ENV, AGENT_ID, CONVERSATION_ID));
+        assertThrows(AgentMismatchException.class, () -> conversationService.undo(ENV, AGENT_ID, CONVERSATION_ID));
     }
 
     @Test
@@ -273,8 +264,7 @@ class ConversationServiceTest {
 
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
 
-        assertThrows(AgentMismatchException.class,
-                () -> conversationService.redo(ENV, AGENT_ID, CONVERSATION_ID));
+        assertThrows(AgentMismatchException.class, () -> conversationService.redo(ENV, AGENT_ID, CONVERSATION_ID));
     }
 
     // --- say tests ---
@@ -292,10 +282,8 @@ class ConversationServiceTest {
 
         var handler = mock(ConversationResponseHandler.class);
 
-        assertThrows(AgentMismatchException.class,
-                () -> conversationService.say(ENV, AGENT_ID, CONVERSATION_ID,
-                        false, false, List.of(),
-                        new InputData("hello", Map.of()), false, handler));
+        assertThrows(AgentMismatchException.class, () -> conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
+                new InputData("hello", Map.of()), false, handler));
     }
 
     @Test
@@ -317,10 +305,8 @@ class ConversationServiceTest {
 
         var handler = mock(ConversationResponseHandler.class);
 
-        assertThrows(ConversationEndedException.class,
-                () -> conversationService.say(ENV, AGENT_ID, CONVERSATION_ID,
-                        false, false, List.of(),
-                        new InputData("hello", Map.of()), false, handler));
+        assertThrows(ConversationEndedException.class, () -> conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
+                new InputData("hello", Map.of()), false, handler));
     }
 
     @Test
@@ -342,9 +328,7 @@ class ConversationServiceTest {
 
         var handler = mock(ConversationResponseHandler.class);
 
-        conversationService.say(ENV, AGENT_ID, CONVERSATION_ID,
-                false, false, List.of(),
-                new InputData("hello", Map.of()), false, handler);
+        conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(), new InputData("hello", Map.of()), false, handler);
 
         // Verify conversation was submitted to the coordinator
         verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
@@ -379,10 +363,8 @@ class ConversationServiceTest {
 
         var handler = mock(ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler.class);
 
-        assertThrows(AgentMismatchException.class,
-                () -> conversationService.sayStreaming(ENV, AGENT_ID, CONVERSATION_ID,
-                        false, false, List.of(),
-                        new InputData("hello", Map.of()), handler));
+        assertThrows(AgentMismatchException.class, () -> conversationService.sayStreaming(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
+                new InputData("hello", Map.of()), handler));
     }
 
     @Test
@@ -404,10 +386,8 @@ class ConversationServiceTest {
 
         var handler = mock(ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler.class);
 
-        assertThrows(ConversationEndedException.class,
-                () -> conversationService.sayStreaming(ENV, AGENT_ID, CONVERSATION_ID,
-                        false, false, List.of(),
-                        new InputData("hello", Map.of()), handler));
+        assertThrows(ConversationEndedException.class, () -> conversationService.sayStreaming(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
+                new InputData("hello", Map.of()), handler));
     }
 
     @SuppressWarnings("unchecked")
@@ -430,9 +410,7 @@ class ConversationServiceTest {
 
         var handler = mock(ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler.class);
 
-        conversationService.sayStreaming(ENV, AGENT_ID, CONVERSATION_ID,
-                false, false, List.of(),
-                new InputData("hello", Map.of()), handler);
+        conversationService.sayStreaming(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(), new InputData("hello", Map.of()), handler);
 
         verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any(Callable.class));
     }

@@ -36,9 +36,7 @@ public class PrePostUtils {
     private static final Logger LOGGER = Logger.getLogger(PrePostUtils.class);
 
     @Inject
-    public PrePostUtils(IJsonSerialization jsonSerialization,
-            IMemoryItemConverter memoryItemConverter,
-            ITemplatingEngine templatingEngine,
+    public PrePostUtils(IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter, ITemplatingEngine templatingEngine,
             IDataFactory dataFactory) {
         this.jsonSerialization = jsonSerialization;
         this.memoryItemConverter = memoryItemConverter;
@@ -46,10 +44,8 @@ public class PrePostUtils {
         this.dataFactory = dataFactory;
     }
 
-    public Map<String, Object> executePreRequestPropertyInstructions(IConversationMemory memory,
-            Map<String, Object> templateDataObjects,
-            PreRequest preRequest)
-            throws ITemplatingEngine.TemplateEngineException {
+    public Map<String, Object> executePreRequestPropertyInstructions(IConversationMemory memory, Map<String, Object> templateDataObjects,
+            PreRequest preRequest) throws ITemplatingEngine.TemplateEngineException {
 
         if (preRequest != null && preRequest.getPropertyInstructions() != null) {
             var propertyInstructions = preRequest.getPropertyInstructions();
@@ -59,15 +55,13 @@ public class PrePostUtils {
         return templateDataObjects;
     }
 
-    public void executePropertyInstructions(List<PropertyInstruction> propertyInstructions,
-            int httpCode, boolean validationError, IConversationMemory memory,
-            Map<String, Object> templateDataObjects)
-            throws ITemplatingEngine.TemplateEngineException {
+    public void executePropertyInstructions(List<PropertyInstruction> propertyInstructions, int httpCode, boolean validationError,
+            IConversationMemory memory, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
 
         if (propertyInstructions != null) {
             for (PropertyInstruction propertyInstruction : propertyInstructions) {
-                if ((validationError && propertyInstruction.getRunOnValidationError()) || (httpCode == 0 ||
-                        verifyHttpCode(propertyInstruction.getHttpCodeValidator(), httpCode))) {
+                if ((validationError && propertyInstruction.getRunOnValidationError())
+                        || (httpCode == 0 || verifyHttpCode(propertyInstruction.getHttpCodeValidator(), httpCode))) {
 
                     String propertyName = propertyInstruction.getName();
                     checkNotNull(propertyName, "name");
@@ -88,8 +82,7 @@ public class PrePostUtils {
                         if (!isNullOrEmpty(propertyValue) && propertyValue instanceof String propertyValueString) {
                             var value = templateValues(propertyValueString, templateDataObjects);
                             var valueTrimmed = value.trim();
-                            if (propertyInstruction.getConvertToObject() &&
-                                    valueTrimmed.startsWith("{") && valueTrimmed.endsWith("}")) {
+                            if (propertyInstruction.getConvertToObject() && valueTrimmed.startsWith("{") && valueTrimmed.endsWith("}")) {
                                 try {
                                     propertyValue = jsonSerialization.deserialize(valueTrimmed);
                                 } catch (IOException e) {
@@ -103,27 +96,21 @@ public class PrePostUtils {
                         }
 
                         if (propertyValue instanceof String s) {
-                            memory.getConversationProperties().put(propertyName,
-                                    new Property(propertyName, s, scope));
+                            memory.getConversationProperties().put(propertyName, new Property(propertyName, s, scope));
                         } else if (propertyValue instanceof Map<?, ?>) {
                             @SuppressWarnings("unchecked")
                             var m = (Map<String, Object>) propertyValue;
-                            memory.getConversationProperties().put(propertyName,
-                                    new Property(propertyName, m, scope));
+                            memory.getConversationProperties().put(propertyName, new Property(propertyName, m, scope));
                         } else if (propertyValue instanceof List<?>) {
                             @SuppressWarnings("unchecked")
                             var l = (List<Object>) propertyValue;
-                            memory.getConversationProperties().put(propertyName,
-                                    new Property(propertyName, l, scope));
+                            memory.getConversationProperties().put(propertyName, new Property(propertyName, l, scope));
                         } else if (propertyValue instanceof Integer i) {
-                            memory.getConversationProperties().put(propertyName,
-                                    new Property(propertyName, i, scope));
+                            memory.getConversationProperties().put(propertyName, new Property(propertyName, i, scope));
                         } else if (propertyValue instanceof Float f) {
-                            memory.getConversationProperties().put(propertyName,
-                                    new Property(propertyName, f, scope));
+                            memory.getConversationProperties().put(propertyName, new Property(propertyName, f, scope));
                         } else if (propertyValue instanceof Boolean b) {
-                            memory.getConversationProperties().put(propertyName,
-                                    new Property(propertyName, b, scope));
+                            memory.getConversationProperties().put(propertyName, new Property(propertyName, b, scope));
                         }
 
                         templateDataObjects.put("properties", memory.getConversationProperties().toMap());
@@ -147,19 +134,16 @@ public class PrePostUtils {
             }
         }
 
-        return httpCodeValidator.getRunOnHttpCode().contains(httpCode) &&
-                !httpCodeValidator.getSkipOnHttpCode().contains(httpCode);
+        return httpCodeValidator.getRunOnHttpCode().contains(httpCode) && !httpCodeValidator.getSkipOnHttpCode().contains(httpCode);
     }
 
-    public String templateValues(String toBeTemplated, Map<String, Object> properties)
-            throws ITemplatingEngine.TemplateEngineException {
+    public String templateValues(String toBeTemplated, Map<String, Object> properties) throws ITemplatingEngine.TemplateEngineException {
 
         return templatingEngine.processTemplate(toBeTemplated, properties);
     }
 
-    public void createMemoryEntry(IConversationMemory.IWritableConversationStep currentStep,
-            Object responseObject,
-            String responseObjectName, String outputKey) {
+    public void createMemoryEntry(IConversationMemory.IWritableConversationStep currentStep, Object responseObject, String responseObjectName,
+            String outputKey) {
 
         var memoryDataName = outputKey + ":" + responseObjectName;
         IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
@@ -169,11 +153,8 @@ public class PrePostUtils {
         currentStep.addConversationOutputMap(outputKey, map);
     }
 
-    public void runPostResponse(IConversationMemory memory,
-            PostResponse postResponse,
-            Map<String, Object> templateDataObjects,
-            int httpCode, boolean validationError)
-            throws IOException, ITemplatingEngine.TemplateEngineException {
+    public void runPostResponse(IConversationMemory memory, PostResponse postResponse, Map<String, Object> templateDataObjects, int httpCode,
+            boolean validationError) throws IOException, ITemplatingEngine.TemplateEngineException {
 
         if (postResponse != null) {
             var propertyInstructions = postResponse.getPropertyInstructions();
@@ -185,8 +166,7 @@ public class PrePostUtils {
 
     }
 
-    private void buildOutput(IConversationMemory memory, Map<String, Object> templateDataObjects,
-            int httpCode, PostResponse postResponse)
+    private void buildOutput(IConversationMemory memory, Map<String, Object> templateDataObjects, int httpCode, PostResponse postResponse)
             throws IOException, ITemplatingEngine.TemplateEngineException {
 
         var outputBuildInstructions = postResponse.getOutputBuildInstructions();
@@ -195,14 +175,9 @@ public class PrePostUtils {
             for (var buildingInstruction : outputBuildInstructions) {
                 if (verifyHttpCode(buildingInstruction.getHttpCodeValidator(), httpCode)) {
 
-                    output.addAll(
-                            buildOutput(
-                                    buildingInstruction.getIterationObjectName(),
-                                    buildingInstruction.getPathToTargetArray(),
-                                    buildingInstruction.getTemplateFilterExpression(),
-                                    buildingInstruction.getOutputType(),
-                                    buildingInstruction.getOutputValue(),
-                                    templateDataObjects));
+                    output.addAll(buildOutput(buildingInstruction.getIterationObjectName(), buildingInstruction.getPathToTargetArray(),
+                            buildingInstruction.getTemplateFilterExpression(), buildingInstruction.getOutputType(),
+                            buildingInstruction.getOutputValue(), templateDataObjects));
                 }
             }
 
@@ -212,8 +187,7 @@ public class PrePostUtils {
         }
     }
 
-    private void buildQuickReplies(IConversationMemory memory, Map<String, Object> templateDataObjects,
-            int httpCode, PostResponse postResponse)
+    private void buildQuickReplies(IConversationMemory memory, Map<String, Object> templateDataObjects, int httpCode, PostResponse postResponse)
             throws IOException, ITemplatingEngine.TemplateEngineException {
 
         var qrBuildInstructions = postResponse.getQrBuildInstructions();
@@ -222,14 +196,9 @@ public class PrePostUtils {
             for (QuickRepliesBuildingInstruction qrBuildInstruction : qrBuildInstructions) {
                 if (verifyHttpCode(qrBuildInstruction.getHttpCodeValidator(), httpCode)) {
 
-                    quickReplies.addAll(
-                            buildQuickReplies(
-                                    qrBuildInstruction.getIterationObjectName(),
-                                    qrBuildInstruction.getPathToTargetArray(),
-                                    qrBuildInstruction.getTemplateFilterExpression(),
-                                    qrBuildInstruction.getQuickReplyValue(),
-                                    qrBuildInstruction.getQuickReplyExpressions(),
-                                    templateDataObjects));
+                    quickReplies.addAll(buildQuickReplies(qrBuildInstruction.getIterationObjectName(), qrBuildInstruction.getPathToTargetArray(),
+                            qrBuildInstruction.getTemplateFilterExpression(), qrBuildInstruction.getQuickReplyValue(),
+                            qrBuildInstruction.getQuickReplyExpressions(), templateDataObjects));
                 }
             }
 
@@ -239,25 +208,14 @@ public class PrePostUtils {
         }
     }
 
-    private List<Object> buildOutput(String iterationObjectName,
-            String pathToTargetArray,
-            String templateFilterExpression,
-            String outputType,
-            String outputValue,
-            Map<String, Object> templateDataObjects)
-            throws IOException, ITemplatingEngine.TemplateEngineException {
+    private List<Object> buildOutput(String iterationObjectName, String pathToTargetArray, String templateFilterExpression, String outputType,
+            String outputValue, Map<String, Object> templateDataObjects) throws IOException, ITemplatingEngine.TemplateEngineException {
 
         if (!isNullOrEmpty(pathToTargetArray)) {
 
-            final String outputTemplate = "    {" +
-                    "        \"type\":\"" + outputType + "\"," +
-                    "        \"valueAlternatives\":[{" +
-                    "               \"type\":\"" + outputType + "\"," +
-                    "               \"text\":\"" + outputValue + "\"" +
-                    "        }]" +
-                    "    }";
-            return buildListFromJson(iterationObjectName,
-                    pathToTargetArray, templateFilterExpression, outputTemplate, templateDataObjects);
+            final String outputTemplate = "    {" + "        \"type\":\"" + outputType + "\"," + "        \"valueAlternatives\":[{"
+                    + "               \"type\":\"" + outputType + "\"," + "               \"text\":\"" + outputValue + "\"" + "        }]" + "    }";
+            return buildListFromJson(iterationObjectName, pathToTargetArray, templateFilterExpression, outputTemplate, templateDataObjects);
 
         } else {
             var outputText = templatingEngine.processTemplate(outputValue, templateDataObjects);
@@ -265,42 +223,27 @@ public class PrePostUtils {
         }
     }
 
-    private List<Object> buildQuickReplies(String iterationObjectName,
-            String pathToTargetArray,
-            String templateFilterExpression,
-            String quickReplyValue,
-            String quickReplyExpressions,
-            Map<String, Object> templateDataObjects)
+    private List<Object> buildQuickReplies(String iterationObjectName, String pathToTargetArray, String templateFilterExpression,
+            String quickReplyValue, String quickReplyExpressions, Map<String, Object> templateDataObjects)
             throws IOException, ITemplatingEngine.TemplateEngineException {
 
-        final String quickReplyTemplate = "    {" +
-                "        \"value\":\"" + quickReplyValue + "\"," +
-                "        \"expressions\":\"" + quickReplyExpressions + "\"" +
-                "    },";
+        final String quickReplyTemplate = "    {" + "        \"value\":\"" + quickReplyValue + "\"," + "        \"expressions\":\""
+                + quickReplyExpressions + "\"" + "    },";
 
-        return buildListFromJson(iterationObjectName,
-                pathToTargetArray, templateFilterExpression, quickReplyTemplate, templateDataObjects);
+        return buildListFromJson(iterationObjectName, pathToTargetArray, templateFilterExpression, quickReplyTemplate, templateDataObjects);
     }
 
-    public List<Object> buildListFromJson(String iterationObjectName,
-            String pathToTargetArray,
-            String templateFilterExpression,
-            String iterationValue,
-            Map<String, Object> templateDataObjects)
-            throws ITemplatingEngine.TemplateEngineException, IOException {
+    public List<Object> buildListFromJson(String iterationObjectName, String pathToTargetArray, String templateFilterExpression,
+            String iterationValue, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException, IOException {
 
-        String templateCode = "[" +
-                "[# th:each=\"" + iterationObjectName + " : ${" + pathToTargetArray + "}\"";
+        String templateCode = "[" + "[# th:each=\"" + iterationObjectName + " : ${" + pathToTargetArray + "}\"";
 
         if (!isNullOrEmpty(templateFilterExpression)) {
             templateCode += "   th:object=\"${" + iterationObjectName + "}\"";
             templateCode += "   th:if=\"" + templateFilterExpression + "\"";
         }
 
-        templateCode += "]" +
-                (isNullOrEmpty(iterationValue) ? "\"[[${" + iterationObjectName + "}]]\"," : iterationValue) +
-                "[/]" +
-                "]";
+        templateCode += "]" + (isNullOrEmpty(iterationValue) ? "\"[[${" + iterationObjectName + "}]]\"," : iterationValue) + "[/]" + "]";
 
         String jsonList = templatingEngine.processTemplate(templateCode, templateDataObjects);
 

@@ -1,14 +1,13 @@
 package ai.labs.eddi.modules.llm.model;
 
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Tracks tool calls made during agent execution for debugging, logging, and analytics.
- * Phase 4: Enhanced with metrics, caching, and cost tracking.
+ * Tracks tool calls made during agent execution for debugging, logging, and
+ * analytics. Phase 4: Enhanced with metrics, caching, and cost tracking.
  */
 public class ToolExecutionTrace {
 
@@ -99,7 +98,8 @@ public class ToolExecutionTrace {
         public ToolCall() {
         }
 
-        public ToolCall(String toolName, String arguments, String result, long executionTimeMs, String error, boolean success, double cost, boolean fromCache, long timestamp) {
+        public ToolCall(String toolName, String arguments, String result, long executionTimeMs, String error, boolean success, double cost,
+                boolean fromCache, long timestamp) {
             this.toolName = toolName;
             this.arguments = arguments;
             this.result = result;
@@ -185,10 +185,15 @@ public class ToolExecutionTrace {
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
             ToolCall that = (ToolCall) o;
-            return java.util.Objects.equals(toolName, that.toolName) && java.util.Objects.equals(arguments, that.arguments) && java.util.Objects.equals(result, that.result) && executionTimeMs == that.executionTimeMs && java.util.Objects.equals(error, that.error) && success == that.success && Double.compare(that.cost, cost) == 0 && fromCache == that.fromCache && timestamp == that.timestamp;
+            return java.util.Objects.equals(toolName, that.toolName) && java.util.Objects.equals(arguments, that.arguments)
+                    && java.util.Objects.equals(result, that.result) && executionTimeMs == that.executionTimeMs
+                    && java.util.Objects.equals(error, that.error) && success == that.success && Double.compare(that.cost, cost) == 0
+                    && fromCache == that.fromCache && timestamp == that.timestamp;
         }
 
         @Override
@@ -198,7 +203,8 @@ public class ToolExecutionTrace {
 
         @Override
         public String toString() {
-            return "ToolCall(" + "toolName=" + toolName + ", arguments=" + arguments + ", result=" + result + ", executionTimeMs=" + executionTimeMs + ", error=" + error + ", success=" + success + ", cost=" + cost + ", fromCache=" + fromCache + ", timestamp=" + timestamp + ")";
+            return "ToolCall(" + "toolName=" + toolName + ", arguments=" + arguments + ", result=" + result + ", executionTimeMs=" + executionTimeMs
+                    + ", error=" + error + ", success=" + success + ", cost=" + cost + ", fromCache=" + fromCache + ", timestamp=" + timestamp + ")";
         }
     }
 
@@ -231,7 +237,8 @@ public class ToolExecutionTrace {
         public ToolMetrics() {
         }
 
-        public ToolMetrics(String toolName, int totalCalls, int successfulCalls, int failedCalls, long totalExecutionTimeMs, long minExecutionTimeMs, long maxExecutionTimeMs, double totalCost, int cacheHits) {
+        public ToolMetrics(String toolName, int totalCalls, int successfulCalls, int failedCalls, long totalExecutionTimeMs, long minExecutionTimeMs,
+                long maxExecutionTimeMs, double totalCost, int cacheHits) {
             this.toolName = toolName;
             this.totalCalls = totalCalls;
             this.successfulCalls = successfulCalls;
@@ -317,28 +324,35 @@ public class ToolExecutionTrace {
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
             ToolMetrics that = (ToolMetrics) o;
-            return java.util.Objects.equals(toolName, that.toolName) && totalCalls == that.totalCalls && successfulCalls == that.successfulCalls && failedCalls == that.failedCalls && totalExecutionTimeMs == that.totalExecutionTimeMs && minExecutionTimeMs == that.minExecutionTimeMs && maxExecutionTimeMs == that.maxExecutionTimeMs && Double.compare(that.totalCost, totalCost) == 0 && cacheHits == that.cacheHits;
+            return java.util.Objects.equals(toolName, that.toolName) && totalCalls == that.totalCalls && successfulCalls == that.successfulCalls
+                    && failedCalls == that.failedCalls && totalExecutionTimeMs == that.totalExecutionTimeMs
+                    && minExecutionTimeMs == that.minExecutionTimeMs && maxExecutionTimeMs == that.maxExecutionTimeMs
+                    && Double.compare(that.totalCost, totalCost) == 0 && cacheHits == that.cacheHits;
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(toolName, totalCalls, successfulCalls, failedCalls, totalExecutionTimeMs, minExecutionTimeMs, maxExecutionTimeMs, totalCost, cacheHits);
+            return java.util.Objects.hash(toolName, totalCalls, successfulCalls, failedCalls, totalExecutionTimeMs, minExecutionTimeMs,
+                    maxExecutionTimeMs, totalCost, cacheHits);
         }
 
         @Override
         public String toString() {
-            return "ToolMetrics(" + "toolName=" + toolName + ", totalCalls=" + totalCalls + ", successfulCalls=" + successfulCalls + ", failedCalls=" + failedCalls + ", totalExecutionTimeMs=" + totalExecutionTimeMs + ", minExecutionTimeMs=" + minExecutionTimeMs + ", maxExecutionTimeMs=" + maxExecutionTimeMs + ", totalCost=" + totalCost + ", cacheHits=" + cacheHits + ")";
+            return "ToolMetrics(" + "toolName=" + toolName + ", totalCalls=" + totalCalls + ", successfulCalls=" + successfulCalls + ", failedCalls="
+                    + failedCalls + ", totalExecutionTimeMs=" + totalExecutionTimeMs + ", minExecutionTimeMs=" + minExecutionTimeMs
+                    + ", maxExecutionTimeMs=" + maxExecutionTimeMs + ", totalCost=" + totalCost + ", cacheHits=" + cacheHits + ")";
         }
     }
 
     /**
      * Add a successful tool call to the trace
      */
-    public void addToolCall(String toolName, String arguments, String result, long executionTimeMs,
-                           double cost, boolean fromCache) {
+    public void addToolCall(String toolName, String arguments, String result, long executionTimeMs, double cost, boolean fromCache) {
         ToolCall call = new ToolCall();
         call.setToolName(toolName);
         call.setArguments(arguments);
@@ -423,18 +437,16 @@ public class ToolExecutionTrace {
         sb.append("Total Calls: ").append(toolCalls.size()).append("\n");
         sb.append("Total Time: ").append(totalExecutionTimeMs).append("ms\n");
         sb.append("Total Cost: $").append(String.format("%.4f", totalCost)).append("\n");
-        sb.append("Cache Hit Rate: ").append(
-            toolCalls.size() > 0 ? String.format("%.1f%%", (double) cacheHits / toolCalls.size() * 100) : "0%"
-        ).append("\n");
+        sb.append("Cache Hit Rate: ").append(toolCalls.size() > 0 ? String.format("%.1f%%", (double) cacheHits / toolCalls.size() * 100) : "0%")
+                .append("\n");
         sb.append("Errors: ").append(hasErrors ? "Yes" : "No").append("\n");
 
         if (!toolMetrics.isEmpty()) {
             sb.append("\nPer-Tool Metrics:\n");
             toolMetrics.values().forEach(m -> {
-                sb.append("  - ").append(m.getToolName()).append(": ")
-                  .append(m.getTotalCalls()).append(" calls, ")
-                  .append(String.format("%.1f%%", m.getSuccessRate())).append(" success, ")
-                  .append(String.format("%.0f", m.getAverageExecutionTimeMs())).append("ms avg\n");
+                sb.append("  - ").append(m.getToolName()).append(": ").append(m.getTotalCalls()).append(" calls, ")
+                        .append(String.format("%.1f%%", m.getSuccessRate())).append(" success, ")
+                        .append(String.format("%.0f", m.getAverageExecutionTimeMs())).append("ms avg\n");
             });
         }
 
@@ -490,10 +502,14 @@ public class ToolExecutionTrace {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         ToolExecutionTrace that = (ToolExecutionTrace) o;
-        return java.util.Objects.equals(toolCalls, that.toolCalls) && totalExecutionTimeMs == that.totalExecutionTimeMs && hasErrors == that.hasErrors && Double.compare(that.totalCost, totalCost) == 0 && cacheHits == that.cacheHits && cacheMisses == that.cacheMisses && java.util.Objects.equals(toolMetrics, that.toolMetrics);
+        return java.util.Objects.equals(toolCalls, that.toolCalls) && totalExecutionTimeMs == that.totalExecutionTimeMs && hasErrors == that.hasErrors
+                && Double.compare(that.totalCost, totalCost) == 0 && cacheHits == that.cacheHits && cacheMisses == that.cacheMisses
+                && java.util.Objects.equals(toolMetrics, that.toolMetrics);
     }
 
     @Override
@@ -503,8 +519,7 @@ public class ToolExecutionTrace {
 
     @Override
     public String toString() {
-        return "ToolExecutionTrace(" + "toolCalls=" + toolCalls + ", totalExecutionTimeMs=" + totalExecutionTimeMs + ", hasErrors=" + hasErrors + ", totalCost=" + totalCost + ", cacheHits=" + cacheHits + ", cacheMisses=" + cacheMisses + ", toolMetrics=" + toolMetrics + ")";
+        return "ToolExecutionTrace(" + "toolCalls=" + toolCalls + ", totalExecutionTimeMs=" + totalExecutionTimeMs + ", hasErrors=" + hasErrors
+                + ", totalCost=" + totalCost + ", cacheHits=" + cacheHits + ", cacheMisses=" + cacheMisses + ", toolMetrics=" + toolMetrics + ")";
     }
 }
-
-

@@ -6,7 +6,7 @@ package ai.labs.eddi.configs.descriptors.model;
 public class DocumentDescriptor extends ResourceDescriptor {
     private String name;
     private String description;
-    private String originId;  // resource ID from the exporting instance (for merge import)
+    private String originId; // resource ID from the exporting instance (for merge import)
 
     public String getName() {
         return name;

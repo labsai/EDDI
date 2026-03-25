@@ -12,8 +12,7 @@ public class DeploymentInfo {
     private DeploymentStatus deploymentStatus;
 
     public enum DeploymentStatus {
-        deployed,
-        undeployed
+        deployed, undeployed
     }
 
     public String getAgentId() {

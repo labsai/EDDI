@@ -21,11 +21,14 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * Parses an OpenAPI spec and generates EDDI-compatible ApiCallsConfiguration resources,
- * grouped by OpenAPI tag. Each tag becomes a separate ApiCallsConfiguration with
- * proper naming (e.g. "MyAPI - Users", "MyAPI - Orders").
+ * Parses an OpenAPI spec and generates EDDI-compatible ApiCallsConfiguration
+ * resources, grouped by OpenAPI tag. Each tag becomes a separate
+ * ApiCallsConfiguration with proper naming (e.g. "MyAPI - Users", "MyAPI -
+ * Orders").
  *
- * <p>This is a stateless utility used by {@link McpSetupTools#createApIAgent}.</p>
+ * <p>
+ * This is a stateless utility used by {@link McpSetupTools#createApIAgent}.
+ * </p>
  *
  * @author ginccc
  */
@@ -43,28 +46,33 @@ public final class McpApiToolBuilder {
     /**
      * Result of building configs from an OpenAPI spec.
      *
-     * @param configsByGroup map of group/tag name → ApiCallsConfiguration
-     * @param apiSummary     human-readable summary of available endpoints for LLM context
-     * @param endpointCount  total number of endpoints processed
+     * @param configsByGroup
+     *            map of group/tag name → ApiCallsConfiguration
+     * @param apiSummary
+     *            human-readable summary of available endpoints for LLM context
+     * @param endpointCount
+     *            total number of endpoints processed
      */
-    public record ApiBuildResult(
-            Map<String, ApiCallsConfiguration> configsByGroup,
-            String apiSummary,
-            int endpointCount
-    ) {}
+    public record ApiBuildResult(Map<String, ApiCallsConfiguration> configsByGroup, String apiSummary, int endpointCount) {
+    }
 
     /**
      * Parse an OpenAPI spec and build grouped ApiCallsConfigurations.
      *
-     * @param openApiSpec    OpenAPI spec as JSON/YAML string or a URL
-     * @param endpointFilter comma-separated filter (e.g. "GET /users,POST /orders"), null for all
-     * @param apiBaseUrl     override the spec's server URL, null to use spec's servers[0]
-     * @param apiAuth        authorization header value or vault ref, null for none
+     * @param openApiSpec
+     *            OpenAPI spec as JSON/YAML string or a URL
+     * @param endpointFilter
+     *            comma-separated filter (e.g. "GET /users,POST /orders"), null for
+     *            all
+     * @param apiBaseUrl
+     *            override the spec's server URL, null to use spec's servers[0]
+     * @param apiAuth
+     *            authorization header value or vault ref, null for none
      * @return build result with grouped configs and API summary
-     * @throws IllegalArgumentException if the spec cannot be parsed
+     * @throws IllegalArgumentException
+     *             if the spec cannot be parsed
      */
-    public static ApiBuildResult parseAndBuild(String openApiSpec, String endpointFilter,
-                                         String apiBaseUrl, String apiAuth) {
+    public static ApiBuildResult parseAndBuild(String openApiSpec, String endpointFilter, String apiBaseUrl, String apiAuth) {
         OpenAPI openAPI = parseSpec(openApiSpec);
         String baseUrl = resolveBaseUrl(openAPI, apiBaseUrl);
         Set<String> allowedEndpoints = parseEndpointFilter(endpointFilter);
@@ -98,9 +106,7 @@ public final class McpApiToolBuilder {
                     }
 
                     // Determine group (first tag, or "General")
-                    String group = (operation.getTags() != null && !operation.getTags().isEmpty())
-                            ? operation.getTags().get(0)
-                            : DEFAULT_GROUP;
+                    String group = (operation.getTags() != null && !operation.getTags().isEmpty()) ? operation.getTags().get(0) : DEFAULT_GROUP;
 
                     ApiCall httpCall = buildApiCall(method, path, operation, apiAuth);
                     callsByGroup.computeIfAbsent(group, k -> new ArrayList<>()).add(httpCall);
@@ -113,8 +119,8 @@ public final class McpApiToolBuilder {
         }
 
         if (endpointCount == 0) {
-            throw new IllegalArgumentException("No valid endpoints found in the OpenAPI spec" +
-                    (allowedEndpoints.isEmpty() ? "" : " matching the filter"));
+            throw new IllegalArgumentException(
+                    "No valid endpoints found in the OpenAPI spec" + (allowedEndpoints.isEmpty() ? "" : " matching the filter"));
         }
 
         // Build ApiCallsConfiguration per group
@@ -126,12 +132,9 @@ public final class McpApiToolBuilder {
             configsByGroup.put(entry.getKey(), config);
         }
 
-        var displayLines = summaryLines.size() <= MAX_SUMMARY_ENDPOINTS
-                ? summaryLines
-                : summaryLines.subList(0, MAX_SUMMARY_ENDPOINTS);
-        String apiSummary = "Available API endpoints (" + endpointCount + " total, " +
-                configsByGroup.size() + " groups):\n" +
-                String.join("\n", displayLines);
+        var displayLines = summaryLines.size() <= MAX_SUMMARY_ENDPOINTS ? summaryLines : summaryLines.subList(0, MAX_SUMMARY_ENDPOINTS);
+        String apiSummary = "Available API endpoints (" + endpointCount + " total, " + configsByGroup.size() + " groups):\n"
+                + String.join("\n", displayLines);
         if (summaryLines.size() > MAX_SUMMARY_ENDPOINTS) {
             apiSummary += "\n... and " + (summaryLines.size() - MAX_SUMMARY_ENDPOINTS) + " more";
         }
@@ -156,9 +159,7 @@ public final class McpApiToolBuilder {
         }
 
         if (result == null || result.getOpenAPI() == null) {
-            String errors = result != null && result.getMessages() != null
-                    ? String.join("; ", result.getMessages())
-                    : "unknown error";
+            String errors = result != null && result.getMessages() != null ? String.join("; ", result.getMessages()) : "unknown error";
             throw new IllegalArgumentException("Failed to parse OpenAPI spec: " + errors);
         }
 
@@ -172,8 +173,7 @@ public final class McpApiToolBuilder {
     /**
      * Build a single ApiCall from an OpenAPI operation.
      */
-    private static ApiCall buildApiCall(String method, String path,
-                                           Operation operation, String apiAuth) {
+    private static ApiCall buildApiCall(String method, String path, Operation operation, String apiAuth) {
         var httpCall = new ApiCall();
 
         // Name: operationId or generated slug
@@ -222,9 +222,7 @@ public final class McpApiToolBuilder {
         if (operation.getParameters() != null) {
             for (Parameter param : operation.getParameters()) {
                 String paramName = param.getName();
-                String paramDesc = param.getDescription() != null
-                        ? param.getDescription()
-                        : paramName;
+                String paramDesc = param.getDescription() != null ? param.getDescription() : paramName;
 
                 if ("query".equals(param.getIn())) {
                     // Query params use Thymeleaf template for LLM-provided values
@@ -259,8 +257,8 @@ public final class McpApiToolBuilder {
     }
 
     /**
-     * Convert OpenAPI path params to Thymeleaf inline templates.
-     * E.g. /pets/{petId}/toys → /pets/[[${petId}]]/toys
+     * Convert OpenAPI path params to Thymeleaf inline templates. E.g.
+     * /pets/{petId}/toys → /pets/[[${petId}]]/toys
      */
     static String convertPathParams(String path) {
         var matcher = PATH_PARAM_PATTERN.matcher(path);
@@ -277,19 +275,16 @@ public final class McpApiToolBuilder {
      * Generate a slug from method + path: GET /users/{id} → get_users_id
      */
     static String generateSlug(String method, String path) {
-        String cleaned = path.replaceAll("[{}]", "")
-                .replaceAll("[^a-zA-Z0-9/]", "")
-                .replaceAll("/+", "_")
-                .replaceAll("^_|_$", "");
+        String cleaned = path.replaceAll("[{}]", "").replaceAll("[^a-zA-Z0-9/]", "").replaceAll("/+", "_").replaceAll("^_|_$", "");
         return method.toLowerCase() + "_" + cleaned.toLowerCase();
     }
 
     /**
-     * Build a JSON body template from a schema.
-     * Produces a Thymeleaf-templated JSON body where each property is a template variable.
+     * Build a JSON body template from a schema. Produces a Thymeleaf-templated JSON
+     * body where each property is a template variable.
      * <p>
-     * Note: Only handles flat schemas (direct properties). Nested objects and arrays
-     * fall back to a single {@code [[${requestBody}]]} template variable.
+     * Note: Only handles flat schemas (direct properties). Nested objects and
+     * arrays fall back to a single {@code [[${requestBody}]]} template variable.
      */
     private static String buildBodyTemplate(Schema<?> schema) {
         if (schema == null) {
@@ -350,18 +345,14 @@ public final class McpApiToolBuilder {
         if (filter == null || filter.isBlank()) {
             return Set.of();
         }
-        return Arrays.stream(filter.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .map(s -> {
-                    // Uppercase the method but keep the path as-is
-                    int space = s.indexOf(' ');
-                    if (space > 0) {
-                        return s.substring(0, space).toUpperCase() + s.substring(space);
-                    }
-                    return s.toUpperCase();
-                })
-                .collect(Collectors.toSet());
+        return Arrays.stream(filter.split(",")).map(String::trim).filter(s -> !s.isEmpty()).map(s -> {
+            // Uppercase the method but keep the path as-is
+            int space = s.indexOf(' ');
+            if (space > 0) {
+                return s.substring(0, space).toUpperCase() + s.substring(space);
+            }
+            return s.toUpperCase();
+        }).collect(Collectors.toSet());
     }
 
     /**
@@ -369,11 +360,16 @@ public final class McpApiToolBuilder {
      */
     private static Map<String, Operation> getOperations(PathItem pathItem) {
         var ops = new LinkedHashMap<String, Operation>();
-        if (pathItem.getGet() != null) ops.put("GET", pathItem.getGet());
-        if (pathItem.getPost() != null) ops.put("POST", pathItem.getPost());
-        if (pathItem.getPut() != null) ops.put("PUT", pathItem.getPut());
-        if (pathItem.getDelete() != null) ops.put("DELETE", pathItem.getDelete());
-        if (pathItem.getPatch() != null) ops.put("PATCH", pathItem.getPatch());
+        if (pathItem.getGet() != null)
+            ops.put("GET", pathItem.getGet());
+        if (pathItem.getPost() != null)
+            ops.put("POST", pathItem.getPost());
+        if (pathItem.getPut() != null)
+            ops.put("PUT", pathItem.getPut());
+        if (pathItem.getDelete() != null)
+            ops.put("DELETE", pathItem.getDelete());
+        if (pathItem.getPatch() != null)
+            ops.put("PATCH", pathItem.getPatch());
         return ops;
     }
 }

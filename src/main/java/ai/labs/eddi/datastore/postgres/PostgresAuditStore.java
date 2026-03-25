@@ -17,8 +17,8 @@ import java.util.*;
 /**
  * PostgreSQL implementation of {@link IAuditStore}.
  * <p>
- * Uses a dedicated {@code audit_ledger} table with INSERT-only semantics.
- * No UPDATE or DELETE operations — enforces the write-once contract.
+ * Uses a dedicated {@code audit_ledger} table with INSERT-only semantics. No
+ * UPDATE or DELETE operations — enforces the write-once contract.
  * <p>
  * Activated via {@code @IfBuildProfile("postgres")}.
  *
@@ -78,8 +78,7 @@ public class PostgresAuditStore implements IAuditStore {
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSource.getConnection();
-                Statement stmt = conn.createStatement()) {
+        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
             stmt.execute(CREATE_INDEX_CONV);
             stmt.execute(CREATE_INDEX_AGENT);
@@ -93,8 +92,7 @@ public class PostgresAuditStore implements IAuditStore {
     @Override
     public void appendEntry(AuditEntry entry) {
         ensureSchema();
-        try (Connection conn = dataSource.getConnection();
-                PreparedStatement ps = conn.prepareStatement(INSERT_SQL)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(INSERT_SQL)) {
             setEntryParams(ps, entry);
             ps.executeUpdate();
         } catch (SQLException | IOException e) {
@@ -107,8 +105,7 @@ public class PostgresAuditStore implements IAuditStore {
         if (entries == null || entries.isEmpty())
             return;
         ensureSchema();
-        try (Connection conn = dataSource.getConnection();
-                PreparedStatement ps = conn.prepareStatement(INSERT_SQL)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(INSERT_SQL)) {
             for (AuditEntry entry : entries) {
                 setEntryParams(ps, entry);
                 ps.addBatch();
@@ -122,8 +119,7 @@ public class PostgresAuditStore implements IAuditStore {
     @Override
     public List<AuditEntry> getEntries(String conversationId, int skip, int limit) {
         ensureSchema();
-        String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger" +
-                " WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
+        String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger" + " WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
         return queryEntries(sql, conversationId, limit, skip);
     }
 
@@ -131,10 +127,9 @@ public class PostgresAuditStore implements IAuditStore {
     public List<AuditEntry> getEntriesByAgent(String agentId, Integer agentVersion, int skip, int limit) {
         ensureSchema();
         if (agentVersion != null) {
-            String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger" +
-                    " WHERE AGENT_ID = ? AND AGENT_VERSION = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
-            try (Connection conn = dataSource.getConnection();
-                    PreparedStatement ps = conn.prepareStatement(sql)) {
+            String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger"
+                    + " WHERE AGENT_ID = ? AND AGENT_VERSION = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
+            try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, agentId);
                 ps.setInt(2, agentVersion);
                 ps.setInt(3, limit);
@@ -144,8 +139,7 @@ public class PostgresAuditStore implements IAuditStore {
                 throw new RuntimeException("Failed to query audit entries by agent", e);
             }
         } else {
-            String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger" +
-                    " WHERE AGENT_ID = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
+            String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger" + " WHERE AGENT_ID = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
             return queryEntries(sql, agentId, limit, skip);
         }
     }
@@ -154,8 +148,7 @@ public class PostgresAuditStore implements IAuditStore {
     public long countByConversation(String conversationId) {
         ensureSchema();
         String sql = "SELECT COUNT(*) FROM audit_ledger WHERE conversation_id = ?";
-        try (Connection conn = dataSource.getConnection();
-                PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, conversationId);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
@@ -195,15 +188,12 @@ public class PostgresAuditStore implements IAuditStore {
         ps.setLong(11, entry.durationMs());
         ps.setDouble(12, entry.cost());
         ps.setString(13, entry.hmac());
-        ps.setTimestamp(14, entry.timestamp() != null
-                ? Timestamp.from(entry.timestamp())
-                : Timestamp.from(Instant.now()));
+        ps.setTimestamp(14, entry.timestamp() != null ? Timestamp.from(entry.timestamp()) : Timestamp.from(Instant.now()));
         ps.setString(15, jsonSerialization.serialize(data));
     }
 
     private List<AuditEntry> queryEntries(String sql, String param, int limit, int skip) {
-        try (Connection conn = dataSource.getConnection();
-                PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, param);
             ps.setInt(2, limit);
             ps.setInt(3, skip);
@@ -218,8 +208,7 @@ public class PostgresAuditStore implements IAuditStore {
         List<AuditEntry> results = new ArrayList<>();
         try (ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
-                Map<String, Object> data = jsonSerialization.deserialize(
-                        rs.getString("data"), Map.class);
+                Map<String, Object> data = jsonSerialization.deserialize(rs.getString("data"), Map.class);
                 results.add(fromRow(rs, data));
             }
         }
@@ -229,25 +218,11 @@ public class PostgresAuditStore implements IAuditStore {
     @SuppressWarnings("unchecked")
     private AuditEntry fromRow(ResultSet rs, Map<String, Object> data) throws SQLException {
         Timestamp ts = rs.getTimestamp("created_at");
-        return new AuditEntry(
-                rs.getString("id"),
-                rs.getString("conversation_id"),
-                rs.getString("AGENT_ID"),
-                rs.getInt("AGENT_VERSION"),
-                rs.getString("user_id"),
-                rs.getString("environment"),
-                rs.getInt("step_index"),
-                rs.getString("task_id"),
-                rs.getString("task_type"),
-                rs.getInt("task_index"),
-                rs.getLong("duration_ms"),
-                (Map<String, Object>) data.get("input"),
-                (Map<String, Object>) data.get("output"),
-                (Map<String, Object>) data.get("llmDetail"),
-                (Map<String, Object>) data.get("toolCalls"),
-                data.get("actions") instanceof List<?> list ? (List<String>) list : null,
-                rs.getDouble("cost"),
-                ts != null ? ts.toInstant() : null,
+        return new AuditEntry(rs.getString("id"), rs.getString("conversation_id"), rs.getString("AGENT_ID"), rs.getInt("AGENT_VERSION"),
+                rs.getString("user_id"), rs.getString("environment"), rs.getInt("step_index"), rs.getString("task_id"), rs.getString("task_type"),
+                rs.getInt("task_index"), rs.getLong("duration_ms"), (Map<String, Object>) data.get("input"), (Map<String, Object>) data.get("output"),
+                (Map<String, Object>) data.get("llmDetail"), (Map<String, Object>) data.get("toolCalls"),
+                data.get("actions") instanceof List<?> list ? (List<String>) list : null, rs.getDouble("cost"), ts != null ? ts.toInstant() : null,
                 rs.getString("hmac"));
     }
 }

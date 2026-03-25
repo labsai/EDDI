@@ -32,12 +32,8 @@ public class RestOutputActions implements IRestOutputActions {
     private final IRuleSetStore behaviorStore;
     private final IOutputStore outputStore;
 
-
-
     @Inject
-    public RestOutputActions(IWorkflowStore workflowStore,
-                             IRuleSetStore behaviorStore,
-                             IOutputStore outputStore) {
+    public RestOutputActions(IWorkflowStore workflowStore, IRuleSetStore behaviorStore, IOutputStore outputStore) {
         this.workflowStore = workflowStore;
         this.behaviorStore = behaviorStore;
         this.outputStore = outputStore;
@@ -121,4 +117,3 @@ public class RestOutputActions implements IRestOutputActions {
         return resourceIds;
     }
 }
-

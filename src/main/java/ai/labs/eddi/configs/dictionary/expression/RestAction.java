@@ -29,13 +29,8 @@ public class RestAction implements IRestAction {
     private final IApiCallsStore httpCallsStore;
     private final IOutputStore outputStore;
 
-
-
     @Inject
-    public RestAction(IWorkflowStore workflowStore,
-                      IRuleSetStore behaviorStore,
-                      IApiCallsStore httpCallsStore,
-                      IOutputStore outputStore) {
+    public RestAction(IWorkflowStore workflowStore, IRuleSetStore behaviorStore, IApiCallsStore httpCallsStore, IOutputStore outputStore) {
         this.workflowStore = workflowStore;
         this.behaviorStore = behaviorStore;
         this.httpCallsStore = httpCallsStore;
@@ -67,7 +62,6 @@ public class RestAction implements IRestAction {
 
                 CollectionUtilities.addAllWithoutDuplicates(retActions, actions);
             }
-
 
             return retActions;
         } catch (IResourceStore.ResourceNotFoundException e) {

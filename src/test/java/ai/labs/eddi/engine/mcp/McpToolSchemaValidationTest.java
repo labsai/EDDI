@@ -13,57 +13,55 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Validates that all MCP-exposed tool parameter names conform to the
- * JSON schema property key pattern required by LLM API providers.
+ * Validates that all MCP-exposed tool parameter names conform to the JSON
+ * schema property key pattern required by LLM API providers.
  *
- * <p>The MCP protocol exposes tool parameters as JSON schema properties.
- * Providers like Claude require property keys to match {@code ^[a-zA-Z0-9_.-]{1,64}$}.
- * The Quarkus MCP server uses {@code @P} annotation values from langchain4j tools
- * as property keys in the generated schema.
+ * <p>
+ * The MCP protocol exposes tool parameters as JSON schema properties. Providers
+ * like Claude require property keys to match {@code ^[a-zA-Z0-9_.-]{1,64}$}.
+ * The Quarkus MCP server uses {@code @P} annotation values from langchain4j
+ * tools as property keys in the generated schema.
  *
- * <p>This test prevents regressions where descriptive sentences in {@code @P} annotations
- * (e.g., "URL of the web page") are used as schema keys, breaking MCP client compatibility.
+ * <p>
+ * This test prevents regressions where descriptive sentences in {@code @P}
+ * annotations (e.g., "URL of the web page") are used as schema keys, breaking
+ * MCP client compatibility.
  *
- * @see <a href="https://docs.anthropic.com/en/docs/build-with-claude/tool-use">Claude Tool Use</a>
+ * @see <a href=
+ *      "https://docs.anthropic.com/en/docs/build-with-claude/tool-use">Claude
+ *      Tool Use</a>
  */
 class McpToolSchemaValidationTest {
 
     /**
-     * Pattern that MCP property keys must match.
-     * Only alphanumeric characters, underscores, dots, and hyphens are allowed.
-     * Maximum length is 64 characters.
+     * Pattern that MCP property keys must match. Only alphanumeric characters,
+     * underscores, dots, and hyphens are allowed. Maximum length is 64 characters.
      */
     private static final Pattern VALID_PROPERTY_KEY = Pattern.compile("^[a-zA-Z0-9_.-]{1,64}$");
 
     /**
-     * All classes that expose @Tool methods (langchain4j or Quarkus MCP).
-     * Add any new tool class here to include it in validation.
+     * All classes that expose @Tool methods (langchain4j or Quarkus MCP). Add any
+     * new tool class here to include it in validation.
      */
     private static final Class<?>[] TOOL_CLASSES = {
             // Built-in langchain4j tools (use @P for parameter names)
-            ai.labs.eddi.modules.llm.tools.impl.CalculatorTool.class,
-            ai.labs.eddi.modules.llm.tools.impl.DataFormatterTool.class,
-            ai.labs.eddi.modules.llm.tools.impl.DateTimeTool.class,
-            ai.labs.eddi.modules.llm.tools.impl.PdfReaderTool.class,
-            ai.labs.eddi.modules.llm.tools.impl.TextSummarizerTool.class,
-            ai.labs.eddi.modules.llm.tools.impl.WeatherTool.class,
-            ai.labs.eddi.modules.llm.tools.impl.WebScraperTool.class,
-            ai.labs.eddi.modules.llm.tools.impl.WebSearchTool.class,
+            ai.labs.eddi.modules.llm.tools.impl.CalculatorTool.class, ai.labs.eddi.modules.llm.tools.impl.DataFormatterTool.class,
+            ai.labs.eddi.modules.llm.tools.impl.DateTimeTool.class, ai.labs.eddi.modules.llm.tools.impl.PdfReaderTool.class,
+            ai.labs.eddi.modules.llm.tools.impl.TextSummarizerTool.class, ai.labs.eddi.modules.llm.tools.impl.WeatherTool.class,
+            ai.labs.eddi.modules.llm.tools.impl.WebScraperTool.class, ai.labs.eddi.modules.llm.tools.impl.WebSearchTool.class,
             ai.labs.eddi.modules.llm.tools.EddiToolBridge.class,
 
             // MCP tools (use @ToolArg — Java parameter names become keys)
-            McpConversationTools.class,
-            McpAdminTools.class,
-            McpSetupTools.class,
-    };
+            McpConversationTools.class, McpAdminTools.class, McpSetupTools.class,};
 
     /**
-     * Validates that every @P annotation value across all tool classes
-     * is a valid MCP property key (no spaces, special characters, or excessive length).
+     * Validates that every @P annotation value across all tool classes is a valid
+     * MCP property key (no spaces, special characters, or excessive length).
      *
-     * <p>The Quarkus MCP server uses the @P annotation value as the JSON schema
-     * property key. If a @P value contains spaces or special characters,
-     * MCP clients like Claude will reject the tool definition with HTTP 400.
+     * <p>
+     * The Quarkus MCP server uses the @P annotation value as the JSON schema
+     * property key. If a @P value contains spaces or special characters, MCP
+     * clients like Claude will reject the tool definition with HTTP 400.
      */
     @Test
     void allToolParameters_P_annotations_mustBeValidPropertyKeys() {
@@ -82,13 +80,9 @@ class McpToolSchemaValidationTest {
                         String propertyKey = pAnnotation.value();
                         if (!VALID_PROPERTY_KEY.matcher(propertyKey).matches()) {
                             violations.add(String.format(
-                                    "  %s.%s — @P(\"%s\") is not a valid MCP property key.%n" +
-                                            "    Keys must match: %s%n" +
-                                            "    Suggestion: use @P(\"%s\") instead.",
-                                    toolClass.getSimpleName(),
-                                    method.getName(),
-                                    truncate(propertyKey, 60),
-                                    VALID_PROPERTY_KEY.pattern(),
+                                    "  %s.%s — @P(\"%s\") is not a valid MCP property key.%n" + "    Keys must match: %s%n"
+                                            + "    Suggestion: use @P(\"%s\") instead.",
+                                    toolClass.getSimpleName(), method.getName(), truncate(propertyKey, 60), VALID_PROPERTY_KEY.pattern(),
                                     param.getName()));
                         }
                     }
@@ -96,15 +90,13 @@ class McpToolSchemaValidationTest {
             }
         }
 
-        assertTrue(violations.isEmpty(),
-                "Found @P annotations with invalid MCP property keys " +
-                        "(must match " + VALID_PROPERTY_KEY.pattern() + "):\n\n" +
-                        String.join("\n\n", violations));
+        assertTrue(violations.isEmpty(), "Found @P annotations with invalid MCP property keys " + "(must match " + VALID_PROPERTY_KEY.pattern()
+                + "):\n\n" + String.join("\n\n", violations));
     }
 
     /**
-     * Validates that every @ToolArg-annotated parameter on Quarkus MCP @Tool methods
-     * has a valid Java parameter name (which becomes the schema key).
+     * Validates that every @ToolArg-annotated parameter on Quarkus MCP @Tool
+     * methods has a valid Java parameter name (which becomes the schema key).
      */
     @Test
     void allToolParameters_ToolArg_javaNamesAreValidPropertyKeys() {
@@ -121,23 +113,16 @@ class McpToolSchemaValidationTest {
                     if (param.isAnnotationPresent(io.quarkiverse.mcp.server.ToolArg.class)) {
                         String paramName = param.getName();
                         if (!VALID_PROPERTY_KEY.matcher(paramName).matches()) {
-                            violations.add(String.format(
-                                    "  %s.%s — parameter '%s' is not a valid MCP property key.%n" +
-                                            "    Keys must match: %s",
-                                    toolClass.getSimpleName(),
-                                    method.getName(),
-                                    paramName,
-                                    VALID_PROPERTY_KEY.pattern()));
+                            violations.add(String.format("  %s.%s — parameter '%s' is not a valid MCP property key.%n" + "    Keys must match: %s",
+                                    toolClass.getSimpleName(), method.getName(), paramName, VALID_PROPERTY_KEY.pattern()));
                         }
                     }
                 }
             }
         }
 
-        assertTrue(violations.isEmpty(),
-                "Found @ToolArg parameters with invalid MCP property keys " +
-                        "(must match " + VALID_PROPERTY_KEY.pattern() + "):\n\n" +
-                        String.join("\n\n", violations));
+        assertTrue(violations.isEmpty(), "Found @ToolArg parameters with invalid MCP property keys " + "(must match " + VALID_PROPERTY_KEY.pattern()
+                + "):\n\n" + String.join("\n\n", violations));
     }
 
     /**

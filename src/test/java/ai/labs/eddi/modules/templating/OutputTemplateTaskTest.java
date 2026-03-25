@@ -47,8 +47,7 @@ public class OutputTemplateTaskTest {
         IMemoryItemConverter memoryTemplateConverter = mock(IMemoryItemConverter.class);
         when(memoryTemplateConverter.convert(any(IConversationMemory.class))).then(invocation -> new HashMap<>());
         ObjectMapper objectMapper = new ObjectMapper();
-        outputTemplateTask = new OutputTemplateTask(templatingEngine, memoryTemplateConverter, dataFactory,
-                objectMapper);
+        outputTemplateTask = new OutputTemplateTask(templatingEngine, memoryTemplateConverter, dataFactory, objectMapper);
     }
 
     @Test
@@ -56,8 +55,7 @@ public class OutputTemplateTaskTest {
         // setup
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
-            ret.add(new MockData<>("context:someContext",
-                    new Context(Context.ContextType.string, "someContextValue")));
+            ret.add(new MockData<>("context:someContext", new Context(Context.ContextType.string, "someContextValue")));
             return ret;
         });
         List<QuickReply> expectedPostQuickReplies = setupTask();
@@ -75,8 +73,7 @@ public class OutputTemplateTaskTest {
         final TestContextObject testContextObject = new TestContextObject("someContext", "someContextValue");
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
-            ret.add(new MockData<>("context:someContext",
-                    new Context(Context.ContextType.object, testContextObject)));
+            ret.add(new MockData<>("context:someContext", new Context(Context.ContextType.object, testContextObject)));
             return ret;
         });
         List<QuickReply> expectedPostQuickReplies = setupTask();
@@ -95,14 +92,10 @@ public class OutputTemplateTaskTest {
             return ret;
         });
         List<QuickReply> expectedPreQuickReplies = new LinkedList<>();
-        expectedPreQuickReplies.add(new QuickReply(
-                "Quick Reply Value [[${context}]]",
-                "quickReply(expression)", false));
+        expectedPreQuickReplies.add(new QuickReply("Quick Reply Value [[${context}]]", "quickReply(expression)", false));
 
         List<QuickReply> expectedPostQuickReplies = new LinkedList<>();
-        expectedPostQuickReplies.add(new QuickReply(
-                "Quick Reply Value someContextValue",
-                "quickReply(expression)", false));
+        expectedPostQuickReplies.add(new QuickReply("Quick Reply Value someContextValue", "quickReply(expression)", false));
 
         when(currentStep.getAllData(eq("quickReplies"))).then(invocation -> {
             LinkedList<IData<List<QuickReply>>> ret = new LinkedList<>();
@@ -110,15 +103,11 @@ public class OutputTemplateTaskTest {
             ret.add(new MockData<>(KEY_QUICK_REPLY_SOME_ACTION, expectedPostQuickReplies));
             return ret;
         });
-        when(dataFactory.createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_PRE_TEMPLATED),
-                eq(new TextOutputItem(templateString))))
-                .then(invocation -> new Data<>(KEY_OUTPUT_TEXT_SOME_ACTION_PRE_TEMPLATED,
-                        new TextOutputItem(templateString)));
+        when(dataFactory.createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_PRE_TEMPLATED), eq(new TextOutputItem(templateString))))
+                .then(invocation -> new Data<>(KEY_OUTPUT_TEXT_SOME_ACTION_PRE_TEMPLATED, new TextOutputItem(templateString)));
 
-        when(dataFactory.createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_POST_TEMPLATED),
-                eq(new TextOutputItem(expectedOutputString))))
-                .then(invocation -> new Data<>(KEY_OUTPUT_TEXT_SOME_ACTION_POST_TEMPLATED,
-                        new TextOutputItem(expectedOutputString)));
+        when(dataFactory.createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_POST_TEMPLATED), eq(new TextOutputItem(expectedOutputString))))
+                .then(invocation -> new Data<>(KEY_OUTPUT_TEXT_SOME_ACTION_POST_TEMPLATED, new TextOutputItem(expectedOutputString)));
 
         when(dataFactory.createData(eq(KEY_QUICK_REPLY_SOME_ACTION_PRE_TEMPLATED), anyList()))
                 .then(invocation -> new Data<>(KEY_QUICK_REPLY_SOME_ACTION_PRE_TEMPLATED, expectedPreQuickReplies));
@@ -126,8 +115,7 @@ public class OutputTemplateTaskTest {
         when(dataFactory.createData(eq(KEY_QUICK_REPLY_SOME_ACTION_POST_TEMPLATED), anyList()))
                 .then(invocation -> new Data<>(KEY_QUICK_REPLY_SOME_ACTION_POST_TEMPLATED, expectedPostQuickReplies));
 
-        when(templatingEngine.processTemplate(eq(templateString), anyMap(), eq(TEXT)))
-                .then(invocation -> expectedOutputString);
+        when(templatingEngine.processTemplate(eq(templateString), anyMap(), eq(TEXT))).then(invocation -> expectedOutputString);
 
         var expectedPreQuickReply = expectedPreQuickReplies.getFirst();
         var expectedPostQuickReply = expectedPostQuickReplies.getFirst();
@@ -136,15 +124,12 @@ public class OutputTemplateTaskTest {
         String expectedPostQuickReplyValue = expectedPostQuickReply.getValue();
         String expectedPostQuickReplyExpressions = expectedPostQuickReply.getExpressions();
 
-        when(templatingEngine.processTemplate(eq(expectedPreQuickReplyValue), anyMap()))
-                .then(invocation -> expectedPostQuickReplyValue);
+        when(templatingEngine.processTemplate(eq(expectedPreQuickReplyValue), anyMap())).then(invocation -> expectedPostQuickReplyValue);
         when(templatingEngine.processTemplate(eq(expectedPreQuickReply.getExpressions()), anyMap()))
                 .then(invocation -> expectedPostQuickReplyExpressions);
 
-        when(templatingEngine.processTemplate(eq(expectedPostQuickReplyValue), anyMap()))
-                .then(invocation -> expectedPostQuickReplyValue);
-        when(templatingEngine.processTemplate(eq(expectedPostQuickReplyExpressions), anyMap()))
-                .then(invocation -> expectedPostQuickReplyExpressions);
+        when(templatingEngine.processTemplate(eq(expectedPostQuickReplyValue), anyMap())).then(invocation -> expectedPostQuickReplyValue);
+        when(templatingEngine.processTemplate(eq(expectedPostQuickReplyExpressions), anyMap())).then(invocation -> expectedPostQuickReplyExpressions);
 
         return expectedPostQuickReplies;
     }
@@ -152,13 +137,10 @@ public class OutputTemplateTaskTest {
     private void verifyTask(List<QuickReply> expectedPostQuickReplies) {
         verify(currentStep).getAllData("output");
         verify(currentStep).getAllData("quickReplies");
-        verify(dataFactory).createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_PRE_TEMPLATED),
-                eq(new TextOutputItem(templateString)));
-        verify(dataFactory).createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_POST_TEMPLATED),
-                eq(new TextOutputItem(expectedOutputString)));
+        verify(dataFactory).createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_PRE_TEMPLATED), eq(new TextOutputItem(templateString)));
+        verify(dataFactory).createData(eq(KEY_OUTPUT_TEXT_SOME_ACTION_POST_TEMPLATED), eq(new TextOutputItem(expectedOutputString)));
         verify(dataFactory, times(2)).createData(eq(KEY_QUICK_REPLY_SOME_ACTION_PRE_TEMPLATED), any());
-        verify(dataFactory, times(2)).createData(eq(KEY_QUICK_REPLY_SOME_ACTION_POST_TEMPLATED),
-                eq(expectedPostQuickReplies));
+        verify(dataFactory, times(2)).createData(eq(KEY_QUICK_REPLY_SOME_ACTION_POST_TEMPLATED), eq(expectedPostQuickReplies));
         verify(currentStep, times(9)).storeData(any(IData.class));
     }
 

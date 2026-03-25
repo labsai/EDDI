@@ -15,8 +15,8 @@ import java.sql.Statement;
 /**
  * Readiness health check for PostgreSQL connectivity.
  * <p>
- * Only active when {@code eddi.datastore.type=postgres}.
- * Reports at {@code /q/health/ready} alongside other readiness checks.
+ * Only active when {@code eddi.datastore.type=postgres}. Reports at
+ * {@code /q/health/ready} alongside other readiness checks.
  */
 @Readiness
 @ApplicationScoped
@@ -33,17 +33,12 @@ public class PostgresHealthCheck implements HealthCheck {
     @Override
     public HealthCheckResponse call() {
         HealthCheckResponseBuilder builder = HealthCheckResponse.named("PostgreSQL connection");
-        try (Connection conn = dataSource.getConnection();
-             Statement stmt = conn.createStatement()) {
+        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute("SELECT 1");
-            return builder.up()
-                    .withData("database", conn.getMetaData().getDatabaseProductName())
-                    .withData("url", conn.getMetaData().getURL())
+            return builder.up().withData("database", conn.getMetaData().getDatabaseProductName()).withData("url", conn.getMetaData().getURL())
                     .build();
         } catch (Exception e) {
-            return builder.down()
-                    .withData("error", e.getMessage())
-                    .build();
+            return builder.down().withData("error", e.getMessage()).build();
         }
     }
 }

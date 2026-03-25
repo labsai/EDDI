@@ -13,8 +13,8 @@ public final class SneakyThrow {
     }
 
     /**
-     * Rethrows any exception as unchecked without wrapping it.
-     * The ExceptionMapper infrastructure will match the original exception type.
+     * Rethrows any exception as unchecked without wrapping it. The ExceptionMapper
+     * infrastructure will match the original exception type.
      */
     @SuppressWarnings("unchecked")
     public static <E extends Throwable> RuntimeException sneakyThrow(Throwable e) throws E {

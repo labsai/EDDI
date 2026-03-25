@@ -15,17 +15,18 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 
 /**
- * In-memory ring buffer that captures log records with MDC context.
- * Provides:
+ * In-memory ring buffer that captures log records with MDC context. Provides:
  * <ul>
- *   <li>Instant in-memory access for the SSE live-tail endpoint</li>
- *   <li>Listener-based push for connected SSE clients</li>
- *   <li>Async batched DB persistence via {@link IDatabaseLogs}</li>
+ * <li>Instant in-memory access for the SSE live-tail endpoint</li>
+ * <li>Listener-based push for connected SSE clients</li>
+ * <li>Async batched DB persistence via {@link IDatabaseLogs}</li>
  * </ul>
  *
- * <p>Log records are captured via {@link LogCaptureFilter}, a Quarkus
- * {@code @LoggingFilter} that intercepts every log record in the
- * JBoss LogManager workflow and pushes it to this store.</p>
+ * <p>
+ * Log records are captured via {@link LogCaptureFilter}, a Quarkus
+ * {@code @LoggingFilter} that intercepts every log record in the JBoss
+ * LogManager workflow and pushes it to this store.
+ * </p>
  *
  * @author ginccc
  * @since 6.0.0
@@ -55,9 +56,7 @@ public class BoundedLogStore {
     private ScheduledExecutorService dbWriter;
 
     @Inject
-    public BoundedLogStore(
-            InstanceIdProducer instanceIdProducer,
-            IDatabaseLogs databaseLogs,
+    public BoundedLogStore(InstanceIdProducer instanceIdProducer, IDatabaseLogs databaseLogs,
             @ConfigProperty(name = "eddi.logs.buffer-size", defaultValue = "10000") int bufferSize,
             @ConfigProperty(name = "eddi.logs.db-enabled", defaultValue = "true") boolean dbEnabled,
             @ConfigProperty(name = "eddi.logs.db-flush-interval-seconds", defaultValue = "5") int dbFlushIntervalSeconds,
@@ -73,14 +72,12 @@ public class BoundedLogStore {
     }
 
     /**
-     * Factory method for testing — creates a store without CDI.
-     * Call {@link #init()} after construction to start the DB writer.
+     * Factory method for testing — creates a store without CDI. Call
+     * {@link #init()} after construction to start the DB writer.
      */
-    static BoundedLogStore createForTesting(InstanceIdProducer instanceIdProducer, IDatabaseLogs databaseLogs,
-                                             int bufferSize, boolean dbEnabled, int dbFlushIntervalSeconds,
-                                             String dbPersistMinLevel) {
-        return new BoundedLogStore(instanceIdProducer, databaseLogs, bufferSize,
-                dbEnabled, dbFlushIntervalSeconds, dbPersistMinLevel);
+    static BoundedLogStore createForTesting(InstanceIdProducer instanceIdProducer, IDatabaseLogs databaseLogs, int bufferSize, boolean dbEnabled,
+            int dbFlushIntervalSeconds, String dbPersistMinLevel) {
+        return new BoundedLogStore(instanceIdProducer, databaseLogs, bufferSize, dbEnabled, dbFlushIntervalSeconds, dbPersistMinLevel);
     }
 
     @PostConstruct
@@ -92,10 +89,8 @@ public class BoundedLogStore {
                 t.setDaemon(true);
                 return t;
             });
-            dbWriter.scheduleAtFixedRate(this::flushToDb,
-                    dbFlushIntervalSeconds, dbFlushIntervalSeconds, TimeUnit.SECONDS);
-            log.infov("BoundedLogStore: DB persistence enabled (flush every {0}s, min level: {1})",
-                    dbFlushIntervalSeconds, dbPersistMinLevel);
+            dbWriter.scheduleAtFixedRate(this::flushToDb, dbFlushIntervalSeconds, dbFlushIntervalSeconds, TimeUnit.SECONDS);
+            log.infov("BoundedLogStore: DB persistence enabled (flush every {0}s, min level: {1})", dbFlushIntervalSeconds, dbPersistMinLevel);
         } else {
             log.info("BoundedLogStore: DB persistence disabled (ring buffer + SSE only)");
         }
@@ -121,17 +116,21 @@ public class BoundedLogStore {
     }
 
     /**
-     * Called by {@link LogCaptureFilter} for every log record passing through
-     * the Quarkus logging workflow.
+     * Called by {@link LogCaptureFilter} for every log record passing through the
+     * Quarkus logging workflow.
      *
-     * @param record the JUL LogRecord (actually a JBoss ExtLogRecord at runtime)
+     * @param record
+     *            the JUL LogRecord (actually a JBoss ExtLogRecord at runtime)
      */
     public void capture(java.util.logging.LogRecord record) {
-        if (record == null) return;
+        if (record == null)
+            return;
 
-        // Format the message using a Formatter (avoids deprecated getFormattedMessage())
+        // Format the message using a Formatter (avoids deprecated
+        // getFormattedMessage())
         String message = formatRecord(record);
-        if (message == null || message.isEmpty()) return;
+        if (message == null || message.isEmpty())
+            return;
 
         // Redact potential secrets from log messages (defense-in-depth)
         message = SecretRedactionFilter.redact(message);
@@ -176,18 +175,8 @@ public class BoundedLogStore {
             }
         }
 
-        LogEntry entry = new LogEntry(
-                record.getMillis(),
-                record.getLevel().getName(),
-                loggerName,
-                message,
-                environment,
-                agentId,
-                agentVersion,
-                conversationId,
-                userId,
-                instanceIdProducer.getInstanceId()
-        );
+        LogEntry entry = new LogEntry(record.getMillis(), record.getLevel().getName(), loggerName, message, environment, agentId, agentVersion,
+                conversationId, userId, instanceIdProducer.getInstanceId());
 
         publish(entry);
     }
@@ -263,7 +252,8 @@ public class BoundedLogStore {
      * Flush pending log entries to the database in a single batch.
      */
     void flushToDb() {
-        if (dbQueue.isEmpty()) return;
+        if (dbQueue.isEmpty())
+            return;
 
         List<LogEntry> batch = new ArrayList<>();
         LogEntry entry;
@@ -302,13 +292,14 @@ public class BoundedLogStore {
     // ==================== Private Helpers ====================
 
     /**
-     * Format a LogRecord's message, resolving {0},{1}... placeholders
-     * from the record's parameters array using a standard Formatter.
-     * Avoids deprecated ExtLogRecord.getFormattedMessage().
+     * Format a LogRecord's message, resolving {0},{1}... placeholders from the
+     * record's parameters array using a standard Formatter. Avoids deprecated
+     * ExtLogRecord.getFormattedMessage().
      */
     private static String formatRecord(java.util.logging.LogRecord record) {
         String msg = record.getMessage();
-        if (msg == null) return "";
+        if (msg == null)
+            return "";
 
         // Resolve {0}, {1}, ... placeholders using MessageFormat
         Object[] params = record.getParameters();
@@ -323,14 +314,18 @@ public class BoundedLogStore {
     }
 
     private boolean matchesFilter(LogEntry entry, String agentId, String conversationId, String level) {
-        if (agentId != null && !agentId.equals(entry.agentId())) return false;
-        if (conversationId != null && !conversationId.equals(entry.conversationId())) return false;
-        if (level != null && !level.equalsIgnoreCase(entry.level())) return false;
+        if (agentId != null && !agentId.equals(entry.agentId()))
+            return false;
+        if (conversationId != null && !conversationId.equals(entry.conversationId()))
+            return false;
+        if (level != null && !level.equalsIgnoreCase(entry.level()))
+            return false;
         return true;
     }
 
     private boolean meetsMinLevel(String level) {
-        if (level == null) return false;
+        if (level == null)
+            return false;
         return levelOrdinal(level) >= levelOrdinal(dbPersistMinLevel);
     }
 

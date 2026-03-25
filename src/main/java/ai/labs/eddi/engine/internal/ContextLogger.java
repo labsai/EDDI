@@ -11,11 +11,7 @@ import java.util.Map;
 public class ContextLogger implements IContextLogger {
 
     @Override
-    public Map<String, String> createLoggingContext(Deployment.Environment environment,
-                                                    String agentId,
-                                                    String conversationId,
-                                                    String userId) {
-
+    public Map<String, String> createLoggingContext(Deployment.Environment environment, String agentId, String conversationId, String userId) {
 
         Map<String, String> context = new HashMap<>();
 

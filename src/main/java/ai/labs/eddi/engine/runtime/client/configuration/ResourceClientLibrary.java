@@ -38,12 +38,8 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
     private static final Logger log = Logger.getLogger(ResourceClientLibrary.class);
 
     @Inject
-    public ResourceClientLibrary(IRestParserStore restParserStore,
-            IRestDictionaryStore restDictionaryStore,
-            IRestRuleSetStore restRuleSetStore,
-            IRestApiCallsStore restApiCallsStore,
-            IRestLlmStore restLlmStore,
-            IRestOutputStore restOutputStore,
+    public ResourceClientLibrary(IRestParserStore restParserStore, IRestDictionaryStore restDictionaryStore, IRestRuleSetStore restRuleSetStore,
+            IRestApiCallsStore restApiCallsStore, IRestLlmStore restLlmStore, IRestOutputStore restOutputStore,
             IRestPropertySetterStore restPropertySetterStore) {
         this.restParserStore = restParserStore;
         this.restDictionaryStore = restDictionaryStore;

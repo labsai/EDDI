@@ -9,5 +9,6 @@ import java.util.List;
  * @author ginccc
  */
 public interface IRuleSetStore extends IResourceStore<RuleSetConfiguration> {
-    List<String> readActions(String id, Integer version, String filter, Integer limit) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+    List<String> readActions(String id, Integer version, String filter, Integer limit)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 }

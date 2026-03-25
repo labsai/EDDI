@@ -31,8 +31,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * </ul>
  *
  * <p>
- * Runs via maven-failsafe-plugin ({@code mvn verify -DskipITs=false}).
- * Requires Docker running.
+ * Runs via maven-failsafe-plugin ({@code mvn verify -DskipITs=false}). Requires
+ * Docker running.
  * </p>
  *
  * @author ginccc
@@ -45,30 +45,22 @@ class NatsConversationCoordinatorIT {
 
     @Container
     @SuppressWarnings("resource")
-    static GenericContainer<?> natsContainer = new GenericContainer<>("nats:2.10-alpine")
-            .withExposedPorts(NATS_PORT)
-            .withCommand("--jetstream", "--store_dir=/data")
-            .waitingFor(Wait.forLogMessage(".*Server is ready.*", 1));
+    static GenericContainer<?> natsContainer = new GenericContainer<>("nats:2.10-alpine").withExposedPorts(NATS_PORT)
+            .withCommand("--jetstream", "--store_dir=/data").waitingFor(Wait.forLogMessage(".*Server is ready.*", 1));
 
     private NatsConversationCoordinator coordinator;
     private Connection directConnection;
 
     @BeforeEach
     void setUp() throws Exception {
-        String natsUrl = String.format("nats://%s:%d",
-                natsContainer.getHost(), natsContainer.getMappedPort(NATS_PORT));
+        String natsUrl = String.format("nats://%s:%d", natsContainer.getHost(), natsContainer.getMappedPort(NATS_PORT));
 
         // Create a real IRuntime that executes callables in a thread pool
         IRuntime runtime = new TestRuntime();
 
         // Create coordinator with real NATS connection (no mocks)
-        coordinator = new NatsConversationCoordinator(
-                runtime,
-                null, // no metrics instance for IT
-                natsUrl,
-                "EDDI_IT_CONVERSATIONS",
-                "EDDI_IT_DEAD_LETTERS",
-                3, // maxRetries
+        coordinator = new NatsConversationCoordinator(runtime, null, // no metrics instance for IT
+                natsUrl, "EDDI_IT_CONVERSATIONS", "EDDI_IT_DEAD_LETTERS", 3, // maxRetries
                 60);
 
         // Start coordinator (connects to NATS, creates streams)
@@ -165,8 +157,7 @@ class NatsConversationCoordinatorIT {
         // Verify message exists in dead-letter stream
         try {
             StreamInfo info = jsm.getStreamInfo("EDDI_IT_DEAD_LETTERS");
-            assertTrue(info.getStreamState().getMsgCount() > 0,
-                    "Dead-letter stream should contain at least one message");
+            assertTrue(info.getStreamState().getMsgCount() > 0, "Dead-letter stream should contain at least one message");
         } catch (JetStreamApiException e) {
             fail("Dead-letter stream should exist after coordinator.start()");
         }
@@ -187,17 +178,14 @@ class NatsConversationCoordinatorIT {
 
         // Consume the dead-letter message
         JetStream js = directConnection.jetStream();
-        JetStreamSubscription sub = js.subscribe(
-                "eddi.deadletter." + coordinator.sanitizeSubject(convId));
+        JetStreamSubscription sub = js.subscribe("eddi.deadletter." + coordinator.sanitizeSubject(convId));
 
         Message msg = sub.nextMessage(Duration.ofSeconds(5));
         assertNotNull(msg, "Dead-letter message should be published");
 
         String payload = new String(msg.getData());
-        assertTrue(payload.contains(convId),
-                "Dead-letter payload should contain conversation ID, got: " + payload);
-        assertTrue(payload.contains("payload test failure"),
-                "Dead-letter payload should contain error message, got: " + payload);
+        assertTrue(payload.contains(convId), "Dead-letter payload should contain conversation ID, got: " + payload);
+        assertTrue(payload.contains("payload test failure"), "Dead-letter payload should contain error message, got: " + payload);
     }
 
     @Test
@@ -246,8 +234,7 @@ class NatsConversationCoordinatorIT {
         }
 
         @Override
-        public <T> Future<T> submitCallable(Callable<T> callable, IFinishedExecution<T> callback,
-                java.util.Map<Object, Object> threadBindings) {
+        public <T> Future<T> submitCallable(Callable<T> callable, IFinishedExecution<T> callback, java.util.Map<Object, Object> threadBindings) {
             return executor.submit(() -> {
                 try {
                     T result = callable.call();

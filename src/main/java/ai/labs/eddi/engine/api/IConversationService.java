@@ -13,8 +13,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Core conversation lifecycle service — extracted from RestAgentEngine.
- * All conversation operations are available here without JAX-RS dependencies.
+ * Core conversation lifecycle service — extracted from RestAgentEngine. All
+ * conversation operations are available here without JAX-RS dependencies.
  *
  * @author ginccc
  */
@@ -26,12 +26,14 @@ public interface IConversationService {
     /**
      * Start a new conversation with the latest ready Agent version.
      *
-     * @throws AgentNotReadyException    if no version of the Agent is deployed
-     * @throws ResourceStoreException    on persistence failures
-     * @throws ResourceNotFoundException if referenced resources are not found
+     * @throws AgentNotReadyException
+     *             if no version of the Agent is deployed
+     * @throws ResourceStoreException
+     *             on persistence failures
+     * @throws ResourceNotFoundException
+     *             if referenced resources are not found
      */
-    ConversationResult startConversation(Environment environment, String agentId,
-            String userId, Map<String, Context> context)
+    ConversationResult startConversation(Environment environment, String agentId, String userId, Map<String, Context> context)
             throws AgentNotReadyException, ResourceStoreException, ResourceNotFoundException;
 
     /**
@@ -42,31 +44,32 @@ public interface IConversationService {
     /**
      * Get the current state of a conversation (from cache or DB).
      *
-     * @throws ConversationNotFoundException if no conversation exists with the
-     *                                       given ID
+     * @throws ConversationNotFoundException
+     *             if no conversation exists with the given ID
      */
     ConversationState getConversationState(Environment environment, String conversationId);
 
     /**
      * Read a conversation memory snapshot.
      *
-     * @throws AgentMismatchException    if the conversationId does not belong to
-     *                                   the given agentId
-     * @throws ResourceStoreException    on persistence failures
-     * @throws ResourceNotFoundException if the conversation is not found
+     * @throws AgentMismatchException
+     *             if the conversationId does not belong to the given agentId
+     * @throws ResourceStoreException
+     *             on persistence failures
+     * @throws ResourceNotFoundException
+     *             if the conversation is not found
      */
-    SimpleConversationMemorySnapshot readConversation(Environment environment, String agentId,
-            String conversationId,
-            Boolean returnDetailed,
-            Boolean returnCurrentStepOnly,
-            List<String> returningFields)
+    SimpleConversationMemorySnapshot readConversation(Environment environment, String agentId, String conversationId, Boolean returnDetailed,
+            Boolean returnCurrentStepOnly, List<String> returningFields)
             throws AgentMismatchException, ResourceStoreException, ResourceNotFoundException;
 
     /**
      * Read conversation log in text or structured format.
      *
-     * @throws ResourceStoreException    on persistence failures
-     * @throws ResourceNotFoundException if the conversation is not found
+     * @throws ResourceStoreException
+     *             on persistence failures
+     * @throws ResourceNotFoundException
+     *             if the conversation is not found
      */
     ConversationLogResult readConversationLog(String conversationId, String outputType, Integer logSize)
             throws ResourceStoreException, ResourceNotFoundException;
@@ -75,20 +78,18 @@ public interface IConversationService {
     }
 
     /**
-     * Process a user input (say) or rerun the last step.
-     * Results are delivered via the responseHandler callback.
+     * Process a user input (say) or rerun the last step. Results are delivered via
+     * the responseHandler callback.
      *
-     * @throws AgentMismatchException     if agentId doesn't match the
-     *                                    conversation's
-     *                                    agent
-     * @throws ConversationEndedException if the conversation has already ended
-     * @throws ResourceNotFoundException  if the conversation is not found
+     * @throws AgentMismatchException
+     *             if agentId doesn't match the conversation's agent
+     * @throws ConversationEndedException
+     *             if the conversation has already ended
+     * @throws ResourceNotFoundException
+     *             if the conversation is not found
      */
-    void say(Environment environment, String agentId, String conversationId,
-            Boolean returnDetailed, Boolean returnCurrentStepOnly,
-            List<String> returningFields, InputData inputData,
-            boolean rerunOnly, ConversationResponseHandler responseHandler)
-            throws Exception;
+    void say(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+            List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler) throws Exception;
 
     @FunctionalInterface
     interface ConversationResponseHandler {
@@ -111,16 +112,13 @@ public interface IConversationService {
     }
 
     /**
-     * Process user input with SSE streaming. Token and step events are
-     * delivered via the streamingHandler callback.
+     * Process user input with SSE streaming. Token and step events are delivered
+     * via the streamingHandler callback.
      */
-    void sayStreaming(Environment environment, String agentId, String conversationId,
-            Boolean returnDetailed, Boolean returnCurrentStepOnly,
-            List<String> returningFields, InputData inputData,
-            StreamingResponseHandler streamingHandler) throws Exception;
+    void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+            List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler) throws Exception;
 
-    Boolean isUndoAvailable(Environment environment, String agentId, String conversationId)
-            throws ResourceStoreException, ResourceNotFoundException;
+    Boolean isUndoAvailable(Environment environment, String agentId, String conversationId) throws ResourceStoreException, ResourceNotFoundException;
 
     /**
      * @return true if undo was performed, false if not available
@@ -128,8 +126,7 @@ public interface IConversationService {
     boolean undo(Environment environment, String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException;
 
-    Boolean isRedoAvailable(Environment environment, String agentId, String conversationId)
-            throws ResourceStoreException, ResourceNotFoundException;
+    Boolean isRedoAvailable(Environment environment, String agentId, String conversationId) throws ResourceStoreException, ResourceNotFoundException;
 
     /**
      * @return true if redo was performed, false if not available

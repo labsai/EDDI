@@ -15,8 +15,10 @@ import java.util.Base64;
  * <p>
  * The envelope model uses a two-tier key hierarchy:
  * <ul>
- *   <li><b>KEK (Key Encryption Key)</b> — Master key from environment variable, encrypts DEKs</li>
- *   <li><b>DEK (Data Encryption Key)</b> — Per-tenant key, encrypts actual secrets</li>
+ * <li><b>KEK (Key Encryption Key)</b> — Master key from environment variable,
+ * encrypts DEKs</li>
+ * <li><b>DEK (Data Encryption Key)</b> — Per-tenant key, encrypts actual
+ * secrets</li>
  * </ul>
  * <p>
  * AES-256-GCM provides authenticated encryption (confidentiality + integrity).
@@ -39,8 +41,10 @@ public final class EnvelopeCrypto {
     /**
      * Encrypt plaintext using AES-256-GCM with the given key.
      *
-     * @param plaintext the data to encrypt
-     * @param key       the 32-byte AES-256 key
+     * @param plaintext
+     *            the data to encrypt
+     * @param key
+     *            the 32-byte AES-256 key
      * @return encrypted result containing Base64-encoded ciphertext and IV
      */
     public static EncryptionResult encrypt(String plaintext, byte[] key) {
@@ -54,9 +58,7 @@ public final class EnvelopeCrypto {
 
             byte[] ciphertext = cipher.doFinal(plaintext.getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
-            return new EncryptionResult(
-                    Base64.getEncoder().encodeToString(ciphertext),
-                    Base64.getEncoder().encodeToString(iv));
+            return new EncryptionResult(Base64.getEncoder().encodeToString(ciphertext), Base64.getEncoder().encodeToString(iv));
         } catch (Exception e) {
             throw new CryptoException("Encryption failed", e);
         }
@@ -65,9 +67,12 @@ public final class EnvelopeCrypto {
     /**
      * Decrypt AES-256-GCM ciphertext using the given key.
      *
-     * @param encryptedValue Base64-encoded ciphertext (includes auth tag)
-     * @param ivBase64       Base64-encoded 12-byte IV
-     * @param key            the 32-byte AES-256 key
+     * @param encryptedValue
+     *            Base64-encoded ciphertext (includes auth tag)
+     * @param ivBase64
+     *            Base64-encoded 12-byte IV
+     * @param key
+     *            the 32-byte AES-256 key
      * @return the decrypted plaintext
      */
     public static String decrypt(String encryptedValue, String ivBase64, byte[] key) {
@@ -107,8 +112,10 @@ public final class EnvelopeCrypto {
     /**
      * Encrypt a DEK using the KEK (Master Key).
      *
-     * @param dek the raw DEK bytes
-     * @param kek the raw KEK bytes (32 bytes)
+     * @param dek
+     *            the raw DEK bytes
+     * @param kek
+     *            the raw KEK bytes (32 bytes)
      * @return encrypted result
      */
     public static EncryptionResult encryptDek(byte[] dek, byte[] kek) {
@@ -118,9 +125,12 @@ public final class EnvelopeCrypto {
     /**
      * Decrypt a DEK using the KEK (Master Key).
      *
-     * @param encryptedDek Base64-encoded encrypted DEK
-     * @param ivBase64     Base64-encoded IV
-     * @param kek          the raw KEK bytes (32 bytes)
+     * @param encryptedDek
+     *            Base64-encoded encrypted DEK
+     * @param ivBase64
+     *            Base64-encoded IV
+     * @param kek
+     *            the raw KEK bytes (32 bytes)
      * @return the raw DEK bytes
      */
     public static byte[] decryptDek(String encryptedDek, String ivBase64, byte[] kek) {
@@ -129,7 +139,8 @@ public final class EnvelopeCrypto {
     }
 
     /**
-     * Compute SHA-256 hex digest of plaintext (for integrity checks without exposing the value).
+     * Compute SHA-256 hex digest of plaintext (for integrity checks without
+     * exposing the value).
      */
     public static String sha256Hex(String plaintext) {
         try {
@@ -138,7 +149,8 @@ public final class EnvelopeCrypto {
             StringBuilder hexString = new StringBuilder(2 * hash.length);
             for (byte b : hash) {
                 String hex = Integer.toHexString(0xff & b);
-                if (hex.length() == 1) hexString.append('0');
+                if (hex.length() == 1)
+                    hexString.append('0');
                 hexString.append(hex);
             }
             return hexString.toString();
@@ -154,12 +166,11 @@ public final class EnvelopeCrypto {
      */
     public static byte[] deriveKeyFromString(String keyString) {
         try {
-            javax.crypto.SecretKeyFactory factory =
-                    javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-            // Fixed, application-specific salt — acceptable since the KEK is unique per deployment
+            javax.crypto.SecretKeyFactory factory = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+            // Fixed, application-specific salt — acceptable since the KEK is unique per
+            // deployment
             byte[] salt = "eddi-vault-kek-v1".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            javax.crypto.spec.PBEKeySpec spec =
-                    new javax.crypto.spec.PBEKeySpec(keyString.toCharArray(), salt, 600_000, 256);
+            javax.crypto.spec.PBEKeySpec spec = new javax.crypto.spec.PBEKeySpec(keyString.toCharArray(), salt, 600_000, 256);
             return factory.generateSecret(spec).getEncoded();
         } catch (java.security.NoSuchAlgorithmException | java.security.spec.InvalidKeySpecException e) {
             throw new CryptoException("PBKDF2 key derivation failed", e);
@@ -174,16 +185,17 @@ public final class EnvelopeCrypto {
 
     private static void validateKey(byte[] key) {
         if (key == null || key.length != 32) {
-            throw new CryptoException("AES-256 key must be exactly 32 bytes, got " +
-                    (key == null ? "null" : key.length));
+            throw new CryptoException("AES-256 key must be exactly 32 bytes, got " + (key == null ? "null" : key.length));
         }
     }
 
     /**
      * Result of an encryption operation.
      *
-     * @param ciphertext Base64-encoded ciphertext (includes GCM auth tag)
-     * @param iv         Base64-encoded 12-byte initialization vector
+     * @param ciphertext
+     *            Base64-encoded ciphertext (includes GCM auth tag)
+     * @param iv
+     *            Base64-encoded 12-byte initialization vector
      */
     public record EncryptionResult(String ciphertext, String iv) {
     }

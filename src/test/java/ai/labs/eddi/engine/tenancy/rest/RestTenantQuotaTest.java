@@ -42,8 +42,7 @@ class RestTenantQuotaTest {
 
     @Test
     void shouldReturn404ForUnknownTenant() {
-        assertThrows(NotFoundException.class,
-                () -> restTenantQuota.getQuota("unknown-tenant"));
+        assertThrows(NotFoundException.class, () -> restTenantQuota.getQuota("unknown-tenant"));
     }
 
     @Test

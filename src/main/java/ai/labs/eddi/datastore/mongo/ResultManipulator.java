@@ -35,7 +35,7 @@ public class ResultManipulator<T> {
 
         filter = StringUtilities.convertToSearchString(filter);
         boolean matches;
-        for (int i = 0; i < listForManipulation.size(); ) {
+        for (int i = 0; i < listForManipulation.size();) {
             T obj = listForManipulation.get(i);
             if (obj == null) {
                 String message = "Error while filtering! Null values are not allowed. Operation was aborted.";

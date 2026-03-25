@@ -9,8 +9,8 @@ import java.time.Duration;
 import java.util.concurrent.*;
 
 /**
- * Decorator that adds provider-agnostic timeout and request/response logging
- * to any {@link ChatModel}. Applied automatically by {@link ChatModelRegistry}
+ * Decorator that adds provider-agnostic timeout and request/response logging to
+ * any {@link ChatModel}. Applied automatically by {@link ChatModelRegistry}
  * when {@code timeout}, {@code logRequests}, or {@code logResponses} parameters
  * are set in the langchain configuration.
  */
@@ -28,8 +28,7 @@ public class ObservableChatModel implements ChatModel {
     private final boolean logResponses;
     private final String modelType;
 
-    ObservableChatModel(ChatModel delegate, String modelType,
-                        Duration timeout, boolean logRequests, boolean logResponses) {
+    ObservableChatModel(ChatModel delegate, String modelType, Duration timeout, boolean logRequests, boolean logResponses) {
         this.delegate = delegate;
         this.modelType = modelType;
         this.timeout = timeout;
@@ -42,8 +41,7 @@ public class ObservableChatModel implements ChatModel {
         if (logRequests) {
             var messages = chatRequest.messages();
             var lastMsg = messages.isEmpty() ? "<empty>" : messages.getLast().toString();
-            LOGGER.infof("[%s] Chat request: %d messages, last: \"%s\"",
-                    modelType, messages.size(), truncate(lastMsg, 200));
+            LOGGER.infof("[%s] Chat request: %d messages, last: \"%s\"", modelType, messages.size(), truncate(lastMsg, 200));
         }
 
         long startMs = System.currentTimeMillis();
@@ -59,8 +57,7 @@ public class ObservableChatModel implements ChatModel {
 
         if (logResponses) {
             var text = response.aiMessage() != null ? response.aiMessage().text() : "<null>";
-            LOGGER.infof("[%s] Chat response (%dms): \"%s\"",
-                    modelType, elapsedMs, truncate(text, 500));
+            LOGGER.infof("[%s] Chat response (%dms): \"%s\"", modelType, elapsedMs, truncate(text, 500));
         }
 
         return response;
@@ -72,8 +69,7 @@ public class ObservableChatModel implements ChatModel {
             return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             future.cancel(true);
-            throw new RuntimeException(String.format(
-                    "[%s] Chat request timed out after %dms", modelType, timeout.toMillis()), e);
+            throw new RuntimeException(String.format("[%s] Chat request timed out after %dms", modelType, timeout.toMillis()), e);
         } catch (ExecutionException e) {
             throw new RuntimeException(e.getCause());
         } catch (InterruptedException e) {
@@ -83,16 +79,16 @@ public class ObservableChatModel implements ChatModel {
     }
 
     private static String truncate(String text, int maxLen) {
-        if (text == null) return "<null>";
+        if (text == null)
+            return "<null>";
         return text.length() <= maxLen ? text : text.substring(0, maxLen) + "…";
     }
 
     /**
-     * Wraps a ChatModel with timeout and logging if any observability params are set.
-     * Returns the original model unwrapped if no observability is configured.
+     * Wraps a ChatModel with timeout and logging if any observability params are
+     * set. Returns the original model unwrapped if no observability is configured.
      */
-    static ChatModel wrapIfNeeded(ChatModel model, String modelType,
-                                   String timeoutMs, String logReq, String logResp) {
+    static ChatModel wrapIfNeeded(ChatModel model, String modelType, String timeoutMs, String logReq, String logResp) {
         Duration timeout = null;
         if (timeoutMs != null && !timeoutMs.isBlank()) {
             try {

@@ -80,8 +80,7 @@ public class InputParserTask implements ILifecycleTask {
     public InputParserTask(IExpressionProvider expressionProvider,
             @ParserNormalizerExtensions Map<String, Provider<INormalizerProvider>> normalizerProviders,
             @ParserDictionaryExtensions Map<String, Provider<IDictionaryProvider>> dictionaryProviders,
-            @ParserCorrectionExtensions Map<String, Provider<ICorrectionProvider>> correctionProviders,
-            ObjectMapper objectMapper) {
+            @ParserCorrectionExtensions Map<String, Provider<ICorrectionProvider>> correctionProviders, ObjectMapper objectMapper) {
         this.expressionProvider = expressionProvider;
         this.normalizerProviders = normalizerProviders;
         this.dictionaryProviders = dictionaryProviders;
@@ -148,16 +147,11 @@ public class InputParserTask implements ILifecycleTask {
     }
 
     private static List<QuickReply> extractQuickReplies(List<Map<String, Object>> quickReplyOutputList) {
-        return quickReplyOutputList.stream()
-                .filter(Objects::nonNull)
-                .map(quickReplyData -> {
-                    String value = quickReplyData.get("value").toString();
-                    String expressions = quickReplyData.get("expressions") != null
-                            ? quickReplyData.get("expressions").toString()
-                            : generateExpression(value);
-                    return new QuickReply(value, expressions, (Boolean) quickReplyData.get("default"));
-                })
-                .toList();
+        return quickReplyOutputList.stream().filter(Objects::nonNull).map(quickReplyData -> {
+            String value = quickReplyData.get("value").toString();
+            String expressions = quickReplyData.get("expressions") != null ? quickReplyData.get("expressions").toString() : generateExpression(value);
+            return new QuickReply(value, expressions, (Boolean) quickReplyData.get("default"));
+        }).toList();
     }
 
     private static String generateExpression(String value) {
@@ -173,13 +167,9 @@ public class InputParserTask implements ILifecycleTask {
         }
     }
 
-    private void storeResultInMemory(IWritableConversationStep currentStep,
-            List<RawSolution> parsedSolutions,
-            IInputParser.Config parserConfig) {
+    private void storeResultInMemory(IWritableConversationStep currentStep, List<RawSolution> parsedSolutions, IInputParser.Config parserConfig) {
         if (!parsedSolutions.isEmpty()) {
-            Solution solution = extractExpressions(parsedSolutions,
-                    parserConfig.isIncludeUnused(),
-                    parserConfig.isIncludeUnknown()).getFirst();
+            Solution solution = extractExpressions(parsedSolutions, parserConfig.isIncludeUnused(), parserConfig.isIncludeUnknown()).getFirst();
 
             Expressions newExpressions = solution.getExpressions();
             if (parserConfig.isAppendExpressions() && !newExpressions.isEmpty()) {
@@ -187,8 +177,7 @@ public class InputParserTask implements ILifecycleTask {
                 if (latestExpressions != null) {
                     Expressions currentExpressions = expressionProvider.parseExpressions(latestExpressions.getResult());
                     currentExpressions.addAll(newExpressions);
-                    newExpressions = currentExpressions.stream().distinct()
-                            .collect(Collectors.toCollection(Expressions::new));
+                    newExpressions = currentExpressions.stream().distinct().collect(Collectors.toCollection(Expressions::new));
                 }
 
                 String expressionString = joinStrings(", ", newExpressions);
@@ -196,8 +185,7 @@ public class InputParserTask implements ILifecycleTask {
                 currentStep.storeData(expressionsData);
                 currentStep.addConversationOutputString(KEY_EXPRESSIONS, expressionString);
 
-                List<String> intents = newExpressions.stream().map(Expression::getExpressionName).distinct()
-                        .toList();
+                List<String> intents = newExpressions.stream().map(Expression::getExpressionName).distinct().toList();
 
                 Data<List<String>> intentData = new Data<>(INTENTS.key(), intents);
                 currentStep.storeData(intentData);
@@ -208,9 +196,7 @@ public class InputParserTask implements ILifecycleTask {
 
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws WorkflowConfigurationException,
-            IllegalExtensionConfigurationException,
-            UnrecognizedExtensionException {
+            throws WorkflowConfigurationException, IllegalExtensionConfigurationException, UnrecognizedExtensionException {
 
         var config = new IInputParser.Config();
 
@@ -293,8 +279,7 @@ public class InputParserTask implements ILifecycleTask {
         Map<String, ConfigValue> extensionConfigs = new HashMap<>();
         extensionConfigs.put(CONFIG_APPEND_EXPRESSIONS, new ConfigValue("Append Expressions", BOOLEAN, true, true));
         extensionConfigs.put(CONFIG_INCLUDE_UNUSED, new ConfigValue("Include Unused Expressions", BOOLEAN, true, true));
-        extensionConfigs.put(CONFIG_INCLUDE_UNKNOWN,
-                new ConfigValue("Include Unknown Expressions", BOOLEAN, true, true));
+        extensionConfigs.put(CONFIG_INCLUDE_UNKNOWN, new ConfigValue("Include Unknown Expressions", BOOLEAN, true, true));
         extensionDescriptor.setConfigs(extensionConfigs);
 
         return extensionDescriptor;
@@ -348,8 +333,7 @@ public class InputParserTask implements ILifecycleTask {
         return dictionaries;
     }
 
-    private List<ICorrection> convertCorrections(List<Map<String, Object>> correctionList,
-            List<IDictionary> dictionaries)
+    private List<ICorrection> convertCorrections(List<Map<String, Object>> correctionList, List<IDictionary> dictionaries)
             throws UnrecognizedExtensionException, IllegalExtensionConfigurationException {
 
         List<ICorrection> corrections = new LinkedList<>();

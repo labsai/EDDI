@@ -22,7 +22,7 @@ public interface IParserExtensionProvider<T> {
     }
 
     default T provide(Map<String, Object> config) throws IllegalExtensionConfigurationException {
-        //to be overridden if needed
+        // to be overridden if needed
 
         return null;
     }

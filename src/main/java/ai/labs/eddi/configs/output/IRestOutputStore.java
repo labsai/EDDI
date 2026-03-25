@@ -38,8 +38,7 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of output descriptors.")
     List<DocumentDescriptor> readOutputDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index,
-            @QueryParam("limit") @DefaultValue("20") Integer limit);
+            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
@@ -47,10 +46,8 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @Operation(description = "Read output.")
     OutputConfigurationSet readOutputSet(@PathParam("id") String id,
             @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("order") @DefaultValue("") String order,
-            @QueryParam("index") @DefaultValue("0") Integer index,
-            @QueryParam("limit") @DefaultValue("0") Integer limit);
+            @QueryParam("filter") @DefaultValue("") String filter, @QueryParam("order") @DefaultValue("") String order,
+            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("0") Integer limit);
 
     @GET
     @Path("/{id}/outputKeys")
@@ -58,8 +55,7 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @Operation(description = "Read output keys.")
     List<String> readOutputKeys(@PathParam("id") String id,
             @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("limit") @DefaultValue("20") Integer limit);
+            @QueryParam("filter") @DefaultValue("") String filter, @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @PUT
     @Path("/{id}")

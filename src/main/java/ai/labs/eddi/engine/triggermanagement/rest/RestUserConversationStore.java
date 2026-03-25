@@ -7,7 +7,6 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -24,11 +23,8 @@ public class RestUserConversationStore implements IRestUserConversationStore {
     private final IUserConversationStore userConversationStore;
     private final ICache<String, UserConversation> userConversationCache;
 
-
-
     @Inject
-    public RestUserConversationStore(IUserConversationStore userConversationStore,
-            ICacheFactory cacheFactory) {
+    public RestUserConversationStore(IUserConversationStore userConversationStore, ICacheFactory cacheFactory) {
         this.userConversationStore = userConversationStore;
         userConversationCache = cacheFactory.getCache(CACHE_NAME);
     }

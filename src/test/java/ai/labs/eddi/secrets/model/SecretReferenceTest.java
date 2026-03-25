@@ -29,13 +29,7 @@ class SecretReferenceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {
-            "not-a-vault-ref",
-            "${vault:foo/bar}",
-            "${eddivault:}",
-            "${eddivault:onlyOneSegment}",
-            "${eddivault:two/segments}"
-    })
+    @ValueSource(strings = {"not-a-vault-ref", "${vault:foo/bar}", "${eddivault:}", "${eddivault:onlyOneSegment}", "${eddivault:two/segments}"})
     void parse_invalidReference_throws(String input) {
         assertThrows(IllegalArgumentException.class, () -> SecretReference.parse(input));
     }

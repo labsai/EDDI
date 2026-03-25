@@ -17,8 +17,8 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * MongoDB implementation of {@link IDatabaseLogs}.
- * Annotated {@code @DefaultBean} so PostgreSQL can override.
+ * MongoDB implementation of {@link IDatabaseLogs}. Annotated
+ * {@code @DefaultBean} so PostgreSQL can override.
  *
  * @author ginccc
  */
@@ -52,16 +52,14 @@ public class DatabaseLogs implements IDatabaseLogs {
     }
 
     @Override
-    public List<DatabaseLog> getLogs(Environment environment, String agentId, Integer agentVersion,
-            String conversationId, String userId, String instanceId,
-            Integer skip, Integer limit) {
-        return getLogs(createFilter(environment, agentId, agentVersion, conversationId, userId, instanceId), skip,
-                limit);
+    public List<DatabaseLog> getLogs(Environment environment, String agentId, Integer agentVersion, String conversationId, String userId,
+            String instanceId, Integer skip, Integer limit) {
+        return getLogs(createFilter(environment, agentId, agentVersion, conversationId, userId, instanceId), skip, limit);
     }
 
     @Override
-    public void addLogs(String environment, String agentId, Integer agentVersion,
-            String conversationId, String userId, String instanceId, String message) {
+    public void addLogs(String environment, String agentId, Integer agentVersion, String conversationId, String userId, String instanceId,
+            String message) {
         Document document = new Document();
         document.put(KEY_MESSAGE, message);
         document.put(TIMESTAMP, new Date(System.currentTimeMillis()));
@@ -114,8 +112,8 @@ public class DatabaseLogs implements IDatabaseLogs {
         }
     }
 
-    private Document createFilter(Environment environment, String agentId, Integer agentVersion,
-            String conversationId, String userId, String instanceId) {
+    private Document createFilter(Environment environment, String agentId, Integer agentVersion, String conversationId, String userId,
+            String instanceId) {
         Document filter = new Document();
         if (environment != null) {
             filter.put(KEY_ENVIRONMENT, environment.toString());

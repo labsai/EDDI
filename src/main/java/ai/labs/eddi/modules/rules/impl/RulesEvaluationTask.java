@@ -46,16 +46,14 @@ public class RulesEvaluationTask implements ILifecycleTask {
     private final IRuleDeserialization behaviorSerialization;
     private final IExpressionProvider expressionProvider;
 
-    private final static boolean appendActionsDefault = true;
-    private final static boolean expressionsAsActionsDefault = false;
+    private static final boolean appendActionsDefault = true;
+    private static final boolean expressionsAsActionsDefault = false;
 
     private static final Logger log = Logger.getLogger(RulesEvaluationTask.class);
 
     @Inject
-    public RulesEvaluationTask(IResourceClientLibrary resourceClientLibrary,
-            IJsonSerialization jsonSerialization,
-            IRuleDeserialization behaviorSerialization,
-            IExpressionProvider expressionProvider) {
+    public RulesEvaluationTask(IResourceClientLibrary resourceClientLibrary, IJsonSerialization jsonSerialization,
+            IRuleDeserialization behaviorSerialization, IExpressionProvider expressionProvider) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.jsonSerialization = jsonSerialization;
         this.behaviorSerialization = behaviorSerialization;
@@ -78,14 +76,11 @@ public class RulesEvaluationTask implements ILifecycleTask {
             final var evaluator = (RulesEvaluator) component;
             var results = evaluator.evaluate(memory);
             var appendActions = evaluator.isAppendActions();
-            addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_SUCCESS, results.getSuccessRules(),
-                    appendActions);
-            addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_DROPPED_SUCCESS, results.getDroppedSuccessRules(),
-                    appendActions);
+            addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_SUCCESS, results.getSuccessRules(), appendActions);
+            addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_DROPPED_SUCCESS, results.getDroppedSuccessRules(), appendActions);
             addResultsToConversationMemory(memory, KEY_BEHAVIOR_RULES_FAIL, results.getFailRules(), appendActions);
 
-            addActionsToConversationMemory(memory, results.getSuccessRules(),
-                    appendActions, evaluator.isExpressionsAsActions());
+            addActionsToConversationMemory(memory, results.getSuccessRules(), appendActions, evaluator.isExpressionsAsActions());
 
         } catch (RulesEvaluator.RuleExecutionException e) {
             String msg = "Error while evaluating behavior rules!";
@@ -96,21 +91,19 @@ public class RulesEvaluationTask implements ILifecycleTask {
         }
     }
 
-    private void addResultsToConversationMemory(IConversationMemory memory, String key,
-            List<Rule> rules, boolean appendActions) {
+    private void addResultsToConversationMemory(IConversationMemory memory, String key, List<Rule> rules, boolean appendActions) {
 
         if (!rules.isEmpty()) {
             var allCurrentRuleNames = rules.stream().map(Rule::getName).toList();
-            saveResults(memory, allCurrentRuleNames, key,
-                    false, false, appendActions);
+            saveResults(memory, allCurrentRuleNames, key, false, false, appendActions);
         }
     }
 
-    private void addActionsToConversationMemory(IConversationMemory memory, List<Rule> successRules,
-            boolean appendActions, boolean expressionsAsActions) {
+    private void addActionsToConversationMemory(IConversationMemory memory, List<Rule> successRules, boolean appendActions,
+            boolean expressionsAsActions) {
         List<String> allCurrentActions = new LinkedList<>();
-        successRules.forEach(successRule -> successRule.getActions().stream()
-                .filter(action -> !allCurrentActions.contains(action)).forEach(allCurrentActions::add));
+        successRules.forEach(successRule -> successRule.getActions().stream().filter(action -> !allCurrentActions.contains(action))
+                .forEach(allCurrentActions::add));
 
         if (expressionsAsActions) {
             allCurrentActions.addAll(extractExpressionsAsActions(memory));
@@ -132,8 +125,8 @@ public class RulesEvaluationTask implements ILifecycleTask {
         return inputExpressions.stream().map(Expression::getExpressionName).toList();
     }
 
-    private void saveResults(IConversationMemory memory, List<String> allCurrentActions, String key,
-            boolean addResultsToConversationMemory, boolean makePublic, boolean appendActions) {
+    private void saveResults(IConversationMemory memory, List<String> allCurrentActions, String key, boolean addResultsToConversationMemory,
+            boolean makePublic, boolean appendActions) {
         var currentStep = memory.getCurrentStep();
 
         var distinctResults = new LinkedHashSet<>();
@@ -157,8 +150,7 @@ public class RulesEvaluationTask implements ILifecycleTask {
     }
 
     @Override
-    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws WorkflowConfigurationException {
+    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions) throws WorkflowConfigurationException {
 
         Object uriObj = configuration.get(BEHAVIOR_CONFIG_URI);
         URI uri = URI.create(uriObj.toString());
@@ -171,14 +163,13 @@ public class RulesEvaluationTask implements ILifecycleTask {
             var behaviorConfigJson = jsonSerialization.serialize(behaviorConfiguration);
             var behaviorSet = behaviorSerialization.deserialize(behaviorConfigJson);
 
-            Object appendActionsObj = configuration.getOrDefault(
-                    BEHAVIOR_CONFIG_APPEND_ACTIONS, behaviorConfiguration.getAppendActions());
+            Object appendActionsObj = configuration.getOrDefault(BEHAVIOR_CONFIG_APPEND_ACTIONS, behaviorConfiguration.getAppendActions());
             if (appendActionsObj != null) {
                 appendActions = Boolean.parseBoolean(appendActionsObj.toString());
             }
 
-            Object expressionsAsActionsObj = configuration.getOrDefault(
-                    BEHAVIOR_CONFIG_EXPRESSIONS_AS_ACTIONS, behaviorConfiguration.getExpressionsAsActions());
+            Object expressionsAsActionsObj = configuration.getOrDefault(BEHAVIOR_CONFIG_EXPRESSIONS_AS_ACTIONS,
+                    behaviorConfiguration.getExpressionsAsActions());
             if (expressionsAsActionsObj != null) {
                 expressionsAsActions = Boolean.parseBoolean(expressionsAsActionsObj.toString());
             }

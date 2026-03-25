@@ -11,7 +11,8 @@ import java.util.List;
 
 /**
  * DeploymentStore delegates to {@link IDeploymentStorage} for all persistence.
- * The underlying storage is injected via CDI (MongoDB by default, PostgreSQL when configured).
+ * The underlying storage is injected via CDI (MongoDB by default, PostgreSQL
+ * when configured).
  *
  * @author ginccc
  */
@@ -26,14 +27,12 @@ public class DeploymentStore implements IDeploymentStore {
     }
 
     @Override
-    public DeploymentInfo getDeploymentInfo(String environment, String agentId, Integer agentVersion)
-            throws IResourceStore.ResourceStoreException {
+    public DeploymentInfo getDeploymentInfo(String environment, String agentId, Integer agentVersion) throws IResourceStore.ResourceStoreException {
         return storage.readDeploymentInfo(environment, agentId, agentVersion);
     }
 
     @Override
-    public void setDeploymentInfo(String environment, String agentId, Integer agentVersion,
-                                  DeploymentInfo.DeploymentStatus deploymentStatus) {
+    public void setDeploymentInfo(String environment, String agentId, Integer agentVersion, DeploymentInfo.DeploymentStatus deploymentStatus) {
         storage.setDeploymentInfo(environment, agentId, agentVersion, deploymentStatus);
     }
 
@@ -43,8 +42,7 @@ public class DeploymentStore implements IDeploymentStore {
     }
 
     @Override
-    public List<DeploymentInfo> readDeploymentInfos(DeploymentInfo.DeploymentStatus deploymentStatus)
-            throws IResourceStore.ResourceStoreException {
+    public List<DeploymentInfo> readDeploymentInfos(DeploymentInfo.DeploymentStatus deploymentStatus) throws IResourceStore.ResourceStoreException {
         return storage.readDeploymentInfos(deploymentStatus.toString());
     }
 }

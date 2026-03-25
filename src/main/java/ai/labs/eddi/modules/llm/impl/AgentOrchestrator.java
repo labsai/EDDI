@@ -71,22 +71,11 @@ class AgentOrchestrator {
     private final IJsonSerialization jsonSerialization;
     private final IMemoryItemConverter memoryItemConverter;
 
-    AgentOrchestrator(CalculatorTool calculatorTool,
-            DateTimeTool dateTimeTool,
-            WebSearchTool webSearchTool,
-            DataFormatterTool dataFormatterTool,
-            WebScraperTool webScraperTool,
-            TextSummarizerTool textSummarizerTool,
-            PdfReaderTool pdfReaderTool,
-            WeatherTool weatherTool,
-            ToolExecutionService toolExecutionService,
-            McpToolProviderManager mcpToolProviderManager,
-            IRestAgentStore restAgentStore,
-            IRestWorkflowStore restWorkflowStore,
-            IResourceClientLibrary resourceClientLibrary,
-            IApiCallExecutor apiCallExecutor,
-            IJsonSerialization jsonSerialization,
-            IMemoryItemConverter memoryItemConverter) {
+    AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
+            WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
+            ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager, IRestAgentStore restAgentStore,
+            IRestWorkflowStore restWorkflowStore, IResourceClientLibrary resourceClientLibrary, IApiCallExecutor apiCallExecutor,
+            IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter) {
         this.calculatorTool = calculatorTool;
         this.dateTimeTool = dateTimeTool;
         this.webSearchTool = webSearchTool;
@@ -108,23 +97,22 @@ class AgentOrchestrator {
     /**
      * Result of an agent execution.
      *
-     * @param response the final LLM text response
-     * @param trace    list of tool call/result trace entries for debugging
+     * @param response
+     *            the final LLM text response
+     * @param trace
+     *            list of tool call/result trace entries for debugging
      */
     record ExecutionResult(String response, List<Map<String, Object>> trace) {
     }
 
     /**
-     * Collect enabled tools, append tool instructions to system message,
-     * and execute the tool-calling loop.
+     * Collect enabled tools, append tool instructions to system message, and
+     * execute the tool-calling loop.
      *
      * @return null if no tools are enabled (caller should use legacy mode),
      *         otherwise the execution result
      */
-    ExecutionResult executeIfToolsEnabled(ChatModel chatModel,
-            String systemMessage,
-            List<ChatMessage> chatMessages,
-            LlmConfiguration.Task task,
+    ExecutionResult executeIfToolsEnabled(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, LlmConfiguration.Task task,
             IConversationMemory memory) throws LifecycleException {
 
         // Collect enabled built-in tools
@@ -151,25 +139,20 @@ class AgentOrchestrator {
             return null;
         }
 
-        int totalTools = enabledTools.size()
-                + (hasMcpTools ? mcpTools.toolSpecs().size() : 0)
+        int totalTools = enabledTools.size() + (hasMcpTools ? mcpTools.toolSpecs().size() : 0)
                 + (hasHttpCallTools ? httpCallTools.toolSpecs().size() : 0);
-        LOGGER.info("Executing with " + totalTools + " enabled tools" +
-                (hasHttpCallTools ? " (" + httpCallTools.toolSpecs().size() + " from workflow httpcalls)" : "") +
-                (hasMcpTools ? " (" + mcpTools.toolSpecs().size() + " from MCP servers)" : ""));
+        LOGGER.info("Executing with " + totalTools + " enabled tools"
+                + (hasHttpCallTools ? " (" + httpCallTools.toolSpecs().size() + " from workflow httpcalls)" : "")
+                + (hasMcpTools ? " (" + mcpTools.toolSpecs().size() + " from MCP servers)" : ""));
 
-        return executeWithTools(chatModel, systemMessage, chatMessages, enabledTools,
-                mcpTools, httpCallTools, task, memory);
+        return executeWithTools(chatModel, systemMessage, chatMessages, enabledTools, mcpTools, httpCallTools, task, memory);
     }
 
     /**
      * Executes the tool-calling loop using direct ChatModel API.
      */
-    private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage,
-            List<ChatMessage> chatMessages, List<Object> tools,
-            McpToolProviderManager.McpToolsResult mcpTools,
-            HttpCallToolsResult httpCallTools,
-            LlmConfiguration.Task task, IConversationMemory memory)
+    private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, List<Object> tools,
+            McpToolProviderManager.McpToolsResult mcpTools, HttpCallToolsResult httpCallTools, LlmConfiguration.Task task, IConversationMemory memory)
             throws LifecycleException {
 
         // Build tool specifications and executors from built-in tool objects
@@ -189,8 +172,7 @@ class AgentOrchestrator {
             // Find methods annotated with @Tool and map them to executors
             for (java.lang.reflect.Method method : toolClass.getDeclaredMethods()) {
                 if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) {
-                    dev.langchain4j.agent.tool.Tool toolAnnotation = method
-                            .getAnnotation(dev.langchain4j.agent.tool.Tool.class);
+                    dev.langchain4j.agent.tool.Tool toolAnnotation = method.getAnnotation(dev.langchain4j.agent.tool.Tool.class);
                     String toolName = toolAnnotation.name().isEmpty() ? method.getName() : toolAnnotation.name();
                     toolExecutors.put(toolName, new DefaultToolExecutor(tool, method));
                 }
@@ -234,8 +216,7 @@ class AgentOrchestrator {
             int maxIterations = 10;
 
             for (int i = 0; i < maxIterations; i++) {
-                ChatRequest.Builder requestBuilder = ChatRequest.builder()
-                        .messages(currentMessages);
+                ChatRequest.Builder requestBuilder = ChatRequest.builder().messages(currentMessages);
 
                 if (!toolSpecs.isEmpty()) {
                     requestBuilder.toolSpecifications(toolSpecs);
@@ -256,8 +237,8 @@ class AgentOrchestrator {
                         trace.add(callStep);
 
                         // Check budget before executing tool
-                        if (maxBudget != null && conversationId != null &&
-                                !toolExecutionService.getCostTracker().isWithinBudget(conversationId, maxBudget)) {
+                        if (maxBudget != null && conversationId != null
+                                && !toolExecutionService.getCostTracker().isWithinBudget(conversationId, maxBudget)) {
                             String budgetError = "Budget exceeded for conversation " + conversationId;
                             LOGGER.warn(budgetError);
 
@@ -267,8 +248,7 @@ class AgentOrchestrator {
                             budgetStep.put("error", budgetError);
                             trace.add(budgetStep);
 
-                            currentMessages.add(ToolExecutionResultMessage.from(toolRequest,
-                                    "Error: " + budgetError));
+                            currentMessages.add(ToolExecutionResultMessage.from(toolRequest, "Error: " + budgetError));
                             continue;
                         }
 
@@ -281,15 +261,8 @@ class AgentOrchestrator {
                                     ? toolRateLimits.get(toolRequest.name())
                                     : defaultRateLimit;
 
-                            toolResult = toolExecutionService.executeToolWrapped(
-                                    toolRequest.name(),
-                                    toolRequest.arguments(),
-                                    conversationId,
-                                    () -> executor.execute(toolRequest, null),
-                                    enableRateLimiting,
-                                    enableCaching,
-                                    enableCostTracking,
-                                    rateLimit);
+                            toolResult = toolExecutionService.executeToolWrapped(toolRequest.name(), toolRequest.arguments(), conversationId,
+                                    () -> executor.execute(toolRequest, null), enableRateLimiting, enableCaching, enableCostTracking, rateLimit);
                         } else {
                             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
                         }
@@ -378,8 +351,9 @@ class AgentOrchestrator {
      * Discovers httpcall configurations from the workflow and creates
      * ToolSpecification + ToolExecutor for each ApiCall.
      * <p>
-     * Traverses: memory → agentId/version → AgentConfiguration → workflows → WorkflowConfiguration
-     * → filter httpcall steps → load ApiCallsConfiguration → create tools from each ApiCall.
+     * Traverses: memory → agentId/version → AgentConfiguration → workflows →
+     * WorkflowConfiguration → filter httpcall steps → load ApiCallsConfiguration →
+     * create tools from each ApiCall.
      */
     HttpCallToolsResult discoverHttpCallTools(IConversationMemory memory) {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
@@ -406,7 +380,8 @@ class AgentOrchestrator {
             // Load each workflow and discover httpcall extensions
             List<HttpCallToolEntry> entries = new ArrayList<>();
             for (URI workflowUri : agentConfig.getWorkflows()) {
-                // Parse id and version from workflow URI: eddi://ai.labs.workflow/workflowstore/workflows/{id}?version={v}
+                // Parse id and version from workflow URI:
+                // eddi://ai.labs.workflow/workflowstore/workflows/{id}?version={v}
                 String workflowPath = workflowUri.getPath();
                 if (workflowPath == null) {
                     LOGGER.warn("Workflow URI has no path: " + workflowUri);
@@ -418,8 +393,7 @@ class AgentOrchestrator {
                     LOGGER.warn("Workflow URI has no version query: " + workflowUri);
                     continue;
                 }
-                int workflowVersion = Integer.parseInt(
-                        workflowQuery.replaceAll(".*version=(\\d+).*", "$1"));
+                int workflowVersion = Integer.parseInt(workflowQuery.replaceAll(".*version=(\\d+).*", "$1"));
 
                 WorkflowConfiguration workflowConfig = restWorkflowStore.readWorkflow(workflowId, workflowVersion);
                 for (var step : workflowConfig.getWorkflowSteps()) {
@@ -427,8 +401,8 @@ class AgentOrchestrator {
                         String uri = (String) step.getConfig().get("uri");
                         if (uri != null) {
                             try {
-                                ApiCallsConfiguration httpCallsConfig =
-                                        resourceClientLibrary.getResource(URI.create(uri), ApiCallsConfiguration.class);
+                                ApiCallsConfiguration httpCallsConfig = resourceClientLibrary.getResource(URI.create(uri),
+                                        ApiCallsConfiguration.class);
                                 for (ApiCall apiCall : httpCallsConfig.getHttpCalls()) {
                                     entries.add(new HttpCallToolEntry(apiCall, httpCallsConfig.getTargetServerUrl()));
                                 }
@@ -449,19 +423,14 @@ class AgentOrchestrator {
                     continue;
                 }
 
-                ToolSpecification.Builder specBuilder = ToolSpecification.builder()
-                        .name(apiCall.getName())
-                        .description(apiCall.getDescription() != null
-                                ? apiCall.getDescription()
-                                : "Execute " + apiCall.getName());
+                ToolSpecification.Builder specBuilder = ToolSpecification.builder().name(apiCall.getName())
+                        .description(apiCall.getDescription() != null ? apiCall.getDescription() : "Execute " + apiCall.getName());
 
                 // Add parameters if defined
                 if (apiCall.getParameters() != null && !apiCall.getParameters().isEmpty()) {
                     var schemaBuilder = dev.langchain4j.model.chat.request.json.JsonObjectSchema.builder();
                     for (var param : apiCall.getParameters().entrySet()) {
-                        schemaBuilder.addStringProperty(
-                                param.getKey(),
-                                param.getValue() != null ? param.getValue() : param.getKey());
+                        schemaBuilder.addStringProperty(param.getKey(), param.getValue() != null ? param.getValue() : param.getKey());
                     }
                     schemaBuilder.required(new ArrayList<>(apiCall.getParameters().keySet()));
                     specBuilder.parameters(schemaBuilder.build());
@@ -485,12 +454,10 @@ class AgentOrchestrator {
                             }
                         }
 
-                        Map<String, Object> result = apiCallExecutor.execute(
-                                apiCall, memory, templateData, targetServerUrl);
+                        Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateData, targetServerUrl);
 
                         String serialized = jsonSerialization.serialize(result);
-                        LOGGER.info("Httpcall tool '" + apiCall.getName() + "' result: keys=" +
-                                result.keySet() + " size=" + serialized.length());
+                        LOGGER.info("Httpcall tool '" + apiCall.getName() + "' result: keys=" + result.keySet() + " size=" + serialized.length());
                         return serialized;
                     } catch (Exception e) {
                         LOGGER.error("Error executing httpcall tool '" + apiCall.getName() + "'", e);

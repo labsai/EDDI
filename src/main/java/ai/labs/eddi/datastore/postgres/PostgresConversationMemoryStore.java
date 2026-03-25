@@ -25,13 +25,12 @@ import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
  * PostgreSQL implementation of {@link IConversationMemoryStore}.
  * <p>
  * Stores conversation snapshots as JSONB in a dedicated
- * {@code conversation_memories} table
- * with extracted indexed columns for efficient querying.
+ * {@code conversation_memories} table with extracted indexed columns for
+ * efficient querying.
  */
 @ApplicationScoped
 @IfBuildProfile("postgres")
-public class PostgresConversationMemoryStore implements IConversationMemoryStore,
-        IResourceStore<ConversationMemorySnapshot> {
+public class PostgresConversationMemoryStore implements IConversationMemoryStore, IResourceStore<ConversationMemorySnapshot> {
 
     private static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS conversation_memories (
@@ -59,8 +58,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSource.getConnection();
-                Statement stmt = conn.createStatement()) {
+        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
             stmt.execute(CREATE_INDEX_STATE);
             stmt.execute(CREATE_INDEX_AGENT);
@@ -84,8 +82,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                         SET AGENT_ID = ?, AGENT_VERSION = ?, conversation_state = ?, data = ?::jsonb
                         WHERE id = ?::uuid
                         """;
-                try (Connection conn = dataSource.getConnection();
-                        PreparedStatement ps = conn.prepareStatement(sql)) {
+                try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
                     ps.setString(1, snapshot.getAgentId());
                     ps.setInt(2, snapshot.getAgentVersion());
                     ps.setString(3, snapshot.getConversationState().name());
@@ -102,14 +99,11 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                         INSERT INTO conversation_memories (id, AGENT_ID, AGENT_VERSION, conversation_state, data)
                         VALUES (?::uuid, ?, ?, ?, ?::jsonb)
                         """;
-                try (Connection conn = dataSource.getConnection();
-                        PreparedStatement ps = conn.prepareStatement(sql)) {
+                try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
                     ps.setString(1, conversationId);
                     ps.setString(2, snapshot.getAgentId());
                     ps.setInt(3, snapshot.getAgentVersion());
-                    ps.setString(4, snapshot.getConversationState() != null
-                            ? snapshot.getConversationState().name()
-                            : "IN_PROGRESS");
+                    ps.setString(4, snapshot.getConversationState() != null ? snapshot.getConversationState().name() : "IN_PROGRESS");
                     ps.setString(5, json2);
                     ps.executeUpdate();
                 }
@@ -123,13 +117,11 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     @Override
     public ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId) {
         String sql = "SELECT data FROM conversation_memories WHERE id = ?::uuid";
-        try (Connection conn = dataSource.getConnection();
-                PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, conversationId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    ConversationMemorySnapshot snapshot = jsonSerialization.deserialize(
-                            rs.getString("data"), ConversationMemorySnapshot.class);
+                    ConversationMemorySnapshot snapshot = jsonSerialization.deserialize(rs.getString("data"), ConversationMemorySnapshot.class);
                     fixContextTypes(snapshot);
                     snapshot.setConversationId(conversationId);
                     return snapshot;
@@ -145,18 +137,15 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     public List<ConversationMemorySnapshot> loadActiveConversationMemorySnapshot(String agentId, Integer agentVersion)
             throws IResourceStore.ResourceStoreException {
         ensureSchema();
-        String sql = "SELECT data FROM conversation_memories " +
-                "WHERE AGENT_ID = ? AND AGENT_VERSION = ? AND conversation_state != ?";
-        try (Connection conn = dataSource.getConnection();
-                PreparedStatement ps = conn.prepareStatement(sql)) {
+        String sql = "SELECT data FROM conversation_memories " + "WHERE AGENT_ID = ? AND AGENT_VERSION = ? AND conversation_state != ?";
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, agentId);
             ps.setInt(2, agentVersion);
             ps.setString(3, ENDED.toString());
             try (ResultSet rs = ps.executeQuery()) {
                 List<ConversationMemorySnapshot> results = new ArrayList<>();
                 while (rs.next()) {
-                    results.add(jsonSerialization.deserialize(
-                            rs.getString("data"), ConversationMemorySnapshot.class));
+                    results.add(jsonSerialization.deserialize(rs.getString("data"), ConversationMemorySnapshot.class));
                 }
                 return results;
             }
@@ -169,8 +158,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     public void setConversationState(String conversationId, ConversationState conversationState) {
         ensureSchema();
         String sql = "UPDATE conversation_memories SET conversation_state = ? WHERE id = ?::uuid";
-        try (Connection conn = dataSource.getConnection();
-                PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, conversationState.name());
             ps.setString(2, conversationId);
             ps.executeUpdate();
@@ -183,8 +171,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     public void deleteConversationMemorySnapshot(String conversationId) {
         ensureSchema();
         String sql = "DELETE FROM conversation_memories WHERE id = ?::uuid";
-        try (Connection conn = dataSource.getConnection();
-                PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, conversationId);
             ps.executeUpdate();
         } catch (SQLException e) {
@@ -196,8 +183,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     public ConversationState getConversationState(String conversationId) {
         ensureSchema();
         String sql = "SELECT conversation_state FROM conversation_memories WHERE id = ?::uuid";
-        try (Connection conn = dataSource.getConnection();
-                PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, conversationId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
@@ -213,10 +199,8 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     @Override
     public Long getActiveConversationCount(String agentId, Integer agentVersion) {
         ensureSchema();
-        String sql = "SELECT COUNT(*) FROM conversation_memories " +
-                "WHERE AGENT_ID = ? AND AGENT_VERSION = ? AND conversation_state != ?";
-        try (Connection conn = dataSource.getConnection();
-                PreparedStatement ps = conn.prepareStatement(sql)) {
+        String sql = "SELECT COUNT(*) FROM conversation_memories " + "WHERE AGENT_ID = ? AND AGENT_VERSION = ? AND conversation_state != ?";
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, agentId);
             ps.setInt(2, agentVersion);
             ps.setString(3, ENDED.toString());
@@ -233,8 +217,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     public List<String> getEndedConversationIds() {
         ensureSchema();
         String sql = "SELECT id FROM conversation_memories WHERE conversation_state = ?";
-        try (Connection conn = dataSource.getConnection();
-                PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, ENDED.toString());
             try (ResultSet rs = ps.executeQuery()) {
                 List<String> ids = new ArrayList<>();

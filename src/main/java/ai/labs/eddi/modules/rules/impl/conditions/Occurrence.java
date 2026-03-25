@@ -127,4 +127,3 @@ public class Occurrence implements IRuleCondition {
         this.maxTimesOccurred = maxTimesOccurred;
     }
 }
-

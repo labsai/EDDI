@@ -12,8 +12,7 @@ import jakarta.inject.Inject;
  * @author ginccc
  */
 @ApplicationScoped
-public class PropertySetterStore extends AbstractResourceStore<PropertySetterConfiguration>
-        implements IPropertySetterStore {
+public class PropertySetterStore extends AbstractResourceStore<PropertySetterConfiguration> implements IPropertySetterStore {
 
     @Inject
     public PropertySetterStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {

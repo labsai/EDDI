@@ -33,9 +33,8 @@ class BoundedLogStoreTest {
     }
 
     private LogEntry createEntry(String level, String agentId, String conversationId, String message) {
-        return new LogEntry(
-                System.currentTimeMillis(), level, "test.Logger", message,
-                "production", agentId, 1, conversationId, "user-1", "test-host-abcd");
+        return new LogEntry(System.currentTimeMillis(), level, "test.Logger", message, "production", agentId, 1, conversationId, "user-1",
+                "test-host-abcd");
     }
 
     // ==================== Ring Buffer ====================
@@ -208,8 +207,7 @@ class BoundedLogStoreTest {
         @Test
         void shouldEnqueueForDbWhenEnabled() {
             // Create store with DB enabled, min level WARN
-            var dbStore = BoundedLogStore.createForTesting(
-                    instanceIdProducer, databaseLogs, 10, true, 5, "WARN");
+            var dbStore = BoundedLogStore.createForTesting(instanceIdProducer, databaseLogs, 10, true, 5, "WARN");
 
             dbStore.publish(createEntry("ERROR", null, null, "should persist"));
             dbStore.publish(createEntry("WARN", null, null, "should persist too"));
@@ -227,8 +225,7 @@ class BoundedLogStoreTest {
 
         @Test
         void shouldFlushToDbInBatch() {
-            var dbStore = BoundedLogStore.createForTesting(
-                    instanceIdProducer, databaseLogs, 10, true, 5, "WARN");
+            var dbStore = BoundedLogStore.createForTesting(instanceIdProducer, databaseLogs, 10, true, 5, "WARN");
 
             dbStore.publish(createEntry("ERROR", null, null, "error 1"));
             dbStore.publish(createEntry("WARN", null, null, "warn 1"));
@@ -241,8 +238,7 @@ class BoundedLogStoreTest {
 
         @Test
         void shouldNotFlushWhenQueueEmpty() {
-            var dbStore = BoundedLogStore.createForTesting(
-                    instanceIdProducer, databaseLogs, 10, true, 5, "WARN");
+            var dbStore = BoundedLogStore.createForTesting(instanceIdProducer, databaseLogs, 10, true, 5, "WARN");
 
             dbStore.flushToDb();
 
@@ -251,8 +247,7 @@ class BoundedLogStoreTest {
 
         @Test
         void shouldRespectMinLevelForDbPersistence() {
-            var dbStore = BoundedLogStore.createForTesting(
-                    instanceIdProducer, databaseLogs, 10, true, 5, "ERROR");
+            var dbStore = BoundedLogStore.createForTesting(instanceIdProducer, databaseLogs, 10, true, 5, "ERROR");
 
             dbStore.publish(createEntry("WARN", null, null, "below error threshold"));
             dbStore.publish(createEntry("ERROR", null, null, "meets threshold"));

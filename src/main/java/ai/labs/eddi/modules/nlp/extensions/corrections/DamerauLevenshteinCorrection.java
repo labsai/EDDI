@@ -48,11 +48,7 @@ public class DamerauLevenshteinCorrection implements ICorrection {
                 final int distance = calculateDistance(lowerCaseLookup, word.getValue().toLowerCase());
 
                 if (distance > -1) {
-                    Word entry = new Word(word.getValue(),
-                            word.getExpressions(),
-                            word.getLanguageCode(),
-                            word.getFrequency(),
-                            word.isPartOfPhrase());
+                    Word entry = new Word(word.getValue(), word.getExpressions(), word.getLanguageCode(), word.getFrequency(), word.isPartOfPhrase());
 
                     foundWords.add(new WordDistanceWrapper(distance, entry));
                 }
@@ -76,8 +72,8 @@ public class DamerauLevenshteinCorrection implements ICorrection {
         int lengthWord = word.length();
         int lengthPart = inputPart.length();
         int distance;
-        if (lengthWord < (lengthPart - maxDistance) || lengthWord > (lengthPart + maxDistance) ||
-                (distance = distanceCalculator.calculate(word, inputPart)) > maxDistance) {
+        if (lengthWord < (lengthPart - maxDistance) || lengthWord > (lengthPart + maxDistance)
+                || (distance = distanceCalculator.calculate(word, inputPart)) > maxDistance) {
             distance = -1;
         }
 

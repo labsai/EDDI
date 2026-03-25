@@ -31,50 +31,38 @@ public class PropertySetterTest {
 
     @Test
     public void extractProperties() {
-        //setup
+        // setup
         String testStringExpressions = "property(someMeaning(someValue)),noProperty(someMeaning(someValue))";
-        when(expressionProvider.parseExpressions(eq(testStringExpressions))).thenAnswer(invocation ->
-                new Expressions(new Expression("property",
-                        new Expression("someMeaning",
-                                new Value("someValue"))),
-                        new Expression("noProperty",
-                                new Expression("someMeaning",
-                                        new Value("someValue")))
-                ));
+        when(expressionProvider.parseExpressions(eq(testStringExpressions)))
+                .thenAnswer(invocation -> new Expressions(new Expression("property", new Expression("someMeaning", new Value("someValue"))),
+                        new Expression("noProperty", new Expression("someMeaning", new Value("someValue")))));
         PropertySetter propertySetter = new PropertySetter(new LinkedList<>());
         Property expectedPropertyEntry = new Property("someMeaning", "someValue", conversation);
 
-        //test
+        // test
         List<Property> propertyEntries = propertySetter.extractProperties(expressionProvider.parseExpressions(testStringExpressions));
 
-        //assert
+        // assert
         verify(expressionProvider, times(1)).parseExpressions(testStringExpressions);
         Assertions.assertEquals(Collections.singletonList(expectedPropertyEntry), propertyEntries);
     }
 
     @Test
     public void extractMoreComplexProperties() {
-        //setup
-        String testStringExpressions = "property(someMeaning(someSubMeaning(someValue)))," +
-                "property(someMeaning(someValue, someOtherValue))";
-        when(expressionProvider.parseExpressions(eq(testStringExpressions))).thenAnswer(invocation ->
-                new Expressions(new Expression("property",
-                        new Expression("someMeaning",
-                                new Expression("someSubMeaning",
-                                        new Value("someValue")))),
-                        new Expression("property",
-                                new Expression("someMeaning",
-                                        new Value("someValue"), new Value("someOtherValue")))
-                ));
+        // setup
+        String testStringExpressions = "property(someMeaning(someSubMeaning(someValue)))," + "property(someMeaning(someValue, someOtherValue))";
+        when(expressionProvider.parseExpressions(eq(testStringExpressions))).thenAnswer(invocation -> new Expressions(
+                new Expression("property", new Expression("someMeaning", new Expression("someSubMeaning", new Value("someValue")))),
+                new Expression("property", new Expression("someMeaning", new Value("someValue"), new Value("someOtherValue")))));
         PropertySetter propertySetter = new PropertySetter(new LinkedList<>());
         List<Property> expectedPropertyEntries = Arrays.asList(
                 new Property(String.join(".", "someMeaning", "someSubMeaning"), "someValue", conversation),
                 new Property("someMeaning", "someValue", conversation));
 
-        //test
+        // test
         List<Property> propertyEntries = propertySetter.extractProperties(expressionProvider.parseExpressions(testStringExpressions));
 
-        //assert
+        // assert
         verify(expressionProvider, times(1)).parseExpressions(testStringExpressions);
         Assertions.assertEquals(expectedPropertyEntries, propertyEntries);
     }

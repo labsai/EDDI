@@ -22,8 +22,7 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        var builder = OllamaChatModel.builder()
-                .httpClientBuilder(JdkHttpClient.builder());
+        var builder = OllamaChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
 
         if (!isNullOrEmpty(parameters.get(KEY_BASE_URL))) {
             builder.baseUrl(parameters.get(KEY_BASE_URL));
@@ -46,8 +45,7 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
-        var builder = OllamaStreamingChatModel.builder()
-                .httpClientBuilder(JdkHttpClient.builder());
+        var builder = OllamaStreamingChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
 
         if (!isNullOrEmpty(parameters.get(KEY_BASE_URL))) {
             builder.baseUrl(parameters.get(KEY_BASE_URL));

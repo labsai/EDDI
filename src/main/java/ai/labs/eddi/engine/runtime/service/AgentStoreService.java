@@ -6,7 +6,6 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
-
 /**
  * @author ginccc
  */

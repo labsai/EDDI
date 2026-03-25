@@ -11,8 +11,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 /**
- * MongoDB implementation of {@link IMigrationLogStore}.
- * Annotated {@code @DefaultBean} so PostgreSQL can override.
+ * MongoDB implementation of {@link IMigrationLogStore}. Annotated
+ * {@code @DefaultBean} so PostgreSQL can override.
  */
 @ApplicationScoped
 @DefaultBean

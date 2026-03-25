@@ -38,8 +38,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         RuntimeUtilities.checkNotNull(database, "database");
 
         MongoCollection<Document> descriptorCollection = database.getCollection(COLLECTION_DESCRIPTORS);
-        MongoResourceStorage<T> resourceStorage = new MongoResourceStorage<>(database, collectionName, documentBuilder,
-                documentType);
+        MongoResourceStorage<T> resourceStorage = new MongoResourceStorage<>(database, collectionName, documentBuilder, documentType);
         this.descriptorResourceStore = new ModifiableHistorizedResourceStore<>(resourceStorage);
         this.resourceFilter = new ResourceFilter<>(descriptorCollection, descriptorResourceStore);
 
@@ -71,13 +70,11 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_RESOURCE, filter));
         }
         if (!queryFiltersOptional.isEmpty()) {
-            IResourceFilter.QueryFilters optional = new IResourceFilter.QueryFilters(
-                    IResourceFilter.QueryFilters.ConnectingType.OR, queryFiltersOptional);
-            return resourceFilter.readResources(new IResourceFilter.QueryFilters[] { required, optional }, index, limit,
-                    FIELD_LAST_MODIFIED);
+            IResourceFilter.QueryFilters optional = new IResourceFilter.QueryFilters(IResourceFilter.QueryFilters.ConnectingType.OR,
+                    queryFiltersOptional);
+            return resourceFilter.readResources(new IResourceFilter.QueryFilters[]{required, optional}, index, limit, FIELD_LAST_MODIFIED);
         } else {
-            return resourceFilter.readResources(new IResourceFilter.QueryFilters[] { required }, index, limit,
-                    FIELD_LAST_MODIFIED);
+            return resourceFilter.readResources(new IResourceFilter.QueryFilters[]{required}, index, limit, FIELD_LAST_MODIFIED);
         }
 
     }
@@ -97,8 +94,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
 
     @Override
     public Integer updateDescriptor(String resourceId, Integer version, T documentDescriptor)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException,
-            IResourceStore.ResourceNotFoundException {
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         return descriptorResourceStore.update(resourceId, version, documentDescriptor);
     }
 
@@ -109,8 +105,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     }
 
     @Override
-    public void createDescriptor(String resourceId, Integer version, T documentDescriptor)
-            throws IResourceStore.ResourceStoreException {
+    public void createDescriptor(String resourceId, Integer version, T documentDescriptor) throws IResourceStore.ResourceStoreException {
         descriptorResourceStore.createNew(resourceId, version, documentDescriptor);
     }
 

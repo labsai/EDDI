@@ -69,19 +69,10 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private static final String SCHEDULE_EXT = "schedule";
 
     @Inject
-    public RestExportService(IDocumentDescriptorStore documentDescriptorStore,
-            IAgentStore agentStore,
-            IWorkflowStore workflowStore,
-            IDictionaryStore regularDictionaryStore,
-            IRuleSetStore behaviorStore,
-            IApiCallsStore httpCallsStore,
-            ILlmStore llmStore,
-            IPropertySetterStore propertySetterStore,
-            IOutputStore outputStore,
-            IJsonSerialization jsonSerialization,
-            IZipArchive zipArchive,
-            SecretScrubber secretScrubber,
-            IScheduleStore scheduleStore) {
+    public RestExportService(IDocumentDescriptorStore documentDescriptorStore, IAgentStore agentStore, IWorkflowStore workflowStore,
+            IDictionaryStore regularDictionaryStore, IRuleSetStore behaviorStore, IApiCallsStore httpCallsStore, ILlmStore llmStore,
+            IPropertySetterStore propertySetterStore, IOutputStore outputStore, IJsonSerialization jsonSerialization, IZipArchive zipArchive,
+            SecretScrubber secretScrubber, IScheduleStore scheduleStore) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
@@ -119,53 +110,50 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     public Response exportAgent(String agentId, Integer agentVersion) {
         try {
             AgentConfiguration agentConfig = agentStore.read(agentId, agentVersion);
-            Path agentPath = writeDirAndDocument(agentId, agentVersion, jsonSerialization.serialize(agentConfig),
-                    tmpPath,
-                    AGENT_EXT);
-            Map<IResourceId, WorkflowConfiguration> workflowConfigurations = readConfigs(workflowStore,
-                    agentConfig.getWorkflows());
+            Path agentPath = writeDirAndDocument(agentId, agentVersion, jsonSerialization.serialize(agentConfig), tmpPath, AGENT_EXT);
+            Map<IResourceId, WorkflowConfiguration> workflowConfigurations = readConfigs(workflowStore, agentConfig.getWorkflows());
 
             DocumentDescriptor agentDocumentDescriptor = writeDocumentDescriptor(agentPath, agentId, agentVersion);
 
             for (IResourceId resourceId : workflowConfigurations.keySet()) {
                 WorkflowConfiguration workflowConfig = workflowConfigurations.get(resourceId);
                 String workflowConfigString = jsonSerialization.serialize(workflowConfig);
-                Path packagePath = writeDirAndDocument(resourceId.getId(), resourceId.getVersion(),
-                        workflowConfigString, agentPath, WORKFLOW_EXT);
+                Path packagePath = writeDirAndDocument(resourceId.getId(), resourceId.getVersion(), workflowConfigString, agentPath, WORKFLOW_EXT);
                 writeDocumentDescriptor(packagePath, resourceId.getId(), resourceId.getVersion());
 
-                writeConfigs(packagePath, convertConfigsToString(readConfigs(regularDictionaryStore,
-                        extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN))), DICTIONARY_EXT);
+                writeConfigs(packagePath,
+                        convertConfigsToString(
+                                readConfigs(regularDictionaryStore, extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN))),
+                        DICTIONARY_EXT);
 
-                writeConfigs(packagePath, convertConfigsToString(readConfigs(behaviorStore,
-                        extractResourcesUris(workflowConfigString, BEHAVIOR_URI_PATTERN))), BEHAVIOR_EXT);
+                writeConfigs(packagePath,
+                        convertConfigsToString(readConfigs(behaviorStore, extractResourcesUris(workflowConfigString, BEHAVIOR_URI_PATTERN))),
+                        BEHAVIOR_EXT);
 
-                writeConfigs(packagePath, convertConfigsToString(readConfigs(httpCallsStore,
-                        extractResourcesUris(workflowConfigString, HTTPCALLS_URI_PATTERN))), HTTPCALLS_EXT);
+                writeConfigs(packagePath,
+                        convertConfigsToString(readConfigs(httpCallsStore, extractResourcesUris(workflowConfigString, HTTPCALLS_URI_PATTERN))),
+                        HTTPCALLS_EXT);
 
-                writeConfigs(packagePath, convertConfigsToString(readConfigs(llmStore,
-                        extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN))), LLM_EXT);
+                writeConfigs(packagePath,
+                        convertConfigsToString(readConfigs(llmStore, extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN))), LLM_EXT);
 
-                writeConfigs(packagePath, convertConfigsToString(readConfigs(propertySetterStore,
-                        extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN))), PROPERTY_EXT);
+                writeConfigs(packagePath,
+                        convertConfigsToString(readConfigs(propertySetterStore, extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN))),
+                        PROPERTY_EXT);
 
-                writeConfigs(packagePath, convertConfigsToString(readConfigs(outputStore,
-                        extractResourcesUris(workflowConfigString, OUTPUT_URI_PATTERN))), OUTPUT_EXT);
+                writeConfigs(packagePath,
+                        convertConfigsToString(readConfigs(outputStore, extractResourcesUris(workflowConfigString, OUTPUT_URI_PATTERN))), OUTPUT_EXT);
 
                 Path unusedPath = Files.createDirectories(Paths.get(tmpPath.toString(), agentId, "unused"));
 
-                writeAllVersionsOfUris(unusedPath, regularDictionaryStore,
-                        extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN), DICTIONARY_EXT);
-                writeAllVersionsOfUris(unusedPath, behaviorStore,
-                        extractResourcesUris(workflowConfigString, BEHAVIOR_URI_PATTERN), BEHAVIOR_EXT);
-                writeAllVersionsOfUris(unusedPath, httpCallsStore,
-                        extractResourcesUris(workflowConfigString, HTTPCALLS_URI_PATTERN), HTTPCALLS_EXT);
-                writeAllVersionsOfUris(unusedPath, llmStore,
-                        extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN), LLM_EXT);
-                writeAllVersionsOfUris(unusedPath, propertySetterStore,
-                        extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN), PROPERTY_EXT);
-                writeAllVersionsOfUris(unusedPath, outputStore,
-                        extractResourcesUris(workflowConfigString, OUTPUT_URI_PATTERN), OUTPUT_EXT);
+                writeAllVersionsOfUris(unusedPath, regularDictionaryStore, extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN),
+                        DICTIONARY_EXT);
+                writeAllVersionsOfUris(unusedPath, behaviorStore, extractResourcesUris(workflowConfigString, BEHAVIOR_URI_PATTERN), BEHAVIOR_EXT);
+                writeAllVersionsOfUris(unusedPath, httpCallsStore, extractResourcesUris(workflowConfigString, HTTPCALLS_URI_PATTERN), HTTPCALLS_EXT);
+                writeAllVersionsOfUris(unusedPath, llmStore, extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN), LLM_EXT);
+                writeAllVersionsOfUris(unusedPath, propertySetterStore, extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN),
+                        PROPERTY_EXT);
+                writeAllVersionsOfUris(unusedPath, outputStore, extractResourcesUris(workflowConfigString, OUTPUT_URI_PATTERN), OUTPUT_EXT);
 
             }
 
@@ -183,8 +171,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         }
     }
 
-    private <T> void writeAllVersionsOfUris(Path unusedPath, IResourceStore<T> store, List<URI> dictionaryUris,
-            String ext) {
+    private <T> void writeAllVersionsOfUris(Path unusedPath, IResourceStore<T> store, List<URI> dictionaryUris, String ext) {
         for (URI dictionaryUri : dictionaryUris) {
             Integer versionToExport = 1;
             IResourceId resourceIdUnused = RestUtilities.extractResourceId(dictionaryUri);
@@ -234,18 +221,16 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     }
 
     private Map<IResourceId, String> convertConfigsToString(Map<IResourceId, ?> configurationMap) {
-        return configurationMap.entrySet().stream().collect(Collectors.toMap(
-                Map.Entry::getKey,
-                e -> {
-                    try {
-                        String json = jsonSerialization.serialize(e.getValue());
-                        // Scrub secrets before export (defense-in-depth)
-                        return secretScrubber.scrubJson(json);
-                    } catch (IOException ex) {
-                        log.error(ex.getLocalizedMessage(), ex);
-                        return "";
-                    }
-                }));
+        return configurationMap.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> {
+            try {
+                String json = jsonSerialization.serialize(e.getValue());
+                // Scrub secrets before export (defense-in-depth)
+                return secretScrubber.scrubJson(json);
+            } catch (IOException ex) {
+                log.error(ex.getLocalizedMessage(), ex);
+                return "";
+            }
+        }));
     }
 
     private void writeConfigs(Path path, Map<IResourceId, String> configs, String fileExtension) {
@@ -266,8 +251,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     private void writeUnusedConfigs(Path path, Map<IResourceId, String> configs, String fileExtension) {
         configs.forEach((resourceId, value) -> {
-            String filename = MessageFormat.format("{0}.{1}.{2}.json", resourceId.getId(), resourceId.getVersion(),
-                    fileExtension);
+            String filename = MessageFormat.format("{0}.{1}.{2}.json", resourceId.getId(), resourceId.getVersion(), fileExtension);
             Path filePath = Paths.get(path.toString(), filename);
             try {
                 deleteFileIfExists(filePath);
@@ -281,8 +265,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         });
     }
 
-    private Path writeDirAndDocument(String documentId, Integer documentVersion,
-            String configurationString, Path tmpPath, String fileExtension)
+    private Path writeDirAndDocument(String documentId, Integer documentVersion, String configurationString, Path tmpPath, String fileExtension)
             throws IOException {
 
         Path dir = Files.createDirectories(Paths.get(tmpPath.toString(), documentId, String.valueOf(documentVersion)));
@@ -300,8 +283,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     private DocumentDescriptor writeDocumentDescriptor(Path path, String documentId, Integer documentVersion)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IOException {
-        DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptorWithHistory(documentId,
-                documentVersion);
+        DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptorWithHistory(documentId, documentVersion);
         String filename = MessageFormat.format("{0}.descriptor.json", documentId);
         Path filePath = Paths.get(path.toString(), filename);
         deleteFileIfExists(filePath);

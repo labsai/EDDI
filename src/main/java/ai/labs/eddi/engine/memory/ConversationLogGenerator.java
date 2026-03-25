@@ -48,13 +48,14 @@ public class ConversationLogGenerator {
 
     public ConversationLog generate(int logSize, boolean includeFirstAgentMessage) {
         if (conversationMemory == null && memorySnapshot == null) {
-            throw new IllegalStateException("ConversationMemory was null. " +
-                    "You need to either set IConversationMemory or ConversationMemorySnapshot");
+            throw new IllegalStateException(
+                    "ConversationMemory was null. " + "You need to either set IConversationMemory or ConversationMemorySnapshot");
         }
 
         var conversationLog = new ConversationLog();
         if (logSize != 0) {
-            var conversationOutputs = conversationMemory != null ? conversationMemory.getConversationOutputs()
+            var conversationOutputs = conversationMemory != null
+                    ? conversationMemory.getConversationOutputs()
                     : memorySnapshot.getConversationOutputs();
 
             var startIndex = 0;
@@ -67,9 +68,8 @@ public class ConversationLogGenerator {
                 var input = conversationOutput.get(OUTPUT_KEY_INPUT, String.class);
                 var context = conversationOutput.get(OUTPUT_KEY_CONTEXT, Map.class);
                 var contentList = new LinkedList<Content>();
-                if (!isNullOrEmpty(context) &&
-                        context.get(KEY_INPUT_FILES) instanceof List &&
-                        ((List<?>) context.get(KEY_INPUT_FILES)).getFirst() instanceof Map) {
+                if (!isNullOrEmpty(context) && context.get(KEY_INPUT_FILES) instanceof List
+                        && ((List<?>) context.get(KEY_INPUT_FILES)).getFirst() instanceof Map) {
 
                     @SuppressWarnings("unchecked")
                     var inputFiles = (List<Map<String, String>>) context.get(KEY_INPUT_FILES);
@@ -100,24 +100,18 @@ public class ConversationLogGenerator {
                         if (outputList.getFirst() instanceof Map) {
                             @SuppressWarnings("unchecked")
                             var mapList = (List<Map<String, Object>>) outputList;
-                            var joinedOutput = mapList.stream()
-                                    .map(item -> item.get(KEY_TEXT).toString())
-                                    .collect(Collectors.joining(" "));
+                            var joinedOutput = mapList.stream().map(item -> item.get(KEY_TEXT).toString()).collect(Collectors.joining(" "));
                             content.setType(text);
                             content.setValue(joinedOutput);
-                            conversationLog.getMessages().add(
-                                    new ConversationPart(KEY_ROLE_ASSISTANT, outputContentList));
+                            conversationLog.getMessages().add(new ConversationPart(KEY_ROLE_ASSISTANT, outputContentList));
 
                         } else if (outputList.getFirst() instanceof TextOutputItem) {
                             @SuppressWarnings("unchecked")
                             var textOutputList = (List<TextOutputItem>) outputList;
-                            var joinedOutput = textOutputList.stream()
-                                    .map(TextOutputItem::getText)
-                                    .collect(Collectors.joining(" "));
+                            var joinedOutput = textOutputList.stream().map(TextOutputItem::getText).collect(Collectors.joining(" "));
                             content.setType(text);
                             content.setValue(joinedOutput);
-                            conversationLog.getMessages().add(
-                                    new ConversationPart(KEY_ROLE_ASSISTANT, outputContentList));
+                            conversationLog.getMessages().add(new ConversationPart(KEY_ROLE_ASSISTANT, outputContentList));
                         }
                     }
                 }

@@ -23,8 +23,7 @@ public interface IRestVersionInfo {
         try {
             IResourceStore.IResourceId currentResourceId = getCurrentResourceId(id);
             String path = URI.create(getResourceURI()).getPath();
-            return Response.seeOther(URI.create(path + id + versionQueryParam + currentResourceId.getVersion()))
-                    .build();
+            return Response.seeOther(URI.create(path + id + versionQueryParam + currentResourceId.getVersion())).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
@@ -45,9 +44,7 @@ public interface IRestVersionInfo {
 
     String getResourceURI();
 
-    default IResourceStore.IResourceId getCurrentResourceId(String id)
-            throws IResourceStore.ResourceNotFoundException {
-        throw new IllegalStateException(
-                "Method getCurrentVersion of interface IRestVersionInfo needs to be implemented");
+    default IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
+        throw new IllegalStateException("Method getCurrentVersion of interface IRestVersionInfo needs to be implemented");
     }
 }

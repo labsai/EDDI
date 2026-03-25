@@ -11,8 +11,8 @@ import javax.sql.DataSource;
 import java.sql.*;
 
 /**
- * PostgreSQL implementation of {@link IPropertiesStore}.
- * Stores user properties as JSON in a key-value table.
+ * PostgreSQL implementation of {@link IPropertiesStore}. Stores user properties
+ * as JSON in a key-value table.
  */
 @ApplicationScoped
 @IfBuildProfile("postgres")
@@ -37,9 +37,9 @@ public class PostgresPropertiesStore implements IPropertiesStore {
     }
 
     private synchronized void ensureSchema() {
-        if (schemaInitialized) return;
-        try (Connection conn = dataSource.getConnection();
-             Statement stmt = conn.createStatement()) {
+        if (schemaInitialized)
+            return;
+        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -51,8 +51,7 @@ public class PostgresPropertiesStore implements IPropertiesStore {
     public Properties readProperties(String userId) {
         ensureSchema();
         String sql = "SELECT data FROM properties WHERE user_id = ?";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
@@ -61,8 +60,8 @@ public class PostgresPropertiesStore implements IPropertiesStore {
                     Properties props = new Properties();
                     if (json != null && !json.isEmpty() && !json.equals("{}")) {
                         @SuppressWarnings("unchecked")
-                        var map = (java.util.Map<String, Object>) new com.fasterxml.jackson.databind.ObjectMapper()
-                                .readValue(json, java.util.Map.class);
+                        var map = (java.util.Map<String, Object>) new com.fasterxml.jackson.databind.ObjectMapper().readValue(json,
+                                java.util.Map.class);
                         if (map != null) {
                             props.putAll(map);
                         }
@@ -79,7 +78,8 @@ public class PostgresPropertiesStore implements IPropertiesStore {
     @Override
     public void mergeProperties(String userId, Properties properties) {
         ensureSchema();
-        if (properties == null || properties.isEmpty()) return;
+        if (properties == null || properties.isEmpty())
+            return;
 
         Properties existing = readProperties(userId);
         Properties current = (existing != null) ? existing : new Properties();
@@ -87,20 +87,17 @@ public class PostgresPropertiesStore implements IPropertiesStore {
         current.putAll(properties);
 
         try {
-            String json = new com.fasterxml.jackson.databind.ObjectMapper()
-                    .writeValueAsString(current);
+            String json = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(current);
             if (create) {
                 String sql = "INSERT INTO properties (user_id, data) VALUES (?, ?::jsonb)";
-                try (Connection conn = dataSource.getConnection();
-                     PreparedStatement ps = conn.prepareStatement(sql)) {
+                try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
                     ps.setString(1, userId);
                     ps.setString(2, json);
                     ps.executeUpdate();
                 }
             } else {
                 String sql = "UPDATE properties SET data = ?::jsonb WHERE user_id = ?";
-                try (Connection conn = dataSource.getConnection();
-                     PreparedStatement ps = conn.prepareStatement(sql)) {
+                try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
                     ps.setString(1, json);
                     ps.setString(2, userId);
                     ps.executeUpdate();
@@ -115,8 +112,7 @@ public class PostgresPropertiesStore implements IPropertiesStore {
     public void deleteProperties(String userId) {
         ensureSchema();
         String sql = "DELETE FROM properties WHERE user_id = ?";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
             ps.executeUpdate();
         } catch (SQLException e) {

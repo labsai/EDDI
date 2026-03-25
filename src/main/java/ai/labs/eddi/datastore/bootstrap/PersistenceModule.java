@@ -30,8 +30,8 @@ import static org.bson.codecs.configuration.CodecRegistries.*;
 /**
  * MongoDB persistence module. Produces the {@link MongoDatabase} CDI bean.
  * <p>
- * Annotated {@code @DefaultBean} so it is NOT activated when
- * PostgreSQL mode overrides the datastore layer.
+ * Annotated {@code @DefaultBean} so it is NOT activated when PostgreSQL mode
+ * overrides the datastore layer.
  *
  * @author ginccc
  */
@@ -42,37 +42,26 @@ public class PersistenceModule {
     @ApplicationScoped
     @DefaultBean
     public MongoDatabase provideMongoDB(@ConfigProperty(name = "mongodb.connectionString") String connectionString,
-                                        @ConfigProperty(name = "mongodb.database") String database) {
-            BsonFactory bsonFactory = new BsonFactory();
-            bsonFactory.enable(BsonParser.Feature.HONOR_DOCUMENT_LENGTH);
+            @ConfigProperty(name = "mongodb.database") String database) {
+        BsonFactory bsonFactory = new BsonFactory();
+        bsonFactory.enable(BsonParser.Feature.HONOR_DOCUMENT_LENGTH);
 
-            MongoClient client = MongoClients.create(buildMongoClientOptions(ReadPreference.nearest(), connectionString, bsonFactory));
-            registerMongoClientShutdownHook(client);
+        MongoClient client = MongoClients.create(buildMongoClientOptions(ReadPreference.nearest(), connectionString, bsonFactory));
+        registerMongoClientShutdownHook(client);
 
-            return client.getDatabase(database);
+        return client.getDatabase(database);
     }
 
-    private MongoClientSettings buildMongoClientOptions(ReadPreference readPreference,
-                                                       String connectionString,
-                                                       BsonFactory bsonFactory) {
+    private MongoClientSettings buildMongoClientOptions(ReadPreference readPreference, String connectionString, BsonFactory bsonFactory) {
 
         var objectMapper = new ObjectMapper(bsonFactory);
         new SerializationCustomizer(false).customize(objectMapper);
-        CodecRegistry codecRegistry = fromRegistries(
-                MongoClientSettings.getDefaultCodecRegistry(),
-                fromCodecs(new URIStringCodec(), new RawBsonDocumentCodec()),
-                fromProviders(
-                        new ValueCodecProvider(), new BsonValueCodecProvider(),
-                        new DocumentCodecProvider(), new IterableCodecProvider(), new MapCodecProvider(),
-                        new JacksonProvider(objectMapper)
-                )
-        );
+        CodecRegistry codecRegistry = fromRegistries(MongoClientSettings.getDefaultCodecRegistry(),
+                fromCodecs(new URIStringCodec(), new RawBsonDocumentCodec()), fromProviders(new ValueCodecProvider(), new BsonValueCodecProvider(),
+                        new DocumentCodecProvider(), new IterableCodecProvider(), new MapCodecProvider(), new JacksonProvider(objectMapper)));
 
-        return MongoClientSettings.builder()
-                .applyConnectionString(new ConnectionString(connectionString))
-                .codecRegistry(codecRegistry)
-                .writeConcern(WriteConcern.MAJORITY)
-                .readPreference(readPreference).build();
+        return MongoClientSettings.builder().applyConnectionString(new ConnectionString(connectionString)).codecRegistry(codecRegistry)
+                .writeConcern(WriteConcern.MAJORITY).readPreference(readPreference).build();
     }
 
     private void registerMongoClientShutdownHook(final MongoClient mongoClient) {
@@ -107,11 +96,9 @@ public class PersistenceModule {
             try {
                 return new URI(uriString);
             } catch (URISyntaxException e) {
-                throw new BsonInvalidOperationException(
-                        String.format("Cannot create URI from string '%s'", uriString));
+                throw new BsonInvalidOperationException(String.format("Cannot create URI from string '%s'", uriString));
 
             }
         }
     }
 }
-

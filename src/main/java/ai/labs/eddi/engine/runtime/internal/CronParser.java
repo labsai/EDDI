@@ -13,12 +13,12 @@ import java.util.stream.IntStream;
  * <p>
  * No external library needed — handles:
  * <ul>
- *   <li>{@code *} — any value</li>
- *   <li>{@code 5} — exact value</li>
- *   <li>{@code 1,3,5} — list</li>
- *   <li>{@code 1-5} — range</li>
- *   <li>{@code * /15} — step (without space)</li>
- *   <li>{@code MON-FRI} — day-of-week names</li>
+ * <li>{@code *} — any value</li>
+ * <li>{@code 5} — exact value</li>
+ * <li>{@code 1,3,5} — list</li>
+ * <li>{@code 1-5} — range</li>
+ * <li>{@code * /15} — step (without space)</li>
+ * <li>{@code MON-FRI} — day-of-week names</li>
  * </ul>
  *
  * @author ginccc
@@ -26,17 +26,11 @@ import java.util.stream.IntStream;
  */
 public final class CronParser {
 
-    static final Map<String, String> DOW_NAMES = Map.of(
-            "SUN", "0", "MON", "1", "TUE", "2", "WED", "3",
-            "THU", "4", "FRI", "5", "SAT", "6"
-    );
+    static final Map<String, String> DOW_NAMES = Map.of("SUN", "0", "MON", "1", "TUE", "2", "WED", "3", "THU", "4", "FRI", "5", "SAT", "6");
 
-    static final Map<String, String> MONTH_NAMES = Map.ofEntries(
-            Map.entry("JAN", "1"), Map.entry("FEB", "2"), Map.entry("MAR", "3"),
-            Map.entry("APR", "4"), Map.entry("MAY", "5"), Map.entry("JUN", "6"),
-            Map.entry("JUL", "7"), Map.entry("AUG", "8"), Map.entry("SEP", "9"),
-            Map.entry("OCT", "10"), Map.entry("NOV", "11"), Map.entry("DEC", "12")
-    );
+    static final Map<String, String> MONTH_NAMES = Map.ofEntries(Map.entry("JAN", "1"), Map.entry("FEB", "2"), Map.entry("MAR", "3"),
+            Map.entry("APR", "4"), Map.entry("MAY", "5"), Map.entry("JUN", "6"), Map.entry("JUL", "7"), Map.entry("AUG", "8"), Map.entry("SEP", "9"),
+            Map.entry("OCT", "10"), Map.entry("NOV", "11"), Map.entry("DEC", "12"));
 
     private CronParser() {
     }
@@ -50,22 +44,24 @@ public final class CronParser {
         }
         String[] parts = cronExpression.trim().split("\\s+");
         if (parts.length != 5) {
-            throw new IllegalArgumentException(
-                    "Cron expression must have exactly 5 fields (min hour dom month dow), got " + parts.length);
+            throw new IllegalArgumentException("Cron expression must have exactly 5 fields (min hour dom month dow), got " + parts.length);
         }
-        parseField(parts[0], 0, 59);   // minute
-        parseField(parts[1], 0, 23);   // hour
-        parseField(parts[2], 1, 31);   // day of month
-        parseField(substituteNames(parts[3], MONTH_NAMES), 1, 12);  // month
-        parseField(substituteNames(parts[4], DOW_NAMES), 0, 6);     // day of week
+        parseField(parts[0], 0, 59); // minute
+        parseField(parts[1], 0, 23); // hour
+        parseField(parts[2], 1, 31); // day of month
+        parseField(substituteNames(parts[3], MONTH_NAMES), 1, 12); // month
+        parseField(substituteNames(parts[4], DOW_NAMES), 0, 6); // day of week
     }
 
     /**
      * Compute the next fire time after the given instant, in the given time zone.
      *
-     * @param cronExpression 5-field cron expression
-     * @param after          compute next fire after this instant
-     * @param zoneId         time zone for evaluation
+     * @param cronExpression
+     *            5-field cron expression
+     * @param after
+     *            compute next fire after this instant
+     * @param zoneId
+     *            time zone for evaluation
      * @return next fire instant (UTC)
      */
     public static Instant computeNextFire(String cronExpression, Instant after, ZoneId zoneId) {
@@ -80,20 +76,17 @@ public final class CronParser {
         Set<Integer> months = parseField(substituteNames(parts[3], MONTH_NAMES), 1, 12);
         Set<Integer> daysOfWeek = parseField(substituteNames(parts[4], DOW_NAMES), 0, 6);
 
-        // Walk forward minute-by-minute from 'after + 1 minute' (aligned to minute boundary)
-        ZonedDateTime candidate = after.atZone(zoneId)
-                .withSecond(0).withNano(0)
-                .plusMinutes(1);
+        // Walk forward minute-by-minute from 'after + 1 minute' (aligned to minute
+        // boundary)
+        ZonedDateTime candidate = after.atZone(zoneId).withSecond(0).withNano(0).plusMinutes(1);
 
         // Safety: max 2 years of scanning (covers leap years + DST)
         ZonedDateTime limit = candidate.plusYears(2);
 
         while (candidate.isBefore(limit)) {
-            if (months.contains(candidate.getMonthValue())
-                    && daysOfMonth.contains(candidate.getDayOfMonth())
+            if (months.contains(candidate.getMonthValue()) && daysOfMonth.contains(candidate.getDayOfMonth())
                     && daysOfWeek.contains(candidate.getDayOfWeek().getValue() % 7) // Java DayOfWeek: MON=1..SUN=7
-                    && hours.contains(candidate.getHour())
-                    && minutes.contains(candidate.getMinute())) {
+                    && hours.contains(candidate.getHour()) && minutes.contains(candidate.getMinute())) {
                 return candidate.toInstant();
             }
 
@@ -103,8 +96,7 @@ public final class CronParser {
                 continue;
             }
             // If day doesn't match, jump to next day
-            if (!daysOfMonth.contains(candidate.getDayOfMonth())
-                    || !daysOfWeek.contains(candidate.getDayOfWeek().getValue() % 7)) {
+            if (!daysOfMonth.contains(candidate.getDayOfMonth()) || !daysOfWeek.contains(candidate.getDayOfWeek().getValue() % 7)) {
                 candidate = candidate.plusDays(1).withHour(0).withMinute(0);
                 continue;
             }
@@ -121,8 +113,8 @@ public final class CronParser {
     }
 
     /**
-     * Compute the minimum interval in seconds between two successive fires.
-     * Used for validating the minimum interval policy.
+     * Compute the minimum interval in seconds between two successive fires. Used
+     * for validating the minimum interval policy.
      */
     public static long computeMinIntervalSeconds(String cronExpression, ZoneId zoneId) {
         Instant now = Instant.now();
@@ -138,10 +130,11 @@ public final class CronParser {
         for (String part : field.split(",")) {
             part = part.trim();
             if (part.contains("/")) {
-                // Step: */15  or  1-30/5
+                // Step: */15 or 1-30/5
                 String[] stepParts = part.split("/");
                 int step = Integer.parseInt(stepParts[1]);
-                if (step <= 0) throw new IllegalArgumentException("Step must be > 0: " + field);
+                if (step <= 0)
+                    throw new IllegalArgumentException("Step must be > 0: " + field);
                 int start = min;
                 int end = max;
                 if (!stepParts[0].equals("*")) {
@@ -174,8 +167,7 @@ public final class CronParser {
         // Validate bounds
         for (int v : values) {
             if (v < min || v > max) {
-                throw new IllegalArgumentException(
-                        String.format("Value %d out of range [%d, %d] in field: %s", v, min, max, field));
+                throw new IllegalArgumentException(String.format("Value %d out of range [%d, %d] in field: %s", v, min, max, field));
             }
         }
         return values;

@@ -13,7 +13,8 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 /**
- * Unit tests for McpToolProviderManager — config parsing, caching, and lifecycle.
+ * Unit tests for McpToolProviderManager — config parsing, caching, and
+ * lifecycle.
  */
 class McpToolProviderManagerTest {
 

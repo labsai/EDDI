@@ -26,7 +26,6 @@ public class DynamicValueMatcher implements IRuleCondition {
     private static final String containsQualifier = "contains";
     private static final String equalsQualifier = "equals";
 
-
     @Override
     public String getId() {
         return ID;

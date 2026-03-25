@@ -77,13 +77,8 @@ public class PropertySetterTask implements ILifecycleTask {
     private final ISecretProvider secretProvider;
 
     @Inject
-    public PropertySetterTask(IExpressionProvider expressionProvider,
-            IMemoryItemConverter memoryItemConverter,
-            ITemplatingEngine templatingEngine,
-            IDataFactory dataFactory,
-            IResourceClientLibrary resourceClientLibrary,
-            ObjectMapper objectMapper,
-            ISecretProvider secretProvider) {
+    public PropertySetterTask(IExpressionProvider expressionProvider, IMemoryItemConverter memoryItemConverter, ITemplatingEngine templatingEngine,
+            IDataFactory dataFactory, IResourceClientLibrary resourceClientLibrary, ObjectMapper objectMapper, ISecretProvider secretProvider) {
         this.expressionProvider = expressionProvider;
         this.memoryItemConverter = memoryItemConverter;
         this.templatingEngine = templatingEngine;
@@ -137,8 +132,7 @@ public class PropertySetterTask implements ILifecycleTask {
                 setOnActionsList.forEach(setOnAction -> {
                     List<String> actions = setOnAction.getActions();
                     if (actions.contains(action) || actions.contains("*")) {
-                        setOnAction.getSetProperties().stream()
-                                .filter(propertyInstruction -> !propertyInstructions.contains(propertyInstruction))
+                        setOnAction.getSetProperties().stream().filter(propertyInstruction -> !propertyInstructions.contains(propertyInstruction))
                                 .forEach(propertyInstructions::add);
                     }
                 });
@@ -161,43 +155,33 @@ public class PropertySetterTask implements ILifecycleTask {
                                     if (!isNullOrEmpty(toObjectPath)) {
                                         PathNavigator.setValue(toObjectPath, templateDataObjects, templatedObj);
                                     } else if (templatedObj instanceof String) {
-                                        templateString = templatingEngine.processTemplate(
-                                                templatedObj.toString(),
-                                                templateDataObjects);
-                                        conversationProperties.put(name,
-                                                new Property(name, templateString, scope));
+                                        templateString = templatingEngine.processTemplate(templatedObj.toString(), templateDataObjects);
+                                        conversationProperties.put(name, new Property(name, templateString, scope));
                                     } else if (templatedObj instanceof Map<?, ?>) {
                                         @SuppressWarnings("unchecked")
                                         var valueMap = (Map<String, Object>) templatedObj;
-                                        conversationProperties.put(name,
-                                                new Property(name, new LinkedHashMap<>(valueMap), scope));
+                                        conversationProperties.put(name, new Property(name, new LinkedHashMap<>(valueMap), scope));
                                     } else if (templatedObj instanceof List<?>) {
                                         @SuppressWarnings("unchecked")
                                         var valueList = (List<Object>) templatedObj;
-                                        conversationProperties.put(name,
-                                                new Property(name, new ArrayList<>(valueList), scope));
+                                        conversationProperties.put(name, new Property(name, new ArrayList<>(valueList), scope));
                                     } else if (templatedObj instanceof Integer valueInt) {
-                                        conversationProperties.put(name,
-                                                new Property(name, valueInt, scope));
+                                        conversationProperties.put(name, new Property(name, valueInt, scope));
                                     } else if (templatedObj instanceof Float valueFloat) {
-                                        conversationProperties.put(name,
-                                                new Property(name, valueFloat, scope));
+                                        conversationProperties.put(name, new Property(name, valueFloat, scope));
                                     } else if (templatedObj instanceof Boolean valueBoolean) {
-                                        conversationProperties.put(name,
-                                                new Property(name, valueBoolean, scope));
+                                        conversationProperties.put(name, new Property(name, valueBoolean, scope));
                                     }
                                 } else {
                                     var valueString = property.getValueString();
                                     if (!isNullOrEmpty(valueString)) {
-                                        templateString = templatingEngine.processTemplate(valueString,
-                                                templateDataObjects);
+                                        templateString = templatingEngine.processTemplate(valueString, templateDataObjects);
                                         if (scope == Scope.secret) {
                                             // Auto-vault: store the plaintext in the vault and
                                             // replace it with a vault reference in conversation properties.
                                             templateString = autoVaultSecret(memory, name, templateString);
                                             // Store as conversation-scoped (the vault ref, not the plaintext)
-                                            conversationProperties.put(name,
-                                                    new Property(name, templateString, conversation));
+                                            conversationProperties.put(name, new Property(name, templateString, conversation));
                                         } else {
                                             // NOTE: Do NOT resolve vault references here — they must stay as-is
                                             // in conversation properties (which are persisted to DB).
@@ -209,14 +193,12 @@ public class PropertySetterTask implements ILifecycleTask {
 
                                     var valueMap = property.getValueObject();
                                     if (valueMap != null) {
-                                        conversationProperties.put(name,
-                                                new Property(name, new LinkedHashMap<>(valueMap), scope));
+                                        conversationProperties.put(name, new Property(name, new LinkedHashMap<>(valueMap), scope));
                                     }
 
                                     var valueList = property.getValueList();
                                     if (valueList != null) {
-                                        conversationProperties.put(name,
-                                                new Property(name, new ArrayList<>(valueList), scope));
+                                        conversationProperties.put(name, new Property(name, new ArrayList<>(valueList), scope));
                                     }
 
                                     var valueInt = property.getValueInt();
@@ -290,8 +272,7 @@ public class PropertySetterTask implements ILifecycleTask {
     }
 
     @Override
-    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws WorkflowConfigurationException {
+    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions) throws WorkflowConfigurationException {
 
         List<SetOnActions> setOnActionsList = new LinkedList<>();
 
@@ -304,8 +285,7 @@ public class PropertySetterTask implements ILifecycleTask {
                 Object uriObj = configuration.get(KEY_URI);
                 if (!isNullOrEmpty(uriObj) && uriObj.toString().startsWith("eddi")) {
                     URI uri = URI.create(uriObj.toString());
-                    var propertySetterConfig = resourceClientLibrary.getResource(uri,
-                            PropertySetterConfiguration.class);
+                    var propertySetterConfig = resourceClientLibrary.getResource(uri, PropertySetterConfiguration.class);
                     setOnActionsList.addAll(propertySetterConfig.getSetOnActions());
                 }
             }
@@ -336,8 +316,7 @@ public class PropertySetterTask implements ILifecycleTask {
 
                     Object setPropertiesObj = setOnAction.get("setProperties");
                     if (setPropertiesObj instanceof List) {
-                        setOnActions.setSetProperties(
-                                convertToProperties(convertObjectToListOfMapsWithObjects(setPropertiesObj)));
+                        setOnActions.setSetProperties(convertToProperties(convertObjectToListOfMapsWithObjects(setPropertiesObj)));
                     }
                 }
 
@@ -400,10 +379,14 @@ public class PropertySetterTask implements ILifecycleTask {
      * Store a plaintext secret in the vault and return the vault reference string.
      * Also scrubs the raw user input from conversation memory to prevent leakage.
      *
-     * @param memory    the conversation memory (used for agentId and input scrubbing)
-     * @param keyName   the property name used as the vault key
-     * @param plaintext the secret value to store
-     * @return the vault reference string, e.g. {@code ${eddivault:default/agentId/keyName}}
+     * @param memory
+     *            the conversation memory (used for agentId and input scrubbing)
+     * @param keyName
+     *            the property name used as the vault key
+     * @param plaintext
+     *            the secret value to store
+     * @return the vault reference string, e.g.
+     *         {@code ${eddivault:default/agentId/keyName}}
      */
     private String autoVaultSecret(IConversationMemory memory, String keyName, String plaintext) {
         // Determine tenantId — use conversation property if set, else "default"

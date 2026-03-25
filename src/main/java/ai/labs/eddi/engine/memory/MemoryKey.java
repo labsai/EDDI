@@ -7,13 +7,13 @@ import java.util.Objects;
  * {@link IConversationMemory.IConversationStep}.
  * <p>
  * Binds a string key name to a Java type at compile time, eliminating unchecked
- * casts
- * and providing discoverability via the {@link MemoryKeys} registry.
+ * casts and providing discoverability via the {@link MemoryKeys} registry.
  * <p>
  * The {@code isPublic} flag determines whether data stored under this key
  * should be included in client responses (see {@link IData#isPublic()}).
  *
- * @param <T> the type of value stored under this key
+ * @param <T>
+ *            the type of value stored under this key
  */
 public final class MemoryKey<T> {
     private final String key;
@@ -25,16 +25,16 @@ public final class MemoryKey<T> {
     }
 
     /**
-     * Creates a private (non-public) memory key.
-     * Data stored under this key will NOT be sent to the client.
+     * Creates a private (non-public) memory key. Data stored under this key will
+     * NOT be sent to the client.
      */
     public static <T> MemoryKey<T> of(String key) {
         return new MemoryKey<>(key, false);
     }
 
     /**
-     * Creates a public memory key.
-     * Data stored under this key WILL be included in client responses.
+     * Creates a public memory key. Data stored under this key WILL be included in
+     * client responses.
      */
     public static <T> MemoryKey<T> ofPublic(String key) {
         return new MemoryKey<>(key, true);

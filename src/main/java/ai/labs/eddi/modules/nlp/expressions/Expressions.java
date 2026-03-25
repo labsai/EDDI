@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.nlp.expressions;
 
-
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.LinkedList;

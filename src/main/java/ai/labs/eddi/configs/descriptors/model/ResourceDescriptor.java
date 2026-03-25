@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.descriptors.model;
 
-
 import java.net.URI;
 import java.util.Date;
 

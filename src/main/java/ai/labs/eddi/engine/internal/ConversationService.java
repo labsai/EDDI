@@ -52,9 +52,8 @@ import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 /**
  * Core conversation lifecycle service — extracted from RestAgentEngine.
  * Contains all business logic for conversation management, metrics, and
- * caching.
- * No JAX-RS dependencies — results are returned as domain objects or via
- * callbacks.
+ * caching. No JAX-RS dependencies — results are returned as domain objects or
+ * via callbacks.
  *
  * @author ginccc
  */
@@ -97,18 +96,10 @@ public class ConversationService implements IConversationService {
     private static final Logger LOGGER = Logger.getLogger(ConversationService.class);
 
     @Inject
-    public ConversationService(IAgentFactory agentFactory,
-            IConversationMemoryStore conversationMemoryStore,
-            IConversationDescriptorStore conversationDescriptorStore,
-            IPropertiesStore propertiesStore,
-            IConversationCoordinator conversationCoordinator,
-            IConversationSetup conversationSetup,
-            ICacheFactory cacheFactory,
-            IRuntime runtime,
-            IContextLogger contextLogger,
-            AuditLedgerService auditLedgerService,
-            TenantQuotaService tenantQuotaService,
-            MeterRegistry meterRegistry,
+    public ConversationService(IAgentFactory agentFactory, IConversationMemoryStore conversationMemoryStore,
+            IConversationDescriptorStore conversationDescriptorStore, IPropertiesStore propertiesStore,
+            IConversationCoordinator conversationCoordinator, IConversationSetup conversationSetup, ICacheFactory cacheFactory, IRuntime runtime,
+            IContextLogger contextLogger, AuditLedgerService auditLedgerService, TenantQuotaService tenantQuotaService, MeterRegistry meterRegistry,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.agentFactory = agentFactory;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -138,13 +129,11 @@ public class ConversationService implements IConversationService {
         this.counterConversationUndo = meterRegistry.counter("eddi_conversation_undo_count");
         this.counterConversationRedo = meterRegistry.counter("eddi_conversation_redo_count");
 
-        meterRegistry.gaugeCollectionSize("eddi_processing_conversation_count",
-                Tags.empty(), processingConversationReferences);
+        meterRegistry.gaugeCollectionSize("eddi_processing_conversation_count", Tags.empty(), processingConversationReferences);
     }
 
     @Override
-    public ConversationResult startConversation(Environment environment, String agentId,
-            String userId, Map<String, Context> context)
+    public ConversationResult startConversation(Environment environment, String agentId, String userId, Map<String, Context> context)
             throws AgentNotReadyException, ResourceStoreException, ResourceNotFoundException {
 
         long startTime = System.nanoTime();
@@ -169,8 +158,7 @@ public class ConversationService implements IConversationService {
             }
 
             userId = conversationSetup.computeAnonymousUserIdIfEmpty(userId, context.get(USER_ID));
-            IConversation conversation = latestAgent.startConversation(userId, context,
-                    createPropertiesHandler(userId), null);
+            IConversation conversation = latestAgent.startConversation(userId, context, createPropertiesHandler(userId), null);
 
             var conversationMemory = conversation.getConversationMemory();
             var conversationId = storeConversationMemory(conversationMemory, environment);
@@ -178,8 +166,7 @@ public class ConversationService implements IConversationService {
             tenantQuotaService.recordConversationStart();
             var conversationUri = createURI(RESOURCE_URI, conversationId);
 
-            conversationSetup.createConversationDescriptor(agentId, latestAgent, userId, conversationId,
-                    conversationUri);
+            conversationSetup.createConversationDescriptor(agentId, latestAgent, userId, conversationId, conversationUri);
 
             return new ConversationResult(conversationId, conversationUri);
         } catch (AgentNotReadyException e) {
@@ -221,17 +208,13 @@ public class ConversationService implements IConversationService {
     }
 
     @Override
-    public SimpleConversationMemorySnapshot readConversation(Environment environment, String agentId,
-            String conversationId,
-            Boolean returnDetailed,
-            Boolean returnCurrentStepOnly,
-            List<String> returningFields)
+    public SimpleConversationMemorySnapshot readConversation(Environment environment, String agentId, String conversationId, Boolean returnDetailed,
+            Boolean returnCurrentStepOnly, List<String> returningFields)
             throws AgentMismatchException, ResourceStoreException, ResourceNotFoundException {
 
         long startTime = System.nanoTime();
         validateParams(environment, agentId, conversationId);
-        Map<String, String> loggingContext = contextLogger.createLoggingContext(environment, agentId, conversationId,
-                null);
+        Map<String, String> loggingContext = contextLogger.createLoggingContext(environment, agentId, conversationId, null);
         contextLogger.setLoggingContext(loggingContext);
 
         try {
@@ -240,18 +223,13 @@ public class ConversationService implements IConversationService {
             contextLogger.setLoggingContext(loggingContext);
 
             if (!agentId.equals(conversationMemorySnapshot.getAgentId())) {
-                String message = "conversationId: '%s' does not belong to Agent with conversationId: '%s'. " +
-                        "(provided agentId='%s', agentId in ConversationMemory='%s')";
-                message = String.format(message, conversationId, agentId, agentId,
-                        conversationMemorySnapshot.getAgentId());
+                String message = "conversationId: '%s' does not belong to Agent with conversationId: '%s'. "
+                        + "(provided agentId='%s', agentId in ConversationMemory='%s')";
+                message = String.format(message, conversationId, agentId, agentId, conversationMemorySnapshot.getAgentId());
                 throw new AgentMismatchException(message);
             }
 
-            return convertSimpleConversationMemorySnapshot(
-                    conversationMemorySnapshot,
-                    returnDetailed,
-                    returnCurrentStepOnly,
-                    returningFields);
+            return convertSimpleConversationMemorySnapshot(conversationMemorySnapshot, returnDetailed, returnCurrentStepOnly, returningFields);
         } finally {
             recordMetrics(timerConversationLoad, counterConversationLoad, startTime);
         }
@@ -273,11 +251,8 @@ public class ConversationService implements IConversationService {
     }
 
     @Override
-    public void say(Environment environment, String agentId, String conversationId,
-            Boolean returnDetailed, Boolean returnCurrentStepOnly,
-            List<String> returningFields, InputData inputData,
-            boolean rerunOnly, ConversationResponseHandler responseHandler)
-            throws Exception {
+    public void say(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+            List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler) throws Exception {
 
         long startTime = System.nanoTime();
         try {
@@ -291,8 +266,7 @@ public class ConversationService implements IConversationService {
             processingConversationReferences.add(createReferenceForMetrics(agentId, conversationId));
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
-            var loggingContext = contextLogger.createLoggingContext(environment, agentId,
-                    conversationId, conversationMemory.getUserId());
+            var loggingContext = contextLogger.createLoggingContext(environment, agentId, conversationId, conversationMemory.getUserId());
             Integer agentVersion = conversationMemory.getAgentVersion();
             loggingContext.put("agentVersion", agentVersion.toString());
             contextLogger.setLoggingContext(loggingContext);
@@ -313,18 +287,13 @@ public class ConversationService implements IConversationService {
             // Set the audit collector on memory (if auditing is enabled)
             if (auditLedgerService.isEnabled()) {
                 String envName = environment.toString();
-                conversationMemory
-                        .setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
+                conversationMemory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
             }
 
-            final IConversation conversation = agent.continueConversation(conversationMemory,
-                    createPropertiesHandler(conversationMemory.getUserId()),
+            final IConversation conversation = agent.continueConversation(conversationMemory, createPropertiesHandler(conversationMemory.getUserId()),
                     returnConversationMemory -> {
-                        SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(
-                                returnConversationMemory,
-                                returnDetailed,
-                                returnCurrentStepOnly,
-                                returningFields);
+                        SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
+                                returnDetailed, returnCurrentStepOnly, returningFields);
                         memorySnapshot.setEnvironment(environment);
                         cacheConversationState(conversationId, memorySnapshot.getConversationState());
                         conversationDescriptorStore.updateTimeStamp(conversationId);
@@ -360,10 +329,8 @@ public class ConversationService implements IConversationService {
                 };
             }
 
-            Callable<Void> processUserInput = processConversationStep(environment,
-                    conversationMemory,
-                    conversationId,
-                    loggingContext, executeConversation);
+            Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
+                    executeConversation);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
@@ -377,10 +344,8 @@ public class ConversationService implements IConversationService {
     }
 
     @Override
-    public void sayStreaming(Environment environment, String agentId, String conversationId,
-            Boolean returnDetailed, Boolean returnCurrentStepOnly,
-            List<String> returningFields, InputData inputData,
-            StreamingResponseHandler streamingHandler) throws Exception {
+    public void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+            List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler) throws Exception {
 
         long startTime = System.nanoTime();
         try {
@@ -394,8 +359,7 @@ public class ConversationService implements IConversationService {
             processingConversationReferences.add(createReferenceForMetrics(agentId, conversationId));
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
-            var loggingContext = contextLogger.createLoggingContext(environment, agentId,
-                    conversationId, conversationMemory.getUserId());
+            var loggingContext = contextLogger.createLoggingContext(environment, agentId, conversationId, conversationMemory.getUserId());
             Integer agentVersion = conversationMemory.getAgentVersion();
             loggingContext.put("agentVersion", agentVersion.toString());
             contextLogger.setLoggingContext(loggingContext);
@@ -421,8 +385,7 @@ public class ConversationService implements IConversationService {
                 }
 
                 @Override
-                public void onTaskComplete(String taskId, String taskType, long durationMs,
-                        Map<String, Object> summary) {
+                public void onTaskComplete(String taskId, String taskType, long durationMs, Map<String, Object> summary) {
                     streamingHandler.onTaskComplete(taskId, taskType, durationMs, summary);
                 }
 
@@ -448,18 +411,13 @@ public class ConversationService implements IConversationService {
             // Set the audit collector on memory (if auditing is enabled)
             if (auditLedgerService.isEnabled()) {
                 String envName = environment.toString();
-                conversationMemory
-                        .setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
+                conversationMemory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
             }
 
-            final IConversation conversation = agent.continueConversation(conversationMemory,
-                    createPropertiesHandler(conversationMemory.getUserId()),
+            final IConversation conversation = agent.continueConversation(conversationMemory, createPropertiesHandler(conversationMemory.getUserId()),
                     returnConversationMemory -> {
-                        SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(
-                                returnConversationMemory,
-                                returnDetailed,
-                                returnCurrentStepOnly,
-                                returningFields);
+                        SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
+                                returnDetailed, returnCurrentStepOnly, returningFields);
                         memorySnapshot.setEnvironment(environment);
                         cacheConversationState(conversationId, memorySnapshot.getConversationState());
                         conversationDescriptorStore.updateTimeStamp(conversationId);
@@ -483,10 +441,8 @@ public class ConversationService implements IConversationService {
                 return null;
             };
 
-            Callable<Void> processUserInput = processConversationStep(environment,
-                    conversationMemory,
-                    conversationId,
-                    loggingContext, executeConversation);
+            Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
+                    executeConversation);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
@@ -586,8 +542,7 @@ public class ConversationService implements IConversationService {
         };
     }
 
-    private IAgent getAgent(Environment environment, String agentId, Integer agentVersion)
-            throws ServiceException, IllegalAccessException {
+    private IAgent getAgent(Environment environment, String agentId, Integer agentVersion) throws ServiceException, IllegalAccessException {
 
         IAgent agent = agentFactory.getAgent(environment, agentId, agentVersion);
         if (agent == null) {
@@ -598,48 +553,42 @@ public class ConversationService implements IConversationService {
         return agent;
     }
 
-    private Callable<Void> processConversationStep(Environment environment,
-            IConversationMemory conversationMemory,
-            String conversationId,
-            Map<String, String> loggingContext,
-            Callable<Void> executeConversation) {
+    private Callable<Void> processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
+            Map<String, String> loggingContext, Callable<Void> executeConversation) {
         return () -> {
             waitForExecutionFinishOrTimeout(loggingContext, conversationId,
-                    runtime.submitCallable(executeConversation,
-                            new IRuntime.IFinishedExecution<>() {
-                                @Override
-                                public void onComplete(Void result) {
-                                    try {
-                                        storeConversationMemory(conversationMemory, environment);
-                                    } catch (ResourceStoreException e) {
-                                        logConversationError(loggingContext, conversationId, e);
-                                    }
-                                }
+                    runtime.submitCallable(executeConversation, new IRuntime.IFinishedExecution<>() {
+                        @Override
+                        public void onComplete(Void result) {
+                            try {
+                                storeConversationMemory(conversationMemory, environment);
+                            } catch (ResourceStoreException e) {
+                                logConversationError(loggingContext, conversationId, e);
+                            }
+                        }
 
-                                @Override
-                                public void onFailure(Throwable t) {
-                                    if (t instanceof LifecycleException.LifecycleInterruptedException) {
-                                        String errorMessage = "Conversation processing got interrupted! (conversationId=%s)";
-                                        errorMessage = String.format(errorMessage, conversationId);
-                                        contextLogger.setLoggingContext(loggingContext);
-                                        LOGGER.warn(errorMessage, t);
-                                    } else if (t instanceof IConversation.ConversationNotReadyException) {
-                                        String msg = "Conversation not ready! (conversationId=%s)";
-                                        msg = String.format(msg, conversationId);
-                                        contextLogger.setLoggingContext(loggingContext);
-                                        LOGGER.error(msg + "\n" + t.getLocalizedMessage(), t);
-                                    } else {
-                                        logConversationError(loggingContext, conversationId, t);
-                                    }
-                                }
-                            }, null));
+                        @Override
+                        public void onFailure(Throwable t) {
+                            if (t instanceof LifecycleException.LifecycleInterruptedException) {
+                                String errorMessage = "Conversation processing got interrupted! (conversationId=%s)";
+                                errorMessage = String.format(errorMessage, conversationId);
+                                contextLogger.setLoggingContext(loggingContext);
+                                LOGGER.warn(errorMessage, t);
+                            } else if (t instanceof IConversation.ConversationNotReadyException) {
+                                String msg = "Conversation not ready! (conversationId=%s)";
+                                msg = String.format(msg, conversationId);
+                                contextLogger.setLoggingContext(loggingContext);
+                                LOGGER.error(msg + "\n" + t.getLocalizedMessage(), t);
+                            } else {
+                                logConversationError(loggingContext, conversationId, t);
+                            }
+                        }
+                    }, null));
             return null;
         };
     }
 
-    private void waitForExecutionFinishOrTimeout(Map<String, String> loggingContext,
-            String conversationId,
-            Future<Void> future) {
+    private void waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId, Future<Void> future) {
         try {
             future.get(agentTimeout, TimeUnit.SECONDS);
         } catch (TimeoutException | InterruptedException e) {
@@ -673,8 +622,7 @@ public class ConversationService implements IConversationService {
         return conversationMemory;
     }
 
-    private IConversationMemory loadConversationMemory(String conversationId)
-            throws ResourceStoreException, ResourceNotFoundException {
+    private IConversationMemory loadConversationMemory(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
         var conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
         return convertConversationMemorySnapshot(conversationMemorySnapshot);
     }
@@ -688,8 +636,7 @@ public class ConversationService implements IConversationService {
         conversationStateCache.put(conversationId, conversationState);
     }
 
-    private String storeConversationMemory(IConversationMemory conversationMemory, Environment environment)
-            throws ResourceStoreException {
+    private String storeConversationMemory(IConversationMemory conversationMemory, Environment environment) throws ResourceStoreException {
         var memorySnapshot = convertConversationMemory(conversationMemory);
         memorySnapshot.setEnvironment(environment);
         return conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);

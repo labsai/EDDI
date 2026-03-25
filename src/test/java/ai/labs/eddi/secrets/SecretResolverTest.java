@@ -37,8 +37,7 @@ class SecretResolverTest {
     }
 
     @Test
-    void resolveValue_vaultRef_resolvesToPlaintext()
-            throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
+    void resolveValue_vaultRef_resolvesToPlaintext() throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
         var ref = new SecretReference("default", "agent1", "openaiKey");
         when(secretProvider.resolve(ref)).thenReturn("sk-actual-secret-key");
 
@@ -49,8 +48,7 @@ class SecretResolverTest {
     }
 
     @Test
-    void resolveValue_multipleRefs_allResolved()
-            throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
+    void resolveValue_multipleRefs_allResolved() throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
         when(secretProvider.resolve(new SecretReference("t", "b", "key1"))).thenReturn("val1");
         when(secretProvider.resolve(new SecretReference("t", "b", "key2"))).thenReturn("val2");
 
@@ -61,10 +59,8 @@ class SecretResolverTest {
     }
 
     @Test
-    void resolveValue_secretNotFound_keepsRef()
-            throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
-        when(secretProvider.resolve(any(SecretReference.class)))
-                .thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
+    void resolveValue_secretNotFound_keepsRef() throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
+        when(secretProvider.resolve(any(SecretReference.class))).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
 
         String input = "Bearer ${eddivault:default/agent1/missing}";
         String result = resolver.resolveValue(input);

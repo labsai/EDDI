@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.apicalls.model;
 
-
 public class BatchRequestBuildingInstruction extends BuildingInstruction {
     private Boolean executeCallsSequentially;
 

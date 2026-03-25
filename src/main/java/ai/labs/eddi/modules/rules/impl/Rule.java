@@ -19,8 +19,7 @@ public class Rule implements Cloneable {
         this.name = name;
     }
 
-    public ExecutionState execute(IConversationMemory memory, List<Rule> trace)
-            throws InfiniteLoopException, RuntimeException {
+    public ExecutionState execute(IConversationMemory memory, List<Rule> trace) throws InfiniteLoopException, RuntimeException {
         if (trace.contains(this)) {
             // this is an infinite loop, thus throw error
             throw throwInfiniteLoopError(trace);
@@ -61,12 +60,19 @@ public class Rule implements Cloneable {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof Rule)) return false;
+        if (this == o)
+            return true;
+        if (!(o instanceof Rule))
+            return false;
 
         Rule that = (Rule) o;
 
         return name.equals(that.getName());
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(name);
     }
 
     @Override

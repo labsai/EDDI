@@ -12,13 +12,16 @@ import java.util.List;
 public interface IConversationMemoryStore {
     String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException;
 
-    ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+    ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
-    List<ConversationMemorySnapshot> loadActiveConversationMemorySnapshot(String agentId, Integer agentVersion) throws IResourceStore.ResourceStoreException;
+    List<ConversationMemorySnapshot> loadActiveConversationMemorySnapshot(String agentId, Integer agentVersion)
+            throws IResourceStore.ResourceStoreException;
 
     void setConversationState(String conversationId, ConversationState conversationState);
 
-    void deleteConversationMemorySnapshot(String conversationId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+    void deleteConversationMemorySnapshot(String conversationId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     ConversationState getConversationState(String conversationId);
 

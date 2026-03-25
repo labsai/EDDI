@@ -20,7 +20,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests for {@link JsonSchemaCreator} — verifies that the victools-based schema
- * generator produces valid Draft 2020-12 JSON schemas for all EDDI configuration types.
+ * generator produces valid Draft 2020-12 JSON schemas for all EDDI
+ * configuration types.
  */
 public class JsonSchemaCreatorTest {
 
@@ -34,15 +35,8 @@ public class JsonSchemaCreatorTest {
     }
 
     static Stream<Class<?>> configurationClasses() {
-        return Stream.of(
-                AgentConfiguration.class,
-                WorkflowConfiguration.class,
-                RuleSetConfiguration.class,
-                ApiCallsConfiguration.class,
-                OutputConfigurationSet.class,
-                DictionaryConfiguration.class,
-                PropertySetterConfiguration.class
-        );
+        return Stream.of(AgentConfiguration.class, WorkflowConfiguration.class, RuleSetConfiguration.class, ApiCallsConfiguration.class,
+                OutputConfigurationSet.class, DictionaryConfiguration.class, PropertySetterConfiguration.class);
     }
 
     @ParameterizedTest(name = "generates valid schema for {0}")
@@ -58,19 +52,15 @@ public class JsonSchemaCreatorTest {
         JsonNode schema = objectMapper.readTree(schemaJson);
 
         // Must have $schema pointing to Draft 2020-12
-        assertTrue(schema.has("$schema"),
-                "Schema for " + clazz.getSimpleName() + " must have $schema");
-        assertEquals("https://json-schema.org/draft/2020-12/schema",
-                schema.get("$schema").asText());
+        assertTrue(schema.has("$schema"), "Schema for " + clazz.getSimpleName() + " must have $schema");
+        assertEquals("https://json-schema.org/draft/2020-12/schema", schema.get("$schema").asText());
 
         // Must declare type: "object"
-        assertTrue(schema.has("type"),
-                "Schema for " + clazz.getSimpleName() + " must have type");
+        assertTrue(schema.has("type"), "Schema for " + clazz.getSimpleName() + " must have type");
         assertEquals("object", schema.get("type").asText());
 
         // Must have properties (even if empty, should be present)
-        assertTrue(schema.has("properties"),
-                "Schema for " + clazz.getSimpleName() + " must have properties");
+        assertTrue(schema.has("properties"), "Schema for " + clazz.getSimpleName() + " must have properties");
         assertTrue(schema.get("properties").isObject());
     }
 
@@ -80,10 +70,8 @@ public class JsonSchemaCreatorTest {
         JsonNode schema = objectMapper.readTree(schemaJson);
         JsonNode properties = schema.get("properties");
 
-        assertTrue(properties.has("workflows"),
-                "AgentConfiguration schema must have 'workflows' property");
-        assertTrue(properties.has("channels"),
-                "AgentConfiguration schema must have 'channels' property");
+        assertTrue(properties.has("workflows"), "AgentConfiguration schema must have 'workflows' property");
+        assertTrue(properties.has("channels"), "AgentConfiguration schema must have 'channels' property");
     }
 
     @Test
@@ -92,12 +80,9 @@ public class JsonSchemaCreatorTest {
         JsonNode schema = objectMapper.readTree(schemaJson);
         JsonNode properties = schema.get("properties");
 
-        assertTrue(properties.has("words"),
-                "Dictionary schema must have 'words' property");
-        assertTrue(properties.has("phrases"),
-                "Dictionary schema must have 'phrases' property");
-        assertTrue(properties.has("regExs"),
-                "Dictionary schema must have 'regExs' property");
+        assertTrue(properties.has("words"), "Dictionary schema must have 'words' property");
+        assertTrue(properties.has("phrases"), "Dictionary schema must have 'phrases' property");
+        assertTrue(properties.has("regExs"), "Dictionary schema must have 'regExs' property");
     }
 
     @Test
@@ -106,8 +91,7 @@ public class JsonSchemaCreatorTest {
         JsonNode schema = objectMapper.readTree(schemaJson);
         JsonNode properties = schema.get("properties");
 
-        assertTrue(properties.has("behaviorGroups"),
-                "RuleSetConfiguration schema must have 'behaviorGroups' property");
+        assertTrue(properties.has("behaviorGroups"), "RuleSetConfiguration schema must have 'behaviorGroups' property");
     }
 
     @Test
@@ -116,9 +100,7 @@ public class JsonSchemaCreatorTest {
         JsonNode schema = objectMapper.readTree(schemaJson);
         JsonNode properties = schema.get("properties");
 
-        assertTrue(properties.has("targetServerUrl"),
-                "ApiCallsConfiguration schema must have 'targetServerUrl' property");
-        assertTrue(properties.has("httpCalls"),
-                "ApiCallsConfiguration schema must have 'httpCalls' property");
+        assertTrue(properties.has("targetServerUrl"), "ApiCallsConfiguration schema must have 'targetServerUrl' property");
+        assertTrue(properties.has("httpCalls"), "ApiCallsConfiguration schema must have 'httpCalls' property");
     }
 }

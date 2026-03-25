@@ -51,8 +51,7 @@ class EnvelopeCryptoTest {
 
         var result = EnvelopeCrypto.encrypt("secret", key1);
 
-        assertThrows(EnvelopeCrypto.CryptoException.class,
-                () -> EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), key2));
+        assertThrows(EnvelopeCrypto.CryptoException.class, () -> EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), key2));
     }
 
     @Test
@@ -74,15 +73,13 @@ class EnvelopeCryptoTest {
 
     @Test
     void encrypt_nullKey_throws() {
-        assertThrows(EnvelopeCrypto.CryptoException.class,
-                () -> EnvelopeCrypto.encrypt("test", null));
+        assertThrows(EnvelopeCrypto.CryptoException.class, () -> EnvelopeCrypto.encrypt("test", null));
     }
 
     @Test
     void encrypt_shortKey_throws() {
         byte[] shortKey = new byte[16]; // AES-128, not AES-256
-        assertThrows(EnvelopeCrypto.CryptoException.class,
-                () -> EnvelopeCrypto.encrypt("test", shortKey));
+        assertThrows(EnvelopeCrypto.CryptoException.class, () -> EnvelopeCrypto.encrypt("test", shortKey));
     }
 
     @Test

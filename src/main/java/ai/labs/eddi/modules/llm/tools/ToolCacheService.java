@@ -19,7 +19,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Caffeine-backed cache service for tool results with smart TTL management.
- * Phase 4: Intelligent caching with tool-specific time-to-live values and metrics.
+ * Phase 4: Intelligent caching with tool-specific time-to-live values and
+ * metrics.
  */
 @ApplicationScoped
 public class ToolCacheService {
@@ -29,20 +30,20 @@ public class ToolCacheService {
 
     // Smart TTL values based on data freshness requirements
     private static final Map<String, Long> TOOL_TTL_SECONDS = Map.ofEntries(
-        // Real-time data - short TTL
-        Map.entry("weather", 300L),           // 5 minutes - weather changes frequently
-        Map.entry("websearch", 1800L),        // 30 minutes - web results change
-        Map.entry("news", 600L),              // 10 minutes - news updates quickly
+            // Real-time data - short TTL
+            Map.entry("weather", 300L), // 5 minutes - weather changes frequently
+            Map.entry("websearch", 1800L), // 30 minutes - web results change
+            Map.entry("news", 600L), // 10 minutes - news updates quickly
 
-        // Semi-static data - medium TTL
-        Map.entry("webscraper", 3600L),       // 1 hour - page content semi-static
-        Map.entry("pdfreader", 86400L),       // 24 hours - PDF content rarely changes
+            // Semi-static data - medium TTL
+            Map.entry("webscraper", 3600L), // 1 hour - page content semi-static
+            Map.entry("pdfreader", 86400L), // 24 hours - PDF content rarely changes
 
-        // Static computations - long TTL
-        Map.entry("calculator", 604800L),     // 7 days - math results never change
-        Map.entry("datetime", 60L),           // 1 minute - current time changes
-        Map.entry("dataformatter", 86400L),   // 24 hours - format conversions are static
-        Map.entry("textsummarizer", 86400L)   // 24 hours - summaries are deterministic
+            // Static computations - long TTL
+            Map.entry("calculator", 604800L), // 7 days - math results never change
+            Map.entry("datetime", 60L), // 1 minute - current time changes
+            Map.entry("dataformatter", 86400L), // 24 hours - format conversions are static
+            Map.entry("textsummarizer", 86400L) // 24 hours - summaries are deterministic
     );
 
     private static final long DEFAULT_TTL_SECONDS = 300L; // 5 minutes default
@@ -108,8 +109,7 @@ public class ToolCacheService {
     }
 
     /**
-     * Get cached result if available
-     * Uses smart TTL based on tool type
+     * Get cached result if available Uses smart TTL based on tool type
      */
     public String get(String toolName, String arguments) {
         return cacheGetTimer.record(() -> {
@@ -137,8 +137,7 @@ public class ToolCacheService {
             // Record hit by tool name
             meterRegistry.counter("eddi.tool.cache.hits", "tool", toolName).increment();
 
-            LOGGER.debug(String.format("Cache hit for %s (age: %dms)",
-                toolName, System.currentTimeMillis() - cached.cachedAt));
+            LOGGER.debug(String.format("Cache hit for %s (age: %dms)", toolName, System.currentTimeMillis() - cached.cachedAt));
             return cached.result;
         });
     }
@@ -164,8 +163,7 @@ public class ToolCacheService {
             // Record put by tool name
             meterRegistry.counter("eddi.tool.cache.puts", "tool", toolName).increment();
 
-            LOGGER.debug(String.format("Cached result for %s (TTL: %d %s)",
-                toolName, ttl, unit.toString().toLowerCase()));
+            LOGGER.debug(String.format("Cached result for %s (TTL: %d %s)", toolName, ttl, unit.toString().toLowerCase()));
         });
     }
 
@@ -219,13 +217,7 @@ public class ToolCacheService {
         int totalRequests = hits.get() + misses.get();
         double hitRate = totalRequests > 0 ? (double) hits.get() / totalRequests * 100 : 0;
 
-        return new CacheStats(
-            cache.size(),
-            hits.get(),
-            misses.get(),
-            hitRate,
-            perToolStats
-        );
+        return new CacheStats(cache.size(), hits.get(), misses.get(), hitRate, perToolStats);
     }
 
     /**
@@ -236,9 +228,9 @@ public class ToolCacheService {
     }
 
     /**
-     * Build cache key from tool name and arguments.
-     * For short arguments (≤2048 chars), the key is readable: "toolName:arguments".
-     * For longer arguments, a SHA-256 digest is used to avoid collisions.
+     * Build cache key from tool name and arguments. For short arguments (≤2048
+     * chars), the key is readable: "toolName:arguments". For longer arguments, a
+     * SHA-256 digest is used to avoid collisions.
      */
     private String buildKey(String toolName, String arguments) {
         if (arguments.length() > 2048) {
@@ -278,8 +270,7 @@ public class ToolCacheService {
         public final double hitRate;
         public final Map<String, ToolCacheStats> perToolStats;
 
-        public CacheStats(int size, int hits, int misses, double hitRate,
-                         Map<String, ToolCacheStats> perToolStats) {
+        public CacheStats(int size, int hits, int misses, double hitRate, Map<String, ToolCacheStats> perToolStats) {
             this.size = size;
             this.hits = hits;
             this.misses = misses;
@@ -290,14 +281,13 @@ public class ToolCacheService {
         @Override
         public String toString() {
             StringBuilder sb = new StringBuilder();
-            sb.append(String.format("Cache Stats: size=%d, hits=%d, misses=%d, hit rate=%.1f%%\n",
-                size, hits, misses, hitRate));
+            sb.append(String.format("Cache Stats: size=%d, hits=%d, misses=%d, hit rate=%.1f%%\n", size, hits, misses, hitRate));
 
             if (!perToolStats.isEmpty()) {
                 sb.append("Per-Tool Stats:\n");
                 perToolStats.forEach((tool, stats) -> {
-                    sb.append(String.format("  %s: %.1f%% hit rate (%d hits, %d misses)\n",
-                        tool, stats.getHitRate(), stats.hits.get(), stats.misses.get()));
+                    sb.append(String.format("  %s: %.1f%% hit rate (%d hits, %d misses)\n", tool, stats.getHitRate(), stats.hits.get(),
+                            stats.misses.get()));
                 });
             }
 
@@ -305,4 +295,3 @@ public class ToolCacheService {
         }
     }
 }
-

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<profiles version="13">
+    <profile kind="CodeFormatterProfile" name="EDDI Formatter" version="13">
+        <!-- Max line length 150 to match checkstyle -->
+        <setting id="org.eclipse.jdt.core.formatter.lineSplit" value="150"/>
+        
+        <!-- Indentation: 4 spaces -->
+        <setting id="org.eclipse.jdt.core.formatter.tabulation.char" value="space"/>
+        <setting id="org.eclipse.jdt.core.formatter.tabulation.size" value="4"/>
+        <setting id="org.eclipse.jdt.core.formatter.indentation.size" value="4"/>
+        
+        <!-- Import organization -->
+        <setting id="org.eclipse.jdt.core.formatter.insert_space_after_opening_paren_in_method_declaration" value="ignore"/>
+        <setting id="org.eclipse.jdt.core.formatter.insert_space_before_closing_paren_in_method_declaration" value="ignore"/>
+    </profile>
+</profiles>

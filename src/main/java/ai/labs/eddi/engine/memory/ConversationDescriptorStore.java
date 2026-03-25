@@ -38,8 +38,7 @@ public class ConversationDescriptorStore implements IConversationDescriptorStore
     }
 
     @Override
-    public List<ConversationDescriptor> readDescriptors(String type, String filter, Integer index,
-                                                        Integer limit, boolean includeDeleted)
+    public List<ConversationDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         return descriptorStore.readDescriptors(type, filter, index, limit, includeDeleted);
@@ -61,8 +60,7 @@ public class ConversationDescriptorStore implements IConversationDescriptorStore
 
     @Override
     public Integer updateDescriptor(String resourceId, Integer version, ConversationDescriptor descriptor)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException,
-            IResourceStore.ResourceNotFoundException {
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
 
         return descriptorStore.updateDescriptor(resourceId, version, descriptor);
     }
@@ -75,8 +73,7 @@ public class ConversationDescriptorStore implements IConversationDescriptorStore
     }
 
     @Override
-    public void createDescriptor(String resourceId, Integer version, ConversationDescriptor descriptor)
-            throws IResourceStore.ResourceStoreException {
+    public void createDescriptor(String resourceId, Integer version, ConversationDescriptor descriptor) throws IResourceStore.ResourceStoreException {
 
         descriptorStore.createDescriptor(resourceId, version, descriptor);
     }

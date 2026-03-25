@@ -45,72 +45,47 @@ public abstract class BaseIntegrationIT {
     // ==================== CRUD Helpers ====================
 
     protected String createResource(String body, String path) {
-        Response response = given()
-                .body(body)
-                .contentType(ContentType.JSON)
-                .post(path);
+        Response response = given().body(body).contentType(ContentType.JSON).post(path);
         response.then().statusCode(201);
         return response.getHeader("location");
     }
 
-    protected void assertCreate(String body, String path, String resourceUri,
-            ResourceId[] outResourceId) {
-        Response response = given()
-                .body(body)
-                .contentType(ContentType.JSON)
-                .post(path);
+    protected void assertCreate(String body, String path, String resourceUri, ResourceId[] outResourceId) {
+        Response response = given().body(body).contentType(ContentType.JSON).post(path);
 
-        response.then().assertThat()
-                .statusCode(equalTo(201))
-                .header("location", startsWith(resourceUri))
-                .header("location", endsWith(VERSION_STRING + "1"));
+        response.then().assertThat().statusCode(equalTo(201)).header("location", startsWith(resourceUri)).header("location",
+                endsWith(VERSION_STRING + "1"));
 
         String location = response.getHeader("location");
         outResourceId[0] = extractResourceId(location);
     }
 
     protected void assertRead(String path, ResourceId resourceId) {
-        given()
-                .get(path + resourceId.id() + VERSION_STRING + resourceId.version())
-                .then().assertThat().statusCode(200);
+        given().get(path + resourceId.id() + VERSION_STRING + resourceId.version()).then().assertThat().statusCode(200);
     }
 
-    protected Response assertUpdate(String body, String path, String resourceUri,
-            ResourceId[] resourceId) {
-        Response response = given()
-                .body(body)
-                .contentType(ContentType.JSON)
+    protected Response assertUpdate(String body, String path, String resourceUri, ResourceId[] resourceId) {
+        Response response = given().body(body).contentType(ContentType.JSON)
                 .put(path + resourceId[0].id() + VERSION_STRING + resourceId[0].version());
 
-        response.then().assertThat()
-                .statusCode(200)
-                .header("location", startsWith(resourceUri))
-                .header("location", endsWith(VERSION_STRING + "2"));
+        response.then().assertThat().statusCode(200).header("location", startsWith(resourceUri)).header("location", endsWith(VERSION_STRING + "2"));
 
         String location = response.getHeader("location");
         resourceId[0] = extractResourceId(location);
 
-        return given()
-                .get(path + resourceId[0].id() + VERSION_STRING + resourceId[0].version());
+        return given().get(path + resourceId[0].id() + VERSION_STRING + resourceId[0].version());
     }
 
-    protected Response assertPatch(String body, String path, String resourceUri,
-            ResourceId[] resourceId) {
-        Response response = given()
-                .body(body)
-                .contentType(ContentType.JSON)
+    protected Response assertPatch(String body, String path, String resourceUri, ResourceId[] resourceId) {
+        Response response = given().body(body).contentType(ContentType.JSON)
                 .patch(path + resourceId[0].id() + VERSION_STRING + resourceId[0].version());
 
-        response.then().assertThat()
-                .statusCode(200)
-                .header("location", startsWith(resourceUri))
-                .header("location", endsWith(VERSION_STRING + "3"));
+        response.then().assertThat().statusCode(200).header("location", startsWith(resourceUri)).header("location", endsWith(VERSION_STRING + "3"));
 
         String location = response.getHeader("location");
         resourceId[0] = extractResourceId(location);
 
-        return given()
-                .get(path + resourceId[0].id() + VERSION_STRING + resourceId[0].version());
+        return given().get(path + resourceId[0].id() + VERSION_STRING + resourceId[0].version());
     }
 
     protected void assertDelete(String path, ResourceId resourceId) {
@@ -125,9 +100,7 @@ public abstract class BaseIntegrationIT {
         given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false", id, version));
 
         for (int i = 0; i < 60; i++) { // max 30 seconds
-            Response response = given()
-                    .get(String.format("administration/production/deploymentstatus/%s?version=%s&format=text", id,
-                            version));
+            Response response = given().get(String.format("administration/production/deploymentstatus/%s?version=%s&format=text", id, version));
             String status = response.getBody().print().trim();
             if ("READY".equals(status))
                 return;
@@ -145,21 +118,14 @@ public abstract class BaseIntegrationIT {
         return extractResourceId(location);
     }
 
-    protected Response sendUserInput(String agentId, String conversationId,
-            String userInput,
-            boolean returnDetailed, boolean returnCurrentStepOnly) {
-        return given()
-                .contentType(ContentType.TEXT)
-                .body(userInput)
-                .post(String.format("agents/production/%s/%s?returnDetailed=%s&returnCurrentStepOnly=%s",
-                        agentId, conversationId, returnDetailed, returnCurrentStepOnly));
+    protected Response sendUserInput(String agentId, String conversationId, String userInput, boolean returnDetailed, boolean returnCurrentStepOnly) {
+        return given().contentType(ContentType.TEXT).body(userInput)
+                .post(String.format("agents/production/%s/%s?returnDetailed=%s&returnCurrentStepOnly=%s", agentId, conversationId, returnDetailed,
+                        returnCurrentStepOnly));
     }
 
-    protected Response getConversationLog(String agentId, String conversationId,
-            boolean returnDetailed) {
-        return given()
-                .get(String.format("agents/production/%s/%s?returnDetailed=%s",
-                        agentId, conversationId, returnDetailed));
+    protected Response getConversationLog(String agentId, String conversationId, boolean returnDetailed) {
+        return given().get(String.format("agents/production/%s/%s?returnDetailed=%s", agentId, conversationId, returnDetailed));
     }
 
     // ==================== URI Utilities ====================

@@ -12,13 +12,13 @@ import jakarta.inject.Inject;
 /**
  * MongoDB implementation of {@link IResourceStorageFactory}.
  * <p>
- * This is the default storage factory ({@code @DefaultBean}).
- * It creates {@link MongoResourceStorage} instances backed by the
- * injected {@link MongoDatabase}.
+ * This is the default storage factory ({@code @DefaultBean}). It creates
+ * {@link MongoResourceStorage} instances backed by the injected
+ * {@link MongoDatabase}.
  * <p>
- * Future database backends (e.g., PostgreSQL) can override this
- * by providing an alternative {@code @ApplicationScoped} bean
- * activated via {@code @LookupIfProperty}.
+ * Future database backends (e.g., PostgreSQL) can override this by providing an
+ * alternative {@code @ApplicationScoped} bean activated via
+ * {@code @LookupIfProperty}.
  */
 @ApplicationScoped
 @DefaultBean
@@ -32,10 +32,7 @@ public class MongoResourceStorageFactory implements IResourceStorageFactory {
     }
 
     @Override
-    public <T> IResourceStorage<T> create(String collectionName,
-                                          IDocumentBuilder documentBuilder,
-                                          Class<T> documentType,
-                                          String... indexes) {
+    public <T> IResourceStorage<T> create(String collectionName, IDocumentBuilder documentBuilder, Class<T> documentType, String... indexes) {
         return new MongoResourceStorage<>(database, collectionName, documentBuilder, documentType, indexes);
     }
 
@@ -43,8 +40,8 @@ public class MongoResourceStorageFactory implements IResourceStorageFactory {
      * Expose the underlying database for stores that need direct MongoDB access
      * (e.g., AgentStore, WorkflowStore with custom queries).
      * <p>
-     * This method is intentionally on the concrete class, not on the interface,
-     * to keep the interface DB-agnostic.
+     * This method is intentionally on the concrete class, not on the interface, to
+     * keep the interface DB-agnostic.
      */
     public MongoDatabase getDatabase() {
         return database;

@@ -10,7 +10,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
-
 /**
  * @author ginccc
  */
@@ -45,10 +44,10 @@ public class Dependency implements IRuleCondition {
     }
 
     @Override
-    public ExecutionState execute(IConversationMemory memory, List<Rule> trace)
-            throws Rule.InfiniteLoopException, Rule.RuntimeException {
+    public ExecutionState execute(IConversationMemory memory, List<Rule> trace) throws Rule.InfiniteLoopException, Rule.RuntimeException {
 
-        //before we execute the behavior rules we make deep copies, so that we don't change the rules in conversation memory!
+        // before we execute the behavior rules we make deep copies, so that we don't
+        // change the rules in conversation memory!
         List<Rule> filteredRules = new LinkedList<>();
         try {
             List<RuleGroup> behaviorGroups = behaviorSet.getRuleGroups();

@@ -10,8 +10,6 @@ import java.util.List;
  * @author ginccc
  */
 public interface IAgentStore extends IResourceStore<AgentConfiguration> {
-    List<DocumentDescriptor> getAgentDescriptorsContainingWorkflow(String workflowId,
-            Integer packageVersion,
-            boolean includePreviousVersions)
+    List<DocumentDescriptor> getAgentDescriptorsContainingWorkflow(String workflowId, Integer packageVersion, boolean includePreviousVersions)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 }

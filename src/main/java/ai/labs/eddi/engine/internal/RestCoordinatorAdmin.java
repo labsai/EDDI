@@ -20,11 +20,14 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * REST implementation for coordinator monitoring and dead-letter administration.
+ * REST implementation for coordinator monitoring and dead-letter
+ * administration.
  *
- * <p>Delegates to the active {@link IConversationCoordinator} (in-memory or NATS).
+ * <p>
+ * Delegates to the active {@link IConversationCoordinator} (in-memory or NATS).
  * The SSE endpoint polls coordinator status every 2 seconds and pushes updates
- * to connected clients.</p>
+ * to connected clients.
+ * </p>
  *
  * @author ginccc
  * @since 6.0.0
@@ -94,10 +97,7 @@ public class RestCoordinatorAdmin implements IRestCoordinatorAdmin {
         // Send initial status immediately
         try {
             CoordinatorStatus status = coordinator.getStatus();
-            OutboundSseEvent event = sse.newEventBuilder()
-                    .name("status")
-                    .data(status)
-                    .build();
+            OutboundSseEvent event = sse.newEventBuilder().name("status").data(status).build();
             eventSink.send(event);
         } catch (Exception e) {
             log.warnf(e, "Failed to send initial status to SSE client");
@@ -105,25 +105,25 @@ public class RestCoordinatorAdmin implements IRestCoordinatorAdmin {
     }
 
     /**
-     * Start the SSE poller that broadcasts coordinator status to all connected clients.
-     * Polls every 2 seconds and sends status snapshots + dead-letter count changes.
+     * Start the SSE poller that broadcasts coordinator status to all connected
+     * clients. Polls every 2 seconds and sends status snapshots + dead-letter count
+     * changes.
      */
     private synchronized void ensurePollerStarted(Sse sse) {
-        if (pollerStarted) return;
+        if (pollerStarted)
+            return;
         pollerStarted = true;
 
         scheduler.scheduleAtFixedRate(() -> {
             // Remove closed clients
             sseClients.removeIf(SseEventSink::isClosed);
 
-            if (sseClients.isEmpty()) return;
+            if (sseClients.isEmpty())
+                return;
 
             try {
                 CoordinatorStatus status = coordinator.getStatus();
-                OutboundSseEvent event = sse.newEventBuilder()
-                        .name("status")
-                        .data(status)
-                        .build();
+                OutboundSseEvent event = sse.newEventBuilder().name("status").data(status).build();
 
                 for (SseEventSink client : sseClients) {
                     if (!client.isClosed()) {

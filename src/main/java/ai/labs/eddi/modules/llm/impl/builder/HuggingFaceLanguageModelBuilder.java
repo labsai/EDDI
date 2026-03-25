@@ -12,24 +12,25 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 /**
  * Builds a HuggingFace chat model using the legacy HuggingFace Inference API.
  *
- * <p><b>Note:</b> {@code HuggingFaceChatModel} is deprecated in langchain4j since v1.7.0.
- * The recommended approach is to use {@code OpenAiChatModel} with HuggingFace's
- * OpenAI-compatible router endpoint:
- * <pre>
- * OpenAiChatModel.builder()
- *     .apiKey(hfApiKey)
- *     .baseUrl("https://router.huggingface.co/v1")
- *     .modelName("HuggingFaceTB/SmolLM3-3B:hf-inference")
- *     .build();
- * </pre>
- * In EDDI, this can be achieved by using the "openai" model type with the above
- * baseUrl and your HuggingFace API key as the apiKey. This builder is retained for
- * backward compatibility with existing configurations.
+ * <p>
+ * <b>Note:</b> {@code HuggingFaceChatModel} is deprecated in langchain4j since
+ * v1.7.0. The recommended approach is to use {@code OpenAiChatModel} with
+ * HuggingFace's OpenAI-compatible router endpoint:
  *
- * <p><b>Core builder methods:</b> {@code accessToken}, {@code modelId} (via baseUrl),
- * {@code timeout}, {@code temperature}, {@code maxNewTokens}, {@code waitForModel}.
- * Parameters like {@code topK}, {@code topP}, {@code doSample}, {@code repetitionPenalty}
- * are NOT supported by the core HuggingFaceChatModel builder (they were quarkiverse extensions).
+ * <pre>
+ * OpenAiChatModel.builder().apiKey(hfApiKey).baseUrl("https://router.huggingface.co/v1").modelName("HuggingFaceTB/SmolLM3-3B:hf-inference").build();
+ * </pre>
+ *
+ * In EDDI, this can be achieved by using the "openai" model type with the above
+ * baseUrl and your HuggingFace API key as the apiKey. This builder is retained
+ * for backward compatibility with existing configurations.
+ *
+ * <p>
+ * <b>Core builder methods:</b> {@code accessToken}, {@code modelId} (via
+ * baseUrl), {@code timeout}, {@code temperature}, {@code maxNewTokens},
+ * {@code waitForModel}. Parameters like {@code topK}, {@code topP},
+ * {@code doSample}, {@code repetitionPenalty} are NOT supported by the core
+ * HuggingFaceChatModel builder (they were quarkiverse extensions).
  */
 @ApplicationScoped
 public class HuggingFaceLanguageModelBuilder implements ILanguageModelBuilder {

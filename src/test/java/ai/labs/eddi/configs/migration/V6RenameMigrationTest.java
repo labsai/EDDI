@@ -135,8 +135,7 @@ class V6RenameMigrationTest {
         @Test
         @DisplayName("should skip when already applied")
         void skipsWhenAlreadyApplied() {
-            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete"))
-                    .thenReturn(new MigrationLog("v6-rename-migration-complete"));
+            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete")).thenReturn(new MigrationLog("v6-rename-migration-complete"));
             migration.runIfNeeded();
             verify(database, never()).getCollection(anyString());
         }
@@ -145,8 +144,7 @@ class V6RenameMigrationTest {
         @DisplayName("should run and record completion when enabled and not yet applied")
         @SuppressWarnings("unchecked")
         void runsAndRecords() {
-            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete"))
-                    .thenReturn(null);
+            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete")).thenReturn(null);
 
             // Mock all collection accesses to return empty collections
             MongoCollection<Document> mockCollection = mock(MongoCollection.class);
@@ -177,12 +175,8 @@ class V6RenameMigrationTest {
         void renamesAllCollections() {
             when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
 
-            var oldNames = java.util.Set.of(
-                    "bots", "bots.history", "packages", "packages.history",
-                    "behaviorrulesets", "behaviorrulesets.history",
-                    "httpcalls", "httpcalls.history",
-                    "langchain", "langchain.history",
-                    "regulardictionaries", "regulardictionaries.history");
+            var oldNames = java.util.Set.of("bots", "bots.history", "packages", "packages.history", "behaviorrulesets", "behaviorrulesets.history",
+                    "httpcalls", "httpcalls.history", "langchain", "langchain.history", "regulardictionaries", "regulardictionaries.history");
 
             // Use thenAnswer to return non-empty for old names, empty for everything else
             when(database.getCollection(anyString())).thenAnswer(invocation -> {

@@ -22,8 +22,7 @@ public class RestParserStore implements IRestParserStore {
     private final RestVersionInfo<ParserConfiguration> restVersionInfo;
 
     @Inject
-    public RestParserStore(IParserStore parserStore,
-            IDocumentDescriptorStore documentDescriptorStore) {
+    public RestParserStore(IParserStore parserStore, IDocumentDescriptorStore documentDescriptorStore) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, parserStore, documentDescriptorStore);
         this.parserStore = parserStore;
     }

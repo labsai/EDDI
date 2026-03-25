@@ -12,11 +12,11 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * In-memory implementation of {@link ITenantQuotaStore}.
- * Loads the default tenant quota from application.properties on startup.
+ * In-memory implementation of {@link ITenantQuotaStore}. Loads the default
+ * tenant quota from application.properties on startup.
  * <p>
- * This is a stub implementation; a DB-backed store can override this
- * via {@code @LookupIfProperty} in future phases.
+ * This is a stub implementation; a DB-backed store can override this via
+ * {@code @LookupIfProperty} in future phases.
  */
 @ApplicationScoped
 @DefaultBean
@@ -27,21 +27,18 @@ public class InMemoryTenantQuotaStore implements ITenantQuotaStore {
     private final Map<String, TenantQuota> quotas = new ConcurrentHashMap<>();
 
     @Inject
-    public InMemoryTenantQuotaStore(
-            @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
+    public InMemoryTenantQuotaStore(@ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.tenant.quota.enabled", defaultValue = "false") boolean enabled,
             @ConfigProperty(name = "eddi.tenant.quota.max-conversations-per-day", defaultValue = "-1") int maxConvPerDay,
             @ConfigProperty(name = "eddi.tenant.quota.max-agents-per-tenant", defaultValue = "-1") int maxAgents,
             @ConfigProperty(name = "eddi.tenant.quota.max-api-calls-per-minute", defaultValue = "-1") int maxApiCalls,
             @ConfigProperty(name = "eddi.tenant.quota.max-monthly-cost-usd", defaultValue = "-1") double maxCost) {
 
-        var defaultQuota = new TenantQuota(
-                defaultTenantId, maxConvPerDay, maxAgents, maxApiCalls, maxCost, enabled);
+        var defaultQuota = new TenantQuota(defaultTenantId, maxConvPerDay, maxAgents, maxApiCalls, maxCost, enabled);
         quotas.put(defaultTenantId, defaultQuota);
 
-        LOGGER.infof(
-                "Tenant quota store initialized: tenantId=%s, enabled=%s, maxConv=%d, maxAgents=%d, maxApi=%d, maxCost=%.2f",
-                defaultTenantId, enabled, maxConvPerDay, maxAgents, maxApiCalls, maxCost);
+        LOGGER.infof("Tenant quota store initialized: tenantId=%s, enabled=%s, maxConv=%d, maxAgents=%d, maxApi=%d, maxCost=%.2f", defaultTenantId,
+                enabled, maxConvPerDay, maxAgents, maxApiCalls, maxCost);
     }
 
     /**

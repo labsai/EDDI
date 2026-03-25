@@ -65,7 +65,8 @@ class EncoderWrapperTest {
     @Test
     void testBase64MimeWithHelloWorld() {
         String plain = "Hello World";
-        // For a short input, MIME encoding returns the same output as the standard encoder (no line breaks).
+        // For a short input, MIME encoding returns the same output as the standard
+        // encoder (no line breaks).
         String expected = Base64.getMimeEncoder().encodeToString(plain.getBytes(StandardCharsets.UTF_8));
         Object result = encoderWrapper.base64Mime(plain);
         assertInstanceOf(String.class, result, "Result should be a String");
@@ -87,7 +88,8 @@ class EncoderWrapperTest {
 
     @Test
     void testBase64MimeWithLongInput() {
-        // Build a long string so that the MIME encoder will insert line breaks (typically CRLF every 76 characters).
+        // Build a long string so that the MIME encoder will insert line breaks
+        // (typically CRLF every 76 characters).
         // Repeat a pattern to ensure the encoded output is long.
         String plain = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".repeat(100);
 
@@ -98,7 +100,6 @@ class EncoderWrapperTest {
 
         // Additionally, assert that the MIME-encoded string contains line breaks.
         String encodedMime = (String) result;
-        assertTrue(encodedMime.contains("\r\n") || encodedMime.contains("\n"),
-                "MIME encoded string should contain line breaks");
+        assertTrue(encodedMime.contains("\r\n") || encodedMime.contains("\n"), "MIME encoded string should contain line breaks");
     }
 }

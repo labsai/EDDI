@@ -24,20 +24,31 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * NATS JetStream-backed implementation of {@link IConversationCoordinator}.
  *
- * <p>Uses NATS JetStream for durable, ordered message processing per conversation.
- * Activated when {@code eddi.messaging.type=nats} is set in application.properties.</p>
+ * <p>
+ * Uses NATS JetStream for durable, ordered message processing per conversation.
+ * Activated when {@code eddi.messaging.type=nats} is set in
+ * application.properties.
+ * </p>
  *
- * <p><b>Design</b>: NATS is used as a distributed ordering primitive. Callables execute
- * in-process on the publishing JVM. NATS guarantees per-subject ordering via its
- * built-in queue semantics. Each conversation gets its own NATS subject
- * ({@code eddi.conversation.<conversationId>}) ensuring sequential processing.</p>
+ * <p>
+ * <b>Design</b>: NATS is used as a distributed ordering primitive. Callables
+ * execute in-process on the publishing JVM. NATS guarantees per-subject
+ * ordering via its built-in queue semantics. Each conversation gets its own
+ * NATS subject ({@code eddi.conversation.<conversationId>}) ensuring sequential
+ * processing.
+ * </p>
  *
- * <p><b>Dead-letter handling</b>: When a task fails more than {@code maxRetries} times,
- * the message is published to a dead-letter stream ({@code eddi.deadletter.<conversationId>})
- * with 30-day retention for operator inspection and replay.</p>
+ * <p>
+ * <b>Dead-letter handling</b>: When a task fails more than {@code maxRetries}
+ * times, the message is published to a dead-letter stream
+ * ({@code eddi.deadletter.<conversationId>}) with 30-day retention for operator
+ * inspection and replay.
+ * </p>
  *
- * <p>For horizontal scaling, a future enhancement will serialize InputData
- * instead of Callable, allowing cross-instance message consumption.</p>
+ * <p>
+ * For horizontal scaling, a future enhancement will serialize InputData instead
+ * of Callable, allowing cross-instance message consumption.
+ * </p>
  *
  * @author ginccc
  * @since 6.0.0
@@ -70,9 +81,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     private final AtomicLong totalDeadLettered = new AtomicLong(0);
 
     @Inject
-    public NatsConversationCoordinator(
-            IRuntime runtime,
-            Instance<NatsMetrics> metricsInstance,
+    public NatsConversationCoordinator(IRuntime runtime, Instance<NatsMetrics> metricsInstance,
             @ConfigProperty(name = "eddi.nats.url", defaultValue = "nats://localhost:4222") String natsUrl,
             @ConfigProperty(name = "eddi.nats.stream-name", defaultValue = "EDDI_CONVERSATIONS") String streamName,
             @ConfigProperty(name = "eddi.nats.dead-letter-stream-name", defaultValue = "EDDI_DEAD_LETTERS") String deadLetterStreamName,
@@ -96,14 +105,9 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
         try {
             log.infof("Connecting to NATS at %s (stream: %s)", natsUrl, streamName);
 
-            Options options = new Options.Builder()
-                    .server(natsUrl)
-                    .connectionTimeout(Duration.ofSeconds(10))
-                    .reconnectWait(Duration.ofSeconds(2))
+            Options options = new Options.Builder().server(natsUrl).connectionTimeout(Duration.ofSeconds(10)).reconnectWait(Duration.ofSeconds(2))
                     .maxReconnects(-1) // unlimited reconnects
-                    .connectionListener((conn, type) ->
-                            log.infof("NATS connection event: %s", type))
-                    .errorListener(new ErrorListener() {
+                    .connectionListener((conn, type) -> log.infof("NATS connection event: %s", type)).errorListener(new ErrorListener() {
                         @Override
                         public void errorOccurred(Connection conn, String error) {
                             log.errorf("NATS error: %s", error);
@@ -118,33 +122,20 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                         public void slowConsumerDetected(Connection conn, Consumer consumer) {
                             log.warnf("NATS slow consumer detected");
                         }
-                    })
-                    .build();
+                    }).build();
 
             natsConnection = Nats.connect(options);
             JetStreamManagement jsm = natsConnection.jetStreamManagement();
 
             // Create or update the main conversation stream
-            StreamConfiguration streamConfig = StreamConfiguration.builder()
-                    .name(streamName)
-                    .subjects(SUBJECT_PREFIX + "*")
-                    .retentionPolicy(RetentionPolicy.WorkQueue)
-                    .maxAge(Duration.ofHours(24))
-                    .storageType(StorageType.File)
-                    .replicas(1)
-                    .build();
+            StreamConfiguration streamConfig = StreamConfiguration.builder().name(streamName).subjects(SUBJECT_PREFIX + "*")
+                    .retentionPolicy(RetentionPolicy.WorkQueue).maxAge(Duration.ofHours(24)).storageType(StorageType.File).replicas(1).build();
 
             createOrUpdateStream(jsm, streamName, streamConfig);
 
             // Create or update the dead-letter stream (30-day retention)
-            StreamConfiguration deadLetterConfig = StreamConfiguration.builder()
-                    .name(deadLetterStreamName)
-                    .subjects(DEAD_LETTER_PREFIX + "*")
-                    .retentionPolicy(RetentionPolicy.Limits)
-                    .maxAge(Duration.ofDays(30))
-                    .storageType(StorageType.File)
-                    .replicas(1)
-                    .build();
+            StreamConfiguration deadLetterConfig = StreamConfiguration.builder().name(deadLetterStreamName).subjects(DEAD_LETTER_PREFIX + "*")
+                    .retentionPolicy(RetentionPolicy.Limits).maxAge(Duration.ofDays(30)).storageType(StorageType.File).replicas(1).build();
 
             createOrUpdateStream(jsm, deadLetterStreamName, deadLetterConfig);
 
@@ -157,8 +148,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
         }
     }
 
-    private void createOrUpdateStream(JetStreamManagement jsm, String name,
-                                      StreamConfiguration config) throws IOException, JetStreamApiException {
+    private void createOrUpdateStream(JetStreamManagement jsm, String name, StreamConfiguration config) throws IOException, JetStreamApiException {
         try {
             jsm.getStreamInfo(name);
             jsm.updateStream(config);
@@ -172,17 +162,20 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     /**
      * Submit a conversation task for ordered processing.
      *
-     * <p>Current behavior (single-instance): Uses NATS for ordering acknowledgment
+     * <p>
+     * Current behavior (single-instance): Uses NATS for ordering acknowledgment
      * while executing the callable locally. The NATS subject per conversation
-     * ensures only one message is active per conversation at a time.</p>
+     * ensures only one message is active per conversation at a time.
+     * </p>
      *
-     * @param conversationId the unique conversation identifier
-     * @param callable the task to execute
+     * @param conversationId
+     *            the unique conversation identifier
+     * @param callable
+     *            the task to execute
      */
     @Override
     public void submitInOrder(String conversationId, Callable<Void> callable) {
-        final BlockingQueue<RetryableCallable> queue = conversationQueues
-                .computeIfAbsent(conversationId, k -> new LinkedTransferQueue<>());
+        final BlockingQueue<RetryableCallable> queue = conversationQueues.computeIfAbsent(conversationId, k -> new LinkedTransferQueue<>());
 
         synchronized (queue) {
             boolean wasEmpty = queue.isEmpty();
@@ -194,8 +187,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
         }
     }
 
-    private void publishAndExecute(String conversationId, BlockingQueue<RetryableCallable> queue,
-                                   RetryableCallable retryable) {
+    private void publishAndExecute(String conversationId, BlockingQueue<RetryableCallable> queue, RetryableCallable retryable) {
         String subject = SUBJECT_PREFIX + sanitizeSubject(conversationId);
 
         try {
@@ -230,13 +222,12 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 int attempt = retryable.incrementAndGetAttempt();
 
                 if (attempt < maxRetries) {
-                    log.warnf(t, "Conversation task failed (conversationId=%s, attempt=%d/%d), retrying...",
-                            conversationId, attempt, maxRetries);
+                    log.warnf(t, "Conversation task failed (conversationId=%s, attempt=%d/%d), retrying...", conversationId, attempt, maxRetries);
                     // Re-execute the same callable (retry)
                     publishAndExecute(conversationId, queue, retryable);
                 } else {
-                    log.errorf(t, "Conversation task exhausted retries (conversationId=%s, attempts=%d), " +
-                            "routing to dead-letter", conversationId, attempt);
+                    log.errorf(t, "Conversation task exhausted retries (conversationId=%s, attempts=%d), " + "routing to dead-letter", conversationId,
+                            attempt);
                     routeToDeadLetter(conversationId, t);
                     submitNext(conversationId, queue);
                 }
@@ -253,17 +244,15 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     }
 
     /**
-     * Route a failed message to the dead-letter stream after all retries are exhausted.
+     * Route a failed message to the dead-letter stream after all retries are
+     * exhausted.
      */
     private void routeToDeadLetter(String conversationId, Throwable failure) {
         String deadLetterSubject = DEAD_LETTER_PREFIX + sanitizeSubject(conversationId);
 
         try {
-            String payload = String.format(
-                    "{\"conversationId\":\"%s\",\"error\":\"%s\",\"timestamp\":%d}",
-                    conversationId,
-                    failure.getMessage() != null ? failure.getMessage().replace("\"", "\\\"") : "unknown",
-                    System.currentTimeMillis());
+            String payload = String.format("{\"conversationId\":\"%s\",\"error\":\"%s\",\"timestamp\":%d}", conversationId,
+                    failure.getMessage() != null ? failure.getMessage().replace("\"", "\\\"") : "unknown", System.currentTimeMillis());
 
             jetStream.publish(deadLetterSubject, payload.getBytes());
             log.infof("Published dead-letter for conversation %s to %s", conversationId, deadLetterSubject);
@@ -288,8 +277,8 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     }
 
     /**
-     * Sanitize conversation ID for use as NATS subject token.
-     * NATS subjects cannot contain spaces or dots.
+     * Sanitize conversation ID for use as NATS subject token. NATS subjects cannot
+     * contain spaces or dots.
      */
     String sanitizeSubject(String conversationId) {
         return conversationId.replace('.', '-').replace(' ', '_');
@@ -320,8 +309,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
 
     @Override
     public boolean isConnected() {
-        return natsConnection != null &&
-                natsConnection.getStatus() == Connection.Status.CONNECTED;
+        return natsConnection != null && natsConnection.getStatus() == Connection.Status.CONNECTED;
     }
 
     @Override
@@ -359,7 +347,8 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     @Override
     public List<DeadLetterEntry> getDeadLetters() {
         List<DeadLetterEntry> entries = new ArrayList<>();
-        if (natsConnection == null || jetStream == null) return entries;
+        if (natsConnection == null || jetStream == null)
+            return entries;
 
         try {
             JetStreamSubscription sub = jetStream.subscribe(DEAD_LETTER_PREFIX + "*");
@@ -369,13 +358,8 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 String subject = msg.getSubject();
                 String convId = subject.replace(DEAD_LETTER_PREFIX, "");
 
-                entries.add(new DeadLetterEntry(
-                        String.valueOf(msg.metaData() != null ? msg.metaData().streamSequence() : entries.size()),
-                        convId,
-                        extractField(payload, "error"),
-                        extractTimestamp(payload),
-                        payload
-                ));
+                entries.add(new DeadLetterEntry(String.valueOf(msg.metaData() != null ? msg.metaData().streamSequence() : entries.size()), convId,
+                        extractField(payload, "error"), extractTimestamp(payload), payload));
             }
             sub.unsubscribe();
         } catch (Exception e) {
@@ -394,7 +378,8 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
 
     @Override
     public int purgeDeadLetters() {
-        if (natsConnection == null) return 0;
+        if (natsConnection == null)
+            return 0;
         try {
             JetStreamManagement jsm = natsConnection.jetStreamManagement();
             PurgeResponse response = jsm.purgeStream(deadLetterStreamName);
@@ -410,7 +395,8 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     private String extractField(String json, String field) {
         String key = "\"" + field + "\":\"";
         int start = json.indexOf(key);
-        if (start < 0) return "unknown";
+        if (start < 0)
+            return "unknown";
         start += key.length();
         int end = json.indexOf("\"", start);
         return end > start ? json.substring(start, end) : "unknown";
@@ -419,7 +405,8 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     private long extractTimestamp(String json) {
         String key = "\"timestamp\":";
         int start = json.indexOf(key);
-        if (start < 0) return 0;
+        if (start < 0)
+            return 0;
         start += key.length();
         int end = json.indexOf("}", start);
         try {

@@ -1,7 +1,5 @@
 package ai.labs.eddi.utils;
 
-
-
 /**
  * @author ginccc
  */
@@ -53,11 +51,9 @@ public class WordSplitter {
                 i++;
                 lastPos = i + 1;
                 i = lastPos;
-            } else if (CharacterUtilities.isStringInteger(String.valueOf(lookup.charAt(i))) &&
-                    lookup.charAt(i - 1) != ' ' &&
-                    lookup.charAt(i - 1) != ':' &&
-                    lookup.charAt(i - 1) != '.' &&
-                    !CharacterUtilities.isStringInteger(String.valueOf(lookup.charAt(i - 1)))) {
+            } else if (CharacterUtilities.isStringInteger(String.valueOf(lookup.charAt(i))) && lookup.charAt(i - 1) != ' '
+                    && lookup.charAt(i - 1) != ':' && lookup.charAt(i - 1) != '.'
+                    && !CharacterUtilities.isStringInteger(String.valueOf(lookup.charAt(i - 1)))) {
                 lookup.insert(i, " ");
                 lastPos = ++i;
             }
@@ -100,7 +96,8 @@ public class WordSplitter {
     public void isPunctuation() {
         for (int i = 0; i < lookup.length(); i++) {
             if (lookup.charAt(i) == '.')
-                if (i > 0 && !Character.isDigit(lookup.charAt(i - 1)) && lookup.charAt(i - 1) != 'm' && lookup.charAt(i - 1) != 'a' && lookup.charAt(i - 1) != 'p') {
+                if (i > 0 && !Character.isDigit(lookup.charAt(i - 1)) && lookup.charAt(i - 1) != 'm' && lookup.charAt(i - 1) != 'a'
+                        && lookup.charAt(i - 1) != 'p') {
                     lookup.insert(i, " ");
                     i++;
                 }

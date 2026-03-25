@@ -21,22 +21,8 @@ class AuditLedgerServiceTest {
     private IAuditStore auditStore;
 
     private AuditEntry createEntry(String taskId, String conversationId) {
-        return new AuditEntry(
-                "entry-" + taskId,
-                conversationId,
-                "agent-1",
-                1,
-                "user-1",
-                "production",
-                0, taskId, "test-type", 0,
-                42L,
-                Map.of("userInput", "hello"),
-                Map.of("output", List.of("world")),
-                null, null,
-                List.of("greet"),
-                0.0,
-                Instant.now(),
-                null);
+        return new AuditEntry("entry-" + taskId, conversationId, "agent-1", 1, "user-1", "production", 0, taskId, "test-type", 0, 42L,
+                Map.of("userInput", "hello"), Map.of("output", List.of("world")), null, null, List.of("greet"), 0.0, Instant.now(), null);
     }
 
     @BeforeEach
@@ -176,9 +162,7 @@ class AuditLedgerServiceTest {
             byte[] hmacKey = AuditHmac.deriveHmacKey("shared-master-key");
             byte[] vaultKey = ai.labs.eddi.secrets.crypto.EnvelopeCrypto.deriveKeyFromString("shared-master-key");
 
-            assertNotEquals(
-                    java.util.HexFormat.of().formatHex(hmacKey),
-                    java.util.HexFormat.of().formatHex(vaultKey),
+            assertNotEquals(java.util.HexFormat.of().formatHex(hmacKey), java.util.HexFormat.of().formatHex(vaultKey),
                     "HMAC key and vault KEK should be different (different PBKDF2 salts)");
         }
     }
@@ -197,11 +181,8 @@ class AuditLedgerServiceTest {
             inputWithSecret.put("authorization", "Bearer sk-abcdefghijklmnopqrstuvwxyz1234567890abcdefghijklmn");
             inputWithSecret.put("normal", "hello world");
 
-            AuditEntry entry = new AuditEntry(
-                    "id-1", "conv-1", "agent-1", 1, "user-1", "production",
-                    0, "task-1", "test", 0, 10L,
-                    inputWithSecret, null, null, null,
-                    List.of("action-1"), 0.0, Instant.now(), null);
+            AuditEntry entry = new AuditEntry("id-1", "conv-1", "agent-1", 1, "user-1", "production", 0, "task-1", "test", 0, 10L, inputWithSecret,
+                    null, null, null, List.of("action-1"), 0.0, Instant.now(), null);
 
             service.submit(entry);
             service.flush();
@@ -235,11 +216,8 @@ class AuditLedgerServiceTest {
 
         @Test
         void shouldHandleNullFields() {
-            AuditEntry entry = new AuditEntry(
-                    null, null, null, null, null, null,
-                    0, null, null, 0, 0L,
-                    null, null, null, null, null,
-                    0.0, null, null);
+            AuditEntry entry = new AuditEntry(null, null, null, null, null, null, 0, null, null, 0, 0L, null, null, null, null, null, 0.0, null,
+                    null);
 
             String canonical = AuditHmac.buildCanonicalString(entry);
             assertNotNull(canonical);
@@ -292,9 +270,7 @@ class AuditLedgerServiceTest {
             service.init();
 
             // First: fail once
-            doThrow(new RuntimeException("DB unavailable"))
-                    .doNothing()
-                    .when(auditStore).appendBatch(any());
+            doThrow(new RuntimeException("DB unavailable")).doNothing().when(auditStore).appendBatch(any());
 
             service.submit(createEntry("task-1", "conv-1"));
             service.flush(); // Failure — re-queue
@@ -319,11 +295,8 @@ class AuditLedgerServiceTest {
             Map<String, Object> input = new LinkedHashMap<>();
             input.put("tokens", List.of("normal-text", "sk-abcdefghijklmnopqrstuvwxyz1234567890abcdefghijklmn"));
 
-            AuditEntry entry = new AuditEntry(
-                    "id-1", "conv-1", "agent-1", 1, "user-1", "production",
-                    0, "task-1", "test", 0, 10L,
-                    input, null, null, null,
-                    List.of(), 0.0, Instant.now(), null);
+            AuditEntry entry = new AuditEntry("id-1", "conv-1", "agent-1", 1, "user-1", "production", 0, "task-1", "test", 0, 10L, input, null, null,
+                    null, List.of(), 0.0, Instant.now(), null);
 
             service.submit(entry);
             service.flush();
@@ -332,8 +305,7 @@ class AuditLedgerServiceTest {
                 AuditEntry scrubbed = list.get(0);
                 @SuppressWarnings("unchecked")
                 List<String> tokens = (List<String>) scrubbed.input().get("tokens");
-                return tokens.get(0).equals("normal-text") &&
-                        !tokens.get(1).contains("sk-abcdefghij");
+                return tokens.get(0).equals("normal-text") && !tokens.get(1).contains("sk-abcdefghij");
             }));
         }
 
@@ -349,11 +321,8 @@ class AuditLedgerServiceTest {
             Map<String, Object> input = new LinkedHashMap<>();
             input.put("config", nested);
 
-            AuditEntry entry = new AuditEntry(
-                    "id-1", "conv-1", "agent-1", 1, "user-1", "production",
-                    0, "task-1", "test", 0, 10L,
-                    input, null, null, null,
-                    List.of(), 0.0, Instant.now(), null);
+            AuditEntry entry = new AuditEntry("id-1", "conv-1", "agent-1", 1, "user-1", "production", 0, "task-1", "test", 0, 10L, input, null, null,
+                    null, List.of(), 0.0, Instant.now(), null);
 
             service.submit(entry);
             service.flush();
@@ -362,8 +331,7 @@ class AuditLedgerServiceTest {
                 AuditEntry scrubbed = list.get(0);
                 @SuppressWarnings("unchecked")
                 Map<String, Object> cfg = (Map<String, Object>) scrubbed.input().get("config");
-                return !((String) cfg.get("apiKey")).contains("sk-abcdefghij") &&
-                        cfg.get("safe").equals("hello");
+                return !((String) cfg.get("apiKey")).contains("sk-abcdefghij") && cfg.get("safe").equals("hello");
             }));
         }
     }
@@ -376,10 +344,8 @@ class AuditLedgerServiceTest {
         @Test
         void withEnvironment_shouldSetEnvironmentField() {
             AuditEntry entry = createEntry("task-1", "conv-1");
-            assertNull(new AuditEntry(
-                    "id", "conv", "agent", 1, "user", null,
-                    0, "task", "type", 0, 0L,
-                    null, null, null, null, null, 0.0, null, null).environment());
+            assertNull(new AuditEntry("id", "conv", "agent", 1, "user", null, 0, "task", "type", 0, 0L, null, null, null, null, null, 0.0, null, null)
+                    .environment());
 
             AuditEntry enriched = entry.withEnvironment("production");
             assertEquals("production", enriched.environment());
@@ -423,21 +389,16 @@ class AuditLedgerServiceTest {
             hash.put("a", "1");
             hash.put("b", "2");
 
-            AuditEntry e1 = new AuditEntry(
-                    "id", "conv", "agent", 1, "user", "test",
-                    0, "task", "type", 0, 0L,
-                    linked, null, null, null, null, 0.0, Instant.EPOCH, null);
+            AuditEntry e1 = new AuditEntry("id", "conv", "agent", 1, "user", "test", 0, "task", "type", 0, 0L, linked, null, null, null, null, 0.0,
+                    Instant.EPOCH, null);
 
-            AuditEntry e2 = new AuditEntry(
-                    "id", "conv", "agent", 1, "user", "test",
-                    0, "task", "type", 0, 0L,
-                    hash, null, null, null, null, 0.0, Instant.EPOCH, null);
+            AuditEntry e2 = new AuditEntry("id", "conv", "agent", 1, "user", "test", 0, "task", "type", 0, 0L, hash, null, null, null, null, 0.0,
+                    Instant.EPOCH, null);
 
             String hmac1 = AuditHmac.computeHmac(e1, key);
             String hmac2 = AuditHmac.computeHmac(e2, key);
 
-            assertEquals(hmac1, hmac2,
-                    "HMAC should be the same regardless of Map implementation (keys are sorted)");
+            assertEquals(hmac1, hmac2, "HMAC should be the same regardless of Map implementation (keys are sorted)");
         }
     }
 

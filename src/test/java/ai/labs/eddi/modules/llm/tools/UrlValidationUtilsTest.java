@@ -16,23 +16,14 @@ class UrlValidationUtilsTest {
     // === Valid URLs ===
 
     @ParameterizedTest
-    @ValueSource(strings = {
-            "https://example.com",
-            "https://example.com/path/to/resource",
-            "http://example.com",
-            "https://example.com:8080/path",
-            "https://www.google.com/search?q=test"
-    })
+    @ValueSource(strings = {"https://example.com", "https://example.com/path/to/resource", "http://example.com", "https://example.com:8080/path",
+            "https://www.google.com/search?q=test"})
     void testValidateUrl_AcceptsValidPublicUrls(String url) {
         assertDoesNotThrow(() -> UrlValidationUtils.validateUrl(url));
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {
-            "https://example.com",
-            "http://example.com",
-            "https://www.google.com"
-    })
+    @ValueSource(strings = {"https://example.com", "http://example.com", "https://www.google.com"})
     void testIsValidHttpUrl_AcceptsValidUrls(String url) {
         assertTrue(UrlValidationUtils.isValidHttpUrl(url));
     }
@@ -67,20 +58,10 @@ class UrlValidationUtilsTest {
     // === Scheme Validation ===
 
     @ParameterizedTest
-    @ValueSource(strings = {
-            "ftp://example.com/file.pdf",
-            "file:///etc/passwd",
-            "file:///C:/Windows/System32/config/SAM",
-            "jar:file:///app.jar!/config.yml",
-            "gopher://evil.com:25/",
-            "dict://evil.com:11111/",
-            "ldap://evil.com/",
-            "tftp://evil.com/"
-    })
+    @ValueSource(strings = {"ftp://example.com/file.pdf", "file:///etc/passwd", "file:///C:/Windows/System32/config/SAM",
+            "jar:file:///app.jar!/config.yml", "gopher://evil.com:25/", "dict://evil.com:11111/", "ldap://evil.com/", "tftp://evil.com/"})
     void testValidateUrl_RejectsNonHttpSchemes(String url) {
-        assertThrows(IllegalArgumentException.class,
-                () -> UrlValidationUtils.validateUrl(url),
-                "Should reject non-HTTP scheme: " + url);
+        assertThrows(IllegalArgumentException.class, () -> UrlValidationUtils.validateUrl(url), "Should reject non-HTTP scheme: " + url);
     }
 
     @Test
@@ -90,26 +71,16 @@ class UrlValidationUtilsTest {
 
     @Test
     void testValidateUrl_RejectsNoScheme() {
-        assertThrows(IllegalArgumentException.class,
-                () -> UrlValidationUtils.validateUrl("example.com/path"));
+        assertThrows(IllegalArgumentException.class, () -> UrlValidationUtils.validateUrl("example.com/path"));
     }
 
     // === Hostname Validation ===
 
     @ParameterizedTest
-    @ValueSource(strings = {
-            "http://localhost/",
-            "http://localhost:8080/",
-            "http://127.0.0.1/",
-            "http://127.0.0.1:3000/admin",
-            "http://[::1]/",
-            "http://169.254.169.254/latest/meta-data/",
-            "http://metadata.google.internal/computeMetadata/v1/"
-    })
+    @ValueSource(strings = {"http://localhost/", "http://localhost:8080/", "http://127.0.0.1/", "http://127.0.0.1:3000/admin", "http://[::1]/",
+            "http://169.254.169.254/latest/meta-data/", "http://metadata.google.internal/computeMetadata/v1/"})
     void testValidateUrl_RejectsInternalHostnames(String url) {
-        assertThrows(IllegalArgumentException.class,
-                () -> UrlValidationUtils.validateUrl(url),
-                "Should reject internal hostname: " + url);
+        assertThrows(IllegalArgumentException.class, () -> UrlValidationUtils.validateUrl(url), "Should reject internal hostname: " + url);
     }
 
     // === isBlockedHostname ===

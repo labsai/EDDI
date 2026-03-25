@@ -21,8 +21,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.*;
  * @author ginccc
  */
 @ApplicationScoped
-public class OutputStore extends AbstractResourceStore<OutputConfigurationSet>
-        implements IOutputStore {
+public class OutputStore extends AbstractResourceStore<OutputConfigurationSet> implements IOutputStore {
 
     private static final OutputComparator OUTPUT_COMPARATOR = new OutputComparator();
 
@@ -32,8 +31,7 @@ public class OutputStore extends AbstractResourceStore<OutputConfigurationSet>
     }
 
     @Override
-    public IResourceStore.IResourceId create(OutputConfigurationSet outputConfigurationSet)
-            throws IResourceStore.ResourceStoreException {
+    public IResourceStore.IResourceId create(OutputConfigurationSet outputConfigurationSet) throws IResourceStore.ResourceStoreException {
         checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
         return super.create(outputConfigurationSet);
     }
@@ -41,16 +39,14 @@ public class OutputStore extends AbstractResourceStore<OutputConfigurationSet>
     @Override
     @ConfigurationUpdate
     public Integer update(String id, Integer version, OutputConfigurationSet outputConfigurationSet)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException,
-            IResourceStore.ResourceNotFoundException {
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
 
         checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
         return super.update(id, version, outputConfigurationSet);
     }
 
     @Override
-    public OutputConfigurationSet read(String id, Integer version, String filter, String order, Integer index,
-            Integer limit)
+    public OutputConfigurationSet read(String id, Integer version, String filter, String order, Integer index, Integer limit)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
 
         OutputConfigurationSet outputConfigurationSet = read(id, version);
@@ -80,8 +76,7 @@ public class OutputStore extends AbstractResourceStore<OutputConfigurationSet>
     public List<String> readActions(String id, Integer version, String filter, Integer limit)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
-        List<String> actions = read(id, version).getOutputSet().stream().map(OutputConfiguration::getAction)
-                .collect(Collectors.toList());
+        List<String> actions = read(id, version).getOutputSet().stream().map(OutputConfiguration::getAction).collect(Collectors.toList());
 
         return limit > 0 ? actions.subList(0, limit) : actions;
     }

@@ -43,9 +43,8 @@ public class RestSemanticParser implements IRestSemanticParser {
     private final Logger log = Logger.getLogger(RestSemanticParser.class);
 
     @Inject
-    public RestSemanticParser(IRuntime runtime,
-                              IResourceClientLibrary resourceClientLibrary,
-                              @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTasks) {
+    public RestSemanticParser(IRuntime runtime, IResourceClientLibrary resourceClientLibrary,
+            @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTasks) {
         this.runtime = runtime;
         this.resourceClientLibrary = resourceClientLibrary;
         this.parserProvider = lifecycleTasks.get("ai.labs.parser");
@@ -59,14 +58,11 @@ public class RestSemanticParser implements IRestSemanticParser {
 
         runtime.submitCallable((Callable<Void>) () -> {
             try {
-                URI resourceUri = URI.create(IRestParserStore.resourceURI + configId +
-                        IRestParserStore.versionQueryParam + version);
+                URI resourceUri = URI.create(IRestParserStore.resourceURI + configId + IRestParserStore.versionQueryParam + version);
                 IInputParser inputParser = getParser(resourceUri);
                 List<RawSolution> rawSolutions = inputParser.parse(sentence);
                 List<Solution> solutionExpressions = extractExpressions(rawSolutions, true, true);
-                asyncResponse.resume(solutionExpressions.stream().
-                        map(solution -> new ResponseSolution(solution.getExpressions())).
-                        toList());
+                asyncResponse.resume(solutionExpressions.stream().map(solution -> new ResponseSolution(solution.getExpressions())).toList());
             } catch (IllegalArgumentException e) {
                 asyncResponse.resume(new BadRequestException(e.getLocalizedMessage()));
             } catch (Exception e) {
@@ -88,10 +84,8 @@ public class RestSemanticParser implements IRestSemanticParser {
             var parserConfiguration = fetchParserConfiguration(resourceUri);
             var config = parserConfiguration.getConfig();
             var extensions = parserConfiguration.getExtensions();
-            var inputParser =
-                    (IInputParser) parserTask.configure(
-                            config != null ? config : new HashMap<>(),
-                            extensions != null ? extensions : new HashMap<>());
+            var inputParser = (IInputParser) parserTask.configure(config != null ? config : new HashMap<>(),
+                    extensions != null ? extensions : new HashMap<>());
 
             cache.put(resourceUri, inputParser);
             return inputParser;

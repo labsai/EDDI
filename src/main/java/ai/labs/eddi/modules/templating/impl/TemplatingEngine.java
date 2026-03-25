@@ -23,9 +23,8 @@ public class TemplatingEngine implements ITemplatingEngine {
     private final JavaScriptTemplateEngine javaScriptTemplateEngine;
 
     @Inject
-    public TemplatingEngine(TextTemplateEngine textTemplateEngine,
-                            HtmlTemplateEngine htmlTemplateEngine,
-                            JavaScriptTemplateEngine javaScriptTemplateEngine) {
+    public TemplatingEngine(TextTemplateEngine textTemplateEngine, HtmlTemplateEngine htmlTemplateEngine,
+            JavaScriptTemplateEngine javaScriptTemplateEngine) {
 
         this.textTemplateEngine = textTemplateEngine;
         this.htmlTemplateEngine = htmlTemplateEngine;
@@ -33,15 +32,13 @@ public class TemplatingEngine implements ITemplatingEngine {
     }
 
     @Override
-    public String processTemplate(String template,
-                                  Map<String, Object> dynamicAttributesMap) throws TemplateEngineException {
+    public String processTemplate(String template, Map<String, Object> dynamicAttributesMap) throws TemplateEngineException {
         return processTemplate(template, dynamicAttributesMap, TemplateMode.TEXT);
     }
 
     @Override
-    public String processTemplate(String template,
-                                  Map<String, Object> dynamicAttributesMap,
-                                  TemplateMode templateMode) throws TemplateEngineException {
+    public String processTemplate(String template, Map<String, Object> dynamicAttributesMap, TemplateMode templateMode)
+            throws TemplateEngineException {
         final Context ctx = new Context(Locale.ENGLISH);
         dynamicAttributesMap.forEach(ctx::setVariable);
         try {
@@ -51,8 +48,8 @@ public class TemplatingEngine implements ITemplatingEngine {
                 return template;
             }
         } catch (TemplateInputException e) {
-            String message = "Error trying to insert context information into template. " +
-                    "Either context is missing or reference in template is wrong!";
+            String message = "Error trying to insert context information into template. "
+                    + "Either context is missing or reference in template is wrong!";
             throw new TemplateEngineException(message, e);
         }
     }

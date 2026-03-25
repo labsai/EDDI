@@ -16,12 +16,12 @@ import java.util.*;
 /**
  * Expose EDDI documentation as MCP resources.
  * <p>
- * AI agents can browse and read the 40+ markdown docs via
- * MCP resources/list and resources/read.
+ * AI agents can browse and read the 40+ markdown docs via MCP resources/list
+ * and resources/read.
  * <p>
- * Docs are loaded from the filesystem at a configurable path
- * (default: {@code docs/} relative to working directory).
- * In Docker, docs must be copied into the container.
+ * Docs are loaded from the filesystem at a configurable path (default:
+ * {@code docs/} relative to working directory). In Docker, docs must be copied
+ * into the container.
  *
  * @author ginccc
  */
@@ -34,21 +34,18 @@ public class McpDocResources {
     String docsPath;
 
     /**
-     * Read a specific doc by name.
-     * Example URI: eddi://docs/getting-started
+     * Read a specific doc by name. Example URI: eddi://docs/getting-started
      *
-     * @param name the doc filename without .md extension
+     * @param name
+     *            the doc filename without .md extension
      * @return the markdown content of the doc
      */
-    @ResourceTemplate(uriTemplate = "eddi://docs/{name}",
-            name = "eddi-doc",
-            description = "Read an EDDI documentation page by name. " +
-                    "Pass the doc name without .md extension, " +
-                    "e.g. 'getting-started', 'architecture', 'langchain'")
+    @ResourceTemplate(uriTemplate = "eddi://docs/{name}", name = "eddi-doc", description = "Read an EDDI documentation page by name. "
+            + "Pass the doc name without .md extension, " + "e.g. 'getting-started', 'architecture', 'langchain'")
     public String readDoc(@ResourceTemplateArg(name = "name") String name) {
-        // Path traversal protection: reject names with directory separators or parent refs
-        if (name == null || name.isEmpty()
-                || name.contains("/") || name.contains("\\") || name.contains("..")) {
+        // Path traversal protection: reject names with directory separators or parent
+        // refs
+        if (name == null || name.isEmpty() || name.contains("/") || name.contains("\\") || name.contains("..")) {
             return "Invalid document name: " + name;
         }
 
@@ -77,12 +74,10 @@ public class McpDocResources {
     }
 
     /**
-     * List all available documentation pages.
-     * This is exposed as a static resource at eddi://docs/index.
+     * List all available documentation pages. This is exposed as a static resource
+     * at eddi://docs/index.
      */
-    @Resource(uri = "eddi://docs/index",
-            name = "eddi-docs-index",
-            description = "List of all available EDDI documentation pages")
+    @Resource(uri = "eddi://docs/index", name = "eddi-docs-index", description = "List of all available EDDI documentation pages")
     public String listDocs() {
         Path docsDir = Path.of(docsPath);
         if (!Files.isDirectory(docsDir)) {

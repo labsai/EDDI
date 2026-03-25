@@ -7,10 +7,13 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Unified configuration for LlmTask supporting agenth legacy and
- * declarative agent modes.
+ * Unified configuration for LlmTask supporting agenth legacy and declarative
+ * agent modes.
  *
- * <p><strong>Legacy Mode (Backward Compatible):</strong></p>
+ * <p>
+ * <strong>Legacy Mode (Backward Compatible):</strong>
+ * </p>
+ *
  * <pre>{@code
  * {
  * "tasks": [
@@ -26,7 +29,10 @@ import java.util.Map;
  * }
  * }</pre>
  *
- * <p><strong>Declarative Agent Mode (Enhanced):</strong></p>
+ * <p>
+ * <strong>Declarative Agent Mode (Enhanced):</strong>
+ * </p>
+ *
  * <pre>{@code
  * {
  * "tasks": [
@@ -85,40 +91,41 @@ public record LlmConfiguration(List<Task> tasks) {
         // === Agent Mode Features (Optional - triggers agent mode when set) ===
 
         /**
-         * List of EDDI httpcall URIs to use as tools.
-         * Setting this enables agent mode with tool calling.
+         * List of EDDI httpcall URIs to use as tools. Setting this enables agent mode
+         * with tool calling.
          */
         private List<String> tools;
 
         /**
-         * External MCP servers to connect to as tool providers.
-         * Each entry defines a remote MCP server whose tools become available
-         * to the LLM alongside built-in and EDDI httpcall tools.
+         * External MCP servers to connect to as tool providers. Each entry defines a
+         * remote MCP server whose tools become available to the LLM alongside built-in
+         * and EDDI httpcall tools.
          */
         private List<McpServerConfig> mcpServers;
 
         /**
-         * Enable built-in tools (calculator, web search, datetime, etc.)
-         * Default: false (opt-in for security)
+         * Enable built-in tools (calculator, web search, datetime, etc.) Default: false
+         * (opt-in for security)
          */
         private Boolean enableBuiltInTools = false;
 
         /**
          * Auto-discover httpcall extensions from the workflow and expose them as tools.
-         * Default: true — agents automatically get tools for all httpcalls in their workflow.
+         * Default: true — agents automatically get tools for all httpcalls in their
+         * workflow.
          */
         private Boolean enableHttpCallTools = true;
 
         /**
-         * Whitelist of specific built-in tools to enable.
-         * Options: "calculator", "datetime", "websearch", "dataformatter",
-         * "webscraper", "textsummarizer", "pdfreader", "weather"
+         * Whitelist of specific built-in tools to enable. Options: "calculator",
+         * "datetime", "websearch", "dataformatter", "webscraper", "textsummarizer",
+         * "pdfreader", "weather"
          */
         private List<String> builtInToolsWhitelist;
 
         /**
-         * Maximum conversation turns to include in context.
-         * -1 = unlimited, 0 = none, default = 10
+         * Maximum conversation turns to include in context. -1 = unlimited, 0 = none,
+         * default = 10
          */
         private Integer conversationHistoryLimit = 10;
 
@@ -163,15 +170,14 @@ public record LlmConfiguration(List<Task> tasks) {
         // === Helper Methods ===
 
         /**
-         * Determines if this task should run in agent mode (with tools).
-         * Note: enableHttpCallTools is NOT a standalone trigger — it only
-         * enhances agent mode when already triggered by tools, builtInTools,
-         * or mcpServers. Httpcall auto-discovery is checked at execution time.
+         * Determines if this task should run in agent mode (with tools). Note:
+         * enableHttpCallTools is NOT a standalone trigger — it only enhances agent mode
+         * when already triggered by tools, builtInTools, or mcpServers. Httpcall
+         * auto-discovery is checked at execution time.
          */
         public boolean isAgentMode() {
-            return (tools != null && !tools.isEmpty()) ||
-                    (enableBuiltInTools != null && enableBuiltInTools) ||
-                    (mcpServers != null && !mcpServers.isEmpty());
+            return (tools != null && !tools.isEmpty()) || (enableBuiltInTools != null && enableBuiltInTools)
+                    || (mcpServers != null && !mcpServers.isEmpty());
         }
 
         /**

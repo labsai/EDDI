@@ -14,7 +14,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Tests that PostgresResourceStorageFactory correctly creates storage instances.
+ * Tests that PostgresResourceStorageFactory correctly creates storage
+ * instances.
  */
 class PostgresResourceStorageFactoryTest {
 
@@ -28,8 +29,7 @@ class PostgresResourceStorageFactoryTest {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.createStatement()).thenReturn(statement);
 
-        PostgresResourceStorageFactory factory = new PostgresResourceStorageFactory(
-                dataSource, jsonSerialization);
+        PostgresResourceStorageFactory factory = new PostgresResourceStorageFactory(dataSource, jsonSerialization);
 
         assertInstanceOf(IResourceStorageFactory.class, factory);
     }
@@ -45,11 +45,9 @@ class PostgresResourceStorageFactoryTest {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.createStatement()).thenReturn(statement);
 
-        PostgresResourceStorageFactory factory = new PostgresResourceStorageFactory(
-                dataSource, jsonSerialization);
+        PostgresResourceStorageFactory factory = new PostgresResourceStorageFactory(dataSource, jsonSerialization);
 
-        IResourceStorage<String> storage = factory.create(
-                "test_collection", documentBuilder, String.class);
+        IResourceStorage<String> storage = factory.create("test_collection", documentBuilder, String.class);
 
         assertNotNull(storage);
         assertInstanceOf(PostgresResourceStorage.class, storage);
@@ -60,8 +58,7 @@ class PostgresResourceStorageFactoryTest {
         DataSource dataSource = mock(DataSource.class);
         IJsonSerialization jsonSerialization = mock(IJsonSerialization.class);
 
-        PostgresResourceStorageFactory factory = new PostgresResourceStorageFactory(
-                dataSource, jsonSerialization);
+        PostgresResourceStorageFactory factory = new PostgresResourceStorageFactory(dataSource, jsonSerialization);
 
         assertSame(dataSource, factory.getDataSource());
     }

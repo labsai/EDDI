@@ -15,14 +15,23 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * In-memory implementation of {@link IConversationCoordinator}.
  *
- * <p>This is the default event bus — uses in-process queues with no external dependencies.
- * Suitable for single-instance deployments. For horizontal scaling, use
- * {@code NatsConversationCoordinator} by setting {@code eddi.messaging.type=nats}.</p>
+ * <p>
+ * This is the default event bus — uses in-process queues with no external
+ * dependencies. Suitable for single-instance deployments. For horizontal
+ * scaling, use {@code NatsConversationCoordinator} by setting
+ * {@code eddi.messaging.type=nats}.
+ * </p>
  *
- * <p>Ensures that messages within the same conversation are processed sequentially,
- * while different conversations can be processed concurrently by the thread pool.</p>
+ * <p>
+ * Ensures that messages within the same conversation are processed
+ * sequentially, while different conversations can be processed concurrently by
+ * the thread pool.
+ * </p>
  *
- * <p>Tracks dead-lettered tasks in memory for inspection via the Coordinator Dashboard.</p>
+ * <p>
+ * Tracks dead-lettered tasks in memory for inspection via the Coordinator
+ * Dashboard.
+ * </p>
  *
  * @author ginccc
  * @see ai.labs.eddi.engine.runtime.IEventBus
@@ -50,8 +59,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
 
     @Override
     public void submitInOrder(String conversationId, Callable<Void> callable) {
-        final BlockingQueue<Callable<Void>> queue = conversationQueues.
-                computeIfAbsent(conversationId, (key) -> new LinkedTransferQueue<>());
+        final BlockingQueue<Callable<Void>> queue = conversationQueues.computeIfAbsent(conversationId, (key) -> new LinkedTransferQueue<>());
 
         synchronized (queue) {
             boolean wasEmpty = queue.isEmpty();
@@ -63,41 +71,36 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
         }
     }
 
-    private void executeWithRetry(String conversationId, BlockingQueue<Callable<Void>> queue,
-                                   Callable<Void> callable, int attempt) {
-        runtime.submitCallable(callable,
-                new IRuntime.IFinishedExecution<>() {
-                    @Override
-                    public void onComplete(Void result) {
-                        totalProcessed.incrementAndGet();
-                        submitNext(conversationId, queue);
-                    }
+    private void executeWithRetry(String conversationId, BlockingQueue<Callable<Void>> queue, Callable<Void> callable, int attempt) {
+        runtime.submitCallable(callable, new IRuntime.IFinishedExecution<>() {
+            @Override
+            public void onComplete(Void result) {
+                totalProcessed.incrementAndGet();
+                submitNext(conversationId, queue);
+            }
 
-                    @Override
-                    public void onFailure(Throwable t) {
-                        int nextAttempt = attempt + 1;
-                        if (nextAttempt < MAX_RETRIES) {
-                            log.warnf(t, "In-memory task failed (conversationId=%s, attempt=%d/%d), retrying...",
-                                    conversationId, nextAttempt, MAX_RETRIES);
-                            executeWithRetry(conversationId, queue, callable, nextAttempt);
-                        } else {
-                            log.errorf(t, "In-memory task exhausted retries (conversationId=%s, attempts=%d), dead-lettering",
-                                    conversationId, nextAttempt);
-                            routeToDeadLetter(conversationId, t);
-                            totalProcessed.incrementAndGet();
-                            submitNext(conversationId, queue);
-                        }
-                    }
-                }, null);
+            @Override
+            public void onFailure(Throwable t) {
+                int nextAttempt = attempt + 1;
+                if (nextAttempt < MAX_RETRIES) {
+                    log.warnf(t, "In-memory task failed (conversationId=%s, attempt=%d/%d), retrying...", conversationId, nextAttempt, MAX_RETRIES);
+                    executeWithRetry(conversationId, queue, callable, nextAttempt);
+                } else {
+                    log.errorf(t, "In-memory task exhausted retries (conversationId=%s, attempts=%d), dead-lettering", conversationId, nextAttempt);
+                    routeToDeadLetter(conversationId, t);
+                    totalProcessed.incrementAndGet();
+                    submitNext(conversationId, queue);
+                }
+            }
+        }, null);
     }
 
     private void routeToDeadLetter(String conversationId, Throwable failure) {
         String id = String.valueOf(deadLetterIdCounter.incrementAndGet());
         String error = failure.getMessage() != null ? failure.getMessage() : "unknown";
         long timestamp = System.currentTimeMillis();
-        String payload = String.format(
-                "{\"conversationId\":\"%s\",\"error\":\"%s\",\"timestamp\":%d}",
-                conversationId, error.replace("\"", "\\\""), timestamp);
+        String payload = String.format("{\"conversationId\":\"%s\",\"error\":\"%s\",\"timestamp\":%d}", conversationId, error.replace("\"", "\\\""),
+                timestamp);
 
         deadLetters.addLast(new DeadLetterEntry(id, conversationId, error, timestamp, payload));
         totalDeadLettered.incrementAndGet();
@@ -158,8 +161,8 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
             DeadLetterEntry entry = it.next();
             if (entry.id().equals(entryId)) {
                 it.remove();
-                log.infof("Replayed dead-letter %s for conversation %s (in-memory — task reference lost, removed from DL queue)",
-                        entryId, entry.conversationId());
+                log.infof("Replayed dead-letter %s for conversation %s (in-memory — task reference lost, removed from DL queue)", entryId,
+                        entry.conversationId());
                 return true;
             }
         }

@@ -36,8 +36,7 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
     private final IComponentCache componentCache;
 
     @Inject
-    public WorkflowStoreClientLibrary(IWorkflowStoreService workflowStoreService,
-            IComponentCache componentCache,
+    public WorkflowStoreClientLibrary(IWorkflowStoreService workflowStoreService, IComponentCache componentCache,
             @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider) {
         this.workflowStoreService = workflowStoreService;
         this.lifecycleExtensionsProvider = lifecycleExtensionsProvider;
@@ -46,13 +45,10 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
     }
 
     @Override
-    public IExecutableWorkflow getExecutableWorkflow(final String workflowId, final Integer packageVersion)
-            throws ServiceException {
+    public IExecutableWorkflow getExecutableWorkflow(final String workflowId, final Integer packageVersion) throws ServiceException {
         try {
-            DocumentDescriptor packageDocumentDescriptor = workflowStoreService
-                    .getWorkflowDocumentDescriptor(workflowId, packageVersion);
-            WorkflowConfiguration knowledgeWorkflow = workflowStoreService.getKnowledgeWorkflow(workflowId,
-                    packageVersion);
+            DocumentDescriptor packageDocumentDescriptor = workflowStoreService.getWorkflowDocumentDescriptor(workflowId, packageVersion);
+            WorkflowConfiguration knowledgeWorkflow = workflowStoreService.getKnowledgeWorkflow(workflowId, packageVersion);
             return createExecutableWorkflow(packageDocumentDescriptor, knowledgeWorkflow);
         } catch (WorkflowInitializationException e) {
             throw new ServiceException("Error while creating executableWorkflow!", e);
@@ -62,8 +58,7 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
     }
 
     private IExecutableWorkflow createExecutableWorkflow(final DocumentDescriptor documentDescriptor,
-            final WorkflowConfiguration workflowConfiguration)
-            throws WorkflowInitializationException, WorkflowConfigurationException {
+            final WorkflowConfiguration workflowConfiguration) throws WorkflowInitializationException, WorkflowConfigurationException {
 
         final var workflowId = extractResourceId(documentDescriptor.getResource());
         final var lifecycleManager = new LifecycleManager(componentCache, workflowId);

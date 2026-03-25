@@ -6,14 +6,14 @@ public class UUIDWrapper {
     }
 
     /**
-     * Extracts the resource ID from an EDDI location URI.
-     * Works with agenth MongoDB ObjectIds (24 hex chars) and PostgreSQL UUIDs (36
-     * chars with dashes).
+     * Extracts the resource ID from an EDDI location URI. Works with agenth MongoDB
+     * ObjectIds (24 hex chars) and PostgreSQL UUIDs (36 chars with dashes).
      *
-     * @param locationUri e.g.
-     *                    "http://localhost:7070/behaviorstore/behaviorsets/6740832a2b0f614abcaee7ab?version=1"
-     *                    or
-     *                    "http://localhost:7070/behaviorstore/behaviorsets/f3be2bcd-aff3-41f0-9a1a-cf4eb513dd81?version=1"
+     * @param locationUri
+     *            e.g.
+     *            "http://localhost:7070/behaviorstore/behaviorsets/6740832a2b0f614abcaee7ab?version=1"
+     *            or
+     *            "http://localhost:7070/behaviorstore/behaviorsets/f3be2bcd-aff3-41f0-9a1a-cf4eb513dd81?version=1"
      * @return the resource ID, e.g. "6740832a2b0f614abcaee7ab" or
      *         "f3be2bcd-aff3-41f0-9a1a-cf4eb513dd81"
      */
@@ -33,8 +33,9 @@ public class UUIDWrapper {
     /**
      * Extracts the version number from an EDDI location URI.
      *
-     * @param locationUri e.g.
-     *                    "http://localhost:7070/behaviorstore/behaviorsets/abc123?version=1"
+     * @param locationUri
+     *            e.g.
+     *            "http://localhost:7070/behaviorstore/behaviorsets/abc123?version=1"
      * @return the version string, e.g. "1"
      */
     public String extractVersion(String locationUri) {

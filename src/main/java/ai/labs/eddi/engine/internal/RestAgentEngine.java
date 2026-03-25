@@ -48,8 +48,7 @@ public class RestAgentEngine implements IRestAgentEngine {
     private static final Logger LOGGER = Logger.getLogger(RestAgentEngine.class);
 
     @Inject
-    public RestAgentEngine(IConversationService conversationService,
-            @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
+    public RestAgentEngine(IConversationService conversationService, @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.conversationService = conversationService;
         this.agentTimeout = agentTimeout;
     }
@@ -60,10 +59,7 @@ public class RestAgentEngine implements IRestAgentEngine {
     }
 
     @Override
-    public Response startConversationWithContext(Environment environment,
-            String agentId,
-            String userId,
-            Map<String, Context> context) {
+    public Response startConversationWithContext(Environment environment, String agentId, String userId, Map<String, Context> context) {
         try {
             var result = conversationService.startConversation(environment, agentId, userId, context);
             return Response.created(result.conversationUri()).build();
@@ -82,15 +78,10 @@ public class RestAgentEngine implements IRestAgentEngine {
     }
 
     @Override
-    public SimpleConversationMemorySnapshot readConversation(Deployment.Environment environment,
-            String agentId,
-            String conversationId,
-            Boolean returnDetailed,
-            Boolean returnCurrentStepOnly,
-            List<String> returningFields) {
+    public SimpleConversationMemorySnapshot readConversation(Deployment.Environment environment, String agentId, String conversationId,
+            Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields) {
         try {
-            return conversationService.readConversation(environment, agentId, conversationId,
-                    returnDetailed, returnCurrentStepOnly, returningFields);
+            return conversationService.readConversation(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields);
         } catch (AgentMismatchException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -119,41 +110,28 @@ public class RestAgentEngine implements IRestAgentEngine {
     }
 
     @Override
-    public void rerunLastConversationStep(Environment environment,
-            String agentId,
-            String conversationId,
-            String language,
-            Boolean returnDetailed,
-            Boolean returnCurrentStepOnly,
-            List<String> returningFields,
-            final AsyncResponse response) {
+    public void rerunLastConversationStep(Environment environment, String agentId, String conversationId, String language, Boolean returnDetailed,
+            Boolean returnCurrentStepOnly, List<String> returningFields, final AsyncResponse response) {
         checkNotNull(environment, "environment");
         checkNotNull(agentId, "agentId");
         checkNotNull(conversationId, "conversationId");
         checkNotEmpty(language, "language");
 
-        sayInternal(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly,
-                returningFields,
-                new InputData("", Map.of(KEY_LANG, new Context(string, language))),
-                true, response);
+        sayInternal(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
+                new InputData("", Map.of(KEY_LANG, new Context(string, language))), true, response);
     }
 
     @Override
-    public void say(final Environment environment,
-            final String agentId, final String conversationId,
-            final Boolean returnDetailed, final Boolean returnCurrentStepOnly,
-            final List<String> returningFields, final String message, final AsyncResponse response) {
+    public void say(final Environment environment, final String agentId, final String conversationId, final Boolean returnDetailed,
+            final Boolean returnCurrentStepOnly, final List<String> returningFields, final String message, final AsyncResponse response) {
 
-        sayWithinContext(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly,
-                returningFields, new InputData(message, new HashMap<>()), response);
+        sayWithinContext(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
+                new InputData(message, new HashMap<>()), response);
     }
 
     @Override
-    public void sayWithinContext(final Environment environment,
-            final String agentId, final String conversationId,
-            final Boolean returnDetailed, final Boolean returnCurrentStepOnly,
-            final List<String> returningFields, final InputData inputData,
-            final AsyncResponse response) {
+    public void sayWithinContext(final Environment environment, final String agentId, final String conversationId, final Boolean returnDetailed,
+            final Boolean returnCurrentStepOnly, final List<String> returningFields, final InputData inputData, final AsyncResponse response) {
 
         checkNotNull(environment, "environment");
         checkNotNull(agentId, "agentId");
@@ -161,23 +139,18 @@ public class RestAgentEngine implements IRestAgentEngine {
         checkNotNull(inputData, "inputData");
         checkNotNull(inputData.getInput(), "inputData.input");
 
-        sayInternal(environment, agentId, conversationId, returnDetailed,
-                returnCurrentStepOnly, returningFields, inputData, false, response);
+        sayInternal(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, false, response);
     }
 
-    private void sayInternal(Environment environment, String agentId, String conversationId,
-            Boolean returnDetailed, Boolean returnCurrentStepOnly,
-            List<String> returningFields, InputData inputData,
-            boolean rerunOnly, AsyncResponse response) {
+    private void sayInternal(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+            List<String> returningFields, InputData inputData, boolean rerunOnly, AsyncResponse response) {
 
         response.setTimeout(agentTimeout, TimeUnit.SECONDS);
-        response.setTimeoutHandler(
-                (asyncResp) -> asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
+        response.setTimeoutHandler((asyncResp) -> asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
 
         try {
-            conversationService.say(environment, agentId, conversationId,
-                    returnDetailed, returnCurrentStepOnly, returningFields,
-                    inputData, rerunOnly, response::resume);
+            conversationService.say(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
+                    rerunOnly, response::resume);
         } catch (AgentMismatchException e) {
             response.resume(Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(e.getMessage()).build());
         } catch (AgentNotReadyException e) {

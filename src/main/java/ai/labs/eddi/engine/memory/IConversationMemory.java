@@ -51,8 +51,8 @@ public interface IConversationMemory extends Serializable {
     Stack<IConversationStep> getRedoCache();
 
     /**
-     * Get the event sink for streaming SSE events. Returns {@code null} when
-     * no streaming is requested (standard say endpoint).
+     * Get the event sink for streaming SSE events. Returns {@code null} when no
+     * streaming is requested (standard say endpoint).
      */
     default ConversationEventSink getEventSink() {
         return null;
@@ -67,16 +67,16 @@ public interface IConversationMemory extends Serializable {
     }
 
     /**
-     * Get the audit entry collector for this conversation turn.
-     * Returns {@code null} when auditing is disabled.
+     * Get the audit entry collector for this conversation turn. Returns
+     * {@code null} when auditing is disabled.
      */
     default IAuditEntryCollector getAuditCollector() {
         return null;
     }
 
     /**
-     * Set the audit entry collector for this conversation turn.
-     * Called from {@code ConversationService} before lifecycle execution.
+     * Set the audit entry collector for this conversation turn. Called from
+     * {@code ConversationService} before lifecycle execution.
      */
     default void setAuditCollector(IAuditEntryCollector auditCollector) {
         // no-op by default
@@ -107,8 +107,8 @@ public interface IConversationMemory extends Serializable {
 
         /**
          * Convenience method: returns the value directly, or {@code null} if not
-         * present.
-         * Equivalent to {@code getData(key) != null ? getData(key).getResult() : null}.
+         * present. Equivalent to
+         * {@code getData(key) != null ? getData(key).getResult() : null}.
          */
         <T> T get(MemoryKey<T> key);
 
@@ -134,8 +134,8 @@ public interface IConversationMemory extends Serializable {
         void storeData(IData<?> element);
 
         /**
-         * Type-safe store: creates a {@link IData} wrapper, sets the public flag
-         * from the key, and stores it in this step.
+         * Type-safe store: creates a {@link IData} wrapper, sets the public flag from
+         * the key, and stores it in this step.
          */
         <T> void set(MemoryKey<T> key, T value);
 

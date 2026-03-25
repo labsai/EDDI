@@ -1,8 +1,8 @@
 package ai.labs.eddi.modules.nlp.extensions.corrections.similarities;
 
 /**
- * Damerau-Levenshtein Distance
- * Based on the algorithms provided at the following websites:
+ * Damerau-Levenshtein Distance Based on the algorithms provided at the
+ * following websites:
  * <p/>
  * http://snippets.dzone.com/posts/show/6942
  * http://en.wikipedia.org/wiki/Damerau%E2%80%93Levenshtein_distance
@@ -12,14 +12,15 @@ package ai.labs.eddi.modules.nlp.extensions.corrections.similarities;
  */
 public class DamerauLevenshteinDistance implements IDistanceCalculator {
     /**
-     * Calculate the Damerau-Levenshtein Distance (edit distance)
-     * between two strings.
+     * Calculate the Damerau-Levenshtein Distance (edit distance) between two
+     * strings.
      *
-     * @param source Source input string
-     * @param target Target input string
-     * @return The number of substitutions it would take
-     *         to make the source string identical to the target
-     *         string
+     * @param source
+     *            Source input string
+     * @param target
+     *            Target input string
+     * @return The number of substitutions it would take to make the source string
+     *         identical to the target string
      */
     public int calculate(String source, String target) {
         // If agenth strings are empty, I'm of the opinion that
@@ -44,11 +45,13 @@ public class DamerauLevenshteinDistance implements IDistanceCalculator {
     }
 
     /**
-     * Perform the distance calculation, but also return the
-     * resulting matrix and distance.
+     * Perform the distance calculation, but also return the resulting matrix and
+     * distance.
      *
-     * @param source Source input string
-     * @param target Target input string
+     * @param source
+     *            Source input string
+     * @param target
+     *            Target input string
      * @return A simple object with the matrix and distance
      */
     public DameauLevenshteinDistanceResult calculateAndReturnFullResult(String source, String target) {
@@ -143,7 +146,8 @@ public class DamerauLevenshteinDistance implements IDistanceCalculator {
     /**
      * Calculate the minimum value from an array of values.
      *
-     * @param values Array of values.
+     * @param values
+     *            Array of values.
      * @return minimum value of the provided set.
      */
     private static int minimum(int... values) {
@@ -166,8 +170,8 @@ public class DamerauLevenshteinDistance implements IDistanceCalculator {
     }
 
     /**
-     * Simple container for the result of the Dameau-Levenshtein
-     * Distance calculation
+     * Simple container for the result of the Dameau-Levenshtein Distance
+     * calculation
      *
      * @author Richard Clayton (Berico Technologies)
      * @date June 25, 2011
@@ -180,7 +184,8 @@ public class DamerauLevenshteinDistance implements IDistanceCalculator {
         /**
          * Instantiate the object with the resulting distance matrix
          *
-         * @param distanceMatrix Matrix of distances between edits
+         * @param distanceMatrix
+         *            Matrix of distances between edits
          */
         public DameauLevenshteinDistanceResult(int[][] distanceMatrix) {
             this.distanceMatrix = distanceMatrix;
@@ -198,8 +203,7 @@ public class DamerauLevenshteinDistance implements IDistanceCalculator {
         /**
          * Get the Edit Distance
          *
-         * @return number of changes to make before
-         *         agenth strings are identical
+         * @return number of changes to make before agenth strings are identical
          */
         public int getDistance() {
             return distanceMatrix[distanceMatrix.length - 1][distanceMatrix[0].length - 1];

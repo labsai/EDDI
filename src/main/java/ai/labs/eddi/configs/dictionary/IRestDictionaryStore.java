@@ -37,8 +37,7 @@ public interface IRestDictionaryStore extends IRestVersionInfo {
     @APIResponse(responseCode = "200", description = "Array of DocumentDescriptors")
     @Operation(description = "Read list of regular dictionary descriptors.")
     List<DocumentDescriptor> readRegularDictionaryDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index,
-            @QueryParam("limit") @DefaultValue("20") Integer limit);
+            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
@@ -47,10 +46,8 @@ public interface IRestDictionaryStore extends IRestVersionInfo {
     @Operation(description = "Read regular dictionary.")
     DictionaryConfiguration readRegularDictionary(@PathParam("id") String id,
             @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("order") @DefaultValue("") String order,
-            @QueryParam("index") @DefaultValue("0") Integer index,
-            @QueryParam("limit") @DefaultValue("20") Integer limit);
+            @QueryParam("filter") @DefaultValue("") String filter, @QueryParam("order") @DefaultValue("") String order,
+            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}/expressions")
@@ -58,10 +55,8 @@ public interface IRestDictionaryStore extends IRestVersionInfo {
     @Operation(description = "Read expressions of regular dictionary.")
     List<String> readExpressions(@PathParam("id") String id,
             @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("order") @DefaultValue("") String order,
-            @QueryParam("index") @DefaultValue("0") Integer index,
-            @QueryParam("limit") @DefaultValue("20") Integer limit);
+            @QueryParam("filter") @DefaultValue("") String filter, @QueryParam("order") @DefaultValue("") String order,
+            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
 
     @PUT
     @Path("/{id}")
@@ -74,24 +69,12 @@ public interface IRestDictionaryStore extends IRestVersionInfo {
     /**
      * example dictionary json config:
      * <p>
-     * {
-     * "language" : "en",
-     * "words" : [
-     * {
-     * "word" : "hello",
-     * "exp" : "greeting(hello)",
-     * "frequency" : 0
-     * }
-     * ],
-     * "phrases" : [
-     * {
-     * "phrase" : "good afternoon",
-     * "exp" : "greeting(good_afternoon)"
-     * }
-     * ]
-     * }
+     * { "language" : "en", "words" : [ { "word" : "hello", "exp" :
+     * "greeting(hello)", "frequency" : 0 } ], "phrases" : [ { "phrase" : "good
+     * afternoon", "exp" : "greeting(good_afternoon)" } ] }
      *
-     * @param regularDictionaryConfiguration dictionary resource to be created
+     * @param regularDictionaryConfiguration
+     *            dictionary resource to be created
      * @return no content, http code 201, see Location header for URI of the created
      *         resource
      */

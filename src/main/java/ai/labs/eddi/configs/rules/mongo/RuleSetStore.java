@@ -19,8 +19,7 @@ import java.util.stream.Collectors;
  * @author ginccc
  */
 @ApplicationScoped
-public class RuleSetStore extends AbstractResourceStore<RuleSetConfiguration>
-        implements IRuleSetStore {
+public class RuleSetStore extends AbstractResourceStore<RuleSetConfiguration> implements IRuleSetStore {
 
     @Inject
     public RuleSetStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
@@ -46,8 +45,7 @@ public class RuleSetStore extends AbstractResourceStore<RuleSetConfiguration>
     public List<String> readActions(String id, Integer version, String filter, Integer limit)
             throws ResourceStoreException, ResourceNotFoundException {
 
-        List<String> actions = read(id, version).getBehaviorGroups().stream()
-                .map(RuleGroupConfiguration::getRules).flatMap(Collection::stream)
+        List<String> actions = read(id, version).getBehaviorGroups().stream().map(RuleGroupConfiguration::getRules).flatMap(Collection::stream)
                 .map(RuleConfiguration::getActions).flatMap(Collection::stream).collect(Collectors.toList());
 
         return limit > 0 ? actions.subList(0, limit) : actions;

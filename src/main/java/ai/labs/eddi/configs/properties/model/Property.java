@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.properties.model;
 
-
 import java.util.List;
 import java.util.Map;
 
@@ -57,7 +56,8 @@ public class Property {
     public Property() {
     }
 
-    public Property(String name, String valueString, Map<String, Object> valueObject, List<Object> valueList, Integer valueInt, Float valueFloat, Boolean valueBoolean, Scope scope) {
+    public Property(String name, String valueString, Map<String, Object> valueObject, List<Object> valueList, Integer valueInt, Float valueFloat,
+            Boolean valueBoolean, Scope scope) {
         this.name = name;
         this.valueString = valueString;
         this.valueObject = valueObject;
@@ -134,10 +134,15 @@ public class Property {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         Property that = (Property) o;
-        return java.util.Objects.equals(name, that.name) && java.util.Objects.equals(valueString, that.valueString) && java.util.Objects.equals(valueObject, that.valueObject) && java.util.Objects.equals(valueList, that.valueList) && java.util.Objects.equals(valueInt, that.valueInt) && java.util.Objects.equals(valueFloat, that.valueFloat) && java.util.Objects.equals(valueBoolean, that.valueBoolean) && java.util.Objects.equals(scope, that.scope);
+        return java.util.Objects.equals(name, that.name) && java.util.Objects.equals(valueString, that.valueString)
+                && java.util.Objects.equals(valueObject, that.valueObject) && java.util.Objects.equals(valueList, that.valueList)
+                && java.util.Objects.equals(valueInt, that.valueInt) && java.util.Objects.equals(valueFloat, that.valueFloat)
+                && java.util.Objects.equals(valueBoolean, that.valueBoolean) && java.util.Objects.equals(scope, that.scope);
     }
 
     @Override

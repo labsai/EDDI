@@ -11,8 +11,7 @@ import java.net.URI;
  */
 public class ConversationDescriptor extends ResourceDescriptor {
     public enum ViewState {
-        UNSEEN,
-        SEEN
+        UNSEEN, SEEN
     }
 
     private String agentName;

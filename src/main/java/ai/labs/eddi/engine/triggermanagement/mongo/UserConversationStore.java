@@ -19,8 +19,8 @@ import org.bson.Document;
 import java.io.IOException;
 
 /**
- * MongoDB implementation of {@link IUserConversationStore}.
- * Annotated {@code @DefaultBean} so PostgreSQL can override.
+ * MongoDB implementation of {@link IUserConversationStore}. Annotated
+ * {@code @DefaultBean} so PostgreSQL can override.
  *
  * @author ginccc
  */
@@ -35,20 +35,14 @@ public class UserConversationStore implements IUserConversationStore {
     private final IJsonSerialization jsonSerialization;
     private final UserConversationResourceStore userConversationStore;
 
-
     @Inject
-    public UserConversationStore(MongoDatabase database,
-                                 IJsonSerialization jsonSerialization,
-                                 IDocumentBuilder documentBuilder) {
+    public UserConversationStore(MongoDatabase database, IJsonSerialization jsonSerialization, IDocumentBuilder documentBuilder) {
         this.jsonSerialization = jsonSerialization;
         RuntimeUtilities.checkNotNull(database, "database");
         this.collection = database.getCollection(COLLECTION_USER_CONVERSATIONS);
         this.documentBuilder = documentBuilder;
         this.userConversationStore = new UserConversationResourceStore();
-        collection.createIndex(
-                Indexes.compoundIndex(
-                        Indexes.ascending(INTENT_FIELD),
-                        Indexes.ascending(USER_ID_FIELD)),
+        collection.createIndex(Indexes.compoundIndex(Indexes.ascending(INTENT_FIELD), Indexes.ascending(USER_ID_FIELD)),
                 new IndexOptions().unique(true));
     }
 
@@ -82,8 +76,7 @@ public class UserConversationStore implements IUserConversationStore {
     }
 
     private class UserConversationResourceStore {
-        UserConversation readUserConversation(String intent, String userId)
-                throws IResourceStore.ResourceStoreException {
+        UserConversation readUserConversation(String intent, String userId) throws IResourceStore.ResourceStoreException {
 
             Document filter = new Document();
             filter.put(INTENT_FIELD, intent);
@@ -100,8 +93,7 @@ public class UserConversationStore implements IUserConversationStore {
             }
         }
 
-        void createUserConversation(UserConversation userConversation)
-                throws IResourceStore.ResourceStoreException, ResourceAlreadyExistsException {
+        void createUserConversation(UserConversation userConversation) throws IResourceStore.ResourceStoreException, ResourceAlreadyExistsException {
 
             Document filter = new Document();
             filter.put(INTENT_FIELD, userConversation.getIntent());
@@ -115,7 +107,8 @@ public class UserConversationStore implements IUserConversationStore {
                 throw new ResourceAlreadyExistsException(message);
             }
 
-            //no user conversation with the given intent has been found, so we create a new one
+            // no user conversation with the given intent has been found, so we create a new
+            // one
             collection.insertOne(createDocument(userConversation));
         }
 
@@ -123,11 +116,9 @@ public class UserConversationStore implements IUserConversationStore {
             collection.deleteOne(new Document(INTENT_FIELD, intent).append(USER_ID_FIELD, userId));
         }
 
-        private Document createDocument(UserConversation userConversation)
-                throws IResourceStore.ResourceStoreException {
+        private Document createDocument(UserConversation userConversation) throws IResourceStore.ResourceStoreException {
             try {
-                return jsonSerialization.deserialize(jsonSerialization.serialize(userConversation),
-                        Document.class);
+                return jsonSerialization.deserialize(jsonSerialization.serialize(userConversation), Document.class);
             } catch (IOException e) {
                 throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
             }

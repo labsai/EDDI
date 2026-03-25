@@ -40,12 +40,14 @@ import java.net.URI;
 import java.util.*;
 
 /**
- * Service that encapsulates the business logic for setting up EDDI agents.
- * Used by both the MCP {@code setup_agent}/{@code create_api_agent} tools
- * and the REST {@code POST /administration/agents/setup*} endpoints.
+ * Service that encapsulates the business logic for setting up EDDI agents. Used
+ * by both the MCP {@code setup_agent}/{@code create_api_agent} tools and the
+ * REST {@code POST /administration/agents/setup*} endpoints.
  *
- * <p>This replaces the former monolithic approach where all logic lived
- * inside MCP {@code @Tool} annotated methods.</p>
+ * <p>
+ * This replaces the former monolithic approach where all logic lived inside MCP
+ * {@code @Tool} annotated methods.
+ * </p>
  *
  * @author ginccc
  */
@@ -59,23 +61,22 @@ public class AgentSetupService {
     private final String ollamaDefaultBaseUrl;
 
     @Inject
-    public AgentSetupService(IRestInterfaceFactory restInterfaceFactory,
-                             IRestAgentAdministration agentAdmin,
-                             @ConfigProperty(name = "eddi.ollama.default-base-url",
-                                     defaultValue = "http://localhost:11434")
-                             String ollamaDefaultBaseUrl) {
+    public AgentSetupService(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin,
+            @ConfigProperty(name = "eddi.ollama.default-base-url", defaultValue = "http://localhost:11434") String ollamaDefaultBaseUrl) {
         this.restInterfaceFactory = restInterfaceFactory;
         this.agentAdmin = agentAdmin;
         this.ollamaDefaultBaseUrl = ollamaDefaultBaseUrl;
     }
 
     /**
-     * Create a fully configured and optionally deployed agent.
-     * Equivalent to the Agent Father's 12-step workflow.
+     * Create a fully configured and optionally deployed agent. Equivalent to the
+     * Agent Father's 12-step workflow.
      *
-     * @param request the setup parameters
+     * @param request
+     *            the setup parameters
      * @return result with created resource IDs
-     * @throws AgentSetupException if the setup fails
+     * @throws AgentSetupException
+     *             if the setup fails
      */
     public SetupResult setupAgent(SetupAgentRequest request) throws AgentSetupException {
         // Validate required params
@@ -118,10 +119,8 @@ public class AgentSetupService {
             patchDescriptor(behaviorId, behaviorVersion, request.name());
 
             // --- Step 3: Create LLM Configuration ---
-            var llmConfig = createLlmConfig(
-                    params.providerType, params.modelId, request.apiKey(), request.systemPrompt(),
-                    toolsEnabled, request.builtInToolsWhitelist(), request.baseUrl(), promptResponseJson,
-                    quickReplies, sentiment, request.mcpServers(), null);
+            var llmConfig = createLlmConfig(params.providerType, params.modelId, request.apiKey(), request.systemPrompt(), toolsEnabled,
+                    request.builtInToolsWhitelist(), request.baseUrl(), promptResponseJson, quickReplies, sentiment, request.mcpServers(), null);
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
             String langchainId = extractIdFromLocation(langchainLocation);
@@ -142,8 +141,7 @@ public class AgentSetupService {
             }
 
             // --- Step 5: Create Workflow ---
-            var workflowConfig = createWorkflowConfig(parserLocation, behaviorLocation, null, langchainLocation,
-                    outputLocation);
+            var workflowConfig = createWorkflowConfig(parserLocation, behaviorLocation, null, langchainLocation, outputLocation);
             Response workflowResponse = getRestStore(IRestWorkflowStore.class).createWorkflow(workflowConfig);
             String workflowLocation = workflowResponse.getHeaderString("Location");
             String workflowId = extractIdFromLocation(workflowLocation);
@@ -162,15 +160,13 @@ public class AgentSetupService {
             patchDescriptor(agentId, agentVersion, request.name());
 
             // --- Step 7: Deploy ---
-            var resultBuilder = SetupResult.builder()
-                    .action("setup_complete")
-                    .agentId(agentId != null ? agentId : "unknown")
-                    .agentName(request.name())
-                    .provider(params.providerType)
-                    .model(params.modelId);
+            var resultBuilder = SetupResult.builder().action("setup_complete").agentId(agentId != null ? agentId : "unknown")
+                    .agentName(request.name()).provider(params.providerType).model(params.modelId);
 
-            if (quickReplies) resultBuilder.quickRepliesEnabled(true);
-            if (sentiment) resultBuilder.sentimentAnalysisEnabled(true);
+            if (quickReplies)
+                resultBuilder.quickRepliesEnabled(true);
+            if (sentiment)
+                resultBuilder.sentimentAnalysisEnabled(true);
 
             if (params.shouldDeploy && agentId != null) {
                 var deployResult = deployAndWait(params.env, agentId, agentVersion);
@@ -188,13 +184,14 @@ public class AgentSetupService {
     }
 
     /**
-     * Create an API agent from an OpenAPI specification.
-     * Parses the spec, generates ApiCalls configurations grouped by tag,
-     * and creates a fully deployed agent.
+     * Create an API agent from an OpenAPI specification. Parses the spec, generates
+     * ApiCalls configurations grouped by tag, and creates a fully deployed agent.
      *
-     * @param request the API agent creation parameters
+     * @param request
+     *            the API agent creation parameters
      * @return result with created resource IDs
-     * @throws AgentSetupException if the setup fails
+     * @throws AgentSetupException
+     *             if the setup fails
      */
     public SetupResult createApiAgent(CreateApiAgentRequest request) throws AgentSetupException {
         // Validate required params
@@ -219,8 +216,7 @@ public class AgentSetupService {
             // --- Step 1: Parse OpenAPI and build grouped httpcalls configs ---
             McpApiToolBuilder.ApiBuildResult buildResult;
             try {
-                buildResult = McpApiToolBuilder.parseAndBuild(
-                        request.openApiSpec(), request.endpoints(), request.apiBaseUrl(), request.apiAuth());
+                buildResult = McpApiToolBuilder.parseAndBuild(request.openApiSpec(), request.endpoints(), request.apiBaseUrl(), request.apiAuth());
             } catch (IllegalArgumentException e) {
                 throw new AgentSetupException("OpenAPI parsing failed: " + e.getMessage(), e);
             }
@@ -248,41 +244,35 @@ public class AgentSetupService {
             Response parserResponse = getRestStore(IRestParserStore.class).createParser(parserConfig);
             String parserLocation = parserResponse.getHeaderString("Location");
             createdResources.put("parserLocation", parserLocation);
-            patchDescriptor(extractIdFromLocation(parserLocation),
-                    extractVersionFromLocation(parserLocation), request.name());
+            patchDescriptor(extractIdFromLocation(parserLocation), extractVersionFromLocation(parserLocation), request.name());
 
             // --- Step 4: Create Behavior Rules ---
             var behaviorConfig = createBehaviorConfig();
             Response behaviorResponse = getRestStore(IRestRuleSetStore.class).createRuleSet(behaviorConfig);
             String behaviorLocation = behaviorResponse.getHeaderString("Location");
             createdResources.put("behaviorLocation", behaviorLocation);
-            patchDescriptor(extractIdFromLocation(behaviorLocation),
-                    extractVersionFromLocation(behaviorLocation), request.name());
+            patchDescriptor(extractIdFromLocation(behaviorLocation), extractVersionFromLocation(behaviorLocation), request.name());
 
-            // Don't include textual API summary — endpoints are available as tool specifications.
+            // Don't include textual API summary — endpoints are available as tool
+            // specifications.
             // The AgentOrchestrator appends tool URIs to the system message automatically.
             String enrichedPrompt = request.systemPrompt();
             boolean quickReplies = request.enableQuickReplies() != null && request.enableQuickReplies();
             boolean sentiment = request.enableSentimentAnalysis() != null && request.enableSentimentAnalysis();
             String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
-            var llmConfig = createLlmConfig(
-                    params.providerType, params.modelId, request.apiKey(), enrichedPrompt,
-                    false, null, null, promptResponseJson,
-                    quickReplies, sentiment, null, httpCallsLocations);
+            var llmConfig = createLlmConfig(params.providerType, params.modelId, request.apiKey(), enrichedPrompt, false, null, null,
+                    promptResponseJson, quickReplies, sentiment, null, httpCallsLocations);
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);
-            patchDescriptor(extractIdFromLocation(langchainLocation),
-                    extractVersionFromLocation(langchainLocation), request.name());
+            patchDescriptor(extractIdFromLocation(langchainLocation), extractVersionFromLocation(langchainLocation), request.name());
 
             // --- Step 6: Create Workflow (with httpcalls in pipeline) ---
-            var workflowConfig = createWorkflowConfig(
-                    parserLocation, behaviorLocation, httpCallsLocations, langchainLocation, null);
+            var workflowConfig = createWorkflowConfig(parserLocation, behaviorLocation, httpCallsLocations, langchainLocation, null);
             Response workflowResponse = getRestStore(IRestWorkflowStore.class).createWorkflow(workflowConfig);
             String workflowLocation = workflowResponse.getHeaderString("Location");
             createdResources.put("packageLocation", workflowLocation);
-            patchDescriptor(extractIdFromLocation(workflowLocation),
-                    extractVersionFromLocation(workflowLocation), request.name());
+            patchDescriptor(extractIdFromLocation(workflowLocation), extractVersionFromLocation(workflowLocation), request.name());
 
             // --- Step 7: Create Agent ---
             var agentConfig = new AgentConfiguration();
@@ -295,13 +285,8 @@ public class AgentSetupService {
             patchDescriptor(agentId, agentVersion, request.name());
 
             // --- Step 8: Deploy ---
-            var resultBuilder = SetupResult.builder()
-                    .action("api_agent_created")
-                    .agentId(agentId != null ? agentId : "unknown")
-                    .agentName(request.name())
-                    .provider(params.providerType)
-                    .model(params.modelId)
-                    .endpointCount(buildResult.endpointCount())
+            var resultBuilder = SetupResult.builder().action("api_agent_created").agentId(agentId != null ? agentId : "unknown")
+                    .agentName(request.name()).provider(params.providerType).model(params.modelId).endpointCount(buildResult.endpointCount())
                     .groups(groupNames);
 
             if (params.shouldDeploy && agentId != null) {
@@ -328,9 +313,7 @@ public class AgentSetupService {
      */
     public ParserConfiguration createParserConfig() {
         var config = new ParserConfiguration();
-        config.setExtensions(Map.of(
-                "dictionaries", List.of(),
-                "corrections", List.of()));
+        config.setExtensions(Map.of("dictionaries", List.of(), "corrections", List.of()));
         return config;
     }
 
@@ -359,12 +342,9 @@ public class AgentSetupService {
     /**
      * Create LLM config with the specified model, system prompt, and tool settings.
      */
-    public LlmConfiguration createLlmConfig(String modelType, String modelId,
-                                              String apiKey, String systemPrompt,
-                                              boolean enableTooling, String toolsWhitelist,
-                                              String baseUrl, String promptResponseJson,
-                                              boolean quickReplies, boolean sentiment,
-                                              String mcpServers, List<String> toolUris) {
+    public LlmConfiguration createLlmConfig(String modelType, String modelId, String apiKey, String systemPrompt, boolean enableTooling,
+            String toolsWhitelist, String baseUrl, String promptResponseJson, boolean quickReplies, boolean sentiment, String mcpServers,
+            List<String> toolUris) {
         var task = new LlmConfiguration.Task();
         task.setActions(List.of("send_message"));
         task.setId(modelType);
@@ -392,8 +372,7 @@ public class AgentSetupService {
         switch (modelType) {
             case "ollama" -> {
                 params.put("model", modelId);
-                String effectiveBaseUrl = (baseUrl != null && !baseUrl.isBlank())
-                        ? baseUrl : ollamaDefaultBaseUrl;
+                String effectiveBaseUrl = (baseUrl != null && !baseUrl.isBlank()) ? baseUrl : ollamaDefaultBaseUrl;
                 params.put("baseUrl", effectiveBaseUrl);
             }
             case "jlama" -> {
@@ -421,11 +400,7 @@ public class AgentSetupService {
         if (enableTooling) {
             task.setEnableBuiltInTools(true);
             if (toolsWhitelist != null && !toolsWhitelist.isBlank()) {
-                task.setBuiltInToolsWhitelist(
-                        List.of(toolsWhitelist.split(",")).stream()
-                                .map(String::trim)
-                                .filter(s -> !s.isEmpty())
-                                .toList());
+                task.setBuiltInToolsWhitelist(List.of(toolsWhitelist.split(",")).stream().map(String::trim).filter(s -> !s.isEmpty()).toList());
             }
         }
 
@@ -504,13 +479,11 @@ public class AgentSetupService {
     }
 
     /**
-     * Create workflow with parser + behavior + [httpcalls...] + langchain [+ output].
+     * Create workflow with parser + behavior + [httpcalls...] + langchain [+
+     * output].
      */
-    public WorkflowConfiguration createWorkflowConfig(String parserLocation,
-                                                       String behaviorLocation,
-                                                       List<String> httpCallsLocations,
-                                                       String langchainLocation,
-                                                       String outputLocation) {
+    public WorkflowConfiguration createWorkflowConfig(String parserLocation, String behaviorLocation, List<String> httpCallsLocations,
+            String langchainLocation, String outputLocation) {
         var extensions = new ArrayList<WorkflowConfiguration.WorkflowStep>();
 
         if (parserLocation != null) {
@@ -557,7 +530,8 @@ public class AgentSetupService {
      * Check if the given provider is a local LLM (no API key needed).
      */
     public static boolean isLocalLlmProvider(String provider) {
-        if (provider == null || provider.isBlank()) return false;
+        if (provider == null || provider.isBlank())
+            return false;
         String normalized = provider.trim().toLowerCase();
         return "ollama".equals(normalized) || "jlama".equals(normalized);
     }
@@ -570,8 +544,8 @@ public class AgentSetupService {
     }
 
     /**
-     * Build the promptResponseJson format instruction for the LLM.
-     * Returns null if neither feature is enabled.
+     * Build the promptResponseJson format instruction for the LLM. Returns null if
+     * neither feature is enabled.
      */
     public static String buildPromptResponseJson(boolean quickReplies, boolean sentiment) {
         if (!quickReplies && !sentiment) {
@@ -579,15 +553,14 @@ public class AgentSetupService {
         }
 
         var schema = new LinkedHashMap<String, Object>();
-        schema.put("htmlResponseText",
-                "String - your main reply to the user, optionally formatted with basic inline HTML tags for readability.");
+        schema.put("htmlResponseText", "String - your main reply to the user, optionally formatted with basic inline HTML tags for readability.");
 
         if (quickReplies) {
-            schema.put("quickReplies", List.of(
-                    "short, button-like suggestions for how the user might want to respond next: " +
-                            "Provide 2-4 concise quick reply buttons that are relevant to your latest answer " +
-                            "and any recent user input. They should prompt fast responses or encourage deeper " +
-                            "exploration (e.g., 'Yes, I agree', 'Tell me more')"));
+            schema.put("quickReplies",
+                    List.of("short, button-like suggestions for how the user might want to respond next: "
+                            + "Provide 2-4 concise quick reply buttons that are relevant to your latest answer "
+                            + "and any recent user input. They should prompt fast responses or encourage deeper "
+                            + "exploration (e.g., 'Yes, I agree', 'Tell me more')"));
         }
 
         if (sentiment) {
@@ -598,17 +571,15 @@ public class AgentSetupService {
             sentimentObj.put("intent", "String - e.g., 'complaint', 'question', 'feedback', 'feature_request'");
             sentimentObj.put("urgency", "String - 'low', 'medium', or 'high'");
             sentimentObj.put("confidence", "Float - 0.0 to 1.0, how confident you are in the sentiment assessment");
-            sentimentObj.put("topicTags",
-                    List.of("String - e.g., 'billing', 'shipping', 'product_quality', 'account'"));
+            sentimentObj.put("topicTags", List.of("String - e.g., 'billing', 'shipping', 'product_quality', 'account'"));
             sentimentObj.put("userFeedback", "String - direct user feedback if present; otherwise empty");
             schema.put("sentiment", sentimentObj);
         }
 
         try {
             String jsonSchema = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(schema);
-            return "Response with one single valid JSON Object (without wrapping it in " +
-                    "any formatting or markdown). Always use the following json structure as response:" +
-                    jsonSchema;
+            return "Response with one single valid JSON Object (without wrapping it in "
+                    + "any formatting or markdown). Always use the following json structure as response:" + jsonSchema;
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new RuntimeException("Failed to serialize JSON schema", e);
         }
@@ -616,17 +587,12 @@ public class AgentSetupService {
 
     // ==================== Private Helpers ====================
 
-    record ResolvedParams(String providerType, String modelId,
-                          boolean shouldDeploy, Deployment.Environment env) {
+    record ResolvedParams(String providerType, String modelId, boolean shouldDeploy, Deployment.Environment env) {
     }
 
-    ResolvedParams resolveParams(String provider, String model,
-                                        Boolean deploy, String environment) {
-        return new ResolvedParams(
-                provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : "anthropic",
-                model != null && !model.isBlank() ? model.trim() : "claude-sonnet-4-6",
-                deploy == null || deploy,
-                parseEnvironment(environment));
+    ResolvedParams resolveParams(String provider, String model, Boolean deploy, String environment) {
+        return new ResolvedParams(provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : "anthropic",
+                model != null && !model.isBlank() ? model.trim() : "claude-sonnet-4-6", deploy == null || deploy, parseEnvironment(environment));
     }
 
     /**
@@ -643,17 +609,14 @@ public class AgentSetupService {
                 try {
                     @SuppressWarnings("unchecked")
                     var body = (java.util.Map<String, Object>) response.getEntity();
-                    String deployStatus = body != null && body.containsKey("status")
-                            ? body.get("status").toString()
-                            : "UNKNOWN";
+                    String deployStatus = body != null && body.containsKey("status") ? body.get("status").toString() : "UNKNOWN";
                     result.put("deployed", "READY".equals(deployStatus));
                     result.put("deploymentStatus", deployStatus);
                     if (body != null && body.containsKey("error")) {
                         result.put("deployError", body.get("error").toString());
                     }
                     if (!"READY".equals(deployStatus)) {
-                        String warning = "Agent created but deployment status is " + deployStatus +
-                                ". Check Agent configuration and credentials.";
+                        String warning = "Agent created but deployment status is " + deployStatus + ". Check Agent configuration and credentials.";
                         if (body != null && body.containsKey("error")) {
                             warning += " Error: " + body.get("error");
                         }
@@ -682,7 +645,8 @@ public class AgentSetupService {
     }
 
     private void patchDescriptor(String id, int version, String name) {
-        if (id == null) return;
+        if (id == null)
+            return;
         try {
             var patchDoc = new DocumentDescriptor();
             patchDoc.setName(name);
@@ -716,16 +680,16 @@ public class AgentSetupService {
     }
 
     static String extractIdFromLocation(String location) {
-        if (location == null || location.isBlank()) return null;
+        if (location == null || location.isBlank())
+            return null;
         String path = location.contains("?") ? location.substring(0, location.indexOf('?')) : location;
         int lastSlash = path.lastIndexOf('/');
-        return lastSlash >= 0 && lastSlash < path.length() - 1
-                ? path.substring(lastSlash + 1)
-                : null;
+        return lastSlash >= 0 && lastSlash < path.length() - 1 ? path.substring(lastSlash + 1) : null;
     }
 
     static int extractVersionFromLocation(String location) {
-        if (location == null || !location.contains("version=")) return 1;
+        if (location == null || !location.contains("version="))
+            return 1;
         try {
             int idx = location.indexOf("version=") + "version=".length();
             int end = location.indexOf('&', idx);

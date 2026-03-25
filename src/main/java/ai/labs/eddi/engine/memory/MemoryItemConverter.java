@@ -51,8 +51,7 @@ public class MemoryItemConverter implements IMemoryItemConverter {
         addInfoObject(conversationDataObjects, memory.getUserId(), KEY_USER_INFO, KEY_USER_ID);
         addInfoObject(conversationDataObjects, memory.getConversationId(), KEY_CONVERSATION_INFO, KEY_CONVERSATION_ID);
         addInfoObject(conversationDataObjects, memory.getAgentId(), KEY_CONVERSATION_INFO, KEY_AGENT_ID);
-        addInfoObject(conversationDataObjects, memory.getAgentVersion().toString(), KEY_CONVERSATION_INFO,
-                KEY_AGENT_VERSION);
+        addInfoObject(conversationDataObjects, memory.getAgentVersion().toString(), KEY_CONVERSATION_INFO, KEY_AGENT_VERSION);
 
         conversationDataObjects.put(KEY_CONVERSATION_LOG, new ConversationLogGenerator(memory));
 

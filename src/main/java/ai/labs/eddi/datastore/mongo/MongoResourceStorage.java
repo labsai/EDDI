@@ -35,15 +35,12 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     protected MongoCollection<Document> historyCollection;
     protected IDocumentBuilder documentBuilder;
 
-    public MongoResourceStorage(MongoDatabase database, String collectionName,
-            IDocumentBuilder documentBuilder,
-            Class<T> documentType) {
+    public MongoResourceStorage(MongoDatabase database, String collectionName, IDocumentBuilder documentBuilder, Class<T> documentType) {
         this(database, collectionName, documentBuilder, documentType, new String[0]);
     }
 
-    public MongoResourceStorage(MongoDatabase database, String collectionName,
-            IDocumentBuilder documentBuilder,
-            Class<T> documentType, String... indexes) {
+    public MongoResourceStorage(MongoDatabase database, String collectionName, IDocumentBuilder documentBuilder, Class<T> documentType,
+            String... indexes) {
         checkNotNull(database, "database");
 
         this.documentType = documentType;
@@ -87,9 +84,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         if (resource.getId() == null) {
             currentCollection.insertOne(resource.getMongoDocument());
         } else {
-            currentCollection.updateOne(
-                    Filters.eq("_id", new ObjectId(resource.getId())),
-                    new Document("$set", resource.getMongoDocument()),
+            currentCollection.updateOne(Filters.eq("_id", new ObjectId(resource.getId())), new Document("$set", resource.getMongoDocument()),
                     new UpdateOptions().upsert(true));
         }
     }
@@ -210,8 +205,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public List<IResourceStore.IResourceId> findResourceIdsContaining(String jsonPath, String value) {
-        Document filter = new Document(jsonPath,
-                new Document("$in", java.util.Collections.singletonList(value)));
+        Document filter = new Document(jsonPath, new Document("$in", java.util.Collections.singletonList(value)));
 
         List<IResourceStore.IResourceId> results = new java.util.LinkedList<>();
         currentCollection.find(filter).forEach(doc -> {
@@ -224,8 +218,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public List<IResourceStore.IResourceId> findHistoryResourceIdsContaining(String jsonPath, String value) {
-        Document filter = new Document(jsonPath,
-                new Document("$in", java.util.Collections.singletonList(value)));
+        Document filter = new Document(jsonPath, new Document("$in", java.util.Collections.singletonList(value)));
 
         List<IResourceStore.IResourceId> results = new java.util.LinkedList<>();
         historyCollection.find(filter).forEach(doc -> {
@@ -240,8 +233,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
-    public List<IResourceStore.IResourceId> findResources(
-            IResourceFilter.QueryFilters[] allQueryFilters, String sortField, int skip, int limit) {
+    public List<IResourceStore.IResourceId> findResources(IResourceFilter.QueryFilters[] allQueryFilters, String sortField, int skip, int limit) {
 
         List<Bson> connectedFilters = new java.util.ArrayList<>();
         for (IResourceFilter.QueryFilters queryFilters : allQueryFilters) {
@@ -264,8 +256,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         Document sort = sortField != null ? new Document(sortField, -1) : new Document();
         int effectiveLimit = limit < 1 ? 20 : limit;
 
-        var iterable = currentCollection.find(query.toBsonDocument()).sort(sort)
-                .limit(effectiveLimit).skip(skip > 0 ? skip : 0);
+        var iterable = currentCollection.find(query.toBsonDocument()).sort(sort).limit(effectiveLimit).skip(skip > 0 ? skip : 0);
 
         List<IResourceStore.IResourceId> results = new java.util.LinkedList<>();
         iterable.forEach(doc -> {

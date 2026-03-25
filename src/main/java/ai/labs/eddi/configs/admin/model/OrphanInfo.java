@@ -1,16 +1,16 @@
 package ai.labs.eddi.configs.admin.model;
 
-
 import java.net.URI;
 
 /**
- * Represents an orphaned resource that is not referenced by any Agent or package.
+ * Represents an orphaned resource that is not referenced by any Agent or
+ * package.
  */
 public class OrphanInfo {
     private URI resourceUri;
-    private String type;        // e.g., "ai.labs.package", "ai.labs.behavior"
-    private String name;        // human-readable name from descriptor
-    private boolean deleted;    // soft-deleted?
+    private String type; // e.g., "ai.labs.package", "ai.labs.behavior"
+    private String name; // human-readable name from descriptor
+    private boolean deleted; // soft-deleted?
 
     public OrphanInfo() {
     }

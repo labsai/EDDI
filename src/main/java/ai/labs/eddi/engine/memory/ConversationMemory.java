@@ -184,7 +184,7 @@ public class ConversationMemory implements IConversationMemory {
         this.auditCollector = auditCollector;
     }
 
-    public final static class ConversationStepStack implements IConversationStepStack {
+    public static final class ConversationStepStack implements IConversationStepStack {
         private final List<IConversationStep> conversationSteps = new ArrayList<>();
 
         public ConversationStepStack(List<IConversationStep> steps) {
@@ -224,9 +224,7 @@ public class ConversationMemory implements IConversationMemory {
 
         @Override
         public <T> List<IData<T>> getAllLatestData(String prefix) {
-            return conversationSteps.stream()
-                    .map((IConversationStep conversationStep) -> conversationStep.<T>getLatestData(prefix))
-                    .toList();
+            return conversationSteps.stream().map((IConversationStep conversationStep) -> conversationStep.<T>getLatestData(prefix)).toList();
         }
 
         @Override

@@ -28,11 +28,9 @@ public class PropertySetter implements IPropertySetter {
 
     @Override
     public List<Property> extractProperties(Expressions expressions) {
-        return expressions.stream().
-                filter(expression ->
-                        PROPERTY_EXPRESSION.equals(expression.getExpressionName()) &&
-                                expression.getSubExpressions().length > 0).
-                map(expression -> {
+        return expressions.stream()
+                .filter(expression -> PROPERTY_EXPRESSION.equals(expression.getExpressionName()) && expression.getSubExpressions().length > 0)
+                .map(expression -> {
                     var meanings = new LinkedList<String>();
                     var propertyValue = new Value();
                     extractMeanings(meanings, propertyValue, expression.getSubExpressions()[0]);
@@ -47,9 +45,9 @@ public class PropertySetter implements IPropertySetter {
                             return new Property(propertyName, propertyValue.toInteger(), propertyScope);
                         }
                     } else {
-                        return propertyValue.isBoolean() ?
-                                new Property(propertyName, propertyValue.toBoolean(), propertyScope) :
-                                new Property(propertyName, propertyValue.getExpressionName(), propertyScope);
+                        return propertyValue.isBoolean()
+                                ? new Property(propertyName, propertyValue.toBoolean(), propertyScope)
+                                : new Property(propertyName, propertyValue.getExpressionName(), propertyScope);
                     }
 
                 }).collect(Collectors.toCollection(LinkedList::new));

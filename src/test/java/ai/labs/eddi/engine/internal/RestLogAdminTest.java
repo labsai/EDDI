@@ -39,11 +39,9 @@ class RestLogAdminTest {
 
     @Test
     void shouldReturnRecentLogsFromBuffer() {
-        LogEntry entry = new LogEntry(
-                System.currentTimeMillis(), "INFO", "test.Logger", "test message",
-                "production", "agent-1", 1, "conv-1", "user-1", "test-host-1234");
-        when(boundedLogStore.getEntries("agent-1", null, null, 200))
-                .thenReturn(List.of(entry));
+        LogEntry entry = new LogEntry(System.currentTimeMillis(), "INFO", "test.Logger", "test message", "production", "agent-1", 1, "conv-1",
+                "user-1", "test-host-1234");
+        when(boundedLogStore.getEntries("agent-1", null, null, 200)).thenReturn(List.of(entry));
 
         List<LogEntry> result = admin.getRecentLogs("agent-1", null, null, 200);
 
@@ -54,8 +52,7 @@ class RestLogAdminTest {
 
     @Test
     void shouldReturnEmptyRecentLogs() {
-        when(boundedLogStore.getEntries(null, null, null, 100))
-                .thenReturn(Collections.emptyList());
+        when(boundedLogStore.getEntries(null, null, null, 100)).thenReturn(Collections.emptyList());
 
         List<LogEntry> result = admin.getRecentLogs(null, null, null, 100);
 
@@ -69,26 +66,18 @@ class RestLogAdminTest {
         DatabaseLog dbLog = new DatabaseLog();
         dbLog.put("message", "historic error");
         dbLog.put("level", "ERROR");
-        when(databaseLogs.getLogs(
-                Deployment.Environment.production, "agent-1", null,
-                null, null, null, 0, 50))
-                .thenReturn(List.of(dbLog));
+        when(databaseLogs.getLogs(Deployment.Environment.production, "agent-1", null, null, null, null, 0, 50)).thenReturn(List.of(dbLog));
 
-        List<DatabaseLog> result = admin.getHistoryLogs(
-                Deployment.Environment.production, "agent-1", null,
-                null, null, null, 0, 50);
+        List<DatabaseLog> result = admin.getHistoryLogs(Deployment.Environment.production, "agent-1", null, null, null, null, 0, 50);
 
         assertEquals(1, result.size());
         assertEquals("historic error", result.get(0).get("message"));
-        verify(databaseLogs).getLogs(
-                Deployment.Environment.production, "agent-1", null,
-                null, null, null, 0, 50);
+        verify(databaseLogs).getLogs(Deployment.Environment.production, "agent-1", null, null, null, null, 0, 50);
     }
 
     @Test
     void shouldPassInstanceIdToHistory() {
-        when(databaseLogs.getLogs(null, null, null, null, null, "instance-xyz", 0, 100))
-                .thenReturn(Collections.emptyList());
+        when(databaseLogs.getLogs(null, null, null, null, null, "instance-xyz", 0, 100)).thenReturn(Collections.emptyList());
 
         admin.getHistoryLogs(null, null, null, null, null, "instance-xyz", 0, 100);
 

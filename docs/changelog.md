@@ -90,7 +90,7 @@ Comprehensive content rename across the entire repository to align all strings, 
 | **Error Messages**              | ~15   | `"Failed to deploy bot"`→`"Failed to deploy agent"`                                            |
 | **OpenAPI Descriptions**        | ~10   | `"Deploy & Undeploy Bots"`→`"Deploy & Undeploy Agents"`                                        |
 | **Constants**                   | ~20   | `BOT_FILE_ENDING`→`AGENT_FILE_ENDING`, `COLLECTION_BOT_TRIGGERS`→`COLLECTION_AGENT_TRIGGERS`   |
-| **Documentation**               | ~40   | `mcp-server.md`, `changelog.md`, `v6_renaming_recommendation.md`                               |
+| **Documentation**               | ~40   | `mcp-server.md`, `changelog.md`                                                                |
 | **Shell Scripts**               | 2     | `install.sh`, `install.ps1` — `BOT_COUNT`→`AGENT_COUNT`                                        |
 
 **Also in this commit:**

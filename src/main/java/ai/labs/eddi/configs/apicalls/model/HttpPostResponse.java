@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.apicalls.model;
 
-
 public class HttpPostResponse extends PostResponse {
     private RetryApiCallInstruction retryApiCallInstruction;
 

@@ -5,8 +5,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.DoubleAdder;
 
 /**
- * Mutable usage counters for a tenant.
- * Thread-safe — uses atomic types for concurrent access.
+ * Mutable usage counters for a tenant. Thread-safe — uses atomic types for
+ * concurrent access.
  * <p>
  * Note: {@link #incrementApiCalls()} and {@link #incrementConversations()} are
  * individually atomic but NOT synchronized with the reset methods. Under high
@@ -95,26 +95,13 @@ public class TenantUsage {
      * Snapshot of current usage for REST API responses.
      */
     public UsageSnapshot toSnapshot() {
-        return new UsageSnapshot(
-                tenantId,
-                conversationsToday.get(),
-                apiCallsThisMinute.get(),
-                monthlyCostUsd.sum(),
-                minuteWindowStart,
-                dayStart
-        );
+        return new UsageSnapshot(tenantId, conversationsToday.get(), apiCallsThisMinute.get(), monthlyCostUsd.sum(), minuteWindowStart, dayStart);
     }
 
     /**
      * Immutable snapshot of usage at a point in time.
      */
-    public record UsageSnapshot(
-            String tenantId,
-            int conversationsToday,
-            int apiCallsThisMinute,
-            double monthlyCostUsd,
-            Instant minuteWindowStart,
-            Instant dayStart
-    ) {
+    public record UsageSnapshot(String tenantId, int conversationsToday, int apiCallsThisMinute, double monthlyCostUsd, Instant minuteWindowStart,
+            Instant dayStart) {
     }
 }

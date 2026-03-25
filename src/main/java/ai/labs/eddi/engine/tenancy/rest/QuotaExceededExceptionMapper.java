@@ -18,13 +18,7 @@ public class QuotaExceededExceptionMapper implements ExceptionMapper<QuotaExceed
 
     @Override
     public Response toResponse(QuotaExceededException exception) {
-        return Response.status(TOO_MANY_REQUESTS)
-                .entity(Map.of(
-                        "error", "quota_exceeded",
-                        "message", exception.getMessage()
-                ))
-                .type(MediaType.APPLICATION_JSON)
-                .header("Retry-After", "60")
-                .build();
+        return Response.status(TOO_MANY_REQUESTS).entity(Map.of("error", "quota_exceeded", "message", exception.getMessage()))
+                .type(MediaType.APPLICATION_JSON).header("Retry-After", "60").build();
     }
 }

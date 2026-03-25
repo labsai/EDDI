@@ -24,7 +24,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
  * <p>
  * Schema is auto-created via {@code CREATE TABLE IF NOT EXISTS}.
  *
- * @param <T> the resource document type
+ * @param <T>
+ *            the resource document type
  */
 public class PostgresResourceStorage<T> implements IResourceStorage<T> {
 
@@ -51,19 +52,15 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
             )
             """;
 
-    private static final String CREATE_HISTORY_INDEX =
-            "CREATE INDEX IF NOT EXISTS idx_resources_history_id_collection " +
-                    "ON resources_history (id, collection_name)";
+    private static final String CREATE_HISTORY_INDEX = "CREATE INDEX IF NOT EXISTS idx_resources_history_id_collection "
+            + "ON resources_history (id, collection_name)";
 
     private final DataSource dataSource;
     private final String collectionName;
     private final IJsonSerialization jsonSerialization;
     private final Class<T> documentType;
 
-    public PostgresResourceStorage(DataSource dataSource,
-                                   String collectionName,
-                                   IJsonSerialization jsonSerialization,
-                                   Class<T> documentType) {
+    public PostgresResourceStorage(DataSource dataSource, String collectionName, IJsonSerialization jsonSerialization, Class<T> documentType) {
         checkNotNull(dataSource, "dataSource");
         checkNotNull(collectionName, "collectionName");
         this.dataSource = dataSource;
@@ -75,8 +72,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
     }
 
     private void initSchema() {
-        try (Connection conn = dataSource.getConnection();
-             Statement stmt = conn.createStatement()) {
+        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_RESOURCES_TABLE);
             stmt.execute(CREATE_HISTORY_TABLE);
             stmt.execute(CREATE_HISTORY_INDEX);
@@ -107,8 +103,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
                 ON CONFLICT (id, collection_name) DO UPDATE
                 SET version = EXCLUDED.version, data = EXCLUDED.data
                 """;
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, pgResource.getId());
             ps.setString(2, collectionName);
             ps.setInt(3, pgResource.getVersion());
@@ -122,10 +117,8 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public void createNew(IResource<T> resource) {
         Resource pgResource = checkInternalResource(resource);
-        String sql = "INSERT INTO resources (id, collection_name, version, data) " +
-                "VALUES (?::uuid, ?, ?, ?::jsonb)";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        String sql = "INSERT INTO resources (id, collection_name, version, data) " + "VALUES (?::uuid, ?, ?, ?::jsonb)";
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, pgResource.getId());
             ps.setString(2, collectionName);
             ps.setInt(3, pgResource.getVersion());
@@ -138,18 +131,14 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public IResource<T> read(String id, Integer version) {
-        String sql = "SELECT id, version, data FROM resources " +
-                "WHERE id = ?::uuid AND collection_name = ? AND version = ?";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        String sql = "SELECT id, version, data FROM resources " + "WHERE id = ?::uuid AND collection_name = ? AND version = ?";
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
             ps.setString(2, collectionName);
             ps.setInt(3, version);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    return new Resource(
-                            rs.getString("id"), rs.getInt("version"),
-                            rs.getString("data"));
+                    return new Resource(rs.getString("id"), rs.getInt("version"), rs.getString("data"));
                 }
                 return null;
             }
@@ -161,8 +150,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public void remove(String id) {
         String sql = "DELETE FROM resources WHERE id = ?::uuid AND collection_name = ?";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
             ps.setString(2, collectionName);
             ps.executeUpdate();
@@ -176,14 +164,12 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                try (PreparedStatement ps = conn.prepareStatement(
-                        "DELETE FROM resources WHERE id = ?::uuid AND collection_name = ?")) {
+                try (PreparedStatement ps = conn.prepareStatement("DELETE FROM resources WHERE id = ?::uuid AND collection_name = ?")) {
                     ps.setString(1, id);
                     ps.setString(2, collectionName);
                     ps.executeUpdate();
                 }
-                try (PreparedStatement ps = conn.prepareStatement(
-                        "DELETE FROM resources_history WHERE id = ?::uuid AND collection_name = ?")) {
+                try (PreparedStatement ps = conn.prepareStatement("DELETE FROM resources_history WHERE id = ?::uuid AND collection_name = ?")) {
                     ps.setString(1, id);
                     ps.setString(2, collectionName);
                     ps.executeUpdate();
@@ -200,18 +186,14 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public IHistoryResource<T> readHistory(String id, Integer version) {
-        String sql = "SELECT id, version, data, deleted FROM resources_history " +
-                "WHERE id = ?::uuid AND collection_name = ? AND version = ?";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        String sql = "SELECT id, version, data, deleted FROM resources_history " + "WHERE id = ?::uuid AND collection_name = ? AND version = ?";
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
             ps.setString(2, collectionName);
             ps.setInt(3, version);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    return new HistoryResource(
-                            rs.getString("id"), rs.getInt("version"),
-                            rs.getString("data"), rs.getBoolean("deleted"));
+                    return new HistoryResource(rs.getString("id"), rs.getInt("version"), rs.getString("data"), rs.getBoolean("deleted"));
                 }
                 return null;
             }
@@ -222,18 +204,14 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public IHistoryResource<T> readHistoryLatest(String id) {
-        String sql = "SELECT id, version, data, deleted FROM resources_history " +
-                "WHERE id = ?::uuid AND collection_name = ? " +
-                "ORDER BY version DESC LIMIT 1";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        String sql = "SELECT id, version, data, deleted FROM resources_history " + "WHERE id = ?::uuid AND collection_name = ? "
+                + "ORDER BY version DESC LIMIT 1";
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
             ps.setString(2, collectionName);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    return new HistoryResource(
-                            rs.getString("id"), rs.getInt("version"),
-                            rs.getString("data"), rs.getBoolean("deleted"));
+                    return new HistoryResource(rs.getString("id"), rs.getInt("version"), rs.getString("data"), rs.getBoolean("deleted"));
                 }
                 return null;
             }
@@ -245,9 +223,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public IHistoryResource<T> newHistoryResourceFor(IResource<T> resource, boolean deleted) {
         Resource pgResource = checkInternalResource(resource);
-        return new HistoryResource(
-                pgResource.getId(), pgResource.getVersion(),
-                pgResource.getJson(), deleted);
+        return new HistoryResource(pgResource.getId(), pgResource.getVersion(), pgResource.getJson(), deleted);
     }
 
     @Override
@@ -259,8 +235,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
                 ON CONFLICT (id, collection_name, version) DO UPDATE
                 SET data = EXCLUDED.data, deleted = EXCLUDED.deleted
                 """;
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, pgHistory.getId());
             ps.setString(2, collectionName);
             ps.setInt(3, pgHistory.getVersion());
@@ -274,10 +249,8 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public Integer getCurrentVersion(String id) {
-        String sql = "SELECT version FROM resources " +
-                "WHERE id = ?::uuid AND collection_name = ?";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        String sql = "SELECT version FROM resources " + "WHERE id = ?::uuid AND collection_name = ?";
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
             ps.setString(2, collectionName);
             try (ResultSet rs = ps.executeQuery()) {
@@ -294,10 +267,8 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public List<IResourceStore.IResourceId> findResourceIdsContaining(String jsonPath, String value) {
         // Use JSONB containment: data->'jsonPath' @> '["value"]'::jsonb
-        String sql = "SELECT id, version FROM resources " +
-                "WHERE collection_name = ? AND data->'" + sanitizeJsonPath(jsonPath) + "' @> ?::jsonb";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        String sql = "SELECT id, version FROM resources " + "WHERE collection_name = ? AND data->'" + sanitizeJsonPath(jsonPath) + "' @> ?::jsonb";
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, collectionName);
             ps.setString(2, "[\"" + value + "\"]");
             return extractResourceIds(ps);
@@ -308,10 +279,9 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public List<IResourceStore.IResourceId> findHistoryResourceIdsContaining(String jsonPath, String value) {
-        String sql = "SELECT id, version FROM resources_history " +
-                "WHERE collection_name = ? AND data->'" + sanitizeJsonPath(jsonPath) + "' @> ?::jsonb";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        String sql = "SELECT id, version FROM resources_history " + "WHERE collection_name = ? AND data->'" + sanitizeJsonPath(jsonPath)
+                + "' @> ?::jsonb";
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, collectionName);
             ps.setString(2, "[\"" + value + "\"]");
             return extractResourceIds(ps);
@@ -321,8 +291,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
-    public List<IResourceStore.IResourceId> findResources(
-            IResourceFilter.QueryFilters[] allQueryFilters, String sortField, int skip, int limit) {
+    public List<IResourceStore.IResourceId> findResources(IResourceFilter.QueryFilters[] allQueryFilters, String sortField, int skip, int limit) {
 
         StringBuilder sql = new StringBuilder("SELECT id, version FROM resources WHERE collection_name = ?");
         List<Object> params = new ArrayList<>();
@@ -343,8 +312,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
                     params.add(qf.getFilter().toString());
                 }
             }
-            String connector = queryFilters.getConnectingType() == IResourceFilter.QueryFilters.ConnectingType.AND
-                    ? " AND " : " OR ";
+            String connector = queryFilters.getConnectingType() == IResourceFilter.QueryFilters.ConnectingType.AND ? " AND " : " OR ";
             sql.append(" AND (").append(String.join(connector, clauses)).append(")");
         }
 
@@ -358,8 +326,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
             sql.append(" OFFSET ").append(skip);
         }
 
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql.toString())) {
             for (int i = 0; i < params.size(); i++) {
                 Object param = params.get(i);
                 if (param instanceof Boolean b) {
@@ -381,8 +348,14 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
                 String id = rs.getString("id");
                 int version = rs.getInt("version");
                 results.add(new IResourceStore.IResourceId() {
-                    @Override public String getId() { return id; }
-                    @Override public Integer getVersion() { return version; }
+                    @Override
+                    public String getId() {
+                        return id;
+                    }
+                    @Override
+                    public Integer getVersion() {
+                        return version;
+                    }
                 });
             }
         }
@@ -397,8 +370,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
     @SuppressWarnings("unchecked")
     private Resource checkInternalResource(IResource<?> resource) {
         if (!(resource instanceof PostgresResourceStorage<?>.Resource)) {
-            throw new IllegalArgumentException(
-                    "Resource must be a PostgresResourceStorage.Resource instance");
+            throw new IllegalArgumentException("Resource must be a PostgresResourceStorage.Resource instance");
         }
         return (Resource) resource;
     }
@@ -406,8 +378,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
     @SuppressWarnings("unchecked")
     private HistoryResource checkInternalHistoryResource(IHistoryResource<?> resource) {
         if (!(resource instanceof PostgresResourceStorage<?>.HistoryResource)) {
-            throw new IllegalArgumentException(
-                    "HistoryResource must be a PostgresResourceStorage.HistoryResource instance");
+            throw new IllegalArgumentException("HistoryResource must be a PostgresResourceStorage.HistoryResource instance");
         }
         return (HistoryResource) resource;
     }

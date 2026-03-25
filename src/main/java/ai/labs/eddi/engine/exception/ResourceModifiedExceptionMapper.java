@@ -10,9 +10,6 @@ import jakarta.ws.rs.ext.Provider;
 public class ResourceModifiedExceptionMapper implements ExceptionMapper<IResourceStore.ResourceModifiedException> {
     @Override
     public Response toResponse(IResourceStore.ResourceModifiedException exception) {
-        return Response.status(Response.Status.CONFLICT)
-                .type(MediaType.TEXT_PLAIN)
-                .entity(exception.getLocalizedMessage())
-                .build();
+        return Response.status(Response.Status.CONFLICT).type(MediaType.TEXT_PLAIN).entity(exception.getLocalizedMessage()).build();
     }
 }

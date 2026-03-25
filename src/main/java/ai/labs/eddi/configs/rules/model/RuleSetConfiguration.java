@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.rules.model;
 
-
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 

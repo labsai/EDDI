@@ -12,8 +12,7 @@ import jakarta.inject.Inject;
  * @author ginccc
  */
 @ApplicationScoped
-public class LlmStore extends AbstractResourceStore<LlmConfiguration>
-        implements ILlmStore {
+public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements ILlmStore {
 
     @Inject
     public LlmStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {

@@ -1,0 +1,16 @@
+[WARNING] src\main\java\ai\labs\eddi\backup\impl\ZipArchive.java:[75] (sizes) LineLength: Line is longer than 150 characters (found 154).
+[WARNING] src\main\java\ai\labs\eddi\configs\admin\IRestOrphanAdmin.java:[30] (sizes) LineLength: Line is longer than 150 characters (found 152).
+[WARNING] src\main\java\ai\labs\eddi\configs\admin\IRestOrphanAdmin.java:[35] (sizes) LineLength: Line is longer than 150 characters (found 177).
+[WARNING] src\main\java\ai\labs\eddi\configs\admin\IRestOrphanAdmin.java:[43] (sizes) LineLength: Line is longer than 150 characters (found 176).
+[WARNING] src\main\java\ai\labs\eddi\configs\agents\IRestAgentStore.java:[48] (sizes) LineLength: Line is longer than 150 characters (found 165).
+[WARNING] src\main\java\ai\labs\eddi\configs\agents\IRestAgentStore.java:[93] (sizes) LineLength: Line is longer than 150 characters (found 161).
+[WARNING] src\main\java\ai\labs\eddi\configs\workflows\IRestWorkflowStore.java:[93] (sizes) LineLength: Line is longer than 150 characters (found 164).
+[WARNING] src\main\java\ai\labs\eddi\datastore\postgres\PostgresDatabaseLogs.java:[111] (sizes) LineLength: Line is longer than 150 characters (found 159).
+[WARNING] src\main\java\ai\labs\eddi\engine\api\IRestAgentAdministration.java:[31] (sizes) LineLength: Line is longer than 150 characters (found 161).
+[WARNING] src\main\java\ai\labs\eddi\engine\api\IRestAgentManagement.java:[27] (sizes) LineLength: Line is longer than 150 characters (found 162).
+[WARNING] src\main\java\ai\labs\eddi\engine\api\IRestAgentSetup.java:[31] (sizes) LineLength: Line is longer than 150 characters (found 169).
+[WARNING] src\main\java\ai\labs\eddi\engine\mcp\McpAdminTools.java:[819] (sizes) LineLength: Line is longer than 150 characters (found 187).
+[WARNING] src\main\java\ai\labs\eddi\engine\mcp\McpAdminTools.java:[844] (sizes) LineLength: Line is longer than 150 characters (found 187).
+[WARNING] src\main\java\ai\labs\eddi\engine\mcp\McpAdminTools.java:[891] (sizes) LineLength: Line is longer than 150 characters (found 159).
+[WARNING] src\main\java\ai\labs\eddi\engine\mcp\McpAdminTools.java:[894] (sizes) LineLength: Line is longer than 150 characters (found 172).
+[WARNING] src\main\java\ai\labs\eddi\engine\memory\rest\RestConversationStore.java:[55] (sizes) LineLength: Line is longer than 150 characters (found 151).

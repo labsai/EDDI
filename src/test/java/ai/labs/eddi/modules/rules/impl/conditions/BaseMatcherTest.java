@@ -15,57 +15,57 @@ abstract class BaseMatcherTest {
 
     @Test
     public void setValues_currentStep() throws Exception {
-        //setup
+        // setup
         Map<String, String> values = new HashMap<>();
         BaseMatcher.ConversationStepOccurrence expectedOccurrence = BaseMatcher.ConversationStepOccurrence.currentStep;
         values.put(KEY_OCCURRENCE, expectedOccurrence.toString());
 
-        //test
+        // test
         matcher.setConfigs(values);
 
-        //assert
+        // assert
         Assertions.assertEquals(expectedOccurrence, matcher.getOccurrence());
     }
 
     @Test
     public void setValues_lastStep() throws Exception {
-        //setup
+        // setup
         Map<String, String> values = new HashMap<>();
         BaseMatcher.ConversationStepOccurrence expectedOccurrence = BaseMatcher.ConversationStepOccurrence.lastStep;
         values.put(KEY_OCCURRENCE, expectedOccurrence.toString());
 
-        //test
+        // test
         matcher.setConfigs(values);
 
-        //assert
+        // assert
         Assertions.assertEquals(expectedOccurrence, matcher.getOccurrence());
     }
 
     @Test
     public void setValues_anyStep() throws Exception {
-        //setup
+        // setup
         Map<String, String> values = new HashMap<>();
         BaseMatcher.ConversationStepOccurrence expectedOccurrence = BaseMatcher.ConversationStepOccurrence.anyStep;
         values.put(KEY_OCCURRENCE, expectedOccurrence.toString());
 
-        //test
+        // test
         matcher.setConfigs(values);
 
-        //assert
+        // assert
         Assertions.assertEquals(expectedOccurrence, matcher.getOccurrence());
     }
 
     @Test
     public void setValues_never() throws Exception {
-        //setup
+        // setup
         Map<String, String> values = new HashMap<>();
         BaseMatcher.ConversationStepOccurrence expectedOccurrence = BaseMatcher.ConversationStepOccurrence.never;
         values.put(KEY_OCCURRENCE, expectedOccurrence.toString());
 
-        //test
+        // test
         matcher.setConfigs(values);
 
-        //assert
+        // assert
         Assertions.assertEquals(expectedOccurrence, matcher.getOccurrence());
     }
 }

@@ -19,9 +19,7 @@ public interface IRuntime {
 
     <T> Future<T> submitCallable(Callable<T> callable, Map<Object, Object> threadBindings);
 
-    <T> Future<T> submitCallable(Callable<T> callable,
-                                 IFinishedExecution<T> callableCompleted,
-                                 Map<Object, Object> threadBindings);
+    <T> Future<T> submitCallable(Callable<T> callable, IFinishedExecution<T> callableCompleted, Map<Object, Object> threadBindings);
 
     interface IFinishedExecution<T> {
         void onComplete(T result);
@@ -29,4 +27,3 @@ public interface IRuntime {
         void onFailure(Throwable t);
     }
 }
-

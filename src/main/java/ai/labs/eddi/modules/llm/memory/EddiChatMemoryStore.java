@@ -17,10 +17,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A quarkus-langchain4j ChatMemoryStore backed by EDDI's IConversationMemoryStore.
- * This ensures that AI agents and the EDDI lifecycle share the same stateful conversation history.
+ * A quarkus-langchain4j ChatMemoryStore backed by EDDI's
+ * IConversationMemoryStore. This ensures that AI agents and the EDDI lifecycle
+ * share the same stateful conversation history.
  *
- * This bridge converts EDDI's conversation outputs into langchain4j's ChatMessage format.
+ * This bridge converts EDDI's conversation outputs into langchain4j's
+ * ChatMessage format.
  */
 @ApplicationScoped
 public class EddiChatMemoryStore implements ChatMemoryStore {
@@ -32,7 +34,8 @@ public class EddiChatMemoryStore implements ChatMemoryStore {
     /**
      * Loads the EDDI conversation history and converts it to Langchain4j's format.
      *
-     * @param memoryId The conversation ID (as Object per langchain4j interface)
+     * @param memoryId
+     *            The conversation ID (as Object per langchain4j interface)
      * @return List of ChatMessages representing the conversation history
      */
     @Override
@@ -85,20 +88,19 @@ public class EddiChatMemoryStore implements ChatMemoryStore {
     }
 
     /**
-     * Updates messages in EDDI's memory store.
-     * Note: In EDDI's architecture, the conversation memory is managed by the lifecycle.
-     * This method is called by langchain4j after agent execution, but EDDI persists
-     * messages through the normal lifecycle flow, not through this method.
+     * Updates messages in EDDI's memory store. Note: In EDDI's architecture, the
+     * conversation memory is managed by the lifecycle. This method is called by
+     * langchain4j after agent execution, but EDDI persists messages through the
+     * normal lifecycle flow, not through this method.
      *
-     * We implement this as a no-op because EDDI's LlmTask will handle
-     * storing the final agent response in the conversation memory.
+     * We implement this as a no-op because EDDI's LlmTask will handle storing the
+     * final agent response in the conversation memory.
      */
     @Override
     public void updateMessages(Object memoryId, List<ChatMessage> messages) {
         // No-op: EDDI manages memory persistence through the lifecycle
         // The LlmTask will store the agent's response in IConversationMemory
-        LOGGER.trace("updateMessages called for conversation " + memoryId +
-                     " (handled by EDDI lifecycle, not persisted here)");
+        LOGGER.trace("updateMessages called for conversation " + memoryId + " (handled by EDDI lifecycle, not persisted here)");
     }
 
     /**
@@ -117,4 +119,3 @@ public class EddiChatMemoryStore implements ChatMemoryStore {
         }
     }
 }
-

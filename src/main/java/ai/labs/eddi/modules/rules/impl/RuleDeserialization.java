@@ -40,11 +40,8 @@ public class RuleDeserialization implements IRuleDeserialization {
     private final IMemoryItemConverter memoryItemConverter;
 
     @Inject
-    public RuleDeserialization(ObjectMapper objectMapper,
-                                   IExpressionProvider expressionProvider,
-                                   IJsonSerialization jsonSerialization,
-                                   IMemoryItemConverter memoryItemConverter,
-                                   @RuleConditions Map<String, Provider<IRuleCondition>> conditionProvider) {
+    public RuleDeserialization(ObjectMapper objectMapper, IExpressionProvider expressionProvider, IJsonSerialization jsonSerialization,
+            IMemoryItemConverter memoryItemConverter, @RuleConditions Map<String, Provider<IRuleCondition>> conditionProvider) {
         this.objectMapper = objectMapper;
         this.expressionProvider = expressionProvider;
         this.conditionProvider = conditionProvider;
@@ -58,32 +55,28 @@ public class RuleDeserialization implements IRuleDeserialization {
             RuleSet behaviorSet = new RuleSet();
             RuleSetConfiguration behaviorJson = objectMapper.readerFor(RuleSetConfiguration.class).readValue(json);
 
-            behaviorSet.getRuleGroups().addAll(behaviorJson.getBehaviorGroups().stream().map(
-                    groupConfiguration -> {
-                        RuleGroup behaviorGroup = new RuleGroup();
-                        behaviorGroup.setName(groupConfiguration.getName());
-                        ExecutionStrategy executionStrategy;
-                        String executionStrategyString = groupConfiguration.getExecutionStrategy();
-                        if (isNullOrEmpty(executionStrategyString)) {
-                            executionStrategy = ExecutionStrategy.executeUntilFirstSuccess;
-                        } else {
-                            executionStrategy = ExecutionStrategy.valueOf(executionStrategyString);
-                        }
+            behaviorSet.getRuleGroups().addAll(behaviorJson.getBehaviorGroups().stream().map(groupConfiguration -> {
+                RuleGroup behaviorGroup = new RuleGroup();
+                behaviorGroup.setName(groupConfiguration.getName());
+                ExecutionStrategy executionStrategy;
+                String executionStrategyString = groupConfiguration.getExecutionStrategy();
+                if (isNullOrEmpty(executionStrategyString)) {
+                    executionStrategy = ExecutionStrategy.executeUntilFirstSuccess;
+                } else {
+                    executionStrategy = ExecutionStrategy.valueOf(executionStrategyString);
+                }
 
-                        behaviorGroup.setExecutionStrategy(executionStrategy);
+                behaviorGroup.setExecutionStrategy(executionStrategy);
 
-                        behaviorGroup.getRules().addAll(groupConfiguration.getRules().stream().map(
-                                behaviorRuleJson -> {
-                                    Rule behaviorRule = new Rule(behaviorRuleJson.getName());
-                                    behaviorRule.setActions(behaviorRuleJson.getActions());
-                                    behaviorRule.setConditions(convert(behaviorRuleJson.getConditions(), behaviorSet));
-                                    return behaviorRule;
-                                }
-                        ).toList());
+                behaviorGroup.getRules().addAll(groupConfiguration.getRules().stream().map(behaviorRuleJson -> {
+                    Rule behaviorRule = new Rule(behaviorRuleJson.getName());
+                    behaviorRule.setActions(behaviorRuleJson.getActions());
+                    behaviorRule.setConditions(convert(behaviorRuleJson.getConditions(), behaviorSet));
+                    return behaviorRule;
+                }).toList());
 
-                        return behaviorGroup;
-                    }
-            ).toList());
+                return behaviorGroup;
+            }).toList());
 
             return behaviorSet;
         } catch (IOException e) {
@@ -91,43 +84,39 @@ public class RuleDeserialization implements IRuleDeserialization {
         }
     }
 
-    private List<IRuleCondition> convert(List<RuleConditionConfiguration> conditionConfigs,
-                                             RuleSet behaviorSet) {
-        return conditionConfigs.stream().map(
-                conditionConfiguration -> {
-                    try {
-                        var type = conditionConfiguration.getType();
-                        checkNotNull(type, "behaviorRule.condition.type");
+    private List<IRuleCondition> convert(List<RuleConditionConfiguration> conditionConfigs, RuleSet behaviorSet) {
+        return conditionConfigs.stream().map(conditionConfiguration -> {
+            try {
+                var type = conditionConfiguration.getType();
+                checkNotNull(type, "behaviorRule.condition.type");
 
-                        var conditionsKey = CONDITION_PREFIX + type;
-                        if (!conditionProvider.containsKey(conditionsKey)) {
-                            var errorMessage = format("behaviorRule.condition.type=%s does not exist", conditionsKey);
-                            throw new IllegalArgumentException(errorMessage);
-                        }
-                        IRuleCondition condition = createCondition(conditionsKey);
-                        var configs = conditionConfiguration.getConfigs();
-                        if (condition != null) {
-                            if (!isNullOrEmpty(configs)) {
-                                condition.setConfigs(configs);
-                            }
-                            var conditions = conditionConfiguration.getConditions();
-                            if (!isNullOrEmpty(conditions)) {
-                                var behaviorConditions = convert(conditions, behaviorSet);
-                                List<IRuleCondition> conditionsClone = deepCopy(behaviorConditions);
-                                condition.setConditions(conditionsClone);
-                            }
-                            condition.setContainingRuleSet(behaviorSet);
-                            return condition;
-                        }
-
-                        throw new DeserializationException(
-                                format("No condition for type %s was created (%s)", type, conditionsKey));
-                    } catch (CloneNotSupportedException | DeserializationException e) {
-                        log.error(e.getLocalizedMessage(), e);
-                        return null;
-                    }
+                var conditionsKey = CONDITION_PREFIX + type;
+                if (!conditionProvider.containsKey(conditionsKey)) {
+                    var errorMessage = format("behaviorRule.condition.type=%s does not exist", conditionsKey);
+                    throw new IllegalArgumentException(errorMessage);
                 }
-        ).toList();
+                IRuleCondition condition = createCondition(conditionsKey);
+                var configs = conditionConfiguration.getConfigs();
+                if (condition != null) {
+                    if (!isNullOrEmpty(configs)) {
+                        condition.setConfigs(configs);
+                    }
+                    var conditions = conditionConfiguration.getConditions();
+                    if (!isNullOrEmpty(conditions)) {
+                        var behaviorConditions = convert(conditions, behaviorSet);
+                        List<IRuleCondition> conditionsClone = deepCopy(behaviorConditions);
+                        condition.setConditions(conditionsClone);
+                    }
+                    condition.setContainingRuleSet(behaviorSet);
+                    return condition;
+                }
+
+                throw new DeserializationException(format("No condition for type %s was created (%s)", type, conditionsKey));
+            } catch (CloneNotSupportedException | DeserializationException e) {
+                log.error(e.getLocalizedMessage(), e);
+                return null;
+            }
+        }).toList();
     }
 
     private IRuleCondition createCondition(String conditionsKey) {
@@ -146,11 +135,10 @@ public class RuleDeserialization implements IRuleDeserialization {
 
     }
 
-    private List<IRuleCondition> deepCopy(List<IRuleCondition> behaviorConditionList)
-            throws CloneNotSupportedException {
+    private List<IRuleCondition> deepCopy(List<IRuleCondition> behaviorConditionList) throws CloneNotSupportedException {
         List<IRuleCondition> executablesClone = new LinkedList<>();
 
-        //deep copy
+        // deep copy
         for (IRuleCondition behaviorCondition : behaviorConditionList) {
             executablesClone.add(behaviorCondition.clone());
         }

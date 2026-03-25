@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.rules.impl;
 
-
 import java.util.LinkedList;
 import java.util.List;
 

@@ -13,9 +13,9 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * REST implementation for the Secrets Vault API.
- * All endpoints require authentication (handled by Keycloak).
- * Plaintext secret values are NEVER returned — only accepted via PUT.
+ * REST implementation for the Secrets Vault API. All endpoints require
+ * authentication (handled by Keycloak). Plaintext secret values are NEVER
+ * returned — only accepted via PUT.
  */
 @ApplicationScoped
 public class RestSecretStore implements IRestSecretStore {
@@ -31,13 +31,12 @@ public class RestSecretStore implements IRestSecretStore {
     }
 
     /**
-     * Validate that a path parameter is safe (alphanumeric + dots, hyphens, underscores).
-     * Prevents path traversal and injection attacks.
+     * Validate that a path parameter is safe (alphanumeric + dots, hyphens,
+     * underscores). Prevents path traversal and injection attacks.
      */
     private static void validateId(String id, String paramName) {
         if (id == null || !VALID_ID.matcher(id).matches()) {
-            throw new IllegalArgumentException(
-                    paramName + " must match [a-zA-Z0-9._-]{1,128}, got: " + id);
+            throw new IllegalArgumentException(paramName + " must match [a-zA-Z0-9._-]{1,128}, got: " + id);
         }
     }
 
@@ -48,13 +47,10 @@ public class RestSecretStore implements IRestSecretStore {
             validateId(agentId, "agentId");
             validateId(keyName, "keyName");
         } catch (IllegalArgumentException e) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(Map.of("error", e.getMessage())).build();
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
         if (body == null || body.value() == null || body.value().isBlank()) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(Map.of("error", "Secret value must not be empty"))
-                    .build();
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "Secret value must not be empty")).build();
         }
 
         try {
@@ -71,11 +67,7 @@ public class RestSecretStore implements IRestSecretStore {
 
             secretProvider.store(ref, body.value());
 
-            var responseRef = Map.of(
-                    "reference", ref.toReferenceString(),
-                    "tenantId", tenantId,
-                    "agentId", agentId,
-                    "keyName", keyName);
+            var responseRef = Map.of("reference", ref.toReferenceString(), "tenantId", tenantId, "agentId", agentId, "keyName", keyName);
 
             if (exists) {
                 return Response.ok(responseRef).build();
@@ -83,11 +75,8 @@ public class RestSecretStore implements IRestSecretStore {
                 return Response.status(Response.Status.CREATED).entity(responseRef).build();
             }
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorv("Failed to store secret: {0}/{1}/{2} — {3}",
-                    tenantId, agentId, keyName, e.getMessage());
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                    .entity(Map.of("error", "Failed to store secret"))
-                    .build();
+            LOGGER.errorv("Failed to store secret: {0}/{1}/{2} — {3}", tenantId, agentId, keyName, e.getMessage());
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to store secret")).build();
         }
     }
 
@@ -98,22 +87,16 @@ public class RestSecretStore implements IRestSecretStore {
             validateId(agentId, "agentId");
             validateId(keyName, "keyName");
         } catch (IllegalArgumentException e) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(Map.of("error", e.getMessage())).build();
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
         try {
             secretProvider.delete(new SecretReference(tenantId, agentId, keyName));
             return Response.noContent().build();
         } catch (ISecretProvider.SecretNotFoundException e) {
-            return Response.status(Response.Status.NOT_FOUND)
-                    .entity(Map.of("error", "Secret not found"))
-                    .build();
+            return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "Secret not found")).build();
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorv("Failed to delete secret: {0}/{1}/{2} — {3}",
-                    tenantId, agentId, keyName, e.getMessage());
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                    .entity(Map.of("error", "Failed to delete secret"))
-                    .build();
+            LOGGER.errorv("Failed to delete secret: {0}/{1}/{2} — {3}", tenantId, agentId, keyName, e.getMessage());
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to delete secret")).build();
         }
     }
 
@@ -124,22 +107,16 @@ public class RestSecretStore implements IRestSecretStore {
             validateId(agentId, "agentId");
             validateId(keyName, "keyName");
         } catch (IllegalArgumentException e) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(Map.of("error", e.getMessage())).build();
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
         try {
             SecretMetadata metadata = secretProvider.getMetadata(new SecretReference(tenantId, agentId, keyName));
             return Response.ok(metadata).build();
         } catch (ISecretProvider.SecretNotFoundException e) {
-            return Response.status(Response.Status.NOT_FOUND)
-                    .entity(Map.of("error", "Secret not found"))
-                    .build();
+            return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "Secret not found")).build();
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorv("Failed to get secret metadata: {0}/{1}/{2} — {3}",
-                    tenantId, agentId, keyName, e.getMessage());
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                    .entity(Map.of("error", "Failed to get metadata"))
-                    .build();
+            LOGGER.errorv("Failed to get secret metadata: {0}/{1}/{2} — {3}", tenantId, agentId, keyName, e.getMessage());
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to get metadata")).build();
         }
     }
 
@@ -154,8 +131,7 @@ public class RestSecretStore implements IRestSecretStore {
         try {
             return secretProvider.listKeys(tenantId, agentId);
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorv("Failed to list secrets: {0}/{1} — {2}",
-                    tenantId, agentId, e.getMessage());
+            LOGGER.errorv("Failed to list secrets: {0}/{1} — {2}", tenantId, agentId, e.getMessage());
             return List.of();
         }
     }
@@ -163,10 +139,7 @@ public class RestSecretStore implements IRestSecretStore {
     @Override
     public Response healthCheck() {
         boolean available = secretProvider.isAvailable();
-        var status = Map.of(
-                "status", available ? "UP" : "DOWN",
-                "provider", secretProvider.getClass().getSimpleName(),
-                "available", available);
+        var status = Map.of("status", available ? "UP" : "DOWN", "provider", secretProvider.getClass().getSimpleName(), "available", available);
 
         if (available) {
             return Response.ok(status).build();

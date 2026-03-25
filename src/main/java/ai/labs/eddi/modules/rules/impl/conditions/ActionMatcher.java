@@ -80,8 +80,7 @@ public class ActionMatcher extends BaseMatcher {
             actions = data.getResult();
         }
 
-        if (isActionEmpty(actions) ||
-                Collections.indexOfSubList(actions, this.actions) > -1) {
+        if (isActionEmpty(actions) || Collections.indexOfSubList(actions, this.actions) > -1) {
             return SUCCESS;
         } else {
             return FAIL;
@@ -93,9 +92,7 @@ public class ActionMatcher extends BaseMatcher {
     }
 
     private boolean isActionEmpty(List<String> actions) {
-        return this.actions.size() == 1 &&
-                this.actions.get(0).equals(KEY_EMPTY) &&
-                actions.size() == 0;
+        return this.actions.size() == 1 && this.actions.get(0).equals(KEY_EMPTY) && actions.size() == 0;
     }
 
     @Override

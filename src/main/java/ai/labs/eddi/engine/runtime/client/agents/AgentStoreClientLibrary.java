@@ -28,8 +28,7 @@ public class AgentStoreClientLibrary implements IAgentStoreClientLibrary {
     private static final Logger LOGGER = Logger.getLogger(AgentFactory.class);
 
     @Inject
-    public AgentStoreClientLibrary(IAgentStoreService agentStoreService,
-                                 IWorkflowFactory workflowFactory) {
+    public AgentStoreClientLibrary(IAgentStoreService agentStoreService, IWorkflowFactory workflowFactory) {
         this.agentStoreService = agentStoreService;
         this.workflowFactory = workflowFactory;
     }

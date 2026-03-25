@@ -17,15 +17,13 @@ public class WorkflowStoreService implements IWorkflowStoreService {
     private final IRestDocumentDescriptorStore restDocumentDescriptorStore;
 
     @Inject
-    public WorkflowStoreService(IRestWorkflowStore restWorkflowStore,
-            IRestDocumentDescriptorStore restDocumentDescriptorStore) {
+    public WorkflowStoreService(IRestWorkflowStore restWorkflowStore, IRestDocumentDescriptorStore restDocumentDescriptorStore) {
         this.restWorkflowStore = restWorkflowStore;
         this.restDocumentDescriptorStore = restDocumentDescriptorStore;
     }
 
     @Override
-    public WorkflowConfiguration getKnowledgeWorkflow(String workflowId, Integer packageVersion)
-            throws ServiceException {
+    public WorkflowConfiguration getKnowledgeWorkflow(String workflowId, Integer packageVersion) throws ServiceException {
         try {
             return restWorkflowStore.readWorkflow(workflowId, packageVersion);
         } catch (Exception e) {
@@ -34,8 +32,7 @@ public class WorkflowStoreService implements IWorkflowStoreService {
     }
 
     @Override
-    public DocumentDescriptor getWorkflowDocumentDescriptor(String workflowId, Integer packageVersion)
-            throws ServiceException {
+    public DocumentDescriptor getWorkflowDocumentDescriptor(String workflowId, Integer packageVersion) throws ServiceException {
         try {
             return restDocumentDescriptorStore.readDescriptor(workflowId, packageVersion);
         } catch (Exception e) {

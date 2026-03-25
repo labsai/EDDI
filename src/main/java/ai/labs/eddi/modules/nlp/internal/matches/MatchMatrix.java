@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.nlp.internal.matches;
 
-
 import java.util.*;
 
 /**
@@ -34,8 +33,10 @@ public class MatchMatrix implements Iterable<Suggestion> {
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
             Match that = (Match) o;
             return index == that.index && java.util.Objects.equals(inputTerm, that.inputTerm);
         }
@@ -45,7 +46,6 @@ public class MatchMatrix implements Iterable<Suggestion> {
             return java.util.Objects.hash(index, inputTerm);
         }
     }
-
 
     private Map<Match, List<MatchingResult>> mappedMatchMatrix = new LinkedHashMap<>();
 
@@ -125,7 +125,7 @@ public class MatchMatrix implements Iterable<Suggestion> {
                     List<MatchingResult> listOfMatchingResults = getMatchingResults(index);
                     Integer iterationIndex = iterationPlan.getIndexes()[index];
                     if (iterationIndex >= listOfMatchingResults.size()) {
-                        //iteration plan is out of bounds, so we skip it
+                        // iteration plan is out of bounds, so we skip it
                         nextSuggestion = null;
                         break;
                     }

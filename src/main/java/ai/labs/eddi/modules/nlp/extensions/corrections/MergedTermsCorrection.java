@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.nlp.extensions.corrections;
 
-
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
 
 import java.util.ArrayList;
@@ -17,7 +16,6 @@ public class MergedTermsCorrection implements ICorrection {
     public void init(List<IDictionary> dictionaries) {
         this.dictionaries = dictionaries;
     }
-
 
     @Override
     public List<IDictionary.IFoundWord> correctWord(String word, String userLanguage, List<IDictionary> temporaryDictionaries) {
@@ -47,7 +45,7 @@ public class MergedTermsCorrection implements ICorrection {
             }
         }
 
-        if (tmpWord.isEmpty() &&   // all terms are known
+        if (tmpWord.isEmpty() && // all terms are known
                 !possibleTerms.isEmpty()) {
             return possibleTerms;
         } else {
@@ -60,10 +58,8 @@ public class MergedTermsCorrection implements ICorrection {
         allDictionaries.addAll(temporaryDictionaries);
         allDictionaries.addAll(dictionaries);
 
-        return allDictionaries.stream().
-                map(dictionary -> dictionary.lookupTerm(part)).
-                filter(result -> result.size() > 0).
-                findFirst().orElse(IDictionary.NO_WORDS_FOUND);
+        return allDictionaries.stream().map(dictionary -> dictionary.lookupTerm(part)).filter(result -> result.size() > 0).findFirst()
+                .orElse(IDictionary.NO_WORDS_FOUND);
 
     }
 

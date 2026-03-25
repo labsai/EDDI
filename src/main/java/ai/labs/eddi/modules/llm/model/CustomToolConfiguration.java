@@ -1,12 +1,11 @@
 package ai.labs.eddi.modules.llm.model;
 
-
 import java.util.List;
 import java.util.Map;
 
 /**
- * Configuration for custom tools defined via JSON config.
- * Phase 4: Allows users to define tools without writing Java code.
+ * Configuration for custom tools defined via JSON config. Phase 4: Allows users
+ * to define tools without writing Java code.
  */
 public class CustomToolConfiguration {
 
@@ -118,10 +117,14 @@ public class CustomToolConfiguration {
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
             ToolParameter that = (ToolParameter) o;
-            return java.util.Objects.equals(name, that.name) && java.util.Objects.equals(description, that.description) && java.util.Objects.equals(type, that.type) && required == that.required && java.util.Objects.equals(defaultValue, that.defaultValue);
+            return java.util.Objects.equals(name, that.name) && java.util.Objects.equals(description, that.description)
+                    && java.util.Objects.equals(type, that.type) && required == that.required
+                    && java.util.Objects.equals(defaultValue, that.defaultValue);
         }
 
         @Override
@@ -131,7 +134,8 @@ public class CustomToolConfiguration {
 
         @Override
         public String toString() {
-            return "ToolParameter(" + "name=" + name + ", description=" + description + ", type=" + type + ", required=" + required + ", defaultValue=" + defaultValue + ")";
+            return "ToolParameter(" + "name=" + name + ", description=" + description + ", type=" + type + ", required=" + required
+                    + ", defaultValue=" + defaultValue + ")";
         }
     }
 
@@ -168,7 +172,8 @@ public class CustomToolConfiguration {
     public CustomToolConfiguration() {
     }
 
-    public CustomToolConfiguration(String name, String description, ToolType type, List<ToolParameter> parameters, Map<String, Object> config, boolean requiresAuth, double costPerExecution, Long cacheTtlMs, Integer rateLimit) {
+    public CustomToolConfiguration(String name, String description, ToolType type, List<ToolParameter> parameters, Map<String, Object> config,
+            boolean requiresAuth, double costPerExecution, Long cacheTtlMs, Integer rateLimit) {
         this.name = name;
         this.description = description;
         this.type = type;
@@ -254,10 +259,16 @@ public class CustomToolConfiguration {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         CustomToolConfiguration that = (CustomToolConfiguration) o;
-        return java.util.Objects.equals(name, that.name) && java.util.Objects.equals(description, that.description) && java.util.Objects.equals(type, that.type) && java.util.Objects.equals(parameters, that.parameters) && java.util.Objects.equals(config, that.config) && requiresAuth == that.requiresAuth && Double.compare(that.costPerExecution, costPerExecution) == 0 && java.util.Objects.equals(cacheTtlMs, that.cacheTtlMs) && java.util.Objects.equals(rateLimit, that.rateLimit);
+        return java.util.Objects.equals(name, that.name) && java.util.Objects.equals(description, that.description)
+                && java.util.Objects.equals(type, that.type) && java.util.Objects.equals(parameters, that.parameters)
+                && java.util.Objects.equals(config, that.config) && requiresAuth == that.requiresAuth
+                && Double.compare(that.costPerExecution, costPerExecution) == 0 && java.util.Objects.equals(cacheTtlMs, that.cacheTtlMs)
+                && java.util.Objects.equals(rateLimit, that.rateLimit);
     }
 
     @Override
@@ -267,7 +278,8 @@ public class CustomToolConfiguration {
 
     @Override
     public String toString() {
-        return "CustomToolConfiguration(" + "name=" + name + ", description=" + description + ", type=" + type + ", parameters=" + parameters + ", config=" + config + ", requiresAuth=" + requiresAuth + ", costPerExecution=" + costPerExecution + ", cacheTtlMs=" + cacheTtlMs + ", rateLimit=" + rateLimit + ")";
+        return "CustomToolConfiguration(" + "name=" + name + ", description=" + description + ", type=" + type + ", parameters=" + parameters
+                + ", config=" + config + ", requiresAuth=" + requiresAuth + ", costPerExecution=" + costPerExecution + ", cacheTtlMs=" + cacheTtlMs
+                + ", rateLimit=" + rateLimit + ")";
     }
 }
-

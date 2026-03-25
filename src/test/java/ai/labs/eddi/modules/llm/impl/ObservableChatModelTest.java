@@ -21,9 +21,7 @@ import static org.mockito.Mockito.*;
  */
 class ObservableChatModelTest {
 
-    private static final ChatResponse MOCK_RESPONSE = ChatResponse.builder()
-            .aiMessage(AiMessage.from("Hello!"))
-            .build();
+    private static final ChatResponse MOCK_RESPONSE = ChatResponse.builder().aiMessage(AiMessage.from("Hello!")).build();
 
     // --- wrapIfNeeded() factory method ---
 
@@ -131,9 +129,7 @@ class ObservableChatModelTest {
         @Test
         void delegatesToUnderlyingModel() {
             ChatModel delegate = mock(ChatModel.class);
-            var request = ChatRequest.builder()
-                    .messages(List.of(UserMessage.from("Hi")))
-                    .build();
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("Hi"))).build();
             when(delegate.chat(request)).thenReturn(MOCK_RESPONSE);
 
             ChatModel wrapped = ObservableChatModel.wrapIfNeeded(delegate, "openai", null, "true", "true");
@@ -147,11 +143,7 @@ class ObservableChatModelTest {
         void withMultipleMessages_delegatesCorrectly() {
             ChatModel delegate = mock(ChatModel.class);
             var request = ChatRequest.builder()
-                    .messages(List.of(
-                            SystemMessage.from("You are helpful"),
-                            UserMessage.from("Hello"),
-                            UserMessage.from("How are you?")))
-                    .build();
+                    .messages(List.of(SystemMessage.from("You are helpful"), UserMessage.from("Hello"), UserMessage.from("How are you?"))).build();
             when(delegate.chat(request)).thenReturn(MOCK_RESPONSE);
 
             ChatModel wrapped = ObservableChatModel.wrapIfNeeded(delegate, "anthropic", null, "true", "true");
@@ -164,9 +156,7 @@ class ObservableChatModelTest {
         @Test
         void delegateThrowsException_propagates() {
             ChatModel delegate = mock(ChatModel.class);
-            var request = ChatRequest.builder()
-                    .messages(List.of(UserMessage.from("Hi")))
-                    .build();
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("Hi"))).build();
             when(delegate.chat(request)).thenThrow(new RuntimeException("API error"));
 
             ChatModel wrapped = ObservableChatModel.wrapIfNeeded(delegate, "openai", null, "true", "true");
@@ -178,9 +168,7 @@ class ObservableChatModelTest {
         @Test
         void loggingOnlyMode_doesNotAlterResponse() {
             ChatModel delegate = mock(ChatModel.class);
-            var request = ChatRequest.builder()
-                    .messages(List.of(UserMessage.from("Hi")))
-                    .build();
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("Hi"))).build();
             when(delegate.chat(request)).thenReturn(MOCK_RESPONSE);
 
             // Only logging, no timeout
@@ -199,9 +187,7 @@ class ObservableChatModelTest {
         @Test
         void withTimeout_delegatesSuccessfully() {
             ChatModel delegate = mock(ChatModel.class);
-            var request = ChatRequest.builder()
-                    .messages(List.of(UserMessage.from("Hi")))
-                    .build();
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("Hi"))).build();
             when(delegate.chat(request)).thenReturn(MOCK_RESPONSE);
 
             // 10 second timeout — more than enough for a mock
@@ -215,9 +201,7 @@ class ObservableChatModelTest {
         @Test
         void withTimeout_throwsOnSlow() {
             ChatModel delegate = mock(ChatModel.class);
-            var request = ChatRequest.builder()
-                    .messages(List.of(UserMessage.from("Hi")))
-                    .build();
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("Hi"))).build();
             when(delegate.chat(request)).thenAnswer(inv -> {
                 Thread.sleep(5000); // simulate slow model
                 return MOCK_RESPONSE;
@@ -234,9 +218,7 @@ class ObservableChatModelTest {
         @Test
         void withTimeout_delegateThrowsException_propagatesUnwrapped() {
             ChatModel delegate = mock(ChatModel.class);
-            var request = ChatRequest.builder()
-                    .messages(List.of(UserMessage.from("Hi")))
-                    .build();
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("Hi"))).build();
             when(delegate.chat(request)).thenThrow(new IllegalArgumentException("Bad input"));
 
             ChatModel wrapped = ObservableChatModel.wrapIfNeeded(delegate, "openai", "10000", null, null);
@@ -251,9 +233,7 @@ class ObservableChatModelTest {
         @Test
         void withTimeoutAndLogging_combinedBehavior() {
             ChatModel delegate = mock(ChatModel.class);
-            var request = ChatRequest.builder()
-                    .messages(List.of(UserMessage.from("Hi")))
-                    .build();
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("Hi"))).build();
             when(delegate.chat(request)).thenReturn(MOCK_RESPONSE);
 
             // Agenth timeout and logging
@@ -278,9 +258,7 @@ class ObservableChatModelTest {
             ChatModel wrapped = ObservableChatModel.wrapIfNeeded(delegate, "openai", null, "true", "true");
 
             for (int i = 0; i < 5; i++) {
-                var request = ChatRequest.builder()
-                        .messages(List.of(UserMessage.from("Message " + i)))
-                        .build();
+                var request = ChatRequest.builder().messages(List.of(UserMessage.from("Message " + i))).build();
                 ChatResponse response = wrapped.chat(request);
                 assertEquals("Hello!", response.aiMessage().text());
             }

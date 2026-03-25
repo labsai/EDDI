@@ -19,8 +19,6 @@ import java.util.List;
 public class RestDeploymentStore implements IRestDeploymentStore {
     private final IDeploymentStore deploymentStore;
 
-
-
     @Inject
     public RestDeploymentStore(IDeploymentStore deploymentStore) {
         this.deploymentStore = deploymentStore;

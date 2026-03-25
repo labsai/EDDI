@@ -26,14 +26,10 @@ public class DictionaryConfiguration {
 
     @JsonClassDescription("A word definition of the dictionary.")
     public static class WordConfiguration implements Comparable<WordConfiguration> {
-        @JsonPropertyDescription(
-                "A word of a natural language such as German or English" +
-                        " that you want the parser to recognize (e.g. hello).")
+        @JsonPropertyDescription("A word of a natural language such as German or English" + " that you want the parser to recognize (e.g. hello).")
 
         private String word;
-        @JsonPropertyDescription(
-                "Prolog like expressions describing the meaning of this word " +
-                        "(e.g. greeting(hello) or property(car(BMW(X5))) )")
+        @JsonPropertyDescription("Prolog like expressions describing the meaning of this word " + "(e.g. greeting(hello) or property(car(BMW(X5))) )")
         @JsonProperty(defaultValue = "unused")
         @JsonAlias({"exp", "exps"})
         private String expressions;
@@ -41,8 +37,10 @@ public class DictionaryConfiguration {
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
 
             WordConfiguration that = (WordConfiguration) o;
 
@@ -86,21 +84,20 @@ public class DictionaryConfiguration {
 
     @JsonClassDescription("A RegEx definition of the dictionary.")
     public static class RegExConfiguration implements Comparable<RegExConfiguration> {
-        @JsonPropertyDescription(
-                "A regular expression (regEx) e.g. \"(\\\\w)(\\\\s+)([\\\\.,])\"")
+        @JsonPropertyDescription("A regular expression (regEx) e.g. \"(\\\\w)(\\\\s+)([\\\\.,])\"")
 
         private String regEx;
-        @JsonPropertyDescription(
-                "Prolog like expressions describing the meaning of this word " +
-                        "(e.g. greeting(hello) or property(car(BMW(X5))) )")
+        @JsonPropertyDescription("Prolog like expressions describing the meaning of this word " + "(e.g. greeting(hello) or property(car(BMW(X5))) )")
         @JsonProperty(defaultValue = "unused")
         @JsonAlias({"exp", "exps"})
         private String expressions;
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
 
             RegExConfiguration that = (RegExConfiguration) o;
 
@@ -136,22 +133,21 @@ public class DictionaryConfiguration {
 
     @JsonClassDescription("A phrase definition of the dictionary.")
     public static class PhraseConfiguration {
-        @JsonPropertyDescription(
-                "A phrase of a natural language such as German or English" +
-                        " that you want the parser to recognize (e.g. good morning).")
+        @JsonPropertyDescription("A phrase of a natural language such as German or English"
+                + " that you want the parser to recognize (e.g. good morning).")
         protected String phrase;
 
-        @JsonPropertyDescription(
-                "A prolog like expressions describing the meaning of this word " +
-                        "(e.g. greeting(good_morning) )")
+        @JsonPropertyDescription("A prolog like expressions describing the meaning of this word " + "(e.g. greeting(good_morning) )")
         @JsonProperty(defaultValue = "unused")
         @JsonAlias({"exp", "exps"})
         protected String expressions;
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
 
             PhraseConfiguration that = (PhraseConfiguration) o;
 
@@ -178,7 +174,6 @@ public class DictionaryConfiguration {
         public void setExpressions(String expressions) {
             this.expressions = expressions;
         }
-
 
     }
 

@@ -32,15 +32,13 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
     private final IDocumentDescriptorStore documentDescriptorStore;
 
     @Inject
-    public AgentStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder,
-            DocumentDescriptorStore documentDescriptorStore) {
+    public AgentStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder, DocumentDescriptorStore documentDescriptorStore) {
         super(storageFactory, "agents", documentBuilder, AgentConfiguration.class, WORKFLOWS_FIELD);
         this.documentDescriptorStore = documentDescriptorStore;
     }
 
     @Override
-    public IResourceStore.IResourceId create(AgentConfiguration agentConfiguration)
-            throws IResourceStore.ResourceStoreException {
+    public IResourceStore.IResourceId create(AgentConfiguration agentConfiguration) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkCollectionNoNullElements(agentConfiguration.getWorkflows(), WORKFLOWS_FIELD);
         return super.create(agentConfiguration);
     }
@@ -48,14 +46,12 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
     @Override
     @IResourceStore.ConfigurationUpdate
     public Integer update(String id, Integer version, AgentConfiguration agentConfiguration)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException,
-            IResourceStore.ResourceNotFoundException {
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkCollectionNoNullElements(agentConfiguration.getWorkflows(), WORKFLOWS_FIELD);
         return super.update(id, version, agentConfiguration);
     }
 
-    public List<DocumentDescriptor> getAgentDescriptorsContainingWorkflow(String workflowId, Integer packageVersion,
-            boolean includePreviousVersions)
+    public List<DocumentDescriptor> getAgentDescriptorsContainingWorkflow(String workflowId, Integer packageVersion, boolean includePreviousVersions)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
 
         List<DocumentDescriptor> ret = new LinkedList<>();
@@ -63,11 +59,9 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
             String workflowUri = WORKFLOW_RESOURCE_URI + workflowId + VERSION_QUERY_PARAM + packageVersion;
 
             // Search in current resources
-            List<IResourceStore.IResourceId> currentIds = resourceStorage.findResourceIdsContaining(WORKFLOWS_FIELD,
-                    workflowUri);
+            List<IResourceStore.IResourceId> currentIds = resourceStorage.findResourceIdsContaining(WORKFLOWS_FIELD, workflowUri);
             // Search in history
-            List<IResourceStore.IResourceId> historyIds = resourceStorage
-                    .findHistoryResourceIdsContaining(WORKFLOWS_FIELD, workflowUri);
+            List<IResourceStore.IResourceId> historyIds = resourceStorage.findHistoryResourceIdsContaining(WORKFLOWS_FIELD, workflowUri);
 
             // Merge and sort
             List<IResourceStore.IResourceId> allIds = new LinkedList<>(currentIds);
@@ -81,8 +75,8 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
                     continue;
                 }
 
-                boolean alreadyContainsResource = ret.stream().anyMatch(
-                        descriptor -> extractResourceId(descriptor.getResource()).getId().equals(agentId.getId()));
+                boolean alreadyContainsResource = ret.stream()
+                        .anyMatch(descriptor -> extractResourceId(descriptor.getResource()).getId().equals(agentId.getId()));
                 if (alreadyContainsResource) {
                     continue;
                 }

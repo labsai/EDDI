@@ -9,8 +9,8 @@ import org.eclipse.microprofile.health.HealthCheckResponseBuilder;
 import org.eclipse.microprofile.health.Readiness;
 
 /**
- * Quarkus health check for NATS JetStream connectivity.
- * Reports at {@code /q/health/ready} when messaging type is NATS.
+ * Quarkus health check for NATS JetStream connectivity. Reports at
+ * {@code /q/health/ready} when messaging type is NATS.
  *
  * @author ginccc
  * @since 6.0.0
@@ -32,13 +32,9 @@ public class NatsHealthCheck implements HealthCheck {
         HealthCheckResponseBuilder builder = HealthCheckResponse.named("NATS JetStream");
 
         if (natsCoordinator.isConnected()) {
-            return builder.up()
-                    .withData("status", natsCoordinator.getConnectionStatus())
-                    .build();
+            return builder.up().withData("status", natsCoordinator.getConnectionStatus()).build();
         } else {
-            return builder.down()
-                    .withData("status", natsCoordinator.getConnectionStatus())
-                    .build();
+            return builder.down().withData("status", natsCoordinator.getConnectionStatus()).build();
         }
     }
 }

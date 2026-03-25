@@ -1,6 +1,5 @@
 package ai.labs.eddi.engine.model;
 
-
 import java.util.HashMap;
 import java.util.Map;
 

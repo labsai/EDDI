@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.apicalls.model;
 
-
 public class HttpPreRequest extends PreRequest {
     private BatchRequestBuildingInstruction batchRequests;
     private Integer delayBeforeExecutingInMillis = 0;

@@ -13,8 +13,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.DoubleAdder;
 
 /**
- * Tracks API costs for tool executions.
- * Phase 4: Monitors and limits costs per tool and per conversation with metrics.
+ * Tracks API costs for tool executions. Phase 4: Monitors and limits costs per
+ * tool and per conversation with metrics.
  */
 @ApplicationScoped
 public class ToolCostTracker {
@@ -27,15 +27,14 @@ public class ToolCostTracker {
     MeterRegistry meterRegistry;
 
     // Cost per tool call (in cents or credits)
-    private static final Map<String, Double> TOOL_COSTS = Map.of(
-        "websearch", 0.001,      // $0.001 per search
-        "weather", 0.0005,       // $0.0005 per weather call
-        "calculator", 0.0,       // Free
-        "datetime", 0.0,         // Free
-        "dataformatter", 0.0,    // Free
-        "webscraper", 0.002,     // $0.002 per scrape
-        "textsummarizer", 0.0,   // Free (local)
-        "pdfreader", 0.001       // $0.001 per PDF
+    private static final Map<String, Double> TOOL_COSTS = Map.of("websearch", 0.001, // $0.001 per search
+            "weather", 0.0005, // $0.0005 per weather call
+            "calculator", 0.0, // Free
+            "datetime", 0.0, // Free
+            "dataformatter", 0.0, // Free
+            "webscraper", 0.002, // $0.002 per scrape
+            "textsummarizer", 0.0, // Free (local)
+            "pdfreader", 0.001 // $0.001 per PDF
     );
 
     private final Map<String, ToolCostMetrics> toolCosts = new ConcurrentHashMap<>();
@@ -124,12 +123,10 @@ public class ToolCostTracker {
         double cost = TOOL_COSTS.getOrDefault(toolName, 0.0);
 
         // Track per-tool costs
-        toolCosts.computeIfAbsent(toolName, ToolCostMetrics::new)
-                 .addCost(cost);
+        toolCosts.computeIfAbsent(toolName, ToolCostMetrics::new).addCost(cost);
 
         // Track per-conversation costs
-        conversationCosts.computeIfAbsent(conversationId, ConversationCostMetrics::new)
-                         .addToolCost(toolName, cost);
+        conversationCosts.computeIfAbsent(conversationId, ConversationCostMetrics::new).addToolCost(toolName, cost);
 
         // Evict oldest entries if map exceeds max size
         evictIfNeeded();
@@ -185,10 +182,7 @@ public class ToolCostTracker {
             // Record budget exceeded event
             meterRegistry.counter("eddi.tool.budget.exceeded").increment();
 
-            LOGGER.warn(String.format(
-                "Conversation %s exceeded budget: $%.4f > $%.4f",
-                conversationId, metrics.getTotalCost(), maxBudget
-            ));
+            LOGGER.warn(String.format("Conversation %s exceeded budget: $%.4f > $%.4f", conversationId, metrics.getTotalCost(), maxBudget));
         }
 
         return withinBudget;
@@ -208,8 +202,7 @@ public class ToolCostTracker {
                 iterator.remove();
                 removed++;
             }
-            LOGGER.info("Evicted " + removed + " conversation cost entries (size was " +
-                    (conversationCosts.size() + removed) + ")");
+            LOGGER.info("Evicted " + removed + " conversation cost entries (size was " + (conversationCosts.size() + removed) + ")");
         }
     }
 
@@ -240,15 +233,10 @@ public class ToolCostTracker {
         sb.append("Per-Tool Costs:\n");
 
         toolCosts.values().forEach(metrics -> {
-            sb.append(String.format("  - %s: %d calls, $%.4f total, $%.4f avg\n",
-                metrics.toolName,
-                metrics.getCallCount(),
-                metrics.getTotalCost(),
-                metrics.getAverageCost()
-            ));
+            sb.append(String.format("  - %s: %d calls, $%.4f total, $%.4f avg\n", metrics.toolName, metrics.getCallCount(), metrics.getTotalCost(),
+                    metrics.getAverageCost()));
         });
 
         return sb.toString();
     }
 }
-

@@ -61,10 +61,7 @@ public class PropertySetterTaskTest {
         String exp = "property(someMeaning(someValue))";
         when(expressionProvider.parseExpressions(eq(exp))).thenAnswer(invocation -> {
             expressions = new Expressions();
-            expressions.add(
-                    new Expression("property",
-                            new Expression("someMeaning",
-                                    new Value("someValue"))));
+            expressions.add(new Expression("property", new Expression("someMeaning", new Value("someValue"))));
 
             return expressions;
         });
@@ -73,13 +70,13 @@ public class PropertySetterTaskTest {
         ITemplatingEngine templateEngine = mock(ITemplatingEngine.class);
         IResourceClientLibrary resourceClientLibrary = mock(IResourceClientLibrary.class);
         ai.labs.eddi.secrets.ISecretProvider secretProvider = mock(ai.labs.eddi.secrets.ISecretProvider.class);
-        propertySetterTask = new PropertySetterTask(expressionProvider, memoryItemConverter, templateEngine,
-                dataFactory, resourceClientLibrary, new ObjectMapper(), secretProvider);
+        propertySetterTask = new PropertySetterTask(expressionProvider, memoryItemConverter, templateEngine, dataFactory, resourceClientLibrary,
+                new ObjectMapper(), secretProvider);
     }
 
     @Test
     public void executeTask() throws LifecycleException {
-        //setup
+        // setup
         final String userInput = "Some Input From the User";
         List<Property> propertyEntries = new LinkedList<>();
         propertyEntries.add(new Property("someMeaning", "someValue", conversation));
@@ -89,36 +86,33 @@ public class PropertySetterTaskTest {
         IData<List<Property>> expectedPropertyData = new Data<>("properties:extracted", propertyEntries);
 
         final String propertyExpression = "property(someMeaning(someValue))";
-        when(currentStep.getLatestData(eq(KEY_EXPRESSIONS_PARSED))).thenAnswer(invocation ->
-                new Data<>(KEY_EXPRESSIONS_PARSED, propertyExpression));
+        when(currentStep.getLatestData(eq(KEY_EXPRESSIONS_PARSED))).thenAnswer(invocation -> new Data<>(KEY_EXPRESSIONS_PARSED, propertyExpression));
         when(propertySetter.extractProperties(eq(expressions))).thenAnswer(invocation -> {
             List<Property> ret = new LinkedList<>();
             ret.add(new Property("someMeaning", "someValue", conversation));
             return ret;
         });
         when(conversationMemory.getPreviousSteps().size()).thenAnswer(invocation -> 1);
-        when(previousStep.getLatestData(eq(KEY_ACTIONS))).thenAnswer(invocation ->
-                new Data<>(KEY_ACTIONS, Arrays.asList("CATCH_ANY_INPUT_AS_PROPERTY", "someOtherAction")));
-        when(currentStep.getLatestData(eq(KEY_INPUT_INITIAL))).thenAnswer(invocation ->
-                new Data<>(KEY_INPUT_INITIAL, userInput));
+        when(previousStep.getLatestData(eq(KEY_ACTIONS)))
+                .thenAnswer(invocation -> new Data<>(KEY_ACTIONS, Arrays.asList("CATCH_ANY_INPUT_AS_PROPERTY", "someOtherAction")));
+        when(currentStep.getLatestData(eq(KEY_INPUT_INITIAL))).thenAnswer(invocation -> new Data<>(KEY_INPUT_INITIAL, userInput));
         when(currentStep.getAllData(KEY_CONTEXT)).thenAnswer(invocation -> {
             Context context = new Context();
             context.setType(Context.ContextType.expressions);
             context.setValue("property(someContextMeaning(someContextValue))");
             return Collections.singletonList(new Data<>(KEY_CONTEXT + ":" + "properties", context));
         });
-        when(dataFactory.createData(eq("properties:extracted"), any(List.class), eq(true))).
-                thenAnswer(invocation -> {
-                    Data<List<Property>> ret = new Data<>("properties:extracted", propertyEntries);
-                    ret.setPublic(true);
-                    return ret;
-                });
+        when(dataFactory.createData(eq("properties:extracted"), any(List.class), eq(true))).thenAnswer(invocation -> {
+            Data<List<Property>> ret = new Data<>("properties:extracted", propertyEntries);
+            ret.setPublic(true);
+            return ret;
+        });
         when(conversationMemory.getConversationProperties()).thenAnswer(invocation -> new ConversationProperties(conversationMemory));
 
-        //test
+        // test
         propertySetterTask.execute(conversationMemory, propertySetter);
 
-        //assert
+        // assert
         verify(currentStep, times(1)).getLatestData(KEY_EXPRESSIONS_PARSED);
         verify(previousStep, times(1)).getLatestData(KEY_ACTIONS);
         verify(currentStep, times(1)).getLatestData(KEY_INPUT_INITIAL);

@@ -6,8 +6,7 @@ import java.util.Map;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 public class MatchingUtilities {
-    public static boolean executeValuePath(Map<String, Object> conversationValues,
-            String valuePath, String equals, String contains) {
+    public static boolean executeValuePath(Map<String, Object> conversationValues, String valuePath, String equals, String contains) {
 
         boolean success = false;
 

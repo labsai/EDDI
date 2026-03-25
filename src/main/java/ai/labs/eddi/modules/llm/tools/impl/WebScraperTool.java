@@ -27,15 +27,11 @@ public class WebScraperTool {
     private final HttpClient httpClient;
 
     public WebScraperTool() {
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(15))
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .build();
+        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).followRedirects(HttpClient.Redirect.NORMAL).build();
     }
 
     @Tool("Extracts text content from a web page URL. Returns the main text content without HTML tags.")
-    public String extractWebPageText(
-            @P("url") String url) {
+    public String extractWebPageText(@P("url") String url) {
 
         try {
             LOGGER.info("Extracting text from URL: " + url);
@@ -78,9 +74,7 @@ public class WebScraperTool {
     }
 
     @Tool("Extracts all links (URLs) from a web page")
-    public String extractLinks(
-            @P("url") String url,
-            @P("maxLinks") Integer maxLinks) {
+    public String extractLinks(@P("url") String url, @P("maxLinks") Integer maxLinks) {
 
         try {
             if (maxLinks == null || maxLinks < 1) {
@@ -102,7 +96,8 @@ public class WebScraperTool {
 
             int count = 0;
             for (Element link : links) {
-                if (count >= maxLinks) break;
+                if (count >= maxLinks)
+                    break;
 
                 String href = link.attr("abs:href"); // Get absolute URL
                 String text = link.text();
@@ -130,9 +125,7 @@ public class WebScraperTool {
     }
 
     @Tool("Extracts structured data from a web page using CSS selectors")
-    public String extractWithSelector(
-            @P("url") String url,
-            @P("cssSelector") String cssSelector) {
+    public String extractWithSelector(@P("url") String url, @P("cssSelector") String cssSelector) {
 
         try {
             LOGGER.info("Extracting elements matching '" + cssSelector + "' from " + url);
@@ -147,8 +140,7 @@ public class WebScraperTool {
             }
 
             StringBuilder result = new StringBuilder();
-            result.append("Found ").append(elements.size()).append(" element(s) matching '")
-                  .append(cssSelector).append("':\n\n");
+            result.append("Found ").append(elements.size()).append(" element(s) matching '").append(cssSelector).append("':\n\n");
 
             int count = 0;
             for (Element element : elements) {
@@ -170,8 +162,7 @@ public class WebScraperTool {
     }
 
     @Tool("Gets metadata from a web page (title, description, keywords)")
-    public String extractMetadata(
-            @P("url") String url) {
+    public String extractMetadata(@P("url") String url) {
 
         try {
             LOGGER.info("Extracting metadata from URL: " + url);
@@ -230,12 +221,8 @@ public class WebScraperTool {
     private String fetchUrl(String url) throws IOException, InterruptedException {
         validateUrl(url);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(15))
-                .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)")
-                .GET()
-                .build();
+        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15))
+                .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)").GET().build();
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -263,4 +250,3 @@ public class WebScraperTool {
         return doc.text();
     }
 }
-

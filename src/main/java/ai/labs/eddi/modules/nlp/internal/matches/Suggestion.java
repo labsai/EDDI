@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.nlp.internal.matches;
 
-
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
 
 import java.util.LinkedList;

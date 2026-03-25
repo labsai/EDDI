@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.apicalls.model;
 
-
 public class OutputBuildingInstruction extends BuildingInstruction {
     private String outputType;
     private String outputValue;

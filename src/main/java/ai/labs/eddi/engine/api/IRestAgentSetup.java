@@ -9,8 +9,8 @@ import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 /**
- * REST API for one-command agent setup.
- * Delegates to {@link ai.labs.eddi.engine.setup.AgentSetupService}.
+ * REST API for one-command agent setup. Delegates to
+ * {@link ai.labs.eddi.engine.setup.AgentSetupService}.
  *
  * @author ginccc
  */
@@ -22,15 +22,14 @@ public interface IRestAgentSetup {
 
     @POST
     @Path("/setup")
-    @Operation(summary = "Setup a standard agent",
-            description = "Creates a fully configured agent with parser, behavior rules, LLM configuration, " +
-                    "optional output set, workflow, and agent — then optionally deploys it.")
+    @Operation(summary = "Setup a standard agent", description = "Creates a fully configured agent with parser, behavior rules, LLM configuration, "
+            + "optional output set, workflow, and agent — then optionally deploys it.")
     Response setupAgent(SetupAgentRequest request);
 
     @POST
     @Path("/setup-api")
-    @Operation(summary = "Create an API agent from an OpenAPI spec",
-            description = "Parses an OpenAPI specification, generates HttpCalls configurations grouped by tag, " +
-                    "creates all necessary resources (parser, behavior, LLM, workflow), and optionally deploys the agent.")
+    @Operation(summary = "Create an API agent from an OpenAPI spec", description = "Parses an OpenAPI specification, "
+            + "generates HttpCalls configurations grouped by tag, "
+            + "creates all necessary resources (parser, behavior, LLM, workflow), and optionally deploys the agent.")
     Response createApiAgent(CreateApiAgentRequest request);
 }

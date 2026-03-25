@@ -60,10 +60,7 @@ public class Data<T> implements IData<T> {
 
     @Override
     public String toString() {
-        return "result" +
-                "{key='" + key + '\'' +
-                ", result=" + result +
-                '}';
+        return "result" + "{key='" + key + '\'' + ", result=" + result + '}';
     }
 
     public final String getKey() {

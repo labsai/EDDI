@@ -20,8 +20,8 @@ import java.time.Duration;
 import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 
 /**
- * PDF reader tool for extracting text from PDF documents.
- * Supports agenth local files and URLs.
+ * PDF reader tool for extracting text from PDF documents. Supports agenth local
+ * files and URLs.
  */
 @ApplicationScoped
 public class PdfReaderTool {
@@ -29,14 +29,11 @@ public class PdfReaderTool {
     private final HttpClient httpClient;
 
     public PdfReaderTool() {
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(30))
-                .build();
+        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
     }
 
     @Tool("Extracts all text content from a PDF file. Provide the URL to the PDF document.")
-    public String extractTextFromPdf(
-            @P("pdfLocation") String pdfLocation) {
+    public String extractTextFromPdf(@P("pdfLocation") String pdfLocation) {
 
         try {
             LOGGER.info("Extracting text from PDF: " + pdfLocation);
@@ -63,10 +60,7 @@ public class PdfReaderTool {
     }
 
     @Tool("Extracts text from specific pages of a PDF file")
-    public String extractTextFromPdfPages(
-            @P("pdfLocation") String pdfLocation,
-            @P("startPage") int startPage,
-            @P("endPage") int endPage) {
+    public String extractTextFromPdfPages(@P("pdfLocation") String pdfLocation, @P("startPage") int startPage, @P("endPage") int endPage) {
 
         try {
             LOGGER.info("Extracting text from PDF pages " + startPage + "-" + endPage + ": " + pdfLocation);
@@ -93,8 +87,7 @@ public class PdfReaderTool {
     }
 
     @Tool("Gets metadata and information about a PDF file (number of pages, title, author, etc.)")
-    public String getPdfInfo(
-            @P("pdfLocation") String pdfLocation) {
+    public String getPdfInfo(@P("pdfLocation") String pdfLocation) {
 
         PDDocument document = null;
         Path tempFile = null;
@@ -162,8 +155,7 @@ public class PdfReaderTool {
             PDFTextStripper stripper = new PDFTextStripper();
             String text = stripper.getText(document);
 
-            LOGGER.info("Extracted " + text.length() + " characters from PDF with " +
-                    document.getNumberOfPages() + " pages");
+            LOGGER.info("Extracted " + text.length() + " characters from PDF with " + document.getNumberOfPages() + " pages");
 
             // Limit output size
             if (text.length() > 10000) {
@@ -198,8 +190,7 @@ public class PdfReaderTool {
 
             String text = stripper.getText(document);
 
-            LOGGER.info("Extracted text from pages " + startPage + "-" + endPage +
-                    " (" + text.length() + " characters)");
+            LOGGER.info("Extracted text from pages " + startPage + "-" + endPage + " (" + text.length() + " characters)");
 
             // Limit output size
             if (text.length() > 10000) {
@@ -218,17 +209,12 @@ public class PdfReaderTool {
     private Path downloadPdf(String url) throws IOException, InterruptedException {
         LOGGER.debug("Downloading PDF from URL: " + url);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(30))
-                .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)")
-                .GET()
-                .build();
+        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(30))
+                .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)").GET().build();
 
         Path tempFile = Files.createTempFile("eddi-pdf-", ".pdf");
 
-        HttpResponse<Path> response = httpClient.send(request,
-                HttpResponse.BodyHandlers.ofFile(tempFile));
+        HttpResponse<Path> response = httpClient.send(request, HttpResponse.BodyHandlers.ofFile(tempFile));
 
         if (response.statusCode() != 200) {
             Files.deleteIfExists(tempFile);

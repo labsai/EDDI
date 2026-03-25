@@ -20,8 +20,7 @@ public interface IAgentFactory {
     void deployAgent(Deployment.Environment environment, String agentId, Integer version, DeploymentProcess deploymentProcess)
             throws ServiceException, IllegalAccessException;
 
-    void undeployAgent(Deployment.Environment environment, String agentId, Integer version)
-            throws ServiceException, IllegalAccessException;
+    void undeployAgent(Deployment.Environment environment, String agentId, Integer version) throws ServiceException, IllegalAccessException;
 
     interface DeploymentProcess {
         void completed(Deployment.Status status);

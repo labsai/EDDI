@@ -70,7 +70,7 @@ public class OutputGeneration implements IOutputGeneration {
             }
         }
 
-        for (int i = 0; i < outputEntries.size(); ) {
+        for (int i = 0; i < outputEntries.size();) {
             OutputEntry outputEntry = outputEntries.get(i);
             if (outputEntry.getOccurred() != highestOccurrence) {
                 outputEntries.remove(outputEntry);

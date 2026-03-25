@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.parser.model;
 
-
 import java.util.Map;
 
 /**

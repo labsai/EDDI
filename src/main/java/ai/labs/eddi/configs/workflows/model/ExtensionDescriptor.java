@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.workflows.model;
 
-
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -17,12 +16,7 @@ public class ExtensionDescriptor {
     }
 
     public enum FieldType {
-        INT,
-        DOUBLE,
-        STRING,
-        BOOLEAN,
-        ARRAY,
-        URI
+        INT, DOUBLE, STRING, BOOLEAN, ARRAY, URI
     }
 
     public static class ConfigValue {

@@ -13,7 +13,8 @@ public class PropertyInstruction extends Property {
     public PropertyInstruction() {
     }
 
-    public PropertyInstruction(String fromObjectPath, String toObjectPath, Boolean convertToObject, Boolean override, Boolean runOnValidationError, HttpCodeValidator httpCodeValidator) {
+    public PropertyInstruction(String fromObjectPath, String toObjectPath, Boolean convertToObject, Boolean override, Boolean runOnValidationError,
+            HttpCodeValidator httpCodeValidator) {
         this.fromObjectPath = fromObjectPath;
         this.toObjectPath = toObjectPath;
         this.convertToObject = convertToObject;
@@ -72,15 +73,22 @@ public class PropertyInstruction extends Property {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        if (!super.equals(o)) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
+        if (!super.equals(o))
+            return false;
         PropertyInstruction that = (PropertyInstruction) o;
-        return java.util.Objects.equals(fromObjectPath, that.fromObjectPath) && java.util.Objects.equals(toObjectPath, that.toObjectPath) && java.util.Objects.equals(convertToObject, that.convertToObject) && java.util.Objects.equals(override, that.override) && java.util.Objects.equals(runOnValidationError, that.runOnValidationError) && java.util.Objects.equals(httpCodeValidator, that.httpCodeValidator);
+        return java.util.Objects.equals(fromObjectPath, that.fromObjectPath) && java.util.Objects.equals(toObjectPath, that.toObjectPath)
+                && java.util.Objects.equals(convertToObject, that.convertToObject) && java.util.Objects.equals(override, that.override)
+                && java.util.Objects.equals(runOnValidationError, that.runOnValidationError)
+                && java.util.Objects.equals(httpCodeValidator, that.httpCodeValidator);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(super.hashCode(), fromObjectPath, toObjectPath, convertToObject, override, runOnValidationError, httpCodeValidator);
+        return java.util.Objects.hash(super.hashCode(), fromObjectPath, toObjectPath, convertToObject, override, runOnValidationError,
+                httpCodeValidator);
     }
 }

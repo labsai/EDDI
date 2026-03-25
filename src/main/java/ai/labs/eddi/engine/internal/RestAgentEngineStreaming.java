@@ -15,8 +15,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * SSE streaming implementation — maps ConversationService streaming events
- * to JAX-RS SSE events.
+ * SSE streaming implementation — maps ConversationService streaming events to
+ * JAX-RS SSE events.
  * <p>
  * Event types:
  * <ul>
@@ -40,31 +40,22 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     }
 
     @Override
-    public void sayStreaming(Environment environment, String agentId, String conversationId,
-            Boolean returnDetailed, Boolean returnCurrentStepOnly,
-            List<String> returningFields, InputData inputData,
-            SseEventSink eventSink, Sse sse) {
+    public void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+            List<String> returningFields, InputData inputData, SseEventSink eventSink, Sse sse) {
 
         try {
-            conversationService.sayStreaming(
-                    environment, agentId, conversationId,
-                    returnDetailed, returnCurrentStepOnly,
-                    returningFields, inputData,
+            conversationService.sayStreaming(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
                     new IConversationService.StreamingResponseHandler() {
                         @Override
                         public void onTaskStart(String taskId, String taskType, int index) {
                             sendEvent(eventSink, sse, "task_start",
-                                    String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"index\":%d}",
-                                            taskId, taskType, index));
+                                    String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"index\":%d}", taskId, taskType, index));
                         }
 
                         @Override
-                        public void onTaskComplete(String taskId, String taskType, long durationMs,
-                                Map<String, Object> summary) {
+                        public void onTaskComplete(String taskId, String taskType, long durationMs, Map<String, Object> summary) {
                             var sb = new StringBuilder();
-                            sb.append(String.format(
-                                    "{\"taskId\":\"%s\",\"taskType\":\"%s\",\"durationMs\":%d",
-                                    taskId, taskType, durationMs));
+                            sb.append(String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"durationMs\":%d", taskId, taskType, durationMs));
                             if (summary.containsKey("actions")) {
                                 sb.append(",\"actions\":").append(toJsonArray(summary.get("actions")));
                             }
@@ -90,21 +81,16 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                         @Override
                         public void onError(Throwable error) {
                             try {
-                                LOGGER.errorf("Streaming error for conversation %s: %s",
-                                        conversationId, error.getMessage());
-                                sendEvent(eventSink, sse, "error",
-                                        String.format("{\"message\":\"%s\"}",
-                                                escapeJson(error.getMessage())));
+                                LOGGER.errorf("Streaming error for conversation %s: %s", conversationId, error.getMessage());
+                                sendEvent(eventSink, sse, "error", String.format("{\"message\":\"%s\"}", escapeJson(error.getMessage())));
                             } finally {
                                 closeQuietly(eventSink);
                             }
                         }
                     });
         } catch (Exception e) {
-            LOGGER.errorf("Failed to start streaming for conversation %s: %s",
-                    conversationId, e.getMessage());
-            sendEvent(eventSink, sse, "error",
-                    String.format("{\"message\":\"%s\"}", escapeJson(e.getMessage())));
+            LOGGER.errorf("Failed to start streaming for conversation %s: %s", conversationId, e.getMessage());
+            sendEvent(eventSink, sse, "error", String.format("{\"message\":\"%s\"}", escapeJson(e.getMessage())));
             closeQuietly(eventSink);
         }
     }
@@ -115,10 +101,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             return;
         }
         try {
-            eventSink.send(sse.newEventBuilder()
-                    .name(eventName)
-                    .data(String.class, data)
-                    .build());
+            eventSink.send(sse.newEventBuilder().name(eventName).data(String.class, data).build());
         } catch (Exception e) {
             LOGGER.warnf("Failed to send SSE event '%s': %s", eventName, e.getMessage());
         }
@@ -137,11 +120,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     private String escapeJson(String text) {
         if (text == null)
             return "";
-        return text.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
+        return text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
     }
 
     private String toJsonArray(Object obj) {
@@ -165,9 +144,8 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             var sb = new StringBuilder("{");
             sb.append("\"conversationState\":\"").append(snapshot.getConversationState()).append("\"");
             if (snapshot.getConversationOutputs() != null) {
-                sb.append(",\"conversationOutputs\":").append(
-                        new com.fasterxml.jackson.databind.ObjectMapper()
-                                .writeValueAsString(snapshot.getConversationOutputs()));
+                sb.append(",\"conversationOutputs\":")
+                        .append(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(snapshot.getConversationOutputs()));
             }
             sb.append("}");
             return sb.toString();

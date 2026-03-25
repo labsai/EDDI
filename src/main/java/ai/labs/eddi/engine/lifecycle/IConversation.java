@@ -24,8 +24,7 @@ public interface IConversation {
 
     void rerun(Map<String, Context> contexts) throws ConversationNotReadyException, LifecycleException;
 
-    void say(final String message, Map<String, Context> contexts)
-            throws LifecycleException, ConversationNotReadyException;
+    void say(final String message, Map<String, Context> contexts) throws LifecycleException, ConversationNotReadyException;
 
     interface IConversationOutputRenderer {
         void renderOutput(IConversationMemory conversationMemory);

@@ -30,7 +30,7 @@ public interface IDictionary {
     boolean lookupIfKnown();
 
     default void setConfig(Map<String, Object> config) throws IllegalExtensionConfigurationException {
-        //to be overridden if needed
+        // to be overridden if needed
     }
 
     interface IDictionaryEntry extends Comparable<IDictionaryEntry> {

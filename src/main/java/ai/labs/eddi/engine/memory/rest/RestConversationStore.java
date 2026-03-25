@@ -50,11 +50,10 @@ public class RestConversationStore implements IRestConversationStore {
     private static final Logger log = Logger.getLogger(RestConversationStore.class);
 
     @Inject
-    public RestConversationStore(IDocumentDescriptorStore documentDescriptorStore,
-            IConversationDescriptorStore conversationDescriptorStore,
-            IConversationMemoryStore conversationMemoryStore,
-            IRuntime runtime,
-            @ConfigProperty(name = "eddi.conversations.deleteEndedConversationsOnceOlderThanDays") Integer deleteEndedConversationsOnceOlderThanDays) {
+    public RestConversationStore(IDocumentDescriptorStore documentDescriptorStore, IConversationDescriptorStore conversationDescriptorStore,
+            IConversationMemoryStore conversationMemoryStore, IRuntime runtime,
+            @ConfigProperty(name = "eddi.conversations.deleteEndedConversationsOnceOlderThanDays")
+            Integer deleteEndedConversationsOnceOlderThanDays) {
 
         this.documentDescriptorStore = documentDescriptorStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
@@ -64,10 +63,8 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     @Override
-    public List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter,
-            String conversationId, String agentId, Integer agentVersion,
-            ConversationState conversationState,
-            ConversationDescriptor.ViewState viewState) {
+    public List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter, String conversationId,
+            String agentId, Integer agentVersion, ConversationState conversationState, ConversationDescriptor.ViewState viewState) {
         try {
             List<ConversationDescriptor> conversationDescriptors;
             List<ConversationDescriptor> retConversationDescriptors = new LinkedList<>();
@@ -127,8 +124,7 @@ public class RestConversationStore implements IRestConversationStore {
         return conversationDescriptorStore.readDescriptors(DESCRIPTOR_TYPE, filter, index, limit, false);
     }
 
-    private void populateDataToDescriptor(ConversationDescriptor conversationDescriptor,
-            IResourceStore.IResourceId resourceId)
+    private void populateDataToDescriptor(ConversationDescriptor conversationDescriptor, IResourceStore.IResourceId resourceId)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         try {
@@ -142,8 +138,7 @@ public class RestConversationStore implements IRestConversationStore {
             conversationDescriptor.setConversationStepSize(memorySnapshot.getConversationSteps().size());
             conversationDescriptor.setConversationState(memorySnapshot.getConversationState());
             if (isNullOrEmpty(conversationDescriptor.getAgentName())) {
-                var documentDescriptor = documentDescriptorStore.readDescriptor(memorySnapshot.getAgentId(),
-                        memorySnapshot.getAgentVersion());
+                var documentDescriptor = documentDescriptorStore.readDescriptor(memorySnapshot.getAgentId(), memorySnapshot.getAgentVersion());
 
                 conversationDescriptor.setAgentName(documentDescriptor.getName());
             }
@@ -167,18 +162,15 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     @Override
-    public SimpleConversationMemorySnapshot readSimpleConversationLog(String conversationId,
-            Boolean returnDetailed,
-            Boolean returnCurrentStepOnly,
+    public SimpleConversationMemorySnapshot readSimpleConversationLog(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
             List<String> returningFields) {
         checkNotNull(conversationId, "conversationId");
         checkNotNull(returnDetailed, "returnDetailed");
         checkNotNull(returnCurrentStepOnly, "returnCurrentStepOnly");
 
         try {
-            return convertSimpleConversationMemory(
-                    conversationMemoryStore.loadConversationMemorySnapshot(conversationId),
-                    returnDetailed, returnCurrentStepOnly);
+            return convertSimpleConversationMemory(conversationMemoryStore.loadConversationMemorySnapshot(conversationId), returnDetailed,
+                    returnCurrentStepOnly);
 
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
@@ -204,12 +196,11 @@ public class RestConversationStore implements IRestConversationStore {
     public void deleteEndedConversationsOlderThanXDays() {
         runtime.submitCallable(() -> {
             try {
-                var amountOfEndedConversations = permanentlyDeleteEndedConversationLogs(
-                        deleteEndedConversationsOnceOlderThanDays);
+                var amountOfEndedConversations = permanentlyDeleteEndedConversationLogs(deleteEndedConversationsOnceOlderThanDays);
 
                 if (amountOfEndedConversations > 0) {
-                    log.info(format("Successfully deleted %s conversations, which were older than %s days",
-                            amountOfEndedConversations, deleteEndedConversationsOnceOlderThanDays));
+                    log.info(format("Successfully deleted %s conversations, which were older than %s days", amountOfEndedConversations,
+                            deleteEndedConversationsOnceOlderThanDays));
                 }
             } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
                 log.error(e.getLocalizedMessage(), e);
@@ -249,8 +240,7 @@ public class RestConversationStore implements IRestConversationStore {
         List<ConversationMemorySnapshot> conversationMemorySnapshots;
         List<ConversationStatus> conversationStatuses = new LinkedList<>();
 
-        conversationMemorySnapshots = conversationMemoryStore.loadActiveConversationMemorySnapshot(agentId,
-                agentVersion);
+        conversationMemorySnapshots = conversationMemoryStore.loadActiveConversationMemorySnapshot(agentId, agentVersion);
         for (var snapshot : conversationMemorySnapshots) {
             ConversationStatus conversationStatus = new ConversationStatus();
             String conversationId = snapshot.getId();
@@ -271,12 +261,9 @@ public class RestConversationStore implements IRestConversationStore {
         try {
             for (ConversationStatus conversationStatus : conversationStatuses) {
                 String conversationId = conversationStatus.getConversationId();
-                conversationMemoryStore.setConversationState(
-                        conversationId,
-                        ConversationState.ENDED);
+                conversationMemoryStore.setConversationState(conversationId, ConversationState.ENDED);
 
-                ConversationDescriptor conversationDescriptor = conversationDescriptorStore
-                        .readDescriptor(conversationId, 0);
+                ConversationDescriptor conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
                 conversationDescriptor.setConversationState(ConversationState.ENDED);
                 conversationDescriptorStore.setDescriptor(conversationId, 0, conversationDescriptor);
 

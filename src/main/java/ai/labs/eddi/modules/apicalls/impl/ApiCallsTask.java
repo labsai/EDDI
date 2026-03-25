@@ -36,9 +36,7 @@ public class ApiCallsTask implements ILifecycleTask {
     private static final Logger LOGGER = Logger.getLogger(ApiCallsTask.class);
 
     @Inject
-    public ApiCallsTask(IResourceClientLibrary resourceClientLibrary,
-            IMemoryItemConverter memoryItemConverter,
-            IApiCallExecutor httpCallExecutor) {
+    public ApiCallsTask(IResourceClientLibrary resourceClientLibrary, IMemoryItemConverter memoryItemConverter, IApiCallExecutor httpCallExecutor) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.memoryItemConverter = memoryItemConverter;
         this.httpCallExecutor = httpCallExecutor;
@@ -74,8 +72,7 @@ public class ApiCallsTask implements ILifecycleTask {
             }).distinct().toList();
 
             for (var call : filteredApiCalls) {
-                var httpCallResult = httpCallExecutor.execute(call, memory, templateDataObjects,
-                        httpCallsConfig.getTargetServerUrl());
+                var httpCallResult = httpCallExecutor.execute(call, memory, templateDataObjects, httpCallsConfig.getTargetServerUrl());
                 // ApiCallExecutor stores response in conversation memory via prePostUtils.
                 // We also merge into templateDataObjects so subsequent calls in this loop can
                 // reference previous results.
@@ -87,21 +84,18 @@ public class ApiCallsTask implements ILifecycleTask {
     }
 
     @Override
-    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws WorkflowConfigurationException {
+    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions) throws WorkflowConfigurationException {
 
         Object uriObj = configuration.get("uri");
         if (!isNullOrEmpty(uriObj)) {
             URI uri = URI.create(uriObj.toString());
 
             try {
-                ApiCallsConfiguration httpCallsConfig = resourceClientLibrary.getResource(uri,
-                        ApiCallsConfiguration.class);
+                ApiCallsConfiguration httpCallsConfig = resourceClientLibrary.getResource(uri, ApiCallsConfiguration.class);
 
                 String targetServerUrl = httpCallsConfig.getTargetServerUrl();
                 if (isNullOrEmpty(targetServerUrl)) {
-                    String message = format(
-                            "Property \"targetServerUrl\" in ApiCalls cannot be null or empty! (uri:%s)", uriObj);
+                    String message = format("Property \"targetServerUrl\" in ApiCalls cannot be null or empty! (uri:%s)", uriObj);
                     throw new ServiceException(message);
                 }
                 if (targetServerUrl.endsWith("/")) {

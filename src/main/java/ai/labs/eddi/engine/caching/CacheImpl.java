@@ -11,11 +11,12 @@ import java.util.concurrent.TimeUnit;
 /**
  * Caffeine-backed implementation of {@link ICache}.
  * <p>
- * TTL-aware put methods use Caffeine's {@code policy().expireVariably()} when available,
- * but since Caffeine's standard builder doesn't support per-entry TTL out of the box
- * without a custom Expiry, we store entries normally and rely on the global max-size eviction.
- * For tool caching (the only consumer using TTL puts), the ToolCacheService already tracks
- * expiry internally via {@code CachedResult.expiresAt}.
+ * TTL-aware put methods use Caffeine's {@code policy().expireVariably()} when
+ * available, but since Caffeine's standard builder doesn't support per-entry
+ * TTL out of the box without a custom Expiry, we store entries normally and
+ * rely on the global max-size eviction. For tool caching (the only consumer
+ * using TTL puts), the ToolCacheService already tracks expiry internally via
+ * {@code CachedResult.expiresAt}.
  */
 public class CacheImpl<K, V> implements ICache<K, V> {
     private final String cacheName;
@@ -32,11 +33,12 @@ public class CacheImpl<K, V> implements ICache<K, V> {
     }
 
     // --- TTL-aware operations ---
-    // Caffeine's standard API doesn't support per-entry TTL without a custom Expiry.
+    // Caffeine's standard API doesn't support per-entry TTL without a custom
+    // Expiry.
     // These delegate to the non-TTL versions since:
-    //   1. ToolCacheService tracks expiry internally (CachedResult.expiresAt)
-    //   2. Other consumers don't use TTL puts at all
-    //   3. Global max-size eviction is the primary eviction strategy
+    // 1. ToolCacheService tracks expiry internally (CachedResult.expiresAt)
+    // 2. Other consumers don't use TTL puts at all
+    // 3. Global max-size eviction is the primary eviction strategy
 
     @Override
     public V put(K key, V value, long lifespan, TimeUnit unit) {

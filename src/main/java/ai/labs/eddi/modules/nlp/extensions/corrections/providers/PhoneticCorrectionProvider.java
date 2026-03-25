@@ -1,13 +1,11 @@
 package ai.labs.eddi.modules.nlp.extensions.corrections.providers;
 
-
 import ai.labs.eddi.modules.nlp.extensions.corrections.ICorrection;
 import ai.labs.eddi.modules.nlp.extensions.corrections.PhoneticCorrection;
 import io.quarkus.runtime.Startup;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import java.util.Map;
-
 
 /**
  * @author ginccc

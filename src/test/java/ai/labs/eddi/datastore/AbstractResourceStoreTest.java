@@ -8,8 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.*;
 
 /**
- * Tests that AbstractResourceStore correctly delegates all CRUD operations
- * to the underlying HistorizedResourceStore.
+ * Tests that AbstractResourceStore correctly delegates all CRUD operations to
+ * the underlying HistorizedResourceStore.
  */
 class AbstractResourceStoreTest {
 

@@ -155,8 +155,7 @@ public class ConversationMemorySnapshot {
         public ResultSnapshot() {
         }
 
-        public ResultSnapshot(String key, Object result, List<?> possibleResults, Date timestamp,
-                String originWorkflowId, boolean isPublic) {
+        public ResultSnapshot(String key, Object result, List<?> possibleResults, Date timestamp, String originWorkflowId, boolean isPublic) {
             this.key = key;
             this.result = result;
             this.possibleResults = possibleResults;
@@ -215,9 +214,8 @@ public class ConversationMemorySnapshot {
 
         @Override
         public String toString() {
-            return "ResultSnapshot(" + "key=" + key + ", result=" + result + ", possibleResults=" + possibleResults
-                    + ", timestamp=" + timestamp + ", originWorkflowId=" + originWorkflowId + ", isPublic=" + isPublic
-                    + ")";
+            return "ResultSnapshot(" + "key=" + key + ", result=" + result + ", possibleResults=" + possibleResults + ", timestamp=" + timestamp
+                    + ", originWorkflowId=" + originWorkflowId + ", isPublic=" + isPublic + ")";
         }
     }
 

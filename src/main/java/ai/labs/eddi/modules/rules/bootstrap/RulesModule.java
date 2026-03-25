@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.rules.bootstrap;
 
-
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.modules.rules.impl.RulesEvaluationTask;
@@ -27,8 +26,7 @@ public class RulesModule {
     private final Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders;
     private final Instance<ILifecycleTask> instance;
 
-    public RulesModule(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
-                          Instance<ILifecycleTask> instance) {
+    public RulesModule(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders, Instance<ILifecycleTask> instance) {
         this.lifecycleTaskProviders = lifecycleTaskProviders;
         this.instance = instance;
     }
@@ -45,24 +43,15 @@ public class RulesModule {
     Map<String, Provider<IRuleCondition>> produceNormalizerProvider(Instance<IRuleCondition> instance) {
         Map<String, Provider<IRuleCondition>> map = new LinkedHashMap<>();
 
-        map.put("ai.labs.behavior.conditions.inputmatcher", () ->
-                instance.select(InputMatcher.class).get());
-        map.put("ai.labs.behavior.conditions.actionmatcher", () ->
-                instance.select(ActionMatcher.class).get());
-        map.put("ai.labs.behavior.conditions.contextmatcher", () ->
-                instance.select(ContextMatcher.class).get());
-        map.put("ai.labs.behavior.conditions.dynamicvaluematcher", () ->
-                instance.select(DynamicValueMatcher.class).get());
-        map.put("ai.labs.behavior.conditions.connector", () ->
-                instance.select(Connector.class).get());
-        map.put("ai.labs.behavior.conditions.dependency", () ->
-                instance.select(Dependency.class).get());
-        map.put("ai.labs.behavior.conditions.negation", () ->
-                instance.select(Negation.class).get());
-        map.put("ai.labs.behavior.conditions.occurrence", () ->
-                instance.select(Occurrence.class).get());
-        map.put("ai.labs.behavior.conditions.sizematcher", () ->
-                instance.select(SizeMatcher.class).get());
+        map.put("ai.labs.behavior.conditions.inputmatcher", () -> instance.select(InputMatcher.class).get());
+        map.put("ai.labs.behavior.conditions.actionmatcher", () -> instance.select(ActionMatcher.class).get());
+        map.put("ai.labs.behavior.conditions.contextmatcher", () -> instance.select(ContextMatcher.class).get());
+        map.put("ai.labs.behavior.conditions.dynamicvaluematcher", () -> instance.select(DynamicValueMatcher.class).get());
+        map.put("ai.labs.behavior.conditions.connector", () -> instance.select(Connector.class).get());
+        map.put("ai.labs.behavior.conditions.dependency", () -> instance.select(Dependency.class).get());
+        map.put("ai.labs.behavior.conditions.negation", () -> instance.select(Negation.class).get());
+        map.put("ai.labs.behavior.conditions.occurrence", () -> instance.select(Occurrence.class).get());
+        map.put("ai.labs.behavior.conditions.sizematcher", () -> instance.select(SizeMatcher.class).get());
 
         return map;
     }

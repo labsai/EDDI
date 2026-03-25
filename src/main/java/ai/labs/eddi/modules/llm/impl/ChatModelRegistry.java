@@ -14,8 +14,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Manages ChatModel creation, caching, and lookup by type and parameters.
  * <p>
- * Models are cached by (type, parameters) tuple so that identical configs
- * reuse the same model instance. Thread-safe via ConcurrentHashMap.
+ * Models are cached by (type, parameters) tuple so that identical configs reuse
+ * the same model instance. Thread-safe via ConcurrentHashMap.
  * <p>
  * Supports agenth synchronous ({@link ChatModel}) and streaming
  * ({@link StreamingChatModel}) models with separate caches.
@@ -38,8 +38,7 @@ class ChatModelRegistry {
     private final Map<ModelCacheKey, ChatModel> modelCache = new ConcurrentHashMap<>(1);
     private final Map<ModelCacheKey, StreamingChatModel> streamingModelCache = new ConcurrentHashMap<>(1);
 
-    ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders,
-            SecretResolver secretResolver) {
+    ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders, SecretResolver secretResolver) {
         this.languageModelApiConnectorBuilders = languageModelApiConnectorBuilders;
         this.secretResolver = secretResolver;
     }
@@ -48,8 +47,7 @@ class ChatModelRegistry {
      * Get or create a ChatModel for the given type and processed parameters.
      * Parameters are filtered to remove non-model keys before cache lookup.
      */
-    ChatModel getOrCreate(String type, Map<String, String> processedParams)
-            throws UnsupportedLlmTaskException {
+    ChatModel getOrCreate(String type, Map<String, String> processedParams) throws UnsupportedLlmTaskException {
 
         // Extract observability params BEFORE filtering (they're removed from cache
         // key)
@@ -79,11 +77,10 @@ class ChatModelRegistry {
     }
 
     /**
-     * Get or create a StreamingChatModel for the given type and parameters.
-     * Returns {@code null} if the builder does not support streaming.
+     * Get or create a StreamingChatModel for the given type and parameters. Returns
+     * {@code null} if the builder does not support streaming.
      */
-    StreamingChatModel getOrCreateStreaming(String type, Map<String, String> processedParams)
-            throws UnsupportedLlmTaskException {
+    StreamingChatModel getOrCreateStreaming(String type, Map<String, String> processedParams) throws UnsupportedLlmTaskException {
 
         var filteredParams = filterParams(processedParams);
         var cacheKey = new ModelCacheKey(type, filteredParams);

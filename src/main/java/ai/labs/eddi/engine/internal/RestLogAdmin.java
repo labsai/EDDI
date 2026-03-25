@@ -34,9 +34,7 @@ public class RestLogAdmin implements IRestLogAdmin {
     private final InstanceIdProducer instanceIdProducer;
 
     @Inject
-    public RestLogAdmin(BoundedLogStore boundedLogStore,
-                        IDatabaseLogs databaseLogs,
-                        InstanceIdProducer instanceIdProducer) {
+    public RestLogAdmin(BoundedLogStore boundedLogStore, IDatabaseLogs databaseLogs, InstanceIdProducer instanceIdProducer) {
         this.boundedLogStore = boundedLogStore;
         this.databaseLogs = databaseLogs;
         this.instanceIdProducer = instanceIdProducer;
@@ -48,16 +46,13 @@ public class RestLogAdmin implements IRestLogAdmin {
     }
 
     @Override
-    public List<DatabaseLog> getHistoryLogs(Deployment.Environment environment, String agentId,
-                                             Integer agentVersion, String conversationId,
-                                             String userId, String instanceId,
-                                             Integer skip, Integer limit) {
+    public List<DatabaseLog> getHistoryLogs(Deployment.Environment environment, String agentId, Integer agentVersion, String conversationId,
+            String userId, String instanceId, Integer skip, Integer limit) {
         return databaseLogs.getLogs(environment, agentId, agentVersion, conversationId, userId, instanceId, skip, limit);
     }
 
     @Override
-    public void streamLogs(String agentId, String conversationId, String level,
-                           SseEventSink eventSink, Sse sse) {
+    public void streamLogs(String agentId, String conversationId, String level, SseEventSink eventSink, Sse sse) {
 
         // Send initial batch from ring buffer
         List<LogEntry> initial = boundedLogStore.getEntries(agentId, conversationId, level, 50);
@@ -67,12 +62,16 @@ public class RestLogAdmin implements IRestLogAdmin {
 
         // Register listener for live push
         String listenerId = boundedLogStore.addListener(entry -> {
-            if (eventSink.isClosed()) return;
+            if (eventSink.isClosed())
+                return;
 
             // Apply filters
-            if (agentId != null && !agentId.equals(entry.agentId())) return;
-            if (conversationId != null && !conversationId.equals(entry.conversationId())) return;
-            if (level != null && !level.equalsIgnoreCase(entry.level())) return;
+            if (agentId != null && !agentId.equals(entry.agentId()))
+                return;
+            if (conversationId != null && !conversationId.equals(entry.conversationId()))
+                return;
+            if (level != null && !level.equalsIgnoreCase(entry.level()))
+                return;
 
             sendEvent(eventSink, sse, entry);
         });
@@ -96,8 +95,7 @@ public class RestLogAdmin implements IRestLogAdmin {
             }
         });
 
-        log.debugv("SSE log stream started (listenerId={0}, agentId={1}, level={2})",
-                listenerId, agentId, level);
+        log.debugv("SSE log stream started (listenerId={0}, agentId={1}, level={2})", listenerId, agentId, level);
     }
 
     @Override
@@ -107,10 +105,7 @@ public class RestLogAdmin implements IRestLogAdmin {
 
     private void sendEvent(SseEventSink eventSink, Sse sse, LogEntry entry) {
         try {
-            OutboundSseEvent event = sse.newEventBuilder()
-                    .name("log")
-                    .data(entry)
-                    .build();
+            OutboundSseEvent event = sse.newEventBuilder().name("log").data(entry).build();
             eventSink.send(event).exceptionally(t -> {
                 log.debugv("Failed to send SSE log event: {0}", t.getMessage());
                 return null;

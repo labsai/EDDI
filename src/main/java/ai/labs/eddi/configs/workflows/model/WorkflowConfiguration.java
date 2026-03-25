@@ -1,6 +1,5 @@
 package ai.labs.eddi.configs.workflows.model;
 
-
 import java.net.URI;
 import java.util.HashMap;
 import java.util.LinkedList;

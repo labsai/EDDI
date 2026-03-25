@@ -23,8 +23,8 @@ import static org.mockito.Mockito.*;
  * Unit tests for {@link NatsConversationCoordinator}.
  *
  * <p>
- * Tests verify local ordering, retry/dead-letter logic, and metrics
- * without requiring a running NATS server. JetStream interactions are mocked.
+ * Tests verify local ordering, retry/dead-letter logic, and metrics without
+ * requiring a running NATS server. JetStream interactions are mocked.
  * </p>
  */
 class NatsConversationCoordinatorTest {
@@ -67,13 +67,7 @@ class NatsConversationCoordinatorTest {
 
         // Create coordinator with mocked dependencies (skip start() since that needs
         // real NATS)
-        coordinator = new NatsConversationCoordinator(
-                runtime,
-                metricsInstance,
-                "nats://localhost:4222",
-                "EDDI_CONVERSATIONS",
-                "EDDI_DEAD_LETTERS",
-                3,
+        coordinator = new NatsConversationCoordinator(runtime, metricsInstance, "nats://localhost:4222", "EDDI_CONVERSATIONS", "EDDI_DEAD_LETTERS", 3,
                 60);
 
         // Inject the mocked JetStream via reflection
@@ -108,8 +102,7 @@ class NatsConversationCoordinatorTest {
         };
 
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor
-                .forClass(IRuntime.IFinishedExecution.class);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
 
         // Submit two tasks for the same conversation
         coordinator.submitInOrder("conv-1", task1);
@@ -145,8 +138,7 @@ class NatsConversationCoordinatorTest {
     @Test
     void shouldContinueOnNatsPublishFailure() throws Exception {
         // NATS publish fails
-        when(jetStream.publish(anyString(), any(byte[].class)))
-                .thenThrow(new IOException("NATS connection lost"));
+        when(jetStream.publish(anyString(), any(byte[].class))).thenThrow(new IOException("NATS connection lost"));
 
         Callable<Void> task = () -> null;
 
@@ -164,8 +156,7 @@ class NatsConversationCoordinatorTest {
         Callable<Void> task2 = () -> null;
 
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor
-                .forClass(IRuntime.IFinishedExecution.class);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
 
         coordinator.submitInOrder("conv-1", task1);
         coordinator.submitInOrder("conv-1", task2);
@@ -217,8 +208,7 @@ class NatsConversationCoordinatorTest {
             throw new RuntimeException("fail");
         };
 
-        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor
-                .forClass(IRuntime.IFinishedExecution.class);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
 
         coordinator.submitInOrder("conv-retry", failingTask);
 
@@ -244,8 +234,7 @@ class NatsConversationCoordinatorTest {
             throw new RuntimeException("persistent failure");
         };
 
-        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor
-                .forClass(IRuntime.IFinishedExecution.class);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
 
         coordinator.submitInOrder("conv-dl", failingTask);
 
@@ -276,8 +265,7 @@ class NatsConversationCoordinatorTest {
     void shouldIncrementConsumeMetricsOnCompletion() throws Exception {
         Callable<Void> task = () -> null;
 
-        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor
-                .forClass(IRuntime.IFinishedExecution.class);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> callbackCaptor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
 
         coordinator.submitInOrder("conv-consume", task);
         verify(runtime).submitCallable(eq(task), callbackCaptor.capture(), isNull());

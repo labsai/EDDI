@@ -50,14 +50,9 @@ public class RestAgentAdministration implements IRestAgentAdministration {
     private static final Logger log = Logger.getLogger(RestAgentAdministration.class);
 
     @Inject
-    public RestAgentAdministration(IRuntime runtime,
-            IAgentFactory agentFactory,
-            IDeploymentStore deploymentStore,
-            IConversationMemoryStore conversationMemoryStore,
-            IRestConversationStore restConversationStore,
-            IDocumentDescriptorStore documentDescriptorStore,
-            IDeploymentListener deploymentListener,
-            IScheduleStore scheduleStore) {
+    public RestAgentAdministration(IRuntime runtime, IAgentFactory agentFactory, IDeploymentStore deploymentStore,
+            IConversationMemoryStore conversationMemoryStore, IRestConversationStore restConversationStore,
+            IDocumentDescriptorStore documentDescriptorStore, IDeploymentListener deploymentListener, IScheduleStore scheduleStore) {
         this.runtime = runtime;
         this.agentFactory = agentFactory;
         this.deploymentStore = deploymentStore;
@@ -69,8 +64,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
     }
 
     @Override
-    public Response deployAgent(final Deployment.Environment environment,
-            final String agentId, final Integer version, final Boolean autoDeploy,
+    public Response deployAgent(final Deployment.Environment environment, final String agentId, final Integer version, final Boolean autoDeploy,
             final Boolean waitForCompletion) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(agentId, "agentId");
@@ -91,8 +85,8 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                 } catch (ExecutionException e) {
                     Throwable cause = e.getCause();
                     // Log full details server-side, expose only safe message to client
-                    log.warn("Deployment failed for Agent " + agentId + " v" + version +
-                            ": " + (cause != null ? cause.getMessage() : e.getMessage()), cause != null ? cause : e);
+                    log.warn("Deployment failed for Agent " + agentId + " v" + version + ": " + (cause != null ? cause.getMessage() : e.getMessage()),
+                            cause != null ? cause : e);
                     deployError = "Deployment failed. Check server logs for details.";
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -119,22 +113,18 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         }
     }
 
-    private Future<Void> deploy(final Deployment.Environment environment,
-            final String agentId, final Integer version, final Boolean autoDeploy) {
+    private Future<Void> deploy(final Deployment.Environment environment, final String agentId, final Integer version, final Boolean autoDeploy) {
         Callable<Void> deployAgentCallable = () -> {
             try {
                 if (EnumSet.of(NOT_FOUND, ERROR).contains(checkDeploymentStatus(environment, agentId, version))) {
-                    agentFactory.deployAgent(environment, agentId, version,
-                            status -> {
-                                if (status == READY && autoDeploy) {
-                                    deploymentStore.setDeploymentInfo(environment.toString(),
-                                            agentId, version, DeploymentInfo.DeploymentStatus.deployed);
-                                }
-                            });
+                    agentFactory.deployAgent(environment, agentId, version, status -> {
+                        if (status == READY && autoDeploy) {
+                            deploymentStore.setDeploymentInfo(environment.toString(), agentId, version, DeploymentInfo.DeploymentStatus.deployed);
+                        }
+                    });
                 }
 
-                deploymentListener.onDeploymentEvent(
-                        new DeploymentEvent(agentId, version, environment, READY));
+                deploymentListener.onDeploymentEvent(new DeploymentEvent(agentId, version, environment, READY));
 
                 // Lifecycle hook: auto-enable schedules for this agent
                 enableSchedulesForAgent(agentId);
@@ -149,13 +139,11 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         return runtime.submitCallable(deployAgentCallable, ThreadContext.getResources());
     }
 
-    private void handleDeploymentException(Exception e, String agentId, Integer version,
-            Deployment.Environment environment) {
+    private void handleDeploymentException(Exception e, String agentId, Integer version, Deployment.Environment environment) {
         deploymentListener.onDeploymentEvent(new DeploymentEvent(agentId, version, environment, ERROR));
 
         if (e instanceof ServiceException) {
-            throwError(agentId, version, (ServiceException) e,
-                    "Error while deploying agent! (agentId=%s , version=%s)");
+            throwError(agentId, version, (ServiceException) e, "Error while deploying agent! (agentId=%s , version=%s)");
         } else if (e instanceof IllegalAccessException) {
             throwErrorForbidden(agentId, version, (IllegalAccessException) e);
         } else {
@@ -164,8 +152,8 @@ public class RestAgentAdministration implements IRestAgentAdministration {
     }
 
     @Override
-    public Response undeployAgent(Deployment.Environment environment, String agentId, Integer version,
-            Boolean endAllActiveConversations, Boolean undeployThisAndAllPreviousAgentVersions) {
+    public Response undeployAgent(Deployment.Environment environment, String agentId, Integer version, Boolean endAllActiveConversations,
+            Boolean undeployThisAndAllPreviousAgentVersions) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(agentId, "agentId");
         RuntimeUtilities.checkNotNull(version, "version");
@@ -179,15 +167,12 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                         restConversationStore.endActiveConversations(activeConversations);
                     } else {
                         var message = getConflictExplanations(agentId, version, activeConversationCount);
-                        return Response.status(Response.Status.CONFLICT).entity(message).type(MediaType.TEXT_PLAIN)
-                                .build();
+                        return Response.status(Response.Status.CONFLICT).entity(message).type(MediaType.TEXT_PLAIN).build();
                     }
                 }
 
                 undeploy(environment, agentId, version);
-                log.info(String.format("Successfully undeployed Agent (agentId=%s, agentVersion=%s, environment=%s)",
-                        agentId,
-                        version, environment));
+                log.info(String.format("Successfully undeployed Agent (agentId=%s, agentVersion=%s, environment=%s)", agentId, version, environment));
             } while (undeployThisAndAllPreviousAgentVersions && version-- > 1);
 
             return Response.accepted().build();
@@ -216,8 +201,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         Callable<Void> undeployAgentCallable = () -> {
             try {
                 agentFactory.undeployAgent(environment, agentId, version);
-                deploymentStore.setDeploymentInfo(environment.toString(),
-                        agentId, version, DeploymentInfo.DeploymentStatus.undeployed);
+                deploymentStore.setDeploymentInfo(environment.toString(), agentId, version, DeploymentInfo.DeploymentStatus.undeployed);
 
                 // Lifecycle hook: auto-disable schedules for this agent
                 disableSchedulesForAgent(agentId);
@@ -237,10 +221,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
     }
 
     @Override
-    public Response getDeploymentStatus(Deployment.Environment environment,
-            String agentId,
-            Integer version,
-            String format) {
+    public Response getDeploymentStatus(Deployment.Environment environment, String agentId, Integer version, String format) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(agentId, "agentId");
         RuntimeUtilities.checkNotNull(version, "version");
@@ -264,20 +245,15 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                 var agentId = latestAgent.getAgentId();
                 var agentVersion = latestAgent.getAgentVersion();
                 var documentDescriptor = documentDescriptorStore.readDescriptor(agentId, agentVersion);
-                agentDeploymentStatuses.add(new AgentDeploymentStatus(
-                        environment,
-                        agentId,
-                        agentVersion,
-                        latestAgent.getDeploymentStatus(),
-                        documentDescriptor));
+                agentDeploymentStatuses
+                        .add(new AgentDeploymentStatus(environment, agentId, agentVersion, latestAgent.getDeploymentStatus(), documentDescriptor));
             }
 
             agentDeploymentStatuses.sort(Comparator.comparing(o -> o.getDescriptor().getLastModifiedOn()));
             Collections.reverse(agentDeploymentStatuses);
 
             return agentDeploymentStatuses;
-        } catch (ServiceException | IResourceStore.ResourceStoreException
-                | IResourceStore.ResourceNotFoundException e) {
+        } catch (ServiceException | IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -311,12 +287,9 @@ public class RestAgentAdministration implements IRestAgentAdministration {
             var schedules = scheduleStore.readSchedulesByAgentId(agentId);
             for (var schedule : schedules) {
                 if (!schedule.isEnabled()) {
-                    var nextFire = schedule.getNextFire() != null
-                            ? schedule.getNextFire()
-                            : java.time.Instant.now();
+                    var nextFire = schedule.getNextFire() != null ? schedule.getNextFire() : java.time.Instant.now();
                     scheduleStore.setScheduleEnabled(schedule.getId(), true, nextFire);
-                    log.infof("[SCHEDULE] Auto-enabled schedule '%s' (id=%s) on Agent %s deploy",
-                            schedule.getName(), schedule.getId(), agentId);
+                    log.infof("[SCHEDULE] Auto-enabled schedule '%s' (id=%s) on Agent %s deploy", schedule.getName(), schedule.getId(), agentId);
                 }
             }
         } catch (Exception e) {
@@ -330,8 +303,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
             for (var schedule : schedules) {
                 if (schedule.isEnabled()) {
                     scheduleStore.setScheduleEnabled(schedule.getId(), false, null);
-                    log.infof("[SCHEDULE] Auto-disabled schedule '%s' (id=%s) on Agent %s undeploy",
-                            schedule.getName(), schedule.getId(), agentId);
+                    log.infof("[SCHEDULE] Auto-disabled schedule '%s' (id=%s) on Agent %s undeploy", schedule.getName(), schedule.getId(), agentId);
                 }
             }
         } catch (Exception e) {

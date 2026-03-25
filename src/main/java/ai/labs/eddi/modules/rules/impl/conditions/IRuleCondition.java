@@ -37,14 +37,10 @@ public interface IRuleCondition extends Cloneable {
     }
 
     enum ExecutionState {
-        SUCCESS,
-        FAIL,
-        NOT_EXECUTED,
-        ERROR
+        SUCCESS, FAIL, NOT_EXECUTED, ERROR
     }
 
-    ExecutionState execute(IConversationMemory memory, List<Rule> trace)
-            throws Rule.InfiniteLoopException, Rule.RuntimeException;
+    ExecutionState execute(IConversationMemory memory, List<Rule> trace) throws Rule.InfiniteLoopException, Rule.RuntimeException;
 
     IRuleCondition clone() throws CloneNotSupportedException;
 }

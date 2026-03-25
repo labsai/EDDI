@@ -12,11 +12,10 @@ public interface ILanguageModelBuilder {
      * Build a streaming-capable chat model. Override in builders that support
      * streaming.
      *
-     * @throws UnsupportedOperationException if streaming is not supported by this
-     *                                       builder
+     * @throws UnsupportedOperationException
+     *             if streaming is not supported by this builder
      */
     default StreamingChatModel buildStreaming(Map<String, String> parameters) {
-        throw new UnsupportedOperationException(
-                "Streaming is not supported by " + getClass().getSimpleName());
+        throw new UnsupportedOperationException("Streaming is not supported by " + getClass().getSimpleName());
     }
 }

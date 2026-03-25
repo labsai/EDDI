@@ -15,35 +15,32 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 /**
  * Converts EDDI conversation memory into a langchain4j ChatMessage list.
  * <p>
- * Handles system message prepending, prompt replacement, log size limits,
- * and multi-modal content types (text, pdf, audio, video).
+ * Handles system message prepending, prompt replacement, log size limits, and
+ * multi-modal content types (text, pdf, audio, video).
  */
 class ConversationHistoryBuilder {
 
     /**
      * Build the full list of ChatMessages for an LLM call.
      *
-     * @param memory                   conversation memory to read history from
-     * @param systemMessage            system message (may be null/empty)
-     * @param prompt                   optional prompt to replace last user message
-     *                                 (may be null/empty)
-     * @param logSizeLimit             conversation history limit (-1 = unlimited)
-     * @param includeFirstAgentMessage whether to include the initial Agent greeting
+     * @param memory
+     *            conversation memory to read history from
+     * @param systemMessage
+     *            system message (may be null/empty)
+     * @param prompt
+     *            optional prompt to replace last user message (may be null/empty)
+     * @param logSizeLimit
+     *            conversation history limit (-1 = unlimited)
+     * @param includeFirstAgentMessage
+     *            whether to include the initial Agent greeting
      * @return ordered list of ChatMessages (system → history → user/prompt)
      */
-    List<ChatMessage> buildMessages(IConversationMemory memory,
-            String systemMessage,
-            String prompt,
-            int logSizeLimit,
+    List<ChatMessage> buildMessages(IConversationMemory memory, String systemMessage, String prompt, int logSizeLimit,
             boolean includeFirstAgentMessage) {
 
         // Generate conversation history from memory
-        var chatMessages = new ArrayList<>(
-                new ConversationLogGenerator(memory).generate(logSizeLimit, includeFirstAgentMessage)
-                        .getMessages()
-                        .stream()
-                        .map(this::convertMessage)
-                        .toList());
+        var chatMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(logSizeLimit, includeFirstAgentMessage).getMessages()
+                .stream().map(this::convertMessage).toList());
 
         // If a custom prompt is defined, replace the last user input with it
         if (!isNullOrEmpty(prompt)) {
@@ -64,8 +61,8 @@ class ConversationHistoryBuilder {
     }
 
     /**
-     * Convert an EDDI ConversationPart into a langchain4j ChatMessage.
-     * Supports multi-modal content (text, pdf, audio, video) for user messages.
+     * Convert an EDDI ConversationPart into a langchain4j ChatMessage. Supports
+     * multi-modal content (text, pdf, audio, video) for user messages.
      */
     ChatMessage convertMessage(ConversationLog.ConversationPart eddiMessage) {
         return switch (eddiMessage.getRole().toLowerCase()) {
@@ -88,7 +85,6 @@ class ConversationHistoryBuilder {
     }
 
     private static String joinMessages(ConversationLog.ConversationPart eddiMessage) {
-        return eddiMessage.getContent().stream().map(ConversationLog.ConversationPart.Content::getValue)
-                .collect(Collectors.joining(" "));
+        return eddiMessage.getContent().stream().map(ConversationLog.ConversationPart.Content::getValue).collect(Collectors.joining(" "));
     }
 }

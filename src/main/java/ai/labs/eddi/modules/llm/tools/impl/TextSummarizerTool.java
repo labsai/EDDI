@@ -9,17 +9,15 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Text summarization and processing tool.
- * Provides extractive summarization and text analysis.
+ * Text summarization and processing tool. Provides extractive summarization and
+ * text analysis.
  */
 @ApplicationScoped
 public class TextSummarizerTool {
     private static final Logger LOGGER = Logger.getLogger(TextSummarizerTool.class);
 
     @Tool("Summarizes long text by extracting the most important sentences. Good for quick overviews of articles or documents.")
-    public String summarizeText(
-            @P("text") String text,
-            @P("numSentences") Integer numSentences) {
+    public String summarizeText(@P("text") String text, @P("numSentences") Integer numSentences) {
 
         try {
             if (numSentences == null || numSentences < 1) {
@@ -44,9 +42,7 @@ public class TextSummarizerTool {
 
             // Get top sentences
             List<Map.Entry<String, Double>> topSentences = sentenceScores.entrySet().stream()
-                    .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
-                    .limit(numSentences)
-                    .toList();
+                    .sorted(Map.Entry.<String, Double>comparingByValue().reversed()).limit(numSentences).toList();
 
             // Maintain original order
             List<String> selectedSentences = new ArrayList<>();
@@ -71,8 +67,7 @@ public class TextSummarizerTool {
     }
 
     @Tool("Counts words, sentences, and characters in text")
-    public String analyzeText(
-            @P("text") String text) {
+    public String analyzeText(@P("text") String text) {
 
         try {
             int charCount = text.length();
@@ -82,8 +77,7 @@ public class TextSummarizerTool {
 
             // Calculate average word length
             String[] words = text.split("\\s+");
-            double avgWordLength = words.length > 0 ?
-                Arrays.stream(words).mapToInt(String::length).average().orElse(0) : 0;
+            double avgWordLength = words.length > 0 ? Arrays.stream(words).mapToInt(String::length).average().orElse(0) : 0;
 
             // Estimate reading time (average 200 words per minute)
             int readingTimeMinutes = (int) Math.ceil(wordCount / 200.0);
@@ -107,9 +101,7 @@ public class TextSummarizerTool {
     }
 
     @Tool("Extracts keywords from text based on frequency and importance")
-    public String extractKeywords(
-            @P("text") String text,
-            @P("numKeywords") Integer numKeywords) {
+    public String extractKeywords(@P("text") String text, @P("numKeywords") Integer numKeywords) {
 
         try {
             if (numKeywords == null || numKeywords < 1) {
@@ -126,24 +118,19 @@ public class TextSummarizerTool {
 
             // Filter out stop words and short words
             Set<String> stopWords = getStopWords();
-            Map<String, Integer> filteredFreq = wordFreq.entrySet().stream()
-                    .filter(e -> !stopWords.contains(e.getKey()))
-                    .filter(e -> e.getKey().length() > 3)
-                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+            Map<String, Integer> filteredFreq = wordFreq.entrySet().stream().filter(e -> !stopWords.contains(e.getKey()))
+                    .filter(e -> e.getKey().length() > 3).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
             // Get top keywords
             List<Map.Entry<String, Integer>> topKeywords = filteredFreq.entrySet().stream()
-                    .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
-                    .limit(numKeywords)
-                    .toList();
+                    .sorted(Map.Entry.<String, Integer>comparingByValue().reversed()).limit(numKeywords).toList();
 
             StringBuilder result = new StringBuilder();
             result.append("Top Keywords:\n\n");
 
             int rank = 1;
             for (Map.Entry<String, Integer> entry : topKeywords) {
-                result.append(rank++).append(". ").append(entry.getKey())
-                      .append(" (").append(entry.getValue()).append(" occurrences)\n");
+                result.append(rank++).append(". ").append(entry.getKey()).append(" (").append(entry.getValue()).append(" occurrences)\n");
             }
 
             LOGGER.info("Extracted " + topKeywords.size() + " keywords");
@@ -156,8 +143,7 @@ public class TextSummarizerTool {
     }
 
     @Tool("Removes extra whitespace and normalizes text formatting")
-    public String normalizeText(
-            @P("text") String text) {
+    public String normalizeText(@P("text") String text) {
 
         try {
             // Remove extra whitespace
@@ -182,9 +168,7 @@ public class TextSummarizerTool {
         Map<String, Integer> freq = new HashMap<>();
 
         // Clean and split text
-        String cleaned = text.toLowerCase()
-                            .replaceAll("[^a-z0-9\\s]", " ")
-                            .replaceAll("\\s+", " ");
+        String cleaned = text.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").replaceAll("\\s+", " ");
 
         String[] words = cleaned.split(" ");
 
@@ -222,16 +206,10 @@ public class TextSummarizerTool {
     }
 
     private Set<String> getStopWords() {
-        return new HashSet<>(Arrays.asList(
-            "the", "be", "to", "of", "and", "a", "in", "that", "have", "i",
-            "it", "for", "not", "on", "with", "he", "as", "you", "do", "at",
-            "this", "but", "his", "by", "from", "they", "we", "say", "her", "she",
-            "or", "an", "will", "my", "one", "all", "would", "there", "their",
-            "what", "so", "up", "out", "if", "about", "who", "get", "which", "go",
-            "me", "when", "make", "can", "like", "time", "no", "just", "him", "know",
-            "take", "people", "into", "year", "your", "good", "some", "could", "them",
-            "see", "other", "than", "then", "now", "look", "only", "come", "its", "over"
-        ));
+        return new HashSet<>(Arrays.asList("the", "be", "to", "of", "and", "a", "in", "that", "have", "i", "it", "for", "not", "on", "with", "he",
+                "as", "you", "do", "at", "this", "but", "his", "by", "from", "they", "we", "say", "her", "she", "or", "an", "will", "my", "one",
+                "all", "would", "there", "their", "what", "so", "up", "out", "if", "about", "who", "get", "which", "go", "me", "when", "make", "can",
+                "like", "time", "no", "just", "him", "know", "take", "people", "into", "year", "your", "good", "some", "could", "them", "see",
+                "other", "than", "then", "now", "look", "only", "come", "its", "over"));
     }
 }
-

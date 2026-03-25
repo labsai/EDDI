@@ -13,11 +13,11 @@ public class PermutationTest {
 
     @Test
     public void testPermutation() {
-        //setup
+        // setup
         Permutation permutation = new Permutation(new Integer[]{1, 2, 3});
         Iterator<Integer[]> permutationIterator = permutation.iterator();
 
-        //assert
+        // assert
         Assertions.assertTrue(permutationIterator.hasNext());
         Assertions.assertArrayEquals(new Integer[]{1, 2, 3}, permutationIterator.next());
         Assertions.assertTrue(permutationIterator.hasNext());
@@ -35,11 +35,11 @@ public class PermutationTest {
 
     @Test
     public void testPermutation1() {
-        //setup
+        // setup
         Permutation permutation = new Permutation(new Integer[]{1, 0, 0});
         Iterator<Integer[]> permutationIterator = permutation.iterator();
 
-        //assert
+        // assert
         Assertions.assertTrue(permutationIterator.hasNext());
         Assertions.assertArrayEquals(new Integer[]{0, 0, 1}, permutationIterator.next());
         Assertions.assertTrue(permutationIterator.hasNext());
@@ -51,11 +51,11 @@ public class PermutationTest {
 
     @Test
     public void testPermutation2() {
-        //setup
+        // setup
         Permutation permutation = new Permutation(new Integer[]{0, 0, 1});
         Iterator<Integer[]> permutationIterator = permutation.iterator();
 
-        //assert
+        // assert
         Assertions.assertTrue(permutationIterator.hasNext());
         Assertions.assertArrayEquals(new Integer[]{0, 0, 1}, permutationIterator.next());
         Assertions.assertTrue(permutationIterator.hasNext());

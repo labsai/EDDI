@@ -23,11 +23,8 @@ class RestAuditStoreTest {
     private RestAuditStore restAuditStore;
 
     private AuditEntry sampleEntry() {
-        return new AuditEntry(
-                "id-1", "conv-1", "agent-1", 1, "user-1", "production",
-                0, "task-1", "test-type", 0, 42L,
-                Map.of("userInput", "hello"), Map.of("output", List.of("world")),
-                null, null, List.of("greet"), 0.0, Instant.now(), "hmac-abc");
+        return new AuditEntry("id-1", "conv-1", "agent-1", 1, "user-1", "production", 0, "task-1", "test-type", 0, 42L, Map.of("userInput", "hello"),
+                Map.of("output", List.of("world")), null, null, List.of("greet"), 0.0, Instant.now(), "hmac-abc");
     }
 
     @BeforeEach

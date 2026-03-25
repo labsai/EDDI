@@ -72,13 +72,8 @@ public class ConversationMemoryUtilities {
             var packageRunSnapshot = new WorkflowRunSnapshot();
             conversationStepSnapshot.getWorkflows().add(packageRunSnapshot);
             for (var data : conversationStep.getAllElements()) {
-                var resultSnapshot = new ResultSnapshot(
-                        data.getKey(),
-                        data.getResult(),
-                        data.getPossibleResults(),
-                        data.getTimestamp(),
-                        data.getOriginWorkflowId(),
-                        data.isPublic());
+                var resultSnapshot = new ResultSnapshot(data.getKey(), data.getResult(), data.getPossibleResults(), data.getTimestamp(),
+                        data.getOriginWorkflowId(), data.isPublic());
                 packageRunSnapshot.getLifecycleTasks().add(resultSnapshot);
             }
         }
@@ -95,8 +90,7 @@ public class ConversationMemoryUtilities {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     @SuppressWarnings("unchecked")
                     var data = new Data<Object>(resultSnapshot.getKey(), resultSnapshot.getResult(),
-                            (List<Object>) resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(),
-                            resultSnapshot.isPublic());
+                            (List<Object>) resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(), resultSnapshot.isPublic());
                     conversationStep.storeData(data);
                 }
             }
@@ -106,8 +100,8 @@ public class ConversationMemoryUtilities {
     }
 
     public static IConversationMemory convertConversationMemorySnapshot(ConversationMemorySnapshot snapshot) {
-        var conversationMemory = new ConversationMemory(snapshot.getConversationId(),
-                snapshot.getAgentId(), snapshot.getAgentVersion(), snapshot.getUserId());
+        var conversationMemory = new ConversationMemory(snapshot.getConversationId(), snapshot.getAgentId(), snapshot.getAgentVersion(),
+                snapshot.getUserId());
 
         conversationMemory.setConversationState(snapshot.getConversationState());
         conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
@@ -132,8 +126,7 @@ public class ConversationMemoryUtilities {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     @SuppressWarnings("unchecked")
                     var data = new Data<Object>(resultSnapshot.getKey(), resultSnapshot.getResult(),
-                            (List<Object>) resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(),
-                            resultSnapshot.isPublic());
+                            (List<Object>) resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(), resultSnapshot.isPublic());
                     conversationMemory.getCurrentStep().storeData(data);
                 }
             }
@@ -142,8 +135,7 @@ public class ConversationMemoryUtilities {
         return conversationMemory;
     }
 
-    public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(
-            ConversationMemorySnapshot conversationMemorySnapshot,
+    public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot,
             boolean returnDetailed, boolean returnCurrentStepOnly) {
 
         var newSnapshot = getSimpleMemorySnapshot(conversationMemorySnapshot);
@@ -161,8 +153,8 @@ public class ConversationMemoryUtilities {
                 var newConversationOutput = newConversationOutputs.get(index);
 
                 for (var key : conversationOutput.keySet()) {
-                    if (key.startsWith(INPUT_INITIAL.key()) || key.startsWith(ACTIONS.key()) ||
-                            key.startsWith(OUTPUT_PREFIX) || key.startsWith(QUICK_REPLIES_PREFIX)) {
+                    if (key.startsWith(INPUT_INITIAL.key()) || key.startsWith(ACTIONS.key()) || key.startsWith(OUTPUT_PREFIX)
+                            || key.startsWith(QUICK_REPLIES_PREFIX)) {
                         newConversationOutput.put(key, conversationOutput.get(key));
                     }
                 }
@@ -177,17 +169,12 @@ public class ConversationMemoryUtilities {
             for (var packageRunSnapshot : conversationStepSnapshot.getWorkflows()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     var key = resultSnapshot.getKey();
-                    if (returnDetailed ||
-                            key.equals(INPUT_INITIAL.key()) || key.startsWith(ACTIONS.key()) ||
-                            key.startsWith(OUTPUT_PREFIX) || key.startsWith(QUICK_REPLIES_PREFIX)) {
+                    if (returnDetailed || key.equals(INPUT_INITIAL.key()) || key.startsWith(ACTIONS.key()) || key.startsWith(OUTPUT_PREFIX)
+                            || key.startsWith(QUICK_REPLIES_PREFIX)) {
 
                         var result = resultSnapshot.getResult();
-                        simpleConversationStep.getConversationStep().add(
-                                new ConversationStepData(
-                                        key,
-                                        result,
-                                        resultSnapshot.getTimestamp(),
-                                        resultSnapshot.getOriginWorkflowId()));
+                        simpleConversationStep.getConversationStep()
+                                .add(new ConversationStepData(key, result, resultSnapshot.getTimestamp(), resultSnapshot.getOriginWorkflowId()));
 
                     } else {
                         continue;
@@ -201,8 +188,7 @@ public class ConversationMemoryUtilities {
         return newSnapshot;
     }
 
-    private static SimpleConversationMemorySnapshot getSimpleMemorySnapshot(
-            ConversationMemorySnapshot conversationMemorySnapshot) {
+    private static SimpleConversationMemorySnapshot getSimpleMemorySnapshot(ConversationMemorySnapshot conversationMemorySnapshot) {
 
         var simpleSnapshot = new SimpleConversationMemorySnapshot();
 
@@ -220,26 +206,17 @@ public class ConversationMemoryUtilities {
         return simpleSnapshot;
     }
 
-    public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(
-            IConversationMemory returnConversationMemory,
-            Boolean returnDetailed,
-            Boolean returnCurrentStepOnly,
-            List<String> returningFields) {
+    public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(IConversationMemory returnConversationMemory,
+            Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields) {
 
-        return convertSimpleConversationMemorySnapshot(
-                convertConversationMemory(returnConversationMemory),
-                returnDetailed,
-                returnCurrentStepOnly, returningFields);
+        return convertSimpleConversationMemorySnapshot(convertConversationMemory(returnConversationMemory), returnDetailed, returnCurrentStepOnly,
+                returningFields);
     }
 
-    public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(
-            ConversationMemorySnapshot conversationMemorySnapshot,
-            Boolean returnDetailed,
-            Boolean returnCurrentStepOnly,
-            List<String> returningFields) {
+    public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(ConversationMemorySnapshot conversationMemorySnapshot,
+            Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields) {
 
-        var memorySnapshot = convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed,
-                returnCurrentStepOnly);
+        var memorySnapshot = convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed, returnCurrentStepOnly);
 
         if (returnCurrentStepOnly) {
             if (isNullOrEmpty(returningFields) || returningFields.contains(KEY_CONVERSATION_STEPS)) {

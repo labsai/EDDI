@@ -29,8 +29,7 @@ import java.io.IOException;
 
 public class IdDeserializer extends JsonDeserializer<String> {
     @Override
-    public String deserialize(JsonParser jsonParser, DeserializationContext ctxt)
-            throws IOException {
+    public String deserialize(JsonParser jsonParser, DeserializationContext ctxt) throws IOException {
         if (!(jsonParser instanceof BsonParser)) {
             return jsonParser.getValueAsString();
         }
@@ -39,8 +38,7 @@ public class IdDeserializer extends JsonDeserializer<String> {
 
     @SuppressWarnings("deprecation")
     public String deserialize(BsonParser bsonParser, DeserializationContext ctxt) throws IOException {
-        if (bsonParser.getCurrentToken() != JsonToken.VALUE_EMBEDDED_OBJECT ||
-                bsonParser.getCurrentBsonType() != BsonConstants.TYPE_OBJECTID) {
+        if (bsonParser.getCurrentToken() != JsonToken.VALUE_EMBEDDED_OBJECT || bsonParser.getCurrentBsonType() != BsonConstants.TYPE_OBJECTID) {
             ctxt.handleUnexpectedToken(ObjectId.class, bsonParser.enable(null));
         }
 

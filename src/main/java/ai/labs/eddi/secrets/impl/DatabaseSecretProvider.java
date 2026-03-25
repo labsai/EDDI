@@ -16,15 +16,16 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.Optional;
 
 /**
- * Default ISecretProvider implementation using envelope encryption.
- * Secrets are encrypted with tenant-scoped DEKs, which are encrypted with the KEK.
+ * Default ISecretProvider implementation using envelope encryption. Secrets are
+ * encrypted with tenant-scoped DEKs, which are encrypted with the KEK.
  * <p>
  * Storage is in-memory for now (ConcurrentHashMaps). When the EDDI database
- * abstraction supports a secrets collection, this can be swapped to persistent storage
- * without changing the interface.
+ * abstraction supports a secrets collection, this can be swapped to persistent
+ * storage without changing the interface.
  * <p>
- * The KEK (Master Key) is supplied via the {@code EDDI_VAULT_MASTER_KEY} environment variable.
- * If not set, the provider is disabled and all operations throw exceptions.
+ * The KEK (Master Key) is supplied via the {@code EDDI_VAULT_MASTER_KEY}
+ * environment variable. If not set, the provider is disabled and all operations
+ * throw exceptions.
  */
 @ApplicationScoped
 public class DatabaseSecretProvider implements ISecretProvider {
@@ -41,8 +42,7 @@ public class DatabaseSecretProvider implements ISecretProvider {
     private final Map<String, EncryptedSecret> secretStore = new ConcurrentHashMap<>(); // compositeKey -> secret
 
     @Inject
-    public DatabaseSecretProvider(
-            @ConfigProperty(name = "eddi.vault.master-key") Optional<String> masterKeyConfig) {
+    public DatabaseSecretProvider(@ConfigProperty(name = "eddi.vault.master-key") Optional<String> masterKeyConfig) {
         this.masterKeyConfig = masterKeyConfig;
     }
 
@@ -64,8 +64,7 @@ public class DatabaseSecretProvider implements ISecretProvider {
         String key = compositeKey(reference);
         EncryptedSecret secret = secretStore.get(key);
         if (secret == null) {
-            throw new SecretNotFoundException(
-                    "Secret not found: " + reference.tenantId() + "/" + reference.agentId() + "/" + reference.keyName());
+            throw new SecretNotFoundException("Secret not found: " + reference.tenantId() + "/" + reference.agentId() + "/" + reference.keyName());
         }
 
         // Decrypt: KEK -> DEK -> plaintext
@@ -90,17 +89,9 @@ public class DatabaseSecretProvider implements ISecretProvider {
         String key = compositeKey(reference);
         EncryptedSecret existing = secretStore.get(key);
 
-        EncryptedSecret secret = new EncryptedSecret(
-                existing != null ? existing.getId() : UUID.randomUUID().toString(),
-                reference.tenantId(),
-                reference.agentId(),
-                reference.keyName(),
-                result.ciphertext(),
-                result.iv(),
-                reference.tenantId(), // dekId is the tenantId for now
-                checksum,
-                existing != null ? existing.getCreatedAt() : Instant.now(),
-                null);
+        EncryptedSecret secret = new EncryptedSecret(existing != null ? existing.getId() : UUID.randomUUID().toString(), reference.tenantId(),
+                reference.agentId(), reference.keyName(), result.ciphertext(), result.iv(), reference.tenantId(), // dekId is the tenantId for now
+                checksum, existing != null ? existing.getCreatedAt() : Instant.now(), null);
 
         secretStore.put(key, secret);
         LOGGER.infov("Secret stored: {0}/{1}/{2}", reference.tenantId(), reference.agentId(), reference.keyName());
@@ -112,8 +103,7 @@ public class DatabaseSecretProvider implements ISecretProvider {
         String key = compositeKey(reference);
         EncryptedSecret removed = secretStore.remove(key);
         if (removed == null) {
-            throw new SecretNotFoundException(
-                    "Secret not found: " + reference.tenantId() + "/" + reference.agentId() + "/" + reference.keyName());
+            throw new SecretNotFoundException("Secret not found: " + reference.tenantId() + "/" + reference.agentId() + "/" + reference.keyName());
         }
         LOGGER.infov("Secret deleted: {0}/{1}/{2}", reference.tenantId(), reference.agentId(), reference.keyName());
     }
@@ -124,26 +114,17 @@ public class DatabaseSecretProvider implements ISecretProvider {
         String key = compositeKey(reference);
         EncryptedSecret secret = secretStore.get(key);
         if (secret == null) {
-            throw new SecretNotFoundException(
-                    "Secret not found: " + reference.tenantId() + "/" + reference.agentId() + "/" + reference.keyName());
+            throw new SecretNotFoundException("Secret not found: " + reference.tenantId() + "/" + reference.agentId() + "/" + reference.keyName());
         }
-        return new SecretMetadata(
-                secret.getTenantId(),
-                secret.getAgentId(),
-                secret.getKeyName(),
-                secret.getCreatedAt(),
-                secret.getLastAccessedAt(),
+        return new SecretMetadata(secret.getTenantId(), secret.getAgentId(), secret.getKeyName(), secret.getCreatedAt(), secret.getLastAccessedAt(),
                 secret.getChecksum());
     }
 
     @Override
     public List<SecretMetadata> listKeys(String tenantId, String agentId) throws SecretProviderException {
         ensureAvailable();
-        return secretStore.values().stream()
-                .filter(s -> s.getTenantId().equals(tenantId) && s.getAgentId().equals(agentId))
-                .map(s -> new SecretMetadata(
-                        s.getTenantId(), s.getAgentId(), s.getKeyName(),
-                        s.getCreatedAt(), s.getLastAccessedAt(), s.getChecksum()))
+        return secretStore.values().stream().filter(s -> s.getTenantId().equals(tenantId) && s.getAgentId().equals(agentId)).map(
+                s -> new SecretMetadata(s.getTenantId(), s.getAgentId(), s.getKeyName(), s.getCreatedAt(), s.getLastAccessedAt(), s.getChecksum()))
                 .toList();
     }
 
@@ -165,12 +146,7 @@ public class DatabaseSecretProvider implements ISecretProvider {
         byte[] newDek = EnvelopeCrypto.generateDek();
         EnvelopeCrypto.EncryptionResult encResult = EnvelopeCrypto.encryptDek(newDek, kek);
 
-        EncryptedDek dek = new EncryptedDek(
-                UUID.randomUUID().toString(),
-                tenantId,
-                encResult.ciphertext(),
-                encResult.iv(),
-                Instant.now());
+        EncryptedDek dek = new EncryptedDek(UUID.randomUUID().toString(), tenantId, encResult.ciphertext(), encResult.iv(), Instant.now());
 
         dekStore.put(tenantId, dek);
         LOGGER.infov("Generated new DEK for tenant: {0}", tenantId);
@@ -179,8 +155,7 @@ public class DatabaseSecretProvider implements ISecretProvider {
 
     private void ensureAvailable() throws SecretProviderException {
         if (!available) {
-            throw new SecretProviderException(
-                    "Secrets Vault is not available. Set EDDI_VAULT_MASTER_KEY environment variable.");
+            throw new SecretProviderException("Secrets Vault is not available. Set EDDI_VAULT_MASTER_KEY environment variable.");
         }
     }
 

@@ -16,15 +16,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Async batch writer for the immutable audit ledger.
  * <p>
- * Follows the same pattern as {@link ai.labs.eddi.engine.runtime.BoundedLogStore}:
- * non-blocking capture via a {@link ConcurrentLinkedQueue}, with a
- * {@link ScheduledExecutorService} flushing entries to {@link IAuditStore}
- * at a configurable interval.
+ * Follows the same pattern as
+ * {@link ai.labs.eddi.engine.runtime.BoundedLogStore}: non-blocking capture via
+ * a {@link ConcurrentLinkedQueue}, with a {@link ScheduledExecutorService}
+ * flushing entries to {@link IAuditStore} at a configurable interval.
  * <p>
  * Before persisting, each entry passes through:
  * <ol>
- *   <li>{@link SecretRedactionFilter} — scrubs potential secrets from string values</li>
- *   <li>{@link AuditHmac} — computes HMAC-SHA256 integrity hash using the vault master key</li>
+ * <li>{@link SecretRedactionFilter} — scrubs potential secrets from string
+ * values</li>
+ * <li>{@link AuditHmac} — computes HMAC-SHA256 integrity hash using the vault
+ * master key</li>
  * </ol>
  *
  * @author ginccc
@@ -47,9 +49,7 @@ public class AuditLedgerService {
     private ScheduledExecutorService flushExecutor;
 
     @Inject
-    public AuditLedgerService(
-            IAuditStore auditStore,
-            @ConfigProperty(name = "eddi.audit.enabled", defaultValue = "true") boolean enabled,
+    public AuditLedgerService(IAuditStore auditStore, @ConfigProperty(name = "eddi.audit.enabled", defaultValue = "true") boolean enabled,
             @ConfigProperty(name = "eddi.audit.flush-interval-seconds", defaultValue = "3") int flushIntervalSeconds,
             @ConfigProperty(name = "eddi.vault.master-key") Optional<String> masterKeyConfig) {
         this.auditStore = auditStore;
@@ -59,11 +59,10 @@ public class AuditLedgerService {
     }
 
     /**
-     * Factory method for unit testing — creates a service without CDI.
-     * Call {@link #init()} after construction.
+     * Factory method for unit testing — creates a service without CDI. Call
+     * {@link #init()} after construction.
      */
-    static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled,
-                                                int flushIntervalSeconds, String masterKeyConfig) {
+    static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig) {
         return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig));
     }
 
@@ -86,8 +85,7 @@ public class AuditLedgerService {
             t.setDaemon(true);
             return t;
         });
-        flushExecutor.scheduleAtFixedRate(this::flush,
-                flushIntervalSeconds, flushIntervalSeconds, TimeUnit.SECONDS);
+        flushExecutor.scheduleAtFixedRate(this::flush, flushIntervalSeconds, flushIntervalSeconds, TimeUnit.SECONDS);
 
         LOGGER.infov("Audit Ledger initialized (flush every {0}s)", flushIntervalSeconds);
     }
@@ -109,13 +107,15 @@ public class AuditLedgerService {
     }
 
     /**
-     * Enqueue an audit entry for async persistence.
-     * Applies secret redaction and HMAC signing before queuing.
+     * Enqueue an audit entry for async persistence. Applies secret redaction and
+     * HMAC signing before queuing.
      *
-     * @param entry the entry to persist (hmac field will be computed)
+     * @param entry
+     *            the entry to persist (hmac field will be computed)
      */
     public void submit(AuditEntry entry) {
-        if (!enabled || entry == null) return;
+        if (!enabled || entry == null)
+            return;
 
         // Scrub secrets from string values in maps
         AuditEntry scrubbed = scrubSecrets(entry);
@@ -136,7 +136,8 @@ public class AuditLedgerService {
      * Flush pending entries to the audit store in a batch.
      */
     void flush() {
-        if (queue.isEmpty()) return;
+        if (queue.isEmpty())
+            return;
 
         List<AuditEntry> batch = new ArrayList<>();
         AuditEntry entry;
@@ -150,8 +151,7 @@ public class AuditLedgerService {
                 consecutiveFailures.set(0);
             } catch (Exception e) {
                 int failures = consecutiveFailures.incrementAndGet();
-                LOGGER.errorv("Failed to flush {0} audit entries (attempt {1}/{2}): {3}",
-                        batch.size(), failures, MAX_FLUSH_RETRIES, e.getMessage());
+                LOGGER.errorv("Failed to flush {0} audit entries (attempt {1}/{2}): {3}", batch.size(), failures, MAX_FLUSH_RETRIES, e.getMessage());
 
                 if (failures < MAX_FLUSH_RETRIES) {
                     // Re-queue entries at the front so the next flush retries them
@@ -160,8 +160,7 @@ public class AuditLedgerService {
                     }
                     LOGGER.warnv("Re-queued {0} audit entries for retry", batch.size());
                 } else {
-                    LOGGER.errorv("Dropping {0} audit entries after {1} consecutive failures",
-                            batch.size(), MAX_FLUSH_RETRIES);
+                    LOGGER.errorv("Dropping {0} audit entries after {1} consecutive failures", batch.size(), MAX_FLUSH_RETRIES);
                     consecutiveFailures.set(0);
                 }
             }
@@ -191,31 +190,16 @@ public class AuditLedgerService {
      * Scrub potential secrets from string values in the entry's maps.
      */
     private static AuditEntry scrubSecrets(AuditEntry entry) {
-        return new AuditEntry(
-                entry.id(),
-                entry.conversationId(),
-                entry.agentId(),
-                entry.agentVersion(),
-                entry.userId(),
-                entry.environment(),
-                entry.stepIndex(),
-                entry.taskId(),
-                entry.taskType(),
-                entry.taskIndex(),
-                entry.durationMs(),
-                scrubMap(entry.input()),
-                scrubMap(entry.output()),
-                scrubMap(entry.llmDetail()),
-                scrubMap(entry.toolCalls()),
-                entry.actions(),
-                entry.cost(),
-                entry.timestamp(),
+        return new AuditEntry(entry.id(), entry.conversationId(), entry.agentId(), entry.agentVersion(), entry.userId(), entry.environment(),
+                entry.stepIndex(), entry.taskId(), entry.taskType(), entry.taskIndex(), entry.durationMs(), scrubMap(entry.input()),
+                scrubMap(entry.output()), scrubMap(entry.llmDetail()), scrubMap(entry.toolCalls()), entry.actions(), entry.cost(), entry.timestamp(),
                 null // HMAC not yet computed
         );
     }
 
     private static Map<String, Object> scrubMap(Map<String, Object> map) {
-        if (map == null || map.isEmpty()) return map;
+        if (map == null || map.isEmpty())
+            return map;
 
         Map<String, Object> scrubbed = new LinkedHashMap<>(map.size());
         for (Map.Entry<String, Object> e : map.entrySet()) {
@@ -231,9 +215,7 @@ public class AuditLedgerService {
         } else if (value instanceof Map<?, ?> nested) {
             return scrubMap((Map<String, Object>) nested);
         } else if (value instanceof List<?> list) {
-            return list.stream()
-                    .map(AuditLedgerService::scrubValue)
-                    .toList();
+            return list.stream().map(AuditLedgerService::scrubValue).toList();
         }
         return value;
     }
