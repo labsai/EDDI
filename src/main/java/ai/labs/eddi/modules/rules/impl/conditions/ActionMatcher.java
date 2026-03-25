@@ -69,6 +69,8 @@ public class ActionMatcher extends BaseMatcher {
             }
             case anyStep -> state = occurredInAnyStep(memory, ACTIONS.key(), this::evaluateActions) ? SUCCESS : FAIL;
             case never -> state = occurredInAnyStep(memory, ACTIONS.key(), this::evaluateActions) ? FAIL : SUCCESS;
+            default -> {
+            }
         }
 
         return state;

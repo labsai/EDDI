@@ -139,12 +139,6 @@ class AgentOrchestrator {
             return null;
         }
 
-        int totalTools = enabledTools.size() + (hasMcpTools ? mcpTools.toolSpecs().size() : 0)
-                + (hasHttpCallTools ? httpCallTools.toolSpecs().size() : 0);
-        LOGGER.info("Executing with " + totalTools + " enabled tools"
-                + (hasHttpCallTools ? " (" + httpCallTools.toolSpecs().size() + " from workflow httpcalls)" : "")
-                + (hasMcpTools ? " (" + mcpTools.toolSpecs().size() + " from MCP servers)" : ""));
-
         return executeWithTools(chatModel, systemMessage, chatMessages, enabledTools, mcpTools, httpCallTools, task, memory);
     }
 

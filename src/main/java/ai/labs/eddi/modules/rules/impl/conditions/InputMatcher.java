@@ -78,6 +78,8 @@ public class InputMatcher extends BaseMatcher {
             }
             case anyStep -> state = occurredInAnyStep(memory, EXPRESSIONS_PARSED.key(), this::evaluateInputExpressions) ? SUCCESS : FAIL;
             case never -> state = occurredInAnyStep(memory, EXPRESSIONS_PARSED.key(), this::evaluateInputExpressions) ? FAIL : SUCCESS;
+            default -> {
+            }
         }
 
         return state;

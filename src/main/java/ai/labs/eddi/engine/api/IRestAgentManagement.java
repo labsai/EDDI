@@ -21,13 +21,20 @@ public interface IRestAgentManagement {
     @Path("/{intent}/{userId}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read conversation.")
-    void loadConversationMemory(@PathParam("intent") String intent, @PathParam("userId") String userId,
-            @Parameter(name = "language", example = "en") @QueryParam("language") String language,
+    // @formatter:off
+    void loadConversationMemory(@PathParam("intent") String intent,
+            @PathParam("userId") String userId,
+            @Parameter(name = "language", example = "en")
+            @QueryParam("language") String language,
             @Parameter(name = "returnDetailed", example = "false")
-            @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
+            @QueryParam("returnDetailed") @DefaultValue("false")
+            Boolean returnDetailed,
             @Parameter(name = "returnCurrentStepOnly", example = "true")
-            @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
-            @QueryParam("returningFields") List<String> returningFields, @Suspended final AsyncResponse response);
+            @QueryParam("returnCurrentStepOnly") @DefaultValue("true")
+            Boolean returnCurrentStepOnly,
+            @QueryParam("returningFields") List<String> returningFields,
+            @Suspended final AsyncResponse response);
+    // @formatter:on
 
     @POST
     @Path("/{intent}/{userId}")

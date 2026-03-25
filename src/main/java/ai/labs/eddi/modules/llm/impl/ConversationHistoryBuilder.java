@@ -75,6 +75,8 @@ class ConversationHistoryBuilder {
                         case audio -> contentList.add(AudioContent.from(content.getValue()));
                         case video -> contentList.add(VideoContent.from(content.getValue()));
                         case image -> contentList.add(ImageContent.from(content.getValue()));
+                        default -> {
+                        }
                     }
                 }
                 yield UserMessage.from(contentList);

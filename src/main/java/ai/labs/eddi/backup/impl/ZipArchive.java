@@ -69,9 +69,7 @@ public class ZipArchive implements IZipArchive {
 
     private static ZipEntry getZipEntry(File directoryToZip, File file) throws IOException {
         // Use '/' for zip standard
-        String entryName = file.getCanonicalPath()
-                .substring(directoryToZip.getCanonicalPath().length() + 1)
-                .replace(File.separatorChar, '/');
+        String entryName = file.getCanonicalPath().substring(directoryToZip.getCanonicalPath().length() + 1).replace(File.separatorChar, '/');
         // Basic check for traversal sequences in the source file path relative to the
         // source directory
         if (entryName.contains("../")) {

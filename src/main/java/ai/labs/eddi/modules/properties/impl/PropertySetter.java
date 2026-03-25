@@ -69,6 +69,8 @@ public class PropertySetter implements IPropertySetter {
                 case "step" -> propertyScope = step;
                 // case "conversation" -> propertyScope = conversation;
                 case "longTerm" -> propertyScope = longTerm;
+                default -> {
+                }
             }
         }
         return propertyScope;

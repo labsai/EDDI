@@ -16,7 +16,7 @@
         <quarkus.microprofile.version>3.0.0.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.32.4</quarkus.platform.version>
+        <quarkus.platform.version>3.34.1</quarkus.platform.version>
         <langchain4j-beta.version>1.12.2-beta22</langchain4j-beta.version>
         <langchain4j.version>1.12.2</langchain4j.version>
         <langchain4j-libs.version>1.12.2</langchain4j-libs.version>
@@ -26,7 +26,7 @@
         <failsafe-plugin.version>3.5.4</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <war-plugin.version>3.4.0</war-plugin.version>
-        <quarkus-mcp-server.version>1.10.2</quarkus-mcp-server.version>
+        <quarkus-mcp-server.version>1.11.0</quarkus-mcp-server.version>
         <skipITs>true</skipITs>
     </properties>
     <dependencyManagement>
@@ -228,7 +228,6 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>3.18.0</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
@@ -260,19 +259,17 @@
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-junit5</artifactId>
+            <artifactId>quarkus-junit</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>io.rest-assured</groupId>
             <artifactId>rest-assured</artifactId>
-            <version>5.5.0</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <version>4.11.0</version>
             <scope>test</scope>
         </dependency>
         <!-- Mozilla Rhino: JavaScript engine for CalculatorTool tests -->
@@ -314,13 +311,11 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers</artifactId>
-            <version>2.0.3</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-junit-jupiter</artifactId>
-            <version>2.0.3</version>
             <scope>test</scope>
         </dependency>
         <!-- Testcontainers PostgreSQL module (Phase 6.31) -->
@@ -384,6 +379,7 @@
                     </excludes>
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                        <java.util.logging.config.file>${project.basedir}/src/test/resources/logging.properties</java.util.logging.config.file>
                         <!--suppress UnresolvedMavenProperty -->
                         <maven.home>${maven.home}</maven.home>
                     </systemPropertyVariables>
@@ -458,7 +454,7 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.12</version>
+                <version>0.8.14</version>
                 <executions>
                     <execution>
                         <goals>

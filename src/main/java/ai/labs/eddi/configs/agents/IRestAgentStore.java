@@ -43,11 +43,15 @@ public interface IRestAgentStore extends IRestVersionInfo {
     @Consumes(MediaType.TEXT_PLAIN)
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of Agent descriptors including a given workflowUri.")
+    // @formatter:off
     List<DocumentDescriptor> readAgentDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit,
-            @Parameter(name = "body", example = "eddi://ai.labs.workflow/workflowstore/workflows/ID?version=VERSION")
+            @QueryParam("index") @DefaultValue("0") Integer index,
+            @QueryParam("limit") @DefaultValue("20") Integer limit,
+            @Parameter(name = "body",
+                    example = "eddi://ai.labs.workflow/workflowstore/workflows/ID?version=VERSION")
             @DefaultValue("") String containingWorkflowUri,
             @QueryParam("includePreviousVersions") @DefaultValue("false") Boolean includePreviousVersions);
+    // @formatter:on
 
     @GET
     @Path("/{id}")
@@ -90,12 +94,18 @@ public interface IRestAgentStore extends IRestVersionInfo {
             + "extensions used by other packages) are skipped. " + "Partial failures are logged but do not prevent the Agent from being deleted.")
     @APIResponse(responseCode = "200", description = "Agent deleted successfully.")
     @APIResponse(responseCode = "404", description = "Agent not found.")
+    // @formatter:off
     Response deleteAgent(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1", description = "Version of the Agent to delete.")
+            @Parameter(name = "version", required = true, example = "1",
+                    description = "Version of the Agent to delete.")
             @QueryParam("version") Integer version,
             @Parameter(description = "If true, permanently remove from database. "
-                    + "If false (default), soft-delete only.") @QueryParam("permanent") @DefaultValue("false") Boolean permanent,
-            @Parameter(description = "If true, also delete all packages and extension resources "
-                    + "referenced by this agent. Resources shared with other agents are still deleted — "
-                    + "use with care.") @QueryParam("cascade") @DefaultValue("false") Boolean cascade);
+                    + "If false (default), soft-delete only.")
+            @QueryParam("permanent") @DefaultValue("false") Boolean permanent,
+            @Parameter(description = "If true, also delete all packages "
+                    + "and extension resources referenced by this agent. "
+                    + "Resources shared with other agents are still deleted "
+                    + "— use with care.")
+            @QueryParam("cascade") @DefaultValue("false") Boolean cascade);
+    // @formatter:on
 }

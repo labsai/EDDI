@@ -50,10 +50,15 @@ public class RestConversationStore implements IRestConversationStore {
     private static final Logger log = Logger.getLogger(RestConversationStore.class);
 
     @Inject
-    public RestConversationStore(IDocumentDescriptorStore documentDescriptorStore, IConversationDescriptorStore conversationDescriptorStore,
-            IConversationMemoryStore conversationMemoryStore, IRuntime runtime,
+    // @formatter:off
+    public RestConversationStore(
+            IDocumentDescriptorStore documentDescriptorStore,
+            IConversationDescriptorStore conversationDescriptorStore,
+            IConversationMemoryStore conversationMemoryStore,
+            IRuntime runtime,
             @ConfigProperty(name = "eddi.conversations.deleteEndedConversationsOnceOlderThanDays")
             Integer deleteEndedConversationsOnceOlderThanDays) {
+    // @formatter:on
 
         this.documentDescriptorStore = documentDescriptorStore;
         this.conversationDescriptorStore = conversationDescriptorStore;

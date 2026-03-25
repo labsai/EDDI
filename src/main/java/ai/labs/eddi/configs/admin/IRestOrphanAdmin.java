@@ -32,16 +32,20 @@ public interface IRestOrphanAdmin {
             + "property setters, dictionaries) and returns resources not referenced by any Agent or package. "
             + "Use includeDeleted=true to also include soft-deleted resources in the report.")
     @APIResponse(responseCode = "200", description = "Orphan report with list of unreferenced resources.")
+    // @formatter:off
     OrphanReport scanOrphans(
             @Parameter(description = "Include soft-deleted resources in the scan. Default: false.")
             @QueryParam("includeDeleted") @DefaultValue("false") Boolean includeDeleted);
+    // @formatter:on
 
     @DELETE
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Purge orphaned resources", description = "Scans all stores for orphans and permanently deletes them. "
             + "Returns a report of what was deleted. This operation is irreversible.")
     @APIResponse(responseCode = "200", description = "Purge report with count and list of deleted resources.")
+    // @formatter:off
     OrphanReport purgeOrphans(
             @Parameter(description = "Include soft-deleted resources in the purge. Default: true.")
             @QueryParam("includeDeleted") @DefaultValue("true") Boolean includeDeleted);
+    // @formatter:on
 }

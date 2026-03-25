@@ -89,12 +89,18 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
             + "Partial failures are logged but do not prevent the workflow from being deleted.")
     @APIResponse(responseCode = "200", description = "Workflow deleted successfully.")
     @APIResponse(responseCode = "404", description = "Workflow not found.")
+    // @formatter:off
     Response deleteWorkflow(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1", description = "Version of the workflow to delete.")
+            @Parameter(name = "version", required = true, example = "1",
+                    description = "Version of the workflow to delete.")
             @QueryParam("version") Integer version,
             @Parameter(description = "If true, permanently remove from database. "
-                    + "If false (default), soft-delete only.") @QueryParam("permanent") @DefaultValue("false") Boolean permanent,
+                    + "If false (default), soft-delete only.")
+            @QueryParam("permanent") @DefaultValue("false") Boolean permanent,
             @Parameter(description = "If true, also delete all extension resources "
-                    + "referenced by this package (behavior, httpcalls, output, langchain, "
-                    + "propertysetter, parser dictionaries).") @QueryParam("cascade") @DefaultValue("false") Boolean cascade);
+                    + "referenced by this package (behavior, httpcalls, "
+                    + "output, langchain, propertysetter, parser "
+                    + "dictionaries).")
+            @QueryParam("cascade") @DefaultValue("false") Boolean cascade);
+    // @formatter:on
 }

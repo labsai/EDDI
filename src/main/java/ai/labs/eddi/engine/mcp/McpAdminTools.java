@@ -815,10 +815,8 @@ public class McpAdminTools {
     @Tool(name = "create_agent_trigger", description = "Create a Agent trigger that maps an intent to one or more agents. "
             + "Once created, the intent can be used with chat_managed to talk to the agent. "
             + "The config must include: intent (string) and agentDeployments (array of {agentId, environment}).")
-    public String createAgentTrigger(
-            @ToolArg(description = "Full JSON configuration: "
-                    + "{\"intent\":\"...\",\"agentDeployments\":[{\"agentId\":\"...\",\"environment\":\"production\"}]} (required)")
-            String config) {
+    public String createAgentTrigger(@ToolArg(description = "Full JSON configuration: "
+            + "{\"intent\":\"...\",\"agentDeployments\":[{\"agentId\":\"...\",\"environment\":\"production\"}]} (required)") String config) {
         if (config == null || config.isBlank())
             return errorJson("config is required");
         try {

@@ -258,6 +258,8 @@ public class ConversationMemoryUtilities {
                 var contextType = context.getType();
                 switch (contextType) {
                     case object, array, string, expressions -> dynamicAttributesMap.put(key, context.getValue());
+                    default -> {
+                    }
                 }
             } else {
                 dynamicAttributesMap.put(key, null);

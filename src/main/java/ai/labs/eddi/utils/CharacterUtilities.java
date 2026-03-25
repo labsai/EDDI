@@ -115,6 +115,9 @@ public class CharacterUtilities {
                         break;
                     case 'á' :
                         input.replace(i, i + 1, "a");
+                        break;
+                    default :
+                        break;
                 }
             }
         }
