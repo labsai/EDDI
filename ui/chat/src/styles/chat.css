@@ -49,7 +49,7 @@ a:hover { opacity: 0.85; }
   align-items: center;
   gap: 12px;
   padding: 12px 20px;
-  border-agenttom: 1px solid var(--chat-border);
+  border-bottom: 1px solid var(--chat-border);
   background: var(--chat-surface);
   flex-shrink: 0;
 }
@@ -237,14 +237,14 @@ a:hover { opacity: 0.85; }
 .message--user .message__bubble {
   background: var(--chat-user-bg);
   color: var(--chat-user-text);
-  border-agenttom-right-radius: 4px;
+  border-bottom-right-radius: 4px;
 }
 
 .message--agent .message__bubble {
   background: var(--chat-agent-bg);
   color: var(--chat-agent-text);
   border: 1px solid var(--chat-agent-border);
-  border-agenttom-left-radius: 4px;
+  border-bottom-left-radius: 4px;
 }
 
 /* Markdown inside agent messages */
@@ -256,7 +256,7 @@ a:hover { opacity: 0.85; }
 
 .message__bubble .markdown-body p { margin: 0.4em 0; }
 .message__bubble .markdown-body p:first-child { margin-top: 0; }
-.message__bubble .markdown-body p:last-child { margin-agenttom: 0; }
+.message__bubble .markdown-body p:last-child { margin-bottom: 0; }
 
 .message__bubble .markdown-body pre {
   background: var(--chat-surface);
@@ -327,7 +327,7 @@ a:hover { opacity: 0.85; }
   background: var(--chat-agent-bg);
   border: 1px solid var(--chat-agent-border);
   border-radius: var(--chat-radius);
-  border-agenttom-left-radius: 4px;
+  border-bottom-left-radius: 4px;
   padding: 12px 18px;
   display: flex;
   align-items: center;
@@ -586,7 +586,7 @@ a:hover { opacity: 0.85; }
   font-size: 0.85rem;
   font-weight: 500;
   color: var(--chat-accent);
-  margin-agenttom: 8px;
+  margin-bottom: 8px;
   letter-spacing: 0.02em;
 }
 
@@ -646,11 +646,11 @@ a:hover { opacity: 0.85; }
   opacity: 0.7;
 }
 
-/* ─── Scroll-to-agenttom ────────────────────────── */
+/* ─── Scroll-to-bottom ────────────────────────── */
 
-.scroll-to-agenttom {
+.scroll-to-bottom {
   position: absolute;
-  agenttom: 90px;
+  bottom: 90px;
   left: 50%;
   transform: translateX(-50%);
   width: 38px;
@@ -670,7 +670,7 @@ a:hover { opacity: 0.85; }
   animation: fadeIn 0.2s ease-out;
 }
 
-.scroll-to-agenttom:hover {
+.scroll-to-bottom:hover {
   background: var(--chat-surface-raised);
   color: var(--chat-text);
 }
@@ -861,11 +861,11 @@ a:hover { opacity: 0.85; }
   }
 
   .message--user .message__bubble {
-    border-agenttom-right-radius: 4px;
+    border-bottom-right-radius: 4px;
   }
 
   .message--agent .message__bubble {
-    border-agenttom-left-radius: 4px;
+    border-bottom-left-radius: 4px;
   }
 
   .chat-input__textarea {
@@ -897,10 +897,10 @@ a:hover { opacity: 0.85; }
     font-size: 0.9rem;
   }
 
-  .scroll-to-agenttom {
+  .scroll-to-bottom {
     width: 34px;
     height: 34px;
-    agenttom: 80px;
+    bottom: 80px;
   }
 }
 
@@ -997,10 +997,10 @@ a:hover { opacity: 0.85; }
     font-size: 0.82rem;
   }
 
-  .scroll-to-agenttom {
+  .scroll-to-bottom {
     width: 32px;
     height: 32px;
-    agenttom: 70px;
+    bottom: 70px;
     font-size: 1rem;
   }
 }
@@ -1081,18 +1081,18 @@ a:hover { opacity: 0.85; }
 }
 
 /* ── Safe areas for notched phones (iPhone X+) ──── */
-@supports (padding: env(safe-area-inset-agenttom)) {
+@supports (padding: env(safe-area-inset-bottom)) {
   .chat-input {
-    padding-agenttom: calc(16px + env(safe-area-inset-agenttom));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
   }
 
   .chat-ended {
-    padding-agenttom: calc(20px + env(safe-area-inset-agenttom));
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
   }
 
   @media (max-width: 480px) {
     .chat-input {
-      padding-agenttom: calc(12px + env(safe-area-inset-agenttom));
+      padding-bottom: calc(12px + env(safe-area-inset-bottom));
     }
   }
 }

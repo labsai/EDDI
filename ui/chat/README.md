@@ -80,7 +80,7 @@ The chat UI can be embedded in any HTML page via iframe:
 
 ```html
 <iframe
-  src="https://your-eddi-server/chat/unrestricted/your-agent-id?hideNewConversation=true&theme=dark"
+  src="https://your-eddi-server/chat/production/your-agent-id?hideNewConversation=true&theme=dark"
   style="width: 400px; height: 600px; border: none; border-radius: 12px;"
 ></iframe>
 ```

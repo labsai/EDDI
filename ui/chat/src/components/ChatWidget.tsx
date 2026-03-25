@@ -13,7 +13,7 @@ import { ChatInput } from "./ChatInput";
 import { SecretInput } from "./SecretInput";
 import { QuickReplies } from "./QuickReplies";
 import { TypingIndicator, ThinkingIndicator } from "./Indicators";
-import { ScrollToAgenttom } from "./ScrollToAgenttom";
+import { ScrollToBottom } from "./ScrollToBottom";
 import { ChatHeader } from "./ChatHeader";
 
 import {
@@ -543,12 +543,12 @@ export function ChatWidget() {
   const handleScroll = useCallback(() => {
     const el = messagesContainerRef.current;
     if (!el) return;
-    const atAgenttom =
+    const atBottom =
       el.scrollHeight - el.scrollTop - el.clientHeight <= 20;
-    setShowScrollBtn(!atAgenttom);
+    setShowScrollBtn(!atBottom);
   }, []);
 
-  const scrollToAgenttom = useCallback(() => {
+  const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
@@ -588,7 +588,7 @@ export function ChatWidget() {
       </div>
 
       <div style={{ position: "relative" }}>
-        <ScrollToAgenttom visible={showScrollBtn} onClick={scrollToAgenttom} />
+        <ScrollToBottom visible={showScrollBtn} onClick={scrollToBottom} />
       </div>
 
       {!isEnded &&
