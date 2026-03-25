@@ -50,6 +50,30 @@ iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1 | iex
 
 This starts an interactive wizard that sets up EDDI + database via Docker, deploys the Agent Father starter agent, and guides you through creating your first AI agent. Requires Docker ([install guide](https://docs.docker.com/get-docker/)).
 
+**Options:**
+
+```bash
+bash install.sh --defaults                 # All defaults, no prompts
+bash install.sh --db=postgres --with-auth  # PostgreSQL + Keycloak
+bash install.sh --full                     # Everything enabled
+bash install.sh --local                    # Build from local source (see below)
+```
+
+### Local Build (for contributors / pre-release)
+
+If you're working on EDDI and want to test with a local build:
+
+```bash
+# 1. Build the Java app
+./mvnw package -DskipTests
+
+# 2. Run the install script with --local
+bash install.sh --local           # Linux / macOS / WSL2
+.\install.ps1 -Local              # Windows PowerShell
+```
+
+The `--local` flag includes `docker-compose.local.yml` as a compose overlay, which builds the Docker image from your local `target/quarkus-app/` output instead of pulling from Docker Hub. All wizard options (database, auth, monitoring) work normally with `--local`.
+
 ## Overview
 
 E.D.D.I is a high performance **middleware orchestration service** for conversational AI. Unlike standalone chatagents or LLMs,
@@ -183,6 +207,12 @@ Technical specifications:
 ./mvnw clean package '-Dquarkus.container-image.build=true'
 ```
 
+Or build without the container image (for use with `install.sh --local`):
+
+```bash
+./mvnw package -DskipTests
+```
+
 ## Download from Docker hub registry
 
 ```bash
@@ -193,16 +223,17 @@ docker pull labsai/eddi
 
 ## Run Docker image
 
-For production, launch standalone mongodb and then start an eddi instance as defined in the docker-compose file
+The simplest way is using the install script (see [Quick Start](#quick-start)). For manual control:
 
 ```bash
+# Production (pulls from Docker Hub)
 docker-compose up
-```
 
-For development, use
-
-```bash
+# Local build (from source)
 docker-compose -f docker-compose.yml -f docker-compose.local.yml up
+
+# With auth + monitoring
+docker-compose -f docker-compose.yml -f docker-compose.auth.yml -f docker-compose.monitoring.yml up
 ```
 
 For integration testing run

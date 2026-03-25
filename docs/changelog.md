@@ -13,6 +13,41 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Test Fixes & Install Script Local Build Support (2026-03-25)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**Test fixes (4 failures → 0):**
+
+| Test | Root Cause | Fix |
+|---|---|---|
+| `McpToolSchemaValidationTest` | `@P` annotation on `EddiToolBridge.executeApiCall` used a descriptive sentence as the property key, violating MCP schema regex `^[a-zA-Z0-9_.-]{1,64}$` | Changed to `@P("httpCallUri")` |
+| `EddiToolBridgeTest` (caching) | `configCache.remove(httpCallUri)` called before every `getOrLoadConfig`, defeating the cache | Removed premature cache invalidation |
+| `McpSetupToolsTest` (API summary) | `AgentSetupService.createApiAgent` was not enriching the system prompt with the API summary | Re-enabled `enrichedPrompt = prompt + apiSummary` |
+| `AgentOrchestratorTest` (Mockito) | Mockito 5.x inline mock maker doesn't create subclasses, so `getSuperclass()` returned `Object` | Used `mockingDetails().getMockCreationSettings().getTypeToMock()` |
+
+**Install script `--local` flag improvements:**
+
+Both `install.sh` (`--local`) and `install.ps1` (`-Local`) now fully support local builds for pre-release development:
+
+- Detect EDDI repo root and verify `Dockerfile.jvm` exists
+- Include `docker-compose.local.yml` as a compose overlay (used directly from repo, not downloaded — build context must be repo root)
+- Run `docker compose build` instead of `docker compose pull`
+- All other wizard choices (DB, auth, monitoring) still work normally with `--local`
+
+**Pre-release workflow:**
+
+```bash
+./mvnw package -DskipTests       # Build the Quarkus app
+bash install.sh --local           # Build Docker image + start containers
+```
+
+**Files changed:** `EddiToolBridge.java`, `AgentSetupService.java`, `AgentOrchestratorTest.java`, `install.sh`, `install.ps1`
+
+**Testing:** ✅ 1151 tests, 0 failures, 0 errors.
+
+---
+
 ## Manager & Chat UI Production Builds (2026-03-25)
 
 **Repos:** EDDI, EDDI-Manager, eddi-chat-ui (`feature/version-6.0.0`)
