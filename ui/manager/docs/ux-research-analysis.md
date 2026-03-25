@@ -38,7 +38,7 @@ config-editor-layout.tsx
 ├── Tab bar: [ Form | JSON ]
 ├── Form view → extension-specific editor component (3.17–3.18)
 └── JSON view → Monaco editor with schema validation (3.14)
-    Agenth read/write the SAME reactive state object
+    both read/write the SAME reactive state object
 ```
 
 ### 2. Side-Sheet Inspector Instead of Navigation (Phase 3.16)

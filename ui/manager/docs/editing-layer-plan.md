@@ -139,7 +139,7 @@ Generic wrapper: loads config by type + ID + version, renders the right editor c
 - **Save**: `PUT /httpcallsstore/httpcalls/{id}`
 
 > [!NOTE]
-> **Completed 2026-03-07.** Agenth editors use a `renderFormEditor` render prop on `ConfigEditorLayout` for two-way Form↔JSON sync. 14 new tests, 119 total. Pre/post instructions shown as JSON preview — full sub-editors deferred to Phase 3.19.
+> **Completed 2026-03-07.** both editors use a `renderFormEditor` render prop on `ConfigEditorLayout` for two-way Form↔JSON sync. 14 new tests, 119 total. Pre/post instructions shown as JSON preview — full sub-editors deferred to Phase 3.19.
 
 ---
 

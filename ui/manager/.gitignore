@@ -12,3 +12,6 @@ coverage
 !webpack.config.babel.js
 !webpack/*.js
 !server.js
+.firebaserc
+firebase.json
+playwright-report/

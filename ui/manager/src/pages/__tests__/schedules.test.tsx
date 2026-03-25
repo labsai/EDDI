@@ -121,7 +121,7 @@ describe("SchedulesPage", () => {
     renderSchedules();
     // Use findByText with extended timeout to wait for async data
     expect(await screen.findByText("Daily Health Check", {}, { timeout: 3000 })).toBeInTheDocument();
-    // "Heartbeat Monitor" appears agenth in the table and the Next Fire card (soonest schedule)
+    // "Heartbeat Monitor" appears both in the table and the Next Fire card (soonest schedule)
     expect(screen.getAllByText("Heartbeat Monitor").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Failed Report")).toBeInTheDocument();
   });

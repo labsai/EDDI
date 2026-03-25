@@ -11,7 +11,7 @@
 | Question                              | Decision                                                                     |
 | ------------------------------------- | ---------------------------------------------------------------------------- |
 | Tackle critical items before Phase 4? | **Yes**, all items below will be addressed                                   |
-| Dashboard data source?                | **Agenth** — mock data for dev, real EDDI backend integration for production |
+| Dashboard data source?                | **both** — mock data for dev, real EDDI backend integration for production |
 | Invest in shared design system?       | **Yes, 100%** — clean and professional component library                     |
 
 ---

@@ -81,7 +81,7 @@ test.describe("Agents CRUD — Real Backend", () => {
     createdAgents.push({ id, version });
 
     // Duplicate — EDDI currently returns 200, should arguably return 201
-    // (backend fix pending). Accept agenth so test passes now AND after fix.
+    // (backend fix pending). Accept both so test passes now AND after fix.
     const dupRes = await request.post(
       `${API_BASE}/agentstore/agents/${id}?version=${version}&deepCopy=false`
     );

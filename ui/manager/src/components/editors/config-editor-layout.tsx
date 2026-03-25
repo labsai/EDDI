@@ -53,7 +53,7 @@ type EditorTab = "form" | "json";
  * This is the chrome around every config editor.
  * Form tab renders children (specific editor component) or a placeholder.
  * JSON tab renders the Monaco editor.
- * Agenth share the same data string.
+ * both share the same data string.
  */
 export function ConfigEditorLayout({
   typeName,
