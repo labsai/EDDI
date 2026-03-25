@@ -75,6 +75,32 @@ Redesigned flat round-based orchestration into a **phase-based execution engine*
 
 **Files:** 1 new (`DiscussionStylePresets.java`), 5 modified.
 
+### Phase 10.5b: MCP/REST Usability Improvements (2026-03-25)
+
+- MCP: added `describe_discussion_styles` discovery tool (rich markdown descriptions)
+- MCP: added `list_group_conversations` tool for browsing past discussions
+- MCP: `create_group` now accepts `memberRoles` param (DEVIL_ADVOCATE/PRO/CON)
+- MCP: enriched all tool descriptions with usage hints and cross-references
+- REST: added `GET /groupstore/groups/styles` endpoint for style discovery
+- McpToolFilter: whitelist updated to 42 tools
+- Tests: 18 → 22 McpGroupToolsTest tests
+
+### Phase 10.6: Group-of-Groups — Nested Group Members (2026-03-25)
+
+Members can now be other groups (`MemberType.GROUP`). The sub-group runs its own full discussion and its synthesized answer becomes the member's response in the parent group.
+
+**Key additions:**
+- `MemberType` enum: `AGENT` (default) | `GROUP` — backward-compatible via 4-arg convenience constructor
+- `executeGroupMemberTurn()`: recursive call to `discuss()`, extracts synthesized answer
+- Depth tracking prevents infinite recursion (`eddi.groups.max-depth`, default: 3)
+- MCP `create_group`: new `memberTypes` param (AGENT/GROUP per member position)
+- `describe_discussion_styles`: documents nested groups capability
+
+**Use cases:** parallel review panels, red-team vs blue-team, tournament brackets.
+
+**Files:** 3 modified (`AgentGroupConfiguration`, `GroupConversationService`, `McpGroupTools`)
+
+
 ---
 
 ## v6 API Endpoint Simplification (2026-03-25)
