@@ -2218,7 +2218,7 @@ EDDI has a `docs/` directory with **40 markdown files** covering:
 | **Getting Started**   | `getting-started.md`, `developer-quickstart.md`, `creating-your-first-chatagent/` (3 files)                               | Onboarding                                   |
 | **Operations**        | `docker.md`, `security.md`, `metrics.md`, `deployment-management-of-chatagents.md`, `redhat-openshift.md`                 | Deployment & ops                             |
 | **Reference**         | `semantic-parser.md`, `passing-context-information.md`, `managed-agents.md`, `import-export-a-chatagent.md`               | Specific features                            |
-| **Git**               | `git-commit-guide.md`, `git-support.md`                                                                                   | Commit conventions                           |
+| **Git**               | `git-commit-guide.md`                                                                                                     | Commit conventions                           |
 | **API**               | Swagger/OpenAPI at `/q/swagger-ui`                                                                                        | Auto-generated from JAX-RS                   |
 
 **Current publishing:** Docs are published via a third-party tool at **[docs.labs.ai](https://docs.labs.ai)**, based on the markdown files in this repo. The website upgrade (Appendix L) could pull them into Astro Content Collections at `eddi.labs.ai/docs/` for a unified experience, or continue using the existing docs.labs.ai setup.

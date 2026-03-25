@@ -13,6 +13,23 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Manager & Chat UI Production Builds (2026-03-25)
+
+**Repos:** EDDI, EDDI-Manager, eddi-chat-ui (`feature/version-6.0.0`)
+
+**What changed:**
+
+Updated the production builds of both the EDDI Manager and EDDI Chat UI, deployed their assets to the EDDI backend `META-INF/resources` folder, and fixed UI build regressions.
+
+- Fixed a broken TypeScript build in `eddi-chat-ui` caused by an aggressive `bot`→`agent` rename that corrupted `ScrollToBottom` casing.
+- Ran full Vite production builds for `EDDI-Manager` and `eddi-chat-ui`.
+- Copied Manager's compiled assets (`index-*.js`, `index-*.css`) to EDDI's `META-INF/resources/scripts/` directory.
+- Updated `manage.html` references with the new Manager bundle hashes.
+- Verified `chat.html` was auto-updated by Vite and cleaned up outdated Chat UI bundles.
+- Verified `eddi-chat-ui` test suite (45/45 passed).
+
+---
+
 ## AgentSetupService Extraction — REST Endpoints for Agent Setup (2026-03-24)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
