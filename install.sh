@@ -102,6 +102,7 @@ NON_INTERACTIVE=false
 DB_CHOICE=""
 WITH_AUTH=false
 WITH_MONITORING=false
+LOCAL_IMAGE=false
 
 # Detect piped stdin (curl | bash) — disable interactive prompts
 if [[ ! -t 0 ]]; then
@@ -116,6 +117,7 @@ for arg in "$@"; do
     --with-auth)      WITH_AUTH=true ;;
     --with-monitoring) WITH_MONITORING=true ;;
     --full)           DB_CHOICE="2"; WITH_AUTH=true; WITH_MONITORING=true ;;
+    --local)          LOCAL_IMAGE=true ;;
     --help|-h)
       echo "EDDI Install Script"
       echo ""
@@ -129,6 +131,7 @@ for arg in "$@"; do
       echo "  --with-auth         Include Keycloak authentication"
       echo "  --with-monitoring   Include Grafana + Prometheus"
       echo "  --full              All options enabled"
+      echo "  --local             Use locally built Docker image (skip pull)"
       echo ""
       echo "Environment variables:"
       echo "  EDDI_PORT           Port for EDDI (default: 7070)"
@@ -347,6 +350,20 @@ download_compose_files() {
     COMPOSE_FILES+=("$EDDI_DIR/docker-compose.yml")
   fi
 
+  # Local build overlay (overrides image with local build context)
+  if [[ "$LOCAL_IMAGE" == "true" ]]; then
+    # --local requires running from the EDDI repo checkout
+    EDDI_REPO_ROOT="$(cd "$(dirname "$0")" 2>/dev/null && pwd)" || EDDI_REPO_ROOT="$(pwd)"
+    if [[ ! -f "$EDDI_REPO_ROOT/docker-compose.local.yml" ]]; then
+      fail "--local requires running from the EDDI repo root.\n     Run: cd /path/to/EDDI && bash install.sh --local"
+    fi
+    if [[ ! -f "$EDDI_REPO_ROOT/src/main/docker/Dockerfile.jvm" ]]; then
+      fail "Dockerfile not found. Run: ./mvnw package -DskipTests first."
+    fi
+    # Use the file directly from the repo (build context must be repo root)
+    COMPOSE_FILES+=("$EDDI_REPO_ROOT/docker-compose.local.yml")
+  fi
+
   # Auth overlay
   if [[ "$WITH_AUTH" == "true" ]]; then
     files_to_download+=("docker-compose.auth.yml")
@@ -369,7 +386,6 @@ download_compose_files() {
     fi
   done
 
-
   # Save config for eddi CLI wrapper
   echo "COMPOSE_FILES=\"${COMPOSE_FILES[*]}\"" > "$EDDI_DIR/.eddi-config"
   echo "EDDI_PORT=$EDDI_PORT" >> "$EDDI_DIR/.eddi-config"
@@ -389,13 +405,24 @@ compose_cmd() {
 start_eddi() {
   section "Starting EDDI"
 
-  echo "  Pulling images (this may take a minute)..."
-  echo ""
-  if compose_cmd pull 2>&1 | sed 's/^/    /'; then
+  if [[ "$LOCAL_IMAGE" == "true" ]]; then
+    echo "  Building local Docker image..."
     echo ""
-    info "Images pulled"
+    if compose_cmd build 2>&1 | sed 's/^/    /'; then
+      echo ""
+      info "Local image built"
+    else
+      fail "Failed to build local image.\n     Make sure you ran: ./mvnw package -DskipTests"
+    fi
   else
-    fail "Failed to pull images. Check internet connection and disk space.\n     Run: docker system df"
+    echo "  Pulling images (this may take a minute)..."
+    echo ""
+    if compose_cmd pull 2>&1 | sed 's/^/    /'; then
+      echo ""
+      info "Images pulled"
+    else
+      fail "Failed to pull images. Check internet connection and disk space.\n     Run: docker system df"
+    fi
   fi
 
   echo -ne "  Starting containers...   "

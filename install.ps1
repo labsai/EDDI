@@ -16,6 +16,7 @@ param(
     [switch]$WithAuth,
     [switch]$WithMonitoring,
     [switch]$Full,
+    [switch]$Local,
     [string]$EddiPort = $env:EDDI_PORT,
     [string]$EddiDir = $env:EDDI_DIR
 )
@@ -220,6 +221,22 @@ function Get-ComposeFiles {
         $filesToDownload += "docker-compose.yml"
     }
 
+    # Local build overlay (overrides image with local build context)
+    if ($Local) {
+        # -Local requires running from the EDDI repo checkout
+        $repoRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Get-Location }
+        $localCompose = Join-Path $repoRoot "docker-compose.local.yml"
+        $dockerfile = Join-Path $repoRoot "src\main\docker\Dockerfile.jvm"
+        if (-not (Test-Path $localCompose)) {
+            Write-Fail "-Local requires running from the EDDI repo root.`n     Run: cd C:\path\to\EDDI; .\install.ps1 -Local"
+        }
+        if (-not (Test-Path $dockerfile)) {
+            Write-Fail "Dockerfile not found. Run: .\mvnw.cmd package -DskipTests first."
+        }
+        # Use the file directly from the repo (build context must be repo root)
+        $script:ComposeFiles += $localCompose
+    }
+
     if ($WithAuth) {
         $filesToDownload += "docker-compose.auth.yml"
     }
@@ -254,15 +271,28 @@ EDDI_PORT=$EddiPort
 function Start-Eddi {
     Write-Section "Starting EDDI"
 
-    Write-Host "  Pulling images (this may take a minute)..."
-    Write-Host ""
-    $pullArgs = @("compose") + ($ComposeFiles | ForEach-Object { @("-f", $_) }) + @("pull")
-    & docker @pullArgs
-    if ($LASTEXITCODE -eq 0) {
+    if ($Local) {
+        Write-Host "  Building local Docker image..."
         Write-Host ""
-        Write-Ok "Images pulled"
+        $buildArgs = @("compose") + ($ComposeFiles | ForEach-Object { @("-f", $_) }) + @("build")
+        & docker @buildArgs
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host ""
+            Write-Ok "Local image built"
+        } else {
+            Write-Fail "Failed to build local image.`n     Make sure you ran: .\mvnw.cmd package -DskipTests"
+        }
     } else {
-        Write-Fail "Failed to pull images. Check internet and disk space."
+        Write-Host "  Pulling images (this may take a minute)..."
+        Write-Host ""
+        $pullArgs = @("compose") + ($ComposeFiles | ForEach-Object { @("-f", $_) }) + @("pull")
+        & docker @pullArgs
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host ""
+            Write-Ok "Images pulled"
+        } else {
+            Write-Fail "Failed to pull images. Check internet and disk space."
+        }
     }
 
     Write-Host "  Starting containers...   " -NoNewline
