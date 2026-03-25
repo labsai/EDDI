@@ -73,7 +73,7 @@ class McpSetupToolsTest {
                                 .thenReturn(Response.created(URI.create("/parserstore/parsers/par-1?version=1"))
                                                 .build());
 
-                service = new AgentSetupService(restInterfaceFactory, agentAdmin);
+                service = new AgentSetupService(restInterfaceFactory, agentAdmin, "http://localhost:11434");
                 tools = new McpSetupTools(service, jsonSerialization);
         }
 
@@ -321,7 +321,7 @@ class McpSetupToolsTest {
                 // Should have 4 extensions: parser, behavior, langchain, output
                 assertEquals(4, pkgConfig.getWorkflowSteps().size());
                 assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getWorkflowSteps().get(0).getType());
-                assertEquals(URI.create("eddi://ai.labs.rules"), pkgConfig.getWorkflowSteps().get(1).getType());
+                assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getWorkflowSteps().get(1).getType());
                 assertEquals(URI.create("eddi://ai.labs.llm"), pkgConfig.getWorkflowSteps().get(2).getType());
                 assertEquals(URI.create("eddi://ai.labs.output"), pkgConfig.getWorkflowSteps().get(3).getType());
         }
@@ -374,7 +374,7 @@ class McpSetupToolsTest {
         void createLlmConfig_withTooling_setsToolFields() {
                 var config = service.createLlmConfig(
                                 "anthropic", "claude-sonnet-4-6", "key", "You are helpful",
-                                true, "calculator,websearch", null, null, false, false, null);
+                                true, "calculator,websearch", null, null, false, false, null, null);
 
                 var task = config.tasks().get(0);
                 assertTrue(task.getEnableBuiltInTools());
@@ -385,7 +385,7 @@ class McpSetupToolsTest {
         void createLlmConfig_ollama_usesModelParam() {
                 var config = service.createLlmConfig(
                                 "ollama", "llama3.2:1b", null, "prompt",
-                                false, null, "http://host.docker.internal:11434", null, false, false, null);
+                                false, null, "http://host.docker.internal:11434", null, false, false, null, null);
 
                 var task = config.tasks().get(0);
                 var params = task.getParameters();
@@ -399,7 +399,7 @@ class McpSetupToolsTest {
         void createLlmConfig_jlama_usesAuthToken() {
                 var config = service.createLlmConfig(
                                 "jlama", "tinyllama", "my-token", "prompt",
-                                false, null, null, null, false, false, null);
+                                false, null, null, null, false, false, null, null);
 
                 var task = config.tasks().get(0);
                 var params = task.getParameters();
@@ -413,7 +413,7 @@ class McpSetupToolsTest {
                 String jsonPrompt = McpSetupTools.buildPromptResponseJson(true, true);
                 var config = service.createLlmConfig(
                                 "openai", "gpt-4o", "key", "prompt",
-                                false, null, null, jsonPrompt, true, true, null);
+                                false, null, null, jsonPrompt, true, true, null, null);
 
                 var task = config.tasks().get(0);
                 assertEquals("aiOutput", task.getResponseObjectName());
@@ -428,7 +428,7 @@ class McpSetupToolsTest {
         void createLlmConfig_withoutJsonFormat_noPostResponse() {
                 var config = service.createLlmConfig(
                                 "anthropic", "claude-sonnet-4-6", "key", "prompt",
-                                false, null, null, null, false, false, null);
+                                false, null, null, null, false, false, null, null);
 
                 var task = config.tasks().get(0);
                 assertNull(task.getResponseObjectName());
@@ -799,9 +799,9 @@ class McpSetupToolsTest {
                 // Should have 5 extensions: parser + behavior + 2 httpcalls groups + langchain
                 assertEquals(5, pkgConfig.getWorkflowSteps().size());
                 assertEquals(URI.create("eddi://ai.labs.parser"), pkgConfig.getWorkflowSteps().get(0).getType());
-                assertEquals(URI.create("eddi://ai.labs.rules"), pkgConfig.getWorkflowSteps().get(1).getType());
-                assertEquals(URI.create("eddi://ai.labs.apicalls"), pkgConfig.getWorkflowSteps().get(2).getType());
-                assertEquals(URI.create("eddi://ai.labs.apicalls"), pkgConfig.getWorkflowSteps().get(3).getType());
+                assertEquals(URI.create("eddi://ai.labs.behavior"), pkgConfig.getWorkflowSteps().get(1).getType());
+                assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getWorkflowSteps().get(2).getType());
+                assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getWorkflowSteps().get(3).getType());
                 assertEquals(URI.create("eddi://ai.labs.llm"), pkgConfig.getWorkflowSteps().get(4).getType());
         }
 }

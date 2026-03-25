@@ -29,7 +29,7 @@ public interface IRestAgentEngine {
         /**
          * create new conversation
          *
-         * @param environment [restricted|production|test]
+         * @param environment [production|production|test]
          * @param agentId     String
          * @return Response HTTP 201 URI conversation ID
          */
@@ -43,7 +43,7 @@ public interface IRestAgentEngine {
         /**
          * create new conversation
          *
-         * @param environment [restricted|production|test]
+         * @param environment [production|production|test]
          * @param agentId     String
          * @param context     json context Map<String, Context>
          * @return Response HTTP 201 URI conversation ID

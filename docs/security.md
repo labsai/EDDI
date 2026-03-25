@@ -53,10 +53,10 @@ docker run -e QUARKUS_OIDC_TENANT_ENABLED=true \
 
 When OIDC is enabled, the following permission rules apply (see `application.properties`):
 
-| Path Pattern                                                                                        | Policy                                   |
-| --------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `/q/metrics/*`, `/q/health/*`, `/chat/unrestricted/*`, `/agents/unrestricted/*`, `/managedagents/*` | **Permit** (no auth)                     |
-| `/`, `/*`                                                                                           | **Authenticated** (valid token required) |
+| Path Pattern                                                                                    | Policy                                   |
+| ----------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `/q/metrics/*`, `/q/health/*`, `/chat/production/*`, `/agents/production/*`, `/managedagents/*` | **Permit** (no auth)                     |
+| `/`, `/*`                                                                                       | **Authenticated** (valid token required) |
 
 ### RestAgentManagement Gate
 
@@ -64,15 +64,15 @@ When OIDC is enabled, the following permission rules apply (see `application.pro
 
 ```java
 if (checkForUserAuthentication &&
-        !unrestricted.equals(userConversation.getEnvironment()) &&
+        !production.equals(userConversation.getEnvironment()) &&
         identity.isAnonymous()) {
     throw new UnauthorizedException();
 }
 ```
 
 - When `quarkus.oidc.tenant-enabled=false` → `checkForUserAuthentication=false` → all requests pass
-- When `quarkus.oidc.tenant-enabled=true` → only authenticated users can access restricted endpoints
-- Requests to `/unrestricted/` environments always pass regardless of auth status
+- When `quarkus.oidc.tenant-enabled=true` → only authenticated users can access production endpoints
+- Requests to `/production/` environments always pass regardless of auth status
 
 ### Local Development Keycloak
 

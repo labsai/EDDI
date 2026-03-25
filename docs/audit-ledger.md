@@ -35,7 +35,7 @@ Each audit entry captures:
 | `agentId`        | String  | Agent identifier                                           |
 | `agentVersion`   | Integer | Agent version                                              |
 | `userId`         | String  | User identifier                                            |
-| `environment`    | String  | Deployment environment (e.g., `unrestricted`)              |
+| `environment`    | String  | Deployment environment (e.g., `production`)                |
 | `stepIndex`      | int     | 0-based step position in the conversation                  |
 | `taskId`         | String  | Lifecycle task ID (e.g., `ai.labs.parser`)                 |
 | `taskType`       | String  | Task type (e.g., `expressions`, `langchain`)               |

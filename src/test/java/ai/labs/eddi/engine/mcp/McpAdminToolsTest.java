@@ -79,7 +79,7 @@ class McpAdminToolsTest {
         }
 
         @Test
-        void deployAgent_defaultsToUnrestricted() throws IOException {
+        void deployAgent_defaultsToProduction() throws IOException {
                 when(agentAdmin.deployAgent(Environment.production, AGENT_ID, 2, true, true))
                                 .thenReturn(Response.ok().build());
                 when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deployed\"}");

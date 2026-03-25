@@ -8,11 +8,13 @@ import java.util.Map;
  * <p>
  * Supports cron schedules, heartbeat intervals, and one-shot triggers:
  * <ul>
- *   <li>{@code CRON} — wall-clock aligned, e.g. "0 9 * * MON-FRI"</li>
- *   <li>{@code HEARTBEAT} — interval-based, drift-proof, persistent conversation</li>
+ * <li>{@code CRON} — wall-clock aligned, e.g. "0 9 * * MON-FRI"</li>
+ * <li>{@code HEARTBEAT} — interval-based, drift-proof, persistent
+ * conversation</li>
  * </ul>
  * <p>
- * State machine: PENDING → CLAIMED → EXECUTING → COMPLETED | FAILED → DEAD_LETTERED
+ * State machine: PENDING → CLAIMED → EXECUTING → COMPLETED | FAILED →
+ * DEAD_LETTERED
  *
  * @author ginccc
  * @since 6.0.0
@@ -28,8 +30,10 @@ public class ScheduleConfiguration {
     public enum TriggerType {
         /** Wall-clock aligned cron expression. Default conversation strategy: "new". */
         CRON,
-        /** Fixed-interval heartbeat. Default conversation strategy: "persistent".
-         *  After fire, nextFire = lastFired + interval (drift-proof). */
+        /**
+         * Fixed-interval heartbeat. Default conversation strategy: "persistent".
+         * After fire, nextFire = lastFired + interval (drift-proof).
+         */
         HEARTBEAT
     }
 
@@ -42,19 +46,19 @@ public class ScheduleConfiguration {
 
     // -- Target --
     private String agentId;
-    private int agentVersion;          // 0 = latest deployed
-    private String environment;      // "production" | "restricted" | "test"
+    private int agentVersion; // 0 = latest deployed
+    private String environment; // "production" | "production" | "test"
     private String tenantId;
 
     // -- Timing --
-    private String cronExpression;   // 5-field standard cron (CRON type)
-    private Long heartbeatIntervalSeconds;  // heartbeat interval in seconds (HEARTBEAT type)
-    private String oneTimeAt;        // ISO-8601 instant (null for recurring)
-    private String timeZone;         // IANA, e.g. "Europe/Vienna" (default: "UTC")
+    private String cronExpression; // 5-field standard cron (CRON type)
+    private Long heartbeatIntervalSeconds; // heartbeat interval in seconds (HEARTBEAT type)
+    private String oneTimeAt; // ISO-8601 instant (null for recurring)
+    private String timeZone; // IANA, e.g. "Europe/Vienna" (default: "UTC")
 
     // -- Trigger --
-    private String message;          // message text sent to the agent
-    private String userId;           // user identity (default: "system:scheduler")
+    private String message; // message text sent to the agent
+    private String userId; // user identity (default: "system:scheduler")
     private String conversationStrategy; // "new" | "persistent"
     private String persistentConversationId; // used when strategy = "persistent"
 
@@ -65,7 +69,7 @@ public class ScheduleConfiguration {
     private FireStatus fireStatus = FireStatus.PENDING;
     private String claimedBy;
     private Instant claimedAt;
-    private String fireId;           // idempotency key: scheduleId + fireTime
+    private String fireId; // idempotency key: scheduleId + fireTime
     private int failCount;
     private Instant nextRetryAt;
 

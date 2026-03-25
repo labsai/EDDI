@@ -327,7 +327,7 @@ Another HTTP call creates a package:
   "actions": ["httpcall(deploy-agent)"],
   "request": {
     "method": "POST",
-    "path": "/administration/unrestricted/deploy/[[${context.newAgentId}]]",
+    "path": "/administration/production/deploy/[[${context.newAgentId}]]",
     "queryParams": {
       "version": "1"
     }
@@ -343,7 +343,7 @@ Another HTTP call creates a package:
 "Your agent has been created successfully!
 Agent ID: [[${context.newAgentId}]]
 You can start chatting with it at:
-http://localhost:7070/chat/unrestricted/[[${context.newAgentId}]]"
+http://localhost:7070/chat/production/[[${context.newAgentId}]]"
 ```
 
 ## Key Architectural Insights
@@ -645,7 +645,7 @@ public class PropertyExtractorTask implements ILifecycleTask {
 
 ```bash
 # 1. Start conversation with Agent Father
-curl -X POST "http://localhost:7070/agents/unrestricted/agentfather" \
+curl -X POST "http://localhost:7070/agents/production/agentfather" \
   -H "Content-Type: application/json" \
   -d '{"input": "I want to create a agent"}'
 
@@ -659,22 +659,22 @@ curl -X POST "http://localhost:7070/agents/unrestricted/agentfather" \
 # }
 
 # 2. Provide agent name
-curl -X POST "http://localhost:7070/agents/unrestricted/agentfather/conv-123" \
+curl -X POST "http://localhost:7070/agents/production/agentfather/conv-123" \
   -H "Content-Type: application/json" \
   -d '{"input": "Weather Agent"}'
 
 # 3. Provide description
-curl -X POST "http://localhost:7070/agents/unrestricted/agentfather/conv-123" \
+curl -X POST "http://localhost:7070/agents/production/agentfather/conv-123" \
   -H "Content-Type: application/json" \
   -d '{"input": "Tells users the current weather"}'
 
 # 4. Provide LLM choice
-curl -X POST "http://localhost:7070/agents/unrestricted/agentfather/conv-123" \
+curl -X POST "http://localhost:7070/agents/production/agentfather/conv-123" \
   -H "Content-Type: application/json" \
   -d '{"input": "OpenAI"}'
 
 # 5. Provide API key
-curl -X POST "http://localhost:7070/agents/unrestricted/agentfather/conv-123" \
+curl -X POST "http://localhost:7070/agents/production/agentfather/conv-123" \
   -H "Content-Type: application/json" \
   -d '{"input": "sk-..."}'
 

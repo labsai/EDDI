@@ -6,8 +6,10 @@ import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 
 /**
- * URL validation utilities to prevent SSRF (Server-Side Request Forgery) attacks.
- * Validates that URLs use allowed schemes and do not target private/internal networks.
+ * URL validation utilities to prevent SSRF (Server-Side Request Forgery)
+ * attacks.
+ * Validates that URLs use allowed schemes and do not target private/internal
+ * networks.
  */
 public final class UrlValidationUtils {
 
@@ -23,7 +25,8 @@ public final class UrlValidationUtils {
      * 3. Hostname does not resolve to a private/loopback/link-local address
      *
      * @param url the URL to validate
-     * @throws IllegalArgumentException if the URL is invalid or targets a restricted address
+     * @throws IllegalArgumentException if the URL is invalid or targets a
+     *                                  production address
      */
     public static void validateUrl(String url) {
         if (url == null || url.isBlank()) {
@@ -71,7 +74,8 @@ public final class UrlValidationUtils {
     }
 
     /**
-     * Checks whether the hostname is a known internal/local hostname that should be blocked.
+     * Checks whether the hostname is a known internal/local hostname that should be
+     * blocked.
      */
     static boolean isBlockedHostname(String host) {
         return host.equals("localhost") ||

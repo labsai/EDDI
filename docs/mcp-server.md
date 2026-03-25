@@ -35,11 +35,11 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `deploy_agent`          | Deploy a agent version to an environment                                        |
 | `undeploy_agent`        | Undeploy a agent from an environment                                            |
 | `get_deployment_status` | Get deployment status of a specific agent version                               |
-| `list_workflows`         | List all packages (pipeline configurations)                                     |
+| `list_workflows`        | List all packages (pipeline configurations)                                     |
 | `create_agent`          | Create a new agent                                                              |
 | `delete_agent`          | Delete a agent (with optional cascade)                                          |
 | `update_agent`          | Update a agent's name/description and optionally redeploy                       |
-| `read_workflow`          | Read a package's full pipeline configuration                                    |
+| `read_workflow`         | Read a package's full pipeline configuration                                    |
 | `read_resource`         | Read any resource config by type (behavior, langchain, httpcalls, output, etc.) |
 | `list_agent_triggers`   | List all agent triggers (intent→agent mappings) for managed conversations       |
 | `create_agent_trigger`  | Create a agent trigger mapping an intent to one or more agent deployments       |
@@ -195,10 +195,10 @@ Discover deployed agents with their capabilities. Returns an enriched list of de
 
 **Parameters:**
 
-| Parameter     | Type   | Required | Default          | Description                                              |
-| ------------- | ------ | -------- | ---------------- | -------------------------------------------------------- |
-| `filter`      | string | No       | `""`             | Filter agents by name (case-insensitive substring match) |
-| `environment` | string | No       | `"unrestricted"` | Environment: `unrestricted`, `restricted`, or `test`     |
+| Parameter     | Type   | Required | Default        | Description                                              |
+| ------------- | ------ | -------- | -------------- | -------------------------------------------------------- |
+| `filter`      | string | No       | `""`           | Filter agents by name (case-insensitive substring match) |
+| `environment` | string | No       | `"production"` | Environment: `production`, `production`, or `test`       |
 
 **Response:**
 
@@ -212,7 +212,7 @@ Discover deployed agents with their capabilities. Returns an enriched list of de
       "description": "gemini powered Agent",
       "version": 1,
       "status": "READY",
-      "environment": "unrestricted",
+      "environment": "production",
       "intents": ["bob-marley-2-692f7fe8d6c14292d2b7f70c"]
     },
     {
@@ -221,7 +221,7 @@ Discover deployed agents with their capabilities. Returns an enriched list of de
       "description": "Agent to create Connector Agents...",
       "version": 110,
       "status": "READY",
-      "environment": "unrestricted"
+      "environment": "production"
     }
   ]
 }
@@ -244,13 +244,13 @@ The conversation is auto-created on first message and reused on subsequent calls
 | `intent`      | string | **Yes**  | Intent that maps to a agent trigger. E.g. `"customer_support"`           |
 | `userId`      | string | **Yes**  | User ID for conversation management (one conversation per intent+userId) |
 | `message`     | string | **Yes**  | The user message to send                                                 |
-| `environment` | string | No       | Environment: `unrestricted` (default), `restricted`, or `test`           |
+| `environment` | string | No       | Environment: `production` (default), `production`, or `test`             |
 
 **Response:**
 
 ```json
 {
-  "environment": "unrestricted",
+  "environment": "production",
   "conversationId": "69bc8b93...",
   "agentId": "692f7fe8...",
   "userId": "user-123",
@@ -290,7 +290,7 @@ List all agent triggers (intent→agent mappings). Returns all configured intent
       "intent": "customer_support",
       "agentDeployments": [
         {
-          "environment": "unrestricted",
+          "environment": "production",
           "agentId": "6544db9b...",
           "initialContext": {}
         }
@@ -322,7 +322,7 @@ Create a agent trigger that maps an intent to one or more agents. Once created, 
   "agentDeployments": [
     {
       "agentId": "64513b3c...",
-      "environment": "unrestricted",
+      "environment": "production",
       "initialContext": {
         "language": { "type": "string", "value": "en" }
       }
@@ -336,7 +336,7 @@ Create a agent trigger that maps an intent to one or more agents. Once created, 
 | `intent`                            | string | **Yes**  | Unique intent identifier. Convention: `slug-agentId` (e.g. `support-agent-abc123`) |
 | `agentDeployments`                  | array  | **Yes**  | List of agent deployments this intent routes to                                    |
 | `agentDeployments[].agentId`        | string | **Yes**  | The agent ID to route messages to                                                  |
-| `agentDeployments[].environment`    | string | No       | Deployment environment (default: `unrestricted`)                                   |
+| `agentDeployments[].environment`    | string | No       | Deployment environment (default: `production`)                                     |
 | `agentDeployments[].initialContext` | object | No       | Key-value pairs injected into the conversation context on creation                 |
 
 **Response:**
@@ -394,7 +394,7 @@ setup_agent(name: "Support Agent", systemPrompt: "You are a helpful support agen
 # 2. Create a trigger mapping an intent to this agent
 create_agent_trigger(config: {
   "intent": "customer_support",
-  "agentDeployments": [{ "agentId": "abc123", "environment": "unrestricted" }]
+  "agentDeployments": [{ "agentId": "abc123", "environment": "production" }]
 })
 
 # 3. Chat using the intent — conversation auto-created
@@ -437,7 +437,7 @@ To add a new MCP tool: add it to the `MCP_TOOLS` set in `McpToolFilter.java`.
 
 - The MCP endpoint inherits EDDI's existing OIDC/Keycloak authentication
 - When auth is enabled (`quarkus.oidc.tenant-enabled=true`), MCP clients must provide valid tokens
-- Admin tools (deploy, undeploy, delete) should be restricted to authorized users via `@RolesAllowed`
+- Admin tools (deploy, undeploy, delete) should be production to authorized users via `@RolesAllowed`
 - **Future**: Per-agent MCP access control via agent configuration for multi-tenant SaaS
 
 ### Recommended Role Mapping

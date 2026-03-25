@@ -210,7 +210,7 @@
     }, {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "You can access it here: <a href=\"/chat/unrestricted/[(${properties.agentId})]\" target=\"_blank\">Open chat with Connector Agent [(${properties.agentName})]</a>",
+        "text" : "You can access it here: <a href=\"/chat/production/[(${properties.agentId})]\" target=\"_blank\">Open chat with Connector Agent [(${properties.agentName})]</a>",
         "delay" : 0
       } ]
     }, {

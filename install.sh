@@ -274,7 +274,7 @@ check_prerequisites() {
 detect_deployed_agents() {
   local count=0
   local response
-  response=$(curl -sf "http://localhost:${EDDI_PORT}/administration/unrestricted/deploymentstatus" 2>/dev/null) || return 1
+  response=$(curl -sf "http://localhost:${EDDI_PORT}/administration/production/deploymentstatus" 2>/dev/null) || return 1
 
   if [[ "$JQ_AVAILABLE" == "true" ]]; then
     count=$(echo "$response" | jq 'length' 2>/dev/null) || count=0
@@ -547,7 +547,7 @@ case "${1:-help}" in
     echo ""
     if curl -sf "http://localhost:${EDDI_PORT}/q/health/ready" &>/dev/null; then
       echo "Health: ✅ ready"
-      AGENT_COUNT=$(curl -sf "http://localhost:${EDDI_PORT}/administration/unrestricted/deploymentstatus" 2>/dev/null | grep -o '"agentId"' | wc -l || echo "0")
+      AGENT_COUNT=$(curl -sf "http://localhost:${EDDI_PORT}/administration/production/deploymentstatus" 2>/dev/null | grep -o '"agentId"' | wc -l || echo "0")
       echo "Deployed agents: $AGENT_COUNT"
     else
       echo "Health: ❌ not ready"

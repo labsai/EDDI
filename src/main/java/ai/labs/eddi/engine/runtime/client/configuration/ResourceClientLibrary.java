@@ -110,6 +110,9 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             }
         });
 
+        // Alias: IRestRuleSetStore uses resourceBaseType "ai.labs.rules"
+        restInterfaces.put("ai.labs.rules", restInterfaces.get("ai.labs.behavior"));
+
         restInterfaces.put("ai.labs.httpcalls", new IResourceService() {
             @Override
             public Object read(String id, Integer version) {
@@ -126,6 +129,9 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
                 return restApiCallsStore.deleteApiCalls(id, version, permanent);
             }
         });
+
+        // Alias: IRestApiCallsStore uses resourceBaseType "ai.labs.apicalls"
+        restInterfaces.put("ai.labs.apicalls", restInterfaces.get("ai.labs.httpcalls"));
 
         restInterfaces.put("ai.labs.llm", new IResourceService() {
             @Override

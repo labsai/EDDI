@@ -1,23 +1,19 @@
 package ai.labs.eddi.modules.llm.tools;
 
-import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
-import ai.labs.eddi.engine.memory.IMemoryItemConverter;
-import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
-import ai.labs.eddi.modules.llm.model.ToolExecutionTrace;
+import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
-
 
 import java.net.URI;
 import java.util.HashMap;
@@ -27,36 +23,31 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * A CDI bean that provides a generic @Tool for Langchain4j agents.
  * This tool acts as a bridge, allowing AI agents to execute pre-configured EDDI httpcalls.
+ * <p>
+ * The conversationId is injected via {@link #setCurrentConversationId(String)} before
+ * the tool-calling loop — the LLM only needs to provide the {@code httpCallUri}.
+ * <p>
+ * Security: the agent can ONLY call httpcalls that have been explicitly configured
+ * and granted to it, not arbitrary APIs.
  *
- * This provides a crucial security layer: the agent can ONLY call httpcalls that have been
- * explicitly configured and granted to it, not arbitrary APIs.
+ * @author ginccc
  */
 @ApplicationScoped
 public class EddiToolBridge {
     private static final Logger LOGGER = Logger.getLogger(EddiToolBridge.class);
 
-    // Cache Method object to avoid repeated reflection lookups on every tool execution
-    private static final java.lang.reflect.Method INTERNAL_EXECUTE_METHOD;
-
-    static {
-        try {
-            INTERNAL_EXECUTE_METHOD = EddiToolBridge.class.getMethod("executeApiCallInternal", String.class, String.class, Map.class);
-        } catch (NoSuchMethodException e) {
-            throw new ExceptionInInitializerError("Failed to cache executeApiCallInternal method: " + e.getMessage());
-        }
-    }
-
-    @Inject
-    IApiCallsStore httpCallsStore;
+    /**
+     * ThreadLocal to hold the current conversationId during a tool-calling loop.
+     * Set by {@link ai.labs.eddi.modules.llm.impl.AgentOrchestrator} before execution,
+     * cleared after the loop completes.
+     */
+    private static final ThreadLocal<String> CURRENT_CONVERSATION_ID = new ThreadLocal<>();
 
     @Inject
     IConversationMemoryStore conversationMemoryStore;
 
     @Inject
     IResourceClientLibrary resourceClientLibrary;
-
-    @Inject
-    IMemoryItemConverter memoryItemConverter;
 
     @Inject
     IJsonSerialization jsonSerialization;
@@ -71,30 +62,42 @@ public class EddiToolBridge {
     private final Map<String, ApiCallsConfiguration> configCache = new ConcurrentHashMap<>();
 
     /**
-     * This method is exposed to the LLM as a tool.
-     * The agent can call this to execute any pre-configured EDDI httpcall.
-     *
-     * Note: In the actual implementation, tool-specific methods would be dynamically
-     * generated based on the agent's configuration. This is a placeholder for the
-     * generic execution mechanism.
-     *
-     * @param conversationId The current conversation ID
-     * @param httpCallUri The URI of the httpcall configuration (e.g., "eddi://ai.labs.apicalls/weather_api?version=1")
-     * @param arguments Arguments to pass to the httpcall for templating
-     * @return JSON string with the httpcall result
+     * Set the current conversation context before the agent tool-calling loop.
+     * Called by AgentOrchestrator.
      */
-    @Tool("Executes a pre-configured EDDI httpcall. Use only httpcalls that have been explicitly provided to you.")
-    public String executeApiCall(String conversationId, String httpCallUri, Map<String, Object> arguments) {
-        return toolExecutionService.executeTool(
-                this,
-                INTERNAL_EXECUTE_METHOD,
-                new Object[]{conversationId, httpCallUri, arguments},
-                conversationId,
-                new ToolExecutionTrace()
-        );
+    public static void setCurrentConversationId(String conversationId) {
+        CURRENT_CONVERSATION_ID.set(conversationId);
     }
 
-    public String executeApiCallInternal(String conversationId, String httpCallUri, Map<String, Object> arguments) {
+    /**
+     * Clear the conversation context after the tool-calling loop completes.
+     * Called by AgentOrchestrator in a finally block.
+     */
+    public static void clearCurrentConversationId() {
+        CURRENT_CONVERSATION_ID.remove();
+    }
+
+    /**
+     * Executes a pre-configured EDDI API call.
+     * <p>
+     * The LLM only needs to provide the httpcall URI — the conversation context
+     * is injected automatically by the system.
+     *
+     * @param httpCallUri URI of the httpcall configuration
+     *                    (e.g., "eddi://ai.labs.apicalls/apicallstore/apicalls/abc123?version=1")
+     * @return JSON string with the API call result
+     */
+    @Tool("Executes a pre-configured EDDI API call to fetch real data. " +
+            "Pass the exact httpCallUri that was provided to you.")
+    public String executeApiCall(
+            @P("The httpcall URI to execute, e.g. eddi://ai.labs.apicalls/apicallstore/apicalls/ID?version=1")
+            String httpCallUri) {
+
+        String conversationId = CURRENT_CONVERSATION_ID.get();
+        if (conversationId == null) {
+            return errorResult("No conversation context available for tool execution");
+        }
+
         try {
             LOGGER.info("Agent executing httpcall: " + httpCallUri + " for conversation: " + conversationId);
 
@@ -107,9 +110,7 @@ public class EddiToolBridge {
                 return errorResult("ApiCalls configuration not found: " + httpCallUri);
             }
 
-            // Find the specific ApiCall within the configuration
-            // For simplicity, we take the first call that matches any action
-            // In a real scenario, the URI would specify which call to execute
+            // Find the first ApiCall in the configuration
             ApiCall httpCall = config.getHttpCalls().stream()
                     .findFirst()
                     .orElse(null);
@@ -118,26 +119,17 @@ public class EddiToolBridge {
                 return errorResult("No httpcalls found in configuration: " + httpCallUri);
             }
 
-            // Load the conversation memory snapshot
-            ConversationMemorySnapshot snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            // Load the conversation memory snapshot for template data
+            var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            var memory = new ConversationMemory(
+                    conversationId, snapshot.getAgentId(),
+                    snapshot.getAgentVersion(), snapshot.getUserId());
 
-            // Create a temporary memory instance to satisfy ApiCallExecutor contract
-            ConversationMemory memory = new ConversationMemory(conversationId, snapshot.getAgentId(), snapshot.getAgentVersion(), snapshot.getUserId());
-
-            // Build template data by merging agent arguments with conversation memory
-            // Note: In real usage, we'd need an IConversationMemory instance, not a snapshot
-            // This is a simplified version - the DeclarativeAgentTask will handle this properly
-            Map<String, Object> templateData = new HashMap<>(arguments);
-
-            // Execute the httpcall using the shared executor
+            // Execute the httpcall
+            Map<String, Object> templateData = new HashMap<>();
             Map<String, Object> result = httpCallExecutor.execute(
-                    httpCall,
-                    memory,
-                    templateData,
-                    config.getTargetServerUrl()
-            );
+                    httpCall, memory, templateData, config.getTargetServerUrl());
 
-            // Return the result as JSON for the agent to process
             return jsonSerialization.serialize(result);
 
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -155,7 +147,8 @@ public class EddiToolBridge {
     /**
      * Loads or retrieves from cache an ApiCallsConfiguration
      */
-    private ApiCallsConfiguration getOrLoadConfig(URI uri) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    private ApiCallsConfiguration getOrLoadConfig(URI uri)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         String cacheKey = uri.toString();
         if (!configCache.containsKey(cacheKey)) {
             try {
@@ -182,4 +175,3 @@ public class EddiToolBridge {
         }
     }
 }
-

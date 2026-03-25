@@ -94,7 +94,7 @@ public class McpConversationTools {
     @Tool(name = "list_agents", description = "List all deployed agents with their status, version, and name. " +
             "Returns a JSON array of Agent deployment statuses.")
     public String listAgents(
-            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
+            @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         try {
             var env = parseEnvironment(environment);
             List<AgentDeploymentStatus> statuses = agentAdmin.getDeploymentStatuses(env);
@@ -127,7 +127,7 @@ public class McpConversationTools {
             "Tip: Use chat_with_agent instead if you want to send a message immediately.")
     public String createConversation(
             @ToolArg(description = "Agent ID (required)") String agentId,
-            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
+            @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         try {
@@ -154,7 +154,7 @@ public class McpConversationTools {
             @ToolArg(description = "Agent ID (required)") String agentId,
             @ToolArg(description = "Conversation ID from create_conversation (required)") String conversationId,
             @ToolArg(description = "The user message to send to the Agent (required)") String message,
-            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
+            @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         if (conversationId == null || conversationId.isBlank())
@@ -182,7 +182,7 @@ public class McpConversationTools {
             @ToolArg(description = "Agent ID (required)") String agentId,
             @ToolArg(description = "The user message to send to the Agent (required)") String message,
             @ToolArg(description = "Conversation ID to continue (optional — creates new if omitted)") String conversationId,
-            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
+            @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         if (message == null || message.isBlank())
@@ -219,7 +219,7 @@ public class McpConversationTools {
     public String readConversation(
             @ToolArg(description = "Agent ID (required)") String agentId,
             @ToolArg(description = "Conversation ID (required)") String conversationId,
-            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment,
+            @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment,
             @ToolArg(description = "Return only the current (latest) step? (default: true)") Boolean currentStepOnly,
             @ToolArg(description = "Return detailed internal data? (default: false)") Boolean returnDetailed,
             @ToolArg(description = "Comma-separated list of fields to return (e.g. 'input,output,actions'). " +
@@ -409,7 +409,7 @@ public class McpConversationTools {
             "and any intents it serves. This is the best way to find agents by purpose.")
     public String discoverAgents(
             @ToolArg(description = "Optional filter string to search Agent names") String filter,
-            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
+            @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         try {
             var env = parseEnvironment(environment);
             List<AgentDeploymentStatus> statuses = agentAdmin.getDeploymentStatuses(env);
@@ -479,7 +479,7 @@ public class McpConversationTools {
             @ToolArg(description = "Intent that maps to a Agent trigger (required). E.g. 'customer_support'") String intent,
             @ToolArg(description = "User ID for conversation management (required)") String userId,
             @ToolArg(description = "The user message to send (required)") String message,
-            @ToolArg(description = "Environment: 'production' (default), 'restricted', or 'test'") String environment) {
+            @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         if (intent == null || intent.isBlank())
             return errorJson("intent is required");
         if (userId == null || userId.isBlank())

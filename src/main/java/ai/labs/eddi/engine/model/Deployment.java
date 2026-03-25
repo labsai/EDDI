@@ -13,7 +13,7 @@ public class Deployment {
 
         /**
          * Backwards-compatible deserialization:
-         * "unrestricted" → production, "restricted" → production
+         * "production" → production, "production" → production
          */
         @JsonCreator
         public static Environment fromString(String value) {

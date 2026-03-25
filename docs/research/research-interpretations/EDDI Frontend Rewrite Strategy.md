@@ -56,11 +56,11 @@ Here is an analysis of the core research conclusions, translated into **concrete
 
 **The Research Conclusion:** Vanity metrics (like Deflection Rate) are useless. Furthermore, platforms struggle to visualize complex deployment pipelines cleanly, leading to duplicate entries.
 
-**The EDDI Fit:** EDDI's legacy UI currently explicitly suffers from this. If "Agent Father" is deployed to unrestricted and test, it shows up as two identical cards, cluttering the screen.
+**The EDDI Fit:** EDDI's legacy UI currently explicitly suffers from this. If "Agent Father" is deployed to production and test, it shows up as two identical cards, cluttering the screen.
 
 **Recommendations for EDDI:**
 
-- **The Environment Matrix:** Group the /agentstore API responses by agent ID. A single agent gets _one row or card_. Inside that card, display columns or badges for Dev, Test, and Unrestricted (Prod). Each badge shows the active version (v1, v2) and the live health status (a green/red dot fueled by your /q/health endpoint).
+- **The Environment Matrix:** Group the /agentstore API responses by agent ID. A single agent gets _one row or card_. Inside that card, display columns or badges for Dev, Test, and Production (Prod). Each badge shows the active version (v1, v2) and the live health status (a green/red dot fueled by your /q/health endpoint).
 - **Actionable Telemetry:** Surface EDDI’s built-in backend ToolCostTracker and Micrometer metrics directly on the dashboard. Show developers exactly how many tokens/dollars a specific agent is burning, and pivot metrics to show "True Resolution Rate" (conversations that hit an end-state without unhandled exceptions).
 
 ### ---

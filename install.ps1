@@ -158,7 +158,7 @@ function Test-Prerequisites {
 
 function Get-DeployedAgentCount {
     try {
-        $response = Invoke-RestMethod -Uri "http://localhost:${EddiPort}/administration/unrestricted/deploymentstatus" -TimeoutSec 5 -ErrorAction Stop
+        $response = Invoke-RestMethod -Uri "http://localhost:${EddiPort}/administration/production/deploymentstatus" -TimeoutSec 5 -ErrorAction Stop
         if ($response -is [array]) { return $response.Count }
         return 0
     } catch {

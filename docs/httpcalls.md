@@ -661,7 +661,7 @@ _Response Headers_
 
 _Request URL_
 
-`POST` `http://localhost:7070/administration/restricted/deploy/**<agent_id>**?version=1&autoDeploy=true`
+`POST` `http://localhost:7070/administration/production/deploy/**<agent_id>**?version=1&autoDeploy=true`
 
 _Response Body_
 
@@ -734,7 +734,7 @@ _Response Body_
 {
   "agentId": "5af8b075ba31c023bcb9ef3b",
   "agentVersion": 1,
-  "environment": "unrestricted",
+  "environment": "production",
   "conversationState": "READY",
   "redoCacheSize": 0,
   "conversationSteps": [
@@ -791,7 +791,7 @@ _Request Body_
 {
   "agentId": "5af8b075ba31c023bcb9ef3b",
   "agentVersion": 1,
-  "environment": "unrestricted",
+  "environment": "production",
   "conversationState": "READY",
   "redoCacheSize": 0,
   "conversationSteps": [

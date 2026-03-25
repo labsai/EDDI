@@ -15,7 +15,7 @@ public record CreateApiAgentRequest(
         @JsonProperty(required = true) String openApiSpec,
         String provider,
         String model,
-        @JsonProperty(required = true) String apiKey,
+        String apiKey,
         String apiBaseUrl,
         String apiAuth,
         String endpoints,

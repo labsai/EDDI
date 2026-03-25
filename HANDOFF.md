@@ -7,7 +7,7 @@
 
 ### Phase 0: Security Quick Wins ✅ (commit `71448a89`)
 
-- [x] CORS restricted to `localhost:3000,localhost:7070`
+- [x] CORS production to `localhost:3000,localhost:7070`
 - [x] `PathNavigator` replaces all 5 explicit `Ognl.getValue()`/`Ognl.setValue()` calls
 - [x] 27 new PathNavigator tests, all 499 tests pass
 

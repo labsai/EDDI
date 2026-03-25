@@ -10,17 +10,17 @@ Deployment management provides:
 
 - **Environment Isolation**: Test agents without affecting production
 - **Version Control**: Deploy specific agent versions, roll back if needed
-- **Gradual Rollout**: Test in `test` environment, then `unrestricted`, finally `restricted`
+- **Gradual Rollout**: Test in `test` environment, then `production`, finally `production`
 - **Zero-Downtime Updates**: Deploy new versions while old ones are still running
 - **Audit Trail**: Track what's deployed, when, and by whom
 
 ### EDDI Environments
 
-| Environment        | Purpose                        | Access Control             |
-| ------------------ | ------------------------------ | -------------------------- |
-| **`test`**         | Development and testing        | Typically unrestricted     |
-| **`unrestricted`** | Public/demo deployments        | No authentication required |
-| **`restricted`**   | Production with authentication | Requires valid OAuth token |
+| Environment      | Purpose                        | Access Control             |
+| ---------------- | ------------------------------ | -------------------------- |
+| **`test`**       | Development and testing        | Typically production       |
+| **`production`** | Public/demo deployments        | No authentication required |
+| **`production`** | Production with authentication | Requires valid OAuth token |
 
 ### Deployment Lifecycle
 
@@ -30,11 +30,11 @@ Deployment management provides:
    → Agent exists but is NOT deployed
 
 2. DEPLOY Agent
-   POST /administration/unrestricted/deploy/agent123?version=1
+   POST /administration/production/deploy/agent123?version=1
    → Agent becomes active and can handle conversations
 
 3. USE Agent
-   POST /agents/unrestricted/agent123
+   POST /agents/production/agent123
    → Users can now interact with the agent
 
 4. UPDATE Agent
@@ -42,7 +42,7 @@ Deployment management provides:
    → Old version still available if specified
 
 5. UNDEPLOY Agent
-   POST /administration/unrestricted/undeploy/agent123
+   POST /administration/production/undeploy/agent123
    → Agent stops processing new conversations
 ```
 
@@ -54,13 +54,13 @@ Deployment management provides:
 This is useful for:
 
 - **Development**: Auto-deploy to `test` for rapid iteration
-- **Production**: Manual deployment to `restricted` for controlled releases
+- **Production**: Manual deployment to `production` for controlled releases
 
 ### Checking Deployment Status
 
 You can check:
 
-- **Single Agent Status**: Is agent123 deployed in unrestricted?
+- **Single Agent Status**: Is agent123 deployed in production?
 - **All Deployments**: List all deployed agents across environments
 - **Version Info**: Which version is currently deployed?
 
@@ -76,18 +76,18 @@ The deployment of a specific chatagent is done through a **`POST`** to **`/admin
 
 ### Deploy Chatagent REST API Endpoint
 
-| Element       | Value                                                                                      |
-| ------------- | ------------------------------------------------------------------------------------------ |
-| HTTP Method   | `POST`                                                                                     |
-| API endpoint  | `/administration/{environment}/deploy/{agentId}`                                           |
-| {environment} | (`Path parameter`):`String` deployment environment (e.g: **restricted,unrestricted,test**) |
-| {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **deploy**.                   |
+| Element       | Value                                                                                    |
+| ------------- | ---------------------------------------------------------------------------------------- |
+| HTTP Method   | `POST`                                                                                   |
+| API endpoint  | `/administration/{environment}/deploy/{agentId}`                                         |
+| {environment} | (`Path parameter`):`String` deployment environment (e.g: **production,production,test**) |
+| {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **deploy**.                 |
 
 ### Example _:_
 
 _Request URL:_
 
-`http://localhost:7070/administration/unrestricted/deploy/5aaf98e19f7dd421ac3c7de9?version=1&autoDeploy=true`
+`http://localhost:7070/administration/production/deploy/5aaf98e19f7dd421ac3c7de9?version=1&autoDeploy=true`
 
 _Response Body:_
 
@@ -116,12 +116,12 @@ The undeployment of a specific chatagent is done through a **`POST`** to **`/adm
 
 ### Undeploy Chatagent REST API Endpoint
 
-| Element       | Value                                                                                      |
-| ------------- | ------------------------------------------------------------------------------------------ |
-| HTTP Method   | `POST`                                                                                     |
-| API endpoint  | `/administration/{environment}/undeploy/{agentId}`                                         |
-| {environment} | (`Path parameter`):`String` deployment environment (e.g: **restricted,unrestricted,test**) |
-| {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **undeploy**.                 |
+| Element       | Value                                                                                    |
+| ------------- | ---------------------------------------------------------------------------------------- |
+| HTTP Method   | `POST`                                                                                   |
+| API endpoint  | `/administration/{environment}/undeploy/{agentId}`                                       |
+| {environment} | (`Path parameter`):`String` deployment environment (e.g: **production,production,test**) |
+| {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **undeploy**.               |
 
 ### Example :
 
@@ -129,7 +129,7 @@ The undeployment of a specific chatagent is done through a **`POST`** to **`/adm
 
 _Request URL_
 
-`http://localhost:7070/administration/unrestricted/undeploy/5aaf98e19f7dd421ac3c7de9?version=1`
+`http://localhost:7070/administration/production/undeploy/5aaf98e19f7dd421ac3c7de9?version=1`
 
 _Response Body_
 
@@ -163,7 +163,7 @@ Deployment status of a Chatagent REST API Endpoint
 | ------------- | ------------------------------------------------------------------------------------------------- |
 | HTTP Method   | `GET`                                                                                             |
 | Api endpoint  | `/administration/{environment}/deploymentstatus/{agentId}`                                        |
-| {environment} | (`Path parameter`):`String` deployment environment (e.g: **restricted,unrestricted,test**)        |
+| {environment} | (`Path parameter`):`String` deployment environment (e.g: **production,production,test**)          |
 | {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **check** its **deployment status**. |
 | Response      | `NOT_FOUND`, `IN_PROGRESS`, `ERROR` and `READY`.                                                  |
 
@@ -171,7 +171,7 @@ Deployment status of a Chatagent REST API Endpoint
 
 _Request URL_
 
-`http://localhost:7070/administration/unrestricted/deploymentstatus/5aaf98e19f7dd421ac3c7de9?version=1`
+`http://localhost:7070/administration/production/deploymentstatus/5aaf98e19f7dd421ac3c7de9?version=1`
 
 _Response Body_
 
@@ -222,19 +222,19 @@ _Response Body_
   {
     agentId: "5aaf90e29f7dd421ac3c7dd4",
     agentVersion: 1,
-    environment: "unrestricted",
+    environment: "production",
     deploymentStatus: "deployed",
   },
   {
     agentId: "5aaf90e29f7dd421ac3c7dd4",
     agentVersion: 1,
-    environment: "restricted",
+    environment: "production",
     deploymentStatus: "deployed",
   },
   {
     agentId: "5aaf98e19f7dd421ac3c7de9",
     agentVersion: 1,
-    environment: "unrestricted",
+    environment: "production",
     deploymentStatus: "deployed",
   },
 ];
@@ -333,7 +333,7 @@ DELETE /packagestore/packages/{id}?version={version}&cascade=true&permanent=true
 If the agent is currently deployed, you should **undeploy** it first:
 
 ```
-POST /administration/unrestricted/undeploy/{agentId}?endAllActiveConversations=true
+POST /administration/production/undeploy/{agentId}?endAllActiveConversations=true
 → 202 Accepted
 
 DELETE /agentstore/agents/{agentId}?version=1&cascade=true&permanent=true

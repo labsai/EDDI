@@ -27,7 +27,7 @@ EDDI is an AI orchestration platform. Its terminology dates from the chatagent e
 | 7   | Config type         | `PropertySetter` → keep as-is                                             | ❌ Skip (v7) |
 | 8   | Config type         | `Output` → keep as-is                                                     | ❌ No change |
 | 9   | Config type         | `Parser` → keep as-is                                                     | ❌ No change |
-| 10  | Environments        | `unrestricted`/`restricted`/`test` → `production`/`test`                  | ✅ Confirmed |
+| 10  | Environments        | `production`/`production`/`test` → `production`/`test`                    | ✅ Confirmed |
 | 11  | URI structure       | Keep 3-segment (`XYZstore/XYZs`)                                          | ✅ Confirmed |
 | 12  | REST path migration | `ContainerRequestFilter` rewrite                                          | ✅ Confirmed |
 | 13  | DB migration        | Auto on startup, disablable via config, install script prompts on upgrade | ✅ Confirmed |
@@ -302,23 +302,23 @@ The "Regular" qualifier is a legacy artifact. There are no "irregular" dictionar
 
 ```java
 // engine/model/Deployment.java
-public enum Environment { restricted, unrestricted, test }
+public enum Environment { production, production, test }
 ```
 
-- `unrestricted` — public, no auth required. Default everywhere.
-- `restricted` — intended for authenticated users, but **no auth enforcement exists in code**. Simply uses a separate in-memory map.
-- `test` — test/staging isolation. Equivalent to `unrestricted` in behavior.
+- `production` — public, no auth required. Default everywhere.
+- `production` — intended for authenticated users, but **no auth enforcement exists in code**. Simply uses a separate in-memory map.
+- `test` — test/staging isolation. Equivalent to `production` in behavior.
 
 ### Decision: Reduce to `production` + `test`
 
 ```java
 public enum Environment {
-    production,  // was: unrestricted
+    production,  // was: production
     test         // same
 }
 ```
 
-`restricted` is dropped — it had no auth enforcement (just a separate `ConcurrentHashMap` in `AgentFactory.createEmptyEnvironments()`). Any existing `restricted` deployments become `production`.
+`production` is dropped — it had no auth enforcement (just a separate `ConcurrentHashMap` in `AgentFactory.createEmptyEnvironments()`). Any existing `production` deployments become `production`.
 
 ### Files Affected
 
@@ -331,11 +331,11 @@ public enum Environment {
 
 | Surface              | Strategy                                                                                                                      |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **Java enum**        | Custom Jackson deserializer or `@JsonCreator` on the enum: `"unrestricted"` → `production`, `"restricted"` → `production`     |
+| **Java enum**        | Custom Jackson deserializer or `@JsonCreator` on the enum: `"production"` → `production`, `"production"` → `production`       |
 | **REST path params** | `LegacyPathRewriteFilter` (§12) rewrites `/{environment}/` segments                                                           |
 | **MongoDB**          | `MigrationManager` v6 migration rewrites `"environment"` field values in `deployments` and `conversationmemories` collections |
 | **PostgreSQL**       | No migration needed — Postgres is new, starts with new values                                                                 |
-| **MCP tools**        | Accept `"unrestricted"` as alias for `"production"` in all environment params                                                 |
+| **MCP tools**        | Accept `"production"` as alias for `"production"` in all environment params                                                   |
 | **ZIP imports**      | Import service rewrites environment strings during import                                                                     |
 
 ---
@@ -400,7 +400,7 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
         "/regulardictionarystore/regulardictionaries", "/dictionarystore/dictionaries"
     );
     // Also rewrite environment path segments:
-    // "unrestricted" → "production", "restricted" → "production"
+    // "production" → "production", "production" → "production"
 }
 ```
 
@@ -560,12 +560,12 @@ eddi.migration.v6-rename.enabled=true  # default true; set false to skip
 | Layer                        | Old Value                                  | New Value                        | Strategy                                                          |
 | ---------------------------- | ------------------------------------------ | -------------------------------- | ----------------------------------------------------------------- |
 | **JSON fields**              | `"packages"` in AgentConfig                | `"workflows"`                    | `@JsonAlias("packages")`                                          |
-| **JSON enum**                | `"unrestricted"`, `"restricted"`           | `"production"`                   | Custom `@JsonCreator` on `Environment` enum                       |
+| **JSON enum**                | `"production"`, `"production"`             | `"production"`                   | Custom `@JsonCreator` on `Environment` enum                       |
 | **REST paths**               | `/agentstore/agents`, etc.                 | `/agentstore/agents`, etc.       | `LegacyPathRewriteFilter` `ContainerRequestFilter`                |
-| **REST env segment**         | `/unrestricted/`, `/restricted/`           | `/production/`                   | Same `LegacyPathRewriteFilter`                                    |
+| **REST env segment**         | `/production/`, `/production/`             | `/production/`                   | Same `LegacyPathRewriteFilter`                                    |
 | **eddi:// URIs**             | `eddi://ai.labs.agent/...`                 | `eddi://ai.labs.agent/...`       | `MigrationManager` URI rewrite on startup                         |
 | **Mongo collections**        | `agents`, `packages`, etc.                 | `agents`, `workflows`, etc.      | `MigrationManager` `renameCollection()`                           |
-| **Mongo environment fields** | `"unrestricted"`, `"restricted"`           | `"production"`                   | `MigrationManager` field rewrite                                  |
+| **Mongo environment fields** | `"production"`, `"production"`             | `"production"`                   | `MigrationManager` field rewrite                                  |
 | **MCP tool names**           | `setup_agent`, etc.                        | `setup_agent`, etc.              | Rename in code; no aliasing needed (MCP tools are server-defined) |
 | **MCP resource types**       | `"langchain"`, `"behavior"`, `"httpcalls"` | `"llm"`, `"rules"`, `"apicalls"` | Accept old values via alias map in MCP tool handlers              |
 | **ZIP imports**              | Old URIs and field names                   | New                              | Import service applies URI rewrite map during import              |

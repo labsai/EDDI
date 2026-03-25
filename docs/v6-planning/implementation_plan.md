@@ -605,25 +605,21 @@ Step-by-step wizard for new users:
 | 41  | **HITL Framework** — pause/resume/approve for STATE_CHANGING MCP tools, budget thresholds, human escalation | 3   | 🟡 High   |
 | 42  | **Workspace AI Operator** — system agent with admin API access                                              | 2   | 🟠 Medium |
 
-### Phase 10a: Multi-Agent Orchestration (8 SP)
+### Phase 10: Group Conversations + Multi-Agent Orchestration (13 SP)
 
-> The differentiating features. Depend on DAG (Phase 9).
-> **Leverage:** langchain4j's `ChatMemory` and `TokenWindowChatMemory` for cross-agent conversation context passing.
+> **Full specification:** [group-conversations.md](file:///c:/dev/git/EDDI/docs/v6-planning/group-conversations.md)
+>
+> Multiple agents discuss a user's question in structured debate rounds. Group is a first-class entity;
+> agents are unchanged (group-unaware). NATS-backed orchestration from the start.
+> Includes agent-to-agent routing (an agent can trigger a group discussion as a tool call)
+> with configurable recursion depth control.
 
-| #   | Item                                                                                    | SP  | Priority |
-| --- | --------------------------------------------------------------------------------------- | --- | -------- |
-| 43  | **Agent-to-agent routing** — orchestrator agent pattern, cascading conversation context | 5   | 🟡 High  |
-| 44  | **Cascading model routing** — small→better fallback, consensus modes                    | 3   | 🟡 High  |
-
-### Phase 10b: Advanced RAG + Debate (8 SP)
-
-> Builds on the basic RAG task from Phase 8c. Adds provenance, multi-tenant isolation, and debate patterns.
-> **Leverage:** langchain4j `ContentRetriever`, `QueryTransformer`, `QueryRouter` for advanced retrieval strategies.
-
-| #   | Item                                                                                                                    | SP  | Priority  |
-| --- | ----------------------------------------------------------------------------------------------------------------------- | --- | --------- |
-| 45  | **Advanced RAG** — document ingestion pipeline, chunk provenance tracking, tenant-level RLS on vector store, re-ranking | 5   | 🟡 High   |
-| 46  | **Group-of-Experts / Debate Pattern** — multi-round specialist agents with moderator synthesis                          | 3   | 🟠 Medium |
+| #    | Item                                                                                               | SP  | Priority |
+| ---- | -------------------------------------------------------------------------------------------------- | --- | -------- |
+| 10.1 | **Group Config + Store** — `AgentGroupConfiguration`, members, protocol, context config, CRUD REST | 3   | 🟡 High  |
+| 10.2 | **Group Orchestration** — `GroupConversationService`, round management, NATS-backed, depth control | 5   | 🟡 High  |
+| 10.3 | **REST + SSE + MCP** — group conversation endpoints, live debate streaming, 7 MCP tools            | 3   | 🟡 High  |
+| 10.4 | **Integration Testing** — end-to-end group discussion, failure handling, depth control, streaming  | 2   | 🟡 High  |
 
 ### Phase 11a: Persistent Memory + Heartbeat (8 SP)
 
@@ -1059,7 +1055,7 @@ Integer getCurrentVersion(String id);
 - `assertPatch(body, path, resourceUri)` — PATCH + assert 200 + verify version increment
 - `assertDelete(path)` — DELETE + verify 404 on re-read
 - `deployAgent(id, version)` — POST deploy + poll status until READY (with STOP/ERROR handling)
-- `sendUserInput(resourceId, conversationId, input, detailed, currentStepOnly)` — POST to `/agents/unrestricted/`
+- `sendUserInput(resourceId, conversationId, input, detailed, currentStepOnly)` — POST to `/agents/production/`
 - `createConversation(agentId, userId)` — POST to create + extract conversation ID
 
 **[`AgentEngineSetup`](file:///c:/dev/git/EDDI-integration-tests/src/test/java/ai/labs/testing/integration/AgentEngineSetup.java)** (123 lines) — Programmatic agent assembly:
@@ -1307,7 +1303,7 @@ class ApiContractTest extends IntegrationTestBase {
 
 **JSON Schema files to create** (in `src/test/resources/schemas/`):
 
-- `conversation-response.json` — validates `/agents/unrestricted/{agentId}/{convId}` response
+- `conversation-response.json` — validates `/agents/production/{agentId}/{convId}` response
 - `agent-config.json` — validates `/agentstore/agents/{id}` response
 - `package-config.json` — validates `/packagestore/packages/{id}` response
 - `behavior-config.json` — validates `/behaviorstore/behaviorsets/{id}` response
@@ -1383,7 +1379,7 @@ AI Agent makes code change
 
 **Two separate OGNL concerns:**
 
-1. **Thymeleaf's internal OGNL** — powers `${variable}` expressions. Thymeleaf 3.1 added restricted expression mode that blocks object instantiation and static class access. Mitigation: restricted mode + monitor thymeleaf#1058.
+1. **Thymeleaf's internal OGNL** — powers `${variable}` expressions. Thymeleaf 3.1 added production expression mode that blocks object instantiation and static class access. Mitigation: production mode + monitor thymeleaf#1058.
 2. **Explicit `Ognl.getValue()` calls** — 6 call sites in 4 files where EDDI directly calls the OGNL library for dot-path navigation. Solution: replace with safe `PathNavigator`.
 
 ### I.2 Thymeleaf — Where & How It's Used
@@ -1424,10 +1420,10 @@ ITemplatingEngine (interface)
 #### OGNL — Dual Security Concern
 
 > [!CAUTION]
-> **OGNL 3.3.4 has CVE-2025-53192** — immediate upgrade to 3.4.9+ required. Additionally, the 6 explicit `Ognl.getValue()` calls bypass Thymeleaf's restricted expression mode, allowing arbitrary method invocation. With MCP/external config sources in v6, this attack surface grows.
+> **OGNL 3.3.4 has CVE-2025-53192** — immediate upgrade to 3.4.9+ required. Additionally, the 6 explicit `Ognl.getValue()` calls bypass Thymeleaf's production expression mode, allowing arbitrary method invocation. With MCP/external config sources in v6, this attack surface grows.
 
-- **Thymeleaf's internal OGNL** is partially mitigated by Thymeleaf 3.1's restricted mode (blocks `new`, `@ClassName@method()` in templates)
-- **Explicit `Ognl.getValue()` calls** are NOT restricted — full OGNL power including method invocation
+- **Thymeleaf's internal OGNL** is partially mitigated by Thymeleaf 3.1's production mode (blocks `new`, `@ClassName@method()` in templates)
+- **Explicit `Ognl.getValue()` calls** are NOT production — full OGNL power including method invocation
 - All OGNL paths come from admin-authored JSON configs (not user input), limiting real-world risk today
 
 #### Thymeleaf — Complexity Hotspot in `PrePostUtils.buildListFromJson()`
@@ -1462,8 +1458,8 @@ Problems:
 | -------------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Thymeleaf** (`ITemplatingEngine`)    | ✅ **KEEP**                         | Well-abstracted interface. `${...}` syntax is intuitive. Custom dialects add value. Best-in-class for text templating in Java.                                                                                                                                                               |
 | **Thymeleaf custom dialects**          | ✅ **KEEP**                         | UUID, JSON, Encoder are useful utilities.                                                                                                                                                                                                                                                    |
-| **OGNL (Thymeleaf internal)**          | ⚠️ **BLOCKED on Thymeleaf**         | Thymeleaf 3.1.3 AND 3.1.4-SNAPSHOT agenth pin `<ognl.version>3.3.4</ognl.version>`. OGNL 3.4.x changed API. [thymeleaf#1058](https://github.com/thymeleaf/thymeleaf/issues/1058) is open, "needs triage". Cannot upgrade independently. Thymeleaf 3.1's restricted mode partially mitigates. |
-| **OGNL (6 explicit call sites)**       | 🔴 **REPLACE** with `PathNavigator` | These bypass Thymeleaf's restricted mode. Only 6 calls = easy migration.                                                                                                                                                                                                                     |
+| **OGNL (Thymeleaf internal)**          | ⚠️ **BLOCKED on Thymeleaf**         | Thymeleaf 3.1.3 AND 3.1.4-SNAPSHOT agenth pin `<ognl.version>3.3.4</ognl.version>`. OGNL 3.4.x changed API. [thymeleaf#1058](https://github.com/thymeleaf/thymeleaf/issues/1058) is open, "needs triage". Cannot upgrade independently. Thymeleaf 3.1's production mode partially mitigates. |
+| **OGNL (6 explicit call sites)**       | 🔴 **REPLACE** with `PathNavigator` | These bypass Thymeleaf's production mode. Only 6 calls = easy migration.                                                                                                                                                                                                                     |
 | **`PrePostUtils.buildListFromJson()`** | 🟡 **REFACTOR**                     | Replace Thymeleaf `th:each` JSON building with Java Stream API + Jackson. Keep the same abstract contract.                                                                                                                                                                                   |
 | **`pom.xml` OGNL dependency**          | ⚠️ **Monitor thymeleaf#1058**       | Can't upgrade to 3.4.x without Thymeleaf support. Keep at 3.3.4 until Thymeleaf releases a fix. Restricted mode mitigates risk.                                                                                                                                                              |
 
@@ -1475,7 +1471,7 @@ Problems:
 | **Pebble**              | Modern syntax (Twig/Jinja-inspired), fast                             | Less ecosystem, different expression syntax              | ❌ Unfamiliar to EDDI users                 |
 | **JTE**                 | Type-safe, 6x faster, precompiled                                     | Requires `.jte` template files (not inline strings)      | ❌ EDDI uses inline string templates        |
 | **Mustache/Handlebars** | Logic-less, simple                                                    | Too limited — can't do `th:each` equivalent easily       | ❌ Too simple for httpCalls post-processing |
-| **Thymeleaf (current)** | Already works, well-abstracted, `${}` is intuitive, 3 custom dialects | OGNL dependency (mitigated by upgrade + restricted mode) | ✅ **Keep — least risk, most value**        |
+| **Thymeleaf (current)** | Already works, well-abstracted, `${}` is intuitive, 3 custom dialects | OGNL dependency (mitigated by upgrade + production mode) | ✅ **Keep — least risk, most value**        |
 
 #### Explicit OGNL Replacement: `PathNavigator`
 
@@ -1663,7 +1659,7 @@ This is a critical factor — whichever framework we choose, AI models (includin
 - 🔴 **No pagination controls visible**: 20+ rows shown; large-scale deployments would be unusable. Only "Find conversation" search exists.
 - 🟡 **Missing agent names**: Some rows at agenttom only show "V1" badge with no agent name — data integrity issue
 - 🟡 **"Refresh" button** (green, right side) but no auto-refresh / polling for live conversations
-- 🟢 **Environment column** shows "unrestricted" for all — works but could use friendlier label
+- 🟢 **Environment column** shows "production" for all — works but could use friendlier label
 
 #### J.2.4 Conversation Debugger (from video walkthrough)
 
@@ -1889,13 +1885,13 @@ graph LR
 
 #### Strengths & Issues
 
-| ✅ Strengths                                           | ⚠️ Issues                                                             |
-| ------------------------------------------------------ | --------------------------------------------------------------------- |
-| Full conversation replay — tests the entire pipeline   | `.equals()` comparison is brittle — any timestamp/ID change = FAILED  |
-| Uses `test` environment (isolated from `unrestricted`) | `Thread.sleep(1000)` polling — not reactive, wastes resources         |
-| Async execution via `IRuntime.submitCallable()`        | Duplicated `MockAsyncResponse` (also in `RestImportService`)          |
-| REST API allows automation                             | No UI in Manager — must use Swagger/curl                              |
-| Supports auto-deploy of undeployed agents              | No diff output — just SUCCESS/FAILED, no indication of _what_ differs |
+| ✅ Strengths                                         | ⚠️ Issues                                                             |
+| ---------------------------------------------------- | --------------------------------------------------------------------- |
+| Full conversation replay — tests the entire pipeline | `.equals()` comparison is brittle — any timestamp/ID change = FAILED  |
+| Uses `test` environment (isolated from `production`) | `Thread.sleep(1000)` polling — not reactive, wastes resources         |
+| Async execution via `IRuntime.submitCallable()`      | Duplicated `MockAsyncResponse` (also in `RestImportService`)          |
+| REST API allows automation                           | No UI in Manager — must use Swagger/curl                              |
+| Supports auto-deploy of undeployed agents            | No diff output — just SUCCESS/FAILED, no indication of _what_ differs |
 
 #### Recommendation: Remove & Replace
 
@@ -1955,7 +1951,7 @@ IMPORT: POST /backup/import (body: ZIP)
 INITIAL AGENTS: POST /backup/import/initialAgents
   → Reads /initial-agents/available_agents.txt (classpath)
   → Imports each listed ZIP
-  → Deploys each to 'unrestricted' environment
+  → Deploys each to 'production' environment
   → Waits for all deployments via CompletableFuture
 ```
 

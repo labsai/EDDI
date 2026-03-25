@@ -115,28 +115,28 @@ Example:
 
 Finally, we are ready to let the agent fly. From here on, you have the possibility to let an UI do it for you or you do it step by step.
 
-The UI that automates these steps can be reached here: `/chat/unrestricted/`**`<UNIQUE_AGENT_ID>`**
+The UI that automates these steps can be reached here: `/chat/production/`**`<UNIQUE_AGENT_ID>`**
 
 Otherwise via REST:
 
 1.  Deploy the Agent:
 
-    Make a **`POST`** to `/administration/unrestricted/deploy/`**`<UNIQUE_AGENT_ID>`**`?version=`**`<AGENT_VERSION>`**
+    Make a **`POST`** to `/administration/production/deploy/`**`<UNIQUE_AGENT_ID>`**`?version=`**`<AGENT_VERSION>`**
 
     You will receive a `202` http code.
 
 2.  Since deployment could take a while it has been made **asynchronous**.
-3.  Make a **`GET`** to `/administration/unrestricted/deploymentstatus/`**`<UNIQUE_AGENT_ID>`**`?version=`**`<AGENT_VERSION>`** to find out the status of deployment.
+3.  Make a **`GET`** to `/administration/production/deploymentstatus/`**`<UNIQUE_AGENT_ID>`**`?version=`**`<AGENT_VERSION>`** to find out the status of deployment.
 
 **`NOT_FOUND`**, **`IN_PROGRESS`**, **`ERROR` and `READY`** is what you can expect to be returned in the body.
 
-1. As soon as the Agent is deployed and has `READY` status, make a **`POST`** to `/agents/unrestricted/`**`<UNIQUE_AGENT_ID>`**
+1. As soon as the Agent is deployed and has `READY` status, make a **`POST`** to `/agents/production/`**`<UNIQUE_AGENT_ID>`**
    1. You will receive a `201` with the `URI` for the newly created Conversation, like this:
       1. e.g.
 
          `eddi://ai.labs.conversation/conversationstore/conversations/`**`<UNIQUE_CONVERSATION_ID>`**
 
-2. Now it's time to start talking to our Agent 1. Make a **`POST`** to `/agents/unrestricted/`**`<UNIQUE_AGENT_ID>`**`/`**`<UNIQUE_CONVERSATION_ID>`**
+2. Now it's time to start talking to our Agent 1. Make a **`POST`** to `/agents/production/`**`<UNIQUE_AGENT_ID>`**`/`**`<UNIQUE_CONVERSATION_ID>`**
 
 **Option 1:** is to hand over the input text as `contentType text/plain`. Include the User Input in the body as `text/plain` (e.g. Hello)&#x20;
 
@@ -150,7 +150,7 @@ Otherwise via REST:
 
 1. You have two query params you can use to config the returned output 1. `returnDetailed` - default is false - will return all sub results of the entire conversation steps, otherwise only public ones such as input, action, output & quickreplies 2. `returnCurrentStepOnly` - default is true - will return only the latest conversation step that has just been processed, otherwise returns all conversation steps since the beginning of this conversation
 2. The output from the agent will be returned as JSON
-3. If you are interested in fetching the **`conversationmemory`** at any given time, make a **`GET`** to `/agents/unrestricted/`**`<UNIQUE_AGENT_ID>`**`/`**`<UNIQUE_CONVERSATION_ID>`**`?returnDetailed=true` (the query param is optional, default is false)
+3. If you are interested in fetching the **`conversationmemory`** at any given time, make a **`GET`** to `/agents/production/`**`<UNIQUE_AGENT_ID>`**`/`**`<UNIQUE_CONVERSATION_ID>`**`?returnDetailed=true` (the query param is optional, default is false)
 
 > If you made it till here, CONGRATULATIONS, you have created your first Chatagent with **EDDI** !
 

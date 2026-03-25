@@ -27,7 +27,7 @@ import java.util.Map;
  * <li>/regulardictionarystore/regulardictionaries →
  * /dictionarystore/dictionaries</li>
  * <li>/bottriggerstore/bottriggers → /triggerstore/triggers</li>
- * <li>/{unrestricted|restricted}/ → /production/</li>
+ * <li>/{production|production}/ → /production/</li>
  * </ul>
  */
 @PreMatching
@@ -75,17 +75,17 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
             }
         }
 
-        // Rewrite environment segments: /unrestricted/ → /production/, /restricted/ →
+        // Rewrite environment segments: /production/ → /production/, /production/ →
         // /production/
-        result = result.replace("/unrestricted/", "/production/");
-        result = result.replace("/restricted/", "/production/");
+        result = result.replace("/production/", "/production/");
+        result = result.replace("/production/", "/production/");
 
-        // Handle trailing paths without slash (e.g., /agents/unrestricted)
-        if (result.endsWith("/unrestricted")) {
-            result = result.substring(0, result.length() - "/unrestricted".length()) + "/production";
+        // Handle trailing paths without slash (e.g., /agents/production)
+        if (result.endsWith("/production")) {
+            result = result.substring(0, result.length() - "/production".length()) + "/production";
         }
-        if (result.endsWith("/restricted")) {
-            result = result.substring(0, result.length() - "/restricted".length()) + "/production";
+        if (result.endsWith("/production")) {
+            result = result.substring(0, result.length() - "/production".length()) + "/production";
         }
 
         return result;

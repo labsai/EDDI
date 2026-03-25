@@ -372,7 +372,7 @@
       "delayBeforeExecutingInMillis" : 0
     },
     "request" : {
-      "path" : "/administration/unrestricted/deploy/[[${properties.agentId}]]",
+      "path" : "/administration/production/deploy/[[${properties.agentId}]]",
       "headers" : { },
       "queryParams" : {
         "version" : "[[${properties.agentVersion}]]"
@@ -395,7 +395,7 @@
       "queryParams" : { },
       "method" : "post",
       "contentType" : "application/json",
-      "body" : "{\"intent\":\"[[${properties.agentIntent}]]\",\"agentDeployments\":[{\"environment\":\"unrestricted\",\"agentId\":\"[[${properties.agentId}]]\"}]}"
+      "body" : "{\"intent\":\"[[${properties.agentIntent}]]\",\"agentDeployments\":[{\"environment\":\"production\",\"agentId\":\"[[${properties.agentId}]]\"}]}"
     }
   } ]
 }

@@ -364,13 +364,13 @@
 			"name": "7 - Deploy the agent",
 			"request": {
 				"url": {
-					"raw": "{{host}}/administration/unrestricted/deploy/{{agent_id}}?version=1",
+					"raw": "{{host}}/administration/production/deploy/{{agent_id}}?version=1",
 					"host": [
 						"{{host}}"
 					],
 					"path": [
 						"administration",
-						"unrestricted",
+						"production",
 						"deploy",
 						"{{agent_id}}"
 					],
@@ -434,7 +434,7 @@
 				}
 			],
 			"request": {
-				"url": "{{host}}/agents/unrestricted/{{agent_id}}",
+				"url": "{{host}}/agents/production/{{agent_id}}",
 				"method": "POST",
 				"header": [],
 				"body": {
@@ -449,13 +449,13 @@
 			"name": "9 - Say weather",
 			"request": {
 				"url": {
-					"raw": "{{host}}/agents/unrestricted/{{agent_id}}/{{conversation_id}}?returnDetailed=false&returnCurrentStepOnly=true",
+					"raw": "{{host}}/agents/production/{{agent_id}}/{{conversation_id}}?returnDetailed=false&returnCurrentStepOnly=true",
 					"host": [
 						"{{host}}"
 					],
 					"path": [
 						"agents",
-						"unrestricted",
+						"production",
 						"{{agent_id}}",
 						"{{conversation_id}}"
 					],
@@ -489,13 +489,13 @@
 			"name": "10 - Say city",
 			"request": {
 				"url": {
-					"raw": "{{host}}/agents/unrestricted/{{agent_id}}/{{conversation_id}}?returnDetailed=false&returnCurrentStepOnly=true",
+					"raw": "{{host}}/agents/production/{{agent_id}}/{{conversation_id}}?returnDetailed=false&returnCurrentStepOnly=true",
 					"host": [
 						"{{host}}"
 					],
 					"path": [
 						"agents",
-						"unrestricted",
+						"production",
 						"{{agent_id}}",
 						"{{conversation_id}}"
 					],

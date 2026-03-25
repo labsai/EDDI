@@ -408,7 +408,7 @@ curl -X POST http://localhost:7070/agentstore/agents \
 ## Step 8: Deploy Agent
 
 ```bash
-curl -X POST "http://localhost:7070/administration/unrestricted/deploy/AGENT_ID?version=1&autoDeploy=true"
+curl -X POST "http://localhost:7070/administration/production/deploy/AGENT_ID?version=1&autoDeploy=true"
 ```
 
 **Result**: Agent is now active and ready to handle conversations!
@@ -418,7 +418,7 @@ curl -X POST "http://localhost:7070/administration/unrestricted/deploy/AGENT_ID?
 ### Initial Conversation
 
 ```bash
-curl -X POST "http://localhost:7070/agents/unrestricted/AGENT_ID" \
+curl -X POST "http://localhost:7070/agents/production/AGENT_ID" \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
@@ -441,7 +441,7 @@ curl -X POST "http://localhost:7070/agents/unrestricted/AGENT_ID" \
 ### Provide City and Check Availability
 
 ```bash
-curl -X POST "http://localhost:7070/agents/unrestricted/AGENT_ID/CONV_ID" \
+curl -X POST "http://localhost:7070/agents/production/AGENT_ID/CONV_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "input": "check availability in Paris",
@@ -485,7 +485,7 @@ curl -X POST "http://localhost:7070/agents/unrestricted/AGENT_ID/CONV_ID" \
 ### Book a Room
 
 ```bash
-curl -X POST "http://localhost:7070/agents/unrestricted/AGENT_ID/CONV_ID" \
+curl -X POST "http://localhost:7070/agents/production/AGENT_ID/CONV_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "input": "book Deluxe Suite",

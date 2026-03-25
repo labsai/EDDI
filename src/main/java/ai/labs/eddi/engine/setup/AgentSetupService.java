@@ -32,6 +32,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
@@ -55,12 +56,17 @@ public class AgentSetupService {
 
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IRestAgentAdministration agentAdmin;
+    private final String ollamaDefaultBaseUrl;
 
     @Inject
     public AgentSetupService(IRestInterfaceFactory restInterfaceFactory,
-                             IRestAgentAdministration agentAdmin) {
+                             IRestAgentAdministration agentAdmin,
+                             @ConfigProperty(name = "eddi.ollama.default-base-url",
+                                     defaultValue = "http://localhost:11434")
+                             String ollamaDefaultBaseUrl) {
         this.restInterfaceFactory = restInterfaceFactory;
         this.agentAdmin = agentAdmin;
+        this.ollamaDefaultBaseUrl = ollamaDefaultBaseUrl;
     }
 
     /**
@@ -115,7 +121,7 @@ public class AgentSetupService {
             var llmConfig = createLlmConfig(
                     params.providerType, params.modelId, request.apiKey(), request.systemPrompt(),
                     toolsEnabled, request.builtInToolsWhitelist(), request.baseUrl(), promptResponseJson,
-                    quickReplies, sentiment, request.mcpServers());
+                    quickReplies, sentiment, request.mcpServers(), null);
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
             String langchainId = extractIdFromLocation(langchainLocation);
@@ -201,8 +207,9 @@ public class AgentSetupService {
         if (request.openApiSpec() == null || request.openApiSpec().isBlank()) {
             throw new AgentSetupException("OpenAPI spec is required");
         }
-        if (request.apiKey() == null || request.apiKey().isBlank()) {
-            throw new AgentSetupException("API key is required");
+        boolean isLocalLLM = isLocalLlmProvider(request.provider());
+        if (!isLocalLLM && (request.apiKey() == null || request.apiKey().isBlank())) {
+            throw new AgentSetupException("API key is required for cloud LLM providers");
         }
 
         var params = resolveParams(request.provider(), request.model(), request.deploy(), request.environment());
@@ -252,15 +259,16 @@ public class AgentSetupService {
             patchDescriptor(extractIdFromLocation(behaviorLocation),
                     extractVersionFromLocation(behaviorLocation), request.name());
 
-            // --- Step 5: Create LLM Configuration ---
-            String enrichedPrompt = request.systemPrompt() + "\n\n" + buildResult.apiSummary();
+            // Don't include textual API summary — endpoints are available as tool specifications.
+            // The AgentOrchestrator appends tool URIs to the system message automatically.
+            String enrichedPrompt = request.systemPrompt();
             boolean quickReplies = request.enableQuickReplies() != null && request.enableQuickReplies();
             boolean sentiment = request.enableSentimentAnalysis() != null && request.enableSentimentAnalysis();
             String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
             var llmConfig = createLlmConfig(
                     params.providerType, params.modelId, request.apiKey(), enrichedPrompt,
                     false, null, null, promptResponseJson,
-                    quickReplies, sentiment, null);
+                    quickReplies, sentiment, null, httpCallsLocations);
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);
@@ -356,7 +364,7 @@ public class AgentSetupService {
                                               boolean enableTooling, String toolsWhitelist,
                                               String baseUrl, String promptResponseJson,
                                               boolean quickReplies, boolean sentiment,
-                                              String mcpServers) {
+                                              String mcpServers, List<String> toolUris) {
         var task = new LlmConfiguration.Task();
         task.setActions(List.of("send_message"));
         task.setId(modelType);
@@ -384,9 +392,9 @@ public class AgentSetupService {
         switch (modelType) {
             case "ollama" -> {
                 params.put("model", modelId);
-                if (baseUrl != null && !baseUrl.isBlank()) {
-                    params.put("baseUrl", baseUrl);
-                }
+                String effectiveBaseUrl = (baseUrl != null && !baseUrl.isBlank())
+                        ? baseUrl : ollamaDefaultBaseUrl;
+                params.put("baseUrl", effectiveBaseUrl);
             }
             case "jlama" -> {
                 params.put("modelName", modelId);
@@ -419,6 +427,11 @@ public class AgentSetupService {
                                 .filter(s -> !s.isEmpty())
                                 .toList());
             }
+        }
+
+        // Wire httpcall URIs as EddiToolBridge tools (used by API agents)
+        if (toolUris != null && !toolUris.isEmpty()) {
+            task.setTools(toolUris);
         }
 
         task.setConversationHistoryLimit(10);
@@ -508,14 +521,14 @@ public class AgentSetupService {
         }
 
         var behavior = new WorkflowConfiguration.WorkflowStep();
-        behavior.setType(URI.create("eddi://ai.labs.rules"));
+        behavior.setType(URI.create("eddi://ai.labs.behavior"));
         behavior.setConfig(Map.of("uri", behaviorLocation));
         extensions.add(behavior);
 
         if (httpCallsLocations != null) {
             for (String httpCallsLocation : httpCallsLocations) {
                 var httpCalls = new WorkflowConfiguration.WorkflowStep();
-                httpCalls.setType(URI.create("eddi://ai.labs.apicalls"));
+                httpCalls.setType(URI.create("eddi://ai.labs.httpcalls"));
                 httpCalls.setConfig(Map.of("uri", httpCallsLocation));
                 extensions.add(httpCalls);
             }

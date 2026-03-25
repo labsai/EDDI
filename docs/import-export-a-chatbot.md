@@ -64,7 +64,7 @@ PRODUCTION EDDI
    ← Returns: New agent ID (Location header)
     ↓
 5. Deploy imported agent
-   POST /administration/unrestricted/deploy/{newAgentId}?version=1
+   POST /administration/production/deploy/{newAgentId}?version=1
 ```
 
 **Subsequent imports (Merge/Sync):**
@@ -118,7 +118,7 @@ curl -X POST -H "Content-Type: application/zip" \
   --data-binary @agent123-1.zip http://prod.eddi.com/backup/import
 
 # 4. Deploy in production
-curl -X POST http://prod.eddi.com/administration/restricted/deploy/{newAgentId}?version=1
+curl -X POST http://prod.eddi.com/administration/production/deploy/{newAgentId}?version=1
 ```
 
 **Scenario 2: Syncing Updates (merge)**
@@ -137,7 +137,7 @@ curl -X POST -H "Content-Type: application/zip" \
   --data-binary @agent123-3.zip "http://prod.eddi.com/backup/import?strategy=merge"
 
 # 4. Redeploy
-curl -X POST http://prod.eddi.com/administration/restricted/deploy/{agentId}?version=2
+curl -X POST http://prod.eddi.com/administration/production/deploy/{agentId}?version=2
 ```
 
 **Scenario 3: Selective Merge (only specific resources)**

@@ -2,7 +2,7 @@
   "intent": "weather-agent",
   "agentDeployments": [
     {
-      "environment": "unrestricted",
+      "environment": "production",
       "agentId": "%s",
       "initialContext": {}
     }

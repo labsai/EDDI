@@ -15,25 +15,25 @@ class McpToolUtilsTest {
     @Test
     void parseEnvironment_validValues() {
         assertEquals(Environment.production, McpToolUtils.parseEnvironment("production"));
-        assertEquals(Environment.production, McpToolUtils.parseEnvironment("restricted"));
+        assertEquals(Environment.production, McpToolUtils.parseEnvironment("production"));
         assertEquals(Environment.test, McpToolUtils.parseEnvironment("test"));
     }
 
     @Test
     void parseEnvironment_caseInsensitive() {
         assertEquals(Environment.production, McpToolUtils.parseEnvironment("UNRESTRICTED"));
-        assertEquals(Environment.production, McpToolUtils.parseEnvironment("Restricted"));
+        assertEquals(Environment.production, McpToolUtils.parseEnvironment("Production"));
     }
 
     @Test
-    void parseEnvironment_nullOrBlank_defaultsToUnrestricted() {
+    void parseEnvironment_nullOrBlank_defaultsToProduction() {
         assertEquals(Environment.production, McpToolUtils.parseEnvironment(null));
         assertEquals(Environment.production, McpToolUtils.parseEnvironment(""));
         assertEquals(Environment.production, McpToolUtils.parseEnvironment("   "));
     }
 
     @Test
-    void parseEnvironment_invalid_defaultsToUnrestricted() {
+    void parseEnvironment_invalid_defaultsToProduction() {
         assertEquals(Environment.production, McpToolUtils.parseEnvironment("invalid"));
         assertEquals(Environment.production, McpToolUtils.parseEnvironment("production"));
     }

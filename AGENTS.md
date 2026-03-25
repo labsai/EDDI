@@ -10,13 +10,13 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 ### Ecosystem (5 repos, all under `c:\dev\git\`)
 
-| Repo                       | Tech                      | Purpose                                                    |
-| -------------------------- | ------------------------- | ---------------------------------------------------------- |
-| **EDDI** (this repo)       | Java 21, Quarkus, MongoDB | Backend engine, REST API, lifecycle pipeline               |
-| **EDDI-Manager**           | React 19, Vite, Tailwind  | Admin dashboard (served from EDDI at `/chat/unrestricted`) |
-| **eddi-chat-ui**           | React, TypeScript         | Standalone chat widget                                     |
-| **eddi-website**           | HTML → migrating to Astro | Marketing site at eddi.labs.ai                             |
-| **EDDI-integration-tests** | Java                      | End-to-end API tests                                       |
+| Repo                       | Tech                      | Purpose                                                  |
+| -------------------------- | ------------------------- | -------------------------------------------------------- |
+| **EDDI** (this repo)       | Java 21, Quarkus, MongoDB | Backend engine, REST API, lifecycle pipeline             |
+| **EDDI-Manager**           | React 19, Vite, Tailwind  | Admin dashboard (served from EDDI at `/chat/production`) |
+| **eddi-chat-ui**           | React, TypeScript         | Standalone chat widget                                   |
+| **eddi-website**           | HTML → migrating to Astro | Marketing site at eddi.labs.ai                           |
+| **EDDI-integration-tests** | Java                      | End-to-end API tests                                     |
 
 ### Key Architecture
 
@@ -158,14 +158,12 @@ Phase 9b: HITL Framework (5 SP)
   41. HITL Framework (pause/resume/approve for MCP + budget)       3 SP
   42. Workspace AI Operator — system agent with admin API access     2 SP
 
-Phase 10a: Multi-Agent Orchestration (8 SP)
-  43. Agent-to-agent routing + orchestrator pattern                    5 SP
-  44. Cascading model routing (small→better, consensus)            3 SP
-
-Phase 10b: Advanced RAG + Debate (8 SP)
-  45. Advanced RAG (ingestion, provenance, tenant RLS, re-ranking) 5 SP
-      (builds on basic RAG task from Phase 8c)
-  46. Group-of-Experts / Debate Pattern                             3 SP
+Phase 10: Group Conversations + Multi-Agent Orchestration (13 SP)
+  10.1 Group Config + Store (AgentGroupConfiguration, CRUD REST)  3 SP
+  10.2 Group Orchestration (rounds, NATS-backed, depth control)   5 SP
+  10.3 REST + SSE + MCP (live debate streaming, 7 MCP tools)      3 SP
+  10.4 Integration Testing (e2e, failures, depth, streaming)      2 SP
+       Full spec: docs/v6-planning/group-conversations.md
 
 Phase 11a: Persistent Memory + Heartbeat (8 SP)
   47. Cross-conversation persistent user memory                    5 SP

@@ -90,7 +90,7 @@ quarkiverse/quarkus-eddi/
 # application.properties
 quarkus.eddi.url=http://eddi:7070
 quarkus.eddi.api-key=${EDDI_API_KEY:}
-quarkus.eddi.environment=production            # v6 default (was "unrestricted")
+quarkus.eddi.environment=production            # v6 default (was "production")
 quarkus.eddi.connect-timeout=5s
 quarkus.eddi.read-timeout=30s
 ```
@@ -132,7 +132,7 @@ public enum LlmProvider {
 }
 
 public enum Environment {
-    PRODUCTION("production"),   // v6 (was "unrestricted")
+    PRODUCTION("production"),   // v6 (was "production")
     TEST("test");
 
     private final String value;

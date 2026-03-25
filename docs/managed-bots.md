@@ -8,10 +8,10 @@
 
 **Without Managed Agents** (manual approach):
 
-1. Your app creates a conversation: `POST /agents/unrestricted/agent123`
+1. Your app creates a conversation: `POST /agents/production/agent123`
 2. EDDI returns conversation ID: `conv-456`
 3. Your app stores this ID
-4. Your app sends messages: `POST /agents/unrestricted/agent123/conv-456`
+4. Your app sends messages: `POST /agents/production/agent123/conv-456`
 5. Your app manages conversation lifecycle
 
 **With Managed Agents** (automatic approach):
@@ -48,7 +48,7 @@
 
 ```
 1. Define Agent Trigger:
-   Intent: "weather_help" → Agent: weather-agent-v2 (unrestricted)
+   Intent: "weather_help" → Agent: weather-agent-v2 (production)
 
 2. User Requests:
    POST /managedagents/weather_help/user-123
@@ -119,7 +119,7 @@ First, you need to set up a `AgentTrigger`.
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | intent           | (`String`) keyword or phrase (camel case or with '-') that will be used in managed agents to trigger the agents defined in this model                                                                                                                                                                          |
 | agentDeployments | (`Array:`<`AgentDeployment`>) array of `AgentDeployment`. If multiple `agentDeployments` are defined, one will be picked randomly.                                                                                                                                                                             |
-| environment      | (`String`) the environment that you would like (restricted, unrestricted, test)                                                                                                                                                                                                                                |
+| environment      | (`String`) the environment that you would like (production, production, test)                                                                                                                                                                                                                                  |
 | agentId          | (`String`) the id of the agent that you want to create the agentTrigger for it.                                                                                                                                                                                                                                |
 | initialContext   | (Array <`Object`> ) As context can be handed over on each request to the agent, `initialContext` allows the definition of context the agent should get at the very first conversation step when a conversation with the agent is started (only way to get context to the agent in the first conversation step) |
 
@@ -166,7 +166,7 @@ _Request Body_
   "intent": "weather_trigger",
   "agentDeployments": [
     {
-      "environment": "unrestricted",
+      "environment": "production",
       "agentId": "5bf5418c46e0fb000b7636d0",
       "initialContext": {}
     }
@@ -218,7 +218,7 @@ _Response Body_
   "agentId": "5bf5418c46e0fb000b7636d0",
   "agentVersion": 10,
   "userId": "myUserId",
-  "environment": "unrestricted",
+  "environment": "production",
   "conversationState": "READY",
   "redoCacheSize": 0,
   "conversationOutputs": [

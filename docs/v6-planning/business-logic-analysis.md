@@ -162,7 +162,7 @@ sequenceDiagram
     API-->>BF: Location header → properties.packageLocation
     BF->>API: POST /agentstore/agents (create agent with package)
     API-->>BF: Location header → properties.agentLocation
-    BF->>API: POST /administration/unrestricted/deploy/{agentId}
+    BF->>API: POST /administration/production/deploy/{agentId}
     BF->>API: POST /agenttriggerstore/agenttriggers (create management config)
     BF-->>U: "Your agent is deployed!"
 ```

@@ -57,7 +57,7 @@ Once passed to EDDI, context can be:
 ### Example Flow
 
 ```
-Your App → POST /agents/unrestricted/agent123/conv456
+Your App → POST /agents/production/agent123/conv456
 {
   "input": "What's my account balance?",
   "context": {
@@ -91,7 +91,7 @@ In order to talk to **EDDI** with context, send a **`POST`** request to `/agents
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | HTTP Method                      | `POST`                                                                                                                                                                                                                                                                                  |
 | API endpoint                     | `/agents/{environment}/{agentId}/{conversationId}`                                                                                                                                                                                                                                      |
-| {environment}                    | (`Path` **parameter**):`String` Deployment environment (e.g: `restricted,unrestricted,test`)                                                                                                                                                                                            |
+| {environment}                    | (`Path` **parameter**):`String` Deployment environment (e.g: `production,production,test`)                                                                                                                                                                                              |
 | {agentId}                        | (`Path` **parameter**):`String Id` of the agent that you wish to **continue a conversation with.**                                                                                                                                                                                      |
 | {conversationId}                 | (`Path` **parameter**): `String Id` of the **conversation** that you wish to **send** the message to.                                                                                                                                                                                   |
 | returnDetailed (Optional)        | (`Query` **parameter**):`Boolean` - Default : `false` Will return all sub results of the entire `conversation steps`, otherwise only public ones such as `input, action, output & quickReplies`.                                                                                        |

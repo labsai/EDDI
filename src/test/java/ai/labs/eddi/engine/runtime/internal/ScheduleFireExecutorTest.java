@@ -191,7 +191,7 @@ class ScheduleFireExecutorTest {
     }
 
     @Test
-    void fire_invalidEnvironment_defaultsToUnrestricted() throws Exception {
+    void fire_invalidEnvironment_defaultsToProduction() throws Exception {
         var schedule = makeCronSchedule("sched-env", "new");
         schedule.setEnvironment("nonsense");
         when(conversationService.startConversation(eq(Environment.production), any(), any(), any()))

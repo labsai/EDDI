@@ -21,22 +21,22 @@ Each entry follows this format:
 
 Extracted all agent setup business logic from `McpSetupTools` (803 lines) into a shared `AgentSetupService` CDI bean. The service is now exposed via both MCP tools (unchanged interface) and new REST endpoints.
 
-| Component | Files | Change |
-|-----------|-------|--------|
-| **Request Records** | `SetupAgentRequest.java`, `CreateApiAgentRequest.java` | NEW — Typed request objects for both operations |
-| **Result Record** | `SetupResult.java` | NEW — Structured result with builder pattern |
-| **Service** | `AgentSetupService.java` (~400 lines) | NEW — All config builders, validation, deploy logic |
-| **REST Interface** | `IRestAgentSetup.java` | NEW — `POST /administration/agents/setup`, `POST /administration/agents/setup-api` |
-| **REST Impl** | `RestAgentSetup.java` | NEW — Thin adapter (201/400/500) |
-| **MCP Tools** | `McpSetupTools.java` (803→145 lines) | REWRITE — Thin wrapper: builds request, calls service, serializes result |
-| **Utility** | `McpApiToolBuilder.java` | Class + `ApiBuildResult` + `parseAndBuild` + `parseSpec` made `public` |
-| **Tests** | `McpSetupToolsTest.java` | REWRITE — Config builder tests via `service.`, MCP integration tests via `tools.` |
+| Component           | Files                                                  | Change                                                                             |
+| ------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| **Request Records** | `SetupAgentRequest.java`, `CreateApiAgentRequest.java` | NEW — Typed request objects for both operations                                    |
+| **Result Record**   | `SetupResult.java`                                     | NEW — Structured result with builder pattern                                       |
+| **Service**         | `AgentSetupService.java` (~400 lines)                  | NEW — All config builders, validation, deploy logic                                |
+| **REST Interface**  | `IRestAgentSetup.java`                                 | NEW — `POST /administration/agents/setup`, `POST /administration/agents/setup-api` |
+| **REST Impl**       | `RestAgentSetup.java`                                  | NEW — Thin adapter (201/400/500)                                                   |
+| **MCP Tools**       | `McpSetupTools.java` (803→145 lines)                   | REWRITE — Thin wrapper: builds request, calls service, serializes result           |
+| **Utility**         | `McpApiToolBuilder.java`                               | Class + `ApiBuildResult` + `parseAndBuild` + `parseSpec` made `public`             |
+| **Tests**           | `McpSetupToolsTest.java`                               | REWRITE — Config builder tests via `service.`, MCP integration tests via `tools.`  |
 
 **New REST API:**
 
-| Method | Path | Request | Response |
-|--------|------|---------|----------|
-| `POST` | `/administration/agents/setup` | `SetupAgentRequest` | `201 SetupResult` / `400 error` |
+| Method | Path                               | Request                 | Response                        |
+| ------ | ---------------------------------- | ----------------------- | ------------------------------- |
+| `POST` | `/administration/agents/setup`     | `SetupAgentRequest`     | `201 SetupResult` / `400 error` |
 | `POST` | `/administration/agents/setup-api` | `CreateApiAgentRequest` | `201 SetupResult` / `400 error` |
 
 **Design decisions:**
@@ -64,17 +64,17 @@ Extracted all agent setup business logic from `McpSetupTools` (803 lines) into a
 
 Comprehensive content rename across the entire repository to align all strings, comments, error messages, parameter names, MCP tool names, and documentation with the v6 naming specification. This completes the rename that was started with file/class renames in earlier phases.
 
-| Category | Count | Examples |
-|----------|-------|---------|
-| **MCP Tool Names** | ~80 | `setup_bot`→`setup_agent`, `list_packages`→`list_workflows`, `chat_with_bot`→`chat_with_agent` |
-| **REST Method Names** | ~70 | `deleteBot()`→`deleteAgent()`, `readPackageDescriptors()`→`readWorkflowDescriptors()` |
-| **Parameter Names** | ~110 | `botId`→`agentId`, `botVersion`→`agentVersion`, `packageId`→`workflowId` |
-| **MCP `@ToolArg` Descriptions** | ~30 | `"Bot ID (required)"`→`"Agent ID (required)"` |
-| **Error Messages** | ~15 | `"Failed to deploy bot"`→`"Failed to deploy agent"` |
-| **OpenAPI Descriptions** | ~10 | `"Deploy & Undeploy Bots"`→`"Deploy & Undeploy Agents"` |
-| **Constants** | ~20 | `BOT_FILE_ENDING`→`AGENT_FILE_ENDING`, `COLLECTION_BOT_TRIGGERS`→`COLLECTION_AGENT_TRIGGERS` |
-| **Documentation** | ~40 | `mcp-server.md`, `changelog.md`, `v6_renaming_recommendation.md` |
-| **Shell Scripts** | 2 | `install.sh`, `install.ps1` — `BOT_COUNT`→`AGENT_COUNT` |
+| Category                        | Count | Examples                                                                                       |
+| ------------------------------- | ----- | ---------------------------------------------------------------------------------------------- |
+| **MCP Tool Names**              | ~80   | `setup_bot`→`setup_agent`, `list_packages`→`list_workflows`, `chat_with_bot`→`chat_with_agent` |
+| **REST Method Names**           | ~70   | `deleteBot()`→`deleteAgent()`, `readPackageDescriptors()`→`readWorkflowDescriptors()`          |
+| **Parameter Names**             | ~110  | `botId`→`agentId`, `botVersion`→`agentVersion`, `packageId`→`workflowId`                       |
+| **MCP `@ToolArg` Descriptions** | ~30   | `"Bot ID (required)"`→`"Agent ID (required)"`                                                  |
+| **Error Messages**              | ~15   | `"Failed to deploy bot"`→`"Failed to deploy agent"`                                            |
+| **OpenAPI Descriptions**        | ~10   | `"Deploy & Undeploy Bots"`→`"Deploy & Undeploy Agents"`                                        |
+| **Constants**                   | ~20   | `BOT_FILE_ENDING`→`AGENT_FILE_ENDING`, `COLLECTION_BOT_TRIGGERS`→`COLLECTION_AGENT_TRIGGERS`   |
+| **Documentation**               | ~40   | `mcp-server.md`, `changelog.md`, `v6_renaming_recommendation.md`                               |
+| **Shell Scripts**               | 2     | `install.sh`, `install.ps1` — `BOT_COUNT`→`AGENT_COUNT`                                        |
 
 **Also in this commit:**
 
@@ -83,6 +83,7 @@ Comprehensive content rename across the entire repository to align all strings, 
 **Scope:** 349 files changed, 11,253 insertions, 10,771 deletions.
 
 **Verification:**
+
 - Exhaustive pattern search across ALL file types: **zero remaining `bot`/`Bot`/`botId`/`packageId`/MCP tool patterns**
 - `compile` + `test-compile`: BUILD SUCCESS
 - 947 unit tests: 0 failures, 0 errors
@@ -366,7 +367,7 @@ EDDI now exposes its agent conversation and administration capabilities via the 
 | ------------------ | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Dependency         | `pom.xml`                           | `quarkus-mcp-server-http` v1.10.2 (Quarkiverse)                                                                                                 |
 | Conversation Tools | `McpConversationTools.java`         | 7 MCP tools: list_agents, list_agent_configs, create_conversation, talk_to_agent, **chat_with_agent**, read_conversation, read_conversation_log |
-| Admin Tools        | `McpAdminTools.java`                | 6 MCP tools: deploy_agent, undeploy_agent, get_deployment_status, list_workflows, create_agent, delete_agent                                     |
+| Admin Tools        | `McpAdminTools.java`                | 6 MCP tools: deploy_agent, undeploy_agent, get_deployment_status, list_workflows, create_agent, delete_agent                                    |
 | **Setup Tools**    | `McpSetupTools.java`                | **setup_agent** composite: creates full agent pipeline in one MCP call (behavior → langchain → output → package → agent → deploy)               |
 | Shared Utils       | `McpToolUtils.java`                 | parseEnvironment, JSON escaping (RFC 8259), extractIdFromLocation, extractVersionFromLocation                                                   |
 | Config             | `application.properties`            | Streamable HTTP transport at `/mcp`                                                                                                             |
@@ -1042,11 +1043,11 @@ Introduced a factory-based abstraction layer so that the datastore can support m
 
 **What changed:**
 
-1. **Agent API** (`agents.ts`) — Added `getAgentDescriptorsWithVersions()` for fetching all versions of a agent, `getDeploymentStatuses()` for fetching deployment status across unrestricted/restricted/test environments simultaneously, plus `ENVIRONMENTS` and `Environment` type exports
+1. **Agent API** (`agents.ts`) — Added `getAgentDescriptorsWithVersions()` for fetching all versions of a agent, `getDeploymentStatuses()` for fetching deployment status across production/production/test environments simultaneously, plus `ENVIRONMENTS` and `Environment` type exports
 2. **Agent hooks** (`use-agents.ts`) — Added `useAgentVersions` (version picker data with sort), `useUpdateAgent` (save mutation), `useDeploymentStatuses` (multi-env polling)
 3. **Agent Detail page** (`agent-detail.tsx`) — Major rewrite from read-only page to full editor:
    - **Version picker** with relative timestamps (replaces hardcoded v1)
-   - **Environment status badges** — 3-column grid showing unrestricted/restricted/test deploy states with per-env deploy/undeploy buttons
+   - **Environment status badges** — 3-column grid showing production/production/test deploy states with per-env deploy/undeploy buttons
    - **Duplicate button** with deep copy and auto-navigation to the clone
    - **Save feedback toast** with auto-dismiss
    - All existing functionality preserved (deploy/undeploy, export, delete, package add/remove)

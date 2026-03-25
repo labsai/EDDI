@@ -92,7 +92,7 @@ class McpConversationToolsTest {
     }
 
     @Test
-    void listAgents_defaultsToUnrestricted() throws IOException {
+    void listAgents_defaultsToProduction() throws IOException {
         when(agentAdmin.getDeploymentStatuses(Environment.production))
                 .thenReturn(Collections.emptyList());
         when(jsonSerialization.serialize(any())).thenReturn("[]");

@@ -13,7 +13,6 @@ import dev.langchain4j.agent.tool.ToolSpecifications;
 import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
-import dev.langchain4j.model.chat.request.ChatRequestParameters;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
@@ -143,8 +142,17 @@ class AgentOrchestrator {
         int totalTools = enabledTools.size() + (mcpTools != null ? mcpTools.toolSpecs().size() : 0);
         LOGGER.info("Executing with " + totalTools + " enabled tools" +
                 (mcpTools != null && !mcpTools.toolSpecs().isEmpty()
-                        ? " (" + mcpTools.toolSpecs().size() + " from MCP servers)" : ""));
-        return executeWithTools(chatModel, effectiveSystemMessage, chatMessages, enabledTools, mcpTools, task, memory);
+                        ? " (" + mcpTools.toolSpecs().size() + " from MCP servers)"
+                        : ""));
+
+        // Set conversation context for EddiToolBridge before tool-calling loop
+        EddiToolBridge.setCurrentConversationId(memory.getConversationId());
+        try {
+            return executeWithTools(chatModel, effectiveSystemMessage, chatMessages, enabledTools, mcpTools, task,
+                    memory);
+        } finally {
+            EddiToolBridge.clearCurrentConversationId();
+        }
     }
 
     /**
@@ -161,11 +169,17 @@ class AgentOrchestrator {
         Map<String, ToolExecutor> toolExecutors = new HashMap<>();
 
         for (Object tool : tools) {
-            var specs = ToolSpecifications.toolSpecificationsFrom(tool);
+            // CDI proxies don't carry @Tool annotations — resolve to actual bean class
+            Class<?> toolClass = tool.getClass();
+            if (toolClass.getName().contains("_ClientProxy") || toolClass.getName().contains("$$")) {
+                toolClass = toolClass.getSuperclass();
+            }
+
+            var specs = ToolSpecifications.toolSpecificationsFrom(toolClass);
             toolSpecs.addAll(specs);
 
             // Find methods annotated with @Tool and map them to executors
-            for (java.lang.reflect.Method method : tool.getClass().getDeclaredMethods()) {
+            for (java.lang.reflect.Method method : toolClass.getDeclaredMethods()) {
                 if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) {
                     dev.langchain4j.agent.tool.Tool toolAnnotation = method
                             .getAnnotation(dev.langchain4j.agent.tool.Tool.class);
@@ -210,12 +224,12 @@ class AgentOrchestrator {
                         .messages(currentMessages);
 
                 if (!toolSpecs.isEmpty()) {
-                    requestBuilder.parameters(ChatRequestParameters.builder()
-                            .toolSpecifications(toolSpecs)
-                            .build());
+                    requestBuilder.toolSpecifications(toolSpecs);
                 }
 
-                ChatResponse chatResponse = chatModel.chat(requestBuilder.build());
+                ChatRequest chatRequest = requestBuilder.build();
+
+                ChatResponse chatResponse = chatModel.chat(chatRequest);
                 AiMessage aiMessage = chatResponse.aiMessage();
                 currentMessages.add(aiMessage);
 
@@ -300,14 +314,22 @@ class AgentOrchestrator {
 
         if (whitelist != null && !whitelist.isEmpty()) {
             // Only add tools that are explicitly listed in the whitelist
-            if (whitelist.contains("calculator")) tools.add(calculatorTool);
-            if (whitelist.contains("datetime")) tools.add(dateTimeTool);
-            if (whitelist.contains("websearch")) tools.add(webSearchTool);
-            if (whitelist.contains("dataformatter")) tools.add(dataFormatterTool);
-            if (whitelist.contains("webscraper")) tools.add(webScraperTool);
-            if (whitelist.contains("textsummarizer")) tools.add(textSummarizerTool);
-            if (whitelist.contains("pdfreader")) tools.add(pdfReaderTool);
-            if (whitelist.contains("weather")) tools.add(weatherTool);
+            if (whitelist.contains("calculator"))
+                tools.add(calculatorTool);
+            if (whitelist.contains("datetime"))
+                tools.add(dateTimeTool);
+            if (whitelist.contains("websearch"))
+                tools.add(webSearchTool);
+            if (whitelist.contains("dataformatter"))
+                tools.add(dataFormatterTool);
+            if (whitelist.contains("webscraper"))
+                tools.add(webScraperTool);
+            if (whitelist.contains("textsummarizer"))
+                tools.add(textSummarizerTool);
+            if (whitelist.contains("pdfreader"))
+                tools.add(pdfReaderTool);
+            if (whitelist.contains("weather"))
+                tools.add(weatherTool);
         } else {
             // No whitelist — add all built-in tools
             tools.add(calculatorTool);
