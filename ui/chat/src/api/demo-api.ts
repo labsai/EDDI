@@ -56,14 +56,14 @@ EDDI supports **LLM integration**, behavior rules, HTTP callouts, and much more.
 
 \`\`\`typescript
 // Start a conversation
-const response = await fetch('/agents/production/myAgent', {
+const response = await fetch('/agents/myAgent/start', {
   method: 'POST'
 });
 const conversationId = response.headers.get('Location');
 
 // Send a message
 const result = await fetch(
-  \`/agents/production/myAgent/\${conversationId}\`,
+  \`/agents/\${conversationId}\`,
   {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },

@@ -17,7 +17,7 @@ function App() {
         <Routes>
           {/* Managed agent route */}
           <Route
-            path="/chat/managedagents/:intent/:userId"
+            path="/chat/managed/:intent/:userId"
             element={<ChatWidget />}
           />
           {/* Direct agent route with userId */}

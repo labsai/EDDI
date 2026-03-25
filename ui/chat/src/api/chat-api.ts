@@ -1,6 +1,7 @@
 /* ──────────────────────────────────────────────
    EDDI Chat — API Layer
    Pure fetch-based, zero external dependencies.
+   v6: simplified paths — all conversation-scoped ops use only conversationId.
    ────────────────────────────────────────────── */
 
 import type {
@@ -27,20 +28,21 @@ function buildUrl(path: string): string {
  * Returns the conversation ID extracted from the Location header.
  */
 export async function startConversation(
-  environment: string,
+  _environment: string,
   agentId: string,
   userId?: string,
 ): Promise<string> {
   const params = userId ? `?userId=${encodeURIComponent(userId)}` : "";
   const res = await fetch(
-    buildUrl(`/agents/${environment}/${agentId}${params}`),
+    buildUrl(`/agents/${agentId}/start${params}`),
     { method: "POST" },
   );
   if (!res.ok) throw new Error(`Failed to start conversation: ${res.statusText}`);
 
   const location = res.headers.get("Location") ?? "";
   const segments = location.split("/");
-  return segments[segments.length - 1] || location;
+  const last = segments[segments.length - 1] || location;
+  return last.split("?")[0];
 }
 
 /**
@@ -48,8 +50,8 @@ export async function startConversation(
  * Used after start (to pick up welcome messages) and to resume.
  */
 export async function readConversation(
-  environment: string,
-  agentId: string,
+  _environment: string,
+  _agentId: string,
   conversationId: string,
   currentStepOnly = false,
 ): Promise<ConversationSnapshot> {
@@ -58,7 +60,7 @@ export async function readConversation(
     returnCurrentStepOnly: String(currentStepOnly),
   });
   const res = await fetch(
-    buildUrl(`/agents/${environment}/${agentId}/${conversationId}?${params}`),
+    buildUrl(`/agents/${conversationId}?${params}`),
   );
   if (!res.ok) throw new Error(`Failed to read conversation: ${res.statusText}`);
   return res.json();
@@ -70,8 +72,8 @@ export async function readConversation(
  * When `context` is provided, sends as JSON `InputData` instead of plain text.
  */
 export async function sendMessage(
-  environment: string,
-  agentId: string,
+  _environment: string,
+  _agentId: string,
   conversationId: string,
   message: string,
   userId?: string,
@@ -86,7 +88,7 @@ export async function sendMessage(
   const hasContext = context && Object.keys(context).length > 0;
 
   const res = await fetch(
-    buildUrl(`/agents/${environment}/${agentId}/${conversationId}?${params}`),
+    buildUrl(`/agents/${conversationId}?${params}`),
     {
       method: "POST",
       headers: {
@@ -106,8 +108,8 @@ export async function sendMessage(
  * Yields parsed SSE events as they arrive.
  */
 export async function* sendMessageStreaming(
-  environment: string,
-  agentId: string,
+  _environment: string,
+  _agentId: string,
   conversationId: string,
   message: string,
   context?: Record<string, { type: string; value: string }>,
@@ -118,7 +120,7 @@ export async function* sendMessageStreaming(
   }
 
   const res = await fetch(
-    buildUrl(`/agents/${environment}/${agentId}/${conversationId}/stream`),
+    buildUrl(`/agents/${conversationId}/stream`),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -171,7 +173,7 @@ export async function* sendMessageStreaming(
 
 /**
  * Send a message to a managed agent (intent-based routing).
- * Used when the URL is `/chat/managedagents/:intent/:userId`.
+ * v6: path changed from /managedagents to /agents/managed
  */
 export async function sendManagedAgentMessage(
   intent: string,
@@ -182,7 +184,7 @@ export async function sendManagedAgentMessage(
     returnDetailed: "false",
     returnCurrentStepOnly: "true",
   });
-  const url = buildUrl(`/managedagents/${intent}/${userId}?${params}`);
+  const url = buildUrl(`/agents/managed/${intent}/${userId}?${params}`);
 
   if (message) {
     const res = await fetch(url, {
@@ -218,12 +220,12 @@ export async function endConversation(
  * Undo the last conversation step.
  */
 export async function undoConversation(
-  environment: string,
-  agentId: string,
+  _environment: string,
+  _agentId: string,
   conversationId: string,
 ): Promise<ConversationSnapshot> {
   const res = await fetch(
-    buildUrl(`/agents/${environment}/${agentId}/undo/${conversationId}`),
+    buildUrl(`/agents/${conversationId}/undo`),
     { method: "POST" },
   );
   if (!res.ok) throw new Error(`Failed to undo: ${res.statusText}`);
@@ -234,12 +236,12 @@ export async function undoConversation(
  * Redo a previously undone conversation step.
  */
 export async function redoConversation(
-  environment: string,
-  agentId: string,
+  _environment: string,
+  _agentId: string,
   conversationId: string,
 ): Promise<ConversationSnapshot> {
   const res = await fetch(
-    buildUrl(`/agents/${environment}/${agentId}/redo/${conversationId}`),
+    buildUrl(`/agents/${conversationId}/redo`),
     { method: "POST" },
   );
   if (!res.ok) throw new Error(`Failed to redo: ${res.statusText}`);
