@@ -24,11 +24,17 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Ensure TLS 1.2 for GitHub downloads (older PS versions default to TLS 1.0)
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+# Suppress Invoke-WebRequest progress bar (drastically speeds up downloads)
+$ProgressPreference = 'SilentlyContinue'
+
 # ── Configuration ──────────────────────────────────────────
 if (-not $EddiPort)      { $EddiPort = "7070" }
 if (-not $EddiHttpsPort) { $EddiHttpsPort = "7443" }
 if (-not $EddiDir)       { $EddiDir = Join-Path $HOME ".eddi" }
-$ComposeBaseUrl = "https://raw.githubusercontent.com/labsai/EDDI/main"
+$EddiBranch = if ($env:EDDI_BRANCH) { $env:EDDI_BRANCH } else { "main" }
+$ComposeBaseUrl = "https://raw.githubusercontent.com/labsai/EDDI/$EddiBranch"
 
 if ($Full) {
     $Db = "postgres"
@@ -278,18 +284,20 @@ function Step-Ports {
 function Get-ComposeFiles {
     New-Item -ItemType Directory -Force -Path $EddiDir | Out-Null
 
-    $filesToDownload = @()
+    # Detect script directory (empty when piped via iwr | iex)
+    $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { "" }
+
+    $neededFiles = @()
 
     if ($Db -eq "postgres") {
-        $filesToDownload += "docker-compose.postgres-only.yml"
+        $neededFiles += "docker-compose.postgres-only.yml"
     } else {
-        $filesToDownload += "docker-compose.yml"
+        $neededFiles += "docker-compose.yml"
     }
 
     # Local build overlay (overrides image with local build context)
     if ($Local) {
-        # -Local requires running from the EDDI repo checkout
-        $repoRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Get-Location }
+        $repoRoot = if ($ScriptDir) { $ScriptDir } else { Get-Location }
         $localCompose = Join-Path $repoRoot "docker-compose.local.yml"
         $dockerfile = Join-Path $repoRoot "src\main\docker\Dockerfile.jvm"
         if (-not (Test-Path $localCompose)) {
@@ -298,27 +306,39 @@ function Get-ComposeFiles {
         if (-not (Test-Path $dockerfile)) {
             Write-Fail "Dockerfile not found. Run: .\mvnw.cmd package -DskipTests first."
         }
-        # Use the file directly from the repo (build context must be repo root)
         $script:ComposeFiles += $localCompose
     }
 
     if ($WithAuth) {
-        $filesToDownload += "docker-compose.auth.yml"
+        $neededFiles += "docker-compose.auth.yml"
     }
 
     if ($WithMonitoring) {
-        $filesToDownload += "docker-compose.monitoring.yml"
+        $neededFiles += "docker-compose.monitoring.yml"
     }
 
-    foreach ($f in $filesToDownload) {
-        Write-Host "  Downloading $f... " -NoNewline
-        try {
-            Invoke-WebRequest -Uri "$ComposeBaseUrl/$f" -OutFile (Join-Path $EddiDir $f) -ErrorAction Stop
-            Write-Host "✅" -ForegroundColor Green
-            $script:ComposeFiles += (Join-Path $EddiDir $f)
-        } catch {
-            Write-Fail "Failed to download $f.`n     Check your internet connection."
+    # Resolve each file: prefer local copy, fall back to download
+    foreach ($f in $neededFiles) {
+        $target = Join-Path $EddiDir $f
+        $localFile = if ($ScriptDir) { Join-Path $ScriptDir $f } else { "" }
+
+        if ($localFile -and (Test-Path $localFile)) {
+            # File exists next to the script — copy to install dir
+            Copy-Item $localFile $target -Force
+            Write-Host "  Using local $f " -NoNewline; Write-Host "✅" -ForegroundColor Green
+        } else {
+            # Not available locally — download from GitHub
+            $downloadUrl = "$ComposeBaseUrl/$f"
+            Write-Host "  Downloading $f... " -NoNewline
+            try {
+                Invoke-WebRequest -Uri $downloadUrl -OutFile $target -UseBasicParsing -ErrorAction Stop
+                Write-Host "✅" -ForegroundColor Green
+            } catch {
+                Write-Fail "Failed to download $f.`n     URL: $downloadUrl`n     Error: $($_.Exception.Message)`n     Check your internet connection and that the branch '$EddiBranch' exists.";
+            }
         }
+
+        $script:ComposeFiles += $target
     }
 
     # Build compose flags

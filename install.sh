@@ -13,10 +13,11 @@ set -euo pipefail
 
 # ── Configuration ──────────────────────────────────────────
 EDDI_VERSION="${EDDI_VERSION:-6}"
+EDDI_BRANCH="${EDDI_BRANCH:-main}"
 EDDI_PORT="${EDDI_PORT:-7070}"
 EDDI_HTTPS_PORT="${EDDI_HTTPS_PORT:-7443}"
 EDDI_DIR="${EDDI_DIR:-$HOME/.eddi}"
-COMPOSE_BASE_URL="https://raw.githubusercontent.com/labsai/EDDI/main"
+COMPOSE_BASE_URL="https://raw.githubusercontent.com/labsai/EDDI/${EDDI_BRANCH}"
 EDDI_ALREADY_RUNNING=false
 
 # ── State flags ────────────────────────────────────────────
@@ -424,25 +425,26 @@ wizard_ports() {
 
 # ── Compose file management ───────────────────────────────
 
-download_compose_files() {
+# Detect script directory (empty when piped via curl | bash)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || SCRIPT_DIR=""
+
+resolve_compose_files() {
   mkdir -p "$EDDI_DIR"
 
-  local files_to_download=()
+  local needed_files=()
   COMPOSE_FILES=()
 
   # Base compose file depends on database choice
   if [[ "${DB_CHOICE:-1}" == "2" ]]; then
-    files_to_download+=("docker-compose.postgres-only.yml")
-    COMPOSE_FILES+=("$EDDI_DIR/docker-compose.postgres-only.yml")
+    needed_files+=("docker-compose.postgres-only.yml")
   else
-    files_to_download+=("docker-compose.yml")
-    COMPOSE_FILES+=("$EDDI_DIR/docker-compose.yml")
+    needed_files+=("docker-compose.yml")
   fi
 
   # Local build overlay (overrides image with local build context)
   if [[ "$LOCAL_IMAGE" == "true" ]]; then
     # --local requires running from the EDDI repo checkout
-    EDDI_REPO_ROOT="$(cd "$(dirname "$0")" 2>/dev/null && pwd)" || EDDI_REPO_ROOT="$(pwd)"
+    EDDI_REPO_ROOT="${SCRIPT_DIR:-$(pwd)}"
     if [[ ! -f "$EDDI_REPO_ROOT/docker-compose.local.yml" ]]; then
       fail "--local requires running from the EDDI repo root.\n     Run: cd /path/to/EDDI && bash install.sh --local"
     fi
@@ -455,24 +457,34 @@ download_compose_files() {
 
   # Auth overlay
   if [[ "$WITH_AUTH" == "true" ]]; then
-    files_to_download+=("docker-compose.auth.yml")
-    COMPOSE_FILES+=("$EDDI_DIR/docker-compose.auth.yml")
+    needed_files+=("docker-compose.auth.yml")
   fi
 
   # Monitoring overlay
   if [[ "$WITH_MONITORING" == "true" ]]; then
-    files_to_download+=("docker-compose.monitoring.yml")
-    COMPOSE_FILES+=("$EDDI_DIR/docker-compose.monitoring.yml")
+    needed_files+=("docker-compose.monitoring.yml")
   fi
 
-  # Download each file
-  for f in "${files_to_download[@]}"; do
-    echo -ne "  Downloading ${f}... "
-    if curl -fsSL "${COMPOSE_BASE_URL}/${f}" -o "$EDDI_DIR/$f"; then
-      echo -e "${GREEN}✅${RESET}"
+  # Resolve each file: prefer local copy, fall back to download
+  for f in "${needed_files[@]}"; do
+    local target="$EDDI_DIR/$f"
+
+    if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/$f" ]]; then
+      # File exists next to the script — copy to install dir
+      cp "$SCRIPT_DIR/$f" "$target"
+      echo -e "  Using local ${f} ${GREEN}✅${RESET}"
     else
-      fail "Failed to download ${f}.\n     Check your internet connection."
+      # Not available locally — download from GitHub
+      local download_url="${COMPOSE_BASE_URL}/${f}"
+      echo -ne "  Downloading ${f}... "
+      if curl -fsSL "${download_url}" -o "$target"; then
+        echo -e "${GREEN}✅${RESET}"
+      else
+        fail "Failed to download ${f}.\n     URL: ${download_url}\n     Check your internet connection and that the branch '${EDDI_BRANCH}' exists."
+      fi
     fi
+
+    COMPOSE_FILES+=("$target")
   done
 
   # Save config for eddi CLI wrapper
@@ -777,7 +789,7 @@ main() {
   print_config_summary
 
   # Download and start
-  download_compose_files
+  resolve_compose_files
   start_eddi
   wait_for_ready
   maybe_import_initial_agents
