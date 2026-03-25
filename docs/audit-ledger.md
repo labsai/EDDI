@@ -68,7 +68,7 @@ Returns audit entries for a conversation, newest first.
 GET /auditstore/agent/{agentId}?agentVersion=1&skip=0&limit=100
 ```
 
-Returns audit entries for a agent. The `agentVersion` parameter is optional.
+Returns audit entries for an agent. The `agentVersion` parameter is optional.
 
 ### Get Entry Count
 

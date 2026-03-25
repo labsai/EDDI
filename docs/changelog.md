@@ -427,7 +427,7 @@ When JSON format is active, `convertToObject=true` is set on the langchain param
 | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `McpSetupTools.java`              | 2 new params, `buildPromptResponseJson()`, `supportsResponseFormat()`, `createLangchainConfig()` with JSON/convertToObject support |
 | `OpenAILanguageModelBuilder.java` | Added `responseFormat=json` → `json_object` support                                                                                |
-| `McpSetupToolsTest.java`          | 10 new tests (31 total): quick replies, sentiment, agenth, anthropic no-responseFormat, helper methods                             |
+| `McpSetupToolsTest.java`          | 10 new tests (31 total): quick replies, sentiment, both, anthropic no-responseFormat, helper methods                             |
 
 **Testing:** ✅ 31 MCP setup tests pass (up from 21), all green.
 
@@ -488,7 +488,7 @@ EDDI now exposes its agent conversation and administration capabilities via the 
 
 **Planned (Phase 8a+): `create_api_agent`**
 
-- Takes an OpenAPI spec → generates httpcalls configs → wires as LangChain tools → creates a agent that can call any API securely
+- Takes an OpenAPI spec → generates httpcalls configs → wires as LangChain tools → creates an agent that can call any API securely
 - Needs `swagger-parser` (`io.swagger.parser.v3:swagger-parser:2.1.x`)
 - Positions EDDI as an AI API gateway
 
@@ -560,7 +560,7 @@ Three improvements to make the MCP server more useful for AI agents:
 | **1. Cleaner responses**      | `McpConversationTools.java`               | `buildConversationResponse()` extracts `agentResponse`, `quickReplies`, `actions`, `conversationState` as top-level fields — eliminates deep JSON navigation |
 | **2. Ollama/jlama support**   | `McpSetupTools.java`, `McpToolUtils.java` | All 7 providers listed; `baseUrl` param; `isLocalLlmProvider()` skips apiKey validation; provider-specific param mapping (ollama→`model`, jlama→`authToken`) |
 | **3. Deploy verification**    | `McpSetupTools.java`                      | `deployAndWait()` polls status for 5s; reports actual `deploymentStatus` + `deployWarning` on failure                                                        |
-| **4. Ollama baseUrl backend** | `OllamaLanguageModelBuilder.java`         | Added `baseUrl` parameter to agenth `build()` and `buildStreaming()`                                                                                         |
+| **4. Ollama baseUrl backend** | `OllamaLanguageModelBuilder.java`         | Added `baseUrl` parameter to both `build()` and `buildStreaming()`                                                                                         |
 | **5. Docker compose**         | `docker-compose.yml`                      | Added `host.docker.internal:host-gateway` extra_hosts for Ollama running in Docker                                                                           |
 
 **Testing:** ✅ 38 MCP tests pass (16 `McpConversationToolsTest` + 22 `McpSetupToolsTest`)
@@ -620,7 +620,7 @@ Added an immutable audit ledger that captures every lifecycle task execution as 
 | Collector        | `IAuditEntryCollector.java`                  | Functional interface decoupling pipeline from storage                      |
 | REST API         | `IRestAuditStore` / `RestAuditStore`         | Read-only endpoints: `/auditstore/{conversationId}`                        |
 | Pipeline Hook    | `LifecycleManager.java`                      | `buildAuditEntry()` emits per-task audit entries                           |
-| Service Wiring   | `ConversationService.java`                   | Audit collector on agenth `say` and `sayStreaming` paths                   |
+| Service Wiring   | `ConversationService.java`                   | Audit collector on both `say` and `sayStreaming` paths                   |
 | Memory API       | `IConversationMemory` / `ConversationMemory` | `getAuditCollector()` / `setAuditCollector()`                              |
 | PostgreSQL Store | `PostgresAuditStore.java`                    | JDBC+JSONB hybrid, `@IfBuildProfile("postgres")`                           |
 | LLM Audit        | `LangchainTask.java`                         | Writes `audit:compiled_prompt`, `audit:model_response`, `audit:model_name` |
@@ -672,7 +672,7 @@ Systematic cleanup of ~50 IDE warnings across 23 files, building on the Lombok r
 
 **What changed:**
 
-Frontend implementation of the secret input system, enabling agenth backend-driven password fields (`InputFieldOutputItem`) and client-initiated secret marking via context flags.
+Frontend implementation of the secret input system, enabling both backend-driven password fields (`InputFieldOutputItem`) and client-initiated secret marking via context flags.
 
 | Component          | Change                                                                                                        |
 | ------------------ | ------------------------------------------------------------------------------------------------------------- |
@@ -847,7 +847,7 @@ Security audit identified 5 critical/high issues in the vault implementation. Al
 | 1   | UI framework: **React + Vite + shadcn/ui + Tailwind CSS**  | AI-friendly (components are plain files), no dependency rot, accessible (Radix), fast DX | J.1a     |
 | 2   | Keep Chat UI **standalone** + extract **shared component** | EDDI has a dedicated single-agent chat endpoint; standalone deployment is needed         | M.1      |
 | 3   | Website: **Astro** on GitHub Pages                         | Static output, built-in i18n routing, zero JS by default, Tailwind integration           | L        |
-| 4   | **Skip API versioning**                                    | Only clients are Manager + Chat UI, agenth first-party controlled                        | M.7      |
+| 4   | **Skip API versioning**                                    | Only clients are Manager + Chat UI, both first-party controlled                        | M.7      |
 | 5   | **Remove internal snapshot tests**                         | Never production-ready; integration tests provide sufficient coverage                    | K.1      |
 | 6   | **Trunk-based branching**                                  | Short-lived feature branches, squash merge, clean main history                           | N.1      |
 | 7   | **Mobile-first responsive** is Phase 1                     | Core requirement, not afterthought; Tailwind breakpoints make this natural               | J.4      |
@@ -908,7 +908,7 @@ Two follow-up items added to the roadmap before proceeding to Phase 7 (MCP):
 
 1. **6A. MongoDB sync driver migration (5 SP)**: The current MongoDB layer uses `mongodb-driver-reactivestreams` but blocks every call with `Observable.fromPublisher(...).blockingFirst()`. This is an anti-pattern — all the complexity of RxJava3 with none of the non-blocking benefits. 13 files need to be migrated to `mongodb-driver-sync`. Since EDDI's lifecycle pipeline is inherently synchronous (`ILifecycleTask.execute()`), the sync driver is the correct choice.
 
-2. **6B. PostgreSQL integration test parity (3 SP)**: All 48 integration tests only run against MongoDB via `IntegrationTestProfile` (hardcoded `mongodb://` connection). The PostgreSQL storage implementations are unit-tested but never integration-tested end-to-end. Need `PostgresIntegrationTestProfile` to run all ITs against agenth databases.
+2. **6B. PostgreSQL integration test parity (3 SP)**: All 48 integration tests only run against MongoDB via `IntegrationTestProfile` (hardcoded `mongodb://` connection). The PostgreSQL storage implementations are unit-tested but never integration-tested end-to-end. Need `PostgresIntegrationTestProfile` to run all ITs against both databases.
 
 **Files affected by 6A:** `MongoResourceStorage`, `MongoDeploymentStorage`, `ConversationMemoryStore`, `DescriptorStore` (mongo), `ResourceFilter`, `ResourceUtilities`, `PropertiesStore`, `AgentTriggerStore`, `UserConversationStore`, `TestCaseStore`, `MigrationManager`, `MigrationLogStore`, `DatabaseLogs`
 
@@ -1043,7 +1043,7 @@ Introduced a factory-based abstraction layer so that the datastore can support m
 
 **Design decisions:**
 
-- Dead-letter works for **agenth** coordinator types (user requirement: not NATS-only)
+- Dead-letter works for **both** coordinator types (user requirement: not NATS-only)
 - SSE poller broadcasts status every 2s (balances responsiveness with overhead)
 - In-memory dead-letter uses `ConcurrentLinkedDeque` (bounded only by JVM memory)
 
@@ -1060,7 +1060,7 @@ Introduced a factory-based abstraction layer so that the datastore can support m
 1. **Dead-letter handling** (`NatsConversationCoordinator.java`) — Tasks that fail are now retried up to `maxRetries` (configurable, default 3). After all retries exhausted, the message is published to a dead-letter JetStream stream (`EDDI_DEAD_LETTERS`) with 30-day `Limits` retention for operator inspection and replay. Payload includes conversationId, error message, and timestamp.
 2. **`NatsMetrics` wiring** — coordinator now injects `NatsMetrics` via `Instance<>` (optional CDI). Publish operations record `eddi_nats_publish_count` + `eddi_nats_publish_duration`. Task completions record `eddi_nats_consume_count` + `eddi_nats_consume_duration`. Dead-letter routing increments `eddi_nats_dead_letter_count`.
 3. **`RetryableCallable` wrapper** — inner class tracks per-callable retry attempt count, enabling retry-then-dead-letter behavior without extra state maps.
-4. **Dead-letter stream creation** — `start()` method now creates/updates agenth the main conversation stream and the dead-letter stream during NATS initialization.
+4. **Dead-letter stream creation** — `start()` method now creates/updates both the main conversation stream and the dead-letter stream during NATS initialization.
 5. **`application.properties`** — Added `eddi.nats.dead-letter-stream-name=EDDI_DEAD_LETTERS`.
 6. **`pom.xml`** — Added `org.testcontainers:testcontainers:2.0.3` and `org.testcontainers:testcontainers-junit-jupiter:2.0.3` (test scope).
 7. **Unit tests** — 12 tests in `NatsConversationCoordinatorTest` (was 8): added `shouldRetryTaskBeforeDeadLettering`, `shouldDeadLetterAfterMaxRetries`, `shouldIncrementPublishMetricsOnSubmit`, `shouldIncrementConsumeMetricsOnCompletion`. Existing `shouldProcessNextTaskAfterFailure` updated for retry behavior.
@@ -1144,7 +1144,7 @@ Introduced a factory-based abstraction layer so that the datastore can support m
 
 **What changed:**
 
-1. **Agent API** (`agents.ts`) — Added `getAgentDescriptorsWithVersions()` for fetching all versions of a agent, `getDeploymentStatuses()` for fetching deployment status across production/production/test environments simultaneously, plus `ENVIRONMENTS` and `Environment` type exports
+1. **Agent API** (`agents.ts`) — Added `getAgentDescriptorsWithVersions()` for fetching all versions of an agent, `getDeploymentStatuses()` for fetching deployment status across production/production/test environments simultaneously, plus `ENVIRONMENTS` and `Environment` type exports
 2. **Agent hooks** (`use-agents.ts`) — Added `useAgentVersions` (version picker data with sort), `useUpdateAgent` (save mutation), `useDeploymentStatuses` (multi-env polling)
 3. **Agent Detail page** (`agent-detail.tsx`) — Major rewrite from read-only page to full editor:
    - **Version picker** with relative timestamps (replaces hardcoded v1)
@@ -1176,7 +1176,7 @@ Introduced a factory-based abstraction layer so that the datastore can support m
 
 1. **Monaco JSON Editor** (`json-editor.tsx`) — Monaco-based editor wrapper with EDDI dark/light theme auto-detection via `useTheme()`, auto-format on mount, configurable read-only mode, loading spinner
 2. **Version Picker** (`version-picker.tsx`) — Dropdown showing version numbers with relative timestamps ("3h ago"). Renders as badge when only one version exists, select when multiple
-3. **Config Editor Layout** (`config-editor-layout.tsx`) — Shared editor chrome with `[ Form | JSON ]` tab toggle. Agenth tabs share a single `useState` object for synchronized editing. Header shows type icon, resource name, version picker, save/discard buttons. Dirty-state detection via deep comparison. Form tab shows placeholder ("Visual editor coming soon") for Phase 3.17–3.18
+3. **Config Editor Layout** (`config-editor-layout.tsx`) — Shared editor chrome with `[ Form | JSON ]` tab toggle. both tabs share a single `useState` object for synchronized editing. Header shows type icon, resource name, version picker, save/discard buttons. Dirty-state detection via deep comparison. Form tab shows placeholder ("Visual editor coming soon") for Phase 3.17–3.18
 4. **`useUpdateResource` hook** — Mutation calling `PUT /{store}/{plural}/{id}?version={version}`, invalidates queries on success
 5. **Resource Detail page** — Rewrote from `<pre>` JSON dump to full `ConfigEditorLayout` with save/discard/dirty-state. All hooks moved above early returns for Rules of Hooks compliance
 6. **i18n** — 15 new keys under `editor.*` in all 11 locale files (formTab, jsonTab, save, discard, dirty, etc.)

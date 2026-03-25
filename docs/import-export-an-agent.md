@@ -1,4 +1,4 @@
-# Import/Export a Chatagent
+# Import/Export an Agent
 
 ## Overview
 
@@ -19,7 +19,7 @@
 
 ### What Gets Exported?
 
-When you export a agent, EDDI packages:
+When you export an agent, EDDI packages:
 
 - ✅ Agent configuration (package references)
 - ✅ All packages used by the agent
@@ -192,7 +192,7 @@ The EDDI Manager provides a guided import wizard accessible from the **Agents** 
 
 ## How Merge Tracking Works
 
-When a agent is first imported into an EDDI instance, EDDI stores the **origin ID** of each resource (the ID it had on the source system) in the `DocumentDescriptor`. On subsequent imports with `strategy=merge`:
+When an agent is first imported into an EDDI instance, EDDI stores the **origin ID** of each resource (the ID it had on the source system) in the `DocumentDescriptor`. On subsequent imports with `strategy=merge`:
 
 1. EDDI reads each resource from the ZIP
 2. Looks up the origin ID in the local descriptor store (`findByOriginId`)
@@ -206,7 +206,7 @@ This means the **agent ID stays the same** across merge imports — only the ver
 
 ## API Reference
 
-### Exporting a Chatagent
+### Exporting an Agent
 
 Send a **`POST`** request to export. The response `Location` header contains the download URL.
 
@@ -225,7 +225,7 @@ curl -X POST http://localhost:7070/backup/export/agent123?agentVersion=1
 curl -O http://localhost:7070/backup/export/agent123-1.zip
 ```
 
-### Importing a Chatagent (Create)
+### Importing an Agent (Create)
 
 Upload a ZIP file to create a new agent.
 
@@ -289,7 +289,7 @@ Dry-run analysis: returns what would change without modifying any data.
 - `UPDATE` — Matching local resource found; will be updated
 - `SKIP` — Resource is unchanged; will be skipped
 
-### Importing a Chatagent (Merge)
+### Importing an Agent (Merge)
 
 Update an existing agent by matching origin IDs.
 
@@ -317,4 +317,4 @@ curl -X POST -H "Content-Type: application/zip" \
   "http://localhost:7070/backup/import?strategy=merge&selectedResources=origin-id-1,origin-id-2"
 ```
 
-> **Important:** The agent will not be deployed after import — you must deploy it yourself using the [Deployment API](deployment-management-of-chatagents.md).
+> **Important:** The agent will not be deployed after import — you must deploy it yourself using the [Deployment API](deployment-management-of-agents.md).

@@ -141,7 +141,7 @@ To signal the chat UI to show a password field, use the `inputField` output type
 
 ### Chat UI: Password Fields + Secret Mode
 
-Agenth **eddi-chat-ui** and the **EDDI-Manager chat panel** support secret input:
+both **eddi-chat-ui** and the **EDDI-Manager chat panel** support secret input:
 
 **Backend-driven password fields:**
 

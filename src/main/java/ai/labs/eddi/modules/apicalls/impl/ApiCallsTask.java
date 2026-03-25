@@ -99,7 +99,7 @@ public class ApiCallsTask implements ILifecycleTask {
                     throw new ServiceException(message);
                 }
                 if (targetServerUrl.endsWith("/")) {
-                    targetServerUrl = targetServerUrl.substring(0, targetServerUrl.length() - 2);
+                    targetServerUrl = targetServerUrl.substring(0, targetServerUrl.length() - 1);
                 }
                 httpCallsConfig.setTargetServerUrl(targetServerUrl);
                 return httpCallsConfig;

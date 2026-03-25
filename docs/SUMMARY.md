@@ -15,7 +15,7 @@
   - [Create an agent that reacts to user inputs](creating-your-first-agent/creating-your-first-agent-1.md)
 - [Import/Export an Agent](import-export-an-agent.md)
 - [Managed Agents](managed-agents.md)
-- [Deployment Management of Agents](deployment-management-of-chatagents.md)
+- [Deployment Management of Agents](deployment-management-of-agents.md)
 - [Extensions](extensions.md)
 - [Behavior Rules](behavior-rules.md)
 - [HTTP Calls / API Calls](httpcalls.md)

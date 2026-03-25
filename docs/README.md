@@ -56,7 +56,7 @@ E.D.D.I is a **multi-agent orchestration middleware** for conversational AI syst
 - **Pattern-Based Input Processing**: Route requests based on vocabulary and patterns
 - **Dynamic Output Generation**: Template-based responses using agent outputs and business data
 - **Composable Agent Model**: Agents assembled from version-controlled packages and extensions (Agent → Workflow → Extension)
-- Support for multiple chatagents, including multiple versions of the same agent, running concurrently
+- Support for multiple agents, including multiple versions of the same agent, running concurrently
 - Support for Major AI API integrations via langchain4j: OpenAI, Hugging Face (text only), Claude, Gemini, Ollama (and more to come)
 
 ## Documentation
@@ -66,7 +66,7 @@ Start with these guides to understand EDDI:
 - **[Getting Started](getting-started.md)** - Setup and installation
 - **[Developer Quickstart Guide](developer-quickstart.md)** - Build your first agent in 5 minutes
 - **[Architecture Overview](architecture.md)** - Deep dive into how EDDI works internally
-- **[Creating Your First Chatagent](creating-your-first-chatagent/)** - Step-by-step tutorial
+- **[Creating Your First Agent](creating-your-first-agent/)** - Step-by-step tutorial
 - **[Behavior Rules](behavior-rules.md)** - Configure agent logic and decision-making
 - **[LangChain Integration](langchain.md)** - Connect to LLM APIs (OpenAI, Claude, etc.)
 - **[Security](security.md)** - SSRF protection, sandboxed evaluation, and tool hardening

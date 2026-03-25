@@ -6,7 +6,7 @@ public class UUIDWrapper {
     }
 
     /**
-     * Extracts the resource ID from an EDDI location URI. Works with agenth MongoDB
+     * Extracts the resource ID from an EDDI location URI. Works with both MongoDB
      * ObjectIds (24 hex chars) and PostgreSQL UUIDs (36 chars with dashes).
      *
      * @param locationUri

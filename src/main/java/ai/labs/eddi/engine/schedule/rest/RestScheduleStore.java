@@ -334,7 +334,7 @@ public class RestScheduleStore implements IRestScheduleStore {
                 throw new IllegalArgumentException("Either cronExpression or oneTimeAt is required for CRON triggers");
             }
             if (hasCron && hasOneTime) {
-                throw new IllegalArgumentException("Cannot set agenth cronExpression and oneTimeAt");
+                throw new IllegalArgumentException("Cannot set both cronExpression and oneTimeAt");
             }
 
             // Validate cron

@@ -28,7 +28,7 @@ Each entry follows this format:
 | 1   | UI framework: **React + Vite + shadcn/ui + Tailwind CSS**  | AI-friendly (components are plain files), no dependency rot, accessible (Radix), fast DX | J.1a     |
 | 2   | Keep Chat UI **standalone** + extract **shared component** | EDDI has a dedicated single-agent chat endpoint; standalone deployment is needed         | M.1      |
 | 3   | Website: **Astro** on GitHub Pages                         | Static output, built-in i18n routing, zero JS by default, Tailwind integration           | L        |
-| 4   | **Skip API versioning**                                    | Only clients are Manager + Chat UI, agenth first-party controlled                        | M.7      |
+| 4   | **Skip API versioning**                                    | Only clients are Manager + Chat UI, both first-party controlled                        | M.7      |
 | 5   | **Remove internal snapshot tests**                         | Never production-ready; integration tests provide sufficient coverage                    | K.1      |
 | 6   | **Trunk-based branching**                                  | Short-lived feature branches, squash merge, clean main history                           | N.1      |
 | 7   | **Mobile-first responsive** is Phase 1                     | Core requirement, not afterthought; Tailwind breakpoints make this natural               | J.4      |
@@ -302,7 +302,7 @@ Refactored the agent tool-calling architecture to dynamically auto-discover `htt
 - Restructured roadmap from 8 phases to 14 phases (7–14b) based on research findings
 - Split all phases >10 SP into ≤10 SP chunks for single-session implementability
 - Added Phase 6C (Infinispan→Caffeine, 2 SP) and Phase 6D (Lombok removal, 5 SP) as quick wins
-- Updated `AGENTS.md` in agenth EDDI and EDDI-Manager with new phase structure
+- Updated `AGENTS.md` in both EDDI and EDDI-Manager with new phase structure
 
 **Key decisions:**
 
@@ -350,7 +350,7 @@ Scans all stores (packages, behavior sets, HTTP calls, output sets, langchains, 
 **Repo:** EDDI
 **Branch:** `feature/version-6.0.0`
 
-**Problem:** Deleting a agent left all its packages and extension resources (behavior sets, HTTP calls, output sets, langchains, property setters, dictionaries) orphaned in the database. Cleanups had to be done manually.
+**Problem:** Deleting an agent left all its packages and extension resources (behavior sets, HTTP calls, output sets, langchains, property setters, dictionaries) orphaned in the database. Cleanups had to be done manually.
 
 **Solution:** Added `cascade` query parameter to `DELETE /agentstore/agents/{id}` and `DELETE /packagestore/packages/{id}`.
 
@@ -362,7 +362,7 @@ Scans all stores (packages, behavior sets, HTTP calls, output sets, langchains, 
 - `RestWorkflowStore.java` — cascade walks extensions + parser dictionaries, deletes via `ResourceClientLibrary`
 - `IResourceClientLibrary.java` — added `deleteResource(URI, boolean)`
 - `ResourceClientLibrary.java` — `IResourceService.delete()` for all 7 store types
-- `deployment-management-of-chatagents.md` — added deletion section with cascade docs
+- `deployment-management-of-agents.md` — added deletion section with cascade docs
 
 **Design decisions:**
 
@@ -613,7 +613,7 @@ Scans all stores (packages, behavior sets, HTTP calls, output sets, langchains, 
 
 - [x] Backend: all tests pass including 11 new `JsonSchemaCreatorTest` cases
 - [x] Manager: `npx tsc --noEmit` ✅, 17/17 tests pass, build succeeds
-- [x] Agenth repos committed with clean working trees
+- [x] both repos committed with clean working trees
 
 ### 2026-03-09 — Phase 4.3: Real-Backend Integration Testing
 
@@ -802,7 +802,7 @@ All 4 new classes are package-private helpers (not CDI beans). They are instanti
 
 **Design decisions:**
 
-- Fixed test port 8081 instead of random — `RestInterfaceFactory` needs agenth `quarkus.http.port` and `quarkus.http.test-port` set to same value since `@QuarkusTest` reads config property as configured value, not runtime value
+- Fixed test port 8081 instead of random — `RestInterfaceFactory` needs both `quarkus.http.port` and `quarkus.http.test-port` set to same value since `@QuarkusTest` reads config property as configured value, not runtime value
 - Weather agent analysis confirmed v6.0 compatibility — no migration needed. `fromObjectPath` expressions work with PathNavigator
 - `EDDI-integration-tests` repo is now fully superseded
 
@@ -855,7 +855,7 @@ Side-sheet extension inspector deferred to Phase 3.17–3.18. For now, clicking 
 - `behavior-editor.tsx` [NEW]: Form editor for `BehaviorConfiguration` — groups accordion → rule cards with action tag input → recursive condition editors (6 types: inputmatcher, actionmatcher, negation, connector, occurrence, dynamicValueMatcher) with key-value config pairs and nested conditions
 - `httpcalls-editor.tsx` [NEW]: Form editor for `HttpCallsConfiguration` — server URL, collapsible call cards with color-coded method badge, request builder (method, path, content type, headers/queryParams KV, body textarea), LLM agent parameters, options toggles, pre/post JSON preview
 - `config-editor-layout.tsx` [MODIFIED]: `renderFormEditor` render prop for two-way Form↔JSON binding; default tab = "Form" when editor exists
-- `resource-detail.tsx` [MODIFIED]: Wires agenth editors via `renderFormEditor` prop keyed by resource type
+- `resource-detail.tsx` [MODIFIED]: Wires both editors via `renderFormEditor` prop keyed by resource type
 - `handlers.ts` [MODIFIED]: Realistic MSW mock data for behavior (1 group, 2 rules, 3 conditions) and httpcalls (1 call with full request)
 - `en.json` + 10 locales [MODIFIED]: 60+ new i18n keys (`behaviorEditor.*`, `httpcallsEditor.*`, `editor.invalidJson`)
 - `resource-detail-behavior.test.tsx` [NEW]: 7 tests
@@ -969,7 +969,7 @@ Render prop pattern on `ConfigEditorLayout` — form editors receive parsed data
 
 - MSW auto-detection over manual flag: the app probes the backend to decide whether to mock — no env vars needed
 - JSON Schema fetched once, cached forever (schemas don't change at runtime)
-- Monaco `setDiagnosticsOptions` provides agenth validation (red squiggles) and autocomplete (Ctrl+Space) from a single schema
+- Monaco `setDiagnosticsOptions` provides both validation (red squiggles) and autocomplete (Ctrl+Space) from a single schema
 
 **Testing:**
 

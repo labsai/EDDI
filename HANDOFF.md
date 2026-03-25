@@ -355,7 +355,7 @@
   - Algorithm: enumerate agents → packages → extensions → compare against all descriptors per store
 - [x] DTOs: `OrphanInfo`, `OrphanReport`; interfaces: `IRestOrphanAdmin`, `IRestAgentStore`, `IRestWorkflowStore` updated
 - [x] Enriched OpenAPI annotations with `@Operation`, `@Parameter`, `@APIResponse` descriptions
-- [x] Documentation: deletion + orphan sections in `docs/deployment-management-of-chatagents.md`
+- [x] Documentation: deletion + orphan sections in `docs/deployment-management-of-agents.md`
 - [x] Tests: `RestAgentStoreTest` (6/6), `RestWorkflowStoreTest` (7/7), `RestOrphanAdminTest` (4/4) — 17 new tests total
 - [x] Full test suite passes
 
@@ -374,7 +374,7 @@
 - `IRestAgentStore.java`, `RestAgentStore.java` — cascade + shared-resource check
 - `IRestWorkflowStore.java`, `RestWorkflowStore.java` — cascade + shared-resource check
 - `IResourceClientLibrary.java`, `ResourceClientLibrary.java` — `deleteResource` method
-- `docs/deployment-management-of-chatagents.md` — deletion + orphan docs
+- `docs/deployment-management-of-agents.md` — deletion + orphan docs
 
 ### Phase 6C: Infinispan → Caffeine ✅
 
@@ -464,7 +464,7 @@
 - [x] Created `AuditLedgerService` — async batch writer with re-queue retry (3 attempts), secret scrubbing, HMAC signing
 - [x] Created `IAuditEntryCollector` — functional interface decoupling `LifecycleManager` from storage
 - [x] Integrated into `LifecycleManager` — `buildAuditEntry()` emits audit entry per task completion
-- [x] Integrated into `ConversationService` — agenth `say` and `sayStreaming` paths set audit collector with environment enrichment
+- [x] Integrated into `ConversationService` — both `say` and `sayStreaming` paths set audit collector with environment enrichment
 - [x] Created `IRestAuditStore` / `RestAuditStore` — read-only REST API (`/auditstore/{conversationId}`, `/auditstore/agent/{agentId}`)
 - [x] Added `AuditEntry.withEnvironment()` — environment enrichment at the ConversationService layer
 - [x] Secret redaction via `SecretRedactionFilter.redact()` — recurses into nested maps and lists
@@ -583,7 +583,7 @@ All hooks are **non-fatal** — if schedule operations fail, the primary agent o
   - AI-agent-friendly responses: `buildConversationResponse()` extracts `agentResponse`, `quickReplies`, `actions`, `conversationState` as top-level fields
   - Ollama/jlama support: all 7 providers in `setup_agent`, `baseUrl` param, `isLocalLlmProvider()` skips apiKey validation, provider-specific param mapping
   - Deploy verification: `deployAndWait()` polls deployment status for 5s, reports actual status + warning on failure
-  - `OllamaLanguageModelBuilder` — added `baseUrl` support to agenth `build()` and `buildStreaming()`
+  - `OllamaLanguageModelBuilder` — added `baseUrl` support to both `build()` and `buildStreaming()`
   - `docker-compose.yml` — added `host.docker.internal:host-gateway` for Docker-hosted Ollama
   - 38 MCP tests pass (16 McpConversationToolsTest + 22 McpSetupToolsTest)
 

@@ -85,7 +85,7 @@ In this section we will explain how **EDDI** handles the context of a conversati
 
 In order to talk to **EDDI** with context, send a **`POST`** request to `/agents/`**`{conversationId}`** (same way as interacting in a normal conversation in EDDI), but this time provide context parameters:
 
-### Send message in a conversation with a Chatagent REST API Endpoint
+### Send message in a conversation with an Agent REST API Endpoint
 
 | Element                          | Tags                                                                                                                                                                                                                                                                                    |
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

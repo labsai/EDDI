@@ -90,7 +90,7 @@ In addition to the built-in Thymeleaf `#strings`, `#numbers`, etc., EDDI provide
 | `#uuidUtils.extractId(locationUri)`      | Extracts the resource ID from an EDDI location URI    |
 | `#uuidUtils.extractVersion(locationUri)` | Extracts the version number from an EDDI location URI |
 
-**`extractId` and `extractVersion`** work with agenth MongoDB ObjectIds (24-char hex) and PostgreSQL UUIDs (36-char with dashes):
+**`extractId` and `extractVersion`** work with both MongoDB ObjectIds (24-char hex) and PostgreSQL UUIDs (36-char with dashes):
 
 ```
 // Input: "http://localhost:7070/behaviorstore/behaviorsets/6740832a2b0f614abcaee7ab?version=1"

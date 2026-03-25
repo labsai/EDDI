@@ -11,7 +11,7 @@ import java.util.List;
  * operations. This is a deliberate design constraint for EU AI Act compliance:
  * once an audit entry is persisted, it must remain unmodifiable.
  * <p>
- * Agenth MongoDB and PostgreSQL implementations enforce insert-only semantics.
+ * both MongoDB and PostgreSQL implementations enforce insert-only semantics.
  *
  * @author ginccc
  * @since 6.0.0

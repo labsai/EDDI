@@ -126,7 +126,7 @@ class NatsConversationCoordinatorTest {
         coordinator.submitInOrder("conv-A", taskA);
         coordinator.submitInOrder("conv-B", taskB);
 
-        // Agenth submitted immediately (different conversations)
+        // both submitted immediately (different conversations)
         verify(runtime).submitCallable(eq(taskA), any(), isNull());
         verify(runtime).submitCallable(eq(taskB), any(), isNull());
 

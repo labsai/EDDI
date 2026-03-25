@@ -1,14 +1,14 @@
-# Creating your first Chatagents
+# Creating your first Agents
 
 _Prerequisites: Up and Running instance of **EDDI** (see:_ [_Getting started_](../getting-started.md)_)_
 
 ## How does it work?
 
-In order to build a Chatagent with **EDDI**, you will have to create a few configuration files and `POST` them to the corresponding REST APIs.
+In order to build an Agent with **EDDI**, you will have to create a few configuration files and `POST` them to the corresponding REST APIs.
 
 ![](<../.gitbook/assets/eddi-tech-overview-2 (2).jpg>)
 
-A chatagent can consists of the following elements:
+A agent can consists of the following elements:
 
 1. (Regular) **`Dictionary`** to define the inputs from the users as well as their meanings in respective categories, expressed by a expression language `e.g. apple -> fruit(apple)`
 2. **`Behavior Rules`** triggering **actions** based on execution of behavior rules checking on certain conditions within the current conversation

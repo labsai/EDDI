@@ -63,7 +63,7 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
         do {
             resourceURI = resourceURIPart + version;
 
-            // Search agenth config URI paths in current + history
+            // Search both config URI paths in current + history
             List<IResourceStore.IResourceId> allIds = new LinkedList<>();
 
             // Search in config.uri field

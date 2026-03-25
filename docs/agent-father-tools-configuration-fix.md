@@ -98,7 +98,7 @@ Updated quick replies to:
 ## Benefits
 
 - ✅ **Configurable tool selection** - Users can choose which tools to enable
-- ✅ **Flexible input** - Supports agenth quick replies and custom JSON input
+- ✅ **Flexible input** - Supports both quick replies and custom JSON input
 - ✅ **Proper separation** - Behavior rules match expressions, property actions set values
 - ✅ **Maintainable** - Easy to add new tool combinations in the future
 - ✅ **Consistent** - Same pattern across all LangChain connector agents

@@ -216,7 +216,7 @@ curl -X POST http://localhost:7070/packagestore/packages \
 
 **Response**: Workflow ID
 
-### 5. Create a Agent
+### 5. Create an Agent
 
 ```bash
 curl -X POST http://localhost:7070/agentstore/agents \
@@ -596,4 +596,4 @@ EDDI's power comes from its **configurable pipeline architecture**:
 - Tasks are pluggable and reusable
 - LLMs are orchestrated, not just proxied
 
-Start simple, then add complexity as needed. The architecture scales from basic chatagents to sophisticated multi-API workflows.
+Start simple, then add complexity as needed. The architecture scales from basic agents to sophisticated multi-API workflows.

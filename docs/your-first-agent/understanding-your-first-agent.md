@@ -4,9 +4,9 @@ description: The components of the generated agents
 
 # Understanding your first agent
 
-The Agent Father generates EDDI specific configuration in order to deploy a agent that utilises the ChatGPT API. EDDI is an middleware and therefore it enables the user to create a structured flow for parsing and manipulating user input, to be used by different chatagent APIs. The generated agents enable you to take the user input and to prepare the input to use the ChatGPT API without the need to have any knowledge of the API. This approach can be used with any chatagent engine. Therefore EDDI becomes the abstraction layer of your agent infrastructure.
+The Agent Father generates EDDI specific configuration in order to deploy an agent that utilises the ChatGPT API. EDDI is an middleware and therefore it enables the user to create a structured flow for parsing and manipulating user input, to be used by different agent APIs. The generated agents enable you to take the user input and to prepare the input to use the ChatGPT API without the need to have any knowledge of the API. This approach can be used with any agent engine. Therefore EDDI becomes the abstraction layer of your agent infrastructure.
 
-In order to see the configuration necessary for a agent, we are going to open the agent manager that can be found on the dashboard.
+In order to see the configuration necessary for an agent, we are going to open the agent manager that can be found on the dashboard.
 
 <figure><img src="../.gitbook/assets/Screenshot 2023-05-06 at 06.26.52.png" alt=""><figcaption><p>EDDI Dashboard with deployed demo agent</p></figcaption></figure>
 

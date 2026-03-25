@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Models are cached by (type, parameters) tuple so that identical configs reuse
  * the same model instance. Thread-safe via ConcurrentHashMap.
  * <p>
- * Supports agenth synchronous ({@link ChatModel}) and streaming
+ * Supports both synchronous ({@link ChatModel}) and streaming
  * ({@link StreamingChatModel}) models with separate caches.
  */
 class ChatModelRegistry {

@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Conversations** are the primary interaction mechanism in EDDI. Each conversation represents a stateful dialog session between a user and a agent, maintaining complete history, context, and state throughout the interaction.
+**Conversations** are the primary interaction mechanism in EDDI. Each conversation represents a stateful dialog session between a user and an agent, maintaining complete history, context, and state throughout the interaction.
 
 ### Key Concepts
 
@@ -34,11 +34,11 @@ Each message sent to a conversation:
 
 ## Working with Conversations
 
-In this section we will explain how to **send/receive messages** from a Chatagent. The first step is creating a `conversation`. Once you have the `conversation` `Id`, you can **send** messages via **`POST`** requests and **receive** responses via **`GET`** requests, while having the capacity to send context information through the body of the **POST** request.
+In this section we will explain how to **send/receive messages** from an Agent. The first step is creating a `conversation`. Once you have the `conversation` `Id`, you can **send** messages via **`POST`** requests and **receive** responses via **`GET`** requests, while having the capacity to send context information through the body of the **POST** request.
 
 ## Creating/initiating a conversation :
 
-### &#x20;Create a Conversation with a Chatagent REST API Endpoint
+### &#x20;Create a Conversation with an Agent REST API Endpoint
 
 | Element           | Tags                                                                                           |
 | ----------------- | ---------------------------------------------------------------------------------------------- |
@@ -260,7 +260,7 @@ In this section we will explain how to **send/receive messages** from a Chatagen
 }
 ```
 
-The `conversationId` will be provided through the **`location`** **HTTP Header** of the response, you will use that later to submit messages to the Chatagent to maintain a conversation.
+The `conversationId` will be provided through the **`location`** **HTTP Header** of the response, you will use that later to submit messages to the Agent to maintain a conversation.
 
 ### Example _:_
 
@@ -295,7 +295,7 @@ _Response Headers_
 
 ### Send a message
 
-### Send message in a conversation with a Chatagent REST API Endpoint
+### Send message in a conversation with an Agent REST API Endpoint
 
 | Element               | Tags                                                                                                                                                                                                                                                                   |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -363,7 +363,7 @@ Response Headers
 
 ### Receive a message
 
-### Receive message in a conversation with a Chatagent REST API Endpoint
+### Receive message in a conversation with an Agent REST API Endpoint
 
 | Element          | Tags                                                                                                         |
 | ---------------- | ------------------------------------------------------------------------------------------------------------ |

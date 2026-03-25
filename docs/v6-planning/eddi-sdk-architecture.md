@@ -465,7 +465,7 @@ jobs:
     <version>6.0.0</version>
 </dependency>
 
-<!-- BOM (manages agenth) -->
+<!-- BOM (manages both) -->
 <dependency>
     <groupId>io.quarkiverse.eddi</groupId>
     <artifactId>quarkus-eddi-bom</artifactId>

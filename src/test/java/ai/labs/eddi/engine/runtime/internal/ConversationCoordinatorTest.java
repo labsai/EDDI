@@ -71,7 +71,7 @@ class ConversationCoordinatorTest {
         coordinator.submitInOrder("conv-1", callable1);
         coordinator.submitInOrder("conv-2", callable2);
 
-        // Then: agenth should be submitted to runtime immediately
+        // Then: both should be submitted to runtime immediately
         verify(runtime, times(2)).submitCallable(any(Callable.class), any(IRuntime.IFinishedExecution.class), any());
     }
 
@@ -125,7 +125,7 @@ class ConversationCoordinatorTest {
     @Test
     @SuppressWarnings("unchecked")
     void submitInOrder_concurrentSubmissions_onlyOneSubmittedToRuntime() throws Exception {
-        // L3 fix test: Concurrent submissions should not agenth be submitted to
+        // L3 fix test: Concurrent submissions should not both be submitted to
         // runtime.
         // We simulate concurrent access by using threads with a latch.
 

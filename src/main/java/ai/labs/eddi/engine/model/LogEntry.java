@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * Immutable log entry captured from the JUL handler with MDC context. Used by
- * agenth the in-memory ring buffer and the DB persistence layer.
+ * both the in-memory ring buffer and the DB persistence layer.
  *
  * @author ginccc
  * @since 6.0.0

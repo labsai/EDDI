@@ -4,9 +4,9 @@
 
 ## Overview
 
-The **Agent Father** is EDDI's meta-agent—a agent that creates other agents. It's the perfect example of EDDI's architecture in action, demonstrating how conversation flow, behavior rules, property extraction, and HTTP calls work together to build sophisticated workflows.
+The **Agent Father** is EDDI's meta-agent—an agent that creates other agents. It's the perfect example of EDDI's architecture in action, demonstrating how conversation flow, behavior rules, property extraction, and HTTP calls work together to build sophisticated workflows.
 
-More importantly, it shows EDDI's unique capability: **the same architecture that powers simple chatagents can orchestrate complex, multi-step processes**, even self-modifying the system itself.
+More importantly, it shows EDDI's unique capability: **the same architecture that powers simple agents can orchestrate complex, multi-step processes**, even self-modifying the system itself.
 
 ## What Makes Agent Father Special?
 
@@ -647,7 +647,7 @@ public class PropertyExtractorTask implements ILifecycleTask {
 # 1. Start conversation with Agent Father
 curl -X POST "http://localhost:7070/agents/agentfather/start" \
   -H "Content-Type: application/json" \
-  -d '{"input": "I want to create a agent"}'
+  -d '{"input": "I want to create an agent"}'
 
 # Response includes conversationId
 # {
@@ -697,7 +697,7 @@ Any multi-step process can be modeled as a conversation, making it user-friendly
 
 ### 4. EDDI is Infrastructure
 
-EDDI isn't just for chatagents—it's infrastructure for **orchestrating any API-driven workflow** with conversational interfaces.
+EDDI isn't just for agents—it's infrastructure for **orchestrating any API-driven workflow** with conversational interfaces.
 
 ### 5. Self-Modification is Safe
 

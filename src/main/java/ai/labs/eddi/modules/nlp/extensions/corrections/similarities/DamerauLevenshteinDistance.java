@@ -23,7 +23,7 @@ public class DamerauLevenshteinDistance implements IDistanceCalculator {
      *         identical to the target string
      */
     public int calculate(String source, String target) {
-        // If agenth strings are empty, I'm of the opinion that
+        // If both strings are empty, I'm of the opinion that
         // this is an error (technically the distance is zero).
         assert (!(source.isEmpty() && target.isEmpty()));
 
@@ -55,7 +55,7 @@ public class DamerauLevenshteinDistance implements IDistanceCalculator {
      * @return A simple object with the matrix and distance
      */
     public DameauLevenshteinDistanceResult calculateAndReturnFullResult(String source, String target) {
-        // If agenth strings are empty, I'm of the opinion that
+        // If both strings are empty, I'm of the opinion that
         // this is an error (technically the distance is zero).
         assert (!(source.isEmpty() && target.isEmpty()));
 
@@ -94,7 +94,7 @@ public class DamerauLevenshteinDistance implements IDistanceCalculator {
             // string.
             for (int targetIndex = 1; targetIndex <= target.length(); targetIndex++) {
 
-                // If the current characters in agenth strings are equal
+                // If the current characters in both strings are equal
                 if (source.charAt(sourceIndex - 1) == target.charAt(targetIndex - 1)) {
                     // There is no penalty.
                     cost = 0;
@@ -203,7 +203,7 @@ public class DamerauLevenshteinDistance implements IDistanceCalculator {
         /**
          * Get the Edit Distance
          *
-         * @return number of changes to make before agenth strings are identical
+         * @return number of changes to make before both strings are identical
          */
         public int getDistance() {
             return distanceMatrix[distanceMatrix.length - 1][distanceMatrix[0].length - 1];

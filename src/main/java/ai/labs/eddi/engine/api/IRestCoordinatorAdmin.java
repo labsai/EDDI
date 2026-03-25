@@ -18,7 +18,7 @@ import java.util.List;
  *
  * <p>
  * Provides status introspection, live SSE event streaming, and dead-letter
- * management for agenth in-memory and NATS coordinators.
+ * management for both in-memory and NATS coordinators.
  * </p>
  *
  * @author ginccc

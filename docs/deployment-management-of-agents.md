@@ -1,4 +1,4 @@
-# Deployment Management of Chatagents
+# Deployment Management of Agents
 
 ## Overview
 
@@ -66,15 +66,15 @@ You can check:
 
 ## Deployment Operations
 
-In this section we will discuss the deployment management of Chatagents, including deployment/undeployment, checking deployment status, and listing all deployed Chatagents.
+In this section we will discuss the deployment management of Agents, including deployment/undeployment, checking deployment status, and listing all deployed Agents.
 
-After all the required resources for the chatagent have been created and configured (**`Dictionary`**, **`Behavior Rules`**, **`Output`**, **`Workflow`**, etc.) and the Chatagent is created through **`POST`** to **`/agentstore/agents`**, deployment management is key to having granular control over deployed agents.
+After all the required resources for the agent have been created and configured (**`Dictionary`**, **`Behavior Rules`**, **`Output`**, **`Workflow`**, etc.) and the Agent is created through **`POST`** to **`/agentstore/agents`**, deployment management is key to having granular control over deployed agents.
 
-## **Deployment of a Chatagent :**
+## **Deployment of an Agent :**
 
-The deployment of a specific chatagent is done through a **`POST`** to **`/administration/{environment}/deploy/{agentId}`**
+The deployment of a specific agent is done through a **`POST`** to **`/administration/{environment}/deploy/{agentId}`**
 
-### Deploy Chatagent REST API Endpoint
+### Deploy Agent REST API Endpoint
 
 | Element       | Value                                                                                    |
 | ------------- | ---------------------------------------------------------------------------------------- |
@@ -110,11 +110,11 @@ _Response Headers:_
 }
 ```
 
-## **Undeployment of a Chatagent**
+## **Undeployment of an Agent**
 
-The undeployment of a specific chatagent is done through a **`POST`** to **`/administration/{environment}/undeploy/{agentId}`**
+The undeployment of a specific agent is done through a **`POST`** to **`/administration/{environment}/undeploy/{agentId}`**
 
-### Undeploy Chatagent REST API Endpoint
+### Undeploy Agent REST API Endpoint
 
 | Element       | Value                                                                                    |
 | ------------- | ---------------------------------------------------------------------------------------- |
@@ -125,7 +125,7 @@ The undeployment of a specific chatagent is done through a **`POST`** to **`/adm
 
 ### Example :
 
-**Undeploy a chatagent**
+**Undeploy an agent**
 
 _Request URL_
 
@@ -153,11 +153,11 @@ _Response Headers_
 }
 ```
 
-## **Check the deployment status of a chatagent:**
+## **Check the deployment status of an agent:**
 
-Check the deployment status of a agent is done through a **`GET`** to **`/administration/{environment}/deploymentstatus/{agentId}`**
+Check the deployment status of an agent is done through a **`GET`** to **`/administration/{environment}/deploymentstatus/{agentId}`**
 
-Deployment status of a Chatagent REST API Endpoint
+Deployment status of an Agent REST API Endpoint
 
 | Element       | Value                                                                                             |
 | ------------- | ------------------------------------------------------------------------------------------------- |
@@ -183,7 +183,7 @@ _Response Code_
 
 _Response Headers_
 
-## **List all deployed Chatagents:**
+## **List all deployed Agents:**
 
 ```javascript
 {
@@ -196,9 +196,9 @@ _Response Headers_
 }
 ```
 
-To list all the deployed Chatagents a `GET` to **`/administration/{environment}/deploymentstore/{agentId}`**:
+To list all the deployed Agents a `GET` to **`/administration/{environment}/deploymentstore/{agentId}`**:
 
-### List of Deployed Chatagents REST API Endpoint
+### List of Deployed Agents REST API Endpoint
 
 | Element      | Value                          |
 | ------------ | ------------------------------ |
@@ -255,7 +255,7 @@ _Response Headers_
 
 ---
 
-## Deleting a Agent
+## Deleting an Agent
 
 ### Simple Delete (Soft-Delete)
 
@@ -279,7 +279,7 @@ DELETE /agentstore/agents/5aaf98e19f7dd421ac3c7de9?version=1&permanent=true
 
 ### Cascade Delete
 
-Deletes the agent **and all its child resources** in one operation. This is the recommended way to fully clean up a agent and avoid orphaned resources.
+Deletes the agent **and all its child resources** in one operation. This is the recommended way to fully clean up an agent and avoid orphaned resources.
 
 ```
 Agent

@@ -20,7 +20,7 @@ import java.time.Duration;
 import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 
 /**
- * PDF reader tool for extracting text from PDF documents. Supports agenth local
+ * PDF reader tool for extracting text from PDF documents. Supports both local
  * files and URLs.
  */
 @ApplicationScoped

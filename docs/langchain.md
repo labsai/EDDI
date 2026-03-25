@@ -553,7 +553,7 @@ The Langchain task configurations can be managed via REST API endpoints.
 
 ## Tool Execution Pipeline
 
-All tool invocations—agenth built-in tools and custom HTTP call tools—are routed through a unified **Tool Execution Service** that applies enterprise-grade controls:
+All tool invocations—both built-in tools and custom HTTP call tools—are routed through a unified **Tool Execution Service** that applies enterprise-grade controls:
 
 ```
 Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool ──▶ Cost Tracker ──▶ Result

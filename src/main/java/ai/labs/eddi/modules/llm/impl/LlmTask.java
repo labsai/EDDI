@@ -38,7 +38,7 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
- * Lifecycle task for LLM interactions — supports agenth legacy chat and agent
+ * Lifecycle task for LLM interactions — supports both legacy chat and agent
  * (tool-calling) modes.
  * <p>
  * This class is a thin orchestrator that delegates to:

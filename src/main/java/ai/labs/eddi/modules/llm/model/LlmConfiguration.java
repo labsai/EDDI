@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Unified configuration for LlmTask supporting agenth legacy and declarative
+ * Unified configuration for LlmTask supporting both legacy and declarative
  * agent modes.
  *
  * <p>
@@ -53,7 +53,7 @@ import java.util.Map;
 public record LlmConfiguration(List<Task> tasks) {
 
     /**
-     * Task configuration supporting agenth simple chat and advanced agent features.
+     * Task configuration supporting both simple chat and advanced agent features.
      * The task automatically switches to agent mode when tools are configured.
      */
     public static class Task {

@@ -19,7 +19,7 @@ This document provides a comprehensive overview of EDDI's architecture, design p
 
 ## Overview
 
-E.D.D.I. (Enhanced Dialog Driven Interface) is a **multi-agent orchestration middleware** for conversational AI systems, not a standalone chatagent or language model. It sits between user-facing applications and multiple AI agents (LLMs like OpenAI, Claude, Gemini, or traditional REST APIs), intelligently routing requests, coordinating responses, and maintaining conversation state across agent interactions.
+E.D.D.I. (Enhanced Dialog Driven Interface) is a **multi-agent orchestration middleware** for conversational AI systems, not a standalone agent or language model. It sits between user-facing applications and multiple AI agents (LLMs like OpenAI, Claude, Gemini, or traditional REST APIs), intelligently routing requests, coordinating responses, and maintaining conversation state across agent interactions.
 
 **Core Purpose**: Orchestrate multiple AI agents and business systems in complex conversational workflows without writing code.
 
@@ -445,7 +445,7 @@ void executeLifecycle(
 
 **Location**: `ai.labs.eddi.configs.packages.model.WorkflowConfiguration`
 
-**Purpose**: Defines the structure of a agent package
+**Purpose**: Defines the structure of an agent package
 
 **Model**:
 
@@ -644,7 +644,7 @@ See the [Security documentation](security.md) for details.
 
 ## Case Study: The "Agent Father"
 
-The **Agent Father** is a meta-agent that demonstrates EDDI's architecture in action. It's a agent that creates other agents.
+The **Agent Father** is a meta-agent that demonstrates EDDI's architecture in action. It's an agent that creates other agents.
 
 > **For a comprehensive, step-by-step walkthrough of Agent Father, see [Agent Father: A Deep Dive](agent-father-deep-dive.md)**
 

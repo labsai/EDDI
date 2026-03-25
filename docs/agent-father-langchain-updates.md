@@ -105,7 +105,7 @@ When built-in tools are enabled, the following tools are available:
 
 ## Example Generated Configuration
 
-When a user creates a agent with tools enabled, the HTTP call will generate a configuration like:
+When a user creates an agent with tools enabled, the HTTP call will generate a configuration like:
 
 ```json
 {

@@ -375,7 +375,7 @@ eddi://ai.labs.parser/parserstore/parsers/PARSER_ID?version=1
 | Type           | EDDI URI                                           | Description                                                                                                                   | Example                                          |
 | -------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
 | Integer        | `eddi://ai.labs.parser.dictionaries.integer`       | Matches positive integers                                                                                                     | `"42"` → `number(42)`                            |
-| Decimal        | `eddi://ai.labs.parser.dictionaries.decimal`       | Matches decimal numbers (agenth `.` and `,` separators)                                                                       | `"3.14"` → `decimal(3.14)`                       |
+| Decimal        | `eddi://ai.labs.parser.dictionaries.decimal`       | Matches decimal numbers (both `.` and `,` separators)                                                                       | `"3.14"` → `decimal(3.14)`                       |
 | Punctuation    | `eddi://ai.labs.parser.dictionaries.punctuation`   | Matches common punctuation: `!` (exclamation_mark), `?` (question_mark), `.` (dot), `,` (comma), `:` (colon), `;` (semicolon) | `"!"` → `punctuation(exclamation_mark)`          |
 | Email          | `eddi://ai.labs.parser.dictionaries.email`         | Matches email addresses                                                                                                       | `"user@example.com"` → `email(user@example.com)` |
 | Time           | `eddi://ai.labs.parser.dictionaries.time`          | Matches time formats: 01:20, 01h20, 22:40, 13:43:23                                                                           | `"3pm"` → `time(15:00)`                          |
@@ -393,7 +393,7 @@ eddi://ai.labs.parser/parserstore/parsers/PARSER_ID?version=1
 
 ## Testing the Pattern Matcher
 
-Once you've created agenth dictionary and parser, you can test it standalone.
+Once you've created both dictionary and parser, you can test it standalone.
 
 Make a `POST` request to `/parser/{PARSER_ID}?version={VERSION}` with plain text in the body:
 

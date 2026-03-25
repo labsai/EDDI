@@ -38,7 +38,7 @@ private final Map<Deployment.Environment, ConcurrentHashMap<AgentId, IAgent>> en
 
 **Problems:**
 
-- **No cross-instance sync**: If instance A deploys a agent, instance B doesn't know about it
+- **No cross-instance sync**: If instance A deploys an agent, instance B doesn't know about it
 - **Cold-start penalty**: All agents must be re-deployed after every restart
 - ~~**No hot-swap**~~: ✅ _Already handled_ — Multiple versions run in parallel. New conversations start with the newest version, allowing graceful transitions for breaking changes within ongoing conversations.
 
@@ -195,7 +195,7 @@ MCP Client (IDE, Claude Desktop, etc.)
        └── Resource: "conversation://convId/memory" → conversation state
 ```
 
-**Implementation:** Use the [MCP Java SDK](https://github.com/modelcontextprotocol/java-sdk) to build an `McpServer` that wraps the existing `ConversationService` (after extracting it from `RestAgentEngine`). Support agenth Stdio transport (for IDE plugins) and SSE transport (for web clients).
+**Implementation:** Use the [MCP Java SDK](https://github.com/modelcontextprotocol/java-sdk) to build an `McpServer` that wraps the existing `ConversationService` (after extracting it from `RestAgentEngine`). Support both Stdio transport (for IDE plugins) and SSE transport (for web clients).
 
 ### 2.2 Agents Consuming MCP — Using External Tools via MCP
 
@@ -300,7 +300,7 @@ Round 1:
 Round 2 (each reads others' Round 1 output):
   ├── Architecture Expert → "Acknowledging DevOps concerns, I suggest..."
   ├── DevOps Expert → "Architecture Expert makes a good point about..."
-  └── Business Expert → "Given agenth perspectives, the ROI calculation..."
+  └── Business Expert → "Given both perspectives, the ROI calculation..."
 
 Final: Moderator Agent → Synthesized consensus opinion
 ```
@@ -382,7 +382,7 @@ Client → REST API → Message Queue (Kafka/RabbitMQ) → Worker Instances → 
 - **No relational integrity**: Agent → Workflow → Extension relationships are maintained by application code, not DB constraints
 - **Schema evolution**: 25KB `MigrationManager.java` suggests frequent painful migrations
 - **Query limitations**: Aggregation on conversation analytics is cumbersome in MongoDB
-- **Scaling**: Single database for agenth config (read-heavy) and conversations (write-heavy)
+- **Scaling**: Single database for both config (read-heavy) and conversations (write-heavy)
 
 ### v6 Proposed Database Architecture
 
@@ -403,7 +403,7 @@ Client → REST API → Message Queue (Kafka/RabbitMQ) → Worker Instances → 
 
 ### Current UX Problems (Beyond Tech Stack)
 
-1. **Dashboard is just a agent list** — No status overview, no metrics, no recent activity, no at-a-glance health
+1. **Dashboard is just an agent list** — No status overview, no metrics, no recent activity, no at-a-glance health
 2. **Configuration editing = raw JSON** — Users must understand the JSON schema to configure agents. No visual guidance, no validation feedback.
 3. **Modal-heavy workflow** — 61 modal component files (`ModalComponent/`). Every action opens a modal. Modals stack. Context is lost.
 4. **No visual flow** — The lifecycle pipeline is invisible. Users can't see how Parser → Rules → LLM → Output connects.
@@ -720,7 +720,7 @@ Step-by-step wizard for new users:
 | 4   | PostgreSQL migration                  | **DB-agnostic architecture** (Abstract Repository pattern) — admin chooses DB via config. Implement PostgreSQL as primary new backend, keep MongoDB supported | User prefers full migration or admin choice                       |
 | 5   | Manager rewrite                       | Decision pending — but critical security upgrades needed immediately (keycloak-js, tslint removal)                                                            |                                                                   |
 | 6   | NLP module/expressions                | **Option C: Hybrid** — keep parser for guided flows, add LLM-based intent for agents, simplify syntax for new users                                           | User confirmed after deep-dive                                    |
-| 7   | Persistent memory                     | Decision pending                                                                                                                                              | Agenth per-user and per-user-per-agent valid                      |
+| 7   | Persistent memory                     | Decision pending                                                                                                                                              | both per-user and per-user-per-agent valid                      |
 | 8   | Multi-channel                         | **Separate services** for each channel adapter                                                                                                                | User preference                                                   |
 | 9   | Self-improvement                      | Decision pending                                                                                                                                              |                                                                   |
 | 10  | Agent Father                          | Decision pending                                                                                                                                              |                                                                   |
@@ -1375,7 +1375,7 @@ AI Agent makes code change
 | **OGNL**      | 3.3.4         | 4 files (explicit) + **Thymeleaf internally** | 6 explicit + all `${}` expressions | Deep object nav + Thymeleaf's expression engine                                                       |
 
 > [!WARNING]
-> **OGNL 3.3.4 is affected by [CVE-2025-53192](https://github.com/thymeleaf/thymeleaf/issues/1051).** Thymeleaf uses OGNL internally for all `${}` expression evaluation (unless using Spring/SpEL). This means **every Thymeleaf template in EDDI is evaluated through OGNL 3.3.4**. However, Thymeleaf 3.1.3 (latest) AND 3.1.4-SNAPSHOT agenth **pin** `<ognl.version>3.3.4</ognl.version>` — upgrading OGNL independently would break Thymeleaf due to API changes in OGNL 3.4.x. [thymeleaf#1058](https://github.com/thymeleaf/thymeleaf/issues/1058) tracks this.
+> **OGNL 3.3.4 is affected by [CVE-2025-53192](https://github.com/thymeleaf/thymeleaf/issues/1051).** Thymeleaf uses OGNL internally for all `${}` expression evaluation (unless using Spring/SpEL). This means **every Thymeleaf template in EDDI is evaluated through OGNL 3.3.4**. However, Thymeleaf 3.1.3 (latest) AND 3.1.4-SNAPSHOT both **pin** `<ognl.version>3.3.4</ognl.version>` — upgrading OGNL independently would break Thymeleaf due to API changes in OGNL 3.4.x. [thymeleaf#1058](https://github.com/thymeleaf/thymeleaf/issues/1058) tracks this.
 
 **Two separate OGNL concerns:**
 
@@ -1458,7 +1458,7 @@ Problems:
 | -------------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Thymeleaf** (`ITemplatingEngine`)    | ✅ **KEEP**                         | Well-abstracted interface. `${...}` syntax is intuitive. Custom dialects add value. Best-in-class for text templating in Java.                                                                                                                                                               |
 | **Thymeleaf custom dialects**          | ✅ **KEEP**                         | UUID, JSON, Encoder are useful utilities.                                                                                                                                                                                                                                                    |
-| **OGNL (Thymeleaf internal)**          | ⚠️ **BLOCKED on Thymeleaf**         | Thymeleaf 3.1.3 AND 3.1.4-SNAPSHOT agenth pin `<ognl.version>3.3.4</ognl.version>`. OGNL 3.4.x changed API. [thymeleaf#1058](https://github.com/thymeleaf/thymeleaf/issues/1058) is open, "needs triage". Cannot upgrade independently. Thymeleaf 3.1's production mode partially mitigates. |
+| **OGNL (Thymeleaf internal)**          | ⚠️ **BLOCKED on Thymeleaf**         | Thymeleaf 3.1.3 AND 3.1.4-SNAPSHOT both pin `<ognl.version>3.3.4</ognl.version>`. OGNL 3.4.x changed API. [thymeleaf#1058](https://github.com/thymeleaf/thymeleaf/issues/1058) is open, "needs triage". Cannot upgrade independently. Thymeleaf 3.1's production mode partially mitigates. |
 | **OGNL (6 explicit call sites)**       | 🔴 **REPLACE** with `PathNavigator` | These bypass Thymeleaf's production mode. Only 6 calls = easy migration.                                                                                                                                                                                                                     |
 | **`PrePostUtils.buildListFromJson()`** | 🟡 **REFACTOR**                     | Replace Thymeleaf `th:each` JSON building with Java Stream API + Jackson. Keep the same abstract contract.                                                                                                                                                                                   |
 | **`pom.xml` OGNL dependency**          | ⚠️ **Monitor thymeleaf#1058**       | Can't upgrade to 3.4.x without Thymeleaf support. Keep at 3.3.4 until Thymeleaf releases a fix. Restricted mode mitigates risk.                                                                                                                                                              |
@@ -1823,7 +1823,7 @@ This is the **most powerful screen** in the Manager. Clicking a conversation row
 - Redux-Saga for async flows is well-organized
 - `ConversationHelper` utility centralizes data extraction logic
 - Color-coded execution times in debugger (`getTimeColor()` < 500ms/1s/2s thresholds)
-- Chat supports agenth quick replies and free-text input seamlessly
+- Chat supports both quick replies and free-text input seamlessly
 
 **Technical debt:**
 
@@ -2215,9 +2215,9 @@ EDDI has a `docs/` directory with **40 markdown files** covering:
 | **Architecture**      | `architecture.md`, `conversation-memory.md`, `extensions.md`, `tasks.md`                                                  | System design, memory model, lifecycle tasks |
 | **Agent Development** | `behavior-rules.md`, `httpcalls.md`, `output-configuration.md`, `output-templating.md`, `langchain.md`                    | How to write agent configs                   |
 | **Agent Father**      | `agent-father-deep-dive.md`, `agent-father-conversation-flow.md`, `agent-father-langchain-tools-guide.md`, etc. (6 files) | Agent Father internals and guides            |
-| **Getting Started**   | `getting-started.md`, `developer-quickstart.md`, `creating-your-first-chatagent/` (3 files)                               | Onboarding                                   |
-| **Operations**        | `docker.md`, `security.md`, `metrics.md`, `deployment-management-of-chatagents.md`, `redhat-openshift.md`                 | Deployment & ops                             |
-| **Reference**         | `semantic-parser.md`, `passing-context-information.md`, `managed-agents.md`, `import-export-a-chatagent.md`               | Specific features                            |
+| **Getting Started**   | `getting-started.md`, `developer-quickstart.md`, `creating-your-first-agent/` (3 files)                               | Onboarding                                   |
+| **Operations**        | `docker.md`, `security.md`, `metrics.md`, `deployment-management-of-agents.md`, `redhat-openshift.md`                 | Deployment & ops                             |
+| **Reference**         | `semantic-parser.md`, `passing-context-information.md`, `managed-agents.md`, `import-export-a-agent.md`               | Specific features                            |
 | **Git**               | `git-commit-guide.md`                                                                                                     | Commit conventions                           |
 | **API**               | Swagger/OpenAPI at `/q/swagger-ui`                                                                                        | Auto-generated from JAX-RS                   |
 

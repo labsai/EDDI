@@ -24,7 +24,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `read_conversation`     | Read conversation history, memory, and quick replies                                                                        |
 | `read_conversation_log` | Read conversation log as formatted text                                                                                     |
 | `list_conversations`    | List all conversations for a specific agent                                                                                 |
-| `get_agent`             | Get a agent's full configuration (packages, name, description)                                                              |
+| `get_agent`             | Get an agent's full configuration (packages, name, description)                                                              |
 | `discover_agents`       | Discover deployed agents enriched with intent mappings from agent triggers. Best way to find agents by purpose              |
 | `chat_managed`          | Send a message using intent-based managed conversations (one conversation per intent+userId, auto-creates on first message) |
 
@@ -32,19 +32,19 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 
 | Tool                    | Description                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------- |
-| `deploy_agent`          | Deploy a agent version to an environment                                        |
-| `undeploy_agent`        | Undeploy a agent from an environment                                            |
+| `deploy_agent`          | Deploy an agent version to an environment                                        |
+| `undeploy_agent`        | Undeploy an agent from an environment                                            |
 | `get_deployment_status` | Get deployment status of a specific agent version                               |
 | `list_workflows`        | List all packages (pipeline configurations)                                     |
 | `create_agent`          | Create a new agent                                                              |
-| `delete_agent`          | Delete a agent (with optional cascade)                                          |
-| `update_agent`          | Update a agent's name/description and optionally redeploy                       |
+| `delete_agent`          | Delete an agent (with optional cascade)                                          |
+| `update_agent`          | Update an agent's name/description and optionally redeploy                       |
 | `read_workflow`         | Read a package's full pipeline configuration                                    |
 | `read_resource`         | Read any resource config by type (behavior, langchain, httpcalls, output, etc.) |
 | `list_agent_triggers`   | List all agent triggers (intent→agent mappings) for managed conversations       |
-| `create_agent_trigger`  | Create a agent trigger mapping an intent to one or more agent deployments       |
+| `create_agent_trigger`  | Create an agent trigger mapping an intent to one or more agent deployments       |
 | `update_agent_trigger`  | Update an existing agent trigger                                                |
-| `delete_agent_trigger`  | Delete a agent trigger for a given intent                                       |
+| `delete_agent_trigger`  | Delete an agent trigger for a given intent                                       |
 
 ### Resource CRUD Tools (5)
 
@@ -68,7 +68,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | Tool               | Description                                                                                                                                                                                                                                         |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `setup_agent`      | Create a fully working agent in one call: creates behavior rules, LangChain config, optional output/greeting, package, agent, and deploys. Supports built-in tools, quick replies, and sentiment analysis. Default: `anthropic`/`claude-sonnet-4-6` |
-| `create_api_agent` | Create a agent from an OpenAPI 3.0/3.1 spec. Parses the spec, generates HttpCalls configs (grouped by API tag), creates the full pipeline, and deploys. Supports endpoint filtering, base URL override, and auth header propagation                 |
+| `create_api_agent` | Create an agent from an OpenAPI 3.0/3.1 spec. Parses the spec, generates HttpCalls configs (grouped by API tag), creates the full pipeline, and deploys. Supports endpoint filtering, base URL override, and auth header propagation                 |
 
 ### Schedule Management Tools (6)
 
@@ -147,7 +147,7 @@ Add to `claude_desktop_config.json`:
 3. apply_agent_changes(agentId, agentVersion, [{oldUri: "...?version=1", newUri: "...?version=2"}], redeploy: true)
 ```
 
-### Debugging a Agent
+### Debugging an Agent
 
 ```
 1. read_agent_logs(agentId: "my-agent") → see pipeline errors, LLM timeouts
@@ -233,15 +233,15 @@ Discover deployed agents with their capabilities. Returns an enriched list of de
 
 ### `chat_managed`
 
-Send a message to a agent using **intent-based managed conversations**. Unlike `chat_with_agent` (which requires a agentId and creates multiple conversations), this tool uses an _intent_ to find the right agent and maintains **exactly one conversation per intent+userId** — like a single chat window.
+Send a message to an agent using **intent-based managed conversations**. Unlike `chat_with_agent` (which requires a agentId and creates multiple conversations), this tool uses an _intent_ to find the right agent and maintains **exactly one conversation per intent+userId** — like a single chat window.
 
-The conversation is auto-created on first message and reused on subsequent calls. Requires a agent trigger to be configured for the intent (see `list_agent_triggers` / `create_agent_trigger`).
+The conversation is auto-created on first message and reused on subsequent calls. Requires an agent trigger to be configured for the intent (see `list_agent_triggers` / `create_agent_trigger`).
 
 **Parameters:**
 
 | Parameter     | Type   | Required | Description                                                              |
 | ------------- | ------ | -------- | ------------------------------------------------------------------------ |
-| `intent`      | string | **Yes**  | Intent that maps to a agent trigger. E.g. `"customer_support"`           |
+| `intent`      | string | **Yes**  | Intent that maps to an agent trigger. E.g. `"customer_support"`           |
 | `userId`      | string | **Yes**  | User ID for conversation management (one conversation per intent+userId) |
 | `message`     | string | **Yes**  | The user message to send                                                 |
 | `environment` | string | No       | Environment: `production` (default), `production`, or `test`             |
@@ -306,7 +306,7 @@ List all agent triggers (intent→agent mappings). Returns all configured intent
 
 ### `create_agent_trigger`
 
-Create a agent trigger that maps an intent to one or more agents. Once created, the intent can be used with `chat_managed` to talk to the agent.
+Create an agent trigger that maps an intent to one or more agents. Once created, the intent can be used with `chat_managed` to talk to the agent.
 
 **Parameters:**
 
@@ -368,7 +368,7 @@ Update an existing agent trigger. Changes the agent deployments for a given inte
 
 ### `delete_agent_trigger`
 
-Delete a agent trigger for a given intent. After deletion, `chat_managed` calls with this intent will return an error. Existing conversations are **not** deleted — they become orphaned but can still be read.
+Delete an agent trigger for a given intent. After deletion, `chat_managed` calls with this intent will return an error. Existing conversations are **not** deleted — they become orphaned but can still be read.
 
 **Parameters:**
 
@@ -387,7 +387,7 @@ Delete a agent trigger for a given intent. After deletion, `chat_managed` calls 
 ### End-to-End Example: Setting Up Managed Chat
 
 ```
-# 1. Create a agent (using setup_agent or the Manager UI)
+# 1. Create an agent (using setup_agent or the Manager UI)
 setup_agent(name: "Support Agent", systemPrompt: "You are a helpful support agent...", ...)
 → { agentId: "abc123", version: 1, status: "deployed" }
 

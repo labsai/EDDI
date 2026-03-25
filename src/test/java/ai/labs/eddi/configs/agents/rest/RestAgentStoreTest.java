@@ -115,7 +115,7 @@ class RestAgentStoreTest {
             config.setWorkflows(new ArrayList<>(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID + "?version=1"),
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG2_ID + "?version=1"))));
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
-            // Agenth packages only referenced by this agent
+            // both packages only referenced by this agent
             when(AgentStore.getAgentDescriptorsContainingWorkflow(anyString(), anyInt(), eq(false))).thenReturn(List.of(dummyDescriptor()));
             when(restWorkflowStore.deleteWorkflow(PKG1_ID, 1, true, true)).thenThrow(new RuntimeException("Workflow in use"));
             when(restWorkflowStore.deleteWorkflow(PKG2_ID, 1, true, true)).thenReturn(Response.ok().build());

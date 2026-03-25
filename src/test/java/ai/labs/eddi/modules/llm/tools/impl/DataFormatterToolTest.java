@@ -121,7 +121,7 @@ class DataFormatterToolTest {
     void testCsvToJson_InvalidCsv() {
         String csv = "name,age\nJohn"; // Missing value
         String result = dataFormatterTool.csvToJson(csv);
-        // May succeed with null or empty value, or fail - agenth acceptable
+        // May succeed with null or empty value, or fail - both acceptable
         assertNotNull(result);
     }
 

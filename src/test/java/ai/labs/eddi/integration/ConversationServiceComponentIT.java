@@ -131,11 +131,11 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
         ResourceId conv1 = createConversation(agentResourceId.id(), user1);
         ResourceId conv2 = createConversation(agentResourceId.id(), user2);
 
-        // Send input to agenth conversations
+        // Send input to both conversations
         Response response1 = sendUserInput(agentResourceId.id(), conv1.id(), "hello", false, false);
         Response response2 = sendUserInput(agentResourceId.id(), conv2.id(), "hello", false, false);
 
-        // Agenth conversations should be in READY state and contain the input
+        // both conversations should be in READY state and contain the input
         response1.then().statusCode(200).body("conversationState", equalTo("READY"));
         response2.then().statusCode(200).body("conversationState", equalTo("READY"));
     }

@@ -1,4 +1,4 @@
-# Create a agent that reacts to user inputs
+# Create an agent that reacts to user inputs
 
 _Prerequisites: Up and Running instance of **EDDI** (see:_ [_Getting started_](../getting-started.md)_)_
 
@@ -524,7 +524,7 @@ Example
 
 > See also the API documentation at [http://localhost:7070/view#!/configurations/createWorkflow](http://localhost:7070/view#!/configurations/createWorkflow)
 
-### 5. Creating a Agent
+### 5. Creating an Agent
 
 Make a **`POST`** to **`/agentstore/agents`** with a JSON like this:
 
@@ -597,7 +597,7 @@ Otherwise via REST:
 2. The output from the agent will be returned as JSON
 3. If you are interested in fetching the **`conversationmemory`** at any given time, make a **`GET`** to `/agents/`**`<UNIQUE_AGENT_ID>`**/start`/`**`<UNIQUE_CONVERSATION_ID>`**`?returnDetailed=true` (the query param is optional, default is false)
 
-> If you made it till here, CONGRATULATIONS, you have created your first Chatagent with **EDDI** !
+> If you made it till here, CONGRATULATIONS, you have created your first Agent with **EDDI** !
 
 By the way you can use the attached **postman collection** below to do all of the steps mentioned above by clicking send on each request in postman.
 
@@ -610,7 +610,7 @@ By the way you can use the attached **postman collection** below to do all of th
 7. Create conversation
 8. Say Hello to the agent
 
-{% file src="../.gitbook/assets/Creating and chatting with a agent.postman_collection.json" %}
+{% file src="../.gitbook/assets/Creating and chatting with an agent.postman_collection.json" %}
 Example to download
 {% endfile %}
 

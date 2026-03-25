@@ -49,7 +49,7 @@ eddi://ai.labs.behavior/behaviorstore/behaviorsets/673abc123?version=1
 
 In this article we will talk about **EDDI**'s **`extensions`**.
 
-**EDDI's `extensions`** are the features that your current instance of EDDI is supporting, the latter are used in the process of configuring/developing a Chatagent.
+**EDDI's `extensions`** are the features that your current instance of EDDI is supporting, the latter are used in the process of configuring/developing an Agent.
 
 The list of `extensions` will allow you to have an overview of what is enabled in your current instance of **EDDI**, the list can be retrieved by calling the API endpoint below.
 
@@ -84,7 +84,7 @@ The list of `extensions` will allow you to have an overview of what is enabled i
 
 ## Example
 
-> More about regular dictionaries can be found [here](creating-your-first-chatagent/#1-creating-a-regular-dictionary).
+> More about regular dictionaries can be found [here](creating-your-first-agent/#1-creating-a-regular-dictionary).
 
 _Request URL_
 

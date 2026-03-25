@@ -124,8 +124,8 @@ class NatsConversationCoordinatorIT {
             return null;
         });
 
-        assertTrue(agenthDone.await(10, TimeUnit.SECONDS), "Agenth conversations should complete");
-        assertEquals(2, startOrder.size(), "Agenth tasks should have started");
+        assertTrue(agenthDone.await(10, TimeUnit.SECONDS), "both conversations should complete");
+        assertEquals(2, startOrder.size(), "both tasks should have started");
     }
 
     @Test

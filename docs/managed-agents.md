@@ -16,7 +16,7 @@
 
 **With Managed Agents** (automatic approach):
 
-1. You define a agent trigger with an intent keyword
+1. You define an agent trigger with an intent keyword
 2. Your app sends: `POST /agents/managed/weather_help/user123`
 3. EDDI automatically:
    - Creates conversation (if none exists for this user/intent)
@@ -79,7 +79,7 @@
 
 This feature allows you to take advantage of **EDDI**'s automatic management of agents. It is possible to avoid creating conversations and managing them yourself—let EDDI handle it.
 
-This acts as a shortcut to directly start a conversation with a agent that covers a specific **intent**.
+This acts as a shortcut to directly start a conversation with an agent that covers a specific **intent**.
 
 First, you need to set up a `AgentTrigger`.
 
@@ -153,7 +153,7 @@ To trigger a managed agent you will have to call the following API endpoints.
 
 ### Example _:_
 
-#### 1/Create a AgentTrigger
+#### 1/Create an AgentTrigger
 
 _Request URL:_
 

@@ -19,7 +19,7 @@ Each component is a **separate configuration** that's **combined into packages**
 
 ## Real-World Example: Hotel Booking Agent
 
-Let's build a agent that helps users book hotel rooms. It will:
+Let's build an agent that helps users book hotel rooms. It will:
 
 1. Greet users
 2. Ask for city and dates

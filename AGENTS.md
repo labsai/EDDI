@@ -354,7 +354,7 @@ When implementing a new feature, provide:
    - `*Store.java` (MongoDB implementation)
    - `IRest*Store.java` (JAX-RS interface)
    - `Rest*Store.java` (JAX-RS implementation)
-3. **Sample JSON config** showing how a agent developer uses the feature
+3. **Sample JSON config** showing how an agent developer uses the feature
 4. **Unit test** (`@QuarkusTest`, Mockito mocks, verify memory reads/writes)
 
 ### 4.7 Best Practices & Common Pitfalls

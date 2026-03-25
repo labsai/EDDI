@@ -29,7 +29,7 @@ When a Behavior Rule matches, it triggers **actions**. The Output Configuration 
 
 ## Configuration Structure
 
-`Output Configurations` contain prepared sentences that the Chatagent replies to the user (depending on the `actions` coming from the `Behavior Rules`).
+`Output Configurations` contain prepared sentences that the Agent replies to the user (depending on the `actions` coming from the `Behavior Rules`).
 
 Simple Output Configuration looks like this:
 

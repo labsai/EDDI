@@ -15,7 +15,7 @@ Developed in Java using Quarkus, it is lean, RESTful, scalable, and cloud-native
 It comes as Docker container and can be orchestrated with Kubernetes or Openshift.
 The Docker image has been certified by IBM/Red Hat.
 
-Latest stable version: 5.6.0
+Latest version: 6.0.0
 
 License: Apache License 2.0
 
@@ -76,7 +76,7 @@ The `--local` flag includes `docker-compose.local.yml` as a compose overlay, whi
 
 ## Overview
 
-E.D.D.I is a high performance **middleware orchestration service** for conversational AI. Unlike standalone chatagents or LLMs,
+E.D.D.I is a high performance **middleware orchestration service** for conversational AI. Unlike standalone agents or LLMs,
 EDDI acts as an intelligent layer between your application and backend AI services (OpenAI, Claude, Gemini, etc.),
 providing sophisticated conversation management, configurable behavior rules, and API orchestration.
 
@@ -87,7 +87,7 @@ rather than hard-coded logic.
 
 Key architectural features:
 
-- **Middleware, Not a Chatagent**: EDDI orchestrates between users, business logic, APIs, and LLM services
+- **Middleware, Not a Chatbot**: EDDI orchestrates between users, business logic, APIs, and LLM services
 - **Lifecycle Pipeline**: Configurable, sequential processing pipeline (Input → Parsing → Rules → API/LLM → Output)
 - **Composable Agents**: Agents are assembled from reusable packages and extensions
 - **Stateful Conversations**: Complete conversation history maintained in `IConversationMemory`
@@ -101,7 +101,7 @@ Notable features include:
 - **Seamless integration with conversational or traditional REST APIs**
 - **Configurable Behavior Rules**: Complex IF-THEN logic to orchestrate LLM involvement and business logic
 - **Composable Agent Model**: Agents assembled from version-controlled packages and extensions (Agent → Workflow → Extension)
-- **Multiple Agent Support**: Run multiple chatagents and versions concurrently with smooth transitions
+- **Multiple Agent Support**: Run multiple agents and versions concurrently with smooth transitions
 - **Major AI API integrations** via langchain4j: OpenAI, Hugging Face (text only), Claude, Gemini, Ollama, Jlama
 
 ## Documentation
@@ -148,7 +148,7 @@ See [HTTP Calls](docs/httpcalls.md) for configuration details.
 
 ### Tool Execution Pipeline
 
-All tool invocations (agenth built-in and HTTP call tools) are routed through a unified **Tool Execution Service** that provides:
+All tool invocations (both built-in and HTTP call tools) are routed through a unified **Tool Execution Service** that provides:
 
 - **Rate Limiting** — Configurable per-tool token-bucket rate limits to prevent API abuse
 - **Smart Caching** — Deduplicates identical calls with configurable TTL

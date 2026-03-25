@@ -25,8 +25,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Tests for {@link ChatModelRegistry} — agenth sync and streaming model
- * caching.
+ * Tests for {@link ChatModelRegistry} — both sync and streaming model caching.
  */
 class ChatModelRegistryTest {
 
@@ -228,7 +227,7 @@ class ChatModelRegistryTest {
             params2.put("logRequests", "true");
             ChatModel second = registry.getOrCreate("openai", params2);
 
-            // Agenth should be cached under the same key (observability params filtered
+            // both should be cached under the same key (observability params filtered
             // out)
             // The first cached model (unwrapped) is returned since it was cached first
             assertSame(first, second, "Observability params should be excluded from cache key");

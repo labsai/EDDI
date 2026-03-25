@@ -4,7 +4,7 @@
 
 > Documentation in progress
 
-The agent manager is a friendly Graphical user interface that help **EDDI**'s agent developers to deploy, chat, edit agents packages and also update a agent if an updated package is available!
+The agent manager is a friendly Graphical user interface that help **EDDI**'s agent developers to deploy, chat, edit agents packages and also update an agent if an updated package is available!
 
 ## Access to the agent manager:
 
@@ -17,8 +17,8 @@ You can access to agent manager via:
 ![](<.gitbook/assets/2-main-list (1).jpg>)
 
 1. Allows you to log out from the agent manager and redirects you to login page.
-2. This is the **agents view** where you can see the list of all agents agenth deployed and non deployed agents.
-3. You can use the text box next t o this label to enter your search criteria such as a agent name .
+2. This is the **agents view** where you can see the list of all agents both deployed and non deployed agents.
+3. You can use the text box next t o this label to enter your search criteria such as an agent name .
 4. This is the list of all agents in this image example for brevity we showed only one agent, but most likely you will find a lot of agents (deployed and non deployed).
 5. Name of the agent.
 6. Version of that agent that it is deployed.

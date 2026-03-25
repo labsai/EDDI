@@ -27,7 +27,7 @@ EDDI's competitive moat is structural, not feature-based. It emerges from the co
 
 > _"Agent behavior belongs in JSON configurations. Java code builds the components that read and execute those configurations."_
 
-**The Principle:** EDDI is a **config-driven engine**, not a monolithic application. The intelligence of a agent — its routing rules, API calls, LLM prompts, output templates — is defined entirely in versioned JSON documents. Java code provides the **infrastructure components** (`ILifecycleTask`, `IResourceStore`, tools) that the engine uses to interpret and execute those configurations at runtime. No agent-specific logic may ever be hardcoded in Java.
+**The Principle:** EDDI is a **config-driven engine**, not a monolithic application. The intelligence of an agent — its routing rules, API calls, LLM prompts, output templates — is defined entirely in versioned JSON documents. Java code provides the **infrastructure components** (`ILifecycleTask`, `IResourceStore`, tools) that the engine uses to interpret and execute those configurations at runtime. No agent-specific logic may ever be hardcoded in Java.
 
 **Why This Matters:** Competitors that embed logic in code (Python scripts, JavaScript eval blocks) suffer from:
 
@@ -161,10 +161,10 @@ New Feature Idea -> Configuration POJO -> IResourceStore -> REST API
 
 **The Principle:** The Manager UI must serve two audiences simultaneously:
 
-- **Business users** who want to configure a agent via visual forms, drag-and-drop pipelines, and guided wizards
+- **Business users** who want to configure an agent via visual forms, drag-and-drop pipelines, and guided wizards
 - **Power users** who want raw JSON editing with Monaco, schema validation, and autocomplete
 
-Agenth views are **identical state representations**. Editing the form updates the JSON; editing the JSON updates the form. Neither view is "advanced" — they are complementary perspectives on the same configuration.
+both views are **identical state representations**. Editing the form updates the JSON; editing the JSON updates the form. Neither view is "advanced" — they are complementary perspectives on the same configuration.
 
 **UX Mandates:**
 

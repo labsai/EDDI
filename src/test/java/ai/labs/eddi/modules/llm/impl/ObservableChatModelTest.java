@@ -236,7 +236,7 @@ class ObservableChatModelTest {
             var request = ChatRequest.builder().messages(List.of(UserMessage.from("Hi"))).build();
             when(delegate.chat(request)).thenReturn(MOCK_RESPONSE);
 
-            // Agenth timeout and logging
+            // both timeout and logging
             ChatModel wrapped = ObservableChatModel.wrapIfNeeded(delegate, "vertex-ai", "10000", "true", "true");
             ChatResponse response = wrapped.chat(request);
 

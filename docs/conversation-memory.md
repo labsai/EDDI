@@ -11,7 +11,7 @@
 Think of Conversation Memory as a **living document** that captures everything about a conversation:
 
 - **Who**: User ID and agent ID
-- **What**: All messages exchanged (agenth user inputs and agent outputs)
+- **What**: All messages exchanged (both user inputs and agent outputs)
 - **When**: Timestamp of each interaction
 - **Context**: Data passed from external systems (user profile, session info, etc.)
 - **State**: Current processing stage (READY, IN_PROGRESS, ENDED, etc.)

@@ -38,7 +38,7 @@ Typically, Behavior Rules decide **when** to make an API call by triggering an a
 
 In this article we will talk about EDDI's **`httpCalls`** **feature** (calling other `JSON` APIs).
 
-The **`httpCalls`** feature allows a **Chatagent** to consume **3rd** party APIs and use the `JSON` response in another **`httpCall`** (for **authentication** or requesting a token for instance) or directly print the results in Chatagent's `Output,` this means, for example, you can call a weather API and use the `JSON` response in your Chatagent's output if the user asks about today's weather or the week's forecast!
+The **`httpCalls`** feature allows a **Agent** to consume **3rd** party APIs and use the `JSON` response in another **`httpCall`** (for **authentication** or requesting a token for instance) or directly print the results in Agent's `Output,` this means, for example, you can call a weather API and use the `JSON` response in your Agent's output if the user asks about today's weather or the week's forecast!
 
 We will emphasize the `httpCall` model and go through an example step by step, you can also download the example in **Postman** collection format and run the steps.
 
@@ -235,13 +235,13 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
 
 ## Step by step example
 
-We will do a step by step example from scratch (**Chatagent** creation to a simple conversation that uses `httpCall`)
+We will do a step by step example from scratch (**Agent** creation to a simple conversation that uses `httpCall`)
 
 For the sake of simplicity we will use a free weather API to fetch weather of cities by their names ([api.openweathermap.org](http://api.openweathermap.org/)).
 
 ### 1 - Create regularDictionnary
 
-> More about regular dictionaries can be found [here](creating-your-first-chatagent/#1-creating-a-regular-dictionary).
+> More about regular dictionaries can be found [here](creating-your-first-agent/#1-creating-a-regular-dictionary).
 
 _Request URL_
 
@@ -501,7 +501,7 @@ _Response Headers_
 
 ### 5 - Creating the package
 
-> More about packages can be found [here](creating-your-first-chatagent/#4-creating-the-package).
+> More about packages can be found [here](creating-your-first-agent/#4-creating-the-package).
 >
 > Important Workflow note
 >
