@@ -15,7 +15,7 @@ export interface AgentDescriptor {
 }
 
 export interface Agent {
-  packages?: string[];
+  workflows?: string[];
   channels?: string[];
 }
 

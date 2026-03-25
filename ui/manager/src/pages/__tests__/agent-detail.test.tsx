@@ -79,7 +79,7 @@ describe("AgentDetailPage", () => {
   it("renders add package button", async () => {
     renderAgentDetail();
     await waitFor(() => {
-      expect(screen.getByTestId("add-package-btn")).toBeInTheDocument();
+      expect(screen.getByTestId("add-workflow-btn")).toBeInTheDocument();
     });
   });
 

@@ -32,7 +32,7 @@ function renderPage(type: string, id = "res1") {
 
 describe("HTTP Calls Editor", () => {
   it("renders httpcalls editor", async () => {
-    renderPage("httpcalls");
+    renderPage("apicalls");
 
     await waitFor(() => {
       expect(screen.getByTestId("httpcalls-editor")).toBeInTheDocument();
@@ -40,7 +40,7 @@ describe("HTTP Calls Editor", () => {
   });
 
   it("renders server URL input", async () => {
-    renderPage("httpcalls");
+    renderPage("apicalls");
 
     await waitFor(() => {
       expect(screen.getByTestId("server-url-input")).toBeInTheDocument();
@@ -48,7 +48,7 @@ describe("HTTP Calls Editor", () => {
   });
 
   it("renders HTTP call editor card", async () => {
-    renderPage("httpcalls");
+    renderPage("apicalls");
 
     await waitFor(() => {
       expect(screen.getByTestId("httpcall-editor")).toBeInTheDocument();
@@ -56,7 +56,7 @@ describe("HTTP Calls Editor", () => {
   });
 
   it("renders method select dropdown", async () => {
-    renderPage("httpcalls");
+    renderPage("apicalls");
 
     await waitFor(() => {
       expect(screen.getByTestId("method-select")).toBeInTheDocument();
@@ -64,7 +64,7 @@ describe("HTTP Calls Editor", () => {
   });
 
   it("renders add call button", async () => {
-    renderPage("httpcalls");
+    renderPage("apicalls");
 
     await waitFor(() => {
       expect(screen.getByTestId("add-call-btn")).toBeInTheDocument();
@@ -72,7 +72,7 @@ describe("HTTP Calls Editor", () => {
   });
 
   it("renders call name input", async () => {
-    renderPage("httpcalls");
+    renderPage("apicalls");
 
     await waitFor(() => {
       expect(screen.getByTestId("call-name-input")).toBeInTheDocument();
@@ -80,7 +80,7 @@ describe("HTTP Calls Editor", () => {
   });
 
   it("renders form tab as default when editor exists", async () => {
-    renderPage("httpcalls");
+    renderPage("apicalls");
 
     await waitFor(() => {
       expect(screen.getByTestId("form-view")).toBeInTheDocument();

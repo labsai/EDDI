@@ -30,7 +30,7 @@ const navSections = [
     items: [
       { path: "/manage", icon: LayoutDashboard, labelKey: "nav.dashboard" },
       { path: "/manage/agents", icon: Bot, labelKey: "nav.agents" },
-      { path: "/manage/packages", icon: Workflow, labelKey: "nav.packages" },
+      { path: "/manage/workflows", icon: Workflow, labelKey: "nav.packages" },
     ],
   },
   {

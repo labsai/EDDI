@@ -107,7 +107,7 @@ export function AgentWizardPage() {
     setIsCreating(true);
     try {
       const result = await createAgent.mutateAsync({
-        packages: [],
+        workflows: [],
         channels: [],
       });
 

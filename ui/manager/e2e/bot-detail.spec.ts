@@ -30,7 +30,7 @@ test.describe("Agent Detail", () => {
 
   test("shows environments section with environment names", async ({ page }) => {
     await expect(page.getByText("Environments")).toBeVisible();
-    await expect(page.getByText("Unrestricted")).toBeVisible();
+    await expect(page.getByText("Production")).toBeVisible();
   });
 
   test("shows packages section", async ({ page }) => {

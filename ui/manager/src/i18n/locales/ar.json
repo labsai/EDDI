@@ -131,8 +131,7 @@
     "duplicating": "Duplicating...",
     "duplicateSuccess": "Agent duplicated successfully",
     "environments": "Environments",
-    "envUnrestricted": "Unrestricted",
-    "envRestricted": "Restricted",
+    "envProduction": "Production",
     "envTest": "Test",
     "savingAgent": "Saving agent...",
     "savedAgent": "Agent saved successfully",
@@ -241,11 +240,11 @@
     "count_one": "{{count}} مورد",
     "count_other": "{{count}} موارد",
     "types": {
-      "behavior": {
+      "rules": {
         "name": "قواعد السلوك",
         "description": "تحديد قواعد تدفق المحادثة ومنطق القرار"
       },
-      "httpcalls": {
+      "apicalls": {
         "name": "استدعاءات HTTP",
         "description": "تكوين عمليات تكامل API الخارجية والويب هوك"
       },
@@ -253,11 +252,11 @@
         "name": "مجموعات المخرجات",
         "description": "إدارة قوالب استجابة الروبوت ومتغيرات المخرجات"
       },
-      "dictionaries": {
+      "dictionary": {
         "name": "القواميس",
         "description": "تحديد أنماط التعرف على الكلمات والعبارات"
       },
-      "langchain": {
+      "llm": {
         "name": "LangChain",
         "description": "تكوين نماذج وكيل الذكاء الاصطناعي والتعليمات وربط الأدوات"
       },

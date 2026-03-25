@@ -38,7 +38,7 @@ export function DashboardPage() {
       value: stats?.packageCount ?? 0,
       icon: Workflow,
       color: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10",
-      to: "/manage/packages",
+      to: "/manage/workflows",
     },
     {
       label: t("pages.dashboard.totalConversations"),

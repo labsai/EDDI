@@ -132,7 +132,7 @@ All v6 development is on `feature/version-6.0.0`.
 
 ## Related Repos
 
-- [EDDI](https://github.com/labsai/EDDI) — Backend engine (Java 21, Quarkus, MongoDB)
+- [EDDI](https://github.com/labsai/EDDI) — Backend engine (Java 25, Quarkus, MongoDB)
 - [eddi-chat-ui](https://github.com/labsai/eddi-chat-ui) — Standalone chat widget
 
 ## License

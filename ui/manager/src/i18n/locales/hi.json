@@ -131,8 +131,7 @@
     "duplicating": "Duplicating...",
     "duplicateSuccess": "Agent duplicated successfully",
     "environments": "Environments",
-    "envUnrestricted": "Unrestricted",
-    "envRestricted": "Restricted",
+    "envProduction": "Production",
     "envTest": "Test",
     "savingAgent": "Saving agent...",
     "savedAgent": "Agent saved successfully",
@@ -241,11 +240,11 @@
     "count_one": "{{count}} संसाधन",
     "count_other": "{{count}} संसाधन",
     "types": {
-      "behavior": {
+      "rules": {
         "name": "व्यवहार नियम",
         "description": "वार्तालाप प्रवाह नियम और निर्णय तर्क परिभाषित करें"
       },
-      "httpcalls": {
+      "apicalls": {
         "name": "HTTP कॉल",
         "description": "बाहरी API एकीकरण और वेबहुक कॉन्फ़िगर करें"
       },
@@ -253,11 +252,11 @@
         "name": "आउटपुट सेट",
         "description": "बॉट प्रतिक्रिया टेम्पलेट और आउटपुट वेरिएंट प्रबंधित करें"
       },
-      "dictionaries": {
+      "dictionary": {
         "name": "शब्दकोश",
         "description": "शब्द और वाक्यांश पहचान पैटर्न परिभाषित करें"
       },
-      "langchain": {
+      "llm": {
         "name": "LangChain",
         "description": "AI एजेंट मॉडल, प्रॉम्प्ट और टूल बाइंडिंग कॉन्फ़िगर करें"
       },

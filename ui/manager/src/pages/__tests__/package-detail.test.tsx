@@ -15,12 +15,12 @@ function renderPage(id = "pkg1") {
   });
 
   return render(
-    <MemoryRouter initialEntries={[`/manage/packageview/${id}`]}>
+    <MemoryRouter initialEntries={[`/manage/workflowview/${id}`]}>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
           <Routes>
             <Route
-              path="/manage/packageview/:id"
+              path="/manage/workflowview/:id"
               element={<WorkflowDetailPage />}
             />
           </Routes>
@@ -44,8 +44,8 @@ describe("WorkflowDetailPage", () => {
 
     await waitFor(() => {
       // MSW returns a package with 2 extensions (behavior + langchain)
-      expect(screen.getByText("Behavior Rules")).toBeInTheDocument();
-      expect(screen.getByText("LangChain")).toBeInTheDocument();
+      expect(screen.getByText("Rules")).toBeInTheDocument();
+      expect(screen.getByText("LLM")).toBeInTheDocument();
     });
   });
 

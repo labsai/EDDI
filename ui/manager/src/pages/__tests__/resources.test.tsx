@@ -65,11 +65,11 @@ describe("ResourcesPage (Hub)", () => {
   it("renders all 6 resource type cards", () => {
     renderWithProviders(<ResourcesPage />);
     expect(screen.getByTestId("resource-types-grid")).toBeInTheDocument();
-    expect(screen.getByText("Behavior Rules")).toBeInTheDocument();
-    expect(screen.getByText("HTTP Calls")).toBeInTheDocument();
+    expect(screen.getByText("Rules")).toBeInTheDocument();
+    expect(screen.getByText("API Calls")).toBeInTheDocument();
     expect(screen.getByText("Output Sets")).toBeInTheDocument();
     expect(screen.getByText("Dictionaries")).toBeInTheDocument();
-    expect(screen.getByText("LangChain")).toBeInTheDocument();
+    expect(screen.getByText("LLM")).toBeInTheDocument();
     expect(screen.getByText("Property Setter")).toBeInTheDocument();
   });
 
@@ -87,15 +87,15 @@ describe("ResourcesPage (Hub)", () => {
 describe("ResourceListPage", () => {
   it("renders heading for behavior type", () => {
     renderWithRoute(
-      "/manage/resources/behavior",
+      "/manage/resources/rules",
       <ResourceListPage />
     );
-    expect(screen.getByText("Behavior Rules")).toBeInTheDocument();
+    expect(screen.getByText("Rules")).toBeInTheDocument();
   });
 
   it("renders search input", () => {
     renderWithRoute(
-      "/manage/resources/behavior",
+      "/manage/resources/rules",
       <ResourceListPage />
     );
     expect(screen.getByTestId("resource-search")).toBeInTheDocument();
@@ -103,7 +103,7 @@ describe("ResourceListPage", () => {
 
   it("renders create button", () => {
     renderWithRoute(
-      "/manage/resources/behavior",
+      "/manage/resources/rules",
       <ResourceListPage />
     );
     expect(screen.getByTestId("create-resource-btn")).toBeInTheDocument();
@@ -111,7 +111,7 @@ describe("ResourceListPage", () => {
 
   it("renders back link", () => {
     renderWithRoute(
-      "/manage/resources/behavior",
+      "/manage/resources/rules",
       <ResourceListPage />
     );
     expect(screen.getByTestId("back-to-list")).toBeInTheDocument();
@@ -127,7 +127,7 @@ describe("ResourceListPage", () => {
 
   it("loads and displays resource cards", async () => {
     renderWithRoute(
-      "/manage/resources/behavior",
+      "/manage/resources/rules",
       <ResourceListPage />
     );
     await waitFor(() => {
@@ -139,15 +139,15 @@ describe("ResourceListPage", () => {
 describe("ResourceDetailPage", () => {
   it("renders heading for behavior type", () => {
     renderWithRoute(
-      "/manage/resources/behavior/res1",
+      "/manage/resources/rules/res1",
       <ResourceDetailPage />
     );
-    expect(screen.getByText("Behavior Rules")).toBeInTheDocument();
+    expect(screen.getByText("Rules")).toBeInTheDocument();
   });
 
   it("renders back link", () => {
     renderWithRoute(
-      "/manage/resources/behavior/res1",
+      "/manage/resources/rules/res1",
       <ResourceDetailPage />
     );
     expect(screen.getByTestId("back-to-list")).toBeInTheDocument();
@@ -155,7 +155,7 @@ describe("ResourceDetailPage", () => {
 
   it("renders delete button", () => {
     renderWithRoute(
-      "/manage/resources/behavior/res1",
+      "/manage/resources/rules/res1",
       <ResourceDetailPage />
     );
     expect(screen.getByText("Delete")).toBeInTheDocument();
@@ -163,7 +163,7 @@ describe("ResourceDetailPage", () => {
 
   it("renders duplicate button", () => {
     renderWithRoute(
-      "/manage/resources/behavior/res1",
+      "/manage/resources/rules/res1",
       <ResourceDetailPage />
     );
     expect(screen.getByText("Duplicate")).toBeInTheDocument();
@@ -171,7 +171,7 @@ describe("ResourceDetailPage", () => {
 
   it("loads and displays config editor layout", async () => {
     renderWithRoute(
-      "/manage/resources/behavior/res1",
+      "/manage/resources/rules/res1",
       <ResourceDetailPage />
     );
     await waitFor(() => {

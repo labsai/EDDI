@@ -151,7 +151,7 @@ export function useCascadeSave(slug: string) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: resourceKeys(slug) });
-      queryClient.invalidateQueries({ queryKey: ["packages"] });
+      queryClient.invalidateQueries({ queryKey: ["workflows"] });
       queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
   });

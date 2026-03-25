@@ -166,7 +166,7 @@ describe("ConfigEditorLayout", () => {
 describe("ResourceDetailPage with editor", () => {
   it("renders editor layout when data loads", async () => {
     renderWithRoute(
-      "/manage/resources/behavior/res1",
+      "/manage/resources/rules/res1",
       <ResourceDetailPage />
     );
     await waitFor(() => {
@@ -176,7 +176,7 @@ describe("ResourceDetailPage with editor", () => {
 
   it("renders Form and JSON tabs", async () => {
     renderWithRoute(
-      "/manage/resources/behavior/res1",
+      "/manage/resources/rules/res1",
       <ResourceDetailPage />
     );
     await waitFor(() => {
@@ -187,7 +187,7 @@ describe("ResourceDetailPage with editor", () => {
 
   it("renders back link", () => {
     renderWithRoute(
-      "/manage/resources/behavior/res1",
+      "/manage/resources/rules/res1",
       <ResourceDetailPage />
     );
     expect(screen.getByTestId("back-to-list")).toBeInTheDocument();
@@ -195,7 +195,7 @@ describe("ResourceDetailPage with editor", () => {
 
   it("renders delete and duplicate buttons", () => {
     renderWithRoute(
-      "/manage/resources/behavior/res1",
+      "/manage/resources/rules/res1",
       <ResourceDetailPage />
     );
     expect(screen.getByText("Delete")).toBeInTheDocument();

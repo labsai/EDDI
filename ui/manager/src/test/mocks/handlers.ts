@@ -308,9 +308,9 @@ export const handlers = [
       type: "object",
       title: "AgentConfiguration",
       properties: {
-        packages: {
+        workflows: {
           type: "array",
-          description: "List of package URIs that make up this agent",
+          description: "List of workflow URIs that make up this agent",
           items: { type: "string", format: "uri" },
         },
         channels: {
@@ -333,9 +333,9 @@ export const handlers = [
       type: "object",
       title: "WorkflowConfiguration",
       properties: {
-        packageExtensions: {
+        workflowSteps: {
           type: "array",
-          description: "List of extensions in this package",
+          description: "List of steps in this workflow",
           items: {
             type: "object",
             properties: {
@@ -364,7 +364,7 @@ export const handlers = [
     const url = new URL(request.url);
     const version = parseInt(url.searchParams.get("version") ?? "1", 10);
     return HttpResponse.json({
-      packages: [
+      workflows: [
         "eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=1",
       ],
       channels: [],
@@ -429,7 +429,7 @@ export const handlers = [
   // Get package
   http.get("*/workflowstore/workflows/:id", () => {
     return HttpResponse.json({
-      packageExtensions: [
+      workflowSteps: [
         {
           type: "ai.labs.rules",
           extensions: {},

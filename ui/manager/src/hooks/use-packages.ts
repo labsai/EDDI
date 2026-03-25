@@ -9,7 +9,7 @@ import {
   type WorkflowConfiguration,
 } from "@/lib/api/packages";
 
-const WORKFLOWS_KEY = ["packages"] as const;
+const WORKFLOWS_KEY = ["workflows"] as const;
 
 export function useWorkflowDescriptors(limit = 100, index = 0, filter = "") {
   return useQuery({
@@ -80,14 +80,14 @@ export function useUpdateAgentWorkflows() {
     mutationFn: async ({
       agentId,
       version,
-      packages,
+      workflows,
     }: {
       agentId: string;
       version: number;
-      packages: string[];
+      workflows: string[];
     }) => {
       const { updateAgent } = await import("@/lib/api/agents");
-      return updateAgent(agentId, version, { packages });
+      return updateAgent(agentId, version, { workflows });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agents"] });

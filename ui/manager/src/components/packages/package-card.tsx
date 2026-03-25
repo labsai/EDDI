@@ -29,7 +29,7 @@ export function WorkflowCard({ pkg, onDuplicate, onDelete }: WorkflowCardProps) 
         "group relative flex flex-col rounded-xl border bg-card p-5 shadow-sm transition-all duration-200",
         "hover:shadow-md hover:border-primary/30"
       )}
-      data-testid={`package-card-${pkg.id}`}
+      data-testid={`workflow-card-${pkg.id}`}
     >
       {/* Icon + menu */}
       <div className="flex items-start justify-between">
@@ -82,7 +82,7 @@ export function WorkflowCard({ pkg, onDuplicate, onDelete }: WorkflowCardProps) 
       {/* Workflow info */}
       <div className="mt-4 flex-1">
         <Link
-          to={`/manage/packageview/${pkg.id}`}
+          to={`/manage/workflowview/${pkg.id}`}
           className="text-lg font-semibold text-foreground hover:text-primary transition-colors"
         >
           {pkg.name || t("packages.unnamed", "Unnamed Workflow")}

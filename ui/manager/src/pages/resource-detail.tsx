@@ -75,13 +75,13 @@ const EDITOR_MAP: Record<
   string,
   (parsed: unknown, onChange: (val: unknown) => void, readOnly: boolean) => ReactNode
 > = {
-  behavior: (p, o, r) => (
+  rules: (p, o, r) => (
     <BehaviorEditor data={p as BehaviorConfig} onChange={o} readOnly={r} />
   ),
-  httpcalls: (p, o, r) => (
+  apicalls: (p, o, r) => (
     <HttpCallsEditor data={p as HttpCallsConfig} onChange={o} readOnly={r} />
   ),
-  langchain: (p, o, r) => (
+  llm: (p, o, r) => (
     <LangchainEditor data={p as LangchainConfig} onChange={o} readOnly={r} />
   ),
   output: (p, o, r) => (
@@ -90,7 +90,7 @@ const EDITOR_MAP: Record<
   propertysetter: (p, o, r) => (
     <PropertySetterEditor data={p as PropertySetterConfig} onChange={o} readOnly={r} />
   ),
-  dictionaries: (p, o, r) => (
+  dictionary: (p, o, r) => (
     <DictionaryEditor data={p as DictionaryConfig} onChange={o} readOnly={r} />
   ),
 };

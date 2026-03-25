@@ -10,7 +10,7 @@
 
 | Repo                       | Tech                      | Purpose                                              |
 | -------------------------- | ------------------------- | ---------------------------------------------------- |
-| **EDDI**                   | Java 21, Quarkus, MongoDB | Backend engine, REST API, lifecycle pipeline         |
+| **EDDI**                   | Java 25, Quarkus, MongoDB | Backend engine, REST API, lifecycle pipeline         |
 | **EDDI-Manager** (this)    | React 19, Vite, Tailwind  | Admin dashboard — agents, packages, extensions, chat |
 | **eddi-chat-ui**           | React, TypeScript         | Standalone chat widget                               |
 | **eddi-website**           | HTML → migrating to Astro | Marketing site at eddi.labs.ai                       |

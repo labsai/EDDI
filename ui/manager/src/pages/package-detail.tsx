@@ -69,10 +69,10 @@ export function WorkflowDetailPage() {
 
   // Use local state if user has made edits, otherwise use server data
   const currentExtensions = useMemo(
-    () => localExtensions ?? pkg?.packageExtensions ?? [],
-    [localExtensions, pkg?.packageExtensions]
+    () => localExtensions ?? pkg?.workflowSteps ?? [],
+    [localExtensions, pkg?.workflowSteps]
   );
-  const serverExtensions = pkg?.packageExtensions ?? [];
+  const serverExtensions = pkg?.workflowSteps ?? [];
   const isDirty =
     localExtensions !== null &&
     JSON.stringify(localExtensions) !== JSON.stringify(serverExtensions);
@@ -87,7 +87,7 @@ export function WorkflowDetailPage() {
   // Reset local state when server data changes (version switch)
   useEffect(() => {
     setLocalExtensions(null);
-  }, [pkg?.packageExtensions]);
+  }, [pkg?.workflowSteps]);
 
   // Clear save message after 3s
   useEffect(() => {
@@ -131,7 +131,7 @@ export function WorkflowDetailPage() {
       await updateMutation.mutateAsync({
         id: id!,
         version,
-        config: { packageExtensions: localExtensions },
+        config: { workflowSteps: localExtensions },
       });
       setSaveMessage({
         type: "success",
@@ -160,7 +160,7 @@ export function WorkflowDetailPage() {
       )
     ) {
       await deleteMutation.mutateAsync({ id: id!, version });
-      navigate("/manage/packages");
+      navigate("/manage/workflows");
     }
   }
 
@@ -339,7 +339,7 @@ function BackLink() {
   const { t } = useTranslation();
   return (
     <Link
-      to="/manage/packages"
+      to="/manage/workflows"
       className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
     >
       <ArrowLeft className="h-4 w-4" />
@@ -405,7 +405,7 @@ function formatRelativeTime(timestamp: number): string {
 function RawConfigSection({
   config,
 }: {
-  config: { packageExtensions?: WorkflowExtension[] };
+  config: { workflowSteps?: WorkflowExtension[] };
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);

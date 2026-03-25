@@ -131,8 +131,7 @@
     "duplicating": "Duplicating...",
     "duplicateSuccess": "Agent duplicated successfully",
     "environments": "Environments",
-    "envUnrestricted": "Unrestricted",
-    "envRestricted": "Restricted",
+    "envProduction": "Production",
     "envTest": "Test",
     "savingAgent": "Saving agent...",
     "savedAgent": "Agent saved successfully",
@@ -241,11 +240,11 @@
     "count_one": "{{count}} 個のリソース",
     "count_other": "{{count}} 個のリソース",
     "types": {
-      "behavior": {
+      "rules": {
         "name": "動作ルール",
         "description": "会話フロールールと意思決定ロジックを定義"
       },
-      "httpcalls": {
+      "apicalls": {
         "name": "HTTPコール",
         "description": "外部API連携とWebhookを設定"
       },
@@ -253,11 +252,11 @@
         "name": "出力セット",
         "description": "ボット応答テンプレートと出力バリエーションを管理"
       },
-      "dictionaries": {
+      "dictionary": {
         "name": "辞書",
         "description": "単語とフレーズの認識パターンを定義"
       },
-      "langchain": {
+      "llm": {
         "name": "LangChain",
         "description": "AIエージェントモデル、プロンプト、ツールバインディングを設定"
       },

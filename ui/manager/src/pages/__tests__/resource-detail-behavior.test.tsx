@@ -32,7 +32,7 @@ function renderPage(type: string, id = "res1") {
 
 describe("Behavior Editor", () => {
   it("renders behavior editor with groups", async () => {
-    renderPage("behavior");
+    renderPage("rules");
 
     await waitFor(() => {
       expect(screen.getByTestId("behavior-editor")).toBeInTheDocument();
@@ -40,7 +40,7 @@ describe("Behavior Editor", () => {
   });
 
   it("renders behavior group with rules", async () => {
-    renderPage("behavior");
+    renderPage("rules");
 
     await waitFor(() => {
       expect(screen.getByTestId("behavior-group")).toBeInTheDocument();
@@ -48,7 +48,7 @@ describe("Behavior Editor", () => {
   });
 
   it("renders rule editors with name inputs", async () => {
-    renderPage("behavior");
+    renderPage("rules");
 
     await waitFor(() => {
       expect(
@@ -58,7 +58,7 @@ describe("Behavior Editor", () => {
   });
 
   it("renders condition type dropdowns", async () => {
-    renderPage("behavior");
+    renderPage("rules");
 
     await waitFor(() => {
       expect(
@@ -68,7 +68,7 @@ describe("Behavior Editor", () => {
   });
 
   it("renders add group button", async () => {
-    renderPage("behavior");
+    renderPage("rules");
 
     await waitFor(() => {
       expect(screen.getByTestId("add-group-btn")).toBeInTheDocument();
@@ -76,7 +76,7 @@ describe("Behavior Editor", () => {
   });
 
   it("renders add rule buttons", async () => {
-    renderPage("behavior");
+    renderPage("rules");
 
     await waitFor(() => {
       expect(
@@ -86,7 +86,7 @@ describe("Behavior Editor", () => {
   });
 
   it("renders form tab as default when editor exists", async () => {
-    renderPage("behavior");
+    renderPage("rules");
 
     await waitFor(() => {
       expect(screen.getByTestId("form-view")).toBeInTheDocument();

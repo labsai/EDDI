@@ -76,9 +76,9 @@ describe("getStoredViewMode / setStoredViewMode", () => {
 
   it("stores different values for different pages", () => {
     setStoredViewMode("agents", "list");
-    setStoredViewMode("packages", "card");
+    setStoredViewMode("workflows", "card");
     expect(getStoredViewMode("agents")).toBe("list");
-    expect(getStoredViewMode("packages")).toBe("card");
+    expect(getStoredViewMode("workflows")).toBe("card");
   });
 
   it("returns 'card' for invalid stored value", () => {

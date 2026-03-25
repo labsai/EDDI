@@ -105,7 +105,7 @@ export async function createAndDeployAgent(
 
   // Deploy
   const deployRes = await request.post(
-    `${API_BASE}/administration/unrestricted/deploy/${agent.id}?version=${agent.version}`
+    `${API_BASE}/administration/production/deploy/${agent.id}?version=${agent.version}`
   );
   expect([200, 202]).toContain(deployRes.status());
 
@@ -113,7 +113,7 @@ export async function createAndDeployAgent(
   const start = Date.now();
   while (Date.now() - start < 15_000) {
     const statusRes = await request.get(
-      `${API_BASE}/administration/unrestricted/deploymentstatus/${agent.id}?version=${agent.version}`
+      `${API_BASE}/administration/production/deploymentstatus/${agent.id}?version=${agent.version}`
     );
     if (statusRes.ok()) {
       const body = await statusRes.json();

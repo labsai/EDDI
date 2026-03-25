@@ -32,7 +32,7 @@ export async function findResourceUsage(
     try {
       const pkg = await getWorkflow(pkgId, pkgVersion);
       // Check if any extension references this resource
-      const hasReference = pkg.packageExtensions.some((ext) => {
+      const hasReference = pkg.workflowSteps.some((ext) => {
         const uri = ext.config?.uri;
         return (
           typeof uri === "string" &&
@@ -50,7 +50,7 @@ export async function findResourceUsage(
         try {
           const agent = await getAgent(agentId, agentVersion);
           const pkgUri = pkgDesc.resource;
-          if (agent.packages?.some((uri) => uri === pkgUri)) {
+          if (agent.workflows?.some((uri) => uri === pkgUri)) {
             usages.push({
               workflowId: pkgId,
               packageVersion: pkgVersion,

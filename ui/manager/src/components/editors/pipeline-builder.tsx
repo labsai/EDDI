@@ -89,7 +89,7 @@ function parseExtensionUri(uri: string): { slug: string; id: string } | null {
 export interface PipelineItem {
   /** Stable ID for dnd-kit (index-based) */
   id: string;
-  /** Original index in packageExtensions */
+  /** Original index in workflowSteps */
   index: number;
   extension: WorkflowExtension;
 }

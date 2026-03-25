@@ -10,7 +10,7 @@ export interface WorkflowExtension {
 }
 
 export interface WorkflowConfiguration {
-  packageExtensions: WorkflowExtension[];
+  workflowSteps: WorkflowExtension[];
 }
 
 // API functions

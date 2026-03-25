@@ -32,42 +32,42 @@ function renderPage(type: string, id = "res1") {
 
 describe("Dictionary Editor", () => {
   it("renders dictionary editor", async () => {
-    renderPage("dictionaries");
+    renderPage("dictionary");
     await waitFor(() => {
       expect(screen.getByTestId("dictionary-editor")).toBeInTheDocument();
     });
   });
 
   it("renders word rows", async () => {
-    renderPage("dictionaries");
+    renderPage("dictionary");
     await waitFor(() => {
       expect(screen.getAllByTestId("word-row").length).toBeGreaterThan(0);
     });
   });
 
   it("renders phrase rows", async () => {
-    renderPage("dictionaries");
+    renderPage("dictionary");
     await waitFor(() => {
       expect(screen.getAllByTestId("phrase-row").length).toBeGreaterThan(0);
     });
   });
 
   it("renders regex rows", async () => {
-    renderPage("dictionaries");
+    renderPage("dictionary");
     await waitFor(() => {
       expect(screen.getAllByTestId("regex-row").length).toBeGreaterThan(0);
     });
   });
 
   it("renders add word button", async () => {
-    renderPage("dictionaries");
+    renderPage("dictionary");
     await waitFor(() => {
       expect(screen.getByTestId("add-words-btn")).toBeInTheDocument();
     });
   });
 
   it("renders form tab as default", async () => {
-    renderPage("dictionaries");
+    renderPage("dictionary");
     await waitFor(() => {
       expect(screen.getByTestId("form-view")).toBeInTheDocument();
     });

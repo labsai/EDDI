@@ -65,7 +65,7 @@ export async function cascadeSaveResource(
   const agent = await getAgent(context.agentId, context.agentVersion);
   const updatedAgent: Agent = {
     ...agent,
-    packages: (agent.packages ?? []).map((uri) =>
+    workflows: (agent.workflows ?? []).map((uri) =>
       uri === oldPkgUri ? newPkgUri : uri
     ),
   };
@@ -103,7 +103,7 @@ function replaceExtensionUri(
 ): WorkflowConfiguration {
   return {
     ...pkg,
-    packageExtensions: pkg.packageExtensions.map((ext) => {
+    workflowSteps: pkg.workflowSteps.map((ext) => {
       const uri = ext.config?.uri;
       if (typeof uri === "string" && uri === oldUri) {
         return { ...ext, config: { ...ext.config, uri: newUri } };

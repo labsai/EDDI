@@ -131,8 +131,7 @@
     "duplicating": "Duplicating...",
     "duplicateSuccess": "Agent duplicated successfully",
     "environments": "Environments",
-    "envUnrestricted": "Unrestricted",
-    "envRestricted": "Restricted",
+    "envProduction": "Production",
     "envTest": "Test",
     "savingAgent": "Saving agent...",
     "savedAgent": "Agent saved successfully",
@@ -241,11 +240,11 @@
     "count_one": "{{count}} recurso",
     "count_other": "{{count}} recursos",
     "types": {
-      "behavior": {
+      "rules": {
         "name": "Reglas de comportamiento",
         "description": "Definir reglas de flujo de conversación y lógica de decisión"
       },
-      "httpcalls": {
+      "apicalls": {
         "name": "Llamadas HTTP",
         "description": "Configurar integraciones de API externas y webhooks"
       },
@@ -253,11 +252,11 @@
         "name": "Conjuntos de salida",
         "description": "Gestionar plantillas de respuesta y variantes de salida"
       },
-      "dictionaries": {
+      "dictionary": {
         "name": "Diccionarios",
         "description": "Definir patrones de reconocimiento de palabras y frases"
       },
-      "langchain": {
+      "llm": {
         "name": "LangChain",
         "description": "Configurar modelos de agente IA, prompts y enlaces de herramientas"
       },

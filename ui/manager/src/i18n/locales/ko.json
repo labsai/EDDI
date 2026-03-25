@@ -131,8 +131,7 @@
     "duplicating": "Duplicating...",
     "duplicateSuccess": "Agent duplicated successfully",
     "environments": "Environments",
-    "envUnrestricted": "Unrestricted",
-    "envRestricted": "Restricted",
+    "envProduction": "Production",
     "envTest": "Test",
     "savingAgent": "Saving agent...",
     "savedAgent": "Agent saved successfully",
@@ -241,11 +240,11 @@
     "count_one": "{{count}}개의 리소스",
     "count_other": "{{count}}개의 리소스",
     "types": {
-      "behavior": {
+      "rules": {
         "name": "행동 규칙",
         "description": "대화 흐름 규칙 및 의사결정 로직 정의"
       },
-      "httpcalls": {
+      "apicalls": {
         "name": "HTTP 호출",
         "description": "외부 API 통합 및 웹훅 구성"
       },
@@ -253,11 +252,11 @@
         "name": "출력 세트",
         "description": "봇 응답 템플릿 및 출력 변형 관리"
       },
-      "dictionaries": {
+      "dictionary": {
         "name": "사전",
         "description": "단어 및 구문 인식 패턴 정의"
       },
-      "langchain": {
+      "llm": {
         "name": "LangChain",
         "description": "AI 에이전트 모델, 프롬프트 및 도구 바인딩 구성"
       },

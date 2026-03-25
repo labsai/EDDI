@@ -131,8 +131,7 @@
     "duplicating": "Duplicating...",
     "duplicateSuccess": "Agent duplicated successfully",
     "environments": "Environments",
-    "envUnrestricted": "Unrestricted",
-    "envRestricted": "Restricted",
+    "envProduction": "Production",
     "envTest": "Test",
     "savingAgent": "Saving agent...",
     "savedAgent": "Agent saved successfully",
@@ -241,11 +240,11 @@
     "count_one": "{{count}} 个资源",
     "count_other": "{{count}} 个资源",
     "types": {
-      "behavior": {
+      "rules": {
         "name": "行为规则",
         "description": "定义会话流程规则和决策逻辑"
       },
-      "httpcalls": {
+      "apicalls": {
         "name": "HTTP 调用",
         "description": "配置外部 API 集成和 Webhook"
       },
@@ -253,11 +252,11 @@
         "name": "输出集",
         "description": "管理机器人响应模板和输出变体"
       },
-      "dictionaries": {
+      "dictionary": {
         "name": "词典",
         "description": "定义词语和短语识别模式"
       },
-      "langchain": {
+      "llm": {
         "name": "LangChain",
         "description": "配置 AI 代理模型、提示词和工具绑定"
       },

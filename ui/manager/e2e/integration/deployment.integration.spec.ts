@@ -12,8 +12,8 @@ import {
  * Fully self-contained: creates its own agent + package.
  *
  * Key API behaviors:
- * - POST /administration/unrestricted/deploy returns 202 (accepted)
- * - GET /administration/unrestricted/deploymentstatus returns JSON {"status":"READY"}
+ * - POST /administration/production/deploy returns 202 (accepted)
+ * - GET /administration/production/deploymentstatus returns JSON {"status":"READY"}
  *   (use ?format=text for plain text, deprecated)
  */
 test.describe("Deployment — Real Backend", () => {
@@ -52,7 +52,7 @@ test.describe("Deployment — Real Backend", () => {
     // Undeploy (best-effort)
     try {
       await request.post(
-        `${API_BASE}/administration/unrestricted/undeploy/${testAgentId}?version=${testAgentVersion}`
+        `${API_BASE}/administration/production/undeploy/${testAgentId}?version=${testAgentVersion}`
       );
     } catch {
       /* ignore */
@@ -73,7 +73,7 @@ test.describe("Deployment — Real Backend", () => {
 
   test("Deploy agent returns 202 (accepted)", async ({ request }) => {
     const res = await request.post(
-      `${API_BASE}/administration/unrestricted/deploy/${testAgentId}?version=${testAgentVersion}`
+      `${API_BASE}/administration/production/deploy/${testAgentId}?version=${testAgentVersion}`
     );
     expect([200, 202]).toContain(res.status());
 
@@ -81,7 +81,7 @@ test.describe("Deployment — Real Backend", () => {
     const start = Date.now();
     while (Date.now() - start < 15_000) {
       const statusRes = await request.get(
-        `${API_BASE}/administration/unrestricted/deploymentstatus/${testAgentId}?version=${testAgentVersion}`
+        `${API_BASE}/administration/production/deploymentstatus/${testAgentId}?version=${testAgentVersion}`
       );
       if (statusRes.ok()) {
         const body = await statusRes.json();
@@ -95,7 +95,7 @@ test.describe("Deployment — Real Backend", () => {
     request,
   }) => {
     const res = await request.get(
-      `${API_BASE}/administration/unrestricted/deploymentstatus/${testAgentId}?version=${testAgentVersion}`
+      `${API_BASE}/administration/production/deploymentstatus/${testAgentId}?version=${testAgentVersion}`
     );
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
@@ -118,7 +118,7 @@ test.describe("Deployment — Real Backend", () => {
 
   test("Undeploy agent succeeds", async ({ request }) => {
     const res = await request.post(
-      `${API_BASE}/administration/unrestricted/undeploy/${testAgentId}?version=${testAgentVersion}`
+      `${API_BASE}/administration/production/undeploy/${testAgentId}?version=${testAgentVersion}`
     );
     expect(res.ok()).toBeTruthy();
 
@@ -127,7 +127,7 @@ test.describe("Deployment — Real Backend", () => {
 
     // Verify NOT_FOUND after undeploy
     const statusRes = await request.get(
-      `${API_BASE}/administration/unrestricted/deploymentstatus/${testAgentId}?version=${testAgentVersion}`
+      `${API_BASE}/administration/production/deploymentstatus/${testAgentId}?version=${testAgentVersion}`
     );
     if (statusRes.ok()) {
       const body = await statusRes.json();

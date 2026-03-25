@@ -38,7 +38,7 @@ test.describe("Conversations — Real Backend", () => {
     // Undeploy
     try {
       await request.post(
-        `${API_BASE}/administration/unrestricted/undeploy/${agentId}?version=${agentVersion}`
+        `${API_BASE}/administration/production/undeploy/${agentId}?version=${agentVersion}`
       );
     } catch {
       /* ignore */
@@ -78,7 +78,7 @@ test.describe("Conversations — Real Backend", () => {
     request,
   }) => {
     const res = await request.post(
-      `${API_BASE}/agents/unrestricted/${agentId}`
+      `${API_BASE}/agents/production/${agentId}`
     );
     expect(res.status()).toBe(201);
     const location = res.headers()["location"];
@@ -95,7 +95,7 @@ test.describe("Conversations — Real Backend", () => {
   }) => {
     // Create conversation
     const createRes = await request.post(
-      `${API_BASE}/agents/unrestricted/${agentId}`
+      `${API_BASE}/agents/production/${agentId}`
     );
     expect(createRes.status()).toBe(201);
     const location = createRes.headers()["location"]!;
@@ -108,7 +108,7 @@ test.describe("Conversations — Real Backend", () => {
 
     // Send message — returns 200 with full conversation snapshot
     const sayRes = await request.post(
-      `${API_BASE}/agents/unrestricted/${agentId}/${conversationId}`,
+      `${API_BASE}/agents/production/${agentId}/${conversationId}`,
       {
         headers: { "Content-Type": "text/plain" },
         data: "Hello from integration test!",
@@ -126,7 +126,7 @@ test.describe("Conversations — Real Backend", () => {
   test("Read conversation state via simple endpoint", async ({ request }) => {
     // Create conversation
     const createRes = await request.post(
-      `${API_BASE}/agents/unrestricted/${agentId}`
+      `${API_BASE}/agents/production/${agentId}`
     );
     const location = createRes.headers()["location"]!;
     const convId = location.split("/").filter(Boolean).pop()!;

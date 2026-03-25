@@ -45,7 +45,6 @@ const statusConfig = {
 
 const envLabels: Record<string, string> = {
   production: "agentDetail.envProduction",
-  
   test: "agentDetail.envTest",
 };
 
@@ -115,18 +114,18 @@ export function AgentDetailPage() {
   }
 
   function handleRemoveWorkflow(packageUri: string) {
-    if (!agent?.packages) return;
-    const updated = agent.packages.filter((p) => p !== packageUri);
-    updateWorkflowsMutation.mutate({ agentId: id!, version, packages: updated });
+    if (!agent?.workflows) return;
+    const updated = agent.workflows.filter((p) => p !== packageUri);
+    updateWorkflowsMutation.mutate({ agentId: id!, version, workflows: updated });
   }
 
   function handleAddWorkflow(packageUri: string) {
-    const current = agent?.packages ?? [];
+    const current = agent?.workflows ?? [];
     if (current.includes(packageUri)) return;
     updateWorkflowsMutation.mutate({
       agentId: id!,
       version,
-      packages: [...current, packageUri],
+      workflows: [...current, packageUri],
     });
     setShowAddWorkflow(false);
   }
@@ -304,13 +303,13 @@ export function AgentDetailPage() {
               {t("agentDetail.packages", "Workflows")}
             </h2>
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-              {agent.packages?.length ?? 0}
+              {agent.workflows?.length ?? 0}
             </span>
           </div>
           <button
             onClick={() => setShowAddWorkflow(!showAddWorkflow)}
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
-            data-testid="add-package-btn"
+            data-testid="add-workflow-btn"
           >
             <Plus className="h-4 w-4" />
             {t("agentDetail.addWorkflow", "Add Workflow")}
@@ -319,14 +318,14 @@ export function AgentDetailPage() {
 
         {/* Workflow list */}
         <div className="divide-y divide-border">
-          {(!agent.packages || agent.packages.length === 0) && (
+          {(!agent.workflows || agent.workflows.length === 0) && (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
               <Workflow className="h-10 w-10 opacity-50" />
-              <p className="mt-3 text-sm">{t("agentDetail.noWorkflows", "No packages added yet")}</p>
+              <p className="mt-3 text-sm">{t("agentDetail.noWorkflows", "No workflows added yet")}</p>
             </div>
           )}
 
-          {agent.packages?.map((pkgUri) => {
+          {agent.workflows?.map((pkgUri) => {
             const { id: pkgId, version: pkgVersion } = parseResourceUri(pkgUri);
             return (
               <div
@@ -337,7 +336,7 @@ export function AgentDetailPage() {
                   <Settings className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0">
                     <Link
-                      to={`/manage/packageview/${pkgId}`}
+                      to={`/manage/workflowview/${pkgId}`}
                       className="text-sm font-medium text-foreground hover:text-primary truncate block transition-colors"
                     >
                       {pkgId}
@@ -365,7 +364,7 @@ export function AgentDetailPage() {
       {/* Add package panel */}
       {showAddWorkflow && (
         <AddWorkflowPanel
-          currentWorkflows={agent.packages ?? []}
+          currentWorkflows={agent.workflows ?? []}
           onAdd={handleAddWorkflow}
           onClose={() => setShowAddWorkflow(false)}
         />
@@ -465,7 +464,7 @@ function EnvironmentBadges({
           {t("agentDetail.environments", "Environments")}
         </h2>
       </div>
-      <div className="grid grid-cols-1 gap-0 divide-y divide-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+      <div className="grid grid-cols-1 gap-0 divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0">
         {statuses.map(({ environment, status }) => {
           const conf = statusConfig[status];
           const Icon = conf.icon;
@@ -580,7 +579,7 @@ function AddWorkflowPanel({
 }
 
 /* ─── Raw Config Section ─── */
-function RawConfigSection({ agent }: { agent: { packages?: string[]; channels?: string[] } }) {
+function RawConfigSection({ agent }: { agent: { workflows?: string[]; channels?: string[] } }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 

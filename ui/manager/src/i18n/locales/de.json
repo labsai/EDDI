@@ -131,8 +131,7 @@
     "duplicating": "Duplicating...",
     "duplicateSuccess": "Agent duplicated successfully",
     "environments": "Environments",
-    "envUnrestricted": "Unrestricted",
-    "envRestricted": "Restricted",
+    "envProduction": "Production",
     "envTest": "Test",
     "savingAgent": "Saving agent...",
     "savedAgent": "Agent saved successfully",
@@ -241,11 +240,11 @@
     "count_one": "{{count}} Ressource",
     "count_other": "{{count}} Ressourcen",
     "types": {
-      "behavior": {
+      "rules": {
         "name": "Verhaltensregeln",
         "description": "Gesprächsflussregeln und Entscheidungslogik definieren"
       },
-      "httpcalls": {
+      "apicalls": {
         "name": "HTTP-Aufrufe",
         "description": "Externe API-Integrationen und Webhooks konfigurieren"
       },
@@ -253,11 +252,11 @@
         "name": "Ausgabesets",
         "description": "Agent-Antwortvorlagen und Ausgabevarianten verwalten"
       },
-      "dictionaries": {
+      "dictionary": {
         "name": "Wörterbücher",
         "description": "Wort- und Phrasenerkennungsmuster definieren"
       },
-      "langchain": {
+      "llm": {
         "name": "LangChain",
         "description": "KI-Agentenmodelle, Prompts und Tool-Bindungen konfigurieren"
       },

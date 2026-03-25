@@ -35,7 +35,7 @@ function useBreadcrumbs() {
 
   const labelMap: Record<string, string> = {
     agents: t("nav.agents"),
-    packages: t("nav.packages"),
+    workflows: t("nav.packages"),
     conversations: t("nav.conversations"),
     chat: t("nav.chat"),
     resources: t("nav.resources"),

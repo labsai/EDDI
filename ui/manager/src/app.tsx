@@ -28,8 +28,8 @@ export function App() {
         <Route path="/manage/agents" element={<AgentsPage />} />
         <Route path="/manage/agents/wizard" element={<AgentWizardPage />} />
         <Route path="/manage/agentview/:id" element={<AgentDetailPage />} />
-        <Route path="/manage/packages" element={<WorkflowsPage />} />
-        <Route path="/manage/packageview/:id" element={<WorkflowDetailPage />} />
+        <Route path="/manage/workflows" element={<WorkflowsPage />} />
+        <Route path="/manage/workflowview/:id" element={<WorkflowDetailPage />} />
         <Route path="/manage/conversations" element={<ConversationsPage />} />
         <Route path="/manage/coordinator" element={<CoordinatorPage />} />
         <Route path="/manage/schedules" element={<SchedulesPage />} />

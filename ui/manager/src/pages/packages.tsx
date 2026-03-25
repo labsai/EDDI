@@ -29,7 +29,7 @@ export function WorkflowsPage() {
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
-  const [view, setView] = useState<ViewMode>(() => getStoredViewMode("packages"));
+  const [view, setView] = useState<ViewMode>(() => getStoredViewMode("workflows"));
 
   const { data: packages, isLoading, isError, refetch } =
     useWorkflowDescriptors(100, 0, search);
@@ -64,7 +64,7 @@ export function WorkflowsPage() {
 
   function handleViewChange(mode: ViewMode) {
     setView(mode);
-    setStoredViewMode("packages", mode);
+    setStoredViewMode("workflows", mode);
   }
 
   return (
@@ -82,7 +82,7 @@ export function WorkflowsPage() {
         </div>
         <Button
           onClick={() => setCreateOpen(true)}
-          data-testid="create-package-btn"
+          data-testid="create-workflow-btn"
         >
           <Plus className="h-4 w-4" />
           {t("packages.createWorkflow")}
@@ -99,7 +99,7 @@ export function WorkflowsPage() {
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t("common.search")}
             className="w-full rounded-lg border border-input bg-background py-2.5 ps-10 pe-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
-            data-testid="package-search"
+            data-testid="workflow-search"
           />
         </div>
         <ViewToggle view={view} onChange={handleViewChange} />
@@ -152,7 +152,7 @@ export function WorkflowsPage() {
                 "grid gap-4",
                 "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
               )}
-              data-testid="package-grid"
+              data-testid="workflow-grid"
             >
               {enrichedWorkflows.map((pkg) => (
                 <WorkflowCard
@@ -166,7 +166,7 @@ export function WorkflowsPage() {
           ) : (
             <div
               className="overflow-hidden rounded-xl border bg-card shadow-sm"
-              data-testid="package-list"
+              data-testid="workflow-list"
             >
               <table className="w-full">
                 <thead>
@@ -196,7 +196,7 @@ export function WorkflowsPage() {
                     >
                       <td className="px-5 py-3">
                         <Link
-                          to={`/manage/packageview/${pkg.id}`}
+                          to={`/manage/workflowview/${pkg.id}`}
                           className="text-sm font-medium text-foreground hover:text-primary transition-colors"
                         >
                           {pkg.name || t("packages.unnamed", "Unnamed Workflow")}

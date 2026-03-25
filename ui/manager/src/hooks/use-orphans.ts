@@ -19,7 +19,7 @@ export function usePurgeOrphans() {
       queryClient.invalidateQueries({ queryKey: ORPHANS_KEY });
       // Also invalidate resource-related queries since resources were deleted
       queryClient.invalidateQueries({ queryKey: ["agents"] });
-      queryClient.invalidateQueries({ queryKey: ["packages"] });
+      queryClient.invalidateQueries({ queryKey: ["workflows"] });
       queryClient.invalidateQueries({ queryKey: ["resources"] });
     },
   });

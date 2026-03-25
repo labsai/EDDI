@@ -11,18 +11,18 @@ describe("WorkflowsPage", () => {
 
   it("renders search input", () => {
     renderWithProviders(<WorkflowsPage />);
-    expect(screen.getByTestId("package-search")).toBeInTheDocument();
+    expect(screen.getByTestId("workflow-search")).toBeInTheDocument();
   });
 
   it("renders create package button", () => {
     renderWithProviders(<WorkflowsPage />);
-    expect(screen.getByTestId("create-package-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("create-workflow-btn")).toBeInTheDocument();
   });
 
   it("shows subtitle text", () => {
     renderWithProviders(<WorkflowsPage />);
     expect(
-      screen.getByText("Configure agent packages and extensions")
+      screen.getByText("Configure agent workflows and extensions")
     ).toBeInTheDocument();
   });
 });

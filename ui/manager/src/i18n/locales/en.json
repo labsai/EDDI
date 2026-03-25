@@ -66,7 +66,7 @@
     },
     "packages": {
       "title": "Workflows",
-      "subtitle": "Configure agent packages and extensions"
+      "subtitle": "Configure agent workflows and extensions"
     },
     "conversations": {
       "title": "Conversations",
@@ -119,7 +119,7 @@
     "title": "Agent Detail",
     "backToAgents": "Back to Agents",
     "packages": "Workflows",
-    "noWorkflows": "No packages added yet",
+    "noWorkflows": "No workflows added yet",
     "addWorkflow": "Add Workflow",
     "selectWorkflow": "Select Workflow to Add",
     "rawConfig": "Raw Configuration",
@@ -131,8 +131,7 @@
     "duplicating": "Duplicating...",
     "duplicateSuccess": "Agent duplicated successfully",
     "environments": "Environments",
-    "envUnrestricted": "Unrestricted",
-    "envRestricted": "Restricted",
+    "envProduction": "Production",
     "envTest": "Test",
     "savingAgent": "Saving agent...",
     "savedAgent": "Agent saved successfully",
@@ -149,7 +148,7 @@
     "step2Title": "Agent Information",
     "step2Desc": "Give your agent a name and description",
     "step3Title": "Workflows",
-    "step3Desc": "Configure the initial packages for your agent",
+    "step3Desc": "Configure the initial workflows for your agent",
     "step4Title": "Review & Create",
     "step4Desc": "Review your agent configuration before creating",
     "templateBlank": "Blank Agent",
@@ -160,8 +159,8 @@
     "templateWeatherDesc": "Example agent using HTTP calls to fetch weather data",
     "templateLabel": "Template",
     "defaultWorkflowLabel": "Default Workflow",
-    "createDefaultWorkflow": "Create a default package",
-    "createDefaultWorkflowDesc": "An empty package will be created and linked to the agent. You can add extensions later.",
+    "createDefaultWorkflow": "Create a default workflow",
+    "createDefaultWorkflowDesc": "An empty workflow will be created and linked to the agent. You can add extensions later.",
     "next": "Next",
     "back": "Back",
     "createOnly": "Create Only",
@@ -173,30 +172,30 @@
     "name": "Name",
     "namePlaceholder": "My Workflow",
     "description": "Description",
-    "descriptionPlaceholder": "Describe what this package does...",
+    "descriptionPlaceholder": "Describe what this workflow does...",
     "noDescription": "No description",
-    "empty": "No packages yet. Create your first package!",
-    "confirmDelete": "Are you sure you want to delete this package?",
-    "count_one": "{{count}} package",
-    "count_other": "{{count}} packages"
+    "empty": "No workflows yet. Create your first workflow!",
+    "confirmDelete": "Are you sure you want to delete this workflow?",
+    "count_one": "{{count}} workflow",
+    "count_other": "{{count}} workflows"
   },
   "packageDetail": {
     "title": "Workflow Detail",
     "backToWorkflows": "Back to Workflows",
     "extensions": "Extensions",
-    "noExtensions": "No extensions in this package",
+    "noExtensions": "No extensions in this workflow",
     "rawConfig": "Raw Configuration"
   },
   "packageEditor": {
     "title": "Workflow Editor",
     "pipeline": "Extension Pipeline",
-    "noExtensions": "No extensions in this package",
+    "noExtensions": "No extensions in this workflow",
     "addHint": "Add extensions to build your processing pipeline",
     "addExtension": "Add Extension",
     "addHintDialog": "Select an extension type to add to the pipeline",
     "reorder": "Reorder extension",
     "saved": "Workflow saved successfully",
-    "saveError": "Failed to save package"
+    "saveError": "Failed to save workflow"
   },
   "conversations": {
     "searchPlaceholder": "Search by conversation ID...",
@@ -252,24 +251,24 @@
     "count_one": "{{count}} resource",
     "count_other": "{{count}} resources",
     "types": {
-      "behavior": {
-        "name": "Behavior Rules",
+      "rules": {
+        "name": "Rules",
         "description": "Define conversation flow rules and decision logic"
       },
-      "httpcalls": {
-        "name": "HTTP Calls",
+      "apicalls": {
+        "name": "API Calls",
         "description": "Configure external API integrations and webhooks"
       },
       "output": {
         "name": "Output Sets",
         "description": "Manage agent response templates and output variations"
       },
-      "dictionaries": {
+      "dictionary": {
         "name": "Dictionaries",
         "description": "Define word and phrase recognition patterns"
       },
-      "langchain": {
-        "name": "LangChain",
+      "llm": {
+        "name": "LLM",
         "description": "Configure AI agent models, prompts, and tool bindings"
       },
       "propertysetter": {
@@ -292,9 +291,9 @@
     "readOnly": "Read-only",
     "formPlaceholder": "Visual editor coming soon. Use the JSON tab to edit.",
     "jsonSchema": "Schema validation active",
-    "cascadeMode": "Changes will cascade to parent package and agent",
+    "cascadeMode": "Changes will cascade to parent workflow and agent",
     "usedInAgents": "Used in {{count}} agent(s)",
-    "updateUsageHint": "Update the selected packages and agents to use the new version?",
+    "updateUsageHint": "Update the selected workflows and agents to use the new version?",
     "updateUsage": "Update Selected",
     "skipUpdate": "Skip",
     "cascading": "Updating...",

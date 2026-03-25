@@ -131,8 +131,7 @@
     "duplicating": "Duplicating...",
     "duplicateSuccess": "Agent duplicated successfully",
     "environments": "Environments",
-    "envUnrestricted": "Unrestricted",
-    "envRestricted": "Restricted",
+    "envProduction": "Production",
     "envTest": "Test",
     "savingAgent": "Saving agent...",
     "savedAgent": "Agent saved successfully",
@@ -241,11 +240,11 @@
     "count_one": "{{count}} ทรัพยากร",
     "count_other": "{{count}} ทรัพยากร",
     "types": {
-      "behavior": {
+      "rules": {
         "name": "กฎพฤติกรรม",
         "description": "กำหนดกฎการไหลของการสนทนาและตรรกะการตัดสินใจ"
       },
-      "httpcalls": {
+      "apicalls": {
         "name": "การเรียก HTTP",
         "description": "กำหนดค่าการผสาน API ภายนอกและเว็บฮุค"
       },
@@ -253,11 +252,11 @@
         "name": "ชุดผลลัพธ์",
         "description": "จัดการเทมเพลตการตอบกลับบอทและรูปแบบผลลัพธ์"
       },
-      "dictionaries": {
+      "dictionary": {
         "name": "พจนานุกรม",
         "description": "กำหนดรูปแบบการจดจำคำและวลี"
       },
-      "langchain": {
+      "llm": {
         "name": "LangChain",
         "description": "กำหนดค่าโมเดลเอเจนต์ AI พรอมต์ และการผูกเครื่องมือ"
       },
