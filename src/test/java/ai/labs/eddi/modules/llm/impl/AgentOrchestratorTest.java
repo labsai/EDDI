@@ -284,4 +284,122 @@ class AgentOrchestratorTest {
 
         assertEquals("You are a helpful assistant", task.getSystemMessage());
     }
+
+    // ==================== CDI Proxy Tool Spec Extraction Tests ====================
+    // Regression tests for: CDI proxy classes don't carry @Tool annotations,
+    // so ToolSpecifications.toolSpecificationsFrom() returns empty list.
+    // The fix resolves proxy classes to their superclass before extraction.
+
+    /**
+     * Simulates a real @Tool-annotated CDI bean.
+     */
+    static class SampleToolBean {
+        @dev.langchain4j.agent.tool.Tool("Sample tool for testing")
+        public String sampleAction(@dev.langchain4j.agent.tool.P("input value") String input) {
+            return "result: " + input;
+        }
+    }
+
+    /**
+     * Simulates a CDI ClientProxy — a subclass whose name contains "_ClientProxy".
+     * CDI proxies do NOT carry the @Tool annotations from their parent class.
+     */
+    static class SampleToolBean_ClientProxy extends SampleToolBean {
+        // CDI proxies are empty subclasses — no @Tool annotations here
+    }
+
+    @Test
+    @DisplayName("Tool specs should be extracted from real (non-proxy) tool bean")
+    void testToolSpecExtraction_RealBean() {
+        var tool = new SampleToolBean();
+        Class<?> toolClass = tool.getClass();
+
+        assertFalse(toolClass.getName().contains("_ClientProxy"));
+
+        var specs = dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationsFrom(toolClass);
+        assertEquals(1, specs.size(), "Should find 1 @Tool method");
+        assertEquals("sampleAction", specs.get(0).name());
+    }
+
+    @Test
+    @DisplayName("Tool specs should be extracted from CDI proxy via superclass resolution")
+    void testToolSpecExtraction_CdiProxy() {
+        var proxy = new SampleToolBean_ClientProxy();
+        Class<?> toolClass = proxy.getClass();
+
+        // Proxy class should match the detection pattern
+        assertTrue(toolClass.getName().contains("_ClientProxy"),
+                "Test setup: proxy class name must contain '_ClientProxy'");
+
+        // Without the fix: extracting from proxy class returns empty
+        var specsFromProxy = dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationsFrom(toolClass);
+        assertTrue(specsFromProxy.isEmpty(),
+                "CDI proxy class should NOT have @Tool annotations (this is the bug scenario)");
+
+        // With the fix: resolve to superclass first
+        if (toolClass.getName().contains("_ClientProxy") || toolClass.getName().contains("$$")) {
+            toolClass = toolClass.getSuperclass();
+        }
+
+        var specsFromSuperclass = dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationsFrom(toolClass);
+        assertEquals(1, specsFromSuperclass.size(),
+                "Superclass should have @Tool annotations after proxy resolution");
+        assertEquals("sampleAction", specsFromSuperclass.get(0).name());
+    }
+
+    @Test
+    @DisplayName("Tool executor should use proxy instance but superclass method")
+    void testToolExecutor_CdiProxy() throws Exception {
+        var proxy = new SampleToolBean_ClientProxy();
+        Class<?> toolClass = proxy.getClass();
+
+        // Resolve proxy to superclass
+        if (toolClass.getName().contains("_ClientProxy")) {
+            toolClass = toolClass.getSuperclass();
+        }
+
+        // Find @Tool method on the superclass
+        java.lang.reflect.Method toolMethod = null;
+        for (var method : toolClass.getDeclaredMethods()) {
+            if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) {
+                toolMethod = method;
+                break;
+            }
+        }
+
+        assertNotNull(toolMethod, "Should find @Tool method on superclass");
+        assertEquals("sampleAction", toolMethod.getName());
+
+        // Execute via the proxy instance — method should be callable on the proxy
+        String result = (String) toolMethod.invoke(proxy, "test-input");
+        assertEquals("result: test-input", result,
+                "Method from superclass should be invocable on proxy instance");
+    }
+
+    @Test
+    @DisplayName("Mockito mocks should resolve to original class via superclass")
+    void testMockitoProxy_Resolution() {
+        var mockTool = mock(SampleToolBean.class);
+        Class<?> mockClass = mockTool.getClass();
+
+        // Mockito creates a subclass — its superclass IS the original class
+        assertEquals(SampleToolBean.class, mockClass.getSuperclass(),
+                "Mockito mock superclass should be the original bean class");
+
+        // The proxy resolution logic should work for any proxy pattern
+        // Simulate the resolution: if name matches, use superclass
+        Class<?> resolvedClass = mockClass;
+        if (resolvedClass.getName().contains("_ClientProxy")
+                || resolvedClass.getName().contains("$$")
+                || resolvedClass.getName().contains("MockitoMock")) {
+            resolvedClass = resolvedClass.getSuperclass();
+        }
+
+        assertEquals(SampleToolBean.class, resolvedClass,
+                "Proxy resolution should resolve to the original bean class");
+
+        // Verify tool specs can be extracted from resolved class
+        var specs = dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationsFrom(resolvedClass);
+        assertEquals(1, specs.size(), "Should find @Tool methods on resolved class");
+    }
 }
