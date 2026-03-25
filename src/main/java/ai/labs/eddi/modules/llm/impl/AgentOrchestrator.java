@@ -1,8 +1,10 @@
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -62,6 +64,8 @@ class AgentOrchestrator {
     private final McpToolProviderManager mcpToolProviderManager;
 
     // For httpcall auto-discovery from workflow
+    private final IRestAgentStore restAgentStore;
+    private final IRestWorkflowStore restWorkflowStore;
     private final IResourceClientLibrary resourceClientLibrary;
     private final IApiCallExecutor apiCallExecutor;
     private final IJsonSerialization jsonSerialization;
@@ -77,6 +81,8 @@ class AgentOrchestrator {
             WeatherTool weatherTool,
             ToolExecutionService toolExecutionService,
             McpToolProviderManager mcpToolProviderManager,
+            IRestAgentStore restAgentStore,
+            IRestWorkflowStore restWorkflowStore,
             IResourceClientLibrary resourceClientLibrary,
             IApiCallExecutor apiCallExecutor,
             IJsonSerialization jsonSerialization,
@@ -91,6 +97,8 @@ class AgentOrchestrator {
         this.weatherTool = weatherTool;
         this.toolExecutionService = toolExecutionService;
         this.mcpToolProviderManager = mcpToolProviderManager;
+        this.restAgentStore = restAgentStore;
+        this.restWorkflowStore = restWorkflowStore;
         this.resourceClientLibrary = resourceClientLibrary;
         this.apiCallExecutor = apiCallExecutor;
         this.jsonSerialization = jsonSerialization;
@@ -386,16 +394,26 @@ class AgentOrchestrator {
                 return new HttpCallToolsResult(toolSpecs, executors);
             }
             URI agentUri = URI.create("eddi://ai.labs.agent/agentstore/agents/" + agentId + "?version=" + agentVersion);
-            AgentConfiguration agentConfig = resourceClientLibrary.getResource(agentUri, AgentConfiguration.class);
+            LOGGER.info("Discovering httpcall tools for agent: " + agentUri);
 
-            if (agentConfig.getWorkflows() == null || agentConfig.getWorkflows().isEmpty()) {
+            // Use direct store read — ResourceClientLibrary doesn't map agent/workflow URIs
+            AgentConfiguration agentConfig = restAgentStore.readAgent(agentId, agentVersion);
+
+            if (agentConfig == null || agentConfig.getWorkflows() == null || agentConfig.getWorkflows().isEmpty()) {
+                LOGGER.debug("No agent config or workflows found — skipping httpcall tool discovery");
                 return new HttpCallToolsResult(toolSpecs, executors);
             }
 
             // Load each workflow and discover httpcall extensions
             List<HttpCallToolEntry> entries = new ArrayList<>();
             for (URI workflowUri : agentConfig.getWorkflows()) {
-                WorkflowConfiguration workflowConfig = resourceClientLibrary.getResource(workflowUri, WorkflowConfiguration.class);
+                // Parse id and version from workflow URI: eddi://ai.labs.workflow/workflowstore/workflows/{id}?version={v}
+                String workflowPath = workflowUri.getPath();
+                String workflowId = workflowPath.substring(workflowPath.lastIndexOf('/') + 1);
+                String workflowQuery = workflowUri.getQuery(); // version=1
+                int workflowVersion = Integer.parseInt(workflowQuery.replace("version=", ""));
+
+                WorkflowConfiguration workflowConfig = restWorkflowStore.readWorkflow(workflowId, workflowVersion);
                 for (var step : workflowConfig.getWorkflowSteps()) {
                     if (step.getType() != null && HTTPCALLS_TYPE.equals(step.getType().toString())) {
                         String uri = (String) step.getConfig().get("uri");
@@ -474,7 +492,7 @@ class AgentOrchestrator {
             }
 
             LOGGER.info("Discovered " + toolSpecs.size() + " httpcall tools from workflow");
-        } catch (ServiceException e) {
+        } catch (Exception e) {
             LOGGER.warn("Failed to discover httpcall tools from workflow", e);
         }
 

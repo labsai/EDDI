@@ -1,5 +1,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -47,6 +49,7 @@ class AgentOrchestratorTest {
                 calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
                 mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
                 mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class),
                 mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
     }

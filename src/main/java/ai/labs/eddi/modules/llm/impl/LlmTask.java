@@ -1,5 +1,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
@@ -99,7 +101,9 @@ public class LlmTask implements ILifecycleTask {
             WeatherTool weatherTool,
             IApiCallExecutor apiCallExecutor,
             ToolExecutionService toolExecutionService,
-            McpToolProviderManager mcpToolProviderManager) {
+            McpToolProviderManager mcpToolProviderManager,
+            IRestAgentStore restAgentStore,
+            IRestWorkflowStore restWorkflowStore) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -115,6 +119,7 @@ public class LlmTask implements ILifecycleTask {
                 calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
                 toolExecutionService, mcpToolProviderManager,
+                restAgentStore, restWorkflowStore,
                 resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter);
     }
 

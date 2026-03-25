@@ -14,6 +14,8 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
@@ -111,7 +113,9 @@ class LlmTaskTest {
                                 weatherTool,
                                 apiCallExecutor,
                                 toolExecutionService,
-                                mock(McpToolProviderManager.class));
+                                mock(McpToolProviderManager.class),
+                                mock(IRestAgentStore.class),
+                                mock(IRestWorkflowStore.class));
         }
 
         static Stream<Arguments> provideParameters() {
