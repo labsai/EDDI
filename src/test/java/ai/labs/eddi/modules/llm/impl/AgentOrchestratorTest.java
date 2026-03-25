@@ -385,19 +385,22 @@ class AgentOrchestratorTest {
     }
 
     @Test
-    @DisplayName("Mockito mocks should resolve to original class via superclass")
+    @DisplayName("Mockito mocks should resolve to original class via proxy resolution")
     void testMockitoProxy_Resolution() {
         var mockTool = mock(SampleToolBean.class);
         Class<?> mockClass = mockTool.getClass();
 
-        // Mockito creates a subclass — its superclass IS the original class
-        assertEquals(SampleToolBean.class, mockClass.getSuperclass(), "Mockito mock superclass should be the original bean class");
+        // Mockito mock must be an instance of the original class
+        assertInstanceOf(SampleToolBean.class, mockTool, "Mockito mock should be an instance of the original bean class");
 
-        // The proxy resolution logic should work for any proxy pattern
-        // Simulate the resolution: if name matches, use superclass
+        // The proxy resolution logic should work for any proxy pattern.
+        // Resolve using Mockito's own API for mock detection, then fall back to
+        // class-name heuristics for CDI proxies.
         Class<?> resolvedClass = mockClass;
-        if (resolvedClass.getName().contains("_ClientProxy") || resolvedClass.getName().contains("$$")
-                || resolvedClass.getName().contains("MockitoMock")) {
+        if (org.mockito.Mockito.mockingDetails(mockTool).isMock()) {
+            // Mockito inline mocks may not create subclasses — use the mocked type
+            resolvedClass = org.mockito.Mockito.mockingDetails(mockTool).getMockCreationSettings().getTypeToMock();
+        } else if (resolvedClass.getName().contains("_ClientProxy") || resolvedClass.getName().contains("$$")) {
             resolvedClass = resolvedClass.getSuperclass();
         }
 

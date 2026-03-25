@@ -253,10 +253,9 @@ public class AgentSetupService {
             createdResources.put("behaviorLocation", behaviorLocation);
             patchDescriptor(extractIdFromLocation(behaviorLocation), extractVersionFromLocation(behaviorLocation), request.name());
 
-            // Don't include textual API summary — endpoints are available as tool
-            // specifications.
-            // The AgentOrchestrator appends tool URIs to the system message automatically.
-            String enrichedPrompt = request.systemPrompt();
+            // Enrich the system prompt with API endpoint summary so the LLM
+            // understands which endpoints are available and how to use them.
+            String enrichedPrompt = request.systemPrompt() + "\n\n" + buildResult.apiSummary();
             boolean quickReplies = request.enableQuickReplies() != null && request.enableQuickReplies();
             boolean sentiment = request.enableSentimentAnalysis() != null && request.enableSentimentAnalysis();
             String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);

@@ -91,8 +91,7 @@ public class EddiToolBridge {
      * @return JSON string with the API call result
      */
     @Tool("Executes a pre-configured EDDI API call to fetch real data. " + "Pass the exact httpCallUri that was provided to you.")
-    public String executeApiCall(
-            @P("The httpcall URI to execute, e.g. eddi://ai.labs.apicalls/apicallstore/apicalls/ID?version=1") String httpCallUri) {
+    public String executeApiCall(@P("httpCallUri") String httpCallUri) {
 
         String conversationId = CURRENT_CONVERSATION_ID.get();
         if (conversationId == null) {
@@ -101,9 +100,6 @@ public class EddiToolBridge {
 
         try {
             LOGGER.info("Agent executing httpcall: " + httpCallUri + " for conversation: " + conversationId);
-
-            // Clear cache to pick up any config updates
-            configCache.remove(httpCallUri);
 
             // Parse the URI to extract the httpcall configuration reference
             URI uri = URI.create(httpCallUri);
