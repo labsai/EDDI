@@ -7,8 +7,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "7070:7070"
-      - "7443:7443"
+      - "${EDDI_PORT:-7070}:7070"
+      - "${EDDI_HTTPS_PORT:-7443}:7443"
 #      - "5005:5005"
     depends_on:
       - mongodb

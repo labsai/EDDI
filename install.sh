@@ -14,6 +14,7 @@ set -euo pipefail
 # ── Configuration ──────────────────────────────────────────
 EDDI_VERSION="${EDDI_VERSION:-6}"
 EDDI_PORT="${EDDI_PORT:-7070}"
+EDDI_HTTPS_PORT="${EDDI_HTTPS_PORT:-7443}"
 EDDI_DIR="${EDDI_DIR:-$HOME/.eddi}"
 COMPOSE_BASE_URL="https://raw.githubusercontent.com/labsai/EDDI/main"
 EDDI_ALREADY_RUNNING=false
@@ -85,6 +86,81 @@ ask() {
   done
 }
 
+# Check if a TCP port is in use (fallback chain: ss → lsof → nc)
+port_in_use() {
+  local port="$1"
+  if command -v ss &>/dev/null; then
+    # Use space/end-of-line anchor to avoid matching port 70 when checking 7070
+    ss -tln 2>/dev/null | grep -qE ":${port}( |$)" && return 0
+  elif command -v lsof &>/dev/null; then
+    lsof -iTCP:"${port}" -sTCP:LISTEN &>/dev/null && return 0
+  elif command -v nc &>/dev/null; then
+    nc -z 127.0.0.1 "${port}" 2>/dev/null && return 0
+  else
+    # Last resort: /dev/tcp (bash built-in)
+    (echo >/dev/tcp/127.0.0.1/"${port}") 2>/dev/null && return 0
+  fi
+  return 1
+}
+
+find_next_free_port() {
+  local start="$1"
+  for ((p=start; p<=start+100; p++)); do
+    if ! port_in_use "$p"; then
+      echo "$p"
+      return
+    fi
+  done
+  echo "0"
+}
+
+# Prompt the user for a port. Shows conflict info and suggests alternatives.
+# Returns the chosen port on stdout.
+# Usage: EDDI_PORT=$(read_port "HTTP" "$EDDI_PORT")
+read_port() {
+  local port_name="$1"
+  local default_port="$2"
+  local suggested="$default_port"
+
+  if port_in_use "$default_port"; then
+    warn "Port ${default_port} is already in use!" >&2
+    local next_free
+    next_free=$(find_next_free_port $((default_port + 1)))
+    if [[ "$next_free" != "0" ]]; then
+      echo -e "  Suggested alternative: ${CYAN}${next_free}${RESET}" >&2
+      suggested="$next_free"
+    fi
+  else
+    echo -e "  ${DIM}Port ${default_port} is available.${RESET}" >&2
+  fi
+
+  echo "" >&2
+
+  if [[ "$NON_INTERACTIVE" == "true" ]]; then
+    info "${port_name} port: ${suggested}" >&2
+    echo "$suggested"
+    return
+  fi
+
+  while true; do
+    echo -ne "  ${port_name} port [${suggested}]: " >&2
+    local reply
+    read -r reply </dev/tty 2>/dev/null || reply=""
+    reply="${reply:-$suggested}"
+    if [[ "$reply" =~ ^[0-9]+$ ]] && (( reply >= 1024 && reply <= 65535 )); then
+      if [[ "$reply" != "$default_port" ]] && port_in_use "$reply"; then
+        warn "Port ${reply} is in use. Try another." >&2
+      else
+        info "${port_name} port: ${reply}" >&2
+        echo "$reply"
+        return
+      fi
+    else
+      echo -e "  ${YELLOW}Please enter a valid port (1024-65535)${RESET}" >&2
+    fi
+  done
+}
+
 banner() {
   echo ""
   echo -e "${CYAN}${BOLD}"
@@ -134,7 +210,8 @@ for arg in "$@"; do
       echo "  --local             Use locally built Docker image (skip pull)"
       echo ""
       echo "Environment variables:"
-      echo "  EDDI_PORT           Port for EDDI (default: 7070)"
+      echo "  EDDI_PORT           HTTP port (default: 7070)"
+      echo "  EDDI_HTTPS_PORT     HTTPS port (default: 7443)"
       echo "  EDDI_DIR            Install directory (default: ~/.eddi)"
       echo "  EDDI_VERSION        Docker image tag (default: 6)"
       exit 0
@@ -255,18 +332,21 @@ check_prerequisites() {
 
   # Disk space check (need ~2GB for images)
   local available_gb
-  available_gb=$(df -BG "$HOME" 2>/dev/null | awk 'NR==2{print $4}' | tr -d 'G') || available_gb=999
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS df doesn't support -BG, use -g for GB blocks
+    available_gb=$(df -g "$HOME" 2>/dev/null | awk 'NR==2{print $4}') || available_gb=999
+  else
+    available_gb=$(df -BG "$HOME" 2>/dev/null | awk 'NR==2{print $4}' | tr -d 'G') || available_gb=999
+  fi
   if [[ "$available_gb" =~ ^[0-9]+$ ]] && [[ "$available_gb" -lt 3 ]]; then
     warn "Low disk space (${available_gb}GB free). EDDI images need ~2GB."
     warn "Free space: docker system prune"
   fi
 
-  # Port check — is something already on EDDI_PORT?
+  # Port check — is EDDI already running?
   if curl -sf "http://localhost:${EDDI_PORT}/q/health/ready" &>/dev/null 2>&1; then
     EDDI_ALREADY_RUNNING=true
     info "EDDI already running on port ${EDDI_PORT}"
-  elif curl -sf "http://localhost:${EDDI_PORT}" &>/dev/null 2>&1; then
-    fail "Port ${EDDI_PORT} is in use by another service.\n     Use: EDDI_PORT=7071 bash install.sh"
   else
     EDDI_ALREADY_RUNNING=false
   fi
@@ -291,7 +371,7 @@ detect_deployed_agents() {
 
 # ── Wizard steps ───────────────────────────────────────────
 
-TOTAL_STEPS=3
+TOTAL_STEPS=4
 
 wizard_database() {
   if [[ -n "$DB_CHOICE" ]]; then return; fi
@@ -331,6 +411,15 @@ wizard_monitoring() {
   local mon_choice
   mon_choice=$(ask "1" "1" "2")
   [[ "$mon_choice" == "2" ]] && WITH_MONITORING=true
+}
+
+wizard_ports() {
+  step 4 "Ports"
+  echo "  EDDI uses two ports: HTTP for the dashboard/API, HTTPS for secure access."
+  echo ""
+
+  EDDI_PORT=$(read_port "HTTP" "$EDDI_PORT")
+  EDDI_HTTPS_PORT=$(read_port "HTTPS" "$EDDI_HTTPS_PORT")
 }
 
 # ── Compose file management ───────────────────────────────
@@ -389,6 +478,7 @@ download_compose_files() {
   # Save config for eddi CLI wrapper
   echo "COMPOSE_FILES=\"${COMPOSE_FILES[*]}\"" > "$EDDI_DIR/.eddi-config"
   echo "EDDI_PORT=$EDDI_PORT" >> "$EDDI_DIR/.eddi-config"
+  echo "EDDI_HTTPS_PORT=$EDDI_HTTPS_PORT" >> "$EDDI_DIR/.eddi-config"
 }
 
 # Helper: run docker compose with the right -f flags
@@ -404,6 +494,10 @@ compose_cmd() {
 
 start_eddi() {
   section "Starting EDDI"
+
+  # Export ports so docker-compose variable substitution picks them up
+  export EDDI_PORT
+  export EDDI_HTTPS_PORT
 
   if [[ "$LOCAL_IMAGE" == "true" ]]; then
     echo "  Building local Docker image..."
@@ -493,6 +587,7 @@ print_success() {
   echo -e "${GREEN}${BOLD}─── 🎉 Setup Complete! ────────────────────────────${RESET}"
   echo ""
   echo -e "  ${BOLD}Dashboard${RESET}  →  ${CYAN}http://localhost:${EDDI_PORT}${RESET}"
+  echo -e "  ${BOLD}HTTPS${RESET}      →  ${CYAN}https://localhost:${EDDI_HTTPS_PORT}${RESET}"
   echo -e "  ${BOLD}MCP${RESET}        →  ${CYAN}http://localhost:${EDDI_PORT}/mcp${RESET}"
   echo -e "  ${BOLD}API docs${RESET}   →  ${CYAN}http://localhost:${EDDI_PORT}/q/swagger-ui${RESET}"
 
@@ -556,6 +651,7 @@ done
 
 case "${1:-help}" in
   start)
+    export EDDI_PORT EDDI_HTTPS_PORT
     docker compose $COMPOSE_FLAGS up -d
     echo "EDDI started on port ${EDDI_PORT}"
     ;;
@@ -565,6 +661,7 @@ case "${1:-help}" in
     ;;
   restart)
     docker compose $COMPOSE_FLAGS down
+    export EDDI_PORT EDDI_HTTPS_PORT
     docker compose $COMPOSE_FLAGS up -d
     echo "EDDI restarted."
     ;;
@@ -650,7 +747,7 @@ print_config_summary() {
   else
     echo -e "  Monitoring:     ${DIM}none${RESET}"
   fi
-  echo -e "  Port:           ${BOLD}${EDDI_PORT}${RESET}"
+  echo -e "  Port:           ${BOLD}${EDDI_PORT}${RESET} (HTTP), ${BOLD}${EDDI_HTTPS_PORT}${RESET} (HTTPS)"
   echo -e "  Install dir:    ${BOLD}${EDDI_DIR}${RESET}"
 }
 
@@ -674,6 +771,7 @@ main() {
   wizard_database
   wizard_auth
   wizard_monitoring
+  wizard_ports
 
   # Show chosen config
   print_config_summary

@@ -18,14 +18,16 @@ param(
     [switch]$Full,
     [switch]$Local,
     [string]$EddiPort = $env:EDDI_PORT,
+    [string]$EddiHttpsPort = $env:EDDI_HTTPS_PORT,
     [string]$EddiDir = $env:EDDI_DIR
 )
 
 $ErrorActionPreference = "Stop"
 
 # ── Configuration ──────────────────────────────────────────
-if (-not $EddiPort) { $EddiPort = "7070" }
-if (-not $EddiDir)  { $EddiDir = Join-Path $HOME ".eddi" }
+if (-not $EddiPort)      { $EddiPort = "7070" }
+if (-not $EddiHttpsPort) { $EddiHttpsPort = "7443" }
+if (-not $EddiDir)       { $EddiDir = Join-Path $HOME ".eddi" }
 $ComposeBaseUrl = "https://raw.githubusercontent.com/labsai/EDDI/main"
 
 if ($Full) {
@@ -79,6 +81,65 @@ function Read-Choice($default, [string[]]$valid = @()) {
         if ([string]::IsNullOrWhiteSpace($reply)) { return $default }
         if ($valid.Count -eq 0 -or $valid -contains $reply) { return $reply }
         Write-Host "  Please enter one of: $($valid -join ', ')" -ForegroundColor Yellow
+    }
+}
+
+function Test-PortInUse([int]$Port) {
+    try {
+        $tcp = [System.Net.Sockets.TcpClient]::new()
+        $task = $tcp.ConnectAsync("127.0.0.1", $Port)
+        $connected = $task.Wait(500)
+        $tcp.Dispose()
+        return $connected
+    } catch {
+        return $false
+    }
+}
+
+function Find-NextFreePort([int]$Start) {
+    for ($p = $Start; $p -le $Start + 100; $p++) {
+        if (-not (Test-PortInUse $p)) { return $p }
+    }
+    return 0
+}
+
+function Read-Port([string]$PortName, [int]$DefaultPort) {
+    $inUse = Test-PortInUse $DefaultPort
+
+    if ($inUse) {
+        Write-Warn "Port $DefaultPort is already in use!"
+        $nextFree = Find-NextFreePort ($DefaultPort + 1)
+        if ($nextFree -gt 0) {
+            Write-Host "  Suggested alternative: $nextFree" -ForegroundColor Cyan
+        }
+    } else {
+        Write-Host "  Port $DefaultPort is available." -ForegroundColor DarkGray
+    }
+
+    Write-Host ""
+    $suggested = if ($inUse -and $nextFree -gt 0) { $nextFree } else { $DefaultPort }
+
+    if ($Defaults) {
+        Write-Ok "$PortName port: $suggested"
+        return $suggested
+    }
+
+    while ($true) {
+        $reply = Read-Host "  $PortName port [$suggested]"
+        if ([string]::IsNullOrWhiteSpace($reply)) {
+            Write-Ok "$PortName port: $suggested"
+            return $suggested
+        }
+        if ($reply -match '^\d+$' -and [int]$reply -ge 1024 -and [int]$reply -le 65535) {
+            if (Test-PortInUse ([int]$reply)) {
+                Write-Warn "Port $reply is in use. Try another."
+            } else {
+                Write-Ok "$PortName port: $reply"
+                return [int]$reply
+            }
+        } else {
+            Write-Host "  Please enter a valid port (1024-65535)" -ForegroundColor Yellow
+        }
     }
 }
 
@@ -140,18 +201,13 @@ function Test-Prerequisites {
         Write-Fail "Docker Compose not found.`n     Install: https://docs.docker.com/compose/install/"
     }
 
-    # Port check
+    # Port check — is EDDI already running?
     try {
         Invoke-RestMethod -Uri "http://localhost:${EddiPort}/q/health/ready" -TimeoutSec 3 -ErrorAction Stop | Out-Null
         $script:EddiAlreadyRunning = $true
         Write-Ok "EDDI already running on port $EddiPort"
     } catch {
-        try {
-            Invoke-WebRequest -Uri "http://localhost:${EddiPort}" -TimeoutSec 2 -ErrorAction Stop | Out-Null
-            Write-Fail "Port $EddiPort is in use by another service.`n     Use: `$env:EDDI_PORT='7071'; .\install.ps1"
-        } catch {
-            $script:EddiAlreadyRunning = $false
-        }
+        $script:EddiAlreadyRunning = $false
     }
 }
 
@@ -169,7 +225,7 @@ function Get-DeployedAgentCount {
 
 # ── Wizard steps ──────────────────────────────────────────
 
-$TotalSteps = 3
+$TotalSteps = 4
 
 function Step-Database {
     if ($Db) { return }
@@ -206,6 +262,15 @@ function Step-Monitoring {
     Write-Host ""
     $choice = Read-Choice "1" @("1", "2")
     if ($choice -eq "2") { $script:WithMonitoring = $true }
+}
+
+function Step-Ports {
+    Write-Step 4 $TotalSteps "Ports"
+    Write-Host "  EDDI uses two ports: HTTP for the dashboard/API, HTTPS for secure access."
+    Write-Host ""
+
+    $script:EddiPort = Read-Port "HTTP" ([int]$EddiPort)
+    $script:EddiHttpsPort = Read-Port "HTTPS" ([int]$EddiHttpsPort)
 }
 
 # ── Compose file management ──────────────────────────────
@@ -263,6 +328,7 @@ function Get-ComposeFiles {
     @"
 COMPOSE_FILES=$($ComposeFiles -join " ")
 EDDI_PORT=$EddiPort
+EDDI_HTTPS_PORT=$EddiHttpsPort
 "@ | Set-Content (Join-Path $EddiDir ".eddi-config")
 }
 
@@ -270,6 +336,10 @@ EDDI_PORT=$EddiPort
 
 function Start-Eddi {
     Write-Section "Starting EDDI"
+
+    # Export ports so docker-compose variable substitution picks them up
+    $env:EDDI_PORT = $EddiPort
+    $env:EDDI_HTTPS_PORT = $EddiHttpsPort
 
     if ($Local) {
         Write-Host "  Building local Docker image..."
@@ -358,6 +428,7 @@ function Write-Success {
     Write-Host "─── 🎉 Setup Complete! ────────────────────────────" -ForegroundColor Green
     Write-Host ""
     Write-Host "  Dashboard  →  " -NoNewline; Write-Host "http://localhost:${EddiPort}" -ForegroundColor Cyan
+    Write-Host "  HTTPS      →  " -NoNewline; Write-Host "https://localhost:${EddiHttpsPort}" -ForegroundColor Cyan
     Write-Host "  MCP        →  " -NoNewline; Write-Host "http://localhost:${EddiPort}/mcp" -ForegroundColor Cyan
     Write-Host "  API docs   →  " -NoNewline; Write-Host "http://localhost:${EddiPort}/q/swagger-ui" -ForegroundColor Cyan
 
@@ -394,7 +465,8 @@ function Write-ConfigSummary {
     Write-Host "  Authentication: $authLabel" -ForegroundColor $(if ($WithAuth) { "White" } else { "DarkGray" })
     $monLabel = if ($WithMonitoring) { "Grafana + Prometheus" } else { "none" }
     Write-Host "  Monitoring:     $monLabel" -ForegroundColor $(if ($WithMonitoring) { "White" } else { "DarkGray" })
-    Write-Host "  Port:           $EddiPort" -ForegroundColor White
+    Write-Host "  HTTP port:      $EddiPort" -ForegroundColor White
+    Write-Host "  HTTPS port:     $EddiHttpsPort" -ForegroundColor White
     Write-Host "  Install dir:    $EddiDir" -ForegroundColor White
 }
 
@@ -415,6 +487,7 @@ if ($EddiAlreadyRunning) {
 Step-Database
 Step-Auth
 Step-Monitoring
+Step-Ports
 
 Write-ConfigSummary
 Get-ComposeFiles
