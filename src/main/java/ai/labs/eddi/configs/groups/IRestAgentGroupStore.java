@@ -32,6 +32,13 @@ public interface IRestAgentGroupStore extends IRestVersionInfo {
     Response readJsonSchema();
 
     @GET
+    @Path("/styles")
+    @Produces(MediaType.APPLICATION_JSON)
+    @APIResponse(responseCode = "200", description = "Available discussion styles with descriptions.")
+    @Operation(description = "List available discussion styles and their phase flows.")
+    Response readDiscussionStyles();
+
+    @GET
     @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of group descriptors.")

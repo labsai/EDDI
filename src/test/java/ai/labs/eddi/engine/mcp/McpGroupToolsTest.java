@@ -39,6 +39,21 @@ class McpGroupToolsTest {
         tools = new McpGroupTools(groupStore, groupConversationService, jsonSerialization);
     }
 
+    // --- describe_discussion_styles ---
+
+    @Test
+    void describeDiscussionStyles_returnsNonEmptyDescription() {
+        String result = tools.describe_discussion_styles();
+
+        assertNotNull(result);
+        assertFalse(result.isBlank());
+        assertTrue(result.contains("ROUND_TABLE"));
+        assertTrue(result.contains("PEER_REVIEW"));
+        assertTrue(result.contains("DEVIL_ADVOCATE"));
+        assertTrue(result.contains("DELPHI"));
+        assertTrue(result.contains("DEBATE"));
+    }
+
     // --- list_groups ---
 
     @Test
@@ -98,7 +113,7 @@ class McpGroupToolsTest {
     void createGroup_defaultStyle_usesRoundTable() throws Exception {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/new-id?version=1")).build());
 
-        String result = tools.create_group("Panel", "desc", "a1,a2", "Alice,Bob", null, null, null);
+        String result = tools.create_group("Panel", "desc", "a1,a2", "Alice,Bob", null, null, null, null);
 
         assertTrue(result.contains("ROUND_TABLE"));
         assertTrue(result.contains("2 members"));
@@ -119,7 +134,7 @@ class McpGroupToolsTest {
     void createGroup_peerReviewStyle() throws Exception {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/id?version=1")).build());
 
-        String result = tools.create_group("Review", null, "a1,a2,a3", null, "mod1", "PEER_REVIEW", "1");
+        String result = tools.create_group("Review", null, "a1,a2,a3", null, null, "mod1", "PEER_REVIEW", "1");
 
         assertTrue(result.contains("PEER_REVIEW"));
 
@@ -133,10 +148,26 @@ class McpGroupToolsTest {
     }
 
     @Test
+    void createGroup_withMemberRoles() throws Exception {
+        when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/id?version=1")).build());
+
+        tools.create_group("DA Panel", null, "a1,a2,a3", "Optimist,Pragmatist,Skeptic", "PARTICIPANT,PARTICIPANT,DEVIL_ADVOCATE", "mod1",
+                "DEVIL_ADVOCATE", null);
+
+        ArgumentCaptor<AgentGroupConfiguration> captor = ArgumentCaptor.forClass(AgentGroupConfiguration.class);
+        verify(groupStore).createGroup(captor.capture());
+
+        var members = captor.getValue().getMembers();
+        assertNull(members.get(0).role()); // PARTICIPANT → null (default)
+        assertNull(members.get(1).role());
+        assertEquals("DEVIL_ADVOCATE", members.get(2).role());
+    }
+
+    @Test
     void createGroup_invalidStyle_fallsBackToRoundTable() throws Exception {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/id")).build());
 
-        tools.create_group("Test", null, "a1", null, null, "INVALID", null);
+        tools.create_group("Test", null, "a1", null, null, null, "INVALID", null);
 
         ArgumentCaptor<AgentGroupConfiguration> captor = ArgumentCaptor.forClass(AgentGroupConfiguration.class);
         verify(groupStore).createGroup(captor.capture());
@@ -148,7 +179,7 @@ class McpGroupToolsTest {
     void createGroup_handlesException() {
         when(groupStore.createGroup(any())).thenThrow(new RuntimeException("Insert failed"));
 
-        String result = tools.create_group("Test", null, "a1", null, null, null, null);
+        String result = tools.create_group("Test", null, "a1", null, null, null, null, null);
 
         assertTrue(result.contains("error"));
     }
@@ -230,6 +261,30 @@ class McpGroupToolsTest {
         when(groupConversationService.readGroupConversation(any())).thenThrow(new RuntimeException("Not found"));
 
         String result = tools.read_group_conversation("gc1");
+
+        assertTrue(result.contains("error"));
+    }
+
+    // --- list_group_conversations ---
+
+    @Test
+    void listGroupConversations_success() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc1");
+        when(groupConversationService.listGroupConversations("g1", 0, 20)).thenReturn(List.of(gc));
+        when(jsonSerialization.serialize(any())).thenReturn("[{\"id\":\"gc1\"}]");
+
+        String result = tools.list_group_conversations("g1", null, null);
+
+        assertNotNull(result);
+        verify(groupConversationService).listGroupConversations("g1", 0, 20);
+    }
+
+    @Test
+    void listGroupConversations_handlesException() throws Exception {
+        when(groupConversationService.listGroupConversations(any(), anyInt(), anyInt())).thenThrow(new RuntimeException("DB error"));
+
+        String result = tools.list_group_conversations("g1", null, null);
 
         assertTrue(result.contains("error"));
     }

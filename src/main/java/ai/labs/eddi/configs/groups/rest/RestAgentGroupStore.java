@@ -4,6 +4,8 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
+import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -12,7 +14,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
@@ -41,6 +45,27 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
         } catch (Exception e) {
             throw sneakyThrow(e);
         }
+    }
+
+    @Override
+    public Response readDiscussionStyles() {
+        var styles = Arrays.stream(DiscussionStyle.values()).map(s -> {
+            var phases = DiscussionStylePresets.expand(s, 2);
+            var phaseNames = phases.stream().map(p -> p.name()).toList();
+            return Map.of("style", s.name(), "phases", phaseNames, "description", describeStyle(s));
+        }).toList();
+        return Response.ok(styles).build();
+    }
+
+    private static String describeStyle(DiscussionStyle style) {
+        return switch (style) {
+            case ROUND_TABLE -> "Open discussion with multiple opinion rounds and moderator synthesis";
+            case PEER_REVIEW -> "Each member gives an opinion, then critiques every peer, then revises";
+            case DEVIL_ADVOCATE -> "One designated challenger argues against the group consensus";
+            case DELPHI -> "Anonymous opinion rounds to reduce groupthink and achieve convergence";
+            case DEBATE -> "Structured pro/con argumentation with rebuttal and judge";
+            case CUSTOM -> "User-defined phases for full control over the discussion flow";
+        };
     }
 
     @Override

@@ -44,7 +44,8 @@ public class McpToolFilter implements ToolFilter {
             // Agent Trigger CRUD (Phase 8a.3)
             "list_agent_triggers", "create_agent_trigger", "update_agent_trigger", "delete_agent_trigger",
             // Group Conversations (Phase 10)
-            "list_groups", "read_group", "create_group", "update_group", "delete_group", "discuss_with_group", "read_group_conversation");
+            "describe_discussion_styles", "list_groups", "read_group", "create_group", "update_group", "delete_group", "discuss_with_group",
+            "read_group_conversation", "list_group_conversations");
 
     @Override
     public boolean test(ToolInfo toolInfo, FilterContext filterContext) {
