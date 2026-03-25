@@ -255,7 +255,22 @@ const RESOURCE_SCHEMAS: Record<string, object> = {
               additionalProperties: { type: "string" },
             },
             tools: { type: "array", items: { type: "string" }, description: "URIs to HTTP calls configs used as tools" },
+            mcpServers: {
+              type: "array",
+              description: "External MCP servers whose tools become available to the LLM",
+              items: {
+                type: "object",
+                properties: {
+                  url: { type: "string", description: "URL of the MCP server" },
+                  name: { type: "string", description: "Optional display name" },
+                  transport: { type: "string", description: "Transport type: http or sse" },
+                  apiKey: { type: "string", description: "API key or vault reference" },
+                  timeoutMs: { type: "integer", description: "Timeout in milliseconds" },
+                },
+              },
+            },
             enableBuiltInTools: { type: "boolean", description: "Whether to enable built-in tools" },
+            enableHttpCallTools: { type: "boolean", description: "Auto-discover httpcall extensions from the workflow as tools (default: true)" },
             builtInToolsWhitelist: { type: "array", items: { type: "string" }, description: "Whitelist of built-in tool names" },
             conversationHistoryLimit: { type: "integer", description: "Max conversation history entries sent to LLM" },
             maxBudgetPerConversation: { type: "number", description: "Maximum cost budget per conversation" },
@@ -532,18 +547,18 @@ export const handlers = [
 
   // --- Chat / Agent Engine ---
 
-  // Start conversation
-  http.post("*/agents/:env/:agentId", ({ params }) => {
+  // Start conversation (v6: POST /agents/:agentId)
+  http.post("*/agents/:agentId", () => {
     return new HttpResponse(null, {
       status: 201,
       headers: {
-        Location: `/agents/${params.env}/${params.agentId}/conv-${Date.now()}`,
+        Location: `/agents/conv-${Date.now()}`,
       },
     });
   }),
 
-  // Send message (text/plain or JSON) — returns snapshot
-  http.post("*/agents/:env/:agentId/:conversationId", () => {
+  // Send message (text/plain or JSON) — returns snapshot (v6: POST /agents/:conversationId)
+  http.post("*/agents/:conversationId", () => {
     return HttpResponse.json({
       agentId: "agent1",
       agentVersion: 1,
@@ -560,8 +575,8 @@ export const handlers = [
     });
   }),
 
-  // Read conversation (GET)
-  http.get("*/agents/:env/:agentId/:conversationId", () => {
+  // Read conversation (v6: GET /agents/:conversationId)
+  http.get("*/agents/:conversationId", () => {
     return HttpResponse.json({
       agentId: "agent1",
       agentVersion: 1,
@@ -792,6 +807,10 @@ export const handlers = [
           builtInToolsWhitelist: ["calculator", "datetime"],
           tools: [
             "eddi://ai.labs.apicalls/apicallstore/apicalls/weather?version=1",
+          ],
+          enableHttpCallTools: true,
+          mcpServers: [
+            { url: "http://localhost:7070/mcp", name: "Local MCP", transport: "http" },
           ],
           conversationHistoryLimit: 10,
           maxBudgetPerConversation: 1.0,
@@ -1512,5 +1531,46 @@ export const scheduleHandlers = [
   // Dismiss dead letter
   http.post("*/schedulestore/schedules/:id/dismiss", () => {
     return new HttpResponse(null, { status: 200 });
+  }),
+
+  // --- Agent Setup Wizard ---
+  http.post("*/administration/agents/setup", async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json(
+      {
+        action: "setup_complete",
+        agentId: `agent-${Date.now()}`,
+        agentName: body.name ?? "New Agent",
+        provider: body.provider ?? "anthropic",
+        model: body.model ?? "claude-sonnet-4-6",
+        deployed: body.deploy !== false,
+        deploymentStatus: body.deploy !== false ? "READY" : undefined,
+        quickRepliesEnabled: body.enableQuickReplies ?? false,
+        sentimentAnalysisEnabled: body.enableSentimentAnalysis ?? false,
+        resources: { agentLocation: "/agentstore/agents/mock-agent?version=1" },
+      },
+      { status: 201 },
+    );
+  }),
+
+  http.post("*/administration/agents/setup-api", async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json(
+      {
+        action: "api_agent_created",
+        agentId: `api-agent-${Date.now()}`,
+        agentName: body.name ?? "API Agent",
+        provider: body.provider ?? "anthropic",
+        model: body.model ?? "claude-sonnet-4-6",
+        deployed: body.deploy !== false,
+        deploymentStatus: body.deploy !== false ? "READY" : undefined,
+        endpointCount: 5,
+        groups: ["Users", "Orders"],
+        quickRepliesEnabled: body.enableQuickReplies ?? false,
+        sentimentAnalysisEnabled: body.enableSentimentAnalysis ?? false,
+        resources: { agentLocation: "/agentstore/agents/mock-api-agent?version=1" },
+      },
+      { status: 201 },
+    );
   }),
 ];

@@ -1,89 +1,168 @@
-import { useState, useRef } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Wand2,
   ArrowLeft,
   ArrowRight,
   Check,
-  LayoutTemplate,
-  FileText,
-  Workflow,
-  Rocket,
   Bot,
-  MessageSquare,
-  CloudSun,
+  Globe,
+  Brain,
+  Settings2,
+  Rocket,
   RefreshCw,
+  Upload,
+  Link as LinkIcon,
+  FileCode2,
+  Eye,
+  EyeOff,
+  Sparkles,
+  MessageSquarePlus,
+  BarChart3,
+  Wrench,
+  Server,
+  ChevronDown,
+  AlertCircle,
+  CheckCircle2,
+  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useCreateAgent, useDeployAgent } from "@/hooks/use-agents";
-import { useNavigate, Link } from "react-router-dom";
+import { useSetupAgent, useCreateApiAgent } from "@/hooks/use-agent-setup";
+import {
+  LLM_PROVIDERS,
+  getProviderConfig,
+  type SetupAgentRequest,
+  type CreateApiAgentRequest,
+  type SetupResult,
+} from "@/lib/api/agent-setup";
+import { Link } from "react-router-dom";
+import { toast } from "sonner";
 
-// Wizard step definitions
-const STEPS = [
-  { id: "template", icon: LayoutTemplate },
-  { id: "info", icon: FileText },
-  { id: "packages", icon: Workflow },
+/* ================================================================
+   Types & Constants
+   ================================================================ */
+
+type WizardMode = "standard" | "api";
+
+interface WizardState {
+  mode: WizardMode | "";
+  // Shared
+  name: string;
+  systemPrompt: string;
+  // LLM
+  provider: string;
+  model: string;
+  apiKey: string;
+  baseUrl: string;
+  // Standard-specific
+  introMessage: string;
+  enableBuiltInTools: boolean;
+  builtInToolsWhitelist: string;
+  enableQuickReplies: boolean;
+  enableSentimentAnalysis: boolean;
+  mcpServers: string;
+  // API-specific
+  openApiSpec: string;
+  apiBaseUrl: string;
+  apiAuth: string;
+  endpoints: string;
+  specInputMode: "url" | "file" | "paste";
+  specUrl: string;
+  // Deploy
+  deploy: boolean;
+  environment: string;
+}
+
+const INITIAL_STATE: WizardState = {
+  mode: "",
+  name: "",
+  systemPrompt: "",
+  provider: "anthropic",
+  model: "claude-sonnet-4-6",
+  apiKey: "",
+  baseUrl: "",
+  introMessage: "",
+  enableBuiltInTools: false,
+  builtInToolsWhitelist: "",
+  enableQuickReplies: false,
+  enableSentimentAnalysis: false,
+  mcpServers: "",
+  openApiSpec: "",
+  apiBaseUrl: "",
+  apiAuth: "",
+  endpoints: "",
+  specInputMode: "url",
+  specUrl: "",
+  deploy: true,
+  environment: "production",
+};
+
+const STEPS_STANDARD = [
+  { id: "type", icon: Sparkles },
+  { id: "info", icon: Brain },
+  { id: "llm", icon: Settings2 },
+  { id: "features", icon: Wrench },
   { id: "review", icon: Rocket },
 ] as const;
 
-interface AgentTemplate {
-  id: string;
-  icon: typeof Bot;
-  gradient: string;
-}
+const STEPS_API = [
+  { id: "type", icon: Sparkles },
+  { id: "info", icon: Brain },
+  { id: "apispec", icon: Globe },
+  { id: "llm", icon: Settings2 },
+  { id: "features", icon: Wrench },
+  { id: "review", icon: Rocket },
+] as const;
 
-const TEMPLATES: AgentTemplate[] = [
-  {
-    id: "blank",
-    icon: Bot,
-    gradient: "from-slate-500 to-slate-700",
-  },
-  {
-    id: "qa",
-    icon: MessageSquare,
-    gradient: "from-blue-500 to-indigo-600",
-  },
-  {
-    id: "weather",
-    icon: CloudSun,
-    gradient: "from-amber-400 to-orange-500",
-  },
-];
-
-interface WizardState {
-  template: string;
-  name: string;
-  description: string;
-  createWorkflow: boolean;
-  autoDeploy: boolean;
-}
+/* ================================================================
+   Main Wizard Component
+   ================================================================ */
 
 export function AgentWizardPage() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
+
   const [currentStep, setCurrentStep] = useState(0);
-  const [state, setState] = useState<WizardState>({
-    template: "",
-    name: "",
-    description: "",
-    createWorkflow: true,
-    autoDeploy: false,
-  });
-  const [isCreating, setIsCreating] = useState(false);
+  const [state, setState] = useState<WizardState>(INITIAL_STATE);
+  const [result, setResult] = useState<SetupResult | null>(null);
+  const [error, setError] = useState<string>("");
+  const [showKey, setShowKey] = useState(false);
 
-  const createAgent = useCreateAgent();
-  const deployAgent = useDeployAgent();
+  const setupAgent = useSetupAgent();
+  const createApiAgent = useCreateApiAgent();
 
-  const step = STEPS[currentStep]!;
+  const isCreating = setupAgent.isPending || createApiAgent.isPending;
+  const steps = state.mode === "api" ? STEPS_API : STEPS_STANDARD;
+  const step = steps[currentStep];
+
+  const update = useCallback(
+    (patch: Partial<WizardState>) => setState((s) => ({ ...s, ...patch })),
+    [],
+  );
+
+  function handleProviderChange(providerId: string) {
+    const config = getProviderConfig(providerId);
+    update({
+      provider: providerId,
+      model: config?.defaultModel ?? "",
+      apiKey: config?.needsKey === false ? "" : state.apiKey,
+    });
+  }
 
   function canProceed(): boolean {
+    if (!step) return false;
     switch (step.id) {
-      case "template":
-        return state.template !== "";
+      case "type":
+        return state.mode !== "";
       case "info":
-        return state.name.trim().length > 0;
-      case "packages":
-        return true;
+        return state.name.trim().length > 0 && state.systemPrompt.trim().length > 0;
+      case "llm": {
+        const prov = getProviderConfig(state.provider);
+        if (prov?.needsKey && !state.apiKey.trim()) return false;
+        return state.model.trim().length > 0;
+      }
+      case "apispec":
+        return state.openApiSpec.trim().length > 0;
+      case "features":
       case "review":
         return true;
       default:
@@ -92,48 +171,127 @@ export function AgentWizardPage() {
   }
 
   function handleNext() {
-    if (currentStep < STEPS.length - 1) {
-      setCurrentStep(currentStep + 1);
-    }
+    if (currentStep < steps.length - 1) setCurrentStep(currentStep + 1);
   }
 
   function handleBack() {
-    if (currentStep > 0) {
-      setCurrentStep(currentStep - 1);
+    if (currentStep > 0) setCurrentStep(currentStep - 1);
+  }
+
+  async function handleCreate() {
+    setError("");
+    try {
+      let res: SetupResult;
+      if (state.mode === "api") {
+        const req: CreateApiAgentRequest = {
+          name: state.name,
+          systemPrompt: state.systemPrompt,
+          openApiSpec: state.openApiSpec,
+          provider: state.provider,
+          model: state.model,
+          apiKey: state.apiKey || undefined,
+          apiBaseUrl: state.apiBaseUrl || undefined,
+          apiAuth: state.apiAuth || undefined,
+          endpoints: state.endpoints || undefined,
+          enableQuickReplies: state.enableQuickReplies || undefined,
+          enableSentimentAnalysis: state.enableSentimentAnalysis || undefined,
+          deploy: state.deploy,
+          environment: state.environment,
+        };
+        res = await createApiAgent.mutateAsync(req);
+      } else {
+        const req: SetupAgentRequest = {
+          name: state.name,
+          systemPrompt: state.systemPrompt,
+          provider: state.provider,
+          model: state.model,
+          apiKey: state.apiKey || undefined,
+          baseUrl: state.baseUrl || undefined,
+          introMessage: state.introMessage || undefined,
+          enableBuiltInTools: state.enableBuiltInTools || undefined,
+          builtInToolsWhitelist: state.builtInToolsWhitelist || undefined,
+          enableQuickReplies: state.enableQuickReplies || undefined,
+          enableSentimentAnalysis: state.enableSentimentAnalysis || undefined,
+          mcpServers: state.mcpServers || undefined,
+          deploy: state.deploy,
+          environment: state.environment,
+        };
+        res = await setupAgent.mutateAsync(req);
+      }
+      setResult(res);
+      toast.success(t("setupWizard.success", "Agent created successfully!"));
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === "object" && "message" in err
+          ? (err as { message: string }).message
+          : t("common.error");
+      setError(msg);
+      toast.error(msg);
     }
   }
 
-  async function handleCreate(deploy: boolean) {
-    setIsCreating(true);
-    try {
-      const result = await createAgent.mutateAsync({
-        workflows: [],
-        channels: [],
-      });
+  // ---- Success state ----
+  if (result) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-8">
+        <div className="rounded-2xl border border-emerald-500/30 bg-card p-8 text-center shadow-lg">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/10">
+            <CheckCircle2 className="h-8 w-8 text-emerald-500" />
+          </div>
+          <h2 className="text-2xl font-bold text-foreground">
+            {t("setupWizard.agentCreated", "Agent Created!")}
+          </h2>
+          <p className="mt-2 text-muted-foreground">
+            {result.agentName} — {result.provider}/{result.model}
+          </p>
 
-      if (deploy && result.location) {
-        const parts = result.location.split("/");
-        const idPart = parts[parts.length - 1];
-        const agentId = idPart?.split("?")[0];
-        if (agentId) {
-          deployAgent.mutate({ agentId, version: 1 });
-        }
-      }
+          {result.deployed && (
+            <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {t("setupWizard.deployed", "Deployed")} — {result.deploymentStatus}
+            </div>
+          )}
+          {result.deployed === false && result.deploymentStatus && (
+            <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1 text-sm font-medium text-amber-600 dark:text-amber-400">
+              <AlertCircle className="h-3.5 w-3.5" />
+              {result.deploymentStatus}
+            </div>
+          )}
 
-      // Navigate to agent detail
-      if (result.location) {
-        const parts = result.location.split("/");
-        const idPart = parts[parts.length - 1];
-        const agentId = idPart?.split("?")[0];
-        if (agentId) {
-          navigate(`/manage/agentview/${agentId}`);
-          return;
-        }
-      }
-      navigate("/manage/agents");
-    } catch {
-      setIsCreating(false);
-    }
+          {result.endpointCount != null && (
+            <p className="mt-3 text-sm text-muted-foreground">
+              {t("setupWizard.endpointsParsed", "{{count}} API endpoints parsed", {
+                count: result.endpointCount,
+              })}
+              {result.groups && result.groups.length > 0 && (
+                <> — {result.groups.join(", ")}</>
+              )}
+            </p>
+          )}
+
+          <div className="mt-6 flex items-center justify-center gap-3">
+            <Link
+              to={`/manage/agentview/${result.agentId}`}
+              className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow-md active:scale-[0.98]"
+            >
+              {t("setupWizard.viewAgent", "View Agent")}
+              <ExternalLink className="h-4 w-4" />
+            </Link>
+            <button
+              onClick={() => {
+                setState(INITIAL_STATE);
+                setCurrentStep(0);
+                setResult(null);
+                setError("");
+              }}
+              className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              {t("setupWizard.createAnother", "Create Another")}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -145,22 +303,22 @@ export function AgentWizardPage() {
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
-          {t("wizard.backToAgents", "Back to Agents")}
+          {t("setupWizard.backToAgents", "Back to Agents")}
         </Link>
         <h1 className="flex items-center gap-3 text-3xl font-bold text-foreground">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-primary to-primary/60 text-primary-foreground shadow-lg">
             <Wand2 className="h-5 w-5" />
           </div>
-          {t("wizard.title", "Agent Wizard")}
+          {t("setupWizard.title", "Agent Setup Wizard")}
         </h1>
         <p className="text-muted-foreground">
-          {t("wizard.subtitle", "Create a new agent step by step")}
+          {t("setupWizard.subtitle", "Create a fully configured agent in minutes")}
         </p>
       </div>
 
       {/* Step progress */}
       <div className="flex items-center gap-2" data-testid="wizard-steps">
-        {STEPS.map((s, i) => {
+        {steps.map((s, i) => {
           const Icon = s.icon;
           const isActive = i === currentStep;
           const isComplete = i < currentStep;
@@ -177,7 +335,7 @@ export function AgentWizardPage() {
                     "border-emerald-500 bg-emerald-500 text-white",
                   !isActive &&
                     !isComplete &&
-                    "border-border bg-card text-muted-foreground"
+                    "border-border bg-card text-muted-foreground",
                 )}
               >
                 {isComplete ? (
@@ -186,11 +344,11 @@ export function AgentWizardPage() {
                   <Icon className="h-4 w-4" />
                 )}
               </button>
-              {i < STEPS.length - 1 && (
+              {i < steps.length - 1 && (
                 <div
                   className={cn(
                     "h-0.5 flex-1 rounded-full transition-colors duration-300",
-                    isComplete ? "bg-emerald-500" : "bg-border"
+                    isComplete ? "bg-emerald-500" : "bg-border",
                   )}
                 />
               )}
@@ -201,31 +359,49 @@ export function AgentWizardPage() {
 
       {/* Step content */}
       <div className="rounded-xl border bg-card p-6 shadow-sm">
-        {step.id === "template" && (
-          <TemplateStep
-            selected={state.template}
-            onSelect={(id) => setState({ ...state, template: id })}
-          />
-        )}
-        {step.id === "info" && (
+        {step?.id === "type" && <TypeStep mode={state.mode} onSelect={(m) => update({ mode: m })} />}
+        {step?.id === "info" && (
           <InfoStep
             name={state.name}
-            description={state.description}
-            onNameChange={(name) => setState({ ...state, name })}
-            onDescriptionChange={(description) =>
-              setState({ ...state, description })
-            }
+            systemPrompt={state.systemPrompt}
+            onNameChange={(name) => update({ name })}
+            onPromptChange={(systemPrompt) => update({ systemPrompt })}
           />
         )}
-        {step.id === "packages" && (
-          <WorkflowsStep
-            createWorkflow={state.createWorkflow}
-            onToggle={(v) => setState({ ...state, createWorkflow: v })}
+        {step?.id === "llm" && (
+          <LlmStep
+            provider={state.provider}
+            model={state.model}
+            apiKey={state.apiKey}
+            baseUrl={state.baseUrl}
+            showKey={showKey}
+            onProviderChange={handleProviderChange}
+            onModelChange={(model) => update({ model })}
+            onApiKeyChange={(apiKey) => update({ apiKey })}
+            onBaseUrlChange={(baseUrl) => update({ baseUrl })}
+            onToggleKey={() => setShowKey(!showKey)}
           />
         )}
-        {step.id === "review" && (
-          <ReviewStep state={state} />
+        {step?.id === "apispec" && (
+          <ApiSpecStep
+            spec={state.openApiSpec}
+            specUrl={state.specUrl}
+            specInputMode={state.specInputMode}
+            apiBaseUrl={state.apiBaseUrl}
+            apiAuth={state.apiAuth}
+            endpoints={state.endpoints}
+            onSpecChange={(openApiSpec) => update({ openApiSpec })}
+            onSpecUrlChange={(specUrl) => update({ specUrl })}
+            onModeChange={(specInputMode) => update({ specInputMode })}
+            onApiBaseUrlChange={(apiBaseUrl) => update({ apiBaseUrl })}
+            onApiAuthChange={(apiAuth) => update({ apiAuth })}
+            onEndpointsChange={(endpoints) => update({ endpoints })}
+          />
         )}
+        {step?.id === "features" && (
+          <FeaturesStep state={state} onChange={update} />
+        )}
+        {step?.id === "review" && <ReviewStep state={state} error={error} />}
       </div>
 
       {/* Navigation */}
@@ -237,28 +413,31 @@ export function AgentWizardPage() {
             "inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors",
             currentStep === 0
               ? "invisible"
-              : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              : "text-muted-foreground hover:bg-secondary hover:text-foreground",
           )}
           data-testid="wizard-back"
         >
           <ArrowLeft className="h-4 w-4" />
-          {t("wizard.back", "Back")}
+          {t("setupWizard.back", "Back")}
         </button>
 
-        {currentStep < STEPS.length - 1 ? (
+        {step?.id !== "review" ? (
           <button
             onClick={handleNext}
             disabled={!canProceed()}
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.98]"
             data-testid="wizard-next"
           >
-            {t("wizard.next", "Next")}
+            {t("setupWizard.next", "Next")}
             <ArrowRight className="h-4 w-4" />
           </button>
         ) : (
           <div className="flex items-center gap-2">
             <button
-              onClick={() => handleCreate(false)}
+              onClick={() => {
+                update({ deploy: false });
+                setTimeout(handleCreate, 0);
+              }}
               disabled={isCreating}
               className="inline-flex items-center gap-2 rounded-lg border border-primary/30 px-4 py-2.5 text-sm font-medium text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
               data-testid="wizard-create-only"
@@ -268,10 +447,13 @@ export function AgentWizardPage() {
               ) : (
                 <Check className="h-4 w-4" />
               )}
-              {t("wizard.createOnly", "Create Only")}
+              {t("setupWizard.createOnly", "Create Only")}
             </button>
             <button
-              onClick={() => handleCreate(true)}
+              onClick={() => {
+                update({ deploy: true });
+                setTimeout(handleCreate, 0);
+              }}
               disabled={isCreating}
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.98]"
               data-testid="wizard-create-deploy"
@@ -281,7 +463,7 @@ export function AgentWizardPage() {
               ) : (
                 <Rocket className="h-4 w-4" />
               )}
-              {t("wizard.createAndDeploy", "Create & Deploy")}
+              {t("setupWizard.createAndDeploy", "Create & Deploy")}
             </button>
           </div>
         )}
@@ -290,73 +472,92 @@ export function AgentWizardPage() {
   );
 }
 
-/* ---------- Step components ---------- */
+/* ================================================================
+   Step 1: Choose Type
+   ================================================================ */
 
-function TemplateStep({
-  selected,
+function TypeStep({
+  mode,
   onSelect,
 }: {
-  selected: string;
-  onSelect: (id: string) => void;
+  mode: WizardMode | "";
+  onSelect: (m: WizardMode) => void;
 }) {
   const { t } = useTranslation();
-
-  const templateNames: Record<string, string> = {
-    blank: t("wizard.templateBlank", "Blank Agent"),
-    qa: t("wizard.templateQA", "Q&A Agent"),
-    weather: t("wizard.templateWeather", "Weather Agent"),
-  };
-
-  const templateDescriptions: Record<string, string> = {
-    blank: t("wizard.templateBlankDesc", "Start from scratch with an empty agent configuration"),
-    qa: t("wizard.templateQADesc", "Pre-configured agent for answering frequently asked questions"),
-    weather: t("wizard.templateWeatherDesc", "Example agent using HTTP calls to fetch weather data"),
-  };
+  const types: {
+    id: WizardMode;
+    icon: typeof Bot;
+    gradient: string;
+  }[] = [
+    {
+      id: "standard",
+      icon: Bot,
+      gradient: "from-violet-500 to-indigo-600",
+    },
+    {
+      id: "api",
+      icon: Globe,
+      gradient: "from-emerald-500 to-teal-600",
+    },
+  ];
 
   return (
     <div>
       <h2 className="text-xl font-semibold text-foreground">
-        {t("wizard.step1Title", "Choose a Template")}
+        {t("setupWizard.typeTitle", "What kind of agent?")}
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        {t("wizard.step1Desc", "Select a starting point for your agent")}
+        {t("setupWizard.typeDesc", "Choose the type of agent you want to create")}
       </p>
 
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3" data-testid="template-grid">
-        {TEMPLATES.map((tmpl) => {
-          const Icon = tmpl.icon;
-          const isSelected = selected === tmpl.id;
+      <div
+        className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2"
+        data-testid="type-grid"
+      >
+        {types.map((tp) => {
+          const Icon = tp.icon;
+          const isSelected = mode === tp.id;
           return (
             <button
-              key={tmpl.id}
-              onClick={() => onSelect(tmpl.id)}
+              key={tp.id}
+              onClick={() => onSelect(tp.id)}
               className={cn(
-                "group relative flex flex-col items-center gap-3 rounded-xl border-2 p-6 text-center transition-all duration-200",
+                "group relative flex flex-col items-center gap-4 rounded-xl border-2 p-8 text-center transition-all duration-200",
                 isSelected
-                  ? "border-primary bg-primary/5 shadow-md shadow-primary/10"
-                  : "border-border hover:border-primary/40 hover:shadow-sm"
+                  ? "border-primary bg-primary/5 shadow-lg shadow-primary/10"
+                  : "border-border hover:border-primary/40 hover:shadow-md",
               )}
-              data-testid={`template-${tmpl.id}`}
+              data-testid={`type-${tp.id}`}
             >
               <div
                 className={cn(
-                  "flex h-14 w-14 items-center justify-center rounded-xl bg-linear-to-br text-white shadow-lg transition-transform group-hover:scale-105",
-                  tmpl.gradient
+                  "flex h-16 w-16 items-center justify-center rounded-2xl bg-linear-to-br text-white shadow-lg transition-transform group-hover:scale-110",
+                  tp.gradient,
                 )}
               >
-                <Icon className="h-7 w-7" />
+                <Icon className="h-8 w-8" />
               </div>
               <div>
-                <p className="font-semibold text-foreground">
-                  {templateNames[tmpl.id]}
+                <p className="text-lg font-semibold text-foreground">
+                  {tp.id === "standard"
+                    ? t("setupWizard.standardAgent", "Standard Agent")
+                    : t("setupWizard.apiAgent", "API Agent")}
                 </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {templateDescriptions[tmpl.id]}
+                <p className="mt-1.5 text-sm text-muted-foreground leading-relaxed">
+                  {tp.id === "standard"
+                    ? t(
+                        "setupWizard.standardDesc",
+                        "Conversational AI powered by an LLM with optional tools, quick replies, and sentiment analysis",
+                      )
+                    : t(
+                        "setupWizard.apiDesc",
+                        "Import an OpenAPI/Swagger specification to auto-generate an AI agent that can call your APIs",
+                      )}
                 </p>
               </div>
               {isSelected && (
-                <div className="absolute inset-e-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                  <Check className="h-3.5 w-3.5" />
+                <div className="absolute inset-e-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground shadow">
+                  <Check className="h-4 w-4" />
                 </div>
               )}
             </button>
@@ -367,27 +568,30 @@ function TemplateStep({
   );
 }
 
+/* ================================================================
+   Step 2: Agent Info
+   ================================================================ */
+
 function InfoStep({
   name,
-  description,
+  systemPrompt,
   onNameChange,
-  onDescriptionChange,
+  onPromptChange,
 }: {
   name: string;
-  description: string;
+  systemPrompt: string;
   onNameChange: (v: string) => void;
-  onDescriptionChange: (v: string) => void;
+  onPromptChange: (v: string) => void;
 }) {
   const { t } = useTranslation();
-  const nameRef = useRef<HTMLInputElement>(null);
 
   return (
     <div>
       <h2 className="text-xl font-semibold text-foreground">
-        {t("wizard.step2Title", "Agent Information")}
+        {t("setupWizard.infoTitle", "Agent Identity")}
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        {t("wizard.step2Desc", "Give your agent a name and description")}
+        {t("setupWizard.infoDesc", "Give your agent a name and personality")}
       </p>
 
       <div className="mt-6 space-y-5">
@@ -396,15 +600,14 @@ function InfoStep({
             htmlFor="wizard-name"
             className="mb-1.5 block text-sm font-medium text-foreground"
           >
-            {t("agents.name", "Name")} *
+            {t("setupWizard.agentName", "Agent Name")} *
           </label>
           <input
-            ref={nameRef}
             id="wizard-name"
             type="text"
             value={name}
             onChange={(e) => onNameChange(e.target.value)}
-            placeholder={t("agents.namePlaceholder", "My Agent")}
+            placeholder={t("setupWizard.namePlaceholder", "e.g. Customer Support Bot")}
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
             data-testid="wizard-agent-name"
             autoFocus
@@ -412,22 +615,169 @@ function InfoStep({
         </div>
         <div>
           <label
-            htmlFor="wizard-desc"
+            htmlFor="wizard-prompt"
             className="mb-1.5 block text-sm font-medium text-foreground"
           >
-            {t("agents.description", "Description")}
+            {t("setupWizard.systemPrompt", "System Prompt")} *
           </label>
           <textarea
-            id="wizard-desc"
-            value={description}
-            onChange={(e) => onDescriptionChange(e.target.value)}
+            id="wizard-prompt"
+            value={systemPrompt}
+            onChange={(e) => onPromptChange(e.target.value)}
             placeholder={t(
-              "agents.descriptionPlaceholder",
-              "Describe what this agent does..."
+              "setupWizard.promptPlaceholder",
+              "You are a helpful AI assistant that...",
             )}
-            rows={3}
-            className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none transition-shadow"
-            data-testid="wizard-agent-desc"
+            rows={5}
+            className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-y transition-shadow font-mono"
+            data-testid="wizard-system-prompt"
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t(
+              "setupWizard.promptHint",
+              "This is the instruction that shapes how your agent behaves and responds.",
+            )}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   Step 3: LLM Configuration
+   ================================================================ */
+
+function LlmStep({
+  provider,
+  model,
+  apiKey,
+  baseUrl,
+  showKey,
+  onProviderChange,
+  onModelChange,
+  onApiKeyChange,
+  onBaseUrlChange,
+  onToggleKey,
+}: {
+  provider: string;
+  model: string;
+  apiKey: string;
+  baseUrl: string;
+  showKey: boolean;
+  onProviderChange: (v: string) => void;
+  onModelChange: (v: string) => void;
+  onApiKeyChange: (v: string) => void;
+  onBaseUrlChange: (v: string) => void;
+  onToggleKey: () => void;
+}) {
+  const { t } = useTranslation();
+  const prov = getProviderConfig(provider);
+
+  return (
+    <div>
+      <h2 className="text-xl font-semibold text-foreground">
+        {t("setupWizard.llmTitle", "LLM Configuration")}
+      </h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        {t("setupWizard.llmDesc", "Choose the AI model that powers your agent")}
+      </p>
+
+      <div className="mt-6 space-y-5">
+        {/* Provider */}
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-foreground">
+            {t("setupWizard.provider", "Provider")}
+          </label>
+          <div className="relative">
+            <select
+              value={provider}
+              onChange={(e) => onProviderChange(e.target.value)}
+              className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-2.5 pe-10 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+              data-testid="wizard-provider"
+            >
+              {LLM_PROVIDERS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute inset-e-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          </div>
+        </div>
+
+        {/* Model */}
+        <div>
+          <label
+            htmlFor="wizard-model"
+            className="mb-1.5 block text-sm font-medium text-foreground"
+          >
+            {t("setupWizard.model", "Model")} *
+          </label>
+          <input
+            id="wizard-model"
+            type="text"
+            value={model}
+            onChange={(e) => onModelChange(e.target.value)}
+            placeholder={prov?.defaultModel ?? ""}
+            className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+            data-testid="wizard-model"
+          />
+        </div>
+
+        {/* API Key */}
+        {prov?.needsKey !== false && (
+          <div>
+            <label
+              htmlFor="wizard-apikey"
+              className="mb-1.5 block text-sm font-medium text-foreground"
+            >
+              {t("setupWizard.apiKey", "API Key")} *
+            </label>
+            <div className="relative">
+              <input
+                id="wizard-apikey"
+                type={showKey ? "text" : "password"}
+                value={apiKey}
+                onChange={(e) => onApiKeyChange(e.target.value)}
+                placeholder="sk-..."
+                className="w-full rounded-lg border border-input bg-background px-3 py-2.5 pe-10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow font-mono"
+                data-testid="wizard-apikey"
+              />
+              <button
+                type="button"
+                onClick={onToggleKey}
+                className="absolute inset-e-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Base URL (optional) */}
+        <div>
+          <label
+            htmlFor="wizard-baseurl"
+            className="mb-1.5 block text-sm font-medium text-foreground"
+          >
+            {t("setupWizard.baseUrl", "Base URL")}{" "}
+            <span className="text-muted-foreground font-normal">
+              ({t("setupWizard.optional", "optional")})
+            </span>
+          </label>
+          <input
+            id="wizard-baseurl"
+            type="url"
+            value={baseUrl}
+            onChange={(e) => onBaseUrlChange(e.target.value)}
+            placeholder={
+              provider === "ollama"
+                ? "http://localhost:11434"
+                : t("setupWizard.baseUrlPlaceholder", "Custom endpoint URL")
+            }
+            className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+            data-testid="wizard-baseurl"
           />
         </div>
       </div>
@@ -435,107 +785,515 @@ function InfoStep({
   );
 }
 
-function WorkflowsStep({
-  createWorkflow,
-  onToggle,
+/* ================================================================
+   Step 3B: OpenAPI Spec (API Agent only)
+   ================================================================ */
+
+function ApiSpecStep({
+  spec,
+  specUrl,
+  specInputMode,
+  apiBaseUrl,
+  apiAuth,
+  endpoints,
+  onSpecChange,
+  onSpecUrlChange,
+  onModeChange,
+  onApiBaseUrlChange,
+  onApiAuthChange,
+  onEndpointsChange,
 }: {
-  createWorkflow: boolean;
-  onToggle: (v: boolean) => void;
+  spec: string;
+  specUrl: string;
+  specInputMode: "url" | "file" | "paste";
+  apiBaseUrl: string;
+  apiAuth: string;
+  endpoints: string;
+  onSpecChange: (v: string) => void;
+  onSpecUrlChange: (v: string) => void;
+  onModeChange: (v: "url" | "file" | "paste") => void;
+  onApiBaseUrlChange: (v: string) => void;
+  onApiAuthChange: (v: string) => void;
+  onEndpointsChange: (v: string) => void;
+}) {
+  const { t } = useTranslation();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [fetching, setFetching] = useState(false);
+
+  const inputModes = [
+    { id: "url" as const, icon: LinkIcon, label: t("setupWizard.specByUrl", "URL") },
+    { id: "file" as const, icon: Upload, label: t("setupWizard.specByFile", "File") },
+    { id: "paste" as const, icon: FileCode2, label: t("setupWizard.specByPaste", "Paste") },
+  ];
+
+  async function fetchSpec() {
+    if (!specUrl.trim()) return;
+    setFetching(true);
+    try {
+      const res = await fetch(specUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      onSpecChange(text);
+      toast.success(t("setupWizard.specFetched", "Specification loaded!"));
+    } catch {
+      toast.error(t("setupWizard.specFetchError", "Failed to fetch specification"));
+    } finally {
+      setFetching(false);
+    }
+  }
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      onSpecChange(reader.result as string);
+      toast.success(t("setupWizard.specLoaded", "File loaded: {{name}}", { name: file.name }));
+    };
+    reader.readAsText(file);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      onSpecChange(reader.result as string);
+      onModeChange("file");
+      toast.success(t("setupWizard.specLoaded", "File loaded: {{name}}", { name: file.name }));
+    };
+    reader.readAsText(file);
+  }
+
+  return (
+    <div>
+      <h2 className="text-xl font-semibold text-foreground">
+        {t("setupWizard.apiSpecTitle", "OpenAPI Specification")}
+      </h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        {t("setupWizard.apiSpecDesc", "Provide your API's OpenAPI/Swagger spec")}
+      </p>
+
+      {/* Input mode tabs */}
+      <div className="mt-4 flex rounded-lg border border-border bg-secondary/30 p-1" data-testid="spec-mode-tabs">
+        {inputModes.map((m) => {
+          const Icon = m.icon;
+          return (
+            <button
+              key={m.id}
+              onClick={() => onModeChange(m.id)}
+              className={cn(
+                "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-all",
+                specInputMode === m.id
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Icon className="h-4 w-4" />
+              {m.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 space-y-4">
+        {specInputMode === "url" && (
+          <div className="flex gap-2">
+            <input
+              type="url"
+              value={specUrl}
+              onChange={(e) => onSpecUrlChange(e.target.value)}
+              placeholder="https://api.example.com/openapi.json"
+              className="flex-1 rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+              data-testid="wizard-spec-url"
+            />
+            <button
+              onClick={fetchSpec}
+              disabled={fetching || !specUrl.trim()}
+              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              data-testid="wizard-fetch-spec"
+            >
+              {fetching ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
+              {t("setupWizard.fetch", "Fetch")}
+            </button>
+          </div>
+        )}
+
+        {specInputMode === "file" && (
+          <div
+            onDrop={handleDrop}
+            onDragOver={(e) => e.preventDefault()}
+            className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border bg-secondary/20 p-8 text-center transition-colors hover:border-primary/40"
+            data-testid="wizard-spec-dropzone"
+          >
+            <Upload className="mb-3 h-8 w-8 text-muted-foreground" />
+            <p className="text-sm font-medium text-foreground">
+              {t("setupWizard.dropFile", "Drop your OpenAPI file here")}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t("setupWizard.dropHint", "JSON or YAML format")}
+            </p>
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              {t("setupWizard.browse", "Browse Files")}
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".json,.yaml,.yml"
+              onChange={handleFile}
+              className="hidden"
+              data-testid="wizard-spec-file"
+            />
+          </div>
+        )}
+
+        {specInputMode === "paste" && (
+          <textarea
+            value={spec}
+            onChange={(e) => onSpecChange(e.target.value)}
+            placeholder={t("setupWizard.pasteSpec", "Paste your OpenAPI/Swagger JSON or YAML here...")}
+            rows={10}
+            className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-y transition-shadow font-mono"
+            data-testid="wizard-spec-paste"
+          />
+        )}
+
+        {/* Spec preview indicator */}
+        {spec && (
+          <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-400">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            {t("setupWizard.specReady", "Specification loaded ({{chars}} chars)", {
+              chars: spec.length.toLocaleString(),
+            })}
+          </div>
+        )}
+
+        {/* Optional API config */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-foreground">
+              {t("setupWizard.apiBaseUrlLabel", "API Base URL")}{" "}
+              <span className="text-muted-foreground font-normal">
+                ({t("setupWizard.optional", "optional")})
+              </span>
+            </label>
+            <input
+              type="url"
+              value={apiBaseUrl}
+              onChange={(e) => onApiBaseUrlChange(e.target.value)}
+              placeholder="https://api.example.com"
+              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+              data-testid="wizard-api-baseurl"
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-foreground">
+              {t("setupWizard.apiAuthLabel", "API Auth Header")}{" "}
+              <span className="text-muted-foreground font-normal">
+                ({t("setupWizard.optional", "optional")})
+              </span>
+            </label>
+            <input
+              type="text"
+              value={apiAuth}
+              onChange={(e) => onApiAuthChange(e.target.value)}
+              placeholder="Bearer sk-..."
+              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow font-mono"
+              data-testid="wizard-api-auth"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-foreground">
+            {t("setupWizard.endpointFilter", "Endpoint Filter")}{" "}
+            <span className="text-muted-foreground font-normal">
+              ({t("setupWizard.optional", "optional")})
+            </span>
+          </label>
+          <input
+            type="text"
+            value={endpoints}
+            onChange={(e) => onEndpointsChange(e.target.value)}
+            placeholder={t("setupWizard.endpointFilterPlaceholder", "Comma-separated: GET /users, POST /orders")}
+            className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+            data-testid="wizard-endpoints"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   Step 4: Features & Options
+   ================================================================ */
+
+function FeaturesStep({
+  state,
+  onChange,
+}: {
+  state: WizardState;
+  onChange: (patch: Partial<WizardState>) => void;
 }) {
   const { t } = useTranslation();
 
   return (
     <div>
       <h2 className="text-xl font-semibold text-foreground">
-        {t("wizard.step3Title", "Workflows")}
+        {t("setupWizard.featuresTitle", "Features & Options")}
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        {t(
-          "wizard.step3Desc",
-          "Configure the initial packages for your agent"
-        )}
+        {t("setupWizard.featuresDesc", "Customize your agent's capabilities")}
       </p>
 
       <div className="mt-6 space-y-4">
-        <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-4 transition-colors hover:bg-secondary/50">
-          <input
-            type="checkbox"
-            checked={createWorkflow}
-            onChange={(e) => onToggle(e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-input text-primary accent-primary"
-            data-testid="wizard-create-package"
-          />
-          <div>
-            <p className="text-sm font-medium text-foreground">
-              {t("wizard.createDefaultWorkflow", "Create a default package")}
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {t(
-                "wizard.createDefaultWorkflowDesc",
-                "An empty package will be created and linked to the agent. You can add extensions later."
-              )}
-            </p>
+        {/* Intro Message (standard only) */}
+        {state.mode === "standard" && (
+          <div className="rounded-lg border border-border p-4 space-y-3">
+            <FeatureToggle
+              icon={MessageSquarePlus}
+              label={t("setupWizard.introMessage", "Intro Message")}
+              description={t("setupWizard.introMessageDesc", "Greeting shown when a conversation starts")}
+              checked={state.introMessage.length > 0}
+              onChange={(on) => onChange({ introMessage: on ? state.introMessage || "Hello! How can I help you today?" : "" })}
+              data-testid="wizard-toggle-intro"
+            />
+            {state.introMessage.length > 0 && (
+              <textarea
+                value={state.introMessage}
+                onChange={(e) => onChange({ introMessage: e.target.value })}
+                rows={2}
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none transition-shadow"
+                data-testid="wizard-intro-text"
+              />
+            )}
           </div>
-        </label>
+        )}
+
+        {/* Quick Replies */}
+        <FeatureToggle
+          icon={Sparkles}
+          label={t("setupWizard.quickReplies", "Quick Replies")}
+          description={t("setupWizard.quickRepliesDesc", "LLM generates clickable reply suggestions")}
+          checked={state.enableQuickReplies}
+          onChange={(on) => onChange({ enableQuickReplies: on })}
+          data-testid="wizard-toggle-qr"
+        />
+
+        {/* Sentiment Analysis */}
+        <FeatureToggle
+          icon={BarChart3}
+          label={t("setupWizard.sentiment", "Sentiment Analysis")}
+          description={t("setupWizard.sentimentDesc", "Track user mood, intent and urgency in real-time")}
+          checked={state.enableSentimentAnalysis}
+          onChange={(on) => onChange({ enableSentimentAnalysis: on })}
+          data-testid="wizard-toggle-sentiment"
+        />
+
+        {/* Built-in Tools (standard only) */}
+        {state.mode === "standard" && (
+          <div className="rounded-lg border border-border p-4 space-y-3">
+            <FeatureToggle
+              icon={Wrench}
+              label={t("setupWizard.builtInTools", "Built-in Tools")}
+              description={t("setupWizard.builtInToolsDesc", "Enable EDDI's built-in tool library (calculator, datetime, etc.)")}
+              checked={state.enableBuiltInTools}
+              onChange={(on) => onChange({ enableBuiltInTools: on })}
+              data-testid="wizard-toggle-tools"
+            />
+            {state.enableBuiltInTools && (
+              <input
+                value={state.builtInToolsWhitelist}
+                onChange={(e) => onChange({ builtInToolsWhitelist: e.target.value })}
+                placeholder={t("setupWizard.toolsWhitelist", "Whitelist (empty = all tools)")}
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                data-testid="wizard-tools-whitelist"
+              />
+            )}
+          </div>
+        )}
+
+        {/* MCP Servers (standard only) */}
+        {state.mode === "standard" && (
+          <div className="rounded-lg border border-border p-4 space-y-3">
+            <FeatureToggle
+              icon={Server}
+              label={t("setupWizard.mcpServers", "MCP Servers")}
+              description={t("setupWizard.mcpServersDesc", "Connect to Model Context Protocol servers for external tools")}
+              checked={state.mcpServers.length > 0}
+              onChange={(on) => onChange({ mcpServers: on ? state.mcpServers || "" : "" })}
+              data-testid="wizard-toggle-mcp"
+            />
+            {state.mcpServers.length > 0 && (
+              <input
+                value={state.mcpServers}
+                onChange={(e) => onChange({ mcpServers: e.target.value })}
+                placeholder="http://localhost:3000/sse, http://tools.example.com/sse"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow font-mono"
+                data-testid="wizard-mcp-urls"
+              />
+            )}
+          </div>
+        )}
+
+        {/* Deploy toggle */}
+        <div className="mt-2 rounded-lg border border-primary/20 bg-primary/5 p-4">
+          <FeatureToggle
+            icon={Rocket}
+            label={t("setupWizard.autoDeploy", "Auto-Deploy")}
+            description={t("setupWizard.autoDeployDesc", "Deploy the agent immediately after creation")}
+            checked={state.deploy}
+            onChange={(on) => onChange({ deploy: on })}
+            data-testid="wizard-toggle-deploy"
+          />
+          {state.deploy && (
+            <div className="mt-3 flex items-center gap-3 ps-9">
+              <label className="text-sm font-medium text-foreground">
+                {t("setupWizard.environment", "Environment")}:
+              </label>
+              <div className="relative">
+                <select
+                  value={state.environment}
+                  onChange={(e) => onChange({ environment: e.target.value })}
+                  className="appearance-none rounded-lg border border-input bg-background px-3 py-1.5 pe-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                  data-testid="wizard-environment"
+                >
+                  <option value="production">{t("setupWizard.envProduction", "Production")}</option>
+                  <option value="test">{t("setupWizard.envTest", "Test")}</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute inset-e-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function ReviewStep({ state }: { state: WizardState }) {
-  const { t } = useTranslation();
+/* ================================================================
+   Step 5: Review
+   ================================================================ */
 
-  const templateLabels: Record<string, string> = {
-    blank: t("wizard.templateBlank", "Blank Agent"),
-    qa: t("wizard.templateQA", "Q&A Agent"),
-    weather: t("wizard.templateWeather", "Weather Agent"),
-  };
+function ReviewStep({
+  state,
+  error,
+}: {
+  state: WizardState;
+  error: string;
+}) {
+  const { t } = useTranslation();
+  const prov = getProviderConfig(state.provider);
+
+  const rows: [string, string][] = [
+    [t("setupWizard.reviewType", "Type"), state.mode === "api" ? t("setupWizard.apiAgent", "API Agent") : t("setupWizard.standardAgent", "Standard Agent")],
+    [t("setupWizard.reviewName", "Name"), state.name],
+    [t("setupWizard.reviewPrompt", "System Prompt"), state.systemPrompt.length > 80 ? state.systemPrompt.slice(0, 80) + "…" : state.systemPrompt],
+    [t("setupWizard.reviewProvider", "Provider"), prov?.name ?? state.provider],
+    [t("setupWizard.reviewModel", "Model"), state.model],
+  ];
+
+  if (state.mode === "api" && state.openApiSpec) {
+    rows.push([t("setupWizard.reviewSpec", "OpenAPI Spec"), `${state.openApiSpec.length.toLocaleString()} chars`]);
+  }
+  if (state.introMessage) {
+    rows.push([t("setupWizard.reviewIntro", "Intro Message"), state.introMessage.length > 60 ? state.introMessage.slice(0, 60) + "…" : state.introMessage]);
+  }
+  if (state.enableQuickReplies) rows.push([t("setupWizard.quickReplies", "Quick Replies"), "✓"]);
+  if (state.enableSentimentAnalysis) rows.push([t("setupWizard.sentiment", "Sentiment Analysis"), "✓"]);
+  if (state.enableBuiltInTools) rows.push([t("setupWizard.builtInTools", "Built-in Tools"), "✓"]);
+  if (state.mcpServers) rows.push([t("setupWizard.mcpServers", "MCP Servers"), state.mcpServers]);
+  rows.push([t("setupWizard.reviewDeploy", "Deploy"), state.deploy ? `✓ (${state.environment})` : "—"]);
 
   return (
     <div data-testid="wizard-review">
       <h2 className="text-xl font-semibold text-foreground">
-        {t("wizard.step4Title", "Review & Create")}
+        {t("setupWizard.reviewTitle", "Review & Create")}
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        {t("wizard.step4Desc", "Review your agent configuration before creating")}
+        {t("setupWizard.reviewDesc", "Review your configuration before creating the agent")}
       </p>
 
-      <div className="mt-6 space-y-4">
-        <div className="rounded-lg border border-border divide-y divide-border overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 bg-secondary/30">
-            <span className="text-sm font-medium text-muted-foreground">
-              {t("wizard.templateLabel", "Template")}
+      <div className="mt-6 rounded-lg border border-border divide-y divide-border overflow-hidden">
+        {rows.map(([label, value], i) => (
+          <div
+            key={label}
+            className={cn(
+              "flex items-start justify-between gap-4 px-4 py-3",
+              i % 2 === 0 && "bg-secondary/30",
+            )}
+          >
+            <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+              {label}
             </span>
-            <span className="text-sm font-medium text-foreground">
-              {templateLabels[state.template] || state.template}
-            </span>
-          </div>
-          <div className="flex items-center justify-between px-4 py-3">
-            <span className="text-sm font-medium text-muted-foreground">
-              {t("agents.name", "Name")}
-            </span>
-            <span className="text-sm font-medium text-foreground">
-              {state.name || "—"}
+            <span className="text-sm font-medium text-foreground text-end break-all max-w-xs">
+              {value}
             </span>
           </div>
-          <div className="flex items-center justify-between px-4 py-3 bg-secondary/30">
-            <span className="text-sm font-medium text-muted-foreground">
-              {t("agents.description", "Description")}
-            </span>
-            <span className="text-sm text-foreground max-w-xs truncate">
-              {state.description || "—"}
-            </span>
-          </div>
-          <div className="flex items-center justify-between px-4 py-3">
-            <span className="text-sm font-medium text-muted-foreground">
-              {t("wizard.defaultWorkflowLabel", "Default Workflow")}
-            </span>
-            <span className="text-sm font-medium text-foreground">
-              {state.createWorkflow ? "✓" : "—"}
-            </span>
-          </div>
+        ))}
+      </div>
+
+      {error && (
+        <div className="mt-4 flex items-start gap-2 rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================
+   Shared Components
+   ================================================================ */
+
+function FeatureToggle({
+  icon: Icon,
+  label,
+  description,
+  checked,
+  onChange,
+  "data-testid": testId,
+}: {
+  icon: typeof Bot;
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  "data-testid"?: string;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start gap-3 rounded-lg p-0.5 transition-colors">
+      <div className="relative mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200"
+        style={{ backgroundColor: checked ? "var(--color-primary)" : "var(--color-border)" }}
+      >
+        <span
+          className={cn(
+            "absolute h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200",
+            checked ? "translate-x-4" : "translate-x-0.5",
+          )}
+        />
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          className="sr-only"
+          data-testid={testId}
+        />
+      </div>
+      <div className="flex items-start gap-2">
+        <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+        <div>
+          <p className="text-sm font-medium text-foreground">{label}</p>
+          <p className="text-xs text-muted-foreground">{description}</p>
         </div>
       </div>
-    </div>
+    </label>
   );
 }
