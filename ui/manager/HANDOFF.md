@@ -1,8 +1,8 @@
 # EDDI Manager — Handoff Document
 
-> **Last updated**: 2026-03-17  
+> **Last updated**: 2026-03-25  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Phase 7.34b — Tenant Quota Stub (Manager UI)
+> **Last commit**: Agent Setup Wizard + LangChain editor tooling fix
 
 ---
 
@@ -14,6 +14,7 @@
 **Phase 7 (Secrets Vault)**: Chat UI secret input + Manager Secrets Admin page complete.
 **Phase 7.34 (Audit Ledger)**: Manager Audit Trail UI complete.
 **Phase 7.34b (Tenant Quotas)**: Backend engine + REST API + Manager Quotas admin page complete.
+**Agent Setup Wizard**: Two-mode wizard (Standard + API Agent) with backend setup endpoints. LangChain editor updated with enableHttpCallTools + MCP servers.
 
 ### What's Done
 
@@ -44,11 +45,13 @@
 | 4.4b  | Manager: enrich all 8 MSW mock schemas (agent, package, behavior, httpcalls, output, dictionary, langchain, propertysetter) with real field definitions matching backend Java models                                               | `3013459` |
 | 4.5   | Reverted to single bundle (no code splitting) — admin dashboard prioritizes simplicity over micro-optimization. Single JS (1.2 MB, mainly Monaco) + single CSS                                                                     | latest    |
 | —     | **Dashboard replacement**: old Bootstrap/jQuery `index.html` → redirect to `/manage`. OpenAPI + Docs external links in sidebar. Branded loading indicator. Removed bootstrap, jQuery, moment, KaTeX, Slick, old webpack bundles    | latest    |
+| —     | **Agent Setup Wizard**: Two-mode wizard (Standard Agent + API Agent) with `/administration/agents/setup` and `/setup-api` endpoints. OpenAPI spec input (URL/file/paste), LLM provider picker, feature toggles. 90+ i18n keys | `9a568ac` |
+| —     | **LangChain Editor Tooling**: `enableHttpCallTools` toggle, `mcpServers` editor (URL/name/transport/apiKey), updated agent mode detection | `0b527fe` |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 254 pass (`npm run test`) — 30 files (incl. `quotas.test.tsx` 8 tests)
+- **Unit/Component**: 264 pass (`npm run test`) — 31 files (incl. `agent-wizard.test.tsx` 10 tests)
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds
@@ -67,7 +70,8 @@
 - **Resources**: `resource-card.tsx`, `create-resource-dialog.tsx`, `resources.tsx` (hub), `resource-list.tsx`, `resource-detail.tsx`
 - **Dashboard**: `dashboard.tsx` (stat cards, quick actions, recent agents), `api/dashboard.ts`, `use-dashboard.ts`
 - **Backup**: `api/backup.ts` (export/download/import), `use-backup.ts` (hooks)
-- **Agent Wizard**: `agent-wizard.tsx` (4-step guided creation)
+- **Agent Wizard**: `agent-wizard.tsx` (5-6 step two-mode setup wizard)
+- **Agent Setup API**: `api/agent-setup.ts` (types + fetch), `use-agent-setup.ts` (mutation hooks)
 - **API**: `api-client.ts`, `api/agents.ts`, `api/packages.ts`, `api/descriptors.ts`, `api/conversations.ts`, `api/chat.ts`, `api/resources.ts`, `api/backup.ts`, `api/extensions.ts`, `api/schemas.ts`
 - **Hooks**: `use-agents.ts`, `use-packages.ts`, `use-conversations.ts`, `use-chat.ts`, `use-resources.ts`, `use-backup.ts`, `use-extensions-store.ts`, `use-dashboard.ts`, `use-json-schema.ts`
 - **i18n**: `config.ts`, `en.json`, `de.json`, `fr.json`, `es.json`, `ar.json`, `zh.json`, `th.json`, `ja.json`, `ko.json`, `pt.json`, `hi.json`
