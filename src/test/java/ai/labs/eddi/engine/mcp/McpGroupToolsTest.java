@@ -113,7 +113,7 @@ class McpGroupToolsTest {
     void createGroup_defaultStyle_usesRoundTable() throws Exception {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/new-id?version=1")).build());
 
-        String result = tools.create_group("Panel", "desc", "a1,a2", "Alice,Bob", null, null, null, null);
+        String result = tools.create_group("Panel", "desc", "a1,a2", "Alice,Bob", null, null, null, null, null);
 
         assertTrue(result.contains("ROUND_TABLE"));
         assertTrue(result.contains("2 members"));
@@ -134,7 +134,7 @@ class McpGroupToolsTest {
     void createGroup_peerReviewStyle() throws Exception {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/id?version=1")).build());
 
-        String result = tools.create_group("Review", null, "a1,a2,a3", null, null, "mod1", "PEER_REVIEW", "1");
+        String result = tools.create_group("Review", null, "a1,a2,a3", null, null, null, "mod1", "PEER_REVIEW", "1");
 
         assertTrue(result.contains("PEER_REVIEW"));
 
@@ -151,7 +151,7 @@ class McpGroupToolsTest {
     void createGroup_withMemberRoles() throws Exception {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/id?version=1")).build());
 
-        tools.create_group("DA Panel", null, "a1,a2,a3", "Optimist,Pragmatist,Skeptic", "PARTICIPANT,PARTICIPANT,DEVIL_ADVOCATE", "mod1",
+        tools.create_group("DA Panel", null, "a1,a2,a3", "Optimist,Pragmatist,Skeptic", "PARTICIPANT,PARTICIPANT,DEVIL_ADVOCATE", null, "mod1",
                 "DEVIL_ADVOCATE", null);
 
         ArgumentCaptor<AgentGroupConfiguration> captor = ArgumentCaptor.forClass(AgentGroupConfiguration.class);
@@ -167,7 +167,7 @@ class McpGroupToolsTest {
     void createGroup_invalidStyle_fallsBackToRoundTable() throws Exception {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/id")).build());
 
-        tools.create_group("Test", null, "a1", null, null, null, "INVALID", null);
+        tools.create_group("Test", null, "a1", null, null, null, null, "INVALID", null);
 
         ArgumentCaptor<AgentGroupConfiguration> captor = ArgumentCaptor.forClass(AgentGroupConfiguration.class);
         verify(groupStore).createGroup(captor.capture());
@@ -179,9 +179,30 @@ class McpGroupToolsTest {
     void createGroup_handlesException() {
         when(groupStore.createGroup(any())).thenThrow(new RuntimeException("Insert failed"));
 
-        String result = tools.create_group("Test", null, "a1", null, null, null, null, null);
+        String result = tools.create_group("Test", null, "a1", null, null, null, null, null, null);
 
         assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void createGroup_withGroupMembers() throws Exception {
+        when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/id?version=1")).build());
+
+        tools.create_group("Meta Panel", null, "g1,g2", "Team A,Team B", null, "GROUP,GROUP", "mod1", "ROUND_TABLE", null);
+
+        ArgumentCaptor<AgentGroupConfiguration> captor = ArgumentCaptor.forClass(AgentGroupConfiguration.class);
+        verify(groupStore).createGroup(captor.capture());
+
+        var members = captor.getValue().getMembers();
+        assertEquals(AgentGroupConfiguration.MemberType.GROUP, members.get(0).memberType());
+        assertEquals(AgentGroupConfiguration.MemberType.GROUP, members.get(1).memberType());
+    }
+
+    @Test
+    void describeDiscussionStyles_mentionsNestedGroups() {
+        String result = tools.describe_discussion_styles();
+        assertTrue(result.contains("Nested Groups"));
+        assertTrue(result.contains("GROUP"));
     }
 
     // --- update_group ---

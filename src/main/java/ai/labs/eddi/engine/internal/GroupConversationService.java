@@ -312,6 +312,11 @@ public class GroupConversationService implements IGroupConversationService {
 
         TranscriptEntryType entryType = mapPhaseToEntryType(phase.type());
 
+        // --- GROUP member: delegate to a nested sub-group discussion ---
+        if (member.memberType() == AgentGroupConfiguration.MemberType.GROUP) {
+            return executeGroupMemberTurn(member, gc, input, protocol, phaseIdx, phase, entryType, targetAgentId);
+        }
+
         // Check agent availability
         try {
             var agent = agentFactory.getLatestReadyAgent(DEFAULT_ENV, member.agentId());
@@ -589,6 +594,40 @@ public class GroupConversationService implements IGroupConversationService {
             case REBUTTAL -> TranscriptEntryType.REBUTTAL;
             case SYNTHESIS -> TranscriptEntryType.SYNTHESIS;
         };
+    }
+
+    /**
+     * Executes a GROUP member's turn by running a nested sub-group discussion. The
+     * sub-group's synthesized answer (or full transcript if no moderator) becomes
+     * this member's response in the parent group.
+     */
+    private TranscriptEntry executeGroupMemberTurn(GroupMember member, GroupConversation gc, String input, ProtocolConfig protocol, int phaseIdx,
+            DiscussionPhase phase, TranscriptEntryType entryType, String targetAgentId) throws GroupDiscussionException {
+        try {
+            // member.agentId() is actually a groupId for GROUP members
+            String subGroupId = member.agentId();
+            int nextDepth = gc.getDepth() + 1;
+
+            LOGGER.infof("Executing sub-group '%s' (depth %d) as member of parent group '%s'", subGroupId, nextDepth, gc.getGroupId());
+
+            GroupConversation subConversation = discuss(subGroupId, input, gc.getUserId(), nextDepth);
+
+            // Extract the synthesized answer, or concatenate all responses
+            String response = subConversation.getSynthesizedAnswer();
+            if (response == null || response.isBlank()) {
+                response = subConversation.getTranscript().stream().filter(e -> e.content() != null)
+                        .map(e -> "%s: %s".formatted(e.speakerDisplayName(), e.content())).collect(Collectors.joining("\n\n"));
+            }
+
+            return new TranscriptEntry(member.agentId(), member.displayName(), response, phaseIdx, phase.name(), entryType, Instant.now(), null,
+                    targetAgentId);
+
+        } catch (GroupDepthExceededException e) {
+            return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                    Instant.now(), "Sub-group depth exceeded: " + e.getMessage(), targetAgentId);
+        } catch (Exception e) {
+            return handleAgentFailure(member, phaseIdx, phase, protocol, e, "Sub-group discussion failed", targetAgentId);
+        }
     }
 
     private TranscriptEntry handleAgentFailure(GroupMember member, int phaseIdx, DiscussionPhase phase, ProtocolConfig protocol, Throwable cause,

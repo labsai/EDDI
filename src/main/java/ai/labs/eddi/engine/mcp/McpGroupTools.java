@@ -80,10 +80,16 @@ public class McpGroupTools {
                 Use when: Evaluating trade-offs, pro/con analysis, technology comparisons.
                 Member roles: assign members role=PRO or role=CON. Moderator acts as judge.
 
+                ## Nested Groups (Group-of-Groups)
+                Members can be other groups (memberTypes=GROUP). The sub-group runs its
+                own full discussion and its synthesized answer becomes the member's response.
+                Use this for parallel review panels, red-team vs blue-team, or tournament brackets.
+
                 ## Parameters
                 - maxRounds: controls repeat count for ROUND_TABLE and DELPHI (default 2)
                 - moderatorAgentId: required for synthesis/judging phase
-                - memberRoles: comma-separated roles matching member positions (e.g. "PARTICIPANT,DEVIL_ADVOCATE,PARTICIPANT")
+                - memberRoles: comma-separated roles matching member positions
+                - memberTypes: comma-separated types: AGENT (default) or GROUP
                 """;
     }
 
@@ -121,17 +127,17 @@ public class McpGroupTools {
     }
 
     @Tool(description = "Create a new agent group for multi-agent discussions. " + "Call describe_discussion_styles first to choose a style. "
-            + "For DEVIL_ADVOCATE style, assign role=DEVIL_ADVOCATE to one " + "member. For DEBATE style, assign role=PRO or role=CON.")
-    public String create_group(@ToolArg(description = "Group name (e.g. 'Architecture Review Panel')") String name,
+            + "Members can be agents (default) or nested groups (memberTypes=GROUP).")
+    public String create_group(@ToolArg(description = "Group name") String name,
             @ToolArg(description = "Group description (optional)") String description,
-            @ToolArg(description = "Comma-separated agent IDs for group members") String memberAgentIds,
-            @ToolArg(description = "Comma-separated display names, matching " + "the order of memberAgentIds (optional)") String memberDisplayNames,
-            @ToolArg(description = "Comma-separated member roles, matching " + "the order of memberAgentIds. Values: PARTICIPANT "
-                    + "(default), DEVIL_ADVOCATE, PRO, CON (optional)") String memberRoles,
-            @ToolArg(description = "Moderator agent ID for synthesis/judging (optional)") String moderatorAgentId,
+            @ToolArg(description = "Comma-separated member IDs (agent IDs or " + "group IDs depending on memberTypes)") String memberAgentIds,
+            @ToolArg(description = "Comma-separated display names (optional)") String memberDisplayNames,
+            @ToolArg(description = "Comma-separated member roles: PARTICIPANT, " + "DEVIL_ADVOCATE, PRO, CON (optional)") String memberRoles,
+            @ToolArg(description = "Comma-separated member types: AGENT " + "(default) or GROUP for nested groups (optional)") String memberTypes,
+            @ToolArg(description = "Moderator agent ID (optional)") String moderatorAgentId,
             @ToolArg(description = "Discussion style: ROUND_TABLE, PEER_REVIEW, "
                     + "DEVIL_ADVOCATE, DELPHI, DEBATE (default ROUND_TABLE)") String style,
-            @ToolArg(description = "Max rounds for ROUND_TABLE/DELPHI " + "(default 2)") String maxRounds) {
+            @ToolArg(description = "Max rounds (default 2)") String maxRounds) {
         try {
             AgentGroupConfiguration config = new AgentGroupConfiguration();
             config.setName(name);
@@ -141,16 +147,19 @@ public class McpGroupTools {
             String[] agentIds = memberAgentIds.split(",");
             String[] displayNames = memberDisplayNames != null ? memberDisplayNames.split(",") : new String[0];
             String[] roles = memberRoles != null ? memberRoles.split(",") : new String[0];
+            String[] types = memberTypes != null ? memberTypes.split(",") : new String[0];
 
             List<GroupMember> members = new ArrayList<>();
             for (int i = 0; i < agentIds.length; i++) {
                 String displayName = i < displayNames.length ? displayNames[i].trim() : "Agent " + (i + 1);
                 String role = i < roles.length && !roles[i].trim().isBlank() ? roles[i].trim().toUpperCase() : null;
-                // PARTICIPANT is the default — store as null
                 if ("PARTICIPANT".equals(role)) {
                     role = null;
                 }
-                members.add(new GroupMember(agentIds[i].trim(), displayName, i + 1, role));
+                var type = i < types.length && "GROUP".equalsIgnoreCase(types[i].trim())
+                        ? AgentGroupConfiguration.MemberType.GROUP
+                        : AgentGroupConfiguration.MemberType.AGENT;
+                members.add(new GroupMember(agentIds[i].trim(), displayName, i + 1, role, type));
             }
             config.setMembers(members);
 

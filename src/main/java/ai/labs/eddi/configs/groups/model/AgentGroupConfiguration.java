@@ -20,14 +20,33 @@ public class AgentGroupConfiguration {
     private List<DiscussionPhase> phases;
     private ProtocolConfig protocol;
 
-    // --- Member definition ---
+    /**
+     * A member of the group. Members can be individual agents or nested groups.
+     * <p>
+     * For {@code MemberType.GROUP} members, the {@code agentId} field contains the
+     * group configuration ID instead. The sub-group runs its own discussion and its
+     * synthesized answer becomes this member's response.
+     * <p>
+     * The optional {@code role} field controls which phases the member participates
+     * in (e.g. "DEVIL_ADVOCATE", "PRO", "CON"). If null, the member is a default
+     * participant.
+     */
+    public record GroupMember(String agentId, String displayName, Integer speakingOrder, String role, MemberType memberType) {
+
+        /** Convenience constructor defaulting to AGENT member type. */
+        public GroupMember(String agentId, String displayName, Integer speakingOrder, String role) {
+            this(agentId, displayName, speakingOrder, role, MemberType.AGENT);
+        }
+    }
 
     /**
-     * A member of the group. The optional {@code role} field controls which phases
-     * the member participates in (e.g. "DEVIL_ADVOCATE", "PRO", "CON"). If null,
-     * the member is a default participant.
+     * Whether a group member is an individual agent or a nested sub-group.
      */
-    public record GroupMember(String agentId, String displayName, Integer speakingOrder, String role) {
+    public enum MemberType {
+        /** An individual EDDI agent. */
+        AGENT,
+        /** A nested group — runs its own discussion, returns synthesized answer. */
+        GROUP
     }
 
     // --- Discussion Style ---
