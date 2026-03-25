@@ -703,6 +703,21 @@ Agents can now consume external MCP servers as tool providers. Upgraded Quarkus 
 - `McpSetupTools.java`
 - `pom.xml`
 
+### Httpcall Auto-Discovery from Workflow ✅
+
+Agents now auto-discover `httpcall` configurations from their workflow and expose them as LLM tools at runtime. No version-coupled `tools[]` array needed in LLM configuration.
+
+**Key design:** `AgentOrchestrator.discoverHttpCallTools()` traverses agent → workflow → httpcall steps at execution time. Uses direct `IRestAgentStore`/`IRestWorkflowStore` reads (not `ResourceClientLibrary`, which lacks agent/workflow URI mappings).
+
+**Config:** `enableHttpCallTools` defaults to `true` in `LlmConfiguration.Task`. Not a standalone agent-mode trigger — only activates when agent mode is already triggered by tools, builtInTools, or mcpServers.
+
+**Key files:**
+
+- `src/main/java/ai/labs/eddi/modules/llm/impl/AgentOrchestrator.java` — `discoverHttpCallTools()`, `HttpCallToolsResult`
+- `src/main/java/ai/labs/eddi/modules/llm/impl/LlmTask.java` — injects stores into `AgentOrchestrator`
+- `src/main/java/ai/labs/eddi/modules/llm/model/LlmConfiguration.java` — `enableHttpCallTools` field
+- `src/test/java/ai/labs/eddi/modules/llm/impl/AgentOrchestratorTest.java` — 7 new tests (30 total)
+
 See `AGENTS.md` for the full roadmap (Phases 7–14b) and `docs/project-philosophy.md` for the 7 architectural pillars.
 
 ### One-Command Install & Onboarding Wizard ✅

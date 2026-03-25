@@ -43,6 +43,43 @@ Each entry follows this format:
 
 _Entries will be added here as implementation progresses._
 
+### 2026-03-25 — Httpcall Auto-Discovery from Workflow + Code Review Fixes
+
+**Repo:** EDDI
+**Branch:** `feature/version-6.0.0`
+
+**What changed:**
+
+Refactored the agent tool-calling architecture to dynamically auto-discover `httpcall` configurations from the agent's workflow at runtime, eliminating the need for version-coupled `tools[]` arrays in LLM configuration.
+
+**Files modified:**
+
+- `AgentOrchestrator.java` [MODIFIED]: Added `discoverHttpCallTools()` method — traverses memory → agentId/version → AgentConfiguration → workflows → WorkflowConfiguration → filter httpcall steps → load ApiCallsConfiguration → create ToolSpecification + ToolExecutor for each ApiCall. Added `IRestAgentStore` and `IRestWorkflowStore` fields for direct store reads (bypasses `ResourceClientLibrary` which lacks agent/workflow URI mappings). Added `IApiCallExecutor`, `IJsonSerialization`, `IMemoryItemConverter` for tool execution with full conversation memory context.
+- `LlmTask.java` [MODIFIED]: Updated constructor to inject `IRestAgentStore`, `IRestWorkflowStore`, `IApiCallExecutor`, `IJsonSerialization`, `IMemoryItemConverter` and pass them to `AgentOrchestrator`.
+- `LlmConfiguration.java` [MODIFIED]: Added `enableHttpCallTools` field (default: `true`) and integrated into `isAgentMode()` (later fixed to not be a standalone trigger).
+
+**Code review fixes applied:**
+
+1. Fixed `isAgentMode()` — removed `enableHttpCallTools` as standalone agent-mode trigger (was causing 2 test failures)
+2. Added null-safe URI parsing in `discoverHttpCallTools()` — handles missing query string with `continue`
+3. Fixed null `getMessage()` in error response — prevents NPE on null exception messages
+4. Removed unused `agentUri` variable — inlined into log message
+5. Resolved lint warnings for null pointer access on `mcpTools`/`httpCallTools` in `totalTools` calculation
+
+**Tests:**
+
+- `AgentOrchestratorTest` — 7 new tests for `discoverHttpCallTools()` (null agentId, null version, no workflows, happy path, parameters schema, malformed URI, blank name skip) — total 30 tests pass
+- `LlmTaskTest` — updated constructor mock parameters — all tests pass
+
+**Design decisions:**
+
+- Direct `IRestAgentStore`/`IRestWorkflowStore` access instead of `ResourceClientLibrary` — the library lacks mappings for `ai.labs.agent` and `ai.labs.workflow` URI schemes
+- `enableHttpCallTools` defaults to `true` so agents automatically discover workflow httpcall tools
+- `isAgentMode()` does NOT count `enableHttpCallTools` as standalone trigger — it only enhances agent mode when already triggered by tools, builtInTools, or mcpServers
+- Tool executors use `memoryItemConverter.convert(memory)` for full template data access, merged with LLM-provided arguments
+
+---
+
 ### 2026-03-23 — V6 Rename Migration: Deployment Field Rename Fix
 
 **Repo:** EDDI

@@ -1,8 +1,13 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.apicalls.model.ApiCall;
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
@@ -13,7 +18,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 
+import java.net.URI;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -409,5 +416,247 @@ class AgentOrchestratorTest {
         // Verify tool specs can be extracted from resolved class
         var specs = dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationsFrom(resolvedClass);
         assertEquals(1, specs.size(), "Should find @Tool methods on resolved class");
+    }
+
+    // ==================== discoverHttpCallTools Tests ====================
+
+    @Test
+    @DisplayName("discoverHttpCallTools should return empty when agentId is null")
+    void testDiscoverHttpCallTools_NullAgentId() {
+        var memory = mock(IConversationMemory.class);
+        when(memory.getAgentId()).thenReturn(null);
+        when(memory.getAgentVersion()).thenReturn(1);
+
+        var result = orchestrator.discoverHttpCallTools(memory);
+
+        assertNotNull(result);
+        assertTrue(result.toolSpecs().isEmpty());
+        assertTrue(result.executors().isEmpty());
+    }
+
+    @Test
+    @DisplayName("discoverHttpCallTools should return empty when agentVersion is null")
+    void testDiscoverHttpCallTools_NullAgentVersion() {
+        var memory = mock(IConversationMemory.class);
+        when(memory.getAgentId()).thenReturn("agent-1");
+        when(memory.getAgentVersion()).thenReturn(null);
+
+        var result = orchestrator.discoverHttpCallTools(memory);
+
+        assertNotNull(result);
+        assertTrue(result.toolSpecs().isEmpty());
+    }
+
+    @Test
+    @DisplayName("discoverHttpCallTools should return empty when agent has no workflows")
+    void testDiscoverHttpCallTools_NoWorkflows() {
+        var restAgentStore = mock(IRestAgentStore.class);
+        var restWorkflowStore = mock(IRestWorkflowStore.class);
+        var resourceClientLibrary = mock(IResourceClientLibrary.class);
+
+        var testOrchestrator = new AgentOrchestrator(
+                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
+                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
+                mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                restAgentStore, restWorkflowStore, resourceClientLibrary,
+                mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
+                mock(IMemoryItemConverter.class));
+
+        var memory = mock(IConversationMemory.class);
+        when(memory.getAgentId()).thenReturn("agent-1");
+        when(memory.getAgentVersion()).thenReturn(1);
+
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of());
+        when(restAgentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
+
+        var result = testOrchestrator.discoverHttpCallTools(memory);
+
+        assertNotNull(result);
+        assertTrue(result.toolSpecs().isEmpty());
+    }
+
+    @Test
+    @DisplayName("discoverHttpCallTools should discover httpcall tools from workflow")
+    void testDiscoverHttpCallTools_HappyPath() throws Exception {
+        var restAgentStore = mock(IRestAgentStore.class);
+        var restWorkflowStore = mock(IRestWorkflowStore.class);
+        var resourceClientLibrary = mock(IResourceClientLibrary.class);
+
+        var testOrchestrator = new AgentOrchestrator(
+                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
+                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
+                mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                restAgentStore, restWorkflowStore, resourceClientLibrary,
+                mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
+                mock(IMemoryItemConverter.class));
+
+        var memory = mock(IConversationMemory.class);
+        when(memory.getAgentId()).thenReturn("agent-1");
+        when(memory.getAgentVersion()).thenReturn(1);
+
+        // Build workflow with httpcall step
+        var step = new WorkflowConfiguration.WorkflowStep();
+        step.setType(URI.create("eddi://ai.labs.httpcalls"));
+        step.setConfig(Map.of("uri", "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/hc-1?version=1"));
+
+        var workflowConfig = new WorkflowConfiguration();
+        workflowConfig.setWorkflowSteps(List.of(step));
+
+        // Build agent config with workflow URI
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of(
+                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
+        when(restAgentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
+        when(restWorkflowStore.readWorkflow("wf-1", 1)).thenReturn(workflowConfig);
+
+        // Build httpcall config with one API call
+        var apiCall = new ApiCall();
+        apiCall.setName("getWeather");
+        apiCall.setDescription("Get weather for a city");
+
+        var httpCallsConfig = new ApiCallsConfiguration();
+        httpCallsConfig.setTargetServerUrl("https://api.weather.com");
+        httpCallsConfig.setHttpCalls(List.of(apiCall));
+
+        when(resourceClientLibrary.getResource(
+                URI.create("eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/hc-1?version=1"),
+                ApiCallsConfiguration.class)).thenReturn(httpCallsConfig);
+
+        var result = testOrchestrator.discoverHttpCallTools(memory);
+
+        assertEquals(1, result.toolSpecs().size());
+        assertEquals("getWeather", result.toolSpecs().get(0).name());
+        assertEquals("Get weather for a city", result.toolSpecs().get(0).description());
+        assertNotNull(result.executors().get("getWeather"));
+    }
+
+    @Test
+    @DisplayName("discoverHttpCallTools should generate JSON schema from parameters")
+    void testDiscoverHttpCallTools_WithParameters() throws Exception {
+        var restAgentStore = mock(IRestAgentStore.class);
+        var restWorkflowStore = mock(IRestWorkflowStore.class);
+        var resourceClientLibrary = mock(IResourceClientLibrary.class);
+
+        var testOrchestrator = new AgentOrchestrator(
+                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
+                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
+                mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                restAgentStore, restWorkflowStore, resourceClientLibrary,
+                mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
+                mock(IMemoryItemConverter.class));
+
+        var memory = mock(IConversationMemory.class);
+        when(memory.getAgentId()).thenReturn("agent-1");
+        when(memory.getAgentVersion()).thenReturn(1);
+
+        var step = new WorkflowConfiguration.WorkflowStep();
+        step.setType(URI.create("eddi://ai.labs.httpcalls"));
+        step.setConfig(Map.of("uri", "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/hc-1?version=1"));
+
+        var workflowConfig = new WorkflowConfiguration();
+        workflowConfig.setWorkflowSteps(List.of(step));
+
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of(
+                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
+        when(restAgentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
+        when(restWorkflowStore.readWorkflow("wf-1", 1)).thenReturn(workflowConfig);
+
+        var apiCall = new ApiCall();
+        apiCall.setName("searchUsers");
+        apiCall.setDescription("Search for users");
+        apiCall.setParameters(Map.of("query", "Search term", "limit", "Max results"));
+
+        var httpCallsConfig = new ApiCallsConfiguration();
+        httpCallsConfig.setTargetServerUrl("https://api.example.com");
+        httpCallsConfig.setHttpCalls(List.of(apiCall));
+
+        when(resourceClientLibrary.getResource(any(URI.class), eq(ApiCallsConfiguration.class)))
+                .thenReturn(httpCallsConfig);
+
+        var result = testOrchestrator.discoverHttpCallTools(memory);
+
+        assertEquals(1, result.toolSpecs().size());
+        var spec = result.toolSpecs().get(0);
+        assertNotNull(spec.parameters(), "Should have parameters schema");
+    }
+
+    @Test
+    @DisplayName("discoverHttpCallTools should skip workflow with null query string")
+    void testDiscoverHttpCallTools_MalformedWorkflowUri() {
+        var restAgentStore = mock(IRestAgentStore.class);
+
+        var testOrchestrator = new AgentOrchestrator(
+                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
+                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
+                mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                restAgentStore, mock(IRestWorkflowStore.class),
+                mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class),
+                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
+
+        var memory = mock(IConversationMemory.class);
+        when(memory.getAgentId()).thenReturn("agent-1");
+        when(memory.getAgentVersion()).thenReturn(1);
+
+        var agentConfig = new AgentConfiguration();
+        // URI without ?version= query
+        agentConfig.setWorkflows(List.of(
+                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1")));
+        when(restAgentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
+
+        // Should not throw, should return empty
+        var result = testOrchestrator.discoverHttpCallTools(memory);
+
+        assertNotNull(result);
+        assertTrue(result.toolSpecs().isEmpty());
+    }
+
+    @Test
+    @DisplayName("discoverHttpCallTools should skip ApiCalls with blank names")
+    void testDiscoverHttpCallTools_SkipsBlankName() throws Exception {
+        var restAgentStore = mock(IRestAgentStore.class);
+        var restWorkflowStore = mock(IRestWorkflowStore.class);
+        var resourceClientLibrary = mock(IResourceClientLibrary.class);
+
+        var testOrchestrator = new AgentOrchestrator(
+                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
+                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
+                mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                restAgentStore, restWorkflowStore, resourceClientLibrary,
+                mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
+                mock(IMemoryItemConverter.class));
+
+        var memory = mock(IConversationMemory.class);
+        when(memory.getAgentId()).thenReturn("agent-1");
+        when(memory.getAgentVersion()).thenReturn(1);
+
+        var step = new WorkflowConfiguration.WorkflowStep();
+        step.setType(URI.create("eddi://ai.labs.httpcalls"));
+        step.setConfig(Map.of("uri", "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/hc-1?version=1"));
+
+        var workflowConfig = new WorkflowConfiguration();
+        workflowConfig.setWorkflowSteps(List.of(step));
+
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of(
+                URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
+        when(restAgentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
+        when(restWorkflowStore.readWorkflow("wf-1", 1)).thenReturn(workflowConfig);
+
+        // ApiCall with blank name — should be skipped
+        var apiCall = new ApiCall();
+        apiCall.setName("  ");
+
+        var httpCallsConfig = new ApiCallsConfiguration();
+        httpCallsConfig.setTargetServerUrl("https://api.example.com");
+        httpCallsConfig.setHttpCalls(List.of(apiCall));
+
+        when(resourceClientLibrary.getResource(any(URI.class), eq(ApiCallsConfiguration.class)))
+                .thenReturn(httpCallsConfig);
+
+        var result = testOrchestrator.discoverHttpCallTools(memory);
+
+        assertTrue(result.toolSpecs().isEmpty(), "ApiCalls with blank names should be skipped");
     }
 }

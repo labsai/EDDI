@@ -163,12 +163,14 @@ public record LlmConfiguration(List<Task> tasks) {
         // === Helper Methods ===
 
         /**
-         * Determines if this task should run in agent mode (with tools)
+         * Determines if this task should run in agent mode (with tools).
+         * Note: enableHttpCallTools is NOT a standalone trigger — it only
+         * enhances agent mode when already triggered by tools, builtInTools,
+         * or mcpServers. Httpcall auto-discovery is checked at execution time.
          */
         public boolean isAgentMode() {
             return (tools != null && !tools.isEmpty()) ||
                     (enableBuiltInTools != null && enableBuiltInTools) ||
-                    (enableHttpCallTools != null && enableHttpCallTools) ||
                     (mcpServers != null && !mcpServers.isEmpty());
         }
 

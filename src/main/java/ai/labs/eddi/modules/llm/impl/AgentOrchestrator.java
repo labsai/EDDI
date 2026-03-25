@@ -152,8 +152,8 @@ class AgentOrchestrator {
         }
 
         int totalTools = enabledTools.size()
-                + (mcpTools != null ? mcpTools.toolSpecs().size() : 0)
-                + (httpCallTools != null ? httpCallTools.toolSpecs().size() : 0);
+                + (hasMcpTools ? mcpTools.toolSpecs().size() : 0)
+                + (hasHttpCallTools ? httpCallTools.toolSpecs().size() : 0);
         LOGGER.info("Executing with " + totalTools + " enabled tools" +
                 (hasHttpCallTools ? " (" + httpCallTools.toolSpecs().size() + " from workflow httpcalls)" : "") +
                 (hasMcpTools ? " (" + mcpTools.toolSpecs().size() + " from MCP servers)" : ""));
@@ -393,8 +393,7 @@ class AgentOrchestrator {
                 LOGGER.debug("No agent context in memory — skipping httpcall tool discovery");
                 return new HttpCallToolsResult(toolSpecs, executors);
             }
-            URI agentUri = URI.create("eddi://ai.labs.agent/agentstore/agents/" + agentId + "?version=" + agentVersion);
-            LOGGER.info("Discovering httpcall tools for agent: " + agentUri);
+            LOGGER.info("Discovering httpcall tools for agent: " + agentId + " v" + agentVersion);
 
             // Use direct store read — ResourceClientLibrary doesn't map agent/workflow URIs
             AgentConfiguration agentConfig = restAgentStore.readAgent(agentId, agentVersion);
@@ -409,9 +408,18 @@ class AgentOrchestrator {
             for (URI workflowUri : agentConfig.getWorkflows()) {
                 // Parse id and version from workflow URI: eddi://ai.labs.workflow/workflowstore/workflows/{id}?version={v}
                 String workflowPath = workflowUri.getPath();
+                if (workflowPath == null) {
+                    LOGGER.warn("Workflow URI has no path: " + workflowUri);
+                    continue;
+                }
                 String workflowId = workflowPath.substring(workflowPath.lastIndexOf('/') + 1);
-                String workflowQuery = workflowUri.getQuery(); // version=1
-                int workflowVersion = Integer.parseInt(workflowQuery.replace("version=", ""));
+                String workflowQuery = workflowUri.getQuery();
+                if (workflowQuery == null || !workflowQuery.contains("version=")) {
+                    LOGGER.warn("Workflow URI has no version query: " + workflowUri);
+                    continue;
+                }
+                int workflowVersion = Integer.parseInt(
+                        workflowQuery.replaceAll(".*version=(\\d+).*", "$1"));
 
                 WorkflowConfiguration workflowConfig = restWorkflowStore.readWorkflow(workflowId, workflowVersion);
                 for (var step : workflowConfig.getWorkflowSteps()) {
@@ -486,7 +494,8 @@ class AgentOrchestrator {
                         return serialized;
                     } catch (Exception e) {
                         LOGGER.error("Error executing httpcall tool '" + apiCall.getName() + "'", e);
-                        return "{\"error\": \"" + e.getMessage().replace("\"", "'") + "\"}";
+                        String errorMsg = e.getMessage() != null ? e.getMessage().replace("\"", "'") : "Unknown error";
+                        return "{\"error\": \"" + errorMsg + "\"}";
                     }
                 });
             }
