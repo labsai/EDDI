@@ -10,6 +10,8 @@ import {
   Bot,
   Zap,
   Server,
+  Handshake,
+  AlertTriangle,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
 
@@ -21,6 +23,14 @@ export interface McpServerConfig {
   transport?: string;
   apiKey?: string;
   timeoutMs?: number;
+}
+
+export interface A2AAgentConfig {
+  url?: string;
+  name?: string;
+  apiKey?: string;
+  timeoutMs?: number;
+  skillsFilter?: string[];
 }
 
 export interface LangchainTask {
@@ -35,6 +45,7 @@ export interface LangchainTask {
   postResponse?: unknown;
   tools?: string[];
   mcpServers?: McpServerConfig[];
+  a2aAgents?: A2AAgentConfig[];
   enableBuiltInTools?: boolean;
   enableHttpCallTools?: boolean;
   builtInToolsWhitelist?: string[];
@@ -198,6 +209,77 @@ function Section({
   );
 }
 
+function SkillsFilterInput({
+  skills,
+  onChange,
+  readOnly,
+}: {
+  skills: string[];
+  onChange: (s: string[]) => void;
+  readOnly?: boolean;
+}) {
+  const [input, setInput] = useState("");
+
+  const addSkill = () => {
+    const trimmed = input.trim();
+    if (trimmed && !skills.includes(trimmed)) {
+      onChange([...skills, trimmed]);
+      setInput("");
+    }
+  };
+
+  return (
+    <div className="space-y-1">
+      <div className="flex flex-wrap gap-1">
+        {skills.map((s, i) => (
+          <span
+            key={i}
+            className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+          >
+            {s}
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={() => onChange(skills.filter((_, j) => j !== i))}
+                className="rounded p-0.5 hover:bg-primary/20 transition-colors"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            )}
+          </span>
+        ))}
+        {skills.length === 0 && (
+          <span className="text-[10px] text-muted-foreground italic">All skills</span>
+        )}
+      </div>
+      {!readOnly && (
+        <div className="flex gap-1">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addSkill();
+              }
+            }}
+            placeholder="e.g. order-tracking"
+            className="h-6 flex-1 rounded border border-input bg-background px-1.5 text-[10px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          <button
+            type="button"
+            onClick={addSkill}
+            className="inline-flex h-6 items-center rounded border border-input px-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Plus className="h-2.5 w-2.5" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── TaskEditor ──────────────────────────────────────────────────────────────
 
 function TaskEditor({
@@ -217,7 +299,8 @@ function TaskEditor({
   const isAgent =
     (task.tools && task.tools.length > 0) ||
     task.enableBuiltInTools ||
-    (task.mcpServers && task.mcpServers.length > 0);
+    (task.mcpServers && task.mcpServers.length > 0) ||
+    (task.a2aAgents && task.a2aAgents.length > 0);
 
   const updateParam = (key: string, value: string) => {
     onChange({
@@ -675,6 +758,150 @@ function TaskEditor({
                     >
                       <Plus className="h-3 w-3" />
                       {t("langchainEditor.addMcpServer", "Add MCP Server")}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* A2A Agents */}
+              <div>
+                <label className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Handshake className="h-3 w-3" />
+                  {t("langchainEditor.a2aAgents", "A2A Agents")}
+                </label>
+                <p className="mb-1.5 text-[10px] text-muted-foreground">
+                  {t(
+                    "langchainEditor.a2aAgentsDesc",
+                    "Remote A2A-compatible agents whose skills become LLM tools"
+                  )}
+                </p>
+                <div className="space-y-2">
+                  {(task.a2aAgents ?? []).map((agent, ai) => (
+                    <div
+                      key={ai}
+                      className="rounded-lg border border-border bg-secondary/20 p-3 space-y-2"
+                      data-testid={`a2a-agent-${ai}`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="url"
+                          value={agent.url ?? ""}
+                          onChange={(e) => {
+                            const agents = [...(task.a2aAgents ?? [])];
+                            agents[ai] = { ...agent, url: e.target.value };
+                            onChange({ ...task, a2aAgents: agents });
+                          }}
+                          readOnly={readOnly}
+                          placeholder={t(
+                            "langchainEditor.a2aUrlPlaceholder",
+                            "https://remote.example.com/a2a/agents/..."
+                          )}
+                          dir="ltr"
+                          className="h-7 flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                        {!readOnly && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onChange({
+                                ...task,
+                                a2aAgents: (task.a2aAgents ?? []).filter(
+                                  (_, j) => j !== ai
+                                ),
+                              })
+                            }
+                            className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <input
+                          type="text"
+                          value={agent.name ?? ""}
+                          onChange={(e) => {
+                            const agents = [...(task.a2aAgents ?? [])];
+                            agents[ai] = { ...agent, name: e.target.value };
+                            onChange({ ...task, a2aAgents: agents });
+                          }}
+                          readOnly={readOnly}
+                          placeholder={t("langchainEditor.a2aName", "Display Name")}
+                          className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={agent.apiKey ?? ""}
+                            onChange={(e) => {
+                              const agents = [...(task.a2aAgents ?? [])];
+                              agents[ai] = { ...agent, apiKey: e.target.value };
+                              onChange({ ...task, a2aAgents: agents });
+                            }}
+                            readOnly={readOnly}
+                            placeholder={t(
+                              "langchainEditor.a2aApiKey",
+                              "${vault:my-a2a-key}"
+                            )}
+                            dir="ltr"
+                            className="h-7 w-full rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                          />
+                          {agent.apiKey && !agent.apiKey.startsWith("${vault:") && (
+                            <div className="absolute inset-e-1.5 top-1/2 -translate-y-1/2" title="Use ${vault:...} for security">
+                              <AlertTriangle className="h-3 w-3 text-amber-500" />
+                            </div>
+                          )}
+                        </div>
+                        <input
+                          type="number"
+                          value={agent.timeoutMs ?? 30000}
+                          onChange={(e) => {
+                            const agents = [...(task.a2aAgents ?? [])];
+                            agents[ai] = {
+                              ...agent,
+                              timeoutMs: parseInt(e.target.value, 10) || 30000,
+                            };
+                            onChange({ ...task, a2aAgents: agents });
+                          }}
+                          readOnly={readOnly}
+                          placeholder={t("langchainEditor.a2aTimeout", "Timeout (ms)")}
+                          className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                      </div>
+                      {/* Skills filter */}
+                      <div>
+                        <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                          {t("langchainEditor.a2aSkillsFilter", "Skills Filter (empty = all)")}
+                        </label>
+                        <SkillsFilterInput
+                          skills={agent.skillsFilter ?? []}
+                          onChange={(sf) => {
+                            const agents = [...(task.a2aAgents ?? [])];
+                            agents[ai] = { ...agent, skillsFilter: sf.length > 0 ? sf : undefined };
+                            onChange({ ...task, a2aAgents: agents });
+                          }}
+                          readOnly={readOnly}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onChange({
+                          ...task,
+                          a2aAgents: [
+                            ...(task.a2aAgents ?? []),
+                            { url: "", timeoutMs: 30000 },
+                          ],
+                        })
+                      }
+                      className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      data-testid="add-a2a-agent"
+                    >
+                      <Plus className="h-3 w-3" />
+                      {t("langchainEditor.addA2aAgent", "Add A2A Agent")}
                     </button>
                   )}
                 </div>

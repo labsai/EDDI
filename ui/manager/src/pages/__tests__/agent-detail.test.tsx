@@ -89,4 +89,44 @@ describe("AgentDetailPage", () => {
       expect(screen.getByText("Workflows")).toBeInTheDocument();
     });
   });
+
+  it("renders A2A protocol section", async () => {
+    renderAgentDetail();
+    await waitFor(() => {
+      expect(screen.getByTestId("a2a-section")).toBeInTheDocument();
+    });
+  });
+
+  it("shows A2A enabled state with description and skills", async () => {
+    renderAgentDetail();
+    // MSW mock returns a2aEnabled: true, description, a2aSkills
+    await waitFor(() => {
+      expect(screen.getByTestId("a2a-description")).toBeInTheDocument();
+      expect(screen.getByTestId("a2a-skill-input")).toBeInTheDocument();
+    });
+  });
+
+  it("shows A2A endpoint URLs when enabled", async () => {
+    renderAgentDetail();
+    await waitFor(() => {
+      // Should show both GET and POST endpoint badges
+      expect(screen.getByText("GET")).toBeInTheDocument();
+      expect(screen.getByText("POST")).toBeInTheDocument();
+    });
+  });
+
+  it("shows Agent Card Preview toggle when A2A is enabled", async () => {
+    renderAgentDetail();
+    await waitFor(() => {
+      expect(screen.getByTestId("a2a-card-toggle")).toBeInTheDocument();
+    });
+  });
+
+  it("shows A2A skills from mock data", async () => {
+    renderAgentDetail();
+    await waitFor(() => {
+      expect(screen.getByText("order-tracking")).toBeInTheDocument();
+      expect(screen.getByText("refund-processing")).toBeInTheDocument();
+    });
+  });
 });

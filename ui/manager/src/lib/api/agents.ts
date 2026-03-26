@@ -17,6 +17,9 @@ export interface AgentDescriptor {
 export interface Agent {
   workflows?: string[];
   channels?: string[];
+  a2aEnabled?: boolean;
+  description?: string;
+  a2aSkills?: string[];
 }
 
 export interface DeploymentStatus {

@@ -86,4 +86,41 @@ describe("LangChain Editor", () => {
       expect(screen.getByTestId("form-view")).toBeInTheDocument();
     });
   });
+
+  it("renders add A2A agent button", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByTestId("add-a2a-agent")).toBeInTheDocument();
+    });
+  });
+
+  it("renders A2A agent config from mock data", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByTestId("a2a-agent-0")).toBeInTheDocument();
+    });
+  });
+
+  it("shows A2A Agents section header", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByText("A2A Agents")).toBeInTheDocument();
+    });
+  });
+
+  it("renders A2A agent URL from mock data", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      const urlInput = screen.getByDisplayValue("https://remote.example.com/a2a/agents/support");
+      expect(urlInput).toBeInTheDocument();
+    });
+  });
+
+  it("renders A2A agent name from mock data", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      const nameInput = screen.getByDisplayValue("Support Agent");
+      expect(nameInput).toBeInTheDocument();
+    });
+  });
 });

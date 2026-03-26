@@ -19,6 +19,11 @@ import {
   Copy,
   Server,
   MessageSquare,
+  Handshake,
+  Link2,
+  X,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -30,6 +35,7 @@ import {
   useDeleteAgent,
   useDuplicateAgent,
   useAgentVersions,
+  useUpdateAgent,
 } from "@/hooks/use-agents";
 import { useExportAgent } from "@/hooks/use-backup";
 import { useWorkflowDescriptors, useUpdateAgentWorkflows } from "@/hooks/use-packages";
@@ -293,6 +299,13 @@ export function AgentDetailPage() {
           isBusy={isBusy}
         />
       )}
+
+      {/* A2A Protocol Section */}
+      <A2ASection
+        agent={agent}
+        agentId={id!}
+        version={version}
+      />
 
       {/* Workflows section */}
       <section className="rounded-xl border bg-card shadow-sm">
@@ -606,6 +619,282 @@ function RawConfigSection({ agent }: { agent: { workflows?: string[]; channels?:
           </pre>
         </div>
       )}
+    </section>
+  );
+}
+
+/* ─── A2A Protocol Section ─── */
+function A2ASection({
+  agent,
+  agentId,
+  version,
+}: {
+  agent: { workflows?: string[]; channels?: string[]; a2aEnabled?: boolean; description?: string; a2aSkills?: string[] };
+  agentId: string;
+  version: number;
+}) {
+  const { t } = useTranslation();
+  const updateAgent = useUpdateAgent();
+  const [skillInput, setSkillInput] = useState("");
+  const [localDesc, setLocalDesc] = useState(agent.description ?? "");
+  const [showCard, setShowCard] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const isEnabled = agent.a2aEnabled ?? false;
+
+  function handleToggleA2A() {
+    updateAgent.mutate({
+      id: agentId,
+      version,
+      agent: { ...agent, a2aEnabled: !isEnabled },
+    });
+  }
+
+  function handleDescriptionSave() {
+    if (localDesc !== (agent.description ?? "")) {
+      updateAgent.mutate({
+        id: agentId,
+        version,
+        agent: { ...agent, description: localDesc },
+      });
+    }
+  }
+
+  function handleAddSkill() {
+    const trimmed = skillInput.trim();
+    if (!trimmed) return;
+    const current = agent.a2aSkills ?? [];
+    if (current.includes(trimmed)) return;
+    updateAgent.mutate({
+      id: agentId,
+      version,
+      agent: { ...agent, a2aSkills: [...current, trimmed] },
+    });
+    setSkillInput("");
+  }
+
+  function handleRemoveSkill(idx: number) {
+    const updated = (agent.a2aSkills ?? []).filter((_, i) => i !== idx);
+    updateAgent.mutate({
+      id: agentId,
+      version,
+      agent: { ...agent, a2aSkills: updated },
+    });
+  }
+
+  function copyToClipboard(text: string, label: string) {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(label);
+      setTimeout(() => setCopied(null), 2000);
+    });
+  }
+
+  const baseUrl = window.location.origin;
+  const cardUrl = `${baseUrl}/a2a/agents/${agentId}/agent.json`;
+  const rpcUrl = `${baseUrl}/a2a/agents/${agentId}`;
+
+  // Build a preview of the Agent Card (mirrors AgentCardService.java)
+  const agentCard = {
+    name: `EDDI Agent ${agentId}`,
+    description: agent.description || "EDDI conversational AI agent",
+    url: rpcUrl,
+    provider: "EDDI",
+    version: "6.0.0",
+    capabilities: { streaming: false, pushNotifications: false, stateTransitionHistory: true },
+    skills: (agent.a2aSkills && agent.a2aSkills.length > 0)
+      ? agent.a2aSkills.map((s) => ({
+          id: s.toLowerCase().replace(/ /g, "-"),
+          name: s,
+          description: `Skill: ${s}`,
+        }))
+      : [{ id: "chat", name: "Conversational AI", description: "General conversational AI agent powered by EDDI" }],
+  };
+
+  return (
+    <section className="rounded-xl border bg-card shadow-sm" data-testid="a2a-section">
+      <div className="flex items-center justify-between border-b border-border p-5">
+        <div className="flex items-center gap-2">
+          <Handshake className="h-5 w-5 text-primary" />
+          <h2 className="text-lg font-semibold text-foreground">
+            {t("agentDetail.a2aSection", "Agent-to-Agent (A2A)")}
+          </h2>
+          {isEnabled && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              <Link2 className="h-3 w-3" />
+              {t("agentDetail.a2aEnabled", "Enabled")}
+            </span>
+          )}
+        </div>
+        {isEnabled && (
+          <button
+            onClick={handleToggleA2A}
+            disabled={updateAgent.isPending}
+            className="rounded-lg bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50"
+          >
+            {t("agentDetail.a2aDisable", "Disable A2A")}
+          </button>
+        )}
+      </div>
+
+      <div className="p-5">
+        {!isEnabled ? (
+          /* ── Disabled state: CTA ── */
+          <div className="flex flex-col items-center justify-center py-8 text-center">
+            <Handshake className="h-10 w-10 text-muted-foreground/50" />
+            <p className="mt-3 text-sm text-muted-foreground max-w-md">
+              {t(
+                "agentDetail.a2aEnabledDesc",
+                "Make this agent discoverable by other agents via the A2A protocol. Other EDDI instances can find and call this agent as a tool."
+              )}
+            </p>
+            <button
+              onClick={handleToggleA2A}
+              disabled={updateAgent.isPending}
+              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow-md disabled:opacity-50"
+              data-testid="enable-a2a-btn"
+            >
+              <Link2 className="h-4 w-4" />
+              {t("agentDetail.a2aEnable", "Enable A2A")}
+            </button>
+          </div>
+        ) : (
+          /* ── Enabled state: full editor ── */
+          <div className="space-y-5">
+            {/* Description */}
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">
+                {t("agentDetail.a2aDescription", "Agent Description")}
+              </label>
+              <input
+                type="text"
+                value={localDesc}
+                onChange={(e) => setLocalDesc(e.target.value)}
+                onBlur={handleDescriptionSave}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleDescriptionSave();
+                  }
+                }}
+                placeholder={t("agentDetail.a2aDescPlaceholder", "What does this agent do?")}
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                data-testid="a2a-description"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("agentDetail.a2aDescHint", "Shown in the Agent Card — helps other agents understand what this agent does")}
+              </p>
+            </div>
+
+            {/* Skills */}
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">
+                {t("agentDetail.a2aSkills", "A2A Skills")}
+              </label>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {(agent.a2aSkills ?? []).map((skill, i) => (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+                  >
+                    {skill}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveSkill(i)}
+                      className="rounded p-0.5 hover:bg-primary/20 transition-colors"
+                      aria-label={`Remove ${skill}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+                {(agent.a2aSkills ?? []).length === 0 && (
+                  <span className="text-xs text-muted-foreground italic">
+                    {t("agentDetail.a2aNoSkills", "No skills — a default 'chat' skill will be used")}
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={skillInput}
+                  onChange={(e) => setSkillInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddSkill();
+                    }
+                  }}
+                  placeholder={t("agentDetail.a2aSkillPlaceholder", "e.g. translation, code-review")}
+                  className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  data-testid="a2a-skill-input"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddSkill}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+                >
+                  <Plus className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+
+            {/* Endpoints */}
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">
+                {t("agentDetail.a2aEndpoints", "Endpoints")}
+              </label>
+              <div className="space-y-1.5">
+                {[
+                  { method: "GET", url: cardUrl, label: "card" },
+                  { method: "POST", url: rpcUrl, label: "rpc" },
+                ].map(({ method, url, label }) => (
+                  <div key={label} className="flex items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2">
+                    <span className={cn(
+                      "rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+                      method === "GET" ? "bg-sky-500/10 text-sky-600 dark:text-sky-400" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                    )}>
+                      {method}
+                    </span>
+                    <code className="flex-1 truncate font-mono text-xs text-foreground" dir="ltr">
+                      {url}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(url, label)}
+                      className="rounded p-1 text-muted-foreground hover:text-foreground transition-colors"
+                      aria-label="Copy URL"
+                    >
+                      {copied === label ? (
+                        <span className="text-[10px] font-medium text-emerald-500">✓</span>
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Agent Card Preview (collapsible) */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowCard(!showCard)}
+                className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                data-testid="a2a-card-toggle"
+              >
+                {showCard ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                {t("agentDetail.agentCardPreview", "Agent Card Preview")}
+              </button>
+              {showCard && (
+                <pre className="mt-2 max-h-48 overflow-auto rounded-lg bg-secondary p-3 text-xs text-foreground font-mono">
+                  {JSON.stringify(agentCard, null, 2)}
+                </pre>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </section>
   );
 }

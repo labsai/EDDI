@@ -383,6 +383,9 @@ export const handlers = [
         "eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=1",
       ],
       channels: [],
+      a2aEnabled: true,
+      description: "Customer support AI agent for order tracking and refunds",
+      a2aSkills: ["order-tracking", "refund-processing"],
       _version: version,
     });
   }),
@@ -818,6 +821,13 @@ export const handlers = [
           enableToolCaching: true,
           enableRateLimiting: true,
           defaultRateLimit: 100,
+          a2aAgents: [
+            {
+              url: "https://remote.example.com/a2a/agents/support",
+              name: "Support Agent",
+              timeoutMs: 30000,
+            },
+          ],
         },
       ],
     });

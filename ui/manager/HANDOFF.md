@@ -16,6 +16,7 @@
 **Phase 7.34b (Tenant Quotas)**: Backend engine + REST API + Manager Quotas admin page complete.
 **Agent Setup Wizard**: Two-mode wizard (Standard + API Agent) with backend setup endpoints. LangChain editor updated with enableHttpCallTools + MCP servers.
 **Group Discussion UI**: Groups page (card/list views), Group Detail (3-panel), Group Wizard (4-step), 7 components, API layer, hooks, 5 templates.
+**A2A Protocol UI**: Agent-detail A2A section (enable/disable, description, skills, endpoints, Agent Card preview). LangChain editor A2A Agents section (remote agents as tools).
 
 ### What's Done
 
@@ -49,11 +50,12 @@
 | —     | **Agent Setup Wizard**: Two-mode wizard (Standard Agent + API Agent) with `/administration/agents/setup` and `/setup-api` endpoints. OpenAPI spec input (URL/file/paste), LLM provider picker, feature toggles. 90+ i18n keys | `9a568ac` |
 | —     | **LangChain Editor Tooling**: `enableHttpCallTools` toggle, `mcpServers` editor (URL/name/transport/apiKey), updated agent mode detection | `0b527fe` |
 | —     | **Group Discussion UI**: Groups page, Group Detail, Group Wizard, 7 components, API layer, TanStack Query hooks, 5 preset templates | pending |
+| —     | **A2A Protocol UI**: Agent-detail A2A section (CTA enable/disable, description, skills tags, endpoint URLs, Agent Card preview), LangChain editor A2A Agents section (URL, name, apiKey vault warning, timeout, skills filter), MSW mocks, 10 new tests | pending |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 264 pass (`npm run test`) — 31 files (incl. `agent-wizard.test.tsx` 10 tests)
+- **Unit/Component**: 295 pass (`npm run test`) — 31 files
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds
