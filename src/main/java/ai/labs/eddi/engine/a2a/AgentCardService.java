@@ -108,7 +108,7 @@ public class AgentCardService {
      * Build an AgentCard from an agent configuration.
      */
     AgentCard buildAgentCard(String agentId, AgentConfiguration config, Integer version) {
-        String name = !isNullOrEmpty(config.getDescription()) ? config.getDescription() : "EDDI Agent " + agentId;
+        String name = "EDDI Agent " + agentId;
 
         String description = !isNullOrEmpty(config.getDescription()) ? config.getDescription() : "EDDI conversational AI agent";
 
@@ -125,7 +125,7 @@ public class AgentCardService {
             skills.add(new AgentSkill("chat", "Conversational AI", "General conversational AI agent powered by EDDI", List.of("chat", "ai"), null));
         }
 
-        var capabilities = new AgentCapabilities(true, false, true);
+        var capabilities = new AgentCapabilities(false, false, true);
 
         return new AgentCard(name, description, agentUrl, "EDDI", "6.0.0", capabilities, skills);
     }

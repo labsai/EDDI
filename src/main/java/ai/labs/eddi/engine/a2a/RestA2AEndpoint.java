@@ -25,6 +25,7 @@ import java.util.Map;
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
+@jakarta.enterprise.context.ApplicationScoped
 public class RestA2AEndpoint {
 
     private static final Logger LOGGER = Logger.getLogger(RestA2AEndpoint.class);

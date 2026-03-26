@@ -156,7 +156,7 @@ public class A2ATaskHandler {
         }
 
         // Start a new conversation
-        var result = conversationService.startConversation(Environment.production, agentId, null, new LinkedHashMap<>());
+        var result = conversationService.startConversation(Environment.production, agentId, null, Map.of());
         String conversationId = result.conversationId();
 
         // Cache the mapping

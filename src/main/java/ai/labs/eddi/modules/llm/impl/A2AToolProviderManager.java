@@ -94,6 +94,11 @@ public class A2AToolProviderManager {
     @SuppressWarnings("unchecked")
     private void discoverAgentTools(A2AAgentConfig config, List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors) throws Exception {
 
+        // Warn once at discovery time if raw key is used
+        if (!isNullOrEmpty(config.getApiKey())) {
+            warnIfRawKey(config.getApiKey(), config.getUrl());
+        }
+
         String agentUrl = config.getUrl().endsWith("/") ? config.getUrl().substring(0, config.getUrl().length() - 1) : config.getUrl();
 
         Map<String, Object> agentCard = fetchAgentCard(agentUrl, config);
@@ -158,7 +163,6 @@ public class A2AToolProviderManager {
 
         String apiKey = config.getApiKey();
         if (!isNullOrEmpty(apiKey)) {
-            warnIfRawKey(apiKey, config.getUrl());
             apiKey = secretResolver.resolveValue(apiKey);
             requestBuilder.header("Authorization", "Bearer " + apiKey);
         }
@@ -211,7 +215,6 @@ public class A2AToolProviderManager {
 
         String apiKey = config.getApiKey();
         if (!isNullOrEmpty(apiKey)) {
-            warnIfRawKey(apiKey, config.getUrl());
             apiKey = secretResolver.resolveValue(apiKey);
             requestBuilder.header("Authorization", "Bearer " + apiKey);
         }
