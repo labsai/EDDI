@@ -20,7 +20,9 @@ export function CreateWorkflowDialog({ open, onClose }: CreateWorkflowDialogProp
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     await createMutation.mutateAsync({
-      workflowSteps: [],
+      config: { workflowSteps: [] },
+      name,
+      description,
     });
     setName("");
     setDescription("");

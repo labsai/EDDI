@@ -1,16 +1,24 @@
 import { api } from "../api-client";
 import type { AgentDescriptor } from "./agents";
 
+export interface PatchInstruction<T> {
+  operation: "SET" | "DELETE";
+  document: Partial<T>;
+}
+
 /** Update a document descriptor (name + description) */
 export function updateDescriptor(
-  resourceType: string,
   id: string,
   version: number,
-  descriptor: { name: string; description: string }
+  descriptor: { name?: string; description?: string; resources?: Record<string, unknown> }
 ): Promise<void> {
+  const patch: PatchInstruction<typeof descriptor> = {
+    operation: "SET",
+    document: descriptor,
+  };
   return api.patch(
-    `/${resourceType}/descriptors/${id}?version=${version}`,
-    descriptor
+    `/descriptorstore/descriptors/${id}?version=${version}`,
+    patch
   );
 }
 

@@ -7,6 +7,9 @@
 ---
 
 ## Current Status
+- **Phase 4.5 (Production Build + Dashboard)** completed.
+- **Agent/Workflow Creation Fix:** Hooked up `patchDescriptor` in the `EDDI-Manager` API to properly save `name` and `description` when creating new resources.
+- **Terminology Update:** Renamed remaining references from "Packages" to "Workflows" in all frontend routing and i18n locales.
 
 **Phase 3 (Manager UI Rewrite)**: Phases 3.1–3.21 complete.  
 **Phase 4 (Hardening)**: Phase 4.1 + 4.2 + 4.3 + 4.4 + 4.5 complete.  

@@ -14,7 +14,7 @@
   "nav": {
     "dashboard": "डैशबोर्ड",
     "agents": "बॉट",
-    "packages": "पैकेज",
+    "packages": "Workflows",
     "conversations": "वार्तालाप",
     "coordinator": "Coordinator",
     "schedules": "शेड्यूल",
@@ -66,7 +66,7 @@
       "subtitle": "अपने संवादी AI बॉट प्रबंधित करें"
     },
     "packages": {
-      "title": "पैकेज",
+      "title": "Workflows",
       "subtitle": "बॉट पैकेज और एक्सटेंशन कॉन्फ़िगर करें"
     },
     "conversations": {

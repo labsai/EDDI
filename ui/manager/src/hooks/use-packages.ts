@@ -38,7 +38,24 @@ export function useWorkflowVersions(id: string) {
 export function useCreateWorkflow() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (config: WorkflowConfiguration) => createWorkflow(config),
+    mutationFn: async ({
+      config,
+      name,
+      description,
+    }: {
+      config: WorkflowConfiguration;
+      name?: string;
+      description?: string;
+    }) => {
+      const response = await createWorkflow(config);
+      if (name || description) {
+        const { parseResourceUri } = await import("@/lib/api/agents");
+        const { updateDescriptor } = await import("@/lib/api/descriptors");
+        const { id, version } = parseResourceUri(response.location);
+        await updateDescriptor(id, version, { name, description });
+      }
+      return response;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: WORKFLOWS_KEY });
     },

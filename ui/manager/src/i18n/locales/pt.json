@@ -14,7 +14,7 @@
   "nav": {
     "dashboard": "Painel",
     "agents": "Agents",
-    "packages": "Pacotes",
+    "packages": "Workflows",
     "conversations": "Conversas",
     "coordinator": "Coordinator",
     "schedules": "Agendamentos",
@@ -66,7 +66,7 @@
       "subtitle": "Gerencie seus agents de IA conversacional"
     },
     "packages": {
-      "title": "Pacotes",
+      "title": "Workflows",
       "subtitle": "Configure pacotes e extensões de agents"
     },
     "conversations": {

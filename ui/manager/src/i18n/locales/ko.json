@@ -14,7 +14,7 @@
   "nav": {
     "dashboard": "대시보드",
     "agents": "봇",
-    "packages": "패키지",
+    "packages": "Workflows",
     "conversations": "대화",
     "coordinator": "Coordinator",
     "schedules": "스케줄",
@@ -66,7 +66,7 @@
       "subtitle": "대화형 AI 봇을 관리하세요"
     },
     "packages": {
-      "title": "패키지",
+      "title": "Workflows",
       "subtitle": "봇 패키지 및 확장 프로그램을 구성하세요"
     },
     "conversations": {

@@ -14,7 +14,7 @@
   "nav": {
     "dashboard": "แดชบอร์ด",
     "agents": "บอท",
-    "packages": "แพ็กเกจ",
+    "packages": "Workflows",
     "conversations": "การสนทนา",
     "coordinator": "Coordinator",
     "schedules": "ตารางเวลา",
@@ -66,7 +66,7 @@
       "subtitle": "จัดการบอท AI สนทนาของคุณ"
     },
     "packages": {
-      "title": "แพ็กเกจ",
+      "title": "Workflows",
       "subtitle": "กำหนดค่าแพ็กเกจและส่วนขยายบอท"
     },
     "conversations": {

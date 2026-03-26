@@ -14,7 +14,7 @@
   "nav": {
     "dashboard": "ダッシュボード",
     "agents": "ボット",
-    "packages": "パッケージ",
+    "packages": "Workflows",
     "conversations": "会話",
     "coordinator": "Coordinator",
     "schedules": "スケジュール",
@@ -66,7 +66,7 @@
       "subtitle": "会話型AIボットを管理"
     },
     "packages": {
-      "title": "パッケージ",
+      "title": "Workflows",
       "subtitle": "ボットパッケージと拡張機能を設定"
     },
     "conversations": {

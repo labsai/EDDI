@@ -19,7 +19,11 @@ export function CreateAgentDialog({ open, onClose }: CreateAgentDialogProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await createAgent.mutateAsync({ workflows: [], channels: [] });
+      await createAgent.mutateAsync({
+        agent: { workflows: [], channels: [] },
+        name,
+        description,
+      });
       setName("");
       setDescription("");
       onClose();

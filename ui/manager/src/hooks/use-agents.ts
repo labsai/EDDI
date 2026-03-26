@@ -98,7 +98,23 @@ export function useDeploymentStatuses(agentId: string, version: number) {
 export function useCreateAgent() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (agent: Agent) => createAgent(agent),
+    mutationFn: async ({
+      agent,
+      name,
+      description,
+    }: {
+      agent: Agent;
+      name?: string;
+      description?: string;
+    }) => {
+      const response = await createAgent(agent);
+      if (name || description) {
+        const { id, version } = parseResourceUri(response.location);
+        const { updateDescriptor } = await import("@/lib/api/descriptors");
+        await updateDescriptor(id, version, { name, description });
+      }
+      return response;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
     },
