@@ -301,12 +301,12 @@ export function SecretsPage() {
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border p-12 text-center">
           <KeyRound className="h-12 w-12 text-muted-foreground/30" />
           <p className="mt-4 text-lg font-medium text-foreground">
-            {t("secrets.enterAgentId", "Enter a Agent ID")}
+            {t("secrets.enterAgentId", "Enter an Agent ID")}
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
             {t(
               "secrets.enterAgentIdHint",
-              "Specify a agent ID above to view and manage its secrets.",
+              "Specify an Agent ID above to view and manage its secrets.",
             )}
           </p>
         </div>

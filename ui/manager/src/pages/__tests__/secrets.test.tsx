@@ -48,9 +48,9 @@ describe("SecretsPage", () => {
     expect(screen.getByTestId("agent-id-input")).toBeInTheDocument();
   });
 
-  it("shows Enter a Agent ID prompt when no agent ID is set", () => {
+  it("shows Enter an Agent ID prompt when no agent ID is set", () => {
     renderSecrets();
-    expect(screen.getByText("Enter a Agent ID")).toBeInTheDocument();
+    expect(screen.getByText("Enter an Agent ID")).toBeInTheDocument();
   });
 
   it("disables Add Secret button when no agent ID", () => {

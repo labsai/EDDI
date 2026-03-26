@@ -41,7 +41,7 @@ describe("ChatPage", () => {
   it("shows empty state when no agent selected", () => {
     renderWithProviders(<ChatPage />);
     expect(
-      screen.getByText("Select a agent and start chatting!")
+      screen.getByText("Select an agent and start chatting!")
     ).toBeInTheDocument();
   });
 });
