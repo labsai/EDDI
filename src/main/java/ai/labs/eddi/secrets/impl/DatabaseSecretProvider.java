@@ -4,8 +4,9 @@ import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.VaultStartupBanner;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
 import ai.labs.eddi.secrets.model.*;
-import jakarta.annotation.PostConstruct;
+import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -46,8 +47,7 @@ public class DatabaseSecretProvider implements ISecretProvider {
         this.masterKeyConfig = masterKeyConfig;
     }
 
-    @PostConstruct
-    void init() {
+    void onStartup(@Observes StartupEvent event) {
         if (masterKeyConfig.isEmpty() || masterKeyConfig.get().isBlank()) {
             VaultStartupBanner.printDisabled();
             return;
