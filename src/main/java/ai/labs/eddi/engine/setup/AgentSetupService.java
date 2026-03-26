@@ -16,6 +16,8 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
+import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
+import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
@@ -128,7 +130,26 @@ public class AgentSetupService {
             createdResources.put("langchainLocation", langchainLocation);
             patchDescriptor(langchainId, langchainVersion, request.name());
 
-            // --- Step 4: Create Output Set (if intro message provided) ---
+            // --- Step 4: Create MCP Calls Configurations (if MCP server URLs provided) ---
+            List<String> mcpCallsLocations = null;
+            if (request.mcpServerUrls() != null && !request.mcpServerUrls().isBlank()) {
+                mcpCallsLocations = new ArrayList<>();
+                for (String url : request.mcpServerUrls().split(",")) {
+                    String trimmed = url.trim();
+                    if (trimmed.isEmpty())
+                        continue;
+                    var mcpConfig = createMcpCallsConfig(trimmed);
+                    Response mcpResponse = getRestStore(IRestMcpCallsStore.class).createMcpCalls(mcpConfig);
+                    String mcpLocation = mcpResponse.getHeaderString("Location");
+                    String mcpId = extractIdFromLocation(mcpLocation);
+                    int mcpVersion = extractVersionFromLocation(mcpLocation);
+                    mcpCallsLocations.add(mcpLocation);
+                    createdResources.put("mcpCallsLocation_" + mcpCallsLocations.size(), mcpLocation);
+                    patchDescriptor(mcpId, mcpVersion, request.name());
+                }
+            }
+
+            // --- Step 5: Create Output Set (if intro message provided) ---
             String outputLocation = null;
             if (request.introMessage() != null && !request.introMessage().isBlank()) {
                 var outputConfig = createOutputConfig(request.introMessage());
@@ -140,8 +161,8 @@ public class AgentSetupService {
                 patchDescriptor(outputId, outputVersion, request.name());
             }
 
-            // --- Step 5: Create Workflow ---
-            var workflowConfig = createWorkflowConfig(parserLocation, behaviorLocation, null, langchainLocation, outputLocation);
+            // --- Step 6: Create Workflow ---
+            var workflowConfig = createWorkflowConfig(parserLocation, behaviorLocation, null, mcpCallsLocations, langchainLocation, outputLocation);
             Response workflowResponse = getRestStore(IRestWorkflowStore.class).createWorkflow(workflowConfig);
             String workflowLocation = workflowResponse.getHeaderString("Location");
             String workflowId = extractIdFromLocation(workflowLocation);
@@ -149,7 +170,7 @@ public class AgentSetupService {
             createdResources.put("packageLocation", workflowLocation);
             patchDescriptor(workflowId, workflowVersion, request.name());
 
-            // --- Step 6: Create Agent ---
+            // --- Step 7: Create Agent ---
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(List.of(URI.create(workflowLocation)));
             Response agentResponse = getRestStore(IRestAgentStore.class).createAgent(agentConfig);
@@ -159,7 +180,7 @@ public class AgentSetupService {
             createdResources.put("agentLocation", agentLocation);
             patchDescriptor(agentId, agentVersion, request.name());
 
-            // --- Step 7: Deploy ---
+            // --- Step 8: Deploy ---
             var resultBuilder = SetupResult.builder().action("setup_complete").agentId(agentId != null ? agentId : "unknown")
                     .agentName(request.name()).provider(params.providerType).model(params.modelId);
 
@@ -267,7 +288,7 @@ public class AgentSetupService {
             patchDescriptor(extractIdFromLocation(langchainLocation), extractVersionFromLocation(langchainLocation), request.name());
 
             // --- Step 6: Create Workflow (with httpcalls in pipeline) ---
-            var workflowConfig = createWorkflowConfig(parserLocation, behaviorLocation, httpCallsLocations, langchainLocation, null);
+            var workflowConfig = createWorkflowConfig(parserLocation, behaviorLocation, httpCallsLocations, null, langchainLocation, null);
             Response workflowResponse = getRestStore(IRestWorkflowStore.class).createWorkflow(workflowConfig);
             String workflowLocation = workflowResponse.getHeaderString("Location");
             createdResources.put("packageLocation", workflowLocation);
@@ -462,11 +483,22 @@ public class AgentSetupService {
     }
 
     /**
-     * Create workflow with parser + behavior + [httpcalls...] + langchain [+
-     * output].
+     * Create a minimal McpCallsConfiguration for a single MCP server URL.
+     */
+    public McpCallsConfiguration createMcpCallsConfig(String mcpServerUrl) {
+        var config = new McpCallsConfiguration();
+        config.setMcpServerUrl(mcpServerUrl);
+        config.setTransport("http");
+        config.setTimeoutMs(30000L);
+        return config;
+    }
+
+    /**
+     * Create workflow with parser + behavior + [httpcalls...] + [mcpcalls...] +
+     * langchain [+ output].
      */
     public WorkflowConfiguration createWorkflowConfig(String parserLocation, String behaviorLocation, List<String> httpCallsLocations,
-            String langchainLocation, String outputLocation) {
+            List<String> mcpCallsLocations, String langchainLocation, String outputLocation) {
         var extensions = new ArrayList<WorkflowConfiguration.WorkflowStep>();
 
         if (parserLocation != null) {
@@ -487,6 +519,15 @@ public class AgentSetupService {
                 httpCalls.setType(URI.create("eddi://ai.labs.httpcalls"));
                 httpCalls.setConfig(Map.of("uri", httpCallsLocation));
                 extensions.add(httpCalls);
+            }
+        }
+
+        if (mcpCallsLocations != null) {
+            for (String mcpCallsLocation : mcpCallsLocations) {
+                var mcpCalls = new WorkflowConfiguration.WorkflowStep();
+                mcpCalls.setType(URI.create("eddi://ai.labs.mcpcalls"));
+                mcpCalls.setConfig(Map.of("uri", mcpCallsLocation));
+                extensions.add(mcpCalls);
             }
         }
 

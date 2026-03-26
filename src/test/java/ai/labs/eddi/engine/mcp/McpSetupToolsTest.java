@@ -86,7 +86,7 @@ class McpSetupToolsTest {
         when(agentAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
 
         String result = tools.setupAgent("Test Agent", "You are helpful", "anthropic", "claude-sonnet-4-6", "sk-test", null, "Hello!", true,
-                "calculator,datetime", null, null, true, "production");
+                "calculator,datetime", null, null, null, true, "production");
 
         assertNotNull(result);
 
@@ -111,7 +111,7 @@ class McpSetupToolsTest {
         when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
-        tools.setupAgent("Test Agent", "You are helpful", null, null, "sk-test", null, null, null, null, null, null, true, null);
+        tools.setupAgent("Test Agent", "You are helpful", null, null, "sk-test", null, null, null, null, null, null, null, true, null);
 
         // Output store should NOT be called
         verify(outputStore, never()).createOutputSet(any());
@@ -127,7 +127,7 @@ class McpSetupToolsTest {
         when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
-        tools.setupAgent("Test Agent", "You are helpful", null, null, "sk-test", null, null, null, null, null, null, false, null);
+        tools.setupAgent("Test Agent", "You are helpful", null, null, "sk-test", null, null, null, null, null, null, null, false, null);
 
         // Deploy should NOT be called
         verify(agentAdmin, never()).deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean());
@@ -141,7 +141,8 @@ class McpSetupToolsTest {
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
         when(agentAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean())).thenThrow(new RuntimeException("Deploy failed"));
 
-        String result = tools.setupAgent("Test Agent", "You are helpful", null, null, "sk-test", null, null, null, null, null, null, true, null);
+        String result = tools.setupAgent("Test Agent", "You are helpful", null, null, "sk-test", null, null, null, null, null, null, null, true,
+                null);
 
         // Should still return a result (agent was created), not an error
         assertNotNull(result);
@@ -150,21 +151,21 @@ class McpSetupToolsTest {
 
     @Test
     void setupAgent_missingName_returnsError() {
-        String result = tools.setupAgent(null, "prompt", null, null, "key", null, null, null, null, null, null, null, null);
+        String result = tools.setupAgent(null, "prompt", null, null, "key", null, null, null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("name is required"));
     }
 
     @Test
     void setupAgent_missingPrompt_returnsError() {
-        String result = tools.setupAgent("Agent", null, null, null, "key", null, null, null, null, null, null, null, null);
+        String result = tools.setupAgent("Agent", null, null, null, "key", null, null, null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("System prompt is required"));
     }
 
     @Test
     void setupAgent_missingApiKey_returnsError() {
-        String result = tools.setupAgent("Agent", "prompt", null, null, null, null, null, null, null, null, null, null, null);
+        String result = tools.setupAgent("Agent", "prompt", null, null, null, null, null, null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("API key is required"));
     }
@@ -177,8 +178,8 @@ class McpSetupToolsTest {
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
         // Ollama should NOT require an apiKey
-        String result = tools.setupAgent("Ollama Agent", "You are helpful", "ollama", "llama3.2:1b", null, null, null, null, null, null, null, false,
-                null);
+        String result = tools.setupAgent("Ollama Agent", "You are helpful", "ollama", "llama3.2:1b", null, null, null, null, null, null, null, null,
+                false, null);
 
         assertNotNull(result);
         assertFalse(result.contains("\"error\""), "Ollama setup should succeed without API key");
@@ -192,8 +193,8 @@ class McpSetupToolsTest {
         when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
-        String result = tools.setupAgent("Jlama Agent", "You are helpful", "jlama", "tinyllama", null, null, null, null, null, null, null, false,
-                null);
+        String result = tools.setupAgent("Jlama Agent", "You are helpful", "jlama", "tinyllama", null, null, null, null, null, null, null, null,
+                false, null);
 
         assertNotNull(result);
         assertFalse(result.contains("\"error\""), "Jlama setup should succeed without API key");
@@ -206,8 +207,8 @@ class McpSetupToolsTest {
         when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
-        tools.setupAgent("My Agent", "You are a pirate", "anthropic", "claude-3-5-sonnet", "sk-ant-key", null, null, null, null, null, null, false,
-                null);
+        tools.setupAgent("My Agent", "You are a pirate", "anthropic", "claude-3-5-sonnet", "sk-ant-key", null, null, null, null, null, null, null,
+                false, null);
 
         // Capture the langchain config
         var langchainCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
@@ -230,7 +231,7 @@ class McpSetupToolsTest {
         when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
-        tools.setupAgent("Agent", "prompt", null, null, "key", null, "Hello!", null, null, null, null, false, null);
+        tools.setupAgent("Agent", "prompt", null, null, "key", null, "Hello!", null, null, null, null, null, false, null);
 
         // Capture package config
         var packageCaptor = ArgumentCaptor.forClass(WorkflowConfiguration.class);
@@ -252,7 +253,7 @@ class McpSetupToolsTest {
         when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
-        tools.setupAgent("Agent", "prompt", null, null, "key", null, null, null, null, null, null, false, null);
+        tools.setupAgent("Agent", "prompt", null, null, "key", null, null, null, null, null, null, null, false, null);
 
         var packageCaptor = ArgumentCaptor.forClass(WorkflowConfiguration.class);
         verify(WorkflowStore).createWorkflow(packageCaptor.capture());
@@ -346,7 +347,7 @@ class McpSetupToolsTest {
         when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
-        tools.setupAgent("QR Agent", "You are helpful", "openai", "gpt-4o", "sk-test", null, null, null, null, true, null, false, null);
+        tools.setupAgent("QR Agent", "You are helpful", "openai", "gpt-4o", "sk-test", null, null, null, null, true, null, null, false, null);
 
         var lcCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
         verify(langchainStore).createLlm(lcCaptor.capture());
@@ -371,7 +372,8 @@ class McpSetupToolsTest {
         when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
-        tools.setupAgent("Sentiment Agent", "You are helpful", "gemini", "gemini-2.0-flash", "key", null, null, null, null, null, true, false, null);
+        tools.setupAgent("Sentiment Agent", "You are helpful", "gemini", "gemini-2.0-flash", "key", null, null, null, null, null, true, null, false,
+                null);
 
         var lcCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
         verify(langchainStore).createLlm(lcCaptor.capture());
@@ -396,7 +398,7 @@ class McpSetupToolsTest {
         when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
-        tools.setupAgent("Full Agent", "You are helpful", "openai", "gpt-4o", "sk-test", null, null, null, null, true, true, false, null);
+        tools.setupAgent("Full Agent", "You are helpful", "openai", "gpt-4o", "sk-test", null, null, null, null, true, true, null, false, null);
 
         var lcCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
         verify(langchainStore).createLlm(lcCaptor.capture());
@@ -422,8 +424,8 @@ class McpSetupToolsTest {
         when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
-        tools.setupAgent("Anthropic Agent", "You are helpful", "anthropic", "claude-sonnet-4-6", "sk-test", null, null, null, null, true, null, false,
-                null);
+        tools.setupAgent("Anthropic Agent", "You are helpful", "anthropic", "claude-sonnet-4-6", "sk-test", null, null, null, null, true, null, null,
+                false, null);
 
         var lcCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
         verify(langchainStore).createLlm(lcCaptor.capture());

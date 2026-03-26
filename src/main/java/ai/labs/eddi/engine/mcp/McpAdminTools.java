@@ -9,6 +9,8 @@ import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
+import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
@@ -336,10 +338,10 @@ public class McpAdminTools {
     }
 
     @Tool(name = "read_resource", description = "Read any EDDI resource configuration by type and ID. "
-            + "Supported types: 'behavior', 'langchain', 'httpcalls', 'output', "
+            + "Supported types: 'behavior', 'langchain', 'httpcalls', 'mcpcalls', 'output', "
             + "'propertysetter', 'dictionaries'. Returns the full configuration JSON.")
     public String readResource(
-            @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'output', "
+            @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'mcpcalls', 'output', "
                     + "'propertysetter', or 'dictionaries' (required)") String resourceType,
             @ToolArg(description = "Resource ID (required)") String resourceId,
             @ToolArg(description = "Version number (default: 1)") Integer version) {
@@ -374,11 +376,12 @@ public class McpAdminTools {
             case "behavior" -> getRestStore(IRestRuleSetStore.class).readRuleSet(id, version);
             case "langchain" -> getRestStore(IRestLlmStore.class).readLlm(id, version);
             case "httpcalls" -> getRestStore(IRestApiCallsStore.class).readApiCalls(id, version);
+            case "mcpcalls" -> getRestStore(IRestMcpCallsStore.class).readMcpCalls(id, version);
             case "output" -> getRestStore(IRestOutputStore.class).readOutputSet(id, version, "", "", 0, 0);
             case "propertysetter" -> getRestStore(IRestPropertySetterStore.class).readPropertySetter(id, version);
             case "dictionaries" -> getRestStore(IRestDictionaryStore.class).readRegularDictionary(id, version, "", "", 0, 0);
             default -> throw new IllegalArgumentException(
-                    "Unknown resource type: " + type + ". Supported: behavior, langchain, httpcalls, output, propertysetter, dictionaries");
+                    "Unknown resource type: " + type + ". Supported: behavior, langchain, httpcalls, mcpcalls, output, propertysetter, dictionaries");
         };
     }
 
@@ -387,9 +390,9 @@ public class McpAdminTools {
 
     @Tool(name = "update_resource", description = "Update any EDDI resource configuration by type and ID. "
             + "Returns the new version URI after update. "
-            + "Supported types: 'behavior', 'langchain', 'httpcalls', 'output', 'propertysetter', 'dictionaries'.")
+            + "Supported types: 'behavior', 'langchain', 'httpcalls', 'mcpcalls', 'output', 'propertysetter', 'dictionaries'.")
     public String updateResource(
-            @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'output', "
+            @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'mcpcalls', 'output', "
                     + "'propertysetter', or 'dictionaries' (required)") String resourceType,
             @ToolArg(description = "Resource ID (required)") String resourceId,
             @ToolArg(description = "Current version number (required)") Integer version,
@@ -424,9 +427,9 @@ public class McpAdminTools {
     }
 
     @Tool(name = "create_resource", description = "Create a new EDDI resource configuration. " + "Returns the new resource ID and URI. "
-            + "Supported types: 'behavior', 'langchain', 'httpcalls', 'output', 'propertysetter', 'dictionaries'.")
+            + "Supported types: 'behavior', 'langchain', 'httpcalls', 'mcpcalls', 'output', 'propertysetter', 'dictionaries'.")
     public String createResource(
-            @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'output', "
+            @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'mcpcalls', 'output', "
                     + "'propertysetter', or 'dictionaries' (required)") String resourceType,
             @ToolArg(description = "Full JSON configuration body (required)") String config) {
         if (resourceType == null || resourceType.isBlank())
@@ -457,9 +460,9 @@ public class McpAdminTools {
 
     @Tool(name = "delete_resource", description = "Delete an EDDI resource configuration. "
             + "Soft-deletes by default; set permanent=true for permanent removal. "
-            + "Supported types: 'behavior', 'langchain', 'httpcalls', 'output', 'propertysetter', 'dictionaries'.")
+            + "Supported types: 'behavior', 'langchain', 'httpcalls', 'mcpcalls', 'output', 'propertysetter', 'dictionaries'.")
     public String deleteResource(
-            @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'output', "
+            @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'mcpcalls', 'output', "
                     + "'propertysetter', or 'dictionaries' (required)") String resourceType,
             @ToolArg(description = "Resource ID (required)") String resourceId,
             @ToolArg(description = "Current version number (required)") Integer version,
@@ -705,6 +708,8 @@ public class McpAdminTools {
                 getRestStore(IRestLlmStore.class).updateLlm(id, version, jsonSerialization.deserialize(configJson, LlmConfiguration.class));
             case "httpcalls" -> getRestStore(IRestApiCallsStore.class).updateApiCalls(id, version,
                     jsonSerialization.deserialize(configJson, ApiCallsConfiguration.class));
+            case "mcpcalls" -> getRestStore(IRestMcpCallsStore.class).updateMcpCalls(id, version,
+                    jsonSerialization.deserialize(configJson, McpCallsConfiguration.class));
             case "output" -> getRestStore(IRestOutputStore.class).updateOutputSet(id, version,
                     jsonSerialization.deserialize(configJson, OutputConfigurationSet.class));
             case "propertysetter" -> getRestStore(IRestPropertySetterStore.class).updatePropertySetter(id, version,
@@ -712,7 +717,7 @@ public class McpAdminTools {
             case "dictionaries" -> getRestStore(IRestDictionaryStore.class).updateRegularDictionary(id, version,
                     jsonSerialization.deserialize(configJson, DictionaryConfiguration.class));
             default -> throw new IllegalArgumentException(
-                    "Unknown resource type: " + type + ". Supported: behavior, langchain, httpcalls, output, propertysetter, dictionaries");
+                    "Unknown resource type: " + type + ". Supported: behavior, langchain, httpcalls, mcpcalls, output, propertysetter, dictionaries");
         };
     }
 
@@ -726,6 +731,8 @@ public class McpAdminTools {
             case "langchain" -> getRestStore(IRestLlmStore.class).createLlm(jsonSerialization.deserialize(configJson, LlmConfiguration.class));
             case "httpcalls" ->
                 getRestStore(IRestApiCallsStore.class).createApiCalls(jsonSerialization.deserialize(configJson, ApiCallsConfiguration.class));
+            case "mcpcalls" ->
+                getRestStore(IRestMcpCallsStore.class).createMcpCalls(jsonSerialization.deserialize(configJson, McpCallsConfiguration.class));
             case "output" ->
                 getRestStore(IRestOutputStore.class).createOutputSet(jsonSerialization.deserialize(configJson, OutputConfigurationSet.class));
             case "propertysetter" -> getRestStore(IRestPropertySetterStore.class)
@@ -733,7 +740,7 @@ public class McpAdminTools {
             case "dictionaries" -> getRestStore(IRestDictionaryStore.class)
                     .createRegularDictionary(jsonSerialization.deserialize(configJson, DictionaryConfiguration.class));
             default -> throw new IllegalArgumentException(
-                    "Unknown resource type: " + type + ". Supported: behavior, langchain, httpcalls, output, propertysetter, dictionaries");
+                    "Unknown resource type: " + type + ". Supported: behavior, langchain, httpcalls, mcpcalls, output, propertysetter, dictionaries");
         };
     }
 
@@ -745,11 +752,12 @@ public class McpAdminTools {
             case "behavior" -> getRestStore(IRestRuleSetStore.class).deleteRuleSet(id, version, permanent);
             case "langchain" -> getRestStore(IRestLlmStore.class).deleteLlm(id, version, permanent);
             case "httpcalls" -> getRestStore(IRestApiCallsStore.class).deleteApiCalls(id, version, permanent);
+            case "mcpcalls" -> getRestStore(IRestMcpCallsStore.class).deleteMcpCalls(id, version, permanent);
             case "output" -> getRestStore(IRestOutputStore.class).deleteOutputSet(id, version, permanent);
             case "propertysetter" -> getRestStore(IRestPropertySetterStore.class).deletePropertySetter(id, version, permanent);
             case "dictionaries" -> getRestStore(IRestDictionaryStore.class).deleteRegularDictionary(id, version, permanent);
             default -> throw new IllegalArgumentException(
-                    "Unknown resource type: " + type + ". Supported: behavior, langchain, httpcalls, output, propertysetter, dictionaries");
+                    "Unknown resource type: " + type + ". Supported: behavior, langchain, httpcalls, mcpcalls, output, propertysetter, dictionaries");
         };
     }
 
@@ -766,6 +774,8 @@ public class McpAdminTools {
             return "langchain";
         if (typeUri.contains("httpcalls"))
             return "httpcalls";
+        if (typeUri.contains("mcpcalls"))
+            return "mcpcalls";
         if (typeUri.contains("output"))
             return "output";
         if (typeUri.contains("property"))

@@ -11,5 +11,5 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  */
 public record SetupAgentRequest(@JsonProperty(required = true) String name, @JsonProperty(required = true) String systemPrompt, String provider,
         String model, String apiKey, String baseUrl, String introMessage, Boolean enableBuiltInTools, String builtInToolsWhitelist,
-        Boolean enableQuickReplies, Boolean enableSentimentAnalysis, Boolean deploy, String environment) {
+        Boolean enableQuickReplies, Boolean enableSentimentAnalysis, String mcpServerUrls, Boolean deploy, String environment) {
 }
