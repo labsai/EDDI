@@ -10,12 +10,13 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 ### Ecosystem
 
-| Repo                       | Tech                      | Purpose                                                  |
-| -------------------------- | ------------------------- | -------------------------------------------------------- |
-| **EDDI** (this repo)       | Java 25, Quarkus, MongoDB | Backend engine, REST API, lifecycle pipeline             |
-| **EDDI-Manager**           | React 19, Vite, Tailwind  | Admin dashboard (served from EDDI at `/chat/production`) |
-| **eddi-chat-ui**           | React, TypeScript         | Standalone chat widget                                   |
-| **eddi-website**           | Astro, Starlight          | Marketing site + documentation at eddi.labs.ai           |
+| Repo                                                            | Tech                       | Purpose                                                      |
+| --------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------ |
+| **EDDI** (this repo)                                            | Java 25, Quarkus, MongoDB  | Backend engine, REST API, lifecycle pipeline                 |
+| **[quarkus-eddi](https://github.com/quarkiverse/quarkus-eddi)** | Java 21, Quarkus Extension | Quarkus SDK — `@Inject EddiClient`, Dev Services, MCP bridge |
+| **EDDI-Manager**                                                | React 19, Vite, Tailwind   | Admin dashboard (served from EDDI at `/chat/production`)     |
+| **eddi-chat-ui**                                                | React, TypeScript          | Standalone chat widget                                       |
+| **eddi-website**                                                | Astro, Starlight           | Marketing site + documentation at eddi.labs.ai               |
 
 ### Key Architecture
 
@@ -68,33 +69,31 @@ Follow this order unless the user explicitly requests something different.
 
 ### Completed ✅
 
-| Phase | Area | Highlights |
-|---|---|---|
-| 0 | Security Quick Wins | CORS lockdown, PathNavigator (replaced OGNL) |
-| 1 | Backend Foundation | ConversationService extraction, SSE streaming, typed memory, LangchainTask decomposition |
-| 2 | Testing Infrastructure | Integration tests migrated to main repo, Testcontainers, API contract tests |
-| 3 | Manager UI | Greenfield React 19 + Vite + Tailwind rewrite |
-| 4 | Chat-UI | CRA→Vite, SSE streaming, Keycloak auth |
-| 5 | NATS JetStream | Event bus abstraction, async processing, coordinator dashboard |
-| 6 | DB-Agnostic Architecture | PostgreSQL adapter, MongoDB sync driver, Caffeine cache, Lombok removal, langchain4j core migration |
-| 7 | Security & Compliance | Secrets Vault, Audit Ledger (EU AI Act), tenant quota stub |
-| 8 | MCP Integration | MCP Server (33 tools), MCP Client, agent discovery, managed conversations |
+| Phase | Area                     | Highlights                                                                                          |
+| ----- | ------------------------ | --------------------------------------------------------------------------------------------------- |
+| 0     | Security Quick Wins      | CORS lockdown, PathNavigator (replaced OGNL)                                                        |
+| 1     | Backend Foundation       | ConversationService extraction, SSE streaming, typed memory, LangchainTask decomposition            |
+| 2     | Testing Infrastructure   | Integration tests migrated to main repo, Testcontainers, API contract tests                         |
+| 3     | Manager UI               | Greenfield React 19 + Vite + Tailwind rewrite                                                       |
+| 4     | Chat-UI                  | CRA→Vite, SSE streaming, Keycloak auth                                                              |
+| 5     | NATS JetStream           | Event bus abstraction, async processing, coordinator dashboard                                      |
+| 6     | DB-Agnostic Architecture | PostgreSQL adapter, MongoDB sync driver, Caffeine cache, Lombok removal, langchain4j core migration |
+| 7     | Security & Compliance    | Secrets Vault, Audit Ledger (EU AI Act), tenant quota stub                                          |
+| 8     | MCP Integration          | MCP Server (33 tools), MCP Client, agent discovery, managed conversations                           |
 
 ### In Progress / Upcoming
 
-| Phase | Area | Description |
-|---|---|---|
-| 8c | RAG Foundation | Config-driven vector store retrieval via langchain4j |
-| 9 | DAG Pipeline | Parallel tasks, circuit breakers, OpenTelemetry tracing |
-| 9b | HITL Framework | Human-in-the-loop pause/resume/approve |
-| 10 | Group Conversations | Multi-agent orchestration, debate rounds, NATS-backed |
-| 11a | Persistent Memory | Cross-conversation user memory, scheduled triggers |
-| 11b | Multi-Channel | WhatsApp, Telegram, Slack adapters |
-| 12 | CI/CD | GitHub Actions migration (from CircleCI) |
-| 13 | Debugging & Visualization | Time-traveling debugger, visual pipeline builder |
-| 14 | Website | Astro + Starlight documentation site |
-
-
+| Phase | Area                      | Description                                             |
+| ----- | ------------------------- | ------------------------------------------------------- |
+| 8c    | RAG Foundation            | Config-driven vector store retrieval via langchain4j    |
+| 9     | DAG Pipeline              | Parallel tasks, circuit breakers, OpenTelemetry tracing |
+| 9b    | HITL Framework            | Human-in-the-loop pause/resume/approve                  |
+| 10    | Group Conversations       | Multi-agent orchestration, debate rounds, NATS-backed   |
+| 11a   | Persistent Memory         | Cross-conversation user memory, scheduled triggers      |
+| 11b   | Multi-Channel             | WhatsApp, Telegram, Slack adapters                      |
+| 12    | CI/CD                     | GitHub Actions migration (from CircleCI)                |
+| 13    | Debugging & Visualization | Time-traveling debugger, visual pipeline builder        |
+| 14    | Website                   | Astro + Starlight documentation site                    |
 
 ---
 

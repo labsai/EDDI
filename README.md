@@ -25,6 +25,26 @@ Documentation: [here](https://docs.labs.ai/)
 
 [![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade)
 
+## Quarkus SDK
+
+Building a Quarkus app that talks to EDDI? Use the **[quarkus-eddi](https://github.com/quarkiverse/quarkus-eddi)** extension:
+
+```xml
+<dependency>
+    <groupId>io.quarkiverse.eddi</groupId>
+    <artifactId>quarkus-eddi</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+</dependency>
+```
+
+```java
+@Inject EddiClient eddi;
+
+String answer = eddi.chat("my-agent", "Hello!");
+```
+
+Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming, `@EddiAgent` endpoint wiring, `@EddiTool` MCP bridge. See the [quarkus-eddi README](https://github.com/quarkiverse/quarkus-eddi) for full docs.
+
 ## Quick Start
 
 **Linux / macOS / WSL2:**

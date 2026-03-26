@@ -20,7 +20,7 @@ import java.util.regex.Pattern;
  * parameter maps.
  * <p>
  * This is the central integration point between the vault and the execution
- * workflow. It is called <b>after</b> Thymeleaf template processing and
+ * workflow. It is called <b>after</b> Qute template processing and
  * <b>before</b> the final API call (late-binding resolution).
  * <p>
  * Includes a Caffeine cache with configurable TTL to avoid repeated
