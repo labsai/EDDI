@@ -7,9 +7,8 @@ import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
-//@Api(value = "Configurations -> (5) Agent Management", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/userconversationstore/userconversations")
-@Tag(name = "09. Talk to Agents", description = "Communicate with agents")
+@Tag(name = "Conversation Store")
 public interface IRestUserConversationStore {
     String resourceURI = "eddi://ai.labs.userconversation/userconversationstore/userconversations/";
 

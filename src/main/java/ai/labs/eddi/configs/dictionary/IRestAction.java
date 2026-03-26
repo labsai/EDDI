@@ -1,6 +1,7 @@
 package ai.labs.eddi.configs.dictionary;
 
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -9,9 +10,8 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (1)
-// Regular Dictionary", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/actions")
+@Tag(name = "Dictionary")
 public interface IRestAction {
     @GET
     @Produces(MediaType.APPLICATION_JSON)

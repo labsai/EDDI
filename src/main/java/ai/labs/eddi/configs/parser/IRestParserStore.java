@@ -13,14 +13,8 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.util.List;
 
-/**
- * @author ginccc
- */
-
-// @Api(value = "Configurations -> Endpoint Parser Only", authorizations =
-// {@Authorization(value = "eddi_auth")})
 @Path("/parserstore/parsers")
-@Tag(name = "12. Standalone NLP", description = "lifecycle extension for LLM configurations")
+@Tag(name = "Standalone NLP")
 public interface IRestParserStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.parser/parserstore/parsers/";
 

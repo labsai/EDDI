@@ -3,21 +3,18 @@ package ai.labs.eddi.engine.audit.rest;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import java.util.List;
 
 /**
  * Read-only REST API for the immutable audit ledger.
- * <p>
- * Provides query access to audit entries by conversation or agent. No
- * create/update/delete endpoints — entries are created internally by the
- * lifecycle workflow.
  *
- * @author ginccc
  * @since 6.0.0
  */
 @Path("/auditstore")
 @Produces(MediaType.APPLICATION_JSON)
+@Tag(name = "Audit Trail")
 public interface IRestAuditStore {
 
     /**

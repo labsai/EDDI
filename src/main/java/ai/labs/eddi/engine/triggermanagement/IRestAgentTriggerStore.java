@@ -9,9 +9,8 @@ import jakarta.ws.rs.core.Response;
 
 import java.util.List;
 
-//@Api(value = "Configurations -> (5) Agent Management", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/AgentTriggerStore/agenttriggers")
-@Tag(name = "08. Agent Administration", description = "Deploy & Undeploy Agents")
+@Tag(name = "Agent Administration")
 public interface IRestAgentTriggerStore {
     String resourceURI = "eddi://ai.labs.agentTrigger/AgentTriggerStore/agenttriggers/";
 

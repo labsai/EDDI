@@ -13,10 +13,8 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Agent Administration", authorizations = {@Authorization(value =
-// "eddi_auth")})
 @Path("/deploymentstore/deployments")
-@Tag(name = "08. Agent Administration", description = "Deploy & Undeploy Agents")
+@Tag(name = "Agent Administration")
 public interface IRestDeploymentStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)

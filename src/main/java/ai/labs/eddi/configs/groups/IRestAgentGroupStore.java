@@ -19,7 +19,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/groupstore/groups")
-@Tag(name = "10. Groups", description = "agent group configuration for multi-agent debates")
+@Tag(name = "Agent Groups")
 public interface IRestAgentGroupStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.group";
     String resourceURI = resourceBaseType + "/groupstore/groups/";

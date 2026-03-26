@@ -16,10 +16,8 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3)
-// LangChain", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/llmstore/llms")
-@Tag(name = "03. LLM Configs", description = "lifecycle extension for LLM configurations")
+@Tag(name = "LLM Configuration")
 public interface IRestLlmStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.llm";
     String resourceURI = resourceBaseType + "/llmstore/llms/";

@@ -17,10 +17,8 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (1)
-// Regular Dictionary", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/dictionarystore/dictionaries")
-@Tag(name = "01. Dictionary", description = "lifecycle extension for regular dictionary parsing")
+@Tag(name = "Dictionary")
 public interface IRestDictionaryStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.dictionary/dictionarystore/dictionaries/";
 

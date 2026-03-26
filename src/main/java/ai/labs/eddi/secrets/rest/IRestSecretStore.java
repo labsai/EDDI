@@ -3,6 +3,7 @@ package ai.labs.eddi.secrets.rest;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import java.util.List;
 
@@ -11,6 +12,7 @@ import java.util.List;
  * encrypted; plaintext values are NEVER returned by any endpoint.
  */
 @Path("/secretstore/secrets")
+@Tag(name = "Secrets Vault")
 public interface IRestSecretStore {
 
     /**

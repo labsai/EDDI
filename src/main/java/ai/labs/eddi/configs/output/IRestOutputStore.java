@@ -17,10 +17,8 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3)
-// Output", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/outputstore/outputsets")
-@Tag(name = "05. Output", description = "lifecycle extension for LLM configurations")
+@Tag(name = "Output")
 public interface IRestOutputStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.output";
     String resourceURI = resourceBaseType + "/outputstore/outputsets/";

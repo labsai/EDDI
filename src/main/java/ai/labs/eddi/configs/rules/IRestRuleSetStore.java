@@ -3,7 +3,7 @@ package ai.labs.eddi.configs.rules;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import io.swagger.v3.oas.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
@@ -16,10 +16,8 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (2)
-// Behavior Rules", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/rulestore/rulesets")
-@Tag(name = "02. Behavior Rules", description = "lifecycle extension for behavior rule evaluation")
+@Tag(name = "Behavior Rules")
 public interface IRestRuleSetStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.rules";
     String resourceURI = resourceBaseType + "/rulestore/rulesets/";

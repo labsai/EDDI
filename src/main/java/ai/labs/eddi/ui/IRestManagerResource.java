@@ -8,6 +8,9 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.resteasy.reactive.Cache;
 
+/**
+ * Internal SPA serving endpoint — not a public API.
+ */
 @Path("/")
 public interface IRestManagerResource {
 

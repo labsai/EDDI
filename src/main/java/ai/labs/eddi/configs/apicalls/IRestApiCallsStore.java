@@ -16,10 +16,8 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (2) Conversation LifeCycle Tasks -> (3)
-// ApiCalls", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/apicallstore/apicalls")
-@Tag(name = "03. API Calls", description = "lifecycle extension for HTTP API call definitions")
+@Tag(name = "API Calls")
 public interface IRestApiCallsStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.apicalls";
     String resourceURI = resourceBaseType + "/apicallstore/apicalls/";

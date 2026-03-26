@@ -5,6 +5,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.SimpleDocumentDescriptor;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -13,9 +14,8 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (1) General", authorizations =
-// {@Authorization(value = "eddi_auth")})
 @Path("/descriptorstore/descriptors")
+@Tag(name = "Descriptors")
 public interface IRestDocumentDescriptorStore {
     String DESCRIPTOR_STORE_PATH = "/descriptorstore/descriptors/";
     String resourceURI = "eddi://ai.labs.descriptor" + DESCRIPTOR_STORE_PATH;

@@ -18,10 +18,8 @@ import static ai.labs.eddi.datastore.IResourceStore.*;
 /**
  * @author ginccc
  */
-// @Api(value = "Agent Engine -> Conversations", authorizations =
-// {@Authorization(value = "eddi_auth")})
 @Path("/conversationstore/conversations")
-@Tag(name = "09. Talk to Agents", description = "Communicate with agents")
+@Tag(name = "Conversation Store")
 public interface IRestConversationStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)

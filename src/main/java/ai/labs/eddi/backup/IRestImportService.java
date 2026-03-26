@@ -16,7 +16,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("backup/import")
-@Tag(name = "10. Backup Agents", description = "Import & Export Agents as Zip Files")
+@Tag(name = "Backup")
 public interface IRestImportService {
     @POST
     @Path("/initialAgents")

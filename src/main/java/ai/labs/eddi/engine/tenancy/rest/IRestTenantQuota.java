@@ -5,6 +5,7 @@ import ai.labs.eddi.engine.tenancy.model.TenantUsage;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import java.util.List;
 
@@ -14,6 +15,7 @@ import java.util.List;
 @Path("/administration/quotas")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
+@Tag(name = "Tenant Quotas")
 public interface IRestTenantQuota {
 
     /**

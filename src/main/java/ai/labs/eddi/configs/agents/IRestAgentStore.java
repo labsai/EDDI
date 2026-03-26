@@ -17,10 +17,8 @@ import java.util.List;
 /**
  * @author ginccc
  */
-// @Api(value = "Configurations -> (4) Agents", authorizations =
-// {@Authorization(value = "eddi_auth")})
 @Path("/agentstore/agents")
-@Tag(name = "07. Agents", description = "agent configuration")
+@Tag(name = "Agents")
 public interface IRestAgentStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.agent/agentstore/agents/";
 

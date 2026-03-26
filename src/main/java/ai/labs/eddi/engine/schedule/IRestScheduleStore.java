@@ -21,7 +21,7 @@ import java.util.List;
  * @since 6.0.0
  */
 @Path("/schedulestore/schedules")
-@Tag(name = "11. Schedules", description = "Manage scheduled Agent triggers (heartbeat, cron jobs)")
+@Tag(name = "Schedules")
 public interface IRestScheduleStore {
 
     @GET

@@ -9,7 +9,6 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
-// @Api(value = "User Management -> (4) Logout Current User", authorizations = {@Authorization(value = "eddi_auth")})
 @Path("/user")
 @Produces(MediaType.TEXT_PLAIN)
 public interface ILogoutEndpoint {

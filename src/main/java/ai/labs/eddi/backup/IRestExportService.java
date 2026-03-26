@@ -9,7 +9,7 @@ import jakarta.ws.rs.core.Response;
  * @author ginccc
  */
 @Path("/backup/export")
-@Tag(name = "10. Backup Agents", description = "Import & Export Agents as Zip Files")
+@Tag(name = "Backup")
 public interface IRestExportService {
     @GET
     @Produces("application/zip")

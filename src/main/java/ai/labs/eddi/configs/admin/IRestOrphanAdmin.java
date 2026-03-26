@@ -21,7 +21,7 @@ import org.jboss.resteasy.reactive.NoCache;
  * @since 6.0.0
  */
 @Path("/administration/orphans")
-@Tag(name = "11. Orphan Admin", description = "Detect and clean up orphaned resources")
+@Tag(name = "Orphan Admin")
 public interface IRestOrphanAdmin {
 
     @GET
