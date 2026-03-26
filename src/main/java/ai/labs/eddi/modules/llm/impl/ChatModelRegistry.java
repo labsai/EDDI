@@ -66,7 +66,7 @@ class ChatModelRegistry {
             throw new UnsupportedLlmTaskException(String.format("Type \"%s\" is not supported", type));
         }
 
-        // Resolve vault references (late-binding: after Thymeleaf, before
+        // Resolve vault references (late-binding: after Qute, before
         // builder.build())
         var resolvedParams = secretResolver.resolveSecrets(filteredParams);
         var rawModel = languageModelApiConnectorBuilders.get(type).get().build(resolvedParams);
@@ -94,7 +94,7 @@ class ChatModelRegistry {
         }
 
         try {
-            // Resolve vault references (late-binding: after Thymeleaf, before
+            // Resolve vault references (late-binding: after Qute, before
             // builder.build())
             var resolvedParams = secretResolver.resolveSecrets(filteredParams);
             var model = languageModelApiConnectorBuilders.get(type).get().buildStreaming(resolvedParams);

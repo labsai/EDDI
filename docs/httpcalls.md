@@ -127,7 +127,7 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
 | httpCall.request.body                                                       | (`String`) an escaped `JSON` object that goes in the `HTTP Request` body if needed.                                                                                                                                              |
 | httpCall.postResponse.qrBuildInstructions[].pathToTargetArray               | (`String`) path to the array in your `JSON` **response data.**                                                                                                                                                                   |
 | httpCall.postResponse.qrBuildInstructions[].iterationObjectName             | (`String`) a variable name that will point to the `TargetArray.`                                                                                                                                                                 |
-| httpCall.postResponse.qrBuildInstructions[].quickReplyValue                 | (`String`) `thymeleaf expression` to use as a `quickReply` value.                                                                                                                                                                |
+| httpCall.postResponse.qrBuildInstructions[].quickReplyValue                 | (`String`) `Qute expression` to use as a `quickReply` value.                                                                                                                                                                |
 | httpCall.postResponse.qrBuildInstructions[].quickReplyExpressions           | (`String`) `expression` to retrieve a property from `iterationObjectName`.                                                                                                                                                       |
 | httpCall.postResponse.propertyInstructions.name                             | (`String`) name of property to be used in templating                                                                                                                                                                             |
 | httpCall.postResponse.propertyInstructions.value                            | (`String`) a static value can be set here if `fromObjectPath` is not defined.                                                                                                                                                    |
@@ -433,7 +433,7 @@ _Response Headers_
 
 > More about outputSet can be found [Output Configuration](output-configuration.md).
 >
-> Note When you set `"saveResponse" : true` in `httpCall` then you can use `[[${memory.current.httpCalls.<responseObjectName>}]]` to access the response data and use `thymeleaf`( `th:each` ) to iterate over `JSON` `arrays` if you have them in your `JSON` response.
+> Note When you set `"saveResponse" : true` in `httpCall` then you can use `{memory.current.httpCalls.<responseObjectName>}` to access the response data and use Qute ( `{#for}` ) to iterate over `JSON` `arrays` if you have them in your `JSON` response.
 
 _Request URL_
 

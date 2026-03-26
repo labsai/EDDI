@@ -204,7 +204,7 @@ public final class McpApiToolBuilder {
         var request = new Request();
         request.setMethod(method.toLowerCase());
 
-        // Convert path params to Thymeleaf templates: /{petId} → /[[${petId}]]
+        // Convert path params to Qute templates: /{petId} → /{petId}
         String convertedPath = convertPathParams(path);
         request.setPath(convertedPath);
 
@@ -225,8 +225,8 @@ public final class McpApiToolBuilder {
                 String paramDesc = param.getDescription() != null ? param.getDescription() : paramName;
 
                 if ("query".equals(param.getIn())) {
-                    // Query params use Thymeleaf template for LLM-provided values
-                    queryParams.put(paramName, "[[${" + paramName + "}]]");
+                    // Query params use Qute template for LLM-provided values
+                    queryParams.put(paramName, "{" + paramName + "}");
                     paramDescriptions.put(paramName, paramDesc);
                 } else if ("path".equals(param.getIn())) {
                     paramDescriptions.put(paramName, paramDesc);
@@ -257,15 +257,15 @@ public final class McpApiToolBuilder {
     }
 
     /**
-     * Convert OpenAPI path params to Thymeleaf inline templates. E.g.
-     * /pets/{petId}/toys → /pets/[[${petId}]]/toys
+     * Convert OpenAPI path params to Qute templates. E.g. /pets/{petId}/toys →
+     * stays as /pets/{petId}/toys (already Qute-compatible)
      */
     static String convertPathParams(String path) {
         var matcher = PATH_PARAM_PATTERN.matcher(path);
         var sb = new StringBuilder();
         while (matcher.find()) {
             String paramName = matcher.group(1);
-            matcher.appendReplacement(sb, Matcher.quoteReplacement("[[${" + paramName + "}]]"));
+            matcher.appendReplacement(sb, Matcher.quoteReplacement("{" + paramName + "}"));
         }
         matcher.appendTail(sb);
         return sb.toString();
@@ -280,11 +280,11 @@ public final class McpApiToolBuilder {
     }
 
     /**
-     * Build a JSON body template from a schema. Produces a Thymeleaf-templated JSON
-     * body where each property is a template variable.
+     * Build a JSON body template from a schema. Produces a Qute-templated JSON body
+     * where each property is a template variable.
      * <p>
      * Note: Only handles flat schemas (direct properties). Nested objects and
-     * arrays fall back to a single {@code [[${requestBody}]]} template variable.
+     * arrays fall back to a single {@code {requestBody}} template variable.
      */
     private static String buildBodyTemplate(Schema<?> schema) {
         if (schema == null) {
@@ -295,7 +295,7 @@ public final class McpApiToolBuilder {
         Map<String, Schema> properties = schema.getProperties();
         if (properties == null || properties.isEmpty()) {
             // No properties — use the raw template variable based on schema
-            return "[[${requestBody}]]";
+            return "{requestBody}";
         }
 
         var sb = new StringBuilder("{\n");
@@ -309,10 +309,10 @@ public final class McpApiToolBuilder {
 
             String type = propSchema.getType();
             if ("string".equals(type)) {
-                sb.append("\"[[${").append(propName).append("}]]\"");
+                sb.append("\"{").append(propName).append("}\"");
             } else {
                 // number, integer, boolean, object, array — unquoted template
-                sb.append("[[${").append(propName).append("}]]");
+                sb.append("{").append(propName).append("}");
             }
 
             if (i < entries.size() - 1) {

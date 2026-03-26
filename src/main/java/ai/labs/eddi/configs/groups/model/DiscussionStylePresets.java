@@ -12,7 +12,7 @@ import java.util.Map;
 
 /**
  * Expands {@link DiscussionStyle} presets into concrete {@link DiscussionPhase}
- * lists and provides default Thymeleaf templates for each {@link PhaseType}.
+ * lists and provides default Qute templates for each {@link PhaseType}.
  *
  * @author ginccc
  */
@@ -22,120 +22,120 @@ public final class DiscussionStylePresets {
     }
 
     // ------------------------------------------------------------------
-    // Default templates (Thymeleaf TEXT mode)
+    // Default templates (Qute TEXT mode)
     // ------------------------------------------------------------------
 
     public static final String TEMPLATE_OPINION_INDEPENDENT = """
             A panel of experts is discussing the following question:
-            "[[${question}]]"
+            "{question}"
 
-            As [[${displayName}]], please share your professional perspective.""";
+            As {displayName}, please share your professional perspective.""";
 
     public static final String TEMPLATE_OPINION_WITH_CONTEXT = """
             The discussion continues.
 
             Previous responses:
-            [# th:each="entry : ${previousResponses}"]
-            — [[${entry.speaker}]]: "[[${entry.content}]]"
-            [/]
+            {#for entry in previousResponses}
+            — {entry.speaker}: "{entry.content}"
+            {/for}
 
-            As [[${displayName}]], please respond to the others' perspectives.""";
+            As {displayName}, please respond to the others' perspectives.""";
 
     public static final String TEMPLATE_CRITIQUE = """
-            You are reviewing [[${targetName}]]'s perspective on:
-            "[[${question}]]"
+            You are reviewing {targetName}'s perspective on:
+            "{question}"
 
-            Their response: "[[${targetResponse}]]"
+            Their response: "{targetResponse}"
 
-            As [[${displayName}]], provide constructive feedback — identify strengths, \
+            As {displayName}, provide constructive feedback — identify strengths, \
             weaknesses, and suggestions for improvement.""";
 
     public static final String TEMPLATE_REVISION = """
             You previously shared your perspective on:
-            "[[${question}]]"
+            "{question}"
 
-            Your original response: "[[${originalResponse}]]"
+            Your original response: "{originalResponse}"
 
             Feedback received from peers:
-            [# th:each="fb : ${feedbackReceived}"]
-            — [[${fb.reviewer}]]: "[[${fb.content}]]"
-            [/]
+            {#for fb in feedbackReceived}
+            — {fb.reviewer}: "{fb.content}"
+            {/for}
 
-            As [[${displayName}]], please revise your position based on this feedback.""";
+            As {displayName}, please revise your position based on this feedback.""";
 
     public static final String TEMPLATE_CHALLENGE = """
             A panel has shared their opinions on:
-            "[[${question}]]"
+            "{question}"
 
             Their positions:
-            [# th:each="entry : ${allOpinions}"]
-            — [[${entry.speaker}]]: "[[${entry.content}]]"
-            [/]
+            {#for entry in allOpinions}
+            — {entry.speaker}: "{entry.content}"
+            {/for}
 
             As the Devil's Advocate, your role is to challenge assumptions, identify \
             weaknesses in reasoning, and argue against the emerging consensus. Be \
             critical, provocative, and thorough.""";
 
     public static final String TEMPLATE_DEFENSE = """
-            Your position on "[[${question}]]" has been challenged.
+            Your position on "{question}" has been challenged.
 
-            Your original position: "[[${originalResponse}]]"
+            Your original position: "{originalResponse}"
 
             Challenge raised:
-            [# th:each="ch : ${challenges}"]
-            — [[${ch.speaker}]]: "[[${ch.content}]]"
-            [/]
+            {#for ch in challenges}
+            — {ch.speaker}: "{ch.content}"
+            {/for}
 
-            As [[${displayName}]], defend your position or explain how you would \
+            As {displayName}, defend your position or explain how you would \
             revise it in light of these challenges.""";
 
     public static final String TEMPLATE_ARGUE = """
             A formal debate is being held on the proposition:
-            "[[${question}]]"
+            "{question}"
 
-            [# th:if="${opposingArguments != null and !opposingArguments.isEmpty()}"]
+            {#if opposingArguments}
             The opposing side has argued:
-            [# th:each="arg : ${opposingArguments}"]
-            — [[${arg.speaker}]]: "[[${arg.content}]]"
-            [/]
-            [/]
+            {#for arg in opposingArguments}
+            — {arg.speaker}: "{arg.content}"
+            {/for}
+            {/if}
 
-            As [[${displayName}]] on the [[${teamSide}]] side, present your \
+            As {displayName} on the {teamSide} side, present your \
             strongest arguments.""";
 
     public static final String TEMPLATE_REBUTTAL = """
             A formal debate is being held on the proposition:
-            "[[${question}]]"
+            "{question}"
 
             The opposing side has argued:
-            [# th:each="arg : ${opposingArguments}"]
-            — [[${arg.speaker}]]: "[[${arg.content}]]"
-            [/]
+            {#for arg in opposingArguments}
+            — {arg.speaker}: "{arg.content}"
+            {/for}
 
-            As [[${displayName}]] on the [[${teamSide}]] side, counter these \
+            As {displayName} on the {teamSide} side, counter these \
             arguments point by point.""";
 
     public static final String TEMPLATE_SYNTHESIS = """
-            The panel discussed the following question across [[${totalPhases}]] phases:
-            "[[${question}]]"
+            The panel discussed the following question across {totalPhases} phases:
+            "{question}"
 
             Full transcript:
-            [# th:each="entry : ${transcript}"]
-            [[[${entry.phaseName}]]] [[${entry.speaker}]]: "[[${entry.content}]]"
-            [/]
+            {#for entry in transcript}
+            [{entry.phaseName}] {entry.speaker}: "{entry.content}"
+            {/for}
 
             Synthesize a balanced conclusion with a clear recommendation.""";
 
     public static final String TEMPLATE_OPINION_ANONYMOUS = """
             A panel of experts is discussing:
-            "[[${question}]]"
+            "{question}"
 
             Anonymous perspectives shared so far:
-            [# th:each="entry : ${previousResponses}"]
-            — "[[${entry.content}]]"
-            [/]
+            {#for entry in previousResponses}
+            — "{entry.content}"
+            {/for}
 
-            As [[${displayName}]], share your (updated) perspective. Consider the \
+            As {displayName}, share your (updated) perspective. Consider the \
             anonymous feedback but form your own independent judgment.""";
 
     // Template lookup by phase type

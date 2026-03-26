@@ -228,7 +228,7 @@ public class PrePostUtils {
             throws IOException, ITemplatingEngine.TemplateEngineException {
 
         final String quickReplyTemplate = "    {" + "        \"value\":\"" + quickReplyValue + "\"," + "        \"expressions\":\""
-                + quickReplyExpressions + "\"" + "    },";
+                + quickReplyExpressions + "\"" + "    }";
 
         return buildListFromJson(iterationObjectName, pathToTargetArray, templateFilterExpression, quickReplyTemplate, templateDataObjects);
     }
@@ -236,23 +236,34 @@ public class PrePostUtils {
     public List<Object> buildListFromJson(String iterationObjectName, String pathToTargetArray, String templateFilterExpression,
             String iterationValue, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException, IOException {
 
-        String templateCode = "[" + "[# th:each=\"" + iterationObjectName + " : ${" + pathToTargetArray + "}\"";
+        // Build Qute template: [{#for obj in list}{#if filter}value{#if
+        // obj_hasNext},{/if}{/if}{/for}]
+        var sb = new StringBuilder("[");
+        sb.append("{#for ").append(iterationObjectName).append(" in ").append(pathToTargetArray).append("}");
 
         if (!isNullOrEmpty(templateFilterExpression)) {
-            templateCode += "   th:object=\"${" + iterationObjectName + "}\"";
-            templateCode += "   th:if=\"" + templateFilterExpression + "\"";
+            sb.append("{#if ").append(templateFilterExpression).append("}");
         }
 
-        templateCode += "]" + (isNullOrEmpty(iterationValue) ? "\"[[${" + iterationObjectName + "}]]\"," : iterationValue) + "[/]" + "]";
+        if (isNullOrEmpty(iterationValue)) {
+            sb.append("\"{").append(iterationObjectName).append("}\"");
+        } else {
+            sb.append(iterationValue);
+        }
 
+        // Use Qute iteration metadata to avoid trailing comma
+        sb.append("{#if ").append(iterationObjectName).append("_hasNext},{/if}");
+
+        if (!isNullOrEmpty(templateFilterExpression)) {
+            sb.append("{/if}");
+        }
+
+        sb.append("{/for}]");
+
+        String templateCode = sb.toString();
         String jsonList = templatingEngine.processTemplate(templateCode, templateDataObjects);
 
         jsonList = jsonList.replace("\n", "\\\\n");
-
-        // remove last comma of iterated array
-        if (jsonList.contains(",")) {
-            jsonList = new StringBuilder(jsonList).deleteCharAt(jsonList.lastIndexOf(",")).toString();
-        }
 
         @SuppressWarnings("unchecked")
         List<Object> result = jsonSerialization.deserialize(jsonList, List.class);

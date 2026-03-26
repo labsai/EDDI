@@ -295,7 +295,7 @@ public class MigrationManager implements IMigrationManager {
         if (value != null) {
             if (value instanceof String) {
                 if (value.equals("[[${@java.util.UUID@randomUUID()}]]")) {
-                    value = "[# th:with=\"uuid=${@java.util.UUID@randomUUID()}\"][[${uuid}]][/]";
+                    value = "{uuidUtils:generateUUID()}";
                 }
                 propertyInstruction.put(FIELD_NAME_VALUE_STRING, value);
             } else if (value instanceof Map<?, ?>) {

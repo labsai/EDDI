@@ -5,6 +5,7 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
+import ai.labs.eddi.configs.migration.V6QuteMigration;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -56,6 +57,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IMigrationManager migrationManager;
     private final V6RenameMigration v6RenameMigration;
+    private final V6QuteMigration v6QuteMigration;
     private final IAgentsReadiness agentsReadiness;
     private final IRuntime runtime;
     private final int maximumLifeTimeOfIdleConversationsInDays;
@@ -66,7 +68,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     @Inject
     public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
             IAgentsReadiness agentsReadiness, IConversationMemoryStore conversationMemoryStore, IDocumentDescriptorStore documentDescriptorStore,
-            IMigrationManager migrationManager, V6RenameMigration v6RenameMigration, IRuntime runtime,
+            IMigrationManager migrationManager, V6RenameMigration v6RenameMigration, V6QuteMigration v6QuteMigration, IRuntime runtime,
             @ConfigProperty(name = "eddi.conversations.maximumLifeTimeOfIdleConversationsInDays") int maximumLifeTimeOfIdleConversationsInDays) {
         this.deploymentStore = deploymentStore;
         this.agentFactory = agentFactory;
@@ -76,6 +78,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         this.documentDescriptorStore = documentDescriptorStore;
         this.migrationManager = migrationManager;
         this.v6RenameMigration = v6RenameMigration;
+        this.v6QuteMigration = v6QuteMigration;
         this.runtime = runtime;
         this.maximumLifeTimeOfIdleConversationsInDays = maximumLifeTimeOfIdleConversationsInDays;
     }
@@ -94,6 +97,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
         // V6 rename migration must run before document-level migrations
         v6RenameMigration.runIfNeeded();
+        v6QuteMigration.runIfNeeded();
 
         migrationManager.startMigrationIfFirstTimeRun(() -> {
             checkDeployments();

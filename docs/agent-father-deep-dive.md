@@ -299,7 +299,7 @@ Another HTTP call creates a package:
 }
 ```
 
-**Note**: The body uses **Thymeleaf templating** to inject conversation memory values:
+**Note**: The body uses **Qute templating** to inject conversation memory values:
 
 - `${context.llmProvider}` → "openai"
 - `${context.apiKey}` → "sk-..."
@@ -378,7 +378,7 @@ Conversation memory acts as a **state machine**:
 
 ### 4. Template-Based Configuration
 
-HTTP call bodies use Thymeleaf templates, allowing **dynamic configuration**:
+HTTP call bodies use Qute templates, allowing **dynamic configuration**:
 
 ```json
 {

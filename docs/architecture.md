@@ -134,7 +134,7 @@ A typical agent lifecycle includes these task types:
 | **Property Extraction** | Extracts and stores data in conversation memory | Saving user name, preferences               |
 | **HTTP Calls**          | Calls external REST APIs                        | Weather API, CRM systems                    |
 | **LangChain Task**      | Invokes LLM APIs (OpenAI, Claude, etc.)         | Conversational AI responses                 |
-| **Output Generation**   | Formats final response using templates          | Thymeleaf templating with conversation data |
+| **Output Generation**   | Formats final response using templates          | Qute templating with conversation data      |
 
 ### Lifecycle Task Interface
 
@@ -548,7 +548,7 @@ See the [Security documentation](security.md) for details.
 
 ### Templating
 
-- **Thymeleaf**: Output templating engine
+- **Qute**: Output templating engine
   - Dynamic output generation
   - Access to conversation memory in templates
   - Expression language support

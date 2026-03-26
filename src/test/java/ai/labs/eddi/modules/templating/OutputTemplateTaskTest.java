@@ -32,7 +32,7 @@ public class OutputTemplateTaskTest {
     private static IDataFactory dataFactory;
     private static IConversationMemory conversationMemory;
     private static IConversationMemory.IWritableConversationStep currentStep;
-    private static final String templateString = "This is some output with context such as [[${context}]]";
+    private static final String templateString = "This is some output with context such as {context}";
     private static OutputTemplateTask outputTemplateTask;
     private static final String expectedOutputString = "This is some output with context such as someContextValue";
     private static ITemplatingEngine templatingEngine;
@@ -92,7 +92,7 @@ public class OutputTemplateTaskTest {
             return ret;
         });
         List<QuickReply> expectedPreQuickReplies = new LinkedList<>();
-        expectedPreQuickReplies.add(new QuickReply("Quick Reply Value [[${context}]]", "quickReply(expression)", false));
+        expectedPreQuickReplies.add(new QuickReply("Quick Reply Value {context}", "quickReply(expression)", false));
 
         List<QuickReply> expectedPostQuickReplies = new LinkedList<>();
         expectedPostQuickReplies.add(new QuickReply("Quick Reply Value someContextValue", "quickReply(expression)", false));

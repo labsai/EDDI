@@ -16,6 +16,7 @@ import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
+import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -80,13 +81,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final IMigrationManager migrationManager;
     private final IDeploymentListener deploymentListener;
     private final IDocumentDescriptorStore documentDescriptorStore;
+    private final TemplateSyntaxMigrator templateSyntaxMigrator;
 
     private static final Logger log = Logger.getLogger(RestImportService.class);
 
     @Inject
     public RestImportService(IZipArchive zipArchive, IJsonSerialization jsonSerialization, IRestInterfaceFactory restInterfaceFactory,
             IRestAgentAdministration restAgentAdministration, IMigrationManager migrationManager, IDeploymentListener deploymentListener,
-            IDocumentDescriptorStore documentDescriptorStore) {
+            IDocumentDescriptorStore documentDescriptorStore, TemplateSyntaxMigrator templateSyntaxMigrator) {
         this.zipArchive = zipArchive;
         this.jsonSerialization = jsonSerialization;
         this.restInterfaceFactory = restInterfaceFactory;
@@ -94,6 +96,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         this.migrationManager = migrationManager;
         this.deploymentListener = deploymentListener;
         this.documentDescriptorStore = documentDescriptorStore;
+        this.templateSyntaxMigrator = templateSyntaxMigrator;
     }
 
     @Override
@@ -832,6 +835,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         resourceContent = jsonSerialization.serialize(migratedOutputDocument);
                     }
                 }
+
+                // Final pass: migrate any remaining Thymeleaf template syntax to Qute
+                resourceContent = templateSyntaxMigrator.migrate(resourceContent);
+
                 return jsonSerialization.deserialize(resourceContent, clazz);
             } catch (IOException e) {
                 log.error(e.getLocalizedMessage(), e);

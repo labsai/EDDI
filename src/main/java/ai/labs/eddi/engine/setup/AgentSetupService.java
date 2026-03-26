@@ -442,7 +442,7 @@ public class AgentSetupService {
         outputInstruction.setIterationObjectName("obj");
         outputInstruction.setTemplateFilterExpression("");
         outputInstruction.setOutputType("text");
-        outputInstruction.setOutputValue("[(${aiOutput.htmlResponseText})]");
+        outputInstruction.setOutputValue("{aiOutput.htmlResponseText}");
         postResponse.setOutputBuildInstructions(List.of(outputInstruction));
 
         if (quickReplies) {
@@ -450,7 +450,7 @@ public class AgentSetupService {
             qrInstruction.setPathToTargetArray("aiOutput.quickReplies");
             qrInstruction.setIterationObjectName("quickReply");
             qrInstruction.setTemplateFilterExpression("");
-            qrInstruction.setQuickReplyValue("[(${quickReply})]");
+            qrInstruction.setQuickReplyValue("{quickReply}");
             qrInstruction.setQuickReplyExpressions("trigger(quick_reply)");
             postResponse.setQrBuildInstructions(List.of(qrInstruction));
         }

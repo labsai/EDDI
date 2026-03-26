@@ -54,7 +54,7 @@
           "valueAlternatives": [
             {
               "type": "text",
-              "text": "Hello [[${userInfo.username}]]! Nice to meet you! :-)"
+              "text": "Hello {userInfo.username}! Nice to meet you! :-)"
             }
           ]
         }
@@ -76,7 +76,7 @@
       ],
       "quickReplies": [
         {
-          "value": "Bye, bye [[${userInfo.username}]]!!",
+          "value": "Bye, bye {userInfo.username}!!",
           "expressions": "goodbye(bye_bye), operation(quick_reply)"
         },
         {

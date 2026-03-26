@@ -187,14 +187,14 @@ class McpApiToolBuilderTest {
     }
 
     @Test
-    void parseAndBuild_pathParamsToThymeleaf() {
+    void parseAndBuild_pathParamsToQute() {
         var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null);
         var petsConfig = result.configsByGroup().get("pets");
 
         ApiCall getPet = petsConfig.getHttpCalls().stream().filter(c -> "getPet".equals(c.getName())).findFirst().orElseThrow();
 
-        // Path should be converted: /pets/{petId} → /pets/[[${petId}]]
-        assertEquals("/pets/[[${petId}]]", getPet.getRequest().getPath());
+        // Path should be converted: /pets/{petId} → /pets/{petId} (Qute-compatible)
+        assertEquals("/pets/{petId}", getPet.getRequest().getPath());
     }
 
     @Test
@@ -205,8 +205,8 @@ class McpApiToolBuilderTest {
         ApiCall listPets = petsConfig.getHttpCalls().stream().filter(c -> "listPets".equals(c.getName())).findFirst().orElseThrow();
 
         Map<String, String> queryParams = listPets.getRequest().getQueryParams();
-        assertEquals("[[${limit}]]", queryParams.get("limit"));
-        assertEquals("[[${status}]]", queryParams.get("status"));
+        assertEquals("{limit}", queryParams.get("limit"));
+        assertEquals("{status}", queryParams.get("status"));
     }
 
     @Test
@@ -222,7 +222,7 @@ class McpApiToolBuilderTest {
         assertTrue(body.contains("\"name\""), "Body should have 'name' field");
         assertTrue(body.contains("\"age\""), "Body should have 'age' field");
         // String field should be quoted
-        assertTrue(body.contains("\"[[${name}]]\""), "String param should be quoted in template");
+        assertTrue(body.contains("\"{name}\""), "String param should be quoted in template");
     }
 
     @Test
@@ -264,8 +264,8 @@ class McpApiToolBuilderTest {
 
     @Test
     void convertPathParams_basic() {
-        assertEquals("/pets/[[${petId}]]", McpApiToolBuilder.convertPathParams("/pets/{petId}"));
-        assertEquals("/users/[[${userId}]]/orders/[[${orderId}]]", McpApiToolBuilder.convertPathParams("/users/{userId}/orders/{orderId}"));
+        assertEquals("/pets/{petId}", McpApiToolBuilder.convertPathParams("/pets/{petId}"));
+        assertEquals("/users/{userId}/orders/{orderId}", McpApiToolBuilder.convertPathParams("/users/{userId}/orders/{orderId}"));
         assertEquals("/simple", McpApiToolBuilder.convertPathParams("/simple"));
     }
 

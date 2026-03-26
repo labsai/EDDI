@@ -13,7 +13,7 @@
       "queryParams" : {
         "APPID" : "c3366d78c7c0f76d63eb4cdf1384ddbf",
         "units" : "metric",
-        "q" : "[[${memory.current.input}]]"
+        "q" : "{memory.current.input}"
       },
       "method" : "get",
       "contentType" : "",

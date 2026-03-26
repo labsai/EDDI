@@ -81,7 +81,7 @@ public class CreateApiAgentIT {
                     "path": "/users",
                     "method": "get",
                     "headers": { "Authorization": "Bearer test-key" },
-                    "queryParams": { "limit": "[[${limit}]]" },
+                    "queryParams": { "limit": "{limit}" },
                     "contentType": "",
                     "body": ""
                   }
@@ -94,7 +94,7 @@ public class CreateApiAgentIT {
                   "saveResponse": true,
                   "responseObjectName": "getUser_response",
                   "request": {
-                    "path": "/users/[[${userId}]]",
+                    "path": "/users/{userId}",
                     "method": "get",
                     "headers": { "Authorization": "Bearer test-key" },
                     "queryParams": {},
@@ -126,7 +126,7 @@ public class CreateApiAgentIT {
                     "headers": { "Authorization": "Bearer test-key" },
                     "queryParams": {},
                     "contentType": "application/json",
-                    "body": "{\\n  \\"productId\\": \\"[[${productId}]]\\",\\n  \\"quantity\\": [[${quantity}]]\\n}"
+                    "body": "{\\n  \\"productId\\": \\"{productId}\\",\\n  \\"quantity\\": {quantity}\\n}"
                   }
                 }
               ]
@@ -230,8 +230,8 @@ public class CreateApiAgentIT {
                 .body("targetServerUrl", equalTo("https://api.example.com/v1")).body("httpCalls.size()", equalTo(2))
                 .body("httpCalls[0].name", equalTo("listUsers")).body("httpCalls[0].description", equalTo("List all users"))
                 .body("httpCalls[0].actions[0]", equalTo("api_get_users")).body("httpCalls[0].request.path", equalTo("/users"))
-                .body("httpCalls[0].request.queryParams.limit", equalTo("[[${limit}]]")).body("httpCalls[1].name", equalTo("getUser"))
-                .body("httpCalls[1].request.path", equalTo("/users/[[${userId}]]"));
+                .body("httpCalls[0].request.queryParams.limit", equalTo("{limit}")).body("httpCalls[1].name", equalTo("getUser"))
+                .body("httpCalls[1].request.path", equalTo("/users/{userId}"));
     }
 
     // ==================== Step 2: Create Behavior Rules ====================

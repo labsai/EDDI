@@ -23,7 +23,7 @@
           "valueAlternatives": [
             {
               "type": "text",
-              "text": "The current weather situation of [[${properties.chosenCity}]] is [[${properties.currentWeatherDescription}]] at [[${properties.currentTemperature}]] °C"
+              "text": "The current weather situation of {properties.chosenCity} is {properties.currentWeatherDescription} at {properties.currentTemperature} °C"
             }
           ]
         }

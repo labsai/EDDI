@@ -1,34 +1,33 @@
 package ai.labs.eddi.modules.templating.impl;
 
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import io.quarkus.qute.Engine;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.thymeleaf.TemplateEngine;
-import org.thymeleaf.context.Context;
-import org.thymeleaf.exceptions.TemplateInputException;
 
-import java.util.Arrays;
-import java.util.List;
-import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
+ * Qute-based implementation of the EDDI templating engine. Replaces the
+ * previous Thymeleaf implementation for native image compatibility.
+ *
  * @author ginccc
  */
 @ApplicationScoped
 public class TemplatingEngine implements ITemplatingEngine {
-    private static final List<String> templatingControlChars = Arrays.asList("${", "*{", "#{", "@{", "~{", "th:");
-    private final TextTemplateEngine textTemplateEngine;
-    private final HtmlTemplateEngine htmlTemplateEngine;
-    private final JavaScriptTemplateEngine javaScriptTemplateEngine;
+
+    /**
+     * Matches Qute control characters: {variable}, {#for}, {#if}, {/for}, {!
+     * comment !}
+     */
+    private static final Pattern QUTE_CONTROL_PATTERN = Pattern.compile("\\{[a-zA-Z#/!]");
+
+    private final Engine engine;
 
     @Inject
-    public TemplatingEngine(TextTemplateEngine textTemplateEngine, HtmlTemplateEngine htmlTemplateEngine,
-            JavaScriptTemplateEngine javaScriptTemplateEngine) {
-
-        this.textTemplateEngine = textTemplateEngine;
-        this.htmlTemplateEngine = htmlTemplateEngine;
-        this.javaScriptTemplateEngine = javaScriptTemplateEngine;
+    public TemplatingEngine(Engine engine) {
+        this.engine = engine;
     }
 
     @Override
@@ -39,15 +38,21 @@ public class TemplatingEngine implements ITemplatingEngine {
     @Override
     public String processTemplate(String template, Map<String, Object> dynamicAttributesMap, TemplateMode templateMode)
             throws TemplateEngineException {
-        final Context ctx = new Context(Locale.ENGLISH);
-        dynamicAttributesMap.forEach(ctx::setVariable);
         try {
+            if (template == null || template.isEmpty()) {
+                return template;
+            }
             if (containsTemplatingControlCharacters(template)) {
-                return getTemplateEngine(templateMode).process(template, ctx);
+                var parsed = engine.parse(template);
+                var instance = parsed.instance();
+                if (dynamicAttributesMap != null) {
+                    dynamicAttributesMap.forEach(instance::data);
+                }
+                return instance.render();
             } else {
                 return template;
             }
-        } catch (TemplateInputException e) {
+        } catch (Exception e) {
             String message = "Error trying to insert context information into template. "
                     + "Either context is missing or reference in template is wrong!";
             throw new TemplateEngineException(message, e);
@@ -55,14 +60,6 @@ public class TemplatingEngine implements ITemplatingEngine {
     }
 
     private boolean containsTemplatingControlCharacters(String template) {
-        return templatingControlChars.stream().anyMatch(template::contains);
-    }
-
-    private TemplateEngine getTemplateEngine(TemplateMode templateMode) {
-        return switch (templateMode) {
-            case HTML -> htmlTemplateEngine.getTemplateEngine();
-            case JAVASCRIPT -> javaScriptTemplateEngine.getTemplateEngine();
-            default -> textTemplateEngine.getTemplateEngine();
-        };
+        return QUTE_CONTROL_PATTERN.matcher(template).find();
     }
 }

@@ -578,6 +578,44 @@ Phase-based orchestration engine enabling structured multi-agent discussions wit
 - `src/main/java/ai/labs/eddi/engine/mcp/McpGroupTools.java`
 - `src/test/java/ai/labs/eddi/engine/internal/GroupConversationServiceTest.java`
 
+### Templating Engine Migration: Thymeleaf → Quarkus Qute ✅
+
+Replaced Thymeleaf 3.1.3 + OGNL 3.3.4 with Quarkus Qute for native image compatibility and CVE remediation.
+
+| Component | Key Files |
+|---|---|
+| **Core Engine** | `TemplatingEngine.java` — Qute `Engine` API with null-safety |
+| **Extensions** | `EddiTemplateExtensions.java` (UUID, JSON, Encoder namespaces), `StringTemplateExtensions.java` (15 String methods) |
+| **Migrator** | `TemplateSyntaxMigrator.java` — 10 regex patterns + close-tag scanner + string concat handler |
+| **Startup Migration** | `V6QuteMigration.java` — idempotent startup hook for 4 MongoDB collections (apicalls, outputs, propertysetter, llms + history) |
+| **Import Migration** | `RestImportService.java` — `TemplateSyntaxMigrator` wired as final-pass before deserialization |
+
+**Migration patterns:** `[[${var}]]` → `{var}`, `th:each` → `{#for}`, `th:if` → `{#if}`, `#strings.*` → native method calls, `#uuidUtils.`/`#json.`/`#encoder.` → namespace, `a + '/' + b` → `{a}/{b}`.
+
+**Consumers updated:** `McpApiToolBuilder`, `AgentSetupService`, `DiscussionStylePresets` (10 templates), `PrePostUtils`, `ChatModelRegistry`, `MigrationManager`.
+
+**Tests:** `TemplatingEngineTest` (20), `TemplateSyntaxMigratorTest` (29), `OutputTemplateTaskTest` (2), `McpApiToolBuilderTest` (14), `CreateApiAgentIT` (10).
+
+**Docs updated:** `output-templating.md` (full rewrite), `architecture.md`, `httpcalls.md`, `conversation-memory.md`, `agent-father-deep-dive.md`, `changelog.md`.
+
+**Config:**
+```properties
+eddi.migration.v6-qute.enabled=true   # Enable startup migration
+quarkus.qute.strict-rendering=false    # Lenient variable handling
+```
+
+**Key files:**
+
+- `src/main/java/ai/labs/eddi/modules/templating/impl/TemplatingEngine.java`
+- `src/main/java/ai/labs/eddi/modules/templating/impl/extensions/EddiTemplateExtensions.java`
+- `src/main/java/ai/labs/eddi/modules/templating/impl/extensions/StringTemplateExtensions.java`
+- `src/main/java/ai/labs/eddi/configs/migration/TemplateSyntaxMigrator.java`
+- `src/main/java/ai/labs/eddi/configs/migration/V6QuteMigration.java`
+- `src/main/java/ai/labs/eddi/backup/impl/RestImportService.java`
+- `src/test/java/ai/labs/eddi/configs/migration/TemplateSyntaxMigratorTest.java`
+- `src/test/java/ai/labs/eddi/modules/templating/TemplatingEngineTest.java`
+- `docs/output-templating.md`
+
 ## Next Up
 
 ### Quick Wins

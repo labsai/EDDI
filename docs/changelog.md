@@ -13,6 +13,51 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Templating Engine Migration: Thymeleaf → Quarkus Qute (2026-03-26)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Replaced the Thymeleaf 3.1.3 + OGNL 3.3.4 templating stack with Quarkus Qute for native image compatibility and CVE remediation (OGNL CVE-2025-53192).
+
+| Component | Change |
+|---|---|
+| **Dependencies** | Removed `thymeleaf` 3.1.3 + `ognl` 3.3.4, added BOM-managed `quarkus-qute` |
+| **Core Engine** | `TemplatingEngine.java` rewritten to use Qute `Engine` API with null-safety |
+| **Extensions** | `EddiTemplateExtensions.java` — UUID, JSON, Encoder namespace extensions (`uuidUtils:`, `json:`, `encoder:`) |
+| **String Extensions** | `StringTemplateExtensions.java` — 15 methods (toLowerCase, toUpperCase, replace, substring ×2, indexOf, lastIndexOf, contains, startsWith, endsWith, trim, strip, length, isEmpty, charAt, concat) |
+| **Module** | `TemplateEngineModule.java` stripped of all Thymeleaf producers |
+| **Migrator** | `TemplateSyntaxMigrator.java` — 10 regex patterns + close-tag scanner + string concat post-processor |
+| **Startup Migration** | `V6QuteMigration.java` — idempotent startup hook migrating 4 MongoDB collections (apicalls, outputs, propertysetter, llms + history) |
+| **Import Migration** | `RestImportService.java` wired with `TemplateSyntaxMigrator` as final-pass before deserialization |
+| **Config** | `quarkus.qute.strict-rendering=false`, `eddi.migration.v6-qute.enabled` |
+
+**Migration patterns handled:**
+
+| Old (Thymeleaf) | New (Qute) |
+|---|---|
+| `[[${variable}]]` | `{variable}` |
+| `[(${variable})]` | `{variable}` |
+| `[# th:each="x : ${list}"]...[/]` | `{#for x in list}...{/for}` |
+| `[# th:if="${cond}"]...[/]` | `{#if cond}...{/if}` |
+| `#strings.method(var)` | `{var.method()}` |
+| `#strings.method(var, args)` | `{var.method(args)}` |
+| `#uuidUtils.method()` | `{uuidUtils:method()}` |
+| `#json.method()` | `{json:method()}` |
+| `#encoder.method()` | `{encoder:method()}` |
+| `a + '/' + b` | `{a}/{b}` (string concat) |
+
+**Consumers updated:** `McpApiToolBuilder`, `AgentSetupService`, `DiscussionStylePresets` (10 templates), `PrePostUtils` (`buildListFromJson` → `{#for}`/`{_hasNext}`, `buildQuickReplies` trailing comma fix), `ChatModelRegistry` (comments), `MigrationManager` (UUID migration output).
+
+**Docs updated:** `output-templating.md` (full rewrite), `architecture.md`, `httpcalls.md`, `conversation-memory.md`, `agent-father-deep-dive.md`.
+
+**Test resources migrated:** 4 JSON files (agentengine output, weather output, httpcalls).
+
+**Tests:** `TemplatingEngineTest` (20), `TemplateSyntaxMigratorTest` (29), `OutputTemplateTaskTest` (2), `McpApiToolBuilderTest` (14), `CreateApiAgentIT` (10).
+
+---
+
 ## Phase 10: Group Conversations — Multi-Agent Debate Orchestration (2026-03-25)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

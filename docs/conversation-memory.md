@@ -186,7 +186,7 @@ memory.getCurrentStep().storeData(
 
 ## Accessing Memory in Configurations
 
-### In Output Templates (Thymeleaf)
+### In Output Templates (Qute)
 
 ```html
 <!-- Access current input -->
@@ -478,7 +478,7 @@ IData<JsonObject> httpData = memory.getCurrentStep()
     .getLatestData("httpCalls.userProfile");
 String userName = httpData.getResult().getString("name");
 
-// In Thymeleaf
+// In Qute
 [[${memory.current.httpCalls.userProfile.name}]]
 ```
 
@@ -498,7 +498,7 @@ for (IConversationStep step : previousSteps) {
 ### Conditional Memory Access
 
 ```javascript
-// In Thymeleaf, check if data exists
+// In Qute, check if data exists
 [(${memory.current.weatherData != null ? memory.current.weatherData.temperature : 'N/A'})]
 ```
 
