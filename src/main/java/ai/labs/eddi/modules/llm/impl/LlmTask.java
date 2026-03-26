@@ -179,41 +179,105 @@ public class LlmTask implements ILifecycleTask {
         String responseContent;
         Map<String, Object> responseMetadata = new HashMap<>();
         List<Map<String, Object>> toolTrace = new ArrayList<>();
+        boolean usedToolMode = false;
 
         // Build chat messages without system message for agent mode
         // (agent orchestrator adds system message internally)
         List<ChatMessage> chatMessagesWithoutSystem = messages.stream().filter(m -> !(m instanceof dev.langchain4j.data.message.SystemMessage))
                 .toList();
 
-        var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task, memory);
+        // === Multi-Model Cascade Branch ===
+        var cascadeConfig = task.getModelCascade();
+        if (cascadeConfig != null && cascadeConfig.isEnabled() && cascadeConfig.getSteps() != null && !cascadeConfig.getSteps().isEmpty()) {
 
-        if (agentResult != null) {
-            // Agent mode — tools execute synchronously, stream final response if sink
-            // available
-            responseContent = agentResult.response();
-            toolTrace = agentResult.trace();
-            // Stream the final agent response if streaming is active
-            if (eventSink != null && responseContent != null) {
-                eventSink.onToken(responseContent);
-            }
-        } else if (eventSink != null) {
-            // Legacy mode with streaming — try to get a streaming model
-            var streamingModel = chatModelRegistry.getOrCreateStreaming(task.getType(), processedParams);
-            if (streamingModel != null) {
-                responseContent = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink);
+            // In agent mode, cascade only runs if enableInAgentMode is true
+            boolean skipCascade = task.isAgentMode() && !cascadeConfig.isEnableInAgentMode();
+
+            if (!skipCascade) {
+                var cascadeResult = CascadingModelExecutor.execute(chatModelRegistry, cascadeConfig, messages, systemMessage, processedParams, task,
+                        memory, agentOrchestrator);
+
+                responseContent = cascadeResult.response();
+
+                // Propagate agent result's tool trace if agent mode was used
+                if (cascadeResult.agentResult() != null) {
+                    toolTrace = cascadeResult.agentResult().trace();
+                    usedToolMode = true;
+                }
+
+                // Stream final response if streaming is active and no agent result (agent mode
+                // already streams)
+                if (eventSink != null && responseContent != null && cascadeResult.agentResult() == null) {
+                    eventSink.onToken(responseContent);
+                }
+
+                // Store cascade trace for audit
+                if (!cascadeResult.trace().isEmpty()) {
+                    var cascadeTraceData = dataFactory.createData(KEY_LANGCHAIN + ":cascade:trace:" + task.getId(), cascadeResult.trace());
+                    currentStep.storeData(cascadeTraceData);
+                }
+
+                // Store cascade metadata in audit
+                if (memory.getAuditCollector() != null) {
+                    var cascadeModelData = dataFactory.createData("audit:cascade_model",
+                            cascadeResult.modelType() + " (step " + cascadeResult.stepUsed() + ")");
+                    currentStep.storeData(cascadeModelData);
+                    var cascadeConfidenceData = dataFactory.createData("audit:cascade_confidence", String.valueOf(cascadeResult.confidence()));
+                    currentStep.storeData(cascadeConfidenceData);
+                }
+
             } else {
-                // Streaming not supported by this builder — fall back to sync, emit as single
-                // chunk
+                // Agent mode with cascade disabled — use normal agent flow
+                var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
+                        memory);
+                if (agentResult != null) {
+                    responseContent = agentResult.response();
+                    toolTrace = agentResult.trace();
+                    usedToolMode = true;
+                    if (eventSink != null && responseContent != null) {
+                        eventSink.onToken(responseContent);
+                    }
+                } else {
+                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task);
+                    responseContent = chatResult.response();
+                    responseMetadata = chatResult.responseMetadata();
+                }
+            }
+
+        } else {
+            // === Standard (non-cascade) execution path ===
+            var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
+                    memory);
+
+            if (agentResult != null) {
+                // Agent mode — tools execute synchronously, stream final response if sink
+                // available
+                responseContent = agentResult.response();
+                toolTrace = agentResult.trace();
+                usedToolMode = true;
+                // Stream the final agent response if streaming is active
+                if (eventSink != null && responseContent != null) {
+                    eventSink.onToken(responseContent);
+                }
+            } else if (eventSink != null) {
+                // Legacy mode with streaming — try to get a streaming model
+                var streamingModel = chatModelRegistry.getOrCreateStreaming(task.getType(), processedParams);
+                if (streamingModel != null) {
+                    responseContent = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink);
+                } else {
+                    // Streaming not supported by this builder — fall back to sync, emit as single
+                    // chunk
+                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task);
+                    responseContent = chatResult.response();
+                    responseMetadata = chatResult.responseMetadata();
+                    eventSink.onToken(responseContent);
+                }
+            } else {
+                // Standard non-streaming legacy mode
                 var chatResult = legacyChatExecutor.execute(chatModel, messages, task);
                 responseContent = chatResult.response();
                 responseMetadata = chatResult.responseMetadata();
-                eventSink.onToken(responseContent);
             }
-        } else {
-            // Standard non-streaming legacy mode
-            var chatResult = legacyChatExecutor.execute(chatModel, messages, task);
-            responseContent = chatResult.response();
-            responseMetadata = chatResult.responseMetadata();
         }
 
         // Store metadata if configured
@@ -262,7 +326,7 @@ public class LlmTask implements ILifecycleTask {
         }
 
         // Add to output if configured (or if in agent mode with tools)
-        boolean shouldAddToOutput = agentResult != null
+        boolean shouldAddToOutput = usedToolMode
                 || (!isNullOrEmpty(processedParams.get(KEY_ADD_TO_OUTPUT)) && Boolean.parseBoolean(processedParams.get(KEY_ADD_TO_OUTPUT)));
 
         if (shouldAddToOutput) {

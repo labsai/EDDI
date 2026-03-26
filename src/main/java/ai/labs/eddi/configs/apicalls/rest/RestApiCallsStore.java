@@ -8,11 +8,15 @@ import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.engine.mcp.McpApiToolBuilder;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+import org.jboss.logging.Logger;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
@@ -21,6 +25,8 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
  */
 @ApplicationScoped
 public class RestApiCallsStore implements IRestApiCallsStore {
+    private static final Logger LOGGER = Logger.getLogger(RestApiCallsStore.class);
+
     private final IApiCallsStore httpCallsStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<ApiCallsConfiguration> restVersionInfo;
@@ -71,6 +77,40 @@ public class RestApiCallsStore implements IRestApiCallsStore {
         restVersionInfo.validateParameters(id, version);
         ApiCallsConfiguration httpCallsConfiguration = restVersionInfo.read(id, version);
         return restVersionInfo.create(httpCallsConfiguration);
+    }
+
+    @Override
+    public Response discoverEndpoints(String specUrl, String apiBaseUrl, String apiAuth) {
+        if (specUrl == null || specUrl.isBlank()) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "specUrl query parameter is required")).build();
+        }
+        try {
+            LOGGER.infof("Discovering API endpoints from OpenAPI spec at '%s'", specUrl);
+
+            String effectiveBaseUrl = (apiBaseUrl != null && !apiBaseUrl.isBlank()) ? apiBaseUrl : null;
+            String effectiveAuth = (apiAuth != null && !apiAuth.isBlank()) ? apiAuth : null;
+
+            McpApiToolBuilder.ApiBuildResult result = McpApiToolBuilder.parseAndBuild(specUrl, null, effectiveBaseUrl, effectiveAuth);
+
+            // Extract title from the spec
+            var openAPI = McpApiToolBuilder.parseSpec(specUrl);
+            String title = openAPI.getInfo() != null ? openAPI.getInfo().getTitle() : "API";
+
+            var response = new LinkedHashMap<String, Object>();
+            response.put("title", title);
+            response.put("baseUrl", result.configsByGroup().values().iterator().next().getTargetServerUrl());
+            response.put("endpointCount", result.endpointCount());
+            response.put("groups", result.configsByGroup());
+
+            return Response.ok(response).build();
+        } catch (IllegalArgumentException e) {
+            LOGGER.warnf(e, "Failed to parse OpenAPI spec from '%s'", specUrl);
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+        } catch (Exception e) {
+            LOGGER.errorf(e, "Unexpected error discovering endpoints from '%s'", specUrl);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to discover endpoints: " + e.getMessage()))
+                    .build();
+        }
     }
 
     @Override

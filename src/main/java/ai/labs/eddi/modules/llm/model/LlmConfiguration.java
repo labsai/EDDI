@@ -173,6 +173,14 @@ public record LlmConfiguration(List<Task> tasks) {
         /** Timeout for parallel execution (ms) */
         private Long parallelExecutionTimeoutMs = 30000L;
 
+        // === Multi-Model Cascade ===
+
+        /**
+         * Multi-model cascading configuration. When enabled, tries a cheap/fast model
+         * first and escalates to a better model only if confidence is low.
+         */
+        private ModelCascadeConfig modelCascade;
+
         // === Helper Methods ===
 
         /**
@@ -400,6 +408,14 @@ public record LlmConfiguration(List<Task> tasks) {
         public void setParallelExecutionTimeoutMs(Long parallelExecutionTimeoutMs) {
             this.parallelExecutionTimeoutMs = parallelExecutionTimeoutMs;
         }
+
+        public ModelCascadeConfig getModelCascade() {
+            return modelCascade;
+        }
+
+        public void setModelCascade(ModelCascadeConfig modelCascade) {
+            this.modelCascade = modelCascade;
+        }
     }
 
     /**
@@ -620,6 +636,135 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setMinScore(Double minScore) {
             this.minScore = minScore;
+        }
+    }
+
+    /**
+     * Configuration for multi-model cascading — sequential escalation from
+     * cheap/fast models to expensive/powerful models based on confidence.
+     */
+    public static class ModelCascadeConfig {
+        /** Master switch — cascade is only used when enabled */
+        private boolean enabled = false;
+
+        /**
+         * Cascade strategy: "cascade" (sequential escalation, default) or "parallel"
+         * (concurrent, future)
+         */
+        private String strategy = "cascade";
+
+        /**
+         * How to evaluate confidence: "structured_output" (default), "heuristic",
+         * "judge_model", or "none"
+         */
+        private String evaluationStrategy = "structured_output";
+
+        /**
+         * Whether cascade also applies in agent mode (with tools). When false, agent
+         * mode uses the task-level model directly.
+         */
+        private boolean enableInAgentMode = true;
+
+        /** Ordered list of cascade steps (cheap → expensive) */
+        private List<CascadeStep> steps;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getStrategy() {
+            return strategy;
+        }
+
+        public void setStrategy(String strategy) {
+            this.strategy = strategy;
+        }
+
+        public String getEvaluationStrategy() {
+            return evaluationStrategy;
+        }
+
+        public void setEvaluationStrategy(String evaluationStrategy) {
+            this.evaluationStrategy = evaluationStrategy;
+        }
+
+        public boolean isEnableInAgentMode() {
+            return enableInAgentMode;
+        }
+
+        public void setEnableInAgentMode(boolean enableInAgentMode) {
+            this.enableInAgentMode = enableInAgentMode;
+        }
+
+        public List<CascadeStep> getSteps() {
+            return steps;
+        }
+
+        public void setSteps(List<CascadeStep> steps) {
+            this.steps = steps;
+        }
+    }
+
+    /**
+     * A single step in the model cascade — defines a model to try and the
+     * confidence threshold required to accept its response.
+     */
+    public static class CascadeStep {
+        /**
+         * Model provider type (e.g. "openai", "anthropic"). Overrides task-level type
+         * if set.
+         */
+        private String type;
+
+        /**
+         * Model-specific parameters. Merged with task-level params (step params win).
+         */
+        private Map<String, String> parameters;
+
+        /**
+         * Minimum confidence required to accept this step's response (0.0–1.0). If
+         * confidence is below this threshold, escalate to the next step. Omit (null) on
+         * the last step — it is always accepted.
+         */
+        private Double confidenceThreshold;
+
+        /** Per-step timeout in milliseconds. Default: 30000 */
+        private Long timeoutMs = 30000L;
+
+        public String getType() {
+            return type;
+        }
+
+        public void setType(String type) {
+            this.type = type;
+        }
+
+        public Map<String, String> getParameters() {
+            return parameters;
+        }
+
+        public void setParameters(Map<String, String> parameters) {
+            this.parameters = parameters;
+        }
+
+        public Double getConfidenceThreshold() {
+            return confidenceThreshold;
+        }
+
+        public void setConfidenceThreshold(Double confidenceThreshold) {
+            this.confidenceThreshold = confidenceThreshold;
+        }
+
+        public Long getTimeoutMs() {
+            return timeoutMs;
+        }
+
+        public void setTimeoutMs(Long timeoutMs) {
+            this.timeoutMs = timeoutMs;
         }
     }
 }

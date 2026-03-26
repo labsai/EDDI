@@ -55,6 +55,41 @@ public interface ConversationEventSink {
     void onToken(String token);
 
     /**
+     * Called when a model cascade step starts execution.
+     *
+     * @param stepIndex
+     *            0-based step position in the cascade
+     * @param modelType
+     *            model provider (e.g. "openai", "anthropic")
+     * @param modelName
+     *            specific model name (e.g. "gpt-4o-mini")
+     * @param totalSteps
+     *            total number of cascade steps
+     */
+    default void onCascadeStepStart(int stepIndex, String modelType, String modelName, int totalSteps) {
+    }
+
+    /**
+     * Called when a cascade step completes and escalation is triggered.
+     *
+     * @param fromStep
+     *            step index that was just evaluated
+     * @param toStep
+     *            step index being escalated to
+     * @param confidence
+     *            evaluated confidence score (0.0–1.0)
+     * @param threshold
+     *            threshold that was not met
+     * @param reason
+     *            reason for escalation: "low_confidence", "timeout", "error",
+     *            "retryable_error"
+     * @param durationMs
+     *            time spent on the completed step
+     */
+    default void onCascadeEscalation(int fromStep, int toStep, double confidence, double threshold, String reason, long durationMs) {
+    }
+
+    /**
      * Called when the entire conversation step has completed successfully. The SSE
      * endpoint should send the final snapshot and close the stream.
      */

@@ -67,4 +67,13 @@ public interface IRestApiCallsStore extends IRestVersionInfo {
     Response deleteApiCalls(@PathParam("id") String id,
             @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
             @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
+
+    @GET
+    @Path("/discover-endpoints")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Discover API endpoints", description = "Parse an OpenAPI 3.x spec (URL or inline JSON/YAML) and return available endpoints grouped by tag. "
+            + "Returns fully generated ApiCall objects ready for import. Used by the Manager UI for selective API call import.")
+    @APIResponse(responseCode = "200", description = "Discovered endpoints grouped by tag, with generated ApiCall objects.")
+    Response discoverEndpoints(@QueryParam("specUrl") String specUrl, @QueryParam("apiBaseUrl") @DefaultValue("") String apiBaseUrl,
+            @QueryParam("apiAuth") @DefaultValue("") String apiAuth);
 }
