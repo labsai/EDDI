@@ -31,7 +31,7 @@ import {
   Puzzle,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import type { WorkflowExtension } from "@/lib/api/packages";
+import type { WorkflowExtension } from "@/lib/api/workflows";
 import { EXTENSION_TYPE_INFO } from "@/lib/api/extensions";
 
 /* ─── Icon map ─── */

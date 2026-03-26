@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
-import { useCreateWorkflow } from "@/hooks/use-packages";
+import { useCreateWorkflow } from "@/hooks/use-workflows";
 
 interface CreateWorkflowDialogProps {
   open: boolean;

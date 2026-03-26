@@ -1,10 +1,10 @@
 import { getAgentDescriptors } from "./agents";
-import { getWorkflowDescriptors } from "./packages";
+import { getWorkflowDescriptors } from "./workflows";
 import { getConversationDescriptors } from "./conversations";
 
 export interface DashboardStats {
   agentCount: number;
-  packageCount: number;
+  workflowCount: number;
   conversationCount: number;
   resourceCount: number;
 }
@@ -19,7 +19,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
 
   return {
     agentCount: agents.length,
-    packageCount: packages.length,
+    workflowCount: packages.length,
     conversationCount: conversations.length,
     resourceCount: 0, // No single endpoint for total resources
   };

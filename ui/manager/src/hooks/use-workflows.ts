@@ -7,7 +7,7 @@ import {
   updateWorkflow,
   deleteWorkflow,
   type WorkflowConfiguration,
-} from "@/lib/api/packages";
+} from "@/lib/api/workflows";
 
 const WORKFLOWS_KEY = ["workflows"] as const;
 

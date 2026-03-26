@@ -18,10 +18,10 @@ import {
   useUpdateWorkflow,
   useDeleteWorkflow,
   useWorkflowVersions,
-} from "@/hooks/use-packages";
+} from "@/hooks/use-workflows";
 
 import { parseResourceUri } from "@/lib/api/agents";
-import type { WorkflowExtension } from "@/lib/api/packages";
+import type { WorkflowExtension } from "@/lib/api/workflows";
 import type { ExtensionDescriptor } from "@/lib/api/extensions";
 import {
   PipelineBuilder,

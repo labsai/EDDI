@@ -6,7 +6,7 @@ import { DashboardPage } from "@/pages/dashboard";
 // Mock the dashboard hooks since they need API calls
 vi.mock("@/hooks/use-dashboard", () => ({
   useDashboardStats: () => ({
-    data: { agentCount: 5, packageCount: 3, conversationCount: 42, resourceCount: 0 },
+    data: { agentCount: 5, workflowCount: 3, conversationCount: 42, resourceCount: 0 },
     isLoading: false,
   }),
   useRecentAgents: () => ({

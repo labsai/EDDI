@@ -35,7 +35,7 @@ export function DashboardPage() {
     },
     {
       label: t("pages.dashboard.totalWorkflows"),
-      value: stats?.packageCount ?? 0,
+      value: stats?.workflowCount ?? 0,
       icon: Workflow,
       color: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10",
       to: "/manage/workflows",

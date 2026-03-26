@@ -5,9 +5,9 @@ import { toast } from "sonner";
 import {
   useWorkflowDescriptors,
   useDeleteWorkflow,
-} from "@/hooks/use-packages";
-import { WorkflowCard } from "@/components/packages/package-card";
-import { CreateWorkflowDialog } from "@/components/packages/create-package-dialog";
+} from "@/hooks/use-workflows";
+import { WorkflowCard } from "@/components/workflows/workflow-card";
+import { CreateWorkflowDialog } from "@/components/workflows/create-workflow-dialog";
 import { parseResourceUri } from "@/lib/api/agents";
 import { cn } from "@/lib/utils";
 import type { AgentDescriptor } from "@/lib/api/agents";

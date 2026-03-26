@@ -7,7 +7,7 @@ import {
   getWorkflow,
   updateWorkflow,
   type WorkflowConfiguration,
-} from "./packages";
+} from "./workflows";
 import { getAgent, updateAgent, type Agent } from "./agents";
 
 export interface CascadeContext {

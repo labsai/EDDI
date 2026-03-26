@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
-import { WorkflowsPage } from "@/pages/packages";
+import { WorkflowsPage } from "@/pages/workflows";
 
 describe("WorkflowsPage", () => {
   it("renders page heading", () => {

@@ -1,4 +1,4 @@
-import { getWorkflowDescriptors, getWorkflow } from "./packages";
+import { getWorkflowDescriptors, getWorkflow } from "./workflows";
 import { getAgentDescriptors, getAgent, parseResourceUri } from "./agents";
 
 export interface ResourceUsage {

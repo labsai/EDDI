@@ -38,7 +38,7 @@ import {
   useUpdateAgent,
 } from "@/hooks/use-agents";
 import { useExportAgent } from "@/hooks/use-backup";
-import { useWorkflowDescriptors, useUpdateAgentWorkflows } from "@/hooks/use-packages";
+import { useWorkflowDescriptors, useUpdateAgentWorkflows } from "@/hooks/use-workflows";
 import { parseResourceUri, type EnvironmentStatus } from "@/lib/api/agents";
 
 /* ─── Status config for environment badges ─── */
