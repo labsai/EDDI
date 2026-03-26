@@ -46,6 +46,8 @@ public final class McpApiToolBuilder {
     /**
      * Result of building configs from an OpenAPI spec.
      *
+     * @param title
+     *            API title from the spec's info section
      * @param configsByGroup
      *            map of group/tag name → ApiCallsConfiguration
      * @param apiSummary
@@ -53,7 +55,7 @@ public final class McpApiToolBuilder {
      * @param endpointCount
      *            total number of endpoints processed
      */
-    public record ApiBuildResult(Map<String, ApiCallsConfiguration> configsByGroup, String apiSummary, int endpointCount) {
+    public record ApiBuildResult(String title, Map<String, ApiCallsConfiguration> configsByGroup, String apiSummary, int endpointCount) {
     }
 
     /**
@@ -139,7 +141,9 @@ public final class McpApiToolBuilder {
             apiSummary += "\n... and " + (summaryLines.size() - MAX_SUMMARY_ENDPOINTS) + " more";
         }
 
-        return new ApiBuildResult(configsByGroup, apiSummary, endpointCount);
+        String title = (openAPI.getInfo() != null && openAPI.getInfo().getTitle() != null) ? openAPI.getInfo().getTitle() : "API";
+
+        return new ApiBuildResult(title, configsByGroup, apiSummary, endpointCount);
     }
 
     /**

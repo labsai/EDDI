@@ -735,4 +735,172 @@ class LlmTaskTest {
             verify(dataFactory, never()).createData(eq("audit:model_name"), any());
         }
     }
+
+    @Nested
+    @DisplayName("Cascade Mode Tests")
+    class CascadeModeTests {
+
+        @Test
+        @DisplayName("Cascade enabled with 1 step — should execute and store cascade trace")
+        void testCascadeEnabledSingleStep() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "What is 2+2?");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("cascade_action"));
+
+            // Configure task with cascade enabled (single step, none strategy = always
+            // accepts)
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("cascade_action"));
+            task.setId("cascadeTask");
+            task.setType("openai");
+            task.setParameters(Map.of("systemMessage", "You are helpful", "apiKey", "test-key"));
+
+            var cascade = new LlmConfiguration.ModelCascadeConfig();
+            cascade.setEnabled(true);
+            cascade.setEvaluationStrategy("none"); // always returns confidence 1.0
+            var step = new LlmConfiguration.CascadeStep();
+            step.setType("openai");
+            step.setTimeoutMs(5000L);
+            cascade.setSteps(List.of(step));
+            task.setModelCascade(cascade);
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            // Execute
+            langChainTask.execute(memory, llmConfig);
+
+            // Assert: cascade trace should be stored
+            verify(dataFactory).createData(contains("cascade:trace"), any());
+            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
+        }
+
+        @Test
+        @DisplayName("Cascade disabled — should use standard execution path (backward compat)")
+        void testCascadeDisabledUsesStandardPath() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "hi");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("chat"));
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("chat"));
+            task.setId("legacyChat");
+            task.setType("openai");
+            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
+
+            // Cascade present but disabled
+            var cascade = new LlmConfiguration.ModelCascadeConfig();
+            cascade.setEnabled(false);
+            task.setModelCascade(cascade);
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            langChainTask.execute(memory, llmConfig);
+
+            // Should NOT have cascade trace (standard path)
+            verify(dataFactory, never()).createData(contains("cascade:trace"), any());
+            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
+        }
+
+        @Test
+        @DisplayName("Null modelCascade — should use standard execution path (full backward compat)")
+        void testNullCascadeUsesStandardPath() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "hi");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("chat"));
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("chat"));
+            task.setId("legacyChat");
+            task.setType("openai");
+            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
+            // No cascade set — null by default
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            langChainTask.execute(memory, llmConfig);
+
+            verify(dataFactory, never()).createData(contains("cascade:trace"), any());
+            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
+        }
+
+        @Test
+        @DisplayName("Cascade with audit collector — should store cascade model and confidence audit keys")
+        void testCascadeAuditKeys() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getAuditCollector()).thenReturn(entry -> {
+            });
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "test");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("auditCascade");
+            task.setType("openai");
+            task.setParameters(Map.of("systemMessage", "test", "apiKey", "key"));
+
+            var cascade = new LlmConfiguration.ModelCascadeConfig();
+            cascade.setEnabled(true);
+            cascade.setEvaluationStrategy("none");
+            var step = new LlmConfiguration.CascadeStep();
+            step.setType("openai");
+            cascade.setSteps(List.of(step));
+            task.setModelCascade(cascade);
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            langChainTask.execute(memory, llmConfig);
+
+            // Verify cascade-specific audit keys
+            verify(dataFactory).createData(eq("audit:cascade_model"), any());
+            verify(dataFactory).createData(eq("audit:cascade_confidence"), any());
+        }
+    }
 }

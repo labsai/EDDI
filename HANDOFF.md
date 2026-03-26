@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-25
+> **Last updated:** 2026-03-26
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -640,6 +640,28 @@ eddi.a2a.base-url=http://localhost:7070        # Base URL for Agent Card URLs
 **Security:** API keys must use vault references (`${vault:my-key}`). Runtime warning on raw key usage.
 
 **Documentation:** `docs/a2a-protocol.md`
+
+### Multi-Model Cascading Routing ✅ (commit `514821d4`)
+
+Cost-optimized LLM execution via sequential model escalation with confidence-based routing.
+
+- [x] `ModelCascadeConfig` + `CascadeStep` config schema on `LlmConfiguration.Task`
+- [x] `CascadingModelExecutor` — cascade loop with per-step timeout, error escalation, SSE events
+- [x] `ConfidenceEvaluator` — 4 strategies: `structured_output`, `heuristic`, `judge_model`, `none`
+- [x] `ConversationEventSink` — `onCascadeStepStart` + `onCascadeEscalation` default methods
+- [x] `LlmTask` integration — cascade branch with full backward compat
+- [x] Audit trail: `audit:cascade_model`, `audit:cascade_confidence`, `cascade:trace`
+- [x] 39 new tests: `ConfidenceEvaluatorTest` (22), `CascadingModelExecutorTest` (13), `LlmTaskTest` cascade (4)
+- [x] All 1291 tests pass, 0 failures
+
+**Key files:**
+
+- `src/main/java/ai/labs/eddi/modules/llm/impl/CascadingModelExecutor.java` (NEW)
+- `src/main/java/ai/labs/eddi/modules/llm/impl/ConfidenceEvaluator.java` (NEW)
+- `src/main/java/ai/labs/eddi/modules/llm/model/LlmConfiguration.java`
+- `src/main/java/ai/labs/eddi/engine/lifecycle/ConversationEventSink.java`
+- `src/main/java/ai/labs/eddi/modules/llm/impl/LlmTask.java`
+- `docs/model-cascade.md`
 
 ## Next Up
 

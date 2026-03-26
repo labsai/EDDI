@@ -13,6 +13,63 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Multi-Model Cascading Routing (2026-03-26)
+
+**Repo:** EDDI (`feature/version-6.0.0`) — Commit `514821d4`
+
+**What changed:**
+
+Cost-optimized LLM execution via sequential model escalation. Tries a cheap/fast model first and escalates to a more powerful model only if confidence is below a configurable threshold.
+
+| Component | Change |
+|---|---|
+| **Config Schema** | `ModelCascadeConfig` + `CascadeStep` inner classes on `LlmConfiguration.Task` — `enabled`, `strategy` (cascade/parallel), `evaluationStrategy` (4 options), `enableInAgentMode` |
+| **Cascade Executor** | `CascadingModelExecutor.java` — cascade loop with per-step timeout, retryable error escalation, agent-mode and legacy-mode execution, SSE events, best-response tracking |
+| **Confidence Evaluator** | `ConfidenceEvaluator.java` — 4 pluggable strategies: `structured_output` (JSON parsing), `heuristic` (hedging/refusal detection), `judge_model` (secondary LLM), `none` (always accept) |
+| **SSE Events** | `ConversationEventSink` — 2 new default methods: `onCascadeStepStart(stepIndex, modelType)`, `onCascadeEscalation(fromStep, toStep, confidence, reason)` |
+| **LlmTask Integration** | Cascade branch in `executeTask()` with full backward compat — null/disabled cascades use standard path |
+| **Audit Trail** | `audit:cascade_model`, `audit:cascade_confidence`, `cascade:trace` memory keys for observability |
+
+**Cascade step configuration:**
+
+```json
+{
+  "modelCascade": {
+    "enabled": true,
+    "strategy": "cascade",
+    "evaluationStrategy": "structured_output",
+    "enableInAgentMode": true,
+    "steps": [
+      { "type": "openai", "parameters": { "model": "gpt-4o-mini" }, "confidenceThreshold": 0.7, "timeoutMs": 10000 },
+      { "type": "openai", "parameters": { "model": "gpt-4o" }, "confidenceThreshold": null, "timeoutMs": 30000 }
+    ]
+  }
+}
+```
+
+**Error handling:**
+- Retryable errors (429, 503, timeouts) → auto-escalate to next step
+- Non-retryable errors → escalate to next step, log warning
+- Budget exhausted → return best response seen so far
+- All steps fail → throw LifecycleException with trace
+
+**Design decisions:**
+- Intra-task orchestration — cascade loop lives inside `LlmTask`/`CascadingModelExecutor`, no engine-wide pipeline changes
+- Step params merge with base task params — steps only override what they need (e.g., `model`)
+- `confidenceThreshold: null` on final step means "always accept" (no further escalation)
+- `parallel` strategy stubbed in config but not yet implemented (future-ready)
+
+**Tests:** 39 new tests
+- `ConfidenceEvaluatorTest` (22) — all 4 strategies, edge cases (null, blank, short, hedging, refusal, JSON parsing, clamping, fallback)
+- `CascadingModelExecutorTest` (13) — param merging, config defaults, cascade gate conditions
+- `LlmTaskTest` cascade section (4) — cascade execution, backward compat (disabled/null), audit keys
+
+**Files:** 2 new (`CascadingModelExecutor.java`, `ConfidenceEvaluator.java`), 2 new tests, 3 modified (`LlmConfiguration.java`, `ConversationEventSink.java`, `LlmTask.java`), 1 test modified.
+
+**Testing:** ✅ 1291 tests, 0 failures.
+
+---
+
 ## A2A Protocol Integration (2026-03-26)
 
 **Repo:** EDDI (`feature/version-6.0.0`) — Commit `cbc4b70b`

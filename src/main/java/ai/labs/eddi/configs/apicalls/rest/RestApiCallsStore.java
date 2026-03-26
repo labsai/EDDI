@@ -92,13 +92,16 @@ public class RestApiCallsStore implements IRestApiCallsStore {
 
             McpApiToolBuilder.ApiBuildResult result = McpApiToolBuilder.parseAndBuild(specUrl, null, effectiveBaseUrl, effectiveAuth);
 
-            // Extract title from the spec
-            var openAPI = McpApiToolBuilder.parseSpec(specUrl);
-            String title = openAPI.getInfo() != null ? openAPI.getInfo().getTitle() : "API";
+            if (result.configsByGroup().isEmpty()) {
+                return Response.ok(Map.of("title", "API", "baseUrl", "", "endpointCount", 0, "groups", Map.of())).build();
+            }
+
+            // Extract title + baseUrl from result (avoid re-parsing the spec)
+            String baseUrl = result.configsByGroup().values().iterator().next().getTargetServerUrl();
 
             var response = new LinkedHashMap<String, Object>();
-            response.put("title", title);
-            response.put("baseUrl", result.configsByGroup().values().iterator().next().getTargetServerUrl());
+            response.put("title", result.title() != null ? result.title() : "API");
+            response.put("baseUrl", baseUrl != null ? baseUrl : "");
             response.put("endpointCount", result.endpointCount());
             response.put("groups", result.configsByGroup());
 
