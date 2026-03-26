@@ -471,8 +471,7 @@ public class GroupConversationService implements IGroupConversationService {
             case ARGUE, REBUTTAL -> {
                 String role = speaker.role();
                 data.put("teamSide", "PRO".equalsIgnoreCase(role) ? "FOR" : "AGAINST");
-                // Opposing arguments
-                String opposingRole = "PRO".equalsIgnoreCase(role) ? "CON" : "PRO";
+                // Opposing arguments (filtered by different speaker, not role label)
                 List<Map<String, Object>> opposing = transcript.stream()
                         .filter(e -> (e.type() == TranscriptEntryType.ARGUMENT || e.type() == TranscriptEntryType.REBUTTAL) && e.content() != null)
                         .filter(e -> !e.speakerAgentId().equals(speaker.agentId())).map(e -> {
