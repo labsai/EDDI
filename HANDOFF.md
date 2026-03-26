@@ -616,6 +616,31 @@ quarkus.qute.strict-rendering=false    # Lenient variable handling
 - `src/test/java/ai/labs/eddi/modules/templating/TemplatingEngineTest.java`
 - `docs/output-templating.md`
 
+### A2A Protocol: Agent-to-Agent Communication ✅
+
+Implements the [A2A protocol](https://github.com/google/A2A) for distributed peer-to-peer agent communication.
+
+| Component | Key Files |
+|---|---|
+| **A2A Models** | `A2AModels.java` — Protocol records (AgentCard, JSON-RPC, Task, Artifact) |
+| **Server** | `AgentCardService.java` — Agent Card generation from `AgentConfiguration` |
+| | `A2ATaskHandler.java` — JSON-RPC → `ConversationService.say()` bridge |
+| | `RestA2AEndpoint.java` — `/.well-known/agent.json`, `/a2a/agents/{id}` |
+| **Client** | `A2AToolProviderManager.java` — Discovers remote agents, wraps skills as `ToolSpecification` |
+| **Config** | `AgentConfiguration` — `a2aEnabled`, `a2aSkills`, `description` |
+| | `LlmConfiguration.Task` — `a2aAgents[]` with `A2AAgentConfig` |
+| **Integration** | `AgentOrchestrator` + `LlmTask` — A2A tools merge with built-in/MCP/httpcall tools |
+
+**Config properties:**
+```properties
+eddi.a2a.enabled=true                         # Master toggle
+eddi.a2a.base-url=http://localhost:7070        # Base URL for Agent Card URLs
+```
+
+**Security:** API keys must use vault references (`${vault:my-key}`). Runtime warning on raw key usage.
+
+**Documentation:** `docs/a2a-protocol.md`
+
 ## Next Up
 
 ### Quick Wins
