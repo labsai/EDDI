@@ -244,6 +244,10 @@
       "propertysetter": {
         "name": "مُعيِّن الخصائص",
         "description": "تعيين خصائص المحادثة وإدارة ملء الفتحات"
+      },
+      "mcpcalls": {
+        "name": "MCP Calls",
+        "description": "Configure MCP server connections and deterministic tool calls"
       }
     }
   },

@@ -14,6 +14,7 @@ import {
   Bot,
 } from "lucide-react";
 import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import {
   useConversationDescriptors,
@@ -33,50 +34,34 @@ import {
   type ViewMode,
 } from "@/components/shared/view-toggle";
 
-const stateConfig: Record<
+// Status config labels resolved via i18n inside component
+const stateIcons: Record<
   ConversationState,
-  { icon: typeof Circle; label: string; color: string; bg: string }
+  { icon: typeof Circle; color: string; bg: string }
 > = {
-  READY: {
-    icon: Circle,
-    label: "Active",
-    color: "text-emerald-500",
-    bg: "bg-emerald-500/10",
-  },
-  IN_PROGRESS: {
-    icon: Clock,
-    label: "In Progress",
-    color: "text-amber-500",
-    bg: "bg-amber-500/10",
-  },
-  ERROR: {
-    icon: AlertTriangle,
-    label: "Error",
-    color: "text-destructive",
-    bg: "bg-destructive/10",
-  },
-  ENDED: {
-    icon: CheckCircle2,
-    label: "Ended",
-    color: "text-muted-foreground",
-    bg: "bg-muted",
-  },
+  READY: { icon: Circle, color: "text-emerald-500", bg: "bg-emerald-500/10" },
+  IN_PROGRESS: { icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10" },
+  ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
+  ENDED: { icon: CheckCircle2, color: "text-muted-foreground", bg: "bg-muted" },
 };
 
-const stateFilters: { value: ConversationState | "ALL"; label: string }[] = [
-  { value: "ALL", label: "All" },
-  { value: "READY", label: "Active" },
-  { value: "IN_PROGRESS", label: "In Progress" },
-  { value: "ENDED", label: "Ended" },
-  { value: "ERROR", label: "Error" },
+const STATE_FILTER_VALUES: (ConversationState | "ALL")[] = [
+  "ALL", "READY", "IN_PROGRESS", "ENDED", "ERROR",
 ];
 
 export function ConversationsPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
-  const [stateFilter, setStateFilter] = useState<ConversationState | "ALL">(
-    "ALL"
-  );
+  const [stateFilter, setStateFilter] = useState<ConversationState | "ALL">("ALL");
+
+  // i18n labels for conversation states
+  const stateLabels: Record<ConversationState | "ALL", string> = {
+    ALL: t("conversations.filterAll", "All"),
+    READY: t("conversations.stateActive", "Active"),
+    IN_PROGRESS: t("conversations.stateInProgress", "In Progress"),
+    ERROR: t("status.error", "Error"),
+    ENDED: t("conversations.stateEnded", "Ended"),
+  };
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("conversations"));
 
@@ -99,7 +84,7 @@ export function ConversationsPage() {
             toast.success(t("common.delete") + " ✓");
             setDeleteTarget(null);
           },
-          onError: () => toast.error(t("common.error")),
+          onError: (err) => toast.error(getErrorMessage(err)),
         }
       );
     }
@@ -141,15 +126,15 @@ export function ConversationsPage() {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
             <Filter className="h-4 w-4 text-muted-foreground" />
-            {stateFilters.map((sf) => (
+            {STATE_FILTER_VALUES.map((sf) => (
               <Button
-                key={sf.value}
-                variant={stateFilter === sf.value ? "primary" : "secondary"}
+                key={sf}
+                variant={stateFilter === sf ? "primary" : "secondary"}
                 size="sm"
                 className="rounded-full"
-                onClick={() => setStateFilter(sf.value)}
+                onClick={() => setStateFilter(sf)}
               >
-                {sf.label}
+                {stateLabels[sf]}
               </Button>
             ))}
           </div>
@@ -211,8 +196,8 @@ export function ConversationsPage() {
               {conversations.map((conv) => {
                 const convId = parseConversationUri(conv.resource);
                 const state = conv.conversationState || "READY";
-                const config = stateConfig[state];
-                const StateIcon = config.icon;
+                const config = stateIcons[state];
+                const stateLabel = stateLabels[state];                const StateIcon = config.icon;
 
                 return (
                   <Link
@@ -234,7 +219,7 @@ export function ConversationsPage() {
                         )}
                       >
                         <StateIcon className="h-3.5 w-3.5" />
-                        {config.label}
+                        {stateLabel}
                       </span>
                       <button
                         onClick={(e) => {
@@ -316,7 +301,7 @@ export function ConversationsPage() {
                   {conversations.map((conv) => {
                     const convId = parseConversationUri(conv.resource);
                     const state = conv.conversationState || "READY";
-                    const config = stateConfig[state];
+                    const config = stateIcons[state];
                     const StateIcon = config.icon;
 
                     return (
@@ -351,7 +336,7 @@ export function ConversationsPage() {
                             )}
                           >
                             <StateIcon className="h-3 w-3" />
-                            {config.label}
+                            {stateLabels[state]}
                           </span>
                         </td>
                         <td className="px-5 py-3">
@@ -390,7 +375,7 @@ export function ConversationsPage() {
         open={deleteTarget !== null}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title={t("conversations.confirmDelete")}
-        description={t("conversations.confirmDelete")}
+        description={t("conversations.confirmDeleteDescription", "This conversation and its history will be permanently removed.")}
         confirmLabel={t("common.delete")}
         cancelLabel={t("common.cancel")}
         onConfirm={confirmDelete}
@@ -402,6 +387,7 @@ export function ConversationsPage() {
 
 /** Lazily loads and displays the step count for a conversation. */
 function StepCountBadge({ conversationId }: { conversationId: string }) {
+  const { t } = useTranslation();
   const { data: count, isLoading } = useConversationStepCount(conversationId);
 
   if (isLoading) {
@@ -412,7 +398,7 @@ function StepCountBadge({ conversationId }: { conversationId: string }) {
 
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-      {count} {count === 1 ? "step" : "steps"}
+      {count} {count === 1 ? t("conversations.step", "step") : t("conversations.steps", "steps")}
     </span>
   );
 }

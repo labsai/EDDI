@@ -1,8 +1,28 @@
 const BASE_URL = window.location.origin;
 
-interface ApiError {
+export interface ApiError {
   status: number;
   message: string;
+  url?: string;
+}
+
+/** Type guard to check if an error is an ApiError from our client */
+export function isApiError(error: unknown): error is ApiError {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    "message" in error
+  );
+}
+
+/** Extract a human-readable message from any caught error */
+export function getErrorMessage(error: unknown): string {
+  if (isApiError(error)) {
+    return `${error.message} (HTTP ${error.status})`;
+  }
+  if (error instanceof Error) return error.message;
+  return String(error);
 }
 
 class ApiClient {
@@ -23,28 +43,60 @@ class ApiClient {
     delete this.headers["Authorization"];
   }
 
+  /** Get current auth header (if set). Used by modules that need raw fetch (SSE, text/plain). */
+  getAuthHeader(): Record<string, string> {
+    const auth = this.headers["Authorization"];
+    return auth ? { Authorization: auth } : {};
+  }
+
+  /** Get the base URL for building raw fetch URLs */
+  getBaseUrl(): string {
+    return this.baseUrl;
+  }
+
   private async request<T>(
     method: string,
     path: string,
     body?: unknown
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
-    const response = await fetch(url, {
-      method,
-      headers: this.headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method,
+        headers: this.headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (networkError) {
+      // Network failure (offline, DNS, CORS, etc.)
+      const error: ApiError = {
+        status: 0,
+        message:
+          networkError instanceof Error
+            ? `Network error: ${networkError.message}`
+            : "Network error: unable to reach server",
+        url,
+      };
+      throw error;
+    }
 
     if (!response.ok) {
       const error: ApiError = {
         status: response.status,
         message: response.statusText,
+        url,
       };
       try {
         const errorBody = await response.json();
-        error.message = errorBody.message || response.statusText;
+        // Backend may use `message`, `errorMessage`, or `detail`
+        error.message =
+          errorBody.message ||
+          errorBody.errorMessage ||
+          errorBody.detail ||
+          response.statusText;
       } catch {
-        // ignore JSON parse errors
+        // Non-JSON error body — keep statusText
       }
       throw error;
     }
@@ -91,4 +143,3 @@ class ApiClient {
 }
 
 export const api = new ApiClient(BASE_URL);
-export type { ApiError };

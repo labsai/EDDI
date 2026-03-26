@@ -244,6 +244,10 @@
       "propertysetter": {
         "name": "속성 설정기",
         "description": "대화 속성 설정 및 슬롯 채우기 관리"
+      },
+      "mcpcalls": {
+        "name": "MCP Calls",
+        "description": "Configure MCP server connections and deterministic tool calls"
       }
     }
   },

@@ -244,6 +244,10 @@
       "propertysetter": {
         "name": "ตัวตั้งค่าคุณสมบัติ",
         "description": "ตั้งค่าคุณสมบัติการสนทนาและจัดการการเติมสล็อต"
+      },
+      "mcpcalls": {
+        "name": "MCP Calls",
+        "description": "Configure MCP server connections and deterministic tool calls"
       }
     }
   },

@@ -57,6 +57,13 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     labelKey: "resources.types.propertysetter",
     icon: "Settings",
   },
+  {
+    slug: "mcpcalls",
+    store: "mcpcallsstore",
+    plural: "mcpcalls",
+    labelKey: "resources.types.mcpcalls",
+    icon: "Plug",
+  },
 ];
 
 /** Look up a resource type config by slug */

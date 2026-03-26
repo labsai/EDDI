@@ -244,6 +244,10 @@
       "propertysetter": {
         "name": "प्रॉपर्टी सेटर",
         "description": "वार्तालाप गुण सेट करें और स्लॉट-फ़िलिंग प्रबंधित करें"
+      },
+      "mcpcalls": {
+        "name": "MCP Calls",
+        "description": "Configure MCP server connections and deterministic tool calls"
       }
     }
   },

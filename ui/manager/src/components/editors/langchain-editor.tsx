@@ -9,21 +9,12 @@ import {
   Brain,
   Bot,
   Zap,
-  Server,
   Handshake,
   AlertTriangle,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
 
 // ─── Types matching LangChainConfiguration backend model ─────────────────────
-
-export interface McpServerConfig {
-  url?: string;
-  name?: string;
-  transport?: string;
-  apiKey?: string;
-  timeoutMs?: number;
-}
 
 export interface A2AAgentConfig {
   url?: string;
@@ -44,10 +35,10 @@ export interface LangchainTask {
   preRequest?: unknown;
   postResponse?: unknown;
   tools?: string[];
-  mcpServers?: McpServerConfig[];
   a2aAgents?: A2AAgentConfig[];
   enableBuiltInTools?: boolean;
   enableHttpCallTools?: boolean;
+  enableMcpCallTools?: boolean;
   builtInToolsWhitelist?: string[];
   conversationHistoryLimit?: number;
   retrievalAugmentor?: {
@@ -299,7 +290,6 @@ function TaskEditor({
   const isAgent =
     (task.tools && task.tools.length > 0) ||
     task.enableBuiltInTools ||
-    (task.mcpServers && task.mcpServers.length > 0) ||
     (task.a2aAgents && task.a2aAgents.length > 0);
 
   const updateParam = (key: string, value: string) => {
@@ -580,6 +570,33 @@ function TaskEditor({
                 )}
               </p>
 
+              {/* Auto-discover MCP Call Tools */}
+              <label className="inline-flex items-center gap-2 text-xs text-foreground">
+                <input
+                  type="checkbox"
+                  checked={task.enableMcpCallTools ?? true}
+                  onChange={(e) =>
+                    onChange({
+                      ...task,
+                      enableMcpCallTools: e.target.checked,
+                    })
+                  }
+                  disabled={readOnly}
+                  className="h-3.5 w-3.5 rounded border-input accent-primary"
+                  data-testid="enable-mcpcall-tools"
+                />
+                {t(
+                  "langchainEditor.enableMcpCallTools",
+                  "Auto-Discover MCP Call Tools"
+                )}
+              </label>
+              <p className="text-[10px] text-muted-foreground ps-5 -mt-2">
+                {t(
+                  "langchainEditor.enableMcpCallToolsDesc",
+                  "Automatically expose all mcpcalls extensions from the workflow as LLM tools"
+                )}
+              </p>
+
               {/* Explicit HTTP Call Tool URIs */}
               <div>
                 <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -637,127 +654,6 @@ function TaskEditor({
                     >
                       <Plus className="h-3 w-3" />
                       {t("langchainEditor.addTool", "Add Tool URI")}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* MCP Servers */}
-              <div>
-                <label className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  <Server className="h-3 w-3" />
-                  {t("langchainEditor.mcpServers", "MCP Servers")}
-                </label>
-                <p className="mb-1.5 text-[10px] text-muted-foreground">
-                  {t(
-                    "langchainEditor.mcpServersDesc",
-                    "External MCP servers whose tools become available to the LLM"
-                  )}
-                </p>
-                <div className="space-y-2">
-                  {(task.mcpServers ?? []).map((srv, si) => (
-                    <div
-                      key={si}
-                      className="rounded-lg border border-border bg-secondary/20 p-3 space-y-2"
-                      data-testid={`mcp-server-${si}`}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="url"
-                          value={srv.url ?? ""}
-                          onChange={(e) => {
-                            const servers = [...(task.mcpServers ?? [])];
-                            servers[si] = { ...srv, url: e.target.value };
-                            onChange({ ...task, mcpServers: servers });
-                          }}
-                          readOnly={readOnly}
-                          placeholder={t(
-                            "langchainEditor.mcpUrlPlaceholder",
-                            "http://localhost:7070/mcp"
-                          )}
-                          className="h-7 flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                        />
-                        {!readOnly && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onChange({
-                                ...task,
-                                mcpServers: (task.mcpServers ?? []).filter(
-                                  (_, j) => j !== si
-                                ),
-                              })
-                            }
-                            className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        <input
-                          type="text"
-                          value={srv.name ?? ""}
-                          onChange={(e) => {
-                            const servers = [...(task.mcpServers ?? [])];
-                            servers[si] = { ...srv, name: e.target.value };
-                            onChange({ ...task, mcpServers: servers });
-                          }}
-                          readOnly={readOnly}
-                          placeholder={t("langchainEditor.mcpName", "Name")}
-                          className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                        />
-                        <select
-                          value={srv.transport ?? "http"}
-                          onChange={(e) => {
-                            const servers = [...(task.mcpServers ?? [])];
-                            servers[si] = {
-                              ...srv,
-                              transport: e.target.value,
-                            };
-                            onChange({ ...task, mcpServers: servers });
-                          }}
-                          disabled={readOnly}
-                          className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-                        >
-                          <option value="http">HTTP</option>
-                          <option value="sse">SSE</option>
-                        </select>
-                        <input
-                          type="text"
-                          value={srv.apiKey ?? ""}
-                          onChange={(e) => {
-                            const servers = [...(task.mcpServers ?? [])];
-                            servers[si] = { ...srv, apiKey: e.target.value };
-                            onChange({ ...task, mcpServers: servers });
-                          }}
-                          readOnly={readOnly}
-                          placeholder={t(
-                            "langchainEditor.mcpApiKey",
-                            "API Key / vault ref"
-                          )}
-                          className="h-7 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                  {!readOnly && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onChange({
-                          ...task,
-                          mcpServers: [
-                            ...(task.mcpServers ?? []),
-                            { url: "", transport: "http" },
-                          ],
-                        })
-                      }
-                      className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                      data-testid="add-mcp-server"
-                    >
-                      <Plus className="h-3 w-3" />
-                      {t("langchainEditor.addMcpServer", "Add MCP Server")}
                     </button>
                   )}
                 </div>

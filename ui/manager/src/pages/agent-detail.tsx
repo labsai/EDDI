@@ -25,7 +25,10 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
+import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/api-client";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import {
   useAgent,
   useDeploymentStatus,
@@ -41,12 +44,12 @@ import { useExportAgent } from "@/hooks/use-backup";
 import { useWorkflowDescriptors, useUpdateAgentWorkflows } from "@/hooks/use-workflows";
 import { parseResourceUri, type EnvironmentStatus } from "@/lib/api/agents";
 
-/* ─── Status config for environment badges ─── */
-const statusConfig = {
-  READY: { icon: Rocket, label: "Deployed", color: "text-emerald-500", bg: "bg-emerald-500/10" },
-  IN_PROGRESS: { icon: Clock, label: "Deploying...", color: "text-amber-500", bg: "bg-amber-500/10" },
-  ERROR: { icon: AlertTriangle, label: "Error", color: "text-destructive", bg: "bg-destructive/10" },
-  NOT_FOUND: { icon: Square, label: "Not deployed", color: "text-muted-foreground", bg: "bg-muted" },
+/* ─── Status icons (labels resolved via i18n in component) ─── */
+const statusIcons = {
+  READY: { icon: Rocket, color: "text-emerald-500", bg: "bg-emerald-500/10" },
+  IN_PROGRESS: { icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10" },
+  ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
+  NOT_FOUND: { icon: Square, color: "text-muted-foreground", bg: "bg-muted" },
 };
 
 const envLabels: Record<string, string> = {
@@ -60,14 +63,19 @@ export function AgentDetailPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
 
-  const [version, setVersion] = useState(1);
+  const [version, setVersion] = useState<number | undefined>(undefined);
   const [showAddWorkflow, setShowAddWorkflow] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
-  const { data: agent, isLoading, isError, refetch } = useAgent(id!, version);
-  const { data: deployment } = useDeploymentStatus(id!, version);
-  const { data: envStatuses } = useDeploymentStatuses(id!, version);
   const { data: versions } = useAgentVersions(id!);
+
+  // Default to latest version once loaded
+  const resolvedVersion = version ?? versions?.[0]?.version ?? 1;
+
+  const { data: agent, isLoading, isError, refetch } = useAgent(id!, resolvedVersion);
+  const { data: deployment } = useDeploymentStatus(id!, resolvedVersion);
+  const { data: envStatuses } = useDeploymentStatuses(id!, resolvedVersion);
 
   const deployMutation = useDeployAgent();
   const undeployMutation = useUndeployAgent();
@@ -77,8 +85,15 @@ export function AgentDetailPage() {
   const exportMutation = useExportAgent();
 
   const status = deployment?.status ?? "NOT_FOUND";
-  const config = statusConfig[status];
+  const config = statusIcons[status];
   const StatusIcon = config.icon;
+  const statusLabels: Record<string, string> = {
+    READY: t("status.deployed", "Deployed"),
+    IN_PROGRESS: t("status.deploying", "Deploying..."),
+    ERROR: t("status.error", "Error"),
+    NOT_FOUND: t("status.notDeployed", "Not deployed"),
+  };
+  const statusLabel = statusLabels[status] ?? status;
   const isDeployed = status === "READY";
   const isBusy = deployMutation.isPending || undeployMutation.isPending || status === "IN_PROGRESS";
 
@@ -91,48 +106,80 @@ export function AgentDetailPage() {
   }, [saveMessage]);
 
   function handleDeploy() {
-    deployMutation.mutate({ agentId: id!, version });
+    deployMutation.mutate(
+      { agentId: id!, version: resolvedVersion },
+      {
+        onSuccess: () => toast.success(t("agents.deploySuccess", "Deployment started")),
+        onError: (err) => toast.error(getErrorMessage(err)),
+      }
+    );
   }
 
   function handleUndeploy() {
-    undeployMutation.mutate({ agentId: id!, version });
+    undeployMutation.mutate(
+      { agentId: id!, version: resolvedVersion },
+      {
+        onSuccess: () => toast.success(t("agents.undeploySuccess", "Agent undeployed")),
+        onError: (err) => toast.error(getErrorMessage(err)),
+      }
+    );
   }
 
-  async function handleDelete() {
-    if (window.confirm(t("agents.confirmDelete"))) {
-      await deleteMutation.mutateAsync({ id: id!, version });
-      navigate("/manage/agents");
-    }
+  function handleDelete() {
+    deleteMutation.mutate(
+      { id: id!, version: resolvedVersion },
+      {
+        onSuccess: () => {
+          toast.success(t("common.delete") + " ✓");
+          navigate("/manage/agents");
+        },
+        onError: (err) => toast.error(getErrorMessage(err)),
+      }
+    );
+    setShowDeleteDialog(false);
   }
 
   async function handleDuplicate() {
     try {
       const result = await duplicateMutation.mutateAsync({
         id: id!,
-        version,
+        version: resolvedVersion,
         deepCopy: true,
       });
+      toast.success(t("agentDetail.duplicateSuccess"));
       const { id: newId } = parseResourceUri(result.location);
       navigate(`/manage/agentview/${newId}`);
-    } catch {
-      // Error handled by mutation state
+    } catch (err) {
+      toast.error(getErrorMessage(err));
     }
   }
 
   function handleRemoveWorkflow(packageUri: string) {
     if (!agent?.workflows) return;
     const updated = agent.workflows.filter((p) => p !== packageUri);
-    updateWorkflowsMutation.mutate({ agentId: id!, version, workflows: updated });
+    updateWorkflowsMutation.mutate(
+      { agentId: id!, version: resolvedVersion, workflows: updated },
+      {
+        onSuccess: () => toast.success(t("agentDetail.workflowRemoved", "Workflow removed")),
+        onError: (err) => toast.error(getErrorMessage(err)),
+      }
+    );
   }
 
   function handleAddWorkflow(packageUri: string) {
     const current = agent?.workflows ?? [];
     if (current.includes(packageUri)) return;
-    updateWorkflowsMutation.mutate({
-      agentId: id!,
-      version,
-      workflows: [...current, packageUri],
-    });
+    updateWorkflowsMutation.mutate(
+      {
+        agentId: id!,
+        version: resolvedVersion,
+        workflows: [...current, packageUri],
+      },
+      {
+        onSuccess: () => toast.success(t("agentDetail.workflowAdded", "Workflow added")),
+        onError: (err) => toast.error(getErrorMessage(err)),
+      }
+    );
     setShowAddWorkflow(false);
   }
 
@@ -185,7 +232,7 @@ export function AgentDetailPage() {
           {versions && versions.length > 0 && (
             <VersionSelect
               versions={versions}
-              current={version}
+              current={resolvedVersion}
               onChange={handleVersionChange}
             />
           )}
@@ -203,7 +250,7 @@ export function AgentDetailPage() {
             data-testid="deployment-status"
           >
             <StatusIcon className="h-4 w-4" />
-            {config.label}
+            {statusLabel}
           </div>
 
           {/* Deploy/Undeploy */}
@@ -266,7 +313,7 @@ export function AgentDetailPage() {
 
           {/* Delete */}
           <button
-            onClick={handleDelete}
+            onClick={() => setShowDeleteDialog(true)}
             className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
             data-testid="delete-agent-btn"
           >
@@ -294,8 +341,14 @@ export function AgentDetailPage() {
       {envStatuses && envStatuses.length > 0 && (
         <EnvironmentBadges
           statuses={envStatuses}
-          onDeploy={(env) => deployMutation.mutate({ environment: env, agentId: id!, version })}
-          onUndeploy={(env) => undeployMutation.mutate({ environment: env, agentId: id!, version })}
+          onDeploy={(env) => deployMutation.mutate(
+            { environment: env, agentId: id!, version: resolvedVersion },
+            { onError: (err) => toast.error(getErrorMessage(err)) }
+          )}
+          onUndeploy={(env) => undeployMutation.mutate(
+            { environment: env, agentId: id!, version: resolvedVersion },
+            { onError: (err) => toast.error(getErrorMessage(err)) }
+          )}
           isBusy={isBusy}
         />
       )}
@@ -304,7 +357,7 @@ export function AgentDetailPage() {
       <A2ASection
         agent={agent}
         agentId={id!}
-        version={version}
+        version={resolvedVersion}
       />
 
       {/* Workflows section */}
@@ -385,6 +438,18 @@ export function AgentDetailPage() {
 
       {/* Raw config (collapsible) */}
       <RawConfigSection agent={agent} />
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        title={t("agents.confirmDelete")}
+        description={t("agents.confirmDeleteDescription", "This action cannot be undone. The agent and all its data will be permanently removed.")}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={handleDelete}
+        isPending={deleteMutation.isPending}
+      />
     </div>
   );
 }
@@ -444,17 +509,7 @@ function VersionSelect({
   );
 }
 
-function formatRelativeTime(timestamp: number): string {
-  const diff = Date.now() - timestamp;
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(timestamp).toLocaleDateString();
-}
+// formatRelativeTime imported from @/lib/utils
 
 /* ─── Environment Status Badges ─── */
 function EnvironmentBadges({
@@ -469,8 +524,15 @@ function EnvironmentBadges({
   isBusy: boolean;
 }) {
   const { t } = useTranslation();
+  const envStatusLabels: Record<string, string> = {
+    READY: t("status.deployed", "Deployed"),
+    IN_PROGRESS: t("status.deploying", "Deploying..."),
+    ERROR: t("status.error", "Error"),
+    NOT_FOUND: t("status.notDeployed", "Not deployed"),
+  };
+
   return (
-    <section className="rounded-xl border bg-card shadow-sm" data-testid="env-badges">
+    <section className="overflow-hidden rounded-xl border bg-card shadow-sm" data-testid="env-badges">
       <div className="flex items-center gap-2 border-b border-border px-5 py-3">
         <Server className="h-5 w-5 text-primary" />
         <h2 className="text-sm font-semibold text-foreground">
@@ -479,7 +541,7 @@ function EnvironmentBadges({
       </div>
       <div className="grid grid-cols-1 gap-0 divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0">
         {statuses.map(({ environment, status }) => {
-          const conf = statusConfig[status];
+          const conf = statusIcons[status];
           const Icon = conf.icon;
           const isUp = status === "READY";
           return (
@@ -493,7 +555,7 @@ function EnvironmentBadges({
                     {t(envLabels[environment] ?? environment)}
                   </p>
                   <p className={cn("text-xs", conf.color)}>
-                    {conf.label}
+                    {envStatusLabels[status] ?? status}
                   </p>
                 </div>
               </div>
@@ -580,7 +642,7 @@ function AddWorkflowPanel({
                 {pkg.name || parseResourceUri(pkg.resource).id}
               </p>
               <p className="text-xs text-muted-foreground line-clamp-1">
-                {pkg.description || "No description"}
+                {pkg.description || t("agents.noDescription", "No description")}
               </p>
             </div>
             <Plus className="h-4 w-4 text-primary" />

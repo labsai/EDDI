@@ -2,6 +2,7 @@ import { useState, useCallback, type ReactNode } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/api-client";
 import {
   FileCode,
   GitBranch,
@@ -10,6 +11,7 @@ import {
   BookOpen,
   Brain,
   Settings,
+  Plug,
   Trash2,
   Copy,
 } from "lucide-react";
@@ -60,6 +62,10 @@ import {
   DictionaryEditor,
   type DictionaryConfig,
 } from "@/components/editors/dictionary-editor";
+import {
+  McpCallsEditor,
+  type McpCallsConfig,
+} from "@/components/editors/mcpcalls-editor";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   GitBranch,
@@ -68,6 +74,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   BookOpen,
   Brain,
   Settings,
+  Plug,
 };
 
 // Clean editor lookup — replaces the 6-level nested ternary
@@ -92,6 +99,9 @@ const EDITOR_MAP: Record<
   ),
   dictionary: (p, o, r) => (
     <DictionaryEditor data={p as DictionaryConfig} onChange={o} readOnly={r} />
+  ),
+  mcpcalls: (p, o, r) => (
+    <McpCallsEditor data={p as McpCallsConfig} onChange={o} readOnly={r} />
   ),
 };
 
@@ -222,7 +232,7 @@ export function ResourceDetailPage() {
         // Invalid JSON — shouldn't happen, ConfigEditorLayout validates
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, rt]
+    [id, currentVersion, cascadeSave, cascadeContext, rt, t]
   );
 
   const handleCascadeConfirm = useCallback(
@@ -281,7 +291,7 @@ export function ResourceDetailPage() {
           toast.success(t("common.delete") + " ✓");
           navigate(`/manage/resources/${type}`);
         },
-        onError: () => toast.error(t("common.error")),
+        onError: (err) => toast.error(getErrorMessage(err)),
       }
     );
     setShowDeleteDialog(false);
@@ -299,7 +309,7 @@ export function ResourceDetailPage() {
             navigate(`/manage/resources/${type}/${newId}`);
           }
         },
-        onError: () => toast.error(t("common.error")),
+        onError: (err) => toast.error(getErrorMessage(err)),
       }
     );
   }
@@ -327,7 +337,7 @@ export function ResourceDetailPage() {
             <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
               {t(
                 "editor.cascadeMode",
-                "Changes will cascade to parent package and agent"
+                "Changes will cascade to parent workflow and agent"
               )}
             </p>
           )}

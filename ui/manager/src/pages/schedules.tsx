@@ -35,8 +35,7 @@ import type {
 // ==================== Status Badge ====================
 
 function StatusBadge({ schedule }: { schedule: ScheduleConfiguration }) {
-  // Show error states (FAILED, DEAD_LETTERED) even when disabled
-  // since they convey more important information
+  const { t } = useTranslation();
   if (
     !schedule.enabled &&
     schedule.fireStatus !== "FAILED" &&
@@ -45,7 +44,7 @@ function StatusBadge({ schedule }: { schedule: ScheduleConfiguration }) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-zinc-500/10 px-2.5 py-0.5 text-xs font-semibold text-zinc-400">
         <Pause className="h-3 w-3" />
-        Disabled
+        {t("schedules.statusDisabled", "Disabled")}
       </span>
     );
   }
@@ -55,32 +54,32 @@ function StatusBadge({ schedule }: { schedule: ScheduleConfiguration }) {
       PENDING: {
         bg: "bg-emerald-500/10",
         text: "text-emerald-500",
-        label: "Active",
+        label: t("schedules.statusActive", "Active"),
       },
       CLAIMED: {
         bg: "bg-blue-500/10",
         text: "text-blue-500",
-        label: "Running",
+        label: t("schedules.statusRunning", "Running"),
       },
       EXECUTING: {
         bg: "bg-blue-500/10",
         text: "text-blue-500",
-        label: "Executing",
+        label: t("schedules.statusExecuting", "Executing"),
       },
       COMPLETED: {
         bg: "bg-emerald-500/10",
         text: "text-emerald-500",
-        label: "Active",
+        label: t("schedules.statusActive", "Active"),
       },
       FAILED: {
         bg: "bg-amber-500/10",
         text: "text-amber-500",
-        label: "Failed",
+        label: t("schedules.statusFailed", "Failed"),
       },
       DEAD_LETTERED: {
         bg: "bg-red-500/10",
         text: "text-red-500",
-        label: "Dead-Lettered",
+        label: t("schedules.statusDeadLettered", "Dead-Lettered"),
       },
     };
 
@@ -100,15 +99,16 @@ function StatusBadge({ schedule }: { schedule: ScheduleConfiguration }) {
 // ==================== Type Badge ====================
 
 function TypeBadge({ type }: { type: TriggerType }) {
+  const { t } = useTranslation();
   return type === "HEARTBEAT" ? (
     <span className="inline-flex items-center gap-1 rounded-full bg-pink-500/10 px-2.5 py-0.5 text-xs font-semibold text-pink-400">
       <Timer className="h-3 w-3" />
-      Heartbeat
+      {t("schedules.typeHeartbeat", "Heartbeat")}
     </span>
   ) : (
     <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs font-semibold text-violet-400">
       <CalendarClock className="h-3 w-3" />
-      Cron
+      {t("schedules.typeCron", "Cron")}
     </span>
   );
 }
@@ -144,20 +144,20 @@ function FireLogsRow({ scheduleId }: { scheduleId: string }) {
               </div>
             ) : !logs || logs.length === 0 ? (
               <p className="p-4 text-center text-xs text-muted-foreground">
-                No fire history yet
+                {t("schedules.noFireHistory", "No fire history yet")}
               </p>
             ) : (
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border/50 text-muted-foreground">
-                    <th className="px-3 py-2 text-start font-medium">Fired</th>
+                    <th className="px-3 py-2 text-start font-medium">{t("schedules.logFired", "Fired")}</th>
                     <th className="px-3 py-2 text-start font-medium">
-                      Duration
+                      {t("schedules.logDuration", "Duration")}
                     </th>
                     <th className="px-3 py-2 text-start font-medium">
-                      Result
+                      {t("schedules.logResult", "Result")}
                     </th>
-                    <th className="px-3 py-2 text-start font-medium">Error</th>
+                    <th className="px-3 py-2 text-start font-medium">{t("status.error", "Error")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -341,7 +341,7 @@ function CreateScheduleDialog({
                   ) : (
                     <Timer className="h-3.5 w-3.5" />
                   )}
-                  {tt === "CRON" ? "Cron" : "Heartbeat"}
+                  {tt === "CRON" ? t("schedules.typeCron", "Cron") : t("schedules.typeHeartbeat", "Heartbeat")}
                 </button>
               ))}
             </div>
@@ -360,7 +360,7 @@ function CreateScheduleDialog({
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-accent focus:outline-none"
               />
               <p className="mt-1 text-xs text-muted-foreground">
-                5-field format: minute hour day-of-month month day-of-week
+                {t("schedules.cronHelp", "5-field format: minute hour day-of-month month day-of-week")}
               </p>
             </div>
           ) : (
@@ -404,9 +404,9 @@ function CreateScheduleDialog({
               onChange={(e) => setEnvironment(e.target.value)}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
             >
-              <option value="production">Production</option>
+              <option value="production">{t("schedules.envProduction", "Production")}</option>
               
-              <option value="test">Test</option>
+              <option value="test">{t("schedules.envTest", "Test")}</option>
             </select>
           </div>
 
@@ -439,9 +439,9 @@ function CreateScheduleDialog({
                 }
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
               >
-                <option value="new">New (fresh conversation each fire)</option>
+                <option value="new">{t("schedules.strategyNew", "New (fresh conversation each fire)")}</option>
                 <option value="persistent">
-                  Persistent (reuse same conversation)
+                  {t("schedules.strategyPersistent", "Persistent (reuse same conversation)")}
                 </option>
               </select>
             </div>

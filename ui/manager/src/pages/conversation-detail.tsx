@@ -20,6 +20,9 @@ import {
   Code,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/api-client";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import {
   useSimpleConversation,
   useDeleteConversation,
@@ -32,57 +35,48 @@ import type {
 import { extractInput, extractOutput, extractActions } from "@/lib/api/conversations";
 import { useNavigate } from "react-router-dom";
 
-const stateConfig: Record<
+// Status icons — labels resolved via i18n in component
+const stateIcons: Record<
   ConversationState,
-  { icon: typeof Circle; label: string; color: string; bg: string }
+  { icon: typeof Circle; color: string; bg: string }
 > = {
-  READY: {
-    icon: Circle,
-    label: "Active",
-    color: "text-emerald-500",
-    bg: "bg-emerald-500/10",
-  },
-  IN_PROGRESS: {
-    icon: Clock,
-    label: "In Progress",
-    color: "text-amber-500",
-    bg: "bg-amber-500/10",
-  },
-  ERROR: {
-    icon: AlertTriangle,
-    label: "Error",
-    color: "text-destructive",
-    bg: "bg-destructive/10",
-  },
-  ENDED: {
-    icon: CheckCircle2,
-    label: "Ended",
-    color: "text-muted-foreground",
-    bg: "bg-muted",
-  },
+  READY: { icon: Circle, color: "text-emerald-500", bg: "bg-emerald-500/10" },
+  IN_PROGRESS: { icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10" },
+  ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
+  ENDED: { icon: CheckCircle2, color: "text-muted-foreground", bg: "bg-muted" },
 };
 
 export function ConversationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
+  // i18n labels
+  const stateLabels: Record<ConversationState, string> = {
+    READY: t("conversations.stateActive", "Active"),
+    IN_PROGRESS: t("conversations.stateInProgress", "In Progress"),
+    ERROR: t("status.error", "Error"),
+    ENDED: t("conversations.stateEnded", "Ended"),
+  };
+
   const deleteMutation = useDeleteConversation();
 
   const { data: conversation, isLoading, isError, refetch } =
     useSimpleConversation(id!, true, false);
 
-  async function handleDelete() {
-    if (
-      window.confirm(
-        t(
-          "conversations.confirmDelete",
-          "Are you sure you want to delete this conversation?"
-        )
-      )
-    ) {
-      await deleteMutation.mutateAsync({ id: id! });
-      navigate("/manage/conversations");
-    }
+  function handleDelete() {
+    deleteMutation.mutate(
+      { id: id! },
+      {
+        onSuccess: () => {
+          toast.success(t("common.delete") + " \u2713");
+          navigate("/manage/conversations");
+        },
+        onError: (err) => toast.error(getErrorMessage(err)),
+      }
+    );
+    setShowDeleteDialog(false);
   }
 
   if (isLoading) {
@@ -114,8 +108,9 @@ export function ConversationDetailPage() {
   }
 
   const state = conversation.conversationState || "READY";
-  const config = stateConfig[state];
+  const config = stateIcons[state];
   const StateIcon = config.icon;
+  const stateLabel = stateLabels[state];
   const stepCount = conversation.conversationSteps?.length ?? 0;
 
   return (
@@ -144,7 +139,7 @@ export function ConversationDetailPage() {
             )}
           >
             <StateIcon className="h-4 w-4" />
-            {config.label}
+            {stateLabel}
           </span>
 
           {/* Agent info */}
@@ -159,7 +154,7 @@ export function ConversationDetailPage() {
 
           {/* Delete */}
           <button
-            onClick={handleDelete}
+            onClick={() => setShowDeleteDialog(true)}
             className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
           >
             <Trash2 className="h-4 w-4" />
@@ -211,6 +206,18 @@ export function ConversationDetailPage() {
           ))}
         </div>
       </section>
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        title={t("conversations.confirmDelete", "Delete Conversation")}
+        description={t("conversations.confirmDeleteDescription", "This conversation and its history will be permanently removed.")}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={handleDelete}
+        isPending={deleteMutation.isPending}
+      />
     </div>
   );
 }

@@ -60,12 +60,13 @@ function groupByPhase(entries: TranscriptEntry[]): PhaseGroup[] {
   return groups;
 }
 
-const STATE_LABELS: Record<string, { label: string; variant: "default" | "success" | "warning" | "destructive" }> = {
-  CREATED: { label: "Created", variant: "default" },
-  IN_PROGRESS: { label: "In Progress", variant: "warning" },
-  SYNTHESIZING: { label: "Synthesizing…", variant: "warning" },
-  COMPLETED: { label: "Completed", variant: "success" },
-  FAILED: { label: "Failed", variant: "destructive" },
+// State variants — labels resolved via i18n in component
+const STATE_VARIANTS: Record<string, { variant: "default" | "success" | "warning" | "destructive" }> = {
+  CREATED: { variant: "default" },
+  IN_PROGRESS: { variant: "warning" },
+  SYNTHESIZING: { variant: "warning" },
+  COMPLETED: { variant: "success" },
+  FAILED: { variant: "destructive" },
 };
 
 export function DiscussionTranscript({
@@ -97,7 +98,15 @@ export function DiscussionTranscript({
   }
 
   const phases = groupByPhase(conversation.transcript);
-  const stateInfo = STATE_LABELS[conversation.state] || STATE_LABELS.CREATED;
+  const stateVariant = STATE_VARIANTS[conversation.state] || STATE_VARIANTS.CREATED;
+  const discussionStateLabels: Record<string, string> = {
+    CREATED: t("groups.stateCreated", "Created"),
+    IN_PROGRESS: t("conversations.stateInProgress", "In Progress"),
+    SYNTHESIZING: t("groups.stateSynthesizing", "Synthesizing…"),
+    COMPLETED: t("groups.stateCompleted", "Completed"),
+    FAILED: t("groups.stateFailed", "Failed"),
+  };
+  const stateLabel = discussionStateLabels[conversation.state] ?? conversation.state;
 
   function handleCopySynthesis() {
     if (conversation?.synthesizedAnswer) {
@@ -120,8 +129,8 @@ export function DiscussionTranscript({
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 {t("groups.question", "Question")}
               </span>
-              <Badge variant={stateInfo!.variant} className="text-[10px]">
-                {stateInfo!.label}
+              <Badge variant={stateVariant!.variant} className="text-[10px]">
+                {stateLabel}
               </Badge>
               <span className="text-[10px] text-muted-foreground ms-auto">
                 {new Date(conversation.created).toLocaleString()}

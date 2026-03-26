@@ -2,15 +2,15 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Workflow, Search, Plus, ExternalLink, Trash2, Copy } from "lucide-react";
 import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/api-client";
 import {
   useWorkflowDescriptors,
   useDeleteWorkflow,
+  groupWorkflowsByName,
 } from "@/hooks/use-workflows";
 import { WorkflowCard } from "@/components/workflows/workflow-card";
 import { CreateWorkflowDialog } from "@/components/workflows/create-workflow-dialog";
-import { parseResourceUri } from "@/lib/api/agents";
 import { cn } from "@/lib/utils";
-import type { AgentDescriptor } from "@/lib/api/agents";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -35,10 +35,7 @@ export function WorkflowsPage() {
     useWorkflowDescriptors(100, 0, search);
   const deleteMutation = useDeleteWorkflow();
 
-  const enrichedWorkflows = (packages ?? []).map((pkg: AgentDescriptor) => {
-    const { id, version } = parseResourceUri(pkg.resource);
-    return { ...pkg, id, version };
-  });
+  const enrichedWorkflows = packages ? groupWorkflowsByName(packages) : [];
 
   function handleDelete(id: string, version: number) {
     setDeleteTarget({ id, version });
@@ -51,7 +48,7 @@ export function WorkflowsPage() {
           toast.success(t("common.delete") + " ✓");
           setDeleteTarget(null);
         },
-        onError: () => toast.error(t("common.error")),
+        onError: (err) => toast.error(getErrorMessage(err)),
       });
     }
   }
@@ -256,7 +253,7 @@ export function WorkflowsPage() {
         open={deleteTarget !== null}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title={t("packages.confirmDelete")}
-        description={t("packages.confirmDelete")}
+        description={t("packages.confirmDeleteDescription", "This action cannot be undone. The workflow and all its data will be permanently removed.")}
         confirmLabel={t("common.delete")}
         cancelLabel={t("common.cancel")}
         onConfirm={confirmDelete}

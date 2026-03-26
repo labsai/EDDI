@@ -8,6 +8,7 @@ import {
   deleteWorkflow,
   type WorkflowConfiguration,
 } from "@/lib/api/workflows";
+import { parseResourceUri, type AgentDescriptor } from "@/lib/api/agents";
 
 const WORKFLOWS_KEY = ["workflows"] as const;
 
@@ -111,3 +112,26 @@ export function useUpdateAgentWorkflows() {
     },
   });
 }
+
+/** Group workflow descriptors by resource ID, keeping the latest version per workflow */
+export function groupWorkflowsByName(
+  workflows: AgentDescriptor[]
+): (AgentDescriptor & { id: string; version: number })[] {
+  const grouped = new Map<
+    string,
+    AgentDescriptor & { id: string; version: number }
+  >();
+
+  for (const wf of workflows) {
+    const { id, version } = parseResourceUri(wf.resource);
+    const existing = grouped.get(id);
+    if (!existing || version > existing.version) {
+      grouped.set(id, { ...wf, id, version });
+    }
+  }
+
+  return Array.from(grouped.values()).sort(
+    (a, b) => b.lastModifiedOn - a.lastModifiedOn
+  );
+}
+

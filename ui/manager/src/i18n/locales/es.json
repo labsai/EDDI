@@ -244,6 +244,10 @@
       "propertysetter": {
         "name": "Configurador de propiedades",
         "description": "Configurar propiedades de conversación y gestionar el llenado de slots"
+      },
+      "mcpcalls": {
+        "name": "MCP Calls",
+        "description": "Configure MCP server connections and deterministic tool calls"
       }
     }
   },

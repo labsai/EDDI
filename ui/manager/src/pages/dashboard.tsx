@@ -56,6 +56,9 @@ export function DashboardPage() {
     },
   ];
 
+  // Remove resourceCount card (always 0, no backend endpoint)
+  const visibleStatCards = statCards.filter((s) => s.to !== "/manage/resources" || s.value > 0);
+
   return (
     <div className="space-y-8">
       {/* Page header */}
@@ -83,7 +86,7 @@ export function DashboardPage() {
                 </CardContent>
               </Card>
             ))
-          : statCards.map((stat) => (
+          : visibleStatCards.map((stat) => (
               <Link key={stat.label} to={stat.to}>
                 <Card className="transition-shadow hover:shadow-md">
                   <CardContent className="flex items-center gap-4">
@@ -179,7 +182,7 @@ export function DashboardPage() {
               <Link key={agent.id} to={`/manage/agentview/${agent.id}`}>
                 <Card className="transition-all hover:shadow-md hover:border-primary/30">
                   <CardHeader>
-                    <CardTitle className="truncate text-base">{agent.name || "Unnamed Agent"}</CardTitle>
+                    <CardTitle className="truncate text-base">{agent.name || t("agents.unnamed", "Unnamed Agent")}</CardTitle>
                   </CardHeader>
                   <CardContent className="pt-0">
                     <p className="text-xs text-muted-foreground truncate">

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Bot, Search, Plus, Upload, Wand2, ExternalLink, Trash2, Copy, Download } from "lucide-react";
 import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/api-client";
 import { useAgentDescriptors, useDeleteAgent, useDuplicateAgent, groupAgentsByName } from "@/hooks/use-agents";
 import { AgentCard } from "@/components/agents/agent-card";
 import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
@@ -51,7 +52,7 @@ export function AgentsPage() {
           toast.success(t("common.delete") + " ✓");
           setDeleteTarget(null);
         },
-        onError: () => toast.error(t("common.error")),
+        onError: (err) => toast.error(getErrorMessage(err)),
       });
     }
   }
@@ -61,7 +62,7 @@ export function AgentsPage() {
       { id, version, deepCopy: true },
       {
         onSuccess: () => toast.success(t("agentDetail.duplicateSuccess")),
-        onError: () => toast.error(t("common.error")),
+        onError: (err) => toast.error(getErrorMessage(err)),
       }
     );
   }
@@ -292,7 +293,7 @@ export function AgentsPage() {
         open={deleteTarget !== null}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title={t("agents.confirmDelete")}
-        description={t("agents.confirmDelete")}
+        description={t("agents.confirmDeleteDescription", "This action cannot be undone. The agent and all its data will be permanently removed.")}
         confirmLabel={t("common.delete")}
         cancelLabel={t("common.cancel")}
         onConfirm={confirmDelete}

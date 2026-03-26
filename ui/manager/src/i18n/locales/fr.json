@@ -244,6 +244,10 @@
       "propertysetter": {
         "name": "Définisseur de propriétés",
         "description": "Définir les propriétés de conversation et gérer le remplissage de créneaux"
+      },
+      "mcpcalls": {
+        "name": "MCP Calls",
+        "description": "Configure MCP server connections and deterministic tool calls"
       }
     }
   },

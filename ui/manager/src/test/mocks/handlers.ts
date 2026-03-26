@@ -680,6 +680,7 @@ export const handlers = [
       { type: "ai.labs.llm", displayName: "LLM", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
       { type: "ai.labs.output", displayName: "Output", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
       { type: "ai.labs.output.template", displayName: "Output Template", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "ai.labs.mcpcalls", displayName: "MCP Calls", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
     ]);
   }),
 
@@ -899,7 +900,33 @@ export const handlers = [
     });
   }),
 
-  // Generic descriptor handlers for all 6 resource types
+  // MCP Calls mock data
+  http.get("*/mcpcallsstore/mcpcalls/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    return HttpResponse.json({
+      name: "Document Tools Server",
+      mcpServerUrl: "http://localhost:7070/mcp",
+      transport: "http",
+      apiKey: "${vault:mcp-doc-key}",
+      timeoutMs: 30000,
+      toolsWhitelist: ["search_documents", "index_document"],
+      toolsBlacklist: [],
+      mcpCalls: [
+        {
+          name: "searchDocs",
+          actions: ["search"],
+          toolName: "search_documents",
+          toolArguments: { query: "[[${memory.input}]]" },
+          saveResponse: true,
+          responseObjectName: "searchResults",
+        },
+      ],
+    });
+  }),
+
+  // Generic descriptor handlers for all resource types
   ...createResourceHandlers("rulestore", "rulesets", "rules"),
   ...createResourceHandlers("apicallstore", "apicalls", "apicalls"),
   ...createResourceHandlers("outputstore", "outputsets", "output"),
@@ -914,6 +941,7 @@ export const handlers = [
     "propertysetters",
     "propertysetter"
   ),
+  ...createResourceHandlers("mcpcallsstore", "mcpcalls", "mcpcalls"),
 ];
 
 function createResourceHandlers(

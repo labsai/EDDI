@@ -244,6 +244,10 @@
       "propertysetter": {
         "name": "プロパティセッター",
         "description": "会話プロパティの設定とスロットフィリングの管理"
+      },
+      "mcpcalls": {
+        "name": "MCP Calls",
+        "description": "Configure MCP server connections and deterministic tool calls"
       }
     }
   },

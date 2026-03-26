@@ -1,3 +1,4 @@
+import { api } from "../api-client";
 import type { SimpleConversationMemorySnapshot } from "./conversations";
 
 // --- Types ---
@@ -29,12 +30,6 @@ export interface SSEEvent {
 
 // --- Helpers ---
 
-const BASE_URL = window.location.origin;
-
-function buildUrl(path: string): string {
-  return `${BASE_URL}${path}`;
-}
-
 /** Extract conversation ID from Location header (e.g. "/agents/CONV_ID?...") */
 export function parseConversationIdFromLocation(location: string): string {
   const parts = location.split("/");
@@ -45,23 +40,19 @@ export function parseConversationIdFromLocation(location: string): string {
 
 // --- API Functions ---
 
-/** Start a new conversation. Returns the location header containing the conversation ID. */
+/** Start a new conversation. Returns the conversation ID extracted from Location header. */
 export async function startConversation(
   _environment: string,
   agentId: string
 ): Promise<string> {
-  const response = await fetch(buildUrl(`/agents/${agentId}/start`), {
-    method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to start conversation: ${response.statusText}`);
-  }
-  const location = response.headers.get("Location") ?? "";
-  return parseConversationIdFromLocation(location);
+  const result = await api.post<{ location: string }>(
+    `/agents/${agentId}/start`
+  );
+  return parseConversationIdFromLocation(result.location);
 }
 
 /** Read an existing conversation (GET). Used after start (welcome message) and to resume. */
-export async function readConversation(
+export function readConversation(
   _environment: string,
   _agentId: string,
   conversationId: string,
@@ -71,13 +62,9 @@ export async function readConversation(
     returnDetailed: "false",
     returnCurrentStepOnly: String(returnCurrentStepOnly),
   });
-  const response = await fetch(
-    buildUrl(`/agents/${conversationId}?${params.toString()}`)
+  return api.get<SimpleConversationMemorySnapshot>(
+    `/agents/${conversationId}?${params.toString()}`
   );
-  if (!response.ok) {
-    throw new Error(`Failed to read conversation: ${response.statusText}`);
-  }
-  return response.json();
 }
 
 /** Send a plain-text message (non-streaming). */
@@ -87,26 +74,34 @@ export async function sendMessage(
   conversationId: string,
   message: string
 ): Promise<SimpleConversationMemorySnapshot> {
+  // Plain text requires raw fetch since api-client always sets JSON content-type
   const params = new URLSearchParams({
     returnDetailed: "false",
     returnCurrentStepOnly: "true",
   });
   const response = await fetch(
-    buildUrl(`/agents/${conversationId}?${params.toString()}`),
+    `${api.getBaseUrl()}/agents/${conversationId}?${params.toString()}`,
     {
       method: "POST",
-      headers: { "Content-Type": "text/plain" },
+      headers: {
+        "Content-Type": "text/plain",
+        ...api.getAuthHeader(),
+      },
       body: message,
     }
   );
   if (!response.ok) {
-    throw new Error(`Failed to send message: ${response.statusText}`);
+    throw {
+      status: response.status,
+      message: response.statusText,
+      url: response.url,
+    };
   }
   return response.json();
 }
 
 /** Send a message with context (non-streaming). */
-export async function sendMessageWithContext(
+export function sendMessageWithContext(
   _environment: string,
   _agentId: string,
   conversationId: string,
@@ -116,23 +111,17 @@ export async function sendMessageWithContext(
     returnDetailed: "false",
     returnCurrentStepOnly: "true",
   });
-  const response = await fetch(
-    buildUrl(`/agents/${conversationId}?${params.toString()}`),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(inputData),
-    }
+  return api.post<SimpleConversationMemorySnapshot>(
+    `/agents/${conversationId}?${params.toString()}`,
+    inputData
   );
-  if (!response.ok) {
-    throw new Error(`Failed to send message: ${response.statusText}`);
-  }
-  return response.json();
 }
 
 /**
  * Send a message via SSE streaming.
  * Returns an async generator yielding SSE events.
+ * Note: SSE streaming requires raw fetch for ReadableStream access,
+ * but we still attach auth headers.
  */
 export async function* sendMessageStreaming(
   _environment: string,
@@ -141,16 +130,23 @@ export async function* sendMessageStreaming(
   inputData: InputData
 ): AsyncGenerator<SSEEvent> {
   const response = await fetch(
-    buildUrl(`/agents/${conversationId}/stream`),
+    `${api.getBaseUrl()}/agents/${conversationId}/stream`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...api.getAuthHeader(),
+      },
       body: JSON.stringify(inputData),
     }
   );
 
   if (!response.ok) {
-    throw new Error(`Streaming failed: ${response.statusText}`);
+    throw {
+      status: response.status,
+      message: `Streaming failed: ${response.statusText}`,
+      url: response.url,
+    };
   }
 
   const reader = response.body?.getReader();
@@ -194,46 +190,30 @@ export async function* sendMessageStreaming(
 }
 
 /** End a conversation. */
-export async function endConversation(
-  conversationId: string
-): Promise<void> {
-  const response = await fetch(
-    buildUrl(`/agents/${conversationId}/endConversation`),
-    { method: "POST" }
-  );
-  if (!response.ok) {
-    throw new Error(`Failed to end conversation: ${response.statusText}`);
-  }
+export function endConversation(conversationId: string): Promise<void> {
+  return api.post(`/agents/${conversationId}/endConversation`);
 }
 
 /** Undo the last conversation step. */
-export async function undoConversation(
+export function undoConversation(
   _environment: string,
   _agentId: string,
   conversationId: string
 ): Promise<SimpleConversationMemorySnapshot> {
-  const response = await fetch(
-    buildUrl(`/agents/${conversationId}/undo`),
-    { method: "POST" }
+  return api.post<SimpleConversationMemorySnapshot>(
+    `/agents/${conversationId}/undo`
   );
-  if (!response.ok) {
-    throw new Error(`Failed to undo: ${response.statusText}`);
-  }
-  return response.json();
 }
 
 /** Redo a previously undone step. */
-export async function redoConversation(
+export function redoConversation(
   _environment: string,
   _agentId: string,
   conversationId: string
 ): Promise<SimpleConversationMemorySnapshot> {
-  const response = await fetch(
-    buildUrl(`/agents/${conversationId}/redo`),
-    { method: "POST" }
+  return api.post<SimpleConversationMemorySnapshot>(
+    `/agents/${conversationId}/redo`
   );
-  if (!response.ok) {
-    throw new Error(`Failed to redo: ${response.statusText}`);
-  }
-  return response.json();
 }
+
+

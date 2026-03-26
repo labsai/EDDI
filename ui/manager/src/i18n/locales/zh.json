@@ -244,6 +244,10 @@
       "propertysetter": {
         "name": "属性设置器",
         "description": "设置会话属性和管理插槽填充"
+      },
+      "mcpcalls": {
+        "name": "MCP Calls",
+        "description": "Configure MCP server connections and deterministic tool calls"
       }
     }
   },

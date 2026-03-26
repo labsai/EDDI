@@ -11,7 +11,7 @@ import {
   Download,
   MessageSquare,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
 import { useDeploymentStatus, useDeployAgent, useUndeployAgent } from "@/hooks/use-agents";
 import { useExportAgent } from "@/hooks/use-backup";
 import type { AgentDescriptor } from "@/lib/api/agents";
@@ -26,35 +26,12 @@ interface AgentCardProps {
   onExport?: (id: string, version: number) => void;
 }
 
-const statusConfig = {
-  READY: {
-    icon: Rocket,
-    label: "Deployed",
-    color: "text-emerald-500",
-    bg: "bg-emerald-500/10",
-    ring: "ring-emerald-500/20",
-  },
-  IN_PROGRESS: {
-    icon: Clock,
-    label: "Deploying...",
-    color: "text-amber-500",
-    bg: "bg-amber-500/10",
-    ring: "ring-amber-500/20",
-  },
-  ERROR: {
-    icon: AlertTriangle,
-    label: "Error",
-    color: "text-destructive",
-    bg: "bg-destructive/10",
-    ring: "ring-destructive/20",
-  },
-  NOT_FOUND: {
-    icon: Square,
-    label: "Not deployed",
-    color: "text-muted-foreground",
-    bg: "bg-muted",
-    ring: "ring-border",
-  },
+// Status labels use i18n keys — resolved in component body
+const statusIcons = {
+  READY: { icon: Rocket, color: "text-emerald-500", bg: "bg-emerald-500/10", ring: "ring-emerald-500/20" },
+  IN_PROGRESS: { icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10", ring: "ring-amber-500/20" },
+  ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10", ring: "ring-destructive/20" },
+  NOT_FOUND: { icon: Square, color: "text-muted-foreground", bg: "bg-muted", ring: "ring-border" },
 };
 
 export function AgentCard({ agent, onDuplicate, onDelete }: AgentCardProps) {
@@ -66,8 +43,15 @@ export function AgentCard({ agent, onDuplicate, onDelete }: AgentCardProps) {
   const exportMutation = useExportAgent();
 
   const status = deployment?.status ?? "NOT_FOUND";
-  const config = statusConfig[status];
+  const config = statusIcons[status];
   const StatusIcon = config.icon;
+  const statusLabels: Record<string, string> = {
+    READY: t("status.deployed", "Deployed"),
+    IN_PROGRESS: t("status.deploying", "Deploying..."),
+    ERROR: t("status.error", "Error"),
+    NOT_FOUND: t("status.notDeployed", "Not deployed"),
+  };
+  const statusLabel = statusLabels[status] ?? status;
 
   const isDeployed = status === "READY";
   const isBusy =
@@ -95,7 +79,7 @@ export function AgentCard({ agent, onDuplicate, onDelete }: AgentCardProps) {
     );
   }
 
-  const timeAgo = formatTimeAgo(agent.lastModifiedOn);
+  const timeAgo = formatRelativeTime(agent.lastModifiedOn);
 
   return (
     <div
@@ -117,7 +101,7 @@ export function AgentCard({ agent, onDuplicate, onDelete }: AgentCardProps) {
           )}
         >
           <StatusIcon className="h-3.5 w-3.5" />
-          {config.label}
+          {statusLabel}
         </div>
 
         {/* Context menu */}
@@ -188,7 +172,7 @@ export function AgentCard({ agent, onDuplicate, onDelete }: AgentCardProps) {
           {agent.id}
         </p>
         <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-          {agent.description || "No description"}
+          {agent.description || t("agents.noDescription", "No description")}
         </p>
       </div>
 
@@ -234,16 +218,4 @@ export function AgentCard({ agent, onDuplicate, onDelete }: AgentCardProps) {
   );
 }
 
-function formatTimeAgo(timestamp: number): string {
-  const now = Date.now();
-  const diff = now - timestamp;
-  const minutes = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days = Math.floor(diff / 86400000);
 
-  if (minutes < 1) return "Just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 30) return `${days}d ago`;
-  return new Date(timestamp).toLocaleDateString();
-}

@@ -12,7 +12,10 @@ import {
   Save,
   Undo2,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
+import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/api-client";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import {
   useWorkflow,
   useUpdateWorkflow,
@@ -36,8 +39,9 @@ export function WorkflowDetailPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
 
-  const [version, setVersion] = useState(1);
+  const [version, setVersion] = useState<number | undefined>(undefined);
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [localExtensions, setLocalExtensions] = useState<
     WorkflowExtension[] | null
   >(null);
@@ -46,15 +50,7 @@ export function WorkflowDetailPage() {
     text: string;
   } | null>(null);
 
-  const {
-    data: pkg,
-    isLoading,
-    isError,
-    refetch,
-  } = useWorkflow(id!, version);
   const { data: versionDescriptors } = useWorkflowVersions(id!);
-  const updateMutation = useUpdateWorkflow();
-  const deleteMutation = useDeleteWorkflow();
 
   // Version picker data
   const versions = useMemo(() => {
@@ -66,6 +62,18 @@ export function WorkflowDetailPage() {
       })
       .sort((a, b) => b.version - a.version);
   }, [versionDescriptors]);
+
+  // Default to latest version
+  const resolvedVersion = version ?? versions[0]?.version ?? 1;
+
+  const {
+    data: pkg,
+    isLoading,
+    isError,
+    refetch,
+  } = useWorkflow(id!, resolvedVersion);
+  const updateMutation = useUpdateWorkflow();
+  const deleteMutation = useDeleteWorkflow();
 
   // Use local state if user has made edits, otherwise use server data
   const currentExtensions = useMemo(
@@ -130,7 +138,7 @@ export function WorkflowDetailPage() {
     try {
       await updateMutation.mutateAsync({
         id: id!,
-        version,
+        version: resolvedVersion,
         config: { workflowSteps: localExtensions },
       });
       setSaveMessage({
@@ -141,27 +149,27 @@ export function WorkflowDetailPage() {
     } catch {
       setSaveMessage({
         type: "error",
-        text: t("packageEditor.saveError", "Failed to save package"),
+        text: t("packageEditor.saveError", "Failed to save workflow"),
       });
     }
-  }, [isDirty, localExtensions, updateMutation, id, version, t]);
+  }, [isDirty, localExtensions, updateMutation, id, resolvedVersion, t]);
 
   const handleDiscard = useCallback(() => {
     setLocalExtensions(null);
   }, []);
 
-  async function handleDelete() {
-    if (
-      window.confirm(
-        t(
-          "packages.confirmDelete",
-          "Are you sure you want to delete this package?"
-        )
-      )
-    ) {
-      await deleteMutation.mutateAsync({ id: id!, version });
-      navigate("/manage/workflows");
-    }
+  function handleDelete() {
+    deleteMutation.mutate(
+      { id: id!, version: resolvedVersion },
+      {
+        onSuccess: () => {
+          toast.success(t("common.delete") + " \u2713");
+          navigate("/manage/workflows");
+        },
+        onError: (err) => toast.error(getErrorMessage(err)),
+      }
+    );
+    setShowDeleteDialog(false);
   }
 
   const handleVersionChange = useCallback((v: number) => {
@@ -220,7 +228,7 @@ export function WorkflowDetailPage() {
           {versions.length > 0 && (
             <VersionSelect
               versions={versions}
-              current={version}
+              current={resolvedVersion}
               onChange={handleVersionChange}
               disabled={isDirty}
             />
@@ -281,7 +289,7 @@ export function WorkflowDetailPage() {
 
           {/* Delete */}
           <button
-            onClick={handleDelete}
+            onClick={() => setShowDeleteDialog(true)}
             className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
             data-testid="delete-pkg-btn"
           >
@@ -329,6 +337,18 @@ export function WorkflowDetailPage() {
 
       {/* Raw config (collapsible) */}
       <RawConfigSection config={pkg} />
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        title={t("packages.confirmDelete", "Delete Workflow")}
+        description={t("packages.confirmDeleteDescription", "This action cannot be undone. The workflow and all its data will be permanently removed.")}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={handleDelete}
+        isPending={deleteMutation.isPending}
+      />
     </div>
   );
 }
@@ -390,17 +410,7 @@ function VersionSelect({
   );
 }
 
-function formatRelativeTime(timestamp: number): string {
-  const diff = Date.now() - timestamp;
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(timestamp).toLocaleDateString();
-}
+// formatRelativeTime imported from @/lib/utils
 
 function RawConfigSection({
   config,
