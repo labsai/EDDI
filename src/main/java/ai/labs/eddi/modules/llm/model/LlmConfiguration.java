@@ -104,6 +104,12 @@ public record LlmConfiguration(List<Task> tasks) {
         private List<McpServerConfig> mcpServers;
 
         /**
+         * Remote A2A agents to consume as tools. Each entry defines an A2A-compliant
+         * agent whose skills become available as tool calls.
+         */
+        private List<A2AAgentConfig> a2aAgents;
+
+        /**
          * Enable built-in tools (calculator, web search, datetime, etc.) Default: false
          * (opt-in for security)
          */
@@ -177,7 +183,7 @@ public record LlmConfiguration(List<Task> tasks) {
          */
         public boolean isAgentMode() {
             return (tools != null && !tools.isEmpty()) || (enableBuiltInTools != null && enableBuiltInTools)
-                    || (mcpServers != null && !mcpServers.isEmpty());
+                    || (mcpServers != null && !mcpServers.isEmpty()) || (a2aAgents != null && !a2aAgents.isEmpty());
         }
 
         /**
@@ -273,6 +279,14 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setMcpServers(List<McpServerConfig> mcpServers) {
             this.mcpServers = mcpServers;
+        }
+
+        public List<A2AAgentConfig> getA2aAgents() {
+            return a2aAgents;
+        }
+
+        public void setA2aAgents(List<A2AAgentConfig> a2aAgents) {
+            this.a2aAgents = a2aAgents;
         }
 
         public Boolean getEnableBuiltInTools() {
@@ -429,6 +443,74 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setTransport(String transport) {
             this.transport = transport;
+        }
+
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey;
+        }
+
+        public Long getTimeoutMs() {
+            return timeoutMs;
+        }
+
+        public void setTimeoutMs(Long timeoutMs) {
+            this.timeoutMs = timeoutMs;
+        }
+    }
+
+    /**
+     * Configuration for a remote A2A agent to use as a tool provider. Mirrors
+     * McpServerConfig in structure.
+     */
+    public static class A2AAgentConfig {
+        /**
+         * Base URL of the remote A2A agent (e.g.,
+         * "https://remote-agent.example.com/a2a/agents/xyz")
+         */
+        private String url;
+
+        /** Display name for the agent (used in tool naming) */
+        private String name;
+
+        /** Optional filter — only expose specific skills (by id or name) */
+        private List<String> skillsFilter;
+
+        /**
+         * API key as a vault reference (e.g., {@code ${vault:my-a2a-key}}). Raw keys
+         * are strongly discouraged — always use vault references to prevent secret
+         * leakage in configuration exports.
+         */
+        private String apiKey;
+
+        /** Timeout for A2A operations in milliseconds (default: 30000) */
+        private Long timeoutMs = 30000L;
+
+        public String getUrl() {
+            return url;
+        }
+
+        public void setUrl(String url) {
+            this.url = url;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public List<String> getSkillsFilter() {
+            return skillsFilter;
+        }
+
+        public void setSkillsFilter(List<String> skillsFilter) {
+            this.skillsFilter = skillsFilter;
         }
 
         public String getApiKey() {

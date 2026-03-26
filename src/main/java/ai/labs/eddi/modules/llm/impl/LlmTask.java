@@ -89,7 +89,7 @@ public class LlmTask implements ILifecycleTask {
             CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             IApiCallExecutor apiCallExecutor, ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager,
-            IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore) {
+            A2AToolProviderManager a2aToolProviderManager, IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -102,8 +102,8 @@ public class LlmTask implements ILifecycleTask {
         this.legacyChatExecutor = new LegacyChatExecutor();
         this.streamingLegacyChatExecutor = new StreamingLegacyChatExecutor();
         this.agentOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, toolExecutionService, mcpToolProviderManager, restAgentStore, restWorkflowStore,
-                resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter);
+                textSummarizerTool, pdfReaderTool, weatherTool, toolExecutionService, mcpToolProviderManager, a2aToolProviderManager, restAgentStore,
+                restWorkflowStore, resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter);
     }
 
     @Override

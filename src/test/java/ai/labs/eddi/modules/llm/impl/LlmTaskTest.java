@@ -95,7 +95,7 @@ class LlmTaskTest {
         langChainTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter, templatingEngine, jsonSerialization, prePostUtils,
                 languageModelApiConnectorBuilders, secretResolver, calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
                 textSummarizerTool, pdfReaderTool, weatherTool, apiCallExecutor, toolExecutionService, mock(McpToolProviderManager.class),
-                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class));
+                mock(A2AToolProviderManager.class), mock(IRestAgentStore.class), mock(IRestWorkflowStore.class));
     }
 
     static Stream<Arguments> provideParameters() {

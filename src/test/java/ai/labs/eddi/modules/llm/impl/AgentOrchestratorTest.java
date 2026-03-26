@@ -53,9 +53,9 @@ class AgentOrchestratorTest {
         weatherTool = mock(WeatherTool.class);
 
         orchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool, textSummarizerTool,
-                pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class), mock(IRestAgentStore.class),
-                mock(IRestWorkflowStore.class), mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
-                mock(IMemoryItemConverter.class));
+                pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
+                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class),
+                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
     }
 
     // ==================== Tool Collection Tests ====================
@@ -448,9 +448,9 @@ class AgentOrchestratorTest {
         var resourceClientLibrary = mock(IResourceClientLibrary.class);
 
         var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class), restAgentStore,
-                restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
-                mock(IMemoryItemConverter.class));
+                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
+                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
 
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");
@@ -474,9 +474,9 @@ class AgentOrchestratorTest {
         var resourceClientLibrary = mock(IResourceClientLibrary.class);
 
         var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class), restAgentStore,
-                restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
-                mock(IMemoryItemConverter.class));
+                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
+                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
 
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");
@@ -524,9 +524,9 @@ class AgentOrchestratorTest {
         var resourceClientLibrary = mock(IResourceClientLibrary.class);
 
         var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class), restAgentStore,
-                restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
-                mock(IMemoryItemConverter.class));
+                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
+                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
 
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");
@@ -568,9 +568,9 @@ class AgentOrchestratorTest {
         var restAgentStore = mock(IRestAgentStore.class);
 
         var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class), restAgentStore,
-                mock(IRestWorkflowStore.class), mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
-                mock(IMemoryItemConverter.class));
+                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                mock(A2AToolProviderManager.class), restAgentStore, mock(IRestWorkflowStore.class), mock(IResourceClientLibrary.class),
+                mock(IApiCallExecutor.class), mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
 
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");
@@ -596,9 +596,9 @@ class AgentOrchestratorTest {
         var resourceClientLibrary = mock(IResourceClientLibrary.class);
 
         var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class), restAgentStore,
-                restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
-                mock(IMemoryItemConverter.class));
+                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
+                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
 
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");

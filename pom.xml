@@ -162,6 +162,12 @@
             <artifactId>langchain4j-mcp</artifactId>
             <version>${langchain4j-beta.version}</version>
         </dependency>
+        <!-- Phase 10.5: A2A Protocol — core types + HTTP client for agent-to-agent communication -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-agentic-a2a</artifactId>
+            <version>${langchain4j-beta.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>

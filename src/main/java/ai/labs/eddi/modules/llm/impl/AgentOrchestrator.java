@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
@@ -62,6 +63,7 @@ class AgentOrchestrator {
     private final WeatherTool weatherTool;
     private final ToolExecutionService toolExecutionService;
     private final McpToolProviderManager mcpToolProviderManager;
+    private final A2AToolProviderManager a2aToolProviderManager;
 
     // For httpcall auto-discovery from workflow
     private final IRestAgentStore restAgentStore;
@@ -73,9 +75,9 @@ class AgentOrchestrator {
 
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
-            ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager, IRestAgentStore restAgentStore,
-            IRestWorkflowStore restWorkflowStore, IResourceClientLibrary resourceClientLibrary, IApiCallExecutor apiCallExecutor,
-            IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter) {
+            ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager, A2AToolProviderManager a2aToolProviderManager,
+            IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore, IResourceClientLibrary resourceClientLibrary,
+            IApiCallExecutor apiCallExecutor, IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter) {
         this.calculatorTool = calculatorTool;
         this.dateTimeTool = dateTimeTool;
         this.webSearchTool = webSearchTool;
@@ -86,6 +88,7 @@ class AgentOrchestrator {
         this.weatherTool = weatherTool;
         this.toolExecutionService = toolExecutionService;
         this.mcpToolProviderManager = mcpToolProviderManager;
+        this.a2aToolProviderManager = a2aToolProviderManager;
         this.restAgentStore = restAgentStore;
         this.restWorkflowStore = restWorkflowStore;
         this.resourceClientLibrary = resourceClientLibrary;
@@ -134,20 +137,28 @@ class AgentOrchestrator {
         }
         boolean hasHttpCallTools = httpCallTools != null && !httpCallTools.toolSpecs().isEmpty();
 
+        // Discover A2A agent tools (if configured)
+        A2AToolProviderManager.A2AToolsResult a2aTools = null;
+        List<A2AAgentConfig> a2aAgents = task.getA2aAgents();
+        if (a2aAgents != null && !a2aAgents.isEmpty()) {
+            a2aTools = a2aToolProviderManager.discoverTools(a2aAgents);
+        }
+        boolean hasA2aTools = a2aTools != null && !a2aTools.toolSpecs().isEmpty();
+
         // No tools? Return null — caller should use legacy mode
-        if (enabledTools.isEmpty() && !hasMcpTools && !hasHttpCallTools) {
+        if (enabledTools.isEmpty() && !hasMcpTools && !hasHttpCallTools && !hasA2aTools) {
             return null;
         }
 
-        return executeWithTools(chatModel, systemMessage, chatMessages, enabledTools, mcpTools, httpCallTools, task, memory);
+        return executeWithTools(chatModel, systemMessage, chatMessages, enabledTools, mcpTools, httpCallTools, a2aTools, task, memory);
     }
 
     /**
      * Executes the tool-calling loop using direct ChatModel API.
      */
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, List<Object> tools,
-            McpToolProviderManager.McpToolsResult mcpTools, HttpCallToolsResult httpCallTools, LlmConfiguration.Task task, IConversationMemory memory)
-            throws LifecycleException {
+            McpToolProviderManager.McpToolsResult mcpTools, HttpCallToolsResult httpCallTools, A2AToolProviderManager.A2AToolsResult a2aTools,
+            LlmConfiguration.Task task, IConversationMemory memory) throws LifecycleException {
 
         // Build tool specifications and executors from built-in tool objects
         List<ToolSpecification> toolSpecs = new ArrayList<>();
@@ -183,6 +194,12 @@ class AgentOrchestrator {
         if (httpCallTools != null && !httpCallTools.toolSpecs().isEmpty()) {
             toolSpecs.addAll(httpCallTools.toolSpecs());
             toolExecutors.putAll(httpCallTools.executors());
+        }
+
+        // Merge A2A agent tools (if any)
+        if (a2aTools != null && !a2aTools.toolSpecs().isEmpty()) {
+            toolSpecs.addAll(a2aTools.toolSpecs());
+            toolExecutors.putAll(a2aTools.executors());
         }
 
         // Build message list with system message if provided
