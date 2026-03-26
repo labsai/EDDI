@@ -57,12 +57,14 @@ $ComposeCmdFiles = ""
 
 function Write-Banner {
     Write-Host ""
-    Write-Host " ╔═══════════════════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host " ║             E . D . D . I                         ║" -ForegroundColor Cyan
-    Write-Host " ║    Multi-Agent Orchestration Middleware           ║" -ForegroundColor Cyan
-    Write-Host " ║                                                   ║" -ForegroundColor Cyan
-    Write-Host " ║    Setup Wizard                                   ║" -ForegroundColor Cyan
-    Write-Host " ╚═══════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host "     ______   ____    ____    ____  " -ForegroundColor White
+    Write-Host "    / ____/  / __ \  / __ \  /  _/ " -ForegroundColor White
+    Write-Host "   / __/    / / / / / / / /  / /   " -ForegroundColor Cyan
+    Write-Host "  / /___   / /_/ / / /_/ / _/ /    " -ForegroundColor Cyan
+    Write-Host " /_____/  /_____/ /_____/ /___/    " -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "   Multi-Agent Orchestration Middleware" -ForegroundColor White
+    Write-Host "   https://eddi.labs.ai" -ForegroundColor DarkGray
     Write-Host ""
 }
 

@@ -37,13 +37,14 @@ public final class VaultStartupBanner {
     public static void printEnabled() {
         LOGGER.warn("""
 
-                ╔══════════════════════════════════════════════════════════════════╗
-                ║  ✅  SECRETS VAULT: ENABLED                                     ║
-                ║                                                                  ║
-                ║  Envelope encryption is active (AES-256-GCM).                    ║
-                ║  ${eddivault:...} references will be resolved at runtime.        ║
-                ║  Audit entries will be HMAC-signed for tamper detection.          ║
-                ╚══════════════════════════════════════════════════════════════════╝
+                +------------------------------------------------------------------+
+                |  SECRETS VAULT: ENABLED                                          |
+                |                                                                  |
+                |  Envelope encryption is active (AES-256-GCM).                    |
+                |  ${eddivault:...} references will be resolved at runtime.        |
+                |  Audit entries will be HMAC-signed for tamper detection.         |
+                +------------------------------------------------------------------+
+
                 """);
     }
 
@@ -54,20 +55,21 @@ public final class VaultStartupBanner {
     public static void printDisabled() {
         LOGGER.warn("""
 
-                ╔══════════════════════════════════════════════════════════════════╗
-                ║  ⚠️   SECRETS VAULT: DISABLED — Master key not configured        ║
-                ╠══════════════════════════════════════════════════════════════════╣
-                ║                                                                  ║
-                ║  What this means:                                                ║
-                ║    • ${eddivault:...} secret references will NOT be resolved      ║
-                ║    • API keys in configs are stored/transmitted as PLAINTEXT      ║
-                ║    • Audit log entries will NOT have HMAC integrity signatures    ║
-                ║                                                                  ║
-                ║  To enable, set the EDDI_VAULT_MASTER_KEY env variable.           ║
-                ║  See docs for all configuration options:                          ║
-                ║                                                                  ║
-                ║  📖  https://docs.labs.ai/secrets-vault                           ║
-                ╚══════════════════════════════════════════════════════════════════╝
+                +------------------------------------------------------------------+
+                |  WARNING: SECRETS VAULT DISABLED -- Master key not configured    |
+                +------------------------------------------------------------------+
+                |                                                                  |
+                |  What this means:                                                |
+                |    * ${eddivault:...} secret references will NOT be resolved     |
+                |    * API keys in configs are stored/transmitted as PLAINTEXT     |
+                |    * Audit log entries will NOT have HMAC integrity signatures   |
+                |                                                                  |
+                |  To enable, set the EDDI_VAULT_MASTER_KEY env variable.          |
+                |  See docs for all configuration options:                         |
+                |                                                                  |
+                |  > https://docs.labs.ai/secrets-vault                            |
+                +------------------------------------------------------------------+
+
                 """);
     }
 }

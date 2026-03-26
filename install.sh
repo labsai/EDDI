@@ -164,14 +164,15 @@ read_port() {
 
 banner() {
   echo ""
-  echo -e "${CYAN}${BOLD}"
-  echo " ╔═══════════════════════════════════════════════════╗"
-  echo " ║             E . D . D . I                         ║"
-  echo " ║    Multi-Agent Orchestration Middleware           ║"
-  echo " ║                                                   ║"
-  echo " ║    Setup Wizard                                   ║"
-  echo " ╚═══════════════════════════════════════════════════╝"
-  echo -e "${RESET}"
+  echo -e "${BOLD}     ______   ____    ____    ____  ${RESET}"
+  echo -e "${BOLD}    / ____/  / __ \\  / __ \\  /  _/ ${RESET}"
+  echo -e "${CYAN}   / __/    / / / / / / / /  / /   ${RESET}"
+  echo -e "${CYAN}  / /___   / /_/ / / /_/ / _/ /    ${RESET}"
+  echo -e "${CYAN} /_____/  /_____/ /_____/ /___/    ${RESET}"
+  echo ""
+  echo -e "   ${BOLD}Multi-Agent Orchestration Middleware${RESET}"
+  echo -e "   ${DIM}https://eddi.labs.ai${RESET}"
+  echo ""
 }
 
 # ── Parse arguments ────────────────────────────────────────
