@@ -1,8 +1,8 @@
 # EDDI Manager — Handoff Document
 
-> **Last updated**: 2026-03-26  
+> **Last updated**: 2026-03-27  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: Group Discussion UI — groups page, detail, wizard, orchestration components
+> **Last commit**: `184c550` feat(v6): OpenAPI endpoint discovery for HTTP Calls editor and workflow import
 
 ---
 
@@ -54,11 +54,13 @@
 | —     | **LangChain Editor Tooling**: `enableHttpCallTools` toggle, `mcpServers` editor (URL/name/transport/apiKey), updated agent mode detection | `0b527fe` |
 | —     | **Group Discussion UI**: Groups page, Group Detail, Group Wizard, 7 components, API layer, TanStack Query hooks, 5 preset templates | pending |
 | —     | **A2A Protocol UI**: Agent-detail A2A section (CTA enable/disable, description, skills tags, endpoint URLs, Agent Card preview), LangChain editor A2A Agents section (URL, name, apiKey vault warning, timeout, skills filter), MSW mocks, 10 new tests | pending |
+| —     | **MCP Tool Auto-Discovery**: Discover button in MCP editor, DiscoveredToolsPanel, whitelist/blacklist add | pending |
+| —     | **OpenAPI Endpoint Discovery**: Backend `discover-endpoints` via `McpApiToolBuilder`, editor-level import (Append/Replace with confirmation), workflow-level import dialog (parallel multi-config creation), URL validation, Enter key, collision-safe keys | `184c550` |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 295 pass (`npm run test`) — 31 files
+- **Unit/Component**: 318 pass (`npm run test`) — 32 files
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds
