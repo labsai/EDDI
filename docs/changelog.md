@@ -13,6 +13,32 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## A2A Protocol Integration (2026-03-26)
+
+**Repo:** EDDI (`feature/version-6.0.0`) — Commit `cbc4b70b`
+
+**What changed:**
+
+Implemented the Agent2Agent (A2A) protocol for distributed peer-to-peer agent communication.
+
+| Component | Change |
+|---|---|
+| **Dependency** | Added `langchain4j-agentic-a2a` (via `langchain4j-beta.version` property) |
+| **A2A Server** | `A2AModels.java` (protocol records), `AgentCardService.java` (card generation), `A2ATaskHandler.java` (JSON-RPC → ConversationService bridge), `RestA2AEndpoint.java` (JAX-RS endpoints) |
+| **A2A Client** | `A2AToolProviderManager.java` (mirrors `McpToolProviderManager` — discovers remote agents, wraps skills as `ToolSpecification`) |
+| **Config** | `AgentConfiguration` gains `a2aEnabled`, `a2aSkills`, `description` fields; `LlmConfiguration.Task` gains `a2aAgents` list with `A2AAgentConfig` |
+| **Integration** | `AgentOrchestrator` + `LlmTask` inject `A2AToolProviderManager`; A2A tools merge alongside built-in, MCP, and httpcall tools |
+| **Security** | Vault reference enforcement for API keys (`${vault:...}`), runtime warning on raw key usage |
+| **Endpoints** | `GET /.well-known/agent.json`, `GET/POST /a2a/agents/{id}`, `GET /a2a/agents` |
+
+**Design decisions:**
+- Used EDDI's own lightweight protocol records (not SDK types) to keep server endpoints decoupled
+- Mirrors the MCP tool integration pattern exactly — same discovery/merge/execution pipeline
+- Feature toggle via `eddi.a2a.enabled` config property (default: true)
+- `isAgentMode()` updated to include A2A agents as a trigger
+
+---
+
 ## Templating Engine Migration: Thymeleaf → Quarkus Qute (2026-03-26)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
