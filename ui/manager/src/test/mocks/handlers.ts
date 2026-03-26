@@ -255,20 +255,6 @@ const RESOURCE_SCHEMAS: Record<string, object> = {
               additionalProperties: { type: "string" },
             },
             tools: { type: "array", items: { type: "string" }, description: "URIs to HTTP calls configs used as tools" },
-            mcpServers: {
-              type: "array",
-              description: "External MCP servers whose tools become available to the LLM",
-              items: {
-                type: "object",
-                properties: {
-                  url: { type: "string", description: "URL of the MCP server" },
-                  name: { type: "string", description: "Optional display name" },
-                  transport: { type: "string", description: "Transport type: http or sse" },
-                  apiKey: { type: "string", description: "API key or vault reference" },
-                  timeoutMs: { type: "integer", description: "Timeout in milliseconds" },
-                },
-              },
-            },
             enableBuiltInTools: { type: "boolean", description: "Whether to enable built-in tools" },
             enableHttpCallTools: { type: "boolean", description: "Auto-discover httpcall extensions from the workflow as tools (default: true)" },
             builtInToolsWhitelist: { type: "array", items: { type: "string" }, description: "Whitelist of built-in tool names" },
@@ -813,9 +799,7 @@ export const handlers = [
             "eddi://ai.labs.apicalls/apicallstore/apicalls/weather?version=1",
           ],
           enableHttpCallTools: true,
-          mcpServers: [
-            { url: "http://localhost:7070/mcp", name: "Local MCP", transport: "http" },
-          ],
+          enableMcpCallTools: true,
           conversationHistoryLimit: 10,
           maxBudgetPerConversation: 1.0,
           enableCostTracking: true,

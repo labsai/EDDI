@@ -20,7 +20,6 @@ import {
   MessageSquarePlus,
   BarChart3,
   Wrench,
-  Server,
   ChevronDown,
   AlertCircle,
   CheckCircle2,
@@ -60,7 +59,6 @@ interface WizardState {
   builtInToolsWhitelist: string;
   enableQuickReplies: boolean;
   enableSentimentAnalysis: boolean;
-  mcpServers: string;
   // API-specific
   openApiSpec: string;
   apiBaseUrl: string;
@@ -86,7 +84,6 @@ const INITIAL_STATE: WizardState = {
   builtInToolsWhitelist: "",
   enableQuickReplies: false,
   enableSentimentAnalysis: false,
-  mcpServers: "",
   openApiSpec: "",
   apiBaseUrl: "",
   apiAuth: "",
@@ -212,7 +209,6 @@ export function AgentWizardPage() {
           builtInToolsWhitelist: state.builtInToolsWhitelist || undefined,
           enableQuickReplies: state.enableQuickReplies || undefined,
           enableSentimentAnalysis: state.enableSentimentAnalysis || undefined,
-          mcpServers: state.mcpServers || undefined,
           deploy: state.deploy,
           environment: state.environment,
         };
@@ -1119,29 +1115,6 @@ function FeaturesStep({
           </div>
         )}
 
-        {/* MCP Servers (standard only) */}
-        {state.mode === "standard" && (
-          <div className="rounded-lg border border-border p-4 space-y-3">
-            <FeatureToggle
-              icon={Server}
-              label={t("setupWizard.mcpServers", "MCP Servers")}
-              description={t("setupWizard.mcpServersDesc", "Connect to Model Context Protocol servers for external tools")}
-              checked={state.mcpServers.length > 0}
-              onChange={(on) => onChange({ mcpServers: on ? state.mcpServers || "" : "" })}
-              data-testid="wizard-toggle-mcp"
-            />
-            {state.mcpServers.length > 0 && (
-              <input
-                value={state.mcpServers}
-                onChange={(e) => onChange({ mcpServers: e.target.value })}
-                placeholder="http://localhost:3000/sse, http://tools.example.com/sse"
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow font-mono"
-                data-testid="wizard-mcp-urls"
-              />
-            )}
-          </div>
-        )}
-
         {/* Deploy toggle */}
         <div className="mt-2 rounded-lg border border-primary/20 bg-primary/5 p-4">
           <FeatureToggle
@@ -1208,7 +1181,6 @@ function ReviewStep({
   if (state.enableQuickReplies) rows.push([t("setupWizard.quickReplies", "Quick Replies"), "✓"]);
   if (state.enableSentimentAnalysis) rows.push([t("setupWizard.sentiment", "Sentiment Analysis"), "✓"]);
   if (state.enableBuiltInTools) rows.push([t("setupWizard.builtInTools", "Built-in Tools"), "✓"]);
-  if (state.mcpServers) rows.push([t("setupWizard.mcpServers", "MCP Servers"), state.mcpServers]);
   rows.push([t("setupWizard.reviewDeploy", "Deploy"), state.deploy ? `✓ (${state.environment})` : "—"]);
 
   return (

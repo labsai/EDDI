@@ -280,8 +280,8 @@
     "properties": "Conversation Properties"
   },
   "chat": {
-    "selectAgent": "Select a agent...",
-    "noAgents": "No deployed agents available. Deploy a agent first.",
+    "selectAgent": "Select an agent...",
+    "noAgents": "No deployed agents available. Deploy an agent first.",
     "placeholder": "Type a message...",
     "send": "Send",
     "newConversation": "New Conversation",
@@ -289,7 +289,7 @@
     "streaming": "Streaming",
     "thinking": "Thinking...",
     "connectionError": "Connection error. Please try again.",
-    "empty": "Select a agent and start chatting!",
+    "empty": "Select an agent and start chatting!",
     "history": "History",
     "continueConversation": "Continue",
     "noHistory": "No conversation history yet.",
@@ -619,8 +619,8 @@
     "confirmDeleteMessage": "Are you sure you want to permanently delete \"{{key}}\"? This cannot be undone.",
     "empty": "No secrets found",
     "emptyHint": "Create a secret or change the namespace filters above.",
-    "enterAgentId": "Enter a Agent ID",
-    "enterAgentIdHint": "Specify a agent ID above to view and manage its secrets.",
+    "enterAgentId": "Enter an Agent ID",
+    "enterAgentIdHint": "Specify an agent ID above to view and manage its secrets.",
     "vaultUp": "Vault Online",
     "vaultDown": "Vault Offline"
   },

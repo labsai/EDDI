@@ -14,7 +14,6 @@ export interface SetupAgentRequest {
   builtInToolsWhitelist?: string;
   enableQuickReplies?: boolean;
   enableSentimentAnalysis?: boolean;
-  mcpServers?: string;
   deploy?: boolean;
   environment?: string;
 }
