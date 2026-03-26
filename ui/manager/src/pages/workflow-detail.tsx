@@ -11,6 +11,7 @@ import {
   Settings,
   Save,
   Undo2,
+  FileDown,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
@@ -31,6 +32,7 @@ import {
   type PipelineItem,
 } from "@/components/editors/pipeline-builder";
 import { AddExtensionDialog } from "@/components/editors/add-extension-dialog";
+import { ImportOpenApiDialog } from "@/components/editors/import-openapi-dialog";
 
 
 /* ─── Main page ─── */
@@ -41,6 +43,7 @@ export function WorkflowDetailPage() {
 
   const [version, setVersion] = useState<number | undefined>(undefined);
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [localExtensions, setLocalExtensions] = useState<
     WorkflowExtension[] | null
@@ -129,6 +132,13 @@ export function WorkflowDetailPage() {
       };
       setLocalExtensions([...currentExtensions, newExt]);
       setShowAddDialog(false);
+    },
+    [currentExtensions]
+  );
+
+  const handleImportOpenApi = useCallback(
+    (extensions: WorkflowExtension[]) => {
+      setLocalExtensions([...currentExtensions, ...extensions]);
     },
     [currentExtensions]
   );
@@ -318,6 +328,14 @@ export function WorkflowDetailPage() {
             <Plus className="h-4 w-4" />
             {t("packageEditor.addExtension", "Add Extension")}
           </button>
+          <button
+            onClick={() => setShowImportDialog(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
+            data-testid="import-openapi-btn"
+          >
+            <FileDown className="h-4 w-4" />
+            {t("workflowEditor.importOpenApi", "Import from OpenAPI")}
+          </button>
         </div>
 
         <PipelineBuilder
@@ -333,6 +351,13 @@ export function WorkflowDetailPage() {
         open={showAddDialog}
         onClose={() => setShowAddDialog(false)}
         onSelect={handleAddExtension}
+      />
+
+      {/* Import from OpenAPI dialog */}
+      <ImportOpenApiDialog
+        open={showImportDialog}
+        onClose={() => setShowImportDialog(false)}
+        onImport={handleImportOpenApi}
       />
 
       {/* Raw config (collapsible) */}

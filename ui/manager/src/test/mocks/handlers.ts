@@ -738,6 +738,76 @@ export const handlers = [
     });
   }),
 
+  // OpenAPI endpoint discovery
+  http.get("*/apicallstore/apicalls/discover-endpoints", ({ request }) => {
+    const url = new URL(request.url);
+    const specUrl = url.searchParams.get("specUrl");
+    if (!specUrl) {
+      return HttpResponse.json({ error: "specUrl query parameter is required" }, { status: 400 });
+    }
+    return HttpResponse.json({
+      title: "Petstore API",
+      baseUrl: "https://petstore.example.com/v1",
+      endpointCount: 5,
+      groups: {
+        pets: {
+          targetServerUrl: "https://petstore.example.com/v1",
+          httpCalls: [
+            {
+              name: "listPets",
+              description: "List all pets",
+              actions: ["api_get_pets"],
+              saveResponse: true,
+              responseObjectName: "listPets_response",
+              request: { path: "/pets", method: "get", headers: {}, queryParams: { limit: "{limit}" }, contentType: "application/json", body: "" },
+              parameters: { limit: "Max items to return" },
+            },
+            {
+              name: "createPet",
+              description: "Create a pet",
+              actions: ["api_post_pets"],
+              saveResponse: true,
+              responseObjectName: "createPet_response",
+              request: { path: "/pets", method: "post", headers: {}, queryParams: {}, contentType: "application/json", body: '{\n  "name": "{name}",\n  "age": {age}\n}' },
+              parameters: { name: "Pet name", age: "Pet age" },
+            },
+            {
+              name: "getPet",
+              description: "Get a pet by ID",
+              actions: ["api_get_pets_petid"],
+              saveResponse: true,
+              responseObjectName: "getPet_response",
+              request: { path: "/pets/{petId}", method: "get", headers: {}, queryParams: {}, contentType: "application/json", body: "" },
+              parameters: { petId: "The pet ID" },
+            },
+          ],
+        },
+        store: {
+          targetServerUrl: "https://petstore.example.com/v1",
+          httpCalls: [
+            {
+              name: "getInventory",
+              description: "Returns pet inventories",
+              actions: ["api_get_store_inventory"],
+              saveResponse: true,
+              responseObjectName: "getInventory_response",
+              request: { path: "/store/inventory", method: "get", headers: {}, queryParams: {}, contentType: "application/json", body: "" },
+            },
+            {
+              name: "placeOrder",
+              description: "Place an order",
+              actions: ["api_post_store_order"],
+              saveResponse: true,
+              responseObjectName: "placeOrder_response",
+              request: { path: "/store/order", method: "post", headers: {}, queryParams: {}, contentType: "application/json", body: '{\n  "petId": "{petId}",\n  "quantity": {quantity}\n}' },
+              parameters: { petId: "Pet ID to order", quantity: "Number to order" },
+            },
+          ],
+        },
+      },
+    });
+  }),
+
   http.get("*/apicallstore/apicalls/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");

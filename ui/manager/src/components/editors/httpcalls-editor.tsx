@@ -7,8 +7,20 @@ import {
   Trash2,
   X,
   Globe,
+  Search,
+  Loader2,
+  AlertCircle,
+  RefreshCw,
+  Check,
+  FileDown,
+  ShieldAlert,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
+import {
+  discoverEndpoints,
+  type DiscoverEndpointsResult,
+} from "@/lib/api/openapi-discover";
+import { isValidUrl } from "@/lib/utils";
 
 // ─── Types matching HttpCallsConfiguration backend model ─────────────────────
 
@@ -648,6 +660,127 @@ function HttpCallEditor({
   );
 }
 
+// ─── Discovered Endpoints Panel ──────────────────────────────────────────────
+
+function DiscoveredEndpointsPanel({
+  result,
+  selected,
+  onToggle,
+  onToggleGroup,
+  readOnly,
+}: {
+  result: DiscoverEndpointsResult;
+  selected: Set<string>;
+  onToggle: (key: string) => void;
+  onToggleGroup: (group: string, allKeys: string[]) => void;
+  readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div
+      className="space-y-3 rounded-lg border border-border bg-card/50 p-3"
+      data-testid="discovered-endpoints-panel"
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {t("httpcallsEditor.discoveredEndpoints", "Discovered Endpoints")} ({result.endpointCount})
+        </p>
+        <span className="text-[10px] text-muted-foreground">
+          {result.title} — {result.baseUrl}
+        </span>
+      </div>
+      {Object.entries(result.groups).map(([groupName, group]) => {
+        const groupKeys = group.httpCalls.map(
+          (c, i) => `${groupName}::${i}::${c.name}`
+        );
+        const allSelected = groupKeys.every((k) => selected.has(k));
+        const someSelected = groupKeys.some((k) => selected.has(k));
+
+        return (
+          <div key={groupName} className="space-y-1">
+            <div className="flex items-center gap-2">
+              {!readOnly && (
+                <button
+                  type="button"
+                  onClick={() => onToggleGroup(groupName, groupKeys)}
+                  className={`h-3.5 w-3.5 rounded border flex items-center justify-center transition-colors ${
+                    allSelected
+                      ? "bg-primary border-primary text-primary-foreground"
+                      : someSelected
+                        ? "bg-primary/30 border-primary"
+                        : "border-input hover:border-primary"
+                  }`}
+                  data-testid={`group-toggle-${groupName}`}
+                >
+                  {allSelected && <Check className="h-2.5 w-2.5" />}
+                </button>
+              )}
+              <span className="text-xs font-semibold text-foreground uppercase tracking-wider">
+                {groupName}
+              </span>
+              <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                {group.httpCalls.length}
+              </span>
+            </div>
+            <div className="grid gap-1 ps-5">
+              {group.httpCalls.map((call, idx) => {
+                const key = `${groupName}::${idx}::${call.name}`;
+                const isSelected = selected.has(key);
+                const method = call.request?.method?.toUpperCase() ?? "GET";
+                const methodColor =
+                  method === "GET"
+                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                    : method === "POST"
+                      ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                      : method === "PUT"
+                        ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                        : method === "DELETE"
+                          ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                          : "bg-muted text-muted-foreground";
+
+                return (
+                  <label
+                    key={key}
+                    className={`group flex items-center gap-2 rounded-md border px-2.5 py-1.5 transition-colors cursor-pointer ${
+                      isSelected
+                        ? "border-primary/30 bg-primary/5"
+                        : "border-border/50 bg-background hover:border-border"
+                    }`}
+                    data-testid="discovered-endpoint-item"
+                  >
+                    {!readOnly && (
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => onToggle(key)}
+                        className="h-3.5 w-3.5 rounded border-input accent-primary"
+                      />
+                    )}
+                    <span
+                      className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wider ${methodColor}`}
+                    >
+                      {method}
+                    </span>
+                    <span className="font-mono text-xs text-foreground">
+                      {call.request?.path ?? ""}
+                    </span>
+                    {call.description && (
+                      <span className="text-[10px] text-muted-foreground truncate">
+                        — {call.description}
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export interface HttpCallsEditorProps {
@@ -662,6 +795,125 @@ export function HttpCallsEditor({
   readOnly,
 }: HttpCallsEditorProps) {
   const { t } = useTranslation();
+
+  // Discovery state
+  const [specUrl, setSpecUrl] = useState("");
+  const [discoveryResult, setDiscoveryResult] =
+    useState<DiscoverEndpointsResult | null>(null);
+  const [isDiscovering, setIsDiscovering] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null);
+  const [hasDiscovered, setHasDiscovered] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showReplaceConfirm, setShowReplaceConfirm] = useState(false);
+
+  const specUrlValid = specUrl.trim().length > 0 && isValidUrl(specUrl.trim());
+
+  const handleDiscover = useCallback(async () => {
+    if (!specUrlValid) return;
+    setIsDiscovering(true);
+    setDiscoveryError(null);
+    setDiscoveryResult(null);
+    setSelected(new Set());
+    try {
+      const result = await discoverEndpoints(specUrl);
+      setDiscoveryResult(result);
+      // Select all by default, using collision-safe keys
+      const allKeys = new Set<string>();
+      for (const [groupName, group] of Object.entries(result.groups)) {
+        group.httpCalls.forEach((call, i) => {
+          allKeys.add(`${groupName}::${i}::${call.name}`);
+        });
+      }
+      setSelected(allKeys);
+      setHasDiscovered(true);
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === "object" && "message" in err
+          ? String((err as { message: string }).message)
+          : t("httpcallsEditor.discoveryError", "Could not parse OpenAPI spec");
+      setDiscoveryError(msg);
+      setHasDiscovered(true);
+    } finally {
+      setIsDiscovering(false);
+    }
+  }, [specUrl, specUrlValid, t]);
+
+  const toggleEndpoint = useCallback((key: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const toggleGroup = useCallback(
+    (_group: string, allKeys: string[]) => {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        const allSelected = allKeys.every((k) => next.has(k));
+        if (allSelected) {
+          allKeys.forEach((k) => next.delete(k));
+        } else {
+          allKeys.forEach((k) => next.add(k));
+        }
+        return next;
+      });
+    },
+    []
+  );
+
+  const getSelectedCalls = useCallback((): HttpCall[] => {
+    if (!discoveryResult) return [];
+    const calls: HttpCall[] = [];
+    for (const [groupName, group] of Object.entries(discoveryResult.groups)) {
+      group.httpCalls.forEach((call, i) => {
+        if (selected.has(`${groupName}::${i}::${call.name}`)) {
+          calls.push(call);
+        }
+      });
+    }
+    return calls;
+  }, [discoveryResult, selected]);
+
+  const handleImportAppend = useCallback(() => {
+    const calls = getSelectedCalls();
+    if (calls.length === 0) return;
+    const updated: HttpCallsConfig = {
+      ...data,
+      httpCalls: [...(data.httpCalls ?? []), ...calls],
+    };
+    // Auto-fill targetServerUrl from discovered baseUrl if empty
+    if (!data.targetServerUrl && discoveryResult?.baseUrl) {
+      updated.targetServerUrl = discoveryResult.baseUrl;
+    }
+    onChange(updated);
+    setDiscoveryResult(null);
+    setHasDiscovered(false);
+    setSpecUrl("");
+  }, [getSelectedCalls, data, onChange, discoveryResult]);
+
+  const handleImportReplace = useCallback(() => {
+    const calls = getSelectedCalls();
+    if (calls.length === 0) return;
+    // Ask for confirmation if there are existing calls
+    if ((data.httpCalls ?? []).length > 0 && !showReplaceConfirm) {
+      setShowReplaceConfirm(true);
+      return;
+    }
+    const updated: HttpCallsConfig = {
+      ...data,
+      httpCalls: calls,
+    };
+    if (!data.targetServerUrl && discoveryResult?.baseUrl) {
+      updated.targetServerUrl = discoveryResult.baseUrl;
+    }
+    onChange(updated);
+    setDiscoveryResult(null);
+    setHasDiscovered(false);
+    setSpecUrl("");
+    setShowReplaceConfirm(false);
+  }, [getSelectedCalls, data, onChange, discoveryResult, showReplaceConfirm]);
 
   const addCall = useCallback(() => {
     const newCall: HttpCall = {
@@ -702,6 +954,172 @@ export function HttpCallsEditor({
           data-testid="server-url-input"
         />
       </div>
+
+      {/* OpenAPI Discovery */}
+      {!readOnly && (
+        <div className="space-y-3 rounded-xl border border-dashed border-primary/30 bg-primary/5 p-4">
+          <label className="mb-1 block text-sm font-medium text-foreground">
+            <FileDown className="me-1.5 inline h-4 w-4 text-primary" />
+            {t("httpcallsEditor.openApiSpecUrl", "Import from OpenAPI Spec")}
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="url"
+              value={specUrl}
+              onChange={(e) => setSpecUrl(e.target.value)}
+              placeholder={t(
+                "httpcallsEditor.specUrlPlaceholder",
+                "https://api.example.com/openapi.json"
+              )}
+              className="h-8 flex-1 rounded-md border border-input bg-background px-3 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              data-testid="spec-url-input"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && specUrlValid && !isDiscovering) {
+                  e.preventDefault();
+                  handleDiscover();
+                }
+              }}
+            />
+            <button
+              type="button"
+              onClick={handleDiscover}
+              disabled={isDiscovering || !specUrlValid}
+              title={specUrl.trim() && !specUrlValid ? t("httpcallsEditor.invalidUrl", "Enter a valid http:// or https:// URL") : undefined}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              data-testid="discover-endpoints-btn"
+            >
+              {isDiscovering ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Search className="h-3.5 w-3.5" />
+              )}
+              {isDiscovering
+                ? t("httpcallsEditor.discovering", "Parsing…")
+                : t("httpcallsEditor.discoverEndpoints", "Discover Endpoints")}
+            </button>
+          </div>
+
+          {/* Discovery loading */}
+          {isDiscovering && (
+            <div
+              className="flex items-center gap-2 rounded-lg border border-border bg-card/50 px-3 py-4 text-xs text-muted-foreground"
+              data-testid="discovery-loading"
+            >
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              {t("httpcallsEditor.discovering", "Parsing…")}
+            </div>
+          )}
+
+          {/* Discovery error */}
+          {discoveryError && (
+            <div
+              className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-3"
+              data-testid="discovery-error"
+            >
+              <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />
+              <p className="flex-1 text-xs text-destructive">
+                {discoveryError}
+              </p>
+              <button
+                type="button"
+                onClick={handleDiscover}
+                className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors"
+              >
+                <RefreshCw className="h-3 w-3" />
+                {t("httpcallsEditor.retry", "Retry")}
+              </button>
+            </div>
+          )}
+
+          {/* No endpoints found */}
+          {!isDiscovering &&
+            hasDiscovered &&
+            !discoveryError &&
+            !discoveryResult && (
+              <div
+                className="rounded-lg border border-border bg-card/50 px-3 py-4 text-center text-xs text-muted-foreground"
+                data-testid="discovery-empty"
+              >
+                {t(
+                  "httpcallsEditor.noEndpointsFound",
+                  "No endpoints found in the spec"
+                )}
+              </div>
+            )}
+
+          {/* Discovered endpoints */}
+          {discoveryResult && (
+            <>
+              <DiscoveredEndpointsPanel
+                result={discoveryResult}
+                selected={selected}
+                onToggle={toggleEndpoint}
+                onToggleGroup={toggleGroup}
+                readOnly={readOnly}
+              />
+              {/* Import buttons */}
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-muted-foreground">
+                  {selected.size}{" "}
+                  {t("httpcallsEditor.selectedCount", "selected")}
+                </span>
+                <div className="flex-1" />
+                <button
+                  type="button"
+                  onClick={handleImportAppend}
+                  disabled={selected.size === 0}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-primary/50 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
+                  data-testid="import-append-btn"
+                >
+                  <Plus className="h-3 w-3" />
+                  {t("httpcallsEditor.importAppend", "Append to Calls")}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleImportReplace}
+                  disabled={selected.size === 0}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                  data-testid="import-replace-btn"
+                >
+                  <FileDown className="h-3 w-3" />
+                  {t("httpcallsEditor.importReplace", "Replace All Calls")}
+                </button>
+              </div>
+
+              {/* Replace confirmation inline */}
+              {showReplaceConfirm && (
+                <div
+                  className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5"
+                  data-testid="replace-confirm"
+                >
+                  <ShieldAlert className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <p className="flex-1 text-xs text-amber-700 dark:text-amber-300">
+                    {t(
+                      "httpcallsEditor.replaceConfirmMessage",
+                      `This will replace ${(data.httpCalls ?? []).length} existing call(s). Are you sure?`
+                    )}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowReplaceConfirm(false)}
+                    className="rounded px-2 py-1 text-xs font-medium text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 transition-colors"
+                  >
+                    {t("common.cancel", "Cancel")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleImportReplace}
+                    className="rounded bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700 transition-colors"
+                    data-testid="replace-confirm-yes"
+                  >
+                    {t("httpcallsEditor.confirmReplace", "Yes, Replace All")}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Calls list */}
       <div className="space-y-4">
