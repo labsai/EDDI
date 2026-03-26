@@ -120,7 +120,7 @@ public class AgentSetupService {
 
             // --- Step 3: Create LLM Configuration ---
             var llmConfig = createLlmConfig(params.providerType, params.modelId, request.apiKey(), request.systemPrompt(), toolsEnabled,
-                    request.builtInToolsWhitelist(), request.baseUrl(), promptResponseJson, quickReplies, sentiment, request.mcpServers(), null);
+                    request.builtInToolsWhitelist(), request.baseUrl(), promptResponseJson, quickReplies, sentiment, null);
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
             String langchainId = extractIdFromLocation(langchainLocation);
@@ -260,7 +260,7 @@ public class AgentSetupService {
             boolean sentiment = request.enableSentimentAnalysis() != null && request.enableSentimentAnalysis();
             String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
             var llmConfig = createLlmConfig(params.providerType, params.modelId, request.apiKey(), enrichedPrompt, false, null, null,
-                    promptResponseJson, quickReplies, sentiment, null, httpCallsLocations);
+                    promptResponseJson, quickReplies, sentiment, httpCallsLocations);
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);
@@ -342,8 +342,7 @@ public class AgentSetupService {
      * Create LLM config with the specified model, system prompt, and tool settings.
      */
     public LlmConfiguration createLlmConfig(String modelType, String modelId, String apiKey, String systemPrompt, boolean enableTooling,
-            String toolsWhitelist, String baseUrl, String promptResponseJson, boolean quickReplies, boolean sentiment, String mcpServers,
-            List<String> toolUris) {
+            String toolsWhitelist, String baseUrl, String promptResponseJson, boolean quickReplies, boolean sentiment, List<String> toolUris) {
         var task = new LlmConfiguration.Task();
         task.setActions(List.of("send_message"));
         task.setId(modelType);
@@ -409,21 +408,6 @@ public class AgentSetupService {
         }
 
         task.setConversationHistoryLimit(10);
-
-        if (mcpServers != null && !mcpServers.isBlank()) {
-            var mcpConfigs = new ArrayList<LlmConfiguration.McpServerConfig>();
-            for (String serverUrl : mcpServers.split(",")) {
-                String trimmed = serverUrl.trim();
-                if (!trimmed.isEmpty()) {
-                    var mcpConfig = new LlmConfiguration.McpServerConfig();
-                    mcpConfig.setUrl(trimmed);
-                    mcpConfigs.add(mcpConfig);
-                }
-            }
-            if (!mcpConfigs.isEmpty()) {
-                task.setMcpServers(mcpConfigs);
-            }
-        }
 
         if (promptResponseJson != null) {
             task.setPostResponse(buildPostResponse(quickReplies, sentiment));

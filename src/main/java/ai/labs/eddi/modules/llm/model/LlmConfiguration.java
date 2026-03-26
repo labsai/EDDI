@@ -97,13 +97,6 @@ public record LlmConfiguration(List<Task> tasks) {
         private List<String> tools;
 
         /**
-         * External MCP servers to connect to as tool providers. Each entry defines a
-         * remote MCP server whose tools become available to the LLM alongside built-in
-         * and EDDI httpcall tools.
-         */
-        private List<McpServerConfig> mcpServers;
-
-        /**
          * Remote A2A agents to consume as tools. Each entry defines an A2A-compliant
          * agent whose skills become available as tool calls.
          */
@@ -185,12 +178,12 @@ public record LlmConfiguration(List<Task> tasks) {
         /**
          * Determines if this task should run in agent mode (with tools). Note:
          * enableHttpCallTools is NOT a standalone trigger — it only enhances agent mode
-         * when already triggered by tools, builtInTools, or mcpServers. Httpcall
-         * auto-discovery is checked at execution time.
+         * when already triggered by tools, builtInTools, or a2aAgents. Httpcall and
+         * mcpcall auto-discovery is checked at execution time.
          */
         public boolean isAgentMode() {
             return (tools != null && !tools.isEmpty()) || (enableBuiltInTools != null && enableBuiltInTools)
-                    || (mcpServers != null && !mcpServers.isEmpty()) || (a2aAgents != null && !a2aAgents.isEmpty());
+                    || (a2aAgents != null && !a2aAgents.isEmpty());
         }
 
         /**
@@ -278,14 +271,6 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setTools(List<String> tools) {
             this.tools = tools;
-        }
-
-        public List<McpServerConfig> getMcpServers() {
-            return mcpServers;
-        }
-
-        public void setMcpServers(List<McpServerConfig> mcpServers) {
-            this.mcpServers = mcpServers;
         }
 
         public List<A2AAgentConfig> getA2aAgents() {

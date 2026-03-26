@@ -123,14 +123,6 @@ class AgentOrchestrator {
         // Collect enabled built-in tools
         List<Object> enabledTools = collectEnabledTools(task);
 
-        // Discover MCP server tools (if configured)
-        McpToolProviderManager.McpToolsResult mcpTools = null;
-        List<McpServerConfig> mcpServers = task.getMcpServers();
-        if (mcpServers != null && !mcpServers.isEmpty()) {
-            mcpTools = mcpToolProviderManager.discoverTools(mcpServers);
-        }
-        boolean hasMcpTools = mcpTools != null && !mcpTools.toolSpecs().isEmpty();
-
         // Discover httpcall tools from workflow (auto-discovery)
         boolean enableHttpCallTools = task.getEnableHttpCallTools() == null || task.getEnableHttpCallTools();
         HttpCallToolsResult httpCallTools = null;
@@ -156,21 +148,19 @@ class AgentOrchestrator {
         boolean hasA2aTools = a2aTools != null && !a2aTools.toolSpecs().isEmpty();
 
         // No tools? Return null — caller should use legacy mode
-        if (enabledTools.isEmpty() && !hasMcpTools && !hasHttpCallTools && !hasMcpCallWorkflowTools && !hasA2aTools) {
+        if (enabledTools.isEmpty() && !hasHttpCallTools && !hasMcpCallWorkflowTools && !hasA2aTools) {
             return null;
         }
 
-        return executeWithTools(chatModel, systemMessage, chatMessages, enabledTools, mcpTools, httpCallTools, mcpCallWorkflowTools, a2aTools, task,
-                memory);
+        return executeWithTools(chatModel, systemMessage, chatMessages, enabledTools, httpCallTools, mcpCallWorkflowTools, a2aTools, task, memory);
     }
 
     /**
      * Executes the tool-calling loop using direct ChatModel API.
      */
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, List<Object> tools,
-            McpToolProviderManager.McpToolsResult mcpTools, HttpCallToolsResult httpCallTools,
-            McpToolProviderManager.McpToolsResult mcpCallWorkflowTools, A2AToolProviderManager.A2AToolsResult a2aTools, LlmConfiguration.Task task,
-            IConversationMemory memory) throws LifecycleException {
+            HttpCallToolsResult httpCallTools, McpToolProviderManager.McpToolsResult mcpCallWorkflowTools,
+            A2AToolProviderManager.A2AToolsResult a2aTools, LlmConfiguration.Task task, IConversationMemory memory) throws LifecycleException {
 
         // Build tool specifications and executors from built-in tool objects
         List<ToolSpecification> toolSpecs = new ArrayList<>();
@@ -194,12 +184,6 @@ class AgentOrchestrator {
                     toolExecutors.put(toolName, new DefaultToolExecutor(tool, method));
                 }
             }
-        }
-
-        // Merge MCP server tools (if any)
-        if (mcpTools != null && !mcpTools.toolSpecs().isEmpty()) {
-            toolSpecs.addAll(mcpTools.toolSpecs());
-            toolExecutors.putAll(mcpTools.executors());
         }
 
         // Merge httpcall tools discovered from workflow (if any)

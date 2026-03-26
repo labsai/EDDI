@@ -60,14 +60,11 @@ public class McpSetupTools {
                     + "When enabled, the LLM returns structured JSON with sentiment scores, "
                     + "emotion detection, intent classification, and urgency rating. "
                     + "Note: streaming is not supported when this is enabled.") Boolean enableSentimentAnalysis,
-            @ToolArg(description = "Comma-separated list of external MCP server URLs for tool discovery (optional). "
-                    + "The Agent will connect to these servers and use their tools during conversations. "
-                    + "E.g. 'http://localhost:7070/mcp,http://tools.example.com/mcp'") String mcpServers,
             @ToolArg(description = "Automatically deploy the Agent after creation? (default: true)") Boolean deploy,
             @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         try {
             var request = new SetupAgentRequest(name, systemPrompt, provider, model, apiKey, baseUrl, introMessage, enableBuiltInTools,
-                    builtInToolsWhitelist, enableQuickReplies, enableSentimentAnalysis, mcpServers, deploy, environment);
+                    builtInToolsWhitelist, enableQuickReplies, enableSentimentAnalysis, deploy, environment);
             var result = agentSetupService.setupAgent(request);
             return jsonSerialization.serialize(result);
         } catch (AgentSetupException e) {

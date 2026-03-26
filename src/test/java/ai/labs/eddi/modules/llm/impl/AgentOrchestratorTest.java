@@ -212,31 +212,6 @@ class AgentOrchestratorTest {
         assertFalse(task.isAgentMode());
     }
 
-    @Test
-    @DisplayName("isAgentMode should return true when mcpServers configured")
-    void testIsAgentMode_TrueWithMcpServers() {
-        var task = new LlmConfiguration.Task();
-        task.setEnableBuiltInTools(false);
-        task.setTools(null);
-        var mcpServer = new LlmConfiguration.McpServerConfig();
-        mcpServer.setUrl("http://localhost:8080/mcp");
-        mcpServer.setName("test-server");
-        task.setMcpServers(List.of(mcpServer));
-
-        assertTrue(task.isAgentMode());
-    }
-
-    @Test
-    @DisplayName("isAgentMode should return false when mcpServers list is empty")
-    void testIsAgentMode_FalseWithEmptyMcpServers() {
-        var task = new LlmConfiguration.Task();
-        task.setEnableBuiltInTools(false);
-        task.setTools(null);
-        task.setMcpServers(List.of());
-
-        assertFalse(task.isAgentMode());
-    }
-
     // ==================== McpServerConfig Tests ====================
 
     @Test
