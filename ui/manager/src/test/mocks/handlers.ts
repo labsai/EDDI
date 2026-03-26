@@ -884,6 +884,23 @@ export const handlers = [
     });
   }),
 
+  // MCP tool discovery endpoint
+  http.get("*/mcpcallsstore/mcpcalls/discover-tools", ({ request }) => {
+    const url = new URL(request.url);
+    const serverUrl = url.searchParams.get("url");
+    if (!serverUrl) {
+      return HttpResponse.json({ error: "url parameter is required" }, { status: 400 });
+    }
+    return HttpResponse.json({
+      tools: [
+        { name: "search_documents", description: "Search indexed documents by query" },
+        { name: "index_document", description: "Index a new document into the knowledge base" },
+        { name: "delete_document", description: "Delete a document by its unique ID" },
+      ],
+      count: 3,
+    });
+  }),
+
   // MCP Calls mock data
   http.get("*/mcpcallsstore/mcpcalls/:id", ({ request }) => {
     const url = new URL(request.url);

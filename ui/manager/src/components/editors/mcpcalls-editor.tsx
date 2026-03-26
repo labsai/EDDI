@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ChevronDown,
@@ -9,12 +9,24 @@ import {
   Plug,
   ShieldCheck,
   Zap,
+  Search,
+  Loader2,
+  AlertCircle,
+  RefreshCw,
+  ListPlus,
+  ListMinus,
+  Check,
 } from "lucide-react";
+import {
+  discoverMcpTools,
+  type McpToolInfo,
+} from "@/lib/api/mcp-discover";
 
 // ─── Types matching McpCallsConfiguration backend model ──────────────────────
 
 export interface McpCall {
   name?: string;
+  description?: string;
   actions?: string[];
   toolName?: string;
   toolArguments?: Record<string, unknown>;
@@ -122,14 +134,22 @@ function Section({
   label,
   icon: Icon,
   defaultOpen = true,
+  forceOpen,
   children,
 }: {
   label: string;
   icon?: React.ComponentType<{ className?: string }>;
   defaultOpen?: boolean;
+  forceOpen?: boolean;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+
+  // Auto-open when forceOpen transitions to true (e.g. after discovery)
+  useEffect(() => {
+    if (forceOpen) setOpen(true);
+  }, [forceOpen]);
+
   return (
     <div>
       <button
@@ -146,6 +166,98 @@ function Section({
         {label}
       </button>
       {open && <div className="space-y-3">{children}</div>}
+    </div>
+  );
+}
+
+// ─── Discovered Tools Panel ──────────────────────────────────────────────────
+
+function DiscoveredToolsPanel({
+  tools,
+  whitelist,
+  blacklist,
+  onAddWhitelist,
+  onAddBlacklist,
+  readOnly,
+}: {
+  tools: McpToolInfo[];
+  whitelist: string[];
+  blacklist: string[];
+  onAddWhitelist: (name: string) => void;
+  onAddBlacklist: (name: string) => void;
+  readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div
+      className="space-y-1.5 rounded-lg border border-border bg-card/50 p-3"
+      data-testid="discovered-tools-panel"
+    >
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {t("mcpcallsEditor.discoveredTools", "Available Tools")} ({tools.length})
+      </p>
+      <div className="grid gap-1.5">
+        {tools.map((tool) => {
+          const inWhitelist = whitelist.includes(tool.name);
+          const inBlacklist = blacklist.includes(tool.name);
+
+          return (
+            <div
+              key={tool.name}
+              className="group flex items-start gap-2 rounded-md border border-border/50 bg-background px-2.5 py-1.5 transition-colors hover:border-border"
+              data-testid="discovered-tool-item"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="font-mono text-xs font-semibold text-foreground">
+                  {tool.name}
+                </p>
+                {tool.description && (
+                  <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+                    {tool.description}
+                  </p>
+                )}
+              </div>
+              {!readOnly && (
+                <div className="flex shrink-0 items-center gap-1">
+                  {inWhitelist ? (
+                    <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 bg-emerald-50 dark:text-emerald-400 dark:bg-emerald-950/50">
+                      <Check className="h-2.5 w-2.5" />
+                      {t("mcpcallsEditor.whitelisted", "Whitelisted")}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onAddWhitelist(tool.name)}
+                      className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/50 transition-colors"
+                      title={t("mcpcallsEditor.addToWhitelist", "Add to whitelist")}
+                    >
+                      <ListPlus className="h-3 w-3" />
+                      {t("mcpcallsEditor.addWhitelist", "Whitelist")}
+                    </button>
+                  )}
+                  {inBlacklist ? (
+                    <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-red-600 bg-red-50 dark:text-red-400 dark:bg-red-950/50">
+                      <Check className="h-2.5 w-2.5" />
+                      {t("mcpcallsEditor.blacklisted", "Blacklisted")}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onAddBlacklist(tool.name)}
+                      className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/50 transition-colors"
+                      title={t("mcpcallsEditor.addToBlacklist", "Add to blacklist")}
+                    >
+                      <ListMinus className="h-3 w-3" />
+                      {t("mcpcallsEditor.addBlacklist", "Blacklist")}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -356,9 +468,60 @@ export function McpCallsEditor({
 }: McpCallsEditorProps) {
   const { t } = useTranslation();
 
+  // Discovery state
+  const [discoveredTools, setDiscoveredTools] = useState<McpToolInfo[]>([]);
+  const [isDiscovering, setIsDiscovering] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null);
+  const [hasDiscovered, setHasDiscovered] = useState(false);
+
   const update = useCallback(
     (patch: Partial<McpCallsConfig>) => onChange({ ...data, ...patch }),
     [data, onChange]
+  );
+
+  const handleDiscover = useCallback(async () => {
+    if (!data.mcpServerUrl?.trim()) return;
+    setIsDiscovering(true);
+    setDiscoveryError(null);
+    setDiscoveredTools([]);
+    try {
+      const result = await discoverMcpTools(
+        data.mcpServerUrl,
+        data.transport ?? "http",
+        data.apiKey ?? ""
+      );
+      setDiscoveredTools(result.tools);
+      setHasDiscovered(true);
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === "object" && "message" in err
+          ? String((err as { message: string }).message)
+          : t("mcpcallsEditor.discoveryError", "Could not connect to MCP server");
+      setDiscoveryError(msg);
+      setHasDiscovered(true);
+    } finally {
+      setIsDiscovering(false);
+    }
+  }, [data.mcpServerUrl, data.transport, data.apiKey, t]);
+
+  const addToWhitelist = useCallback(
+    (name: string) => {
+      const current = data.toolsWhitelist ?? [];
+      if (!current.includes(name)) {
+        update({ toolsWhitelist: [...current, name] });
+      }
+    },
+    [data.toolsWhitelist, update]
+  );
+
+  const addToBlacklist = useCallback(
+    (name: string) => {
+      const current = data.toolsBlacklist ?? [];
+      if (!current.includes(name)) {
+        update({ toolsBlacklist: [...current, name] });
+      }
+    },
+    [data.toolsBlacklist, update]
   );
 
   return (
@@ -387,15 +550,35 @@ export function McpCallsEditor({
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("mcpcallsEditor.serverUrl", "MCP Server URL")}
             </label>
-            <input
-              type="url"
-              value={data.mcpServerUrl ?? ""}
-              onChange={(e) => update({ mcpServerUrl: e.target.value })}
-              readOnly={readOnly}
-              placeholder="http://localhost:7070/mcp"
-              className="h-8 w-full rounded-md border border-input bg-background px-3 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              data-testid="mcp-url-input"
-            />
+            <div className="flex gap-2">
+              <input
+                type="url"
+                value={data.mcpServerUrl ?? ""}
+                onChange={(e) => update({ mcpServerUrl: e.target.value })}
+                readOnly={readOnly}
+                placeholder="http://localhost:7070/mcp"
+                className="h-8 flex-1 rounded-md border border-input bg-background px-3 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                data-testid="mcp-url-input"
+              />
+              {!readOnly && (
+                <button
+                  type="button"
+                  onClick={handleDiscover}
+                  disabled={isDiscovering || !data.mcpServerUrl?.trim()}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                  data-testid="discover-tools-btn"
+                >
+                  {isDiscovering ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Search className="h-3.5 w-3.5" />
+                  )}
+                  {isDiscovering
+                    ? t("mcpcallsEditor.discovering", "Connecting…")
+                    : t("mcpcallsEditor.discoverTools", "Discover Tools")}
+                </button>
+              )}
+            </div>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
@@ -451,6 +634,7 @@ export function McpCallsEditor({
           (data.toolsWhitelist?.length ?? 0) > 0 ||
           (data.toolsBlacklist?.length ?? 0) > 0
         }
+        forceOpen={hasDiscovered}
       >
         <p className="text-[10px] text-muted-foreground -mt-1 mb-2">
           {t(
@@ -458,6 +642,56 @@ export function McpCallsEditor({
             "Control which tools are exposed. Whitelist = only these; Blacklist = exclude these."
           )}
         </p>
+
+        {/* Discovery results */}
+        {isDiscovering && (
+          <div
+            className="flex items-center gap-2 rounded-lg border border-border bg-card/50 px-3 py-4 text-xs text-muted-foreground"
+            data-testid="discovery-loading"
+          >
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+            {t("mcpcallsEditor.discovering", "Connecting…")}
+          </div>
+        )}
+
+        {discoveryError && (
+          <div
+            className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-3"
+            data-testid="discovery-error"
+          >
+            <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />
+            <p className="flex-1 text-xs text-destructive">{discoveryError}</p>
+            <button
+              type="button"
+              onClick={handleDiscover}
+              className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors"
+            >
+              <RefreshCw className="h-3 w-3" />
+              {t("mcpcallsEditor.retry", "Retry")}
+            </button>
+          </div>
+        )}
+
+        {!isDiscovering && hasDiscovered && !discoveryError && discoveredTools.length === 0 && (
+          <div
+            className="rounded-lg border border-border bg-card/50 px-3 py-4 text-center text-xs text-muted-foreground"
+            data-testid="discovery-empty"
+          >
+            {t("mcpcallsEditor.noToolsFound", "No tools found on this server")}
+          </div>
+        )}
+
+        {discoveredTools.length > 0 && (
+          <DiscoveredToolsPanel
+            tools={discoveredTools}
+            whitelist={data.toolsWhitelist ?? []}
+            blacklist={data.toolsBlacklist ?? []}
+            onAddWhitelist={addToWhitelist}
+            onAddBlacklist={addToBlacklist}
+            readOnly={readOnly}
+          />
+        )}
+
         <TagListInput
           label={t("mcpcallsEditor.whitelist", "Whitelist (only allow)")}
           tags={data.toolsWhitelist ?? []}

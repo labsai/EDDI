@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, fireEvent } from "@testing-library/react";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -180,6 +180,78 @@ describe("MCP Calls Editor", () => {
     await waitFor(() => {
       expect(screen.getByText("search_documents")).toBeInTheDocument();
       expect(screen.getByText("index_document")).toBeInTheDocument();
+    });
+  });
+
+  // ─── Tool Discovery Tests ────────────────────────────────────────────────
+
+  it("renders discover tools button", async () => {
+    renderPage("mcpcalls");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("discover-tools-btn")).toBeInTheDocument();
+    });
+  });
+
+  it("shows discovered tools panel after clicking discover", async () => {
+    renderPage("mcpcalls");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("discover-tools-btn")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("discover-tools-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("discovered-tools-panel")).toBeInTheDocument();
+    });
+  });
+
+  it("shows discovered tool items with names", async () => {
+    renderPage("mcpcalls");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("discover-tools-btn")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("discover-tools-btn"));
+
+    await waitFor(() => {
+      const items = screen.getAllByTestId("discovered-tool-item");
+      expect(items.length).toBe(3);
+    });
+  });
+
+  it("shows tool descriptions in discovered panel", async () => {
+    renderPage("mcpcalls");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("discover-tools-btn")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("discover-tools-btn"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Search indexed documents by query")
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("Delete a document by its unique ID")
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("shows tool count in discovered panel header", async () => {
+    renderPage("mcpcalls");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("discover-tools-btn")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("discover-tools-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Available Tools.*\(3\)/)).toBeInTheDocument();
     });
   });
 });
