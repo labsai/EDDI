@@ -138,7 +138,7 @@ class TemplateSyntaxMigratorTest {
     @Test
     void migrateStringsNestedCalls() {
         String input = "[[${#strings.toLowerCase(#strings.replace(name, ' ', '-'))}]]";
-        String expected = "{name.replace( ' ', '-').toLowerCase()}";
+        String expected = "{name.replace(' ', '-').toLowerCase()}";
         assertEquals(expected, migrator.migrate(input));
     }
 

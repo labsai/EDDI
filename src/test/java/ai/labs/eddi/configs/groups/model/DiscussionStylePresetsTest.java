@@ -194,14 +194,14 @@ class DiscussionStylePresetsTest {
     @Test
     void defaultTemplate_synthesisContainsTranscriptVariable() {
         String template = DiscussionStylePresets.defaultTemplate(PhaseType.SYNTHESIS);
-        assertTrue(template.contains("${transcript}"), "Synthesis template should reference transcript variable");
+        assertTrue(template.contains("{transcript}"), "Synthesis template should reference transcript variable");
     }
 
     @Test
     void defaultTemplate_critiqueContainsTargetVariables() {
         String template = DiscussionStylePresets.defaultTemplate(PhaseType.CRITIQUE);
-        assertTrue(template.contains("${targetName}"), "Critique template should reference targetName");
-        assertTrue(template.contains("${targetResponse}"), "Critique template should reference targetResponse");
+        assertTrue(template.contains("{targetName}"), "Critique template should reference targetName");
+        assertTrue(template.contains("{targetResponse}"), "Critique template should reference targetResponse");
     }
 
     // --- DiscussionPhase convenience constructor ---

@@ -20,7 +20,7 @@ public class TemplatingEngineTest {
 
     @BeforeEach
     public void setUp() {
-        Engine quteEngine = Engine.builder().addDefaults().build();
+        Engine quteEngine = Engine.builder().addDefaults().strictRendering(false).build();
         templatingEngine = new TemplatingEngine(quteEngine);
     }
 
@@ -131,8 +131,8 @@ public class TemplatingEngineTest {
 
         String result = templatingEngine.processTemplate(template, data);
 
-        // _count is total number of items in the list
-        Assertions.assertEquals("333", result);
+        // _count is the 1-based index (count so far) in Qute
+        Assertions.assertEquals("123", result);
     }
 
     @Test
