@@ -4,6 +4,8 @@ import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
+import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
+import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -32,6 +34,7 @@ class McpSetupToolsTest {
     private IRestLlmStore langchainStore;
     private IRestOutputStore outputStore;
     private IRestApiCallsStore httpCallsStore;
+    private IRestMcpCallsStore mcpCallsStore;
     private IRestWorkflowStore WorkflowStore;
     private IRestAgentStore AgentStore;
     private IRestDocumentDescriptorStore descriptorStore;
@@ -47,6 +50,7 @@ class McpSetupToolsTest {
         langchainStore = mock(IRestLlmStore.class);
         outputStore = mock(IRestOutputStore.class);
         httpCallsStore = mock(IRestApiCallsStore.class);
+        mcpCallsStore = mock(IRestMcpCallsStore.class);
         WorkflowStore = mock(IRestWorkflowStore.class);
         AgentStore = mock(IRestAgentStore.class);
         descriptorStore = mock(IRestDocumentDescriptorStore.class);
@@ -60,6 +64,7 @@ class McpSetupToolsTest {
         when(restInterfaceFactory.get(IRestLlmStore.class)).thenReturn(langchainStore);
         when(restInterfaceFactory.get(IRestOutputStore.class)).thenReturn(outputStore);
         when(restInterfaceFactory.get(IRestApiCallsStore.class)).thenReturn(httpCallsStore);
+        when(restInterfaceFactory.get(IRestMcpCallsStore.class)).thenReturn(mcpCallsStore);
         when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(WorkflowStore);
         when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(AgentStore);
         when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
@@ -81,12 +86,13 @@ class McpSetupToolsTest {
         when(behaviorStore.createRuleSet(any())).thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1")).build());
         when(langchainStore.createLlm(any())).thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1")).build());
         when(outputStore.createOutputSet(any())).thenReturn(Response.created(URI.create("/outputstore/outputsets/out-1?version=1")).build());
+        when(mcpCallsStore.createMcpCalls(any())).thenReturn(Response.created(URI.create("/mcpcallsstore/mcpcalls/mcp-1?version=1")).build());
         when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
         when(agentAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
 
         String result = tools.setupAgent("Test Agent", "You are helpful", "anthropic", "claude-sonnet-4-6", "sk-test", null, "Hello!", true,
-                "calculator,datetime", null, null, null, true, "production");
+                "calculator,datetime", null, null, "http://localhost:7070/mcp", true, "production");
 
         assertNotNull(result);
 
@@ -94,14 +100,15 @@ class McpSetupToolsTest {
         verify(parserStore).createParser(any());
         verify(behaviorStore).createRuleSet(any());
         verify(langchainStore).createLlm(any());
+        verify(mcpCallsStore).createMcpCalls(any());
         verify(outputStore).createOutputSet(any());
         verify(WorkflowStore).createWorkflow(any());
         verify(AgentStore).createAgent(any());
         verify(agentAdmin).deployAgent(Environment.production, "agent-1", 1, true, true);
 
-        // Verify 6 descriptors patched (parser, behavior, langchain, output, package,
-        // agent)
-        verify(descriptorStore, times(6)).patchDescriptor(any(), anyInt(), any());
+        // Verify 7 descriptors patched (parser, behavior, langchain, mcpcalls, output,
+        // package, agent)
+        verify(descriptorStore, times(7)).patchDescriptor(any(), anyInt(), any());
     }
 
     @Test
@@ -261,6 +268,53 @@ class McpSetupToolsTest {
         // Without intro message, should have 3 extensions: parser, behavior, langchain
         // (no output)
         assertEquals(3, packageCaptor.getValue().getWorkflowSteps().size());
+    }
+
+    @Test
+    void setupAgent_withMcpServers_wiresIntoWorkflow() throws Exception {
+        when(behaviorStore.createRuleSet(any())).thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1")).build());
+        when(langchainStore.createLlm(any())).thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1")).build());
+        when(mcpCallsStore.createMcpCalls(any())).thenReturn(Response.created(URI.create("/mcpcallsstore/mcpcalls/mcp-1?version=1")).build(),
+                Response.created(URI.create("/mcpcallsstore/mcpcalls/mcp-2?version=1")).build());
+        when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
+
+        tools.setupAgent("MCP Agent", "You are helpful", null, null, "key", null, null, null, null, null, null,
+                "http://localhost:7070/mcp, http://tools.example.com/sse", false, null);
+
+        // Verify 2 McpCalls configs created
+        var mcpCaptor = ArgumentCaptor.forClass(McpCallsConfiguration.class);
+        verify(mcpCallsStore, times(2)).createMcpCalls(mcpCaptor.capture());
+        assertEquals("http://localhost:7070/mcp", mcpCaptor.getAllValues().get(0).getMcpServerUrl());
+        assertEquals("http://tools.example.com/sse", mcpCaptor.getAllValues().get(1).getMcpServerUrl());
+
+        // Verify workflow has 5 extensions: parser, behavior, mcp1, mcp2, langchain
+        var pkgCaptor = ArgumentCaptor.forClass(WorkflowConfiguration.class);
+        verify(WorkflowStore).createWorkflow(pkgCaptor.capture());
+        var steps = pkgCaptor.getValue().getWorkflowSteps();
+        assertEquals(5, steps.size());
+        assertEquals(URI.create("eddi://ai.labs.parser"), steps.get(0).getType());
+        assertEquals(URI.create("eddi://ai.labs.behavior"), steps.get(1).getType());
+        assertEquals(URI.create("eddi://ai.labs.mcpcalls"), steps.get(2).getType());
+        assertEquals(URI.create("eddi://ai.labs.mcpcalls"), steps.get(3).getType());
+        assertEquals(URI.create("eddi://ai.labs.llm"), steps.get(4).getType());
+
+        // Verify 7 descriptors patched (parser, behavior, langchain, 2× mcpcalls,
+        // package, agent)
+        verify(descriptorStore, times(7)).patchDescriptor(any(), anyInt(), any());
+    }
+
+    @Test
+    void setupAgent_withoutMcpServers_skipsMcpCalls() throws Exception {
+        when(behaviorStore.createRuleSet(any())).thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1")).build());
+        when(langchainStore.createLlm(any())).thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1")).build());
+        when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
+
+        tools.setupAgent("Agent", "prompt", null, null, "key", null, null, null, null, null, null, null, false, null);
+
+        // McpCalls store should NOT be called
+        verify(mcpCallsStore, never()).createMcpCalls(any());
     }
 
     // --- Config builder tests (via AgentSetupService) ---
