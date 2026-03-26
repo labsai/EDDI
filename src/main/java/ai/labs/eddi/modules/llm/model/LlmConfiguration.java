@@ -123,6 +123,13 @@ public record LlmConfiguration(List<Task> tasks) {
         private Boolean enableHttpCallTools = true;
 
         /**
+         * Auto-discover mcpcalls extensions from the workflow and expose their tools to
+         * the LLM agent. Default: true — agents automatically get tools for all
+         * mcpcalls configs in their workflow, filtered by whitelist/blacklist.
+         */
+        private Boolean enableMcpCallTools = true;
+
+        /**
          * Whitelist of specific built-in tools to enable. Options: "calculator",
          * "datetime", "websearch", "dataformatter", "webscraper", "textsummarizer",
          * "pdfreader", "weather"
@@ -303,6 +310,14 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setEnableHttpCallTools(Boolean enableHttpCallTools) {
             this.enableHttpCallTools = enableHttpCallTools;
+        }
+
+        public Boolean getEnableMcpCallTools() {
+            return enableMcpCallTools;
+        }
+
+        public void setEnableMcpCallTools(Boolean enableMcpCallTools) {
+            this.enableMcpCallTools = enableMcpCallTools;
         }
 
         public List<String> getBuiltInToolsWhitelist() {

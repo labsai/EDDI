@@ -3,6 +3,7 @@ package ai.labs.eddi.engine.runtime.client.configuration;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
+import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
@@ -33,6 +34,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
     private final IRestLlmStore restLlmStore;
     private final IRestOutputStore restOutputStore;
     private final IRestPropertySetterStore restPropertySetterStore;
+    private final IRestMcpCallsStore restMcpCallsStore;
     private Map<String, IResourceService> restInterfaces;
 
     private static final Logger log = Logger.getLogger(ResourceClientLibrary.class);
@@ -40,7 +42,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
     @Inject
     public ResourceClientLibrary(IRestParserStore restParserStore, IRestDictionaryStore restDictionaryStore, IRestRuleSetStore restRuleSetStore,
             IRestApiCallsStore restApiCallsStore, IRestLlmStore restLlmStore, IRestOutputStore restOutputStore,
-            IRestPropertySetterStore restPropertySetterStore) {
+            IRestPropertySetterStore restPropertySetterStore, IRestMcpCallsStore restMcpCallsStore) {
         this.restParserStore = restParserStore;
         this.restDictionaryStore = restDictionaryStore;
         this.restRuleSetStore = restRuleSetStore;
@@ -48,6 +50,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         this.restLlmStore = restLlmStore;
         this.restOutputStore = restOutputStore;
         this.restPropertySetterStore = restPropertySetterStore;
+        this.restMcpCallsStore = restMcpCallsStore;
 
         init();
     }
@@ -177,6 +180,23 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             @Override
             public Response delete(String id, Integer version, boolean permanent) {
                 return restPropertySetterStore.deletePropertySetter(id, version, permanent);
+            }
+        });
+
+        restInterfaces.put("ai.labs.mcpcalls", new IResourceService() {
+            @Override
+            public Object read(String id, Integer version) {
+                return restMcpCallsStore.readMcpCalls(id, version);
+            }
+
+            @Override
+            public Response duplicate(String id, Integer version) {
+                return restMcpCallsStore.duplicateMcpCalls(id, version);
+            }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restMcpCallsStore.deleteMcpCalls(id, version, permanent);
             }
         });
     }

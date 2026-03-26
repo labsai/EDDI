@@ -4,6 +4,7 @@ import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -51,6 +52,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 class AgentOrchestrator {
     private static final Logger LOGGER = Logger.getLogger(AgentOrchestrator.class);
     private static final String HTTPCALLS_TYPE = "eddi://ai.labs.httpcalls";
+    private static final String MCPCALLS_TYPE = "eddi://ai.labs.mcpcalls";
 
     // Built-in tools
     private final CalculatorTool calculatorTool;
@@ -137,6 +139,14 @@ class AgentOrchestrator {
         }
         boolean hasHttpCallTools = httpCallTools != null && !httpCallTools.toolSpecs().isEmpty();
 
+        // Discover mcpcalls tools from workflow (auto-discovery)
+        boolean enableMcpCallTools = task.getEnableMcpCallTools() == null || task.getEnableMcpCallTools();
+        McpToolProviderManager.McpToolsResult mcpCallWorkflowTools = null;
+        if (enableMcpCallTools) {
+            mcpCallWorkflowTools = discoverMcpCallTools(memory);
+        }
+        boolean hasMcpCallWorkflowTools = mcpCallWorkflowTools != null && !mcpCallWorkflowTools.toolSpecs().isEmpty();
+
         // Discover A2A agent tools (if configured)
         A2AToolProviderManager.A2AToolsResult a2aTools = null;
         List<A2AAgentConfig> a2aAgents = task.getA2aAgents();
@@ -146,19 +156,21 @@ class AgentOrchestrator {
         boolean hasA2aTools = a2aTools != null && !a2aTools.toolSpecs().isEmpty();
 
         // No tools? Return null — caller should use legacy mode
-        if (enabledTools.isEmpty() && !hasMcpTools && !hasHttpCallTools && !hasA2aTools) {
+        if (enabledTools.isEmpty() && !hasMcpTools && !hasHttpCallTools && !hasMcpCallWorkflowTools && !hasA2aTools) {
             return null;
         }
 
-        return executeWithTools(chatModel, systemMessage, chatMessages, enabledTools, mcpTools, httpCallTools, a2aTools, task, memory);
+        return executeWithTools(chatModel, systemMessage, chatMessages, enabledTools, mcpTools, httpCallTools, mcpCallWorkflowTools, a2aTools, task,
+                memory);
     }
 
     /**
      * Executes the tool-calling loop using direct ChatModel API.
      */
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, List<Object> tools,
-            McpToolProviderManager.McpToolsResult mcpTools, HttpCallToolsResult httpCallTools, A2AToolProviderManager.A2AToolsResult a2aTools,
-            LlmConfiguration.Task task, IConversationMemory memory) throws LifecycleException {
+            McpToolProviderManager.McpToolsResult mcpTools, HttpCallToolsResult httpCallTools,
+            McpToolProviderManager.McpToolsResult mcpCallWorkflowTools, A2AToolProviderManager.A2AToolsResult a2aTools, LlmConfiguration.Task task,
+            IConversationMemory memory) throws LifecycleException {
 
         // Build tool specifications and executors from built-in tool objects
         List<ToolSpecification> toolSpecs = new ArrayList<>();
@@ -194,6 +206,12 @@ class AgentOrchestrator {
         if (httpCallTools != null && !httpCallTools.toolSpecs().isEmpty()) {
             toolSpecs.addAll(httpCallTools.toolSpecs());
             toolExecutors.putAll(httpCallTools.executors());
+        }
+
+        // Merge mcpcalls tools discovered from workflow (if any)
+        if (mcpCallWorkflowTools != null && !mcpCallWorkflowTools.toolSpecs().isEmpty()) {
+            toolSpecs.addAll(mcpCallWorkflowTools.toolSpecs());
+            toolExecutors.putAll(mcpCallWorkflowTools.executors());
         }
 
         // Merge A2A agent tools (if any)
@@ -484,5 +502,96 @@ class AgentOrchestrator {
         }
 
         return new HttpCallToolsResult(toolSpecs, executors);
+    }
+
+    // --- McpCalls auto-discovery from workflow ---
+
+    /**
+     * Discovers mcpcalls configurations from the workflow and creates filtered
+     * ToolSpecification + ToolExecutor pairs via McpToolProviderManager.
+     * <p>
+     * Traverses: memory → agentId/version → AgentConfiguration → workflows →
+     * WorkflowConfiguration → filter mcpCalls steps → load McpCallsConfiguration →
+     * apply whitelist/blacklist → return filtered tools.
+     */
+    McpToolProviderManager.McpToolsResult discoverMcpCallTools(IConversationMemory memory) {
+        List<ToolSpecification> toolSpecs = new ArrayList<>();
+        Map<String, ToolExecutor> executors = new HashMap<>();
+
+        try {
+            String agentId = memory.getAgentId();
+            Integer agentVersion = memory.getAgentVersion();
+            if (agentId == null || agentVersion == null) {
+                LOGGER.debug("No agent context in memory — skipping mcpcalls tool discovery");
+                return new McpToolProviderManager.McpToolsResult(toolSpecs, executors);
+            }
+            LOGGER.info("Discovering mcpcalls tools for agent: " + agentId + " v" + agentVersion);
+
+            AgentConfiguration agentConfig = restAgentStore.readAgent(agentId, agentVersion);
+            if (agentConfig == null || agentConfig.getWorkflows() == null || agentConfig.getWorkflows().isEmpty()) {
+                return new McpToolProviderManager.McpToolsResult(toolSpecs, executors);
+            }
+
+            for (URI workflowUri : agentConfig.getWorkflows()) {
+                String workflowPath = workflowUri.getPath();
+                if (workflowPath == null)
+                    continue;
+                String workflowId = workflowPath.substring(workflowPath.lastIndexOf('/') + 1);
+                String workflowQuery = workflowUri.getQuery();
+                if (workflowQuery == null || !workflowQuery.contains("version="))
+                    continue;
+                int workflowVersion = Integer.parseInt(workflowQuery.replaceAll(".*version=(\\d+).*", "$1"));
+
+                WorkflowConfiguration workflowConfig = restWorkflowStore.readWorkflow(workflowId, workflowVersion);
+                for (var step : workflowConfig.getWorkflowSteps()) {
+                    if (step.getType() != null && MCPCALLS_TYPE.equals(step.getType().toString())) {
+                        String uri = (String) step.getConfig().get("uri");
+                        if (uri == null)
+                            continue;
+
+                        try {
+                            McpCallsConfiguration mcpCallsConfig = resourceClientLibrary.getResource(URI.create(uri), McpCallsConfiguration.class);
+
+                            // Build server config from McpCallsConfiguration
+                            McpServerConfig serverConfig = new McpServerConfig();
+                            serverConfig.setUrl(mcpCallsConfig.getMcpServerUrl());
+                            serverConfig.setName(mcpCallsConfig.getName());
+                            serverConfig.setTransport(mcpCallsConfig.getTransport());
+                            serverConfig.setApiKey(mcpCallsConfig.getApiKey());
+                            serverConfig.setTimeoutMs(mcpCallsConfig.getTimeoutMs());
+
+                            // Discover tools from this MCP server
+                            McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.discoverTools(List.of(serverConfig));
+
+                            // Apply whitelist/blacklist filtering
+                            List<String> whitelist = mcpCallsConfig.getToolsWhitelist();
+                            List<String> blacklist = mcpCallsConfig.getToolsBlacklist();
+
+                            for (ToolSpecification spec : result.toolSpecs()) {
+                                String name = spec.name();
+                                if (whitelist != null && !whitelist.isEmpty() && !whitelist.contains(name))
+                                    continue;
+                                if (blacklist != null && blacklist.contains(name))
+                                    continue;
+
+                                toolSpecs.add(spec);
+                                ToolExecutor executor = result.executors().get(name);
+                                if (executor != null) {
+                                    executors.put(name, executor);
+                                }
+                            }
+                        } catch (ServiceException e) {
+                            LOGGER.warn("Failed to load mcpcalls config: " + uri, e);
+                        }
+                    }
+                }
+            }
+
+            LOGGER.info("Discovered " + toolSpecs.size() + " mcpcalls tools from workflow");
+        } catch (Exception e) {
+            LOGGER.warn("Failed to discover mcpcalls tools from workflow", e);
+        }
+
+        return new McpToolProviderManager.McpToolsResult(toolSpecs, executors);
     }
 }

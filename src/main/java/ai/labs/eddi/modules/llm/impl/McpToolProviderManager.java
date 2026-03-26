@@ -61,7 +61,7 @@ public class McpToolProviderManager {
      * @param executors
      *            map of tool name → executor for each discovered tool
      */
-    record McpToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors) {
+    public record McpToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors) {
     }
 
     /**
@@ -75,7 +75,7 @@ public class McpToolProviderManager {
      *            list of MCP server configurations
      * @return combined tools from all reachable servers
      */
-    McpToolsResult discoverTools(List<McpServerConfig> mcpServers) {
+    public McpToolsResult discoverTools(List<McpServerConfig> mcpServers) {
         if (mcpServers == null || mcpServers.isEmpty()) {
             return new McpToolsResult(List.of(), Map.of());
         }
