@@ -51,7 +51,8 @@ class RagContextProviderTest {
         when(memory.getAgentId()).thenReturn("agent-123");
         when(memory.getAgentVersion()).thenReturn(1);
 
-        IData mockData = mock(IData.class);
+        @SuppressWarnings("unchecked")
+        IData<Object> mockData = mock(IData.class);
         when(dataFactory.createData(anyString(), any())).thenReturn(mockData);
     }
 

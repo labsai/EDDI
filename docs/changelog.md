@@ -13,6 +13,47 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Phase 8c: RAG Foundation — Config-Driven Knowledge Base Retrieval (2026-03-27)
+
+**Repo:** EDDI (`feature/version-6.0.0`) — Commit `f10c0611`
+
+**What changed:**
+
+Production-ready, config-driven Retrieval-Augmented Generation system. Knowledge bases are first-class versioned resources with full CRUD, embedding model caching, vector store isolation, and automatic context injection into LLM conversations.
+
+| Component | Change |
+|---|---|
+| **Resource Stack** | `RagConfiguration` POJO, `IRagStore` interface, `RagStore` (MongoDB, collection `rags`), `IRestRagStore` + `RestRagStore` (REST at `/ragstore/rags/`) |
+| **LlmConfiguration** | Added `knowledgeBases` (explicit KB refs), `enableWorkflowRag` (auto-discovery), `ragDefaults`, `httpCallRag` (Phase 8c-0 stub) to `Task` |
+| **EmbeddingModelFactory** | Cached factory for `EmbeddingModel` (OpenAI, Ollama) with `SecretResolver` integration, `TreeMap`-based collision-free cache keys |
+| **EmbeddingStoreFactory** | Cached factory for `EmbeddingStore` (in-memory; pgvector stubbed), per-KB isolation |
+| **RagContextProvider** | Workflow discovery via `WorkflowTraversal`, vector retrieval, context formatting, audit trace storage (`rag:trace:*`, `rag:context:*`) |
+| **RagIngestionService** | Async document ingestion using virtual threads, langchain4j `DocumentSplitter` + `EmbeddingStoreIngestor`, Caffeine-backed status tracking |
+| **LlmTask** | RAG context injection before message building, graceful error handling, `extractUserInput()` helper |
+
+**Design decisions:**
+- RAG retrieval integrated into `LlmTask` lifecycle (not a separate `ILifecycleTask`) for minimal pipeline changes
+- Context injection explicit via `KnowledgeBaseReference` or auto-discovered via `enableWorkflowRag`
+- `RetrievalAugmentorConfiguration` deprecated in favor of new RAG fields
+- Audit traces stored in conversation memory using `rag:trace:{taskId}` and `rag:context:{taskId}` keys
+- Naming uses plural `rags` for REST path and MongoDB collection (consistent with `httpcalls`, `mcpcalls`)
+
+**Code review fixes (8 issues):**
+- Cache key collision (`hashCode()` → `TreeMap.toString()`)
+- NPE in `formatRagContext` (null `textSegment()` guard)
+- Duplicate `taskId`/`currentStep` extraction
+- Null `embeddingParameters` → `Map.of()` default
+- Unbounded `ConcurrentHashMap` → Caffeine (1hr expiry, 10K max)
+- `httpCallRag` and `storeParameters` cache TODO comments
+
+**Tests:** 4 new test files: `RestRagStoreTest`, `EmbeddingModelFactoryTest`, `EmbeddingStoreFactoryTest`, `RagContextProviderTest`. Updated `LlmTaskTest` for `RagContextProvider` mock.
+
+**Files:** 14 new, 2 modified. All tests pass.
+
+**Documentation:** `docs/rag.md` (public), `HANDOFF.md` updated.
+
+---
+
 ## Comprehensive Cosmetic Rename: All `package*` Variables → `workflow*` (2026-03-27)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

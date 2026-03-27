@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-26
+> **Last updated:** 2026-03-27
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -749,6 +749,29 @@ Cost-optimized LLM execution via sequential model escalation with confidence-bas
 - [x] ~~Phase 8a.2: MCP Resource CRUD + Batch Cascade~~ ✅
 - [x] ~~Phase 8a.3: Agent Discovery & Managed Conversations~~ ✅
 - [x] ~~Phase 8b: MCP Client + RAG Foundation~~ ✅
+- [x] ~~Phase 8c: RAG Foundation~~ ✅
+
+### Phase 8c: RAG Foundation ✅ (commit `f10c0611`)
+
+Config-driven knowledge base retrieval integrated into the LLM pipeline. Knowledge bases are first-class versioned resources with full CRUD, embedding model caching, vector store isolation, and automatic context injection.
+
+| Component | Files | Description |
+|---|---|---|
+| **Resource Stack** | `RagConfiguration`, `IRagStore`, `RagStore`, `IRestRagStore`, `RestRagStore` | Full CRUD at `/ragstore/rags/`, MongoDB collection `rags` |
+| **LLM Config** | `LlmConfiguration.java` | `knowledgeBases`, `enableWorkflowRag`, `ragDefaults`, `httpCallRag` |
+| **Embedding Factories** | `EmbeddingModelFactory`, `EmbeddingStoreFactory` | Cached model/store creation with secret resolution |
+| **Runtime** | `RagContextProvider` | Workflow discovery, retrieval, formatting, audit trace |
+| **Ingestion** | `RagIngestionService` | Virtual-thread async ingestion with Caffeine status tracking |
+| **Integration** | `LlmTask.java` | RAG context injection before LLM message building |
+
+**Tests:** `RestRagStoreTest`, `EmbeddingModelFactoryTest`, `EmbeddingStoreFactoryTest`, `RagContextProviderTest`, updated `LlmTaskTest`.
+
+**Documentation:** `docs/rag.md`
+
+**Remaining TODOs:**
+- Phase 8c-0: httpCall-based RAG execution path
+- Phase 8c-β: Persistent vector stores (pgvector)
+- Manager UI: RAG configuration editor
 
 ### Phase 8a.2: MCP Resource CRUD + Batch Cascade ✅
 
