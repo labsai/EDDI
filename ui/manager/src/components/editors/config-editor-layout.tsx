@@ -1,5 +1,7 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { JsonEditor } from "./json-editor";
 import { VersionPicker, type VersionInfo } from "./version-picker";
 import { Save, Undo2, FileCode, FormInput, AlertCircle, GitCompareArrows } from "lucide-react";
@@ -94,8 +96,15 @@ export function ConfigEditorLayout({
 
   const isDirty = editedData !== data;
 
+  // Discard confirmation state
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+
+  // Navigation guard — blocks in-app nav + browser close when dirty
+  const blocker = useUnsavedChangesGuard(isDirty && !readOnly);
+
   const handleDiscard = useCallback(() => {
     setEditedData(data);
+    setShowDiscardConfirm(false);
   }, [data]);
 
   const handleSave = useCallback(() => {
@@ -162,7 +171,7 @@ export function ConfigEditorLayout({
           {!readOnly && (
             <>
               <button
-                onClick={handleDiscard}
+                onClick={() => setShowDiscardConfirm(true)}
                 disabled={!isDirty || isSaving}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-input px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-all hover:bg-secondary active:scale-[0.98] disabled:opacity-50"
                 data-testid="discard-btn"
@@ -264,6 +273,24 @@ export function ConfigEditorLayout({
           </div>
         )}
       </div>
+
+      {/* Discard confirmation dialog */}
+      <UnsavedChangesDialog
+        open={showDiscardConfirm}
+        onConfirm={handleDiscard}
+        onCancel={() => setShowDiscardConfirm(false)}
+        title={t("editor.discardTitle", "Discard Changes?")}
+        message={t("editor.discardMessage", "Are you sure you want to discard all unsaved changes? This action cannot be undone.")}
+      />
+
+      {/* Navigation blocker dialog */}
+      {blocker.state === "blocked" && (
+        <UnsavedChangesDialog
+          open
+          onConfirm={() => blocker.proceed?.()}
+          onCancel={() => blocker.reset?.()}
+        />
+      )}
     </div>
   );
 }
