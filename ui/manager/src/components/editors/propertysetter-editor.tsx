@@ -92,38 +92,155 @@ function PropertyRow({
   onRemove: () => void; readOnly?: boolean;
 }) {
   const { t } = useTranslation();
+  const [showEditor, setShowEditor] = useState(false);
+  const value = prop.valueString ?? "";
+
   return (
-    <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-card p-2" data-testid="property-row">
-      <input type="text" value={prop.name ?? ""} onChange={(e) => onChange({ ...prop, name: e.target.value })}
-        readOnly={readOnly} placeholder={t("propertySetterEditor.propName", "Property name")}
-        className="h-7 w-40 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
-      <span className="text-xs text-muted-foreground">=</span>
-      <input type="text" value={prop.valueString ?? ""} onChange={(e) => onChange({ ...prop, valueString: e.target.value })}
-        readOnly={readOnly} placeholder={t("propertySetterEditor.propValue", "Value / expression")}
-        className="h-7 flex-1 min-w-[120px] rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
-      <select value={prop.scope ?? "conversation"} onChange={(e) => onChange({ ...prop, scope: e.target.value as PropertyInstruction["scope"] })}
-        disabled={readOnly}
-        className="h-7 rounded border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-        data-testid="scope-select">
-        {SCOPES.map((s) => (<option key={s} value={s}>{s}</option>))}
-      </select>
-      <input type="text" value={prop.fromObjectPath ?? ""} onChange={(e) => onChange({ ...prop, fromObjectPath: e.target.value })}
-        readOnly={readOnly} placeholder={t("propertySetterEditor.fromPath", "From path")}
-        className="h-7 w-28 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-        title={t("propertySetterEditor.fromObjectPath", "fromObjectPath")} />
-      <label className="inline-flex items-center gap-1 text-xs text-foreground">
-        <input type="checkbox" checked={prop.override ?? true}
-          onChange={(e) => onChange({ ...prop, override: e.target.checked })}
-          disabled={readOnly} className="h-3 w-3 accent-primary" />
-        {t("propertySetterEditor.override", "Override")}
-      </label>
-      {!readOnly && (
-        <button type="button" onClick={onRemove}
-          className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors">
-          <Trash2 className="h-3 w-3" />
-        </button>
+    <>
+      <div className="rounded-lg border border-border bg-card shadow-sm overflow-hidden" data-testid="property-row">
+        {/* Top: Name + Value */}
+        <div className="flex gap-2 p-3">
+          {/* Name */}
+          <div className="flex flex-col gap-1 w-44 shrink-0">
+            <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {t("propertySetterEditor.propName", "Property")}
+            </label>
+            <input type="text" value={prop.name ?? ""} onChange={(e) => onChange({ ...prop, name: e.target.value })}
+              readOnly={readOnly} placeholder="e.g. botIntent"
+              className="h-8 rounded-md border border-input bg-background px-2.5 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 transition-shadow" />
+          </div>
+
+          {/* Value — expandable textarea */}
+          <div className="flex flex-col gap-1 flex-1 min-w-0">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {t("propertySetterEditor.propValue", "Value / Expression")}
+              </label>
+              {value.length > 80 && (
+                <button
+                  type="button"
+                  onClick={() => setShowEditor(true)}
+                  className="text-[10px] font-medium text-primary hover:underline transition-colors"
+                >
+                  {t("propertySetterEditor.expandEditor", "Expand ↗")}
+                </button>
+              )}
+            </div>
+            <textarea
+              value={value}
+              onChange={(e) => onChange({ ...prop, valueString: e.target.value })}
+              readOnly={readOnly}
+              placeholder={t("propertySetterEditor.valuePlaceholder", "Value, expression, or ${variable} reference")}
+              rows={Math.max(2, Math.min(6, Math.ceil(value.length / 80)))}
+              className="resize-y rounded-md border border-input bg-background px-2.5 py-1.5 text-sm text-foreground font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-ring/50 transition-shadow placeholder:text-muted-foreground"
+            />
+          </div>
+        </div>
+
+        {/* Bottom: Scope, FromPath, Override, Delete */}
+        <div className="flex flex-wrap items-center gap-3 border-t border-border bg-muted/30 px-3 py-2">
+          <div className="flex items-center gap-1.5">
+            <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {t("propertySetterEditor.scope", "Scope")}
+            </label>
+            <select value={prop.scope ?? "conversation"} onChange={(e) => onChange({ ...prop, scope: e.target.value as PropertyInstruction["scope"] })}
+              disabled={readOnly}
+              className="h-7 rounded-md border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              data-testid="scope-select">
+              {SCOPES.map((s) => (<option key={s} value={s}>{s}</option>))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {t("propertySetterEditor.fromPath", "From Path")}
+            </label>
+            <input type="text" value={prop.fromObjectPath ?? ""} onChange={(e) => onChange({ ...prop, fromObjectPath: e.target.value })}
+              readOnly={readOnly} placeholder="—"
+              className="h-7 w-36 rounded-md border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              title={t("propertySetterEditor.fromObjectPath", "fromObjectPath")} />
+          </div>
+
+          <label className="inline-flex items-center gap-1.5 text-xs text-foreground cursor-pointer">
+            <input type="checkbox" checked={prop.override ?? true}
+              onChange={(e) => onChange({ ...prop, override: e.target.checked })}
+              disabled={readOnly} className="h-3.5 w-3.5 rounded accent-primary" />
+            {t("propertySetterEditor.override", "Override")}
+          </label>
+
+          <span className="flex-1" />
+
+          {!readOnly && (
+            <button type="button" onClick={onRemove}
+              className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+              title={t("common.delete", "Delete")}>
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Full-screen value editor modal */}
+      {showEditor && (
+        <ValueEditorModal
+          name={prop.name ?? "property"}
+          value={value}
+          onChange={(v) => onChange({ ...prop, valueString: v })}
+          onClose={() => setShowEditor(false)}
+          readOnly={readOnly}
+        />
       )}
-    </div>
+    </>
+  );
+}
+
+/** Full-screen modal for editing long property values */
+function ValueEditorModal({
+  name, value, onChange, onClose, readOnly,
+}: {
+  name: string; value: string; onChange: (v: string) => void;
+  onClose: () => void; readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+  const [localValue, setLocalValue] = useState(value);
+
+  return (
+    <>
+      <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-8">
+        <div className="flex w-full max-w-3xl flex-col rounded-xl border bg-card shadow-2xl max-h-[80vh]">
+          <div className="flex items-center justify-between border-b border-border px-5 py-3">
+            <h3 className="text-sm font-semibold text-foreground">
+              {t("propertySetterEditor.editValue", "Edit Value")} — <code className="text-primary">{name}</code>
+            </h3>
+            <button onClick={onClose} className="rounded-md p-1 text-muted-foreground hover:bg-secondary transition-colors">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 p-4">
+            <textarea
+              value={localValue}
+              onChange={(e) => setLocalValue(e.target.value)}
+              readOnly={readOnly}
+              className="h-full w-full min-h-[200px] resize-none rounded-lg border border-input bg-background p-4 text-sm font-mono leading-relaxed text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50"
+              autoFocus
+            />
+          </div>
+          <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
+            <button onClick={onClose}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+              {t("common.cancel", "Cancel")}
+            </button>
+            <button
+              onClick={() => { onChange(localValue); onClose(); }}
+              disabled={readOnly}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50">
+              {t("common.apply", "Apply")}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
