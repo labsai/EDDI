@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { X } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
@@ -12,6 +13,7 @@ interface CreateAgentDialogProps {
 
 export function CreateAgentDialog({ open, onClose }: CreateAgentDialogProps) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const createAgent = useCreateAgent();
@@ -21,7 +23,7 @@ export function CreateAgentDialog({ open, onClose }: CreateAgentDialogProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await createAgent.mutateAsync({
+      const result = await createAgent.mutateAsync({
         agent: { workflows: [], channels: [] },
         name,
         description,
@@ -30,6 +32,13 @@ export function CreateAgentDialog({ open, onClose }: CreateAgentDialogProps) {
       setName("");
       setDescription("");
       onClose();
+      // Navigate to the new agent detail page
+      if (result.location) {
+        const url = new URL(result.location, "http://dummy");
+        const parts = url.pathname.split("/").filter(Boolean);
+        const id = parts[parts.length - 1];
+        if (id) navigate(`/manage/agents/${id}`);
+      }
     } catch (err) {
       toast.error(getErrorMessage(err));
     }

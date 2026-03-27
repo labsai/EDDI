@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { X } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
@@ -12,6 +13,7 @@ interface CreateWorkflowDialogProps {
 
 export function CreateWorkflowDialog({ open, onClose }: CreateWorkflowDialogProps) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const createMutation = useCreateWorkflow();
 
   const [name, setName] = useState("");
@@ -22,7 +24,7 @@ export function CreateWorkflowDialog({ open, onClose }: CreateWorkflowDialogProp
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await createMutation.mutateAsync({
+      const result = await createMutation.mutateAsync({
         config: { workflowSteps: [] },
         name,
         description,
@@ -31,6 +33,13 @@ export function CreateWorkflowDialog({ open, onClose }: CreateWorkflowDialogProp
       setName("");
       setDescription("");
       onClose();
+      // Navigate to the new workflow detail page
+      if (result.location) {
+        const url = new URL(result.location, "http://dummy");
+        const parts = url.pathname.split("/").filter(Boolean);
+        const id = parts[parts.length - 1];
+        if (id) navigate(`/manage/workflowview/${id}`);
+      }
     } catch (err) {
       toast.error(getErrorMessage(err));
     }
