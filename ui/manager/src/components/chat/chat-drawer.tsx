@@ -231,6 +231,9 @@ export function ChatDrawer() {
                   )}
                 </div>
 
+                {/* Quick replies */}
+                <QuickRepliesBar />
+
                 {/* Input */}
                 <DrawerChatInput
                   disabled={!conversationId}
@@ -241,6 +244,30 @@ export function ChatDrawer() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/* ─── Quick replies bar for the drawer ─── */
+function QuickRepliesBar() {
+  const quickReplies = useChatStore((s) => s.quickReplies);
+  const isProcessing = useChatStore((s) => s.isProcessing);
+  const sendMessage = useSendMessage();
+
+  if (quickReplies.length === 0 || isProcessing) return null;
+
+  return (
+    <div className="flex flex-wrap gap-1.5 border-t border-border px-3 py-2 shrink-0">
+      {quickReplies.map((reply, i) => (
+        <button
+          key={`${reply}-${i}`}
+          onClick={() => sendMessage.mutate({ message: reply })}
+          className="rounded-full border border-primary/30 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/15"
+          data-testid="drawer-quick-reply"
+        >
+          {reply}
+        </button>
+      ))}
     </div>
   );
 }

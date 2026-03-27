@@ -374,21 +374,18 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore) {
       store.getState().finishStreaming();
       // Parse the snapshot from the done event to extract quickReplies
       // and conversation state (for structured JSON output mode).
-      console.log('[QR-DEBUG] SSE done event.data:', event.data?.substring(0, 500));
       if (event.data) {
         try {
           const snapshot = JSON.parse(event.data);
-          console.log('[QR-DEBUG] SSE done parsed outputs:', JSON.stringify(snapshot.conversationOutputs)?.substring(0, 500));
           if (snapshot.conversationOutputs?.length) {
             const lastOutput = snapshot.conversationOutputs[
               snapshot.conversationOutputs.length - 1
             ];
             const qr = extractQuickReplies(lastOutput);
-            console.log('[QR-DEBUG] SSE extracted QR:', qr);
             store.getState().setQuickReplies(qr);
           }
-        } catch (e) {
-          console.error('[QR-DEBUG] SSE done parse error:', e);
+        } catch {
+          // Ignore parse errors — done event data may be empty
         }
       }
       break;
