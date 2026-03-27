@@ -11,6 +11,14 @@ import {
   Zap,
   Handshake,
   AlertTriangle,
+  Layers,
+  ArrowDown,
+  ArrowUp,
+  RotateCcw,
+  Database,
+  Gauge,
+  DollarSign,
+  Cpu,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
 
@@ -22,6 +30,21 @@ export interface A2AAgentConfig {
   apiKey?: string;
   timeoutMs?: number;
   skillsFilter?: string[];
+}
+
+export interface CascadeStep {
+  type?: string;
+  parameters?: Record<string, string>;
+  confidenceThreshold?: number | null;
+  timeoutMs?: number;
+}
+
+export interface ModelCascadeConfig {
+  enabled?: boolean;
+  strategy?: string;
+  evaluationStrategy?: string;
+  enableInAgentMode?: boolean;
+  steps?: CascadeStep[];
 }
 
 export interface LangchainTask {
@@ -62,6 +85,8 @@ export interface LangchainTask {
   toolRateLimits?: Record<string, number>;
   enableParallelExecution?: boolean;
   parallelExecutionTimeoutMs?: number;
+  maxToolIterations?: number;
+  modelCascade?: ModelCascadeConfig;
 }
 
 export interface LangchainConfig {
@@ -174,10 +199,14 @@ function ActionTags({
 function Section({
   label,
   defaultOpen = true,
+  icon: Icon,
+  accent,
   children,
 }: {
   label: string;
   defaultOpen?: boolean;
+  icon?: React.ComponentType<{ className?: string }>;
+  accent?: string;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -186,13 +215,14 @@ function Section({
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="mb-1.5 flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+        className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
       >
         {open ? (
           <ChevronDown className="h-3 w-3" />
         ) : (
           <ChevronRight className="h-3 w-3" />
         )}
+        {Icon && <Icon className={`h-3.5 w-3.5 ${accent ?? ''}`} />}
         {label}
       </button>
       {open && <div className="space-y-2">{children}</div>}
@@ -814,7 +844,7 @@ function TaskEditor({
                   onChange={(e) =>
                     onChange({
                       ...task,
-                      conversationHistoryLimit: parseInt(e.target.value, 10),
+                      conversationHistoryLimit: parseInt(e.target.value, 10) || 0,
                     })
                   }
                   readOnly={readOnly}
@@ -827,12 +857,14 @@ function TaskEditor({
             </div>
           </Section>
 
-          {/* Budget & Performance */}
+          {/* ══════ Budget & Costs ══════ */}
           <Section
-            label={t("langchainEditor.budgetPerf", "Budget & Performance")}
+            label={t("langchainEditor.budgetCosts", "Budget & Costs")}
+            icon={DollarSign}
+            accent="text-amber-500"
             defaultOpen={false}
           >
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <label className="text-xs text-foreground whitespace-nowrap">
                   {t("langchainEditor.maxBudget", "Max Budget ($)")}
@@ -885,6 +917,76 @@ function TaskEditor({
                   />
                   {t("langchainEditor.toolCaching", "Tool Caching")}
                 </label>
+              </div>
+            </div>
+          </Section>
+
+          {/* ══════ Execution ══════ */}
+          <Section
+            label={t("langchainEditor.execution", "Execution")}
+            icon={Cpu}
+            accent="text-sky-500"
+            defaultOpen={false}
+          >
+            <div className="space-y-3">
+              {/* Parallel execution */}
+              <label className="inline-flex items-center gap-2 text-xs text-foreground">
+                <input
+                  type="checkbox"
+                  checked={task.enableParallelExecution ?? false}
+                  onChange={(e) =>
+                    onChange({ ...task, enableParallelExecution: e.target.checked })
+                  }
+                  disabled={readOnly}
+                  className="h-3.5 w-3.5 rounded border-input accent-primary"
+                  data-testid="enable-parallel-execution"
+                />
+                {t("langchainEditor.parallelExecution", "Parallel Tool Execution")}
+              </label>
+              <p className="text-[10px] text-muted-foreground ps-5 -mt-2">
+                {t("langchainEditor.parallelExecutionDesc", "Run independent tool calls concurrently instead of sequentially")}
+              </p>
+              {task.enableParallelExecution && (
+                <div className="flex items-center gap-2 ps-5">
+                  <label className="text-xs text-foreground whitespace-nowrap">
+                    {t("langchainEditor.parallelTimeout", "Timeout (ms)")}
+                  </label>
+                  <input
+                    type="number"
+                    value={task.parallelExecutionTimeoutMs ?? 30000}
+                    onChange={(e) =>
+                      onChange({ ...task, parallelExecutionTimeoutMs: parseInt(e.target.value, 10) || 30000 })
+                    }
+                    readOnly={readOnly}
+                    className="h-7 w-24 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-foreground whitespace-nowrap">
+                  {t("langchainEditor.maxToolIterations", "Max Tool Iterations")}
+                </label>
+                <input
+                  type="number"
+                  value={task.maxToolIterations ?? ""}
+                  onChange={(e) =>
+                    onChange({
+                      ...task,
+                      maxToolIterations: e.target.value ? parseInt(e.target.value, 10) : undefined,
+                    })
+                  }
+                  readOnly={readOnly}
+                  placeholder="10"
+                  className="h-7 w-20 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+                <span className="text-[10px] text-muted-foreground">
+                  {t("langchainEditor.maxToolIterationsHint", "(default 10)")}
+                </span>
+              </div>
+
+              {/* Rate limiting */}
+              <div className="border-t border-border pt-3 space-y-2">
                 <label className="inline-flex items-center gap-2 text-xs text-foreground">
                   <input
                     type="checkbox"
@@ -900,26 +1002,540 @@ function TaskEditor({
                   />
                   {t("langchainEditor.rateLimiting", "Rate Limiting")}
                 </label>
+                {task.enableRateLimiting && (
+                  <>
+                    <div className="flex items-center gap-2 ps-5">
+                      <label className="text-xs text-foreground whitespace-nowrap">
+                        {t("langchainEditor.defaultRate", "Default Rate (req/min)")}
+                      </label>
+                      <input
+                        type="number"
+                        value={task.defaultRateLimit ?? 100}
+                        onChange={(e) =>
+                          onChange({
+                            ...task,
+                            defaultRateLimit: parseInt(e.target.value, 10) || 100,
+                          })
+                        }
+                        readOnly={readOnly}
+                        className="h-7 w-20 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      />
+                    </div>
+
+                    {/* Per-tool rate limits — array-based to prevent key collision */}
+                    <div className="ps-5">
+                      <label className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        <Gauge className="h-3 w-3" />
+                        {t("langchainEditor.toolRateLimits", "Per-Tool Rate Limits")}
+                      </label>
+                      <p className="mb-1.5 text-[10px] text-muted-foreground">
+                        {t("langchainEditor.toolRateLimitsDesc", "Override the default rate for specific tools (calls/min)")}
+                      </p>
+                      <div className="space-y-1.5">
+                        {Object.entries(task.toolRateLimits ?? {}).map(([tool, rate], i) => (
+                          <div key={`rate-${i}`} className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              value={tool}
+                              onChange={(e) => {
+                                // Convert to array, update by index, convert back — safe for renames
+                                const entries = Object.entries(task.toolRateLimits ?? {});
+                                entries[i] = [e.target.value, rate];
+                                // Deduplicate: last entry with same key wins
+                                const deduped = new Map(entries);
+                                onChange({ ...task, toolRateLimits: Object.fromEntries(deduped) });
+                              }}
+                              readOnly={readOnly}
+                              placeholder={t("langchainEditor.toolName", "Tool name")}
+                              className="h-7 w-40 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                            />
+                            <input
+                              type="number"
+                              value={rate}
+                              onChange={(e) => {
+                                const entries = Object.entries(task.toolRateLimits ?? {});
+                                entries[i] = [tool, parseInt(e.target.value, 10) || 0];
+                                onChange({ ...task, toolRateLimits: Object.fromEntries(entries) });
+                              }}
+                              readOnly={readOnly}
+                              placeholder="100"
+                              className="h-7 w-20 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                            />
+                            <span className="text-[10px] text-muted-foreground">/min</span>
+                            {!readOnly && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const entries = Object.entries(task.toolRateLimits ?? {}).filter((_, j) => j !== i);
+                                  onChange({ ...task, toolRateLimits: entries.length > 0 ? Object.fromEntries(entries) : undefined });
+                                }}
+                                className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                        {!readOnly && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              // Generate unique key to prevent collision
+                              const existing = Object.keys(task.toolRateLimits ?? {});
+                              let key = "tool";
+                              let n = 1;
+                              while (existing.includes(key)) { key = `tool${n++}`; }
+                              onChange({
+                                ...task,
+                                toolRateLimits: { ...(task.toolRateLimits ?? {}), [key]: 100 },
+                              });
+                            }}
+                            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <Plus className="h-3 w-3" />
+                            {t("langchainEditor.addToolRate", "Add Tool Rate")}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
-              {task.enableRateLimiting && (
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-foreground whitespace-nowrap">
-                    {t("langchainEditor.defaultRate", "Default Rate (req/min)")}
+            </div>
+          </Section>
+
+          {/* ══════ Model Cascade ══════ */}
+          <Section
+            label={t("langchainEditor.cascade", "Model Cascade")}
+            icon={Layers}
+            accent="text-purple-500"
+            defaultOpen={!!(task.modelCascade?.enabled)}
+          >
+            <div className="space-y-3" data-testid="cascade-section">
+              {/* Explain what cascade does */}
+              <p className="text-[10px] text-muted-foreground leading-relaxed">
+                {t("langchainEditor.cascadeDesc", "Try a cheap/fast model first. If confidence is too low, automatically escalate to a more powerful (and expensive) model. Saves costs without sacrificing quality.")}
+              </p>
+
+              {/* Enable toggle */}
+              <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  checked={task.modelCascade?.enabled ?? false}
+                  onChange={(e) =>
+                    onChange({
+                      ...task,
+                      modelCascade: {
+                        ...task.modelCascade,
+                        enabled: e.target.checked,
+                        strategy: task.modelCascade?.strategy ?? "cascade",
+                        evaluationStrategy: task.modelCascade?.evaluationStrategy ?? "structured_output",
+                        enableInAgentMode: task.modelCascade?.enableInAgentMode ?? true,
+                        steps: task.modelCascade?.steps ?? [],
+                      },
+                    })
+                  }
+                  disabled={readOnly}
+                  className="h-3.5 w-3.5 rounded border-input accent-primary"
+                  data-testid="cascade-enable"
+                />
+                <Layers className="h-3.5 w-3.5 text-primary" />
+                {t("langchainEditor.cascadeEnable", "Enable Model Cascade")}
+              </label>
+
+              {task.modelCascade?.enabled && (
+                <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                  {/* Strategy + Evaluation */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        {t("langchainEditor.cascadeStrategy", "Strategy")}
+                      </label>
+                      <select
+                        value={task.modelCascade.strategy ?? "cascade"}
+                        onChange={(e) =>
+                          onChange({
+                            ...task,
+                            modelCascade: { ...task.modelCascade!, strategy: e.target.value },
+                          })
+                        }
+                        disabled={readOnly}
+                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                      >
+                        <option value="cascade">{t("langchainEditor.strategyCascade", "Sequential Escalation")}</option>
+                        <option value="parallel">{t("langchainEditor.strategyParallel", "Parallel (future)")}</option>
+                      </select>
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        {t("langchainEditor.cascadeStrategyHint", "Sequential tries cheap first, escalates on low confidence")}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        {t("langchainEditor.cascadeEvalStrategy", "Confidence Evaluation")}
+                      </label>
+                      <select
+                        value={task.modelCascade.evaluationStrategy ?? "structured_output"}
+                        onChange={(e) =>
+                          onChange({
+                            ...task,
+                            modelCascade: { ...task.modelCascade!, evaluationStrategy: e.target.value },
+                          })
+                        }
+                        disabled={readOnly}
+                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                      >
+                        <option value="structured_output">{t("langchainEditor.evalStructured", "Structured Output (JSON)")}</option>
+                        <option value="heuristic">{t("langchainEditor.evalHeuristic", "Heuristic (hedging detection)")}</option>
+                        <option value="judge_model">{t("langchainEditor.evalJudge", "Judge Model (secondary LLM)")}</option>
+                        <option value="none">{t("langchainEditor.evalNone", "None (always accept)")}</option>
+                      </select>
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        {t("langchainEditor.cascadeEvalHint", "How to determine if a response is good enough")}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Enable in agent mode */}
+                  <label className="inline-flex items-center gap-2 text-xs text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={task.modelCascade.enableInAgentMode ?? true}
+                      onChange={(e) =>
+                        onChange({
+                          ...task,
+                          modelCascade: { ...task.modelCascade!, enableInAgentMode: e.target.checked },
+                        })
+                      }
+                      disabled={readOnly}
+                      className="h-3.5 w-3.5 rounded border-input accent-primary"
+                    />
+                    {t("langchainEditor.cascadeInAgent", "Also use cascade in Agent Mode (with tools)")}
+                  </label>
+
+                  {/* Steps */}
+                  <div>
+                    <label className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      <ArrowDown className="h-3 w-3" />
+                      {t("langchainEditor.cascadeSteps", "Cascade Steps (cheap → expensive)")}
+                    </label>
+                    <p className="mb-2 text-[10px] text-muted-foreground">
+                      {t("langchainEditor.cascadeStepsDesc", "Order matters: first step tried first. Last step is always accepted (set confidence to empty).")}
+                    </p>
+
+                    <div className="space-y-2">
+                      {(task.modelCascade.steps ?? []).map((step, si) => (
+                        <div
+                          key={si}
+                          className="rounded-lg border border-border bg-card p-3 space-y-2"
+                          data-testid={`cascade-step-${si}`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
+                              {si + 1}
+                            </span>
+                            <select
+                              value={step.type ?? "openai"}
+                              onChange={(e) => {
+                                const steps = [...(task.modelCascade!.steps ?? [])];
+                                steps[si] = { ...step, type: e.target.value };
+                                onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
+                              }}
+                              disabled={readOnly}
+                              className="h-7 rounded-md border border-input bg-background px-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                            >
+                              {MODEL_TYPES.map((mt) => (
+                                <option key={mt} value={mt}>{mt}</option>
+                              ))}
+                            </select>
+                            <input
+                              type="text"
+                              value={step.parameters?.model ?? ""}
+                              onChange={(e) => {
+                                const steps = [...(task.modelCascade!.steps ?? [])];
+                                steps[si] = { ...step, parameters: { ...(step.parameters ?? {}), model: e.target.value } };
+                                onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
+                              }}
+                              readOnly={readOnly}
+                              placeholder={t("langchainEditor.cascadeModelName", "e.g. gpt-4o-mini")}
+                              className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                            />
+                            {!readOnly && (
+                              <div className="flex items-center gap-0.5">
+                                <button
+                                  type="button"
+                                  disabled={si === 0}
+                                  onClick={() => {
+                                    const steps = [...(task.modelCascade!.steps ?? [])];
+                                    const temp = steps[si];
+                                    steps[si] = steps[si - 1]!;
+                                    steps[si - 1] = temp!;
+                                    onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
+                                  }}
+                                  className="rounded p-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30"
+                                  title={t("langchainEditor.moveUp", "Move up")}
+                                >
+                                  <ArrowUp className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={si === (task.modelCascade!.steps ?? []).length - 1}
+                                  onClick={() => {
+                                    const steps = [...(task.modelCascade!.steps ?? [])];
+                                    const temp = steps[si];
+                                    steps[si] = steps[si + 1]!;
+                                    steps[si + 1] = temp!;
+                                    onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
+                                  }}
+                                  className="rounded p-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30"
+                                  title={t("langchainEditor.moveDown", "Move down")}
+                                >
+                                  <ArrowDown className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const steps = (task.modelCascade!.steps ?? []).filter((_, j) => j !== si);
+                                    onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
+                                  }}
+                                  className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 ps-7">
+                            <div>
+                              <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                                {t("langchainEditor.cascadeConfidence", "Min. Confidence (0–1)")}
+                              </label>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                pattern="[0-9]*(\.[0-9]+)?"
+                                value={step.confidenceThreshold ?? ""}
+                                onChange={(e) => {
+                                  const steps = [...(task.modelCascade!.steps ?? [])];
+                                  const val = e.target.value;
+                                  steps[si] = {
+                                    ...step,
+                                    confidenceThreshold: val === "" ? null : (parseFloat(val) || 0),
+                                  };
+                                  onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
+                                }}
+                                readOnly={readOnly}
+                                placeholder={t("langchainEditor.cascadeConfidencePlaceholder", "empty = always accept")}
+                                className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                                {t("langchainEditor.cascadeTimeout", "Timeout (ms)")}
+                              </label>
+                              <input
+                                type="number"
+                                value={step.timeoutMs ?? 30000}
+                                onChange={(e) => {
+                                  const steps = [...(task.modelCascade!.steps ?? [])];
+                                  steps[si] = { ...step, timeoutMs: parseInt(e.target.value, 10) || 30000 };
+                                  onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
+                                }}
+                                readOnly={readOnly}
+                                className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const steps = [...(task.modelCascade?.steps ?? []), { type: "openai", parameters: { model: "" }, confidenceThreshold: 0.7, timeoutMs: 30000 }];
+                          onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
+                        }}
+                        className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-primary/40 px-3 py-1.5 text-xs font-medium text-primary/70 transition-colors hover:border-primary hover:text-primary"
+                        data-testid="add-cascade-step"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        {t("langchainEditor.addCascadeStep", "Add Cascade Step")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </Section>
+
+          {/* ══════ Retry Configuration ══════ */}
+          <Section
+            label={t("langchainEditor.retryConfig", "Retry Configuration")}
+            icon={RotateCcw}
+            accent="text-orange-500"
+            defaultOpen={false}
+          >
+            <div className="space-y-2" data-testid="retry-section">
+              <p className="text-[10px] text-muted-foreground">
+                {t("langchainEditor.retryDesc", "Configure automatic retries for failed LLM API calls with exponential backoff.")}
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                    <RotateCcw className="inline h-3 w-3 me-1" />
+                    {t("langchainEditor.retryMaxAttempts", "Max Attempts")}
                   </label>
                   <input
                     type="number"
-                    value={task.defaultRateLimit ?? 100}
+                    value={task.retry?.maxAttempts ?? 3}
                     onChange={(e) =>
-                      onChange({
-                        ...task,
-                        defaultRateLimit: parseInt(e.target.value, 10),
-                      })
+                      onChange({ ...task, retry: { ...task.retry, maxAttempts: parseInt(e.target.value, 10) || 1 } })
                     }
                     readOnly={readOnly}
-                    className="h-7 w-20 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                   />
                 </div>
-              )}
+                <div>
+                  <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                    {t("langchainEditor.retryDelay", "Initial Delay (ms)")}
+                  </label>
+                  <input
+                    type="number"
+                    value={task.retry?.backoffDelayMs ?? 1000}
+                    onChange={(e) =>
+                      onChange({ ...task, retry: { ...task.retry, backoffDelayMs: parseInt(e.target.value, 10) || 0 } })
+                    }
+                    readOnly={readOnly}
+                    className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                    {t("langchainEditor.retryMultiplier", "Backoff Multiplier")}
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={task.retry?.backoffMultiplier ?? 2.0}
+                    onChange={(e) =>
+                      onChange({ ...task, retry: { ...task.retry, backoffMultiplier: parseFloat(e.target.value) || 1.0 } })
+                    }
+                    readOnly={readOnly}
+                    className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                    {t("langchainEditor.retryMaxDelay", "Max Delay (ms)")}
+                  </label>
+                  <input
+                    type="number"
+                    value={task.retry?.maxBackoffDelayMs ?? 10000}
+                    onChange={(e) =>
+                      onChange({ ...task, retry: { ...task.retry, maxBackoffDelayMs: parseInt(e.target.value, 10) || 0 } })
+                    }
+                    readOnly={readOnly}
+                    className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+              </div>
+            </div>
+          </Section>
+
+          {/* ══════ RAG Configuration ══════ */}
+          <Section
+            label={t("langchainEditor.ragConfig", "RAG (Knowledge Retrieval)")}
+            icon={Database}
+            accent="text-emerald-500"
+            defaultOpen={false}
+          >
+            <div className="space-y-2" data-testid="rag-section">
+              <p className="text-[10px] text-muted-foreground">
+                {t("langchainEditor.ragDesc", "Augment LLM responses with relevant documents retrieved from an embedding store.")}
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <label className="mb-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <Database className="h-3 w-3" />
+                    {t("langchainEditor.ragHttpCall", "HTTP Call URI")}
+                  </label>
+                  <input
+                    type="text"
+                    value={task.retrievalAugmentor?.httpCall ?? ""}
+                    onChange={(e) =>
+                      onChange({ ...task, retrievalAugmentor: { ...task.retrievalAugmentor, httpCall: e.target.value || undefined } })
+                    }
+                    readOnly={readOnly}
+                    placeholder="eddi://ai.labs.apicalls/..."
+                    dir="ltr"
+                    className="h-7 w-full rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                    {t("langchainEditor.ragEmbeddingModel", "Embedding Model")}
+                  </label>
+                  <input
+                    type="text"
+                    value={task.retrievalAugmentor?.embeddingModel ?? ""}
+                    onChange={(e) =>
+                      onChange({ ...task, retrievalAugmentor: { ...task.retrievalAugmentor, embeddingModel: e.target.value || undefined } })
+                    }
+                    readOnly={readOnly}
+                    placeholder={t("langchainEditor.ragEmbeddingModelPlaceholder", "e.g. text-embedding-3-small")}
+                    className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                    {t("langchainEditor.ragEmbeddingStore", "Embedding Store")}
+                  </label>
+                  <input
+                    type="text"
+                    value={task.retrievalAugmentor?.embeddingStore ?? ""}
+                    onChange={(e) =>
+                      onChange({ ...task, retrievalAugmentor: { ...task.retrievalAugmentor, embeddingStore: e.target.value || undefined } })
+                    }
+                    readOnly={readOnly}
+                    placeholder={t("langchainEditor.ragEmbeddingStorePlaceholder", "e.g. pgvector, qdrant")}
+                    className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                    {t("langchainEditor.ragMaxResults", "Max Results")}
+                  </label>
+                  <input
+                    type="number"
+                    value={task.retrievalAugmentor?.maxResults ?? ""}
+                    onChange={(e) =>
+                      onChange({ ...task, retrievalAugmentor: { ...task.retrievalAugmentor, maxResults: e.target.value ? parseInt(e.target.value, 10) : undefined } })
+                    }
+                    readOnly={readOnly}
+                    placeholder="5"
+                    className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                    {t("langchainEditor.ragMinScore", "Min Similarity Score (0–1)")}
+                  </label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0"
+                    max="1"
+                    value={task.retrievalAugmentor?.minScore ?? ""}
+                    onChange={(e) =>
+                      onChange({ ...task, retrievalAugmentor: { ...task.retrievalAugmentor, minScore: e.target.value ? parseFloat(e.target.value) : undefined } })
+                    }
+                    readOnly={readOnly}
+                    placeholder="0.7"
+                    className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+              </div>
             </div>
           </Section>
 

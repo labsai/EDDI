@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-03-27  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: `184c550` feat(v6): OpenAPI endpoint discovery for HTTP Calls editor and workflow import
+> **Last commit**: `1a2be77` feat(v6): LangChain editor feature parity — cascade, retry, RAG, execution, build script
 
 ---
 
@@ -56,11 +56,12 @@
 | —     | **A2A Protocol UI**: Agent-detail A2A section (CTA enable/disable, description, skills tags, endpoint URLs, Agent Card preview), LangChain editor A2A Agents section (URL, name, apiKey vault warning, timeout, skills filter), MSW mocks, 10 new tests | pending |
 | —     | **MCP Tool Auto-Discovery**: Discover button in MCP editor, DiscoveredToolsPanel, whitelist/blacklist add | pending |
 | —     | **OpenAPI Endpoint Discovery**: Backend `discover-endpoints` via `McpApiToolBuilder`, editor-level import (Append/Replace with confirmation), workflow-level import dialog (parallel multi-config creation), URL validation, Enter key, collision-safe keys | `184c550` |
+| —     | **LangChain Editor Feature Parity**: Model Cascade (reorder, confidence, strategy), Budget & Costs, Execution (parallel, rate limits, tool iterations), Retry (exponential backoff), RAG (knowledge retrieval). 5 bug fixes, 5 UX improvements, deploy.ps1 script | `1a2be77` |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 318 pass (`npm run test`) — 32 files
+- **Unit/Component**: 325 pass (`npm run test`) — 32 files
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds

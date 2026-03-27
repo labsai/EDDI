@@ -123,4 +123,54 @@ describe("LangChain Editor", () => {
       expect(nameInput).toBeInTheDocument();
     });
   });
+
+  it("renders model cascade section header", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByText("Model Cascade")).toBeInTheDocument();
+    });
+  });
+
+  it("renders cascade enable toggle", async () => {
+    renderPage("llm");
+    // The Model Cascade section has defaultOpen=true because mock data has enabled=true
+    await waitFor(() => {
+      expect(screen.getByTestId("cascade-enable")).toBeInTheDocument();
+    });
+  });
+
+  it("renders cascade step from mock data", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("gpt-4o-mini")).toBeInTheDocument();
+    });
+  });
+
+  it("renders budget and costs section header", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByText("Budget & Costs")).toBeInTheDocument();
+    });
+  });
+
+  it("renders execution section header", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByText("Execution")).toBeInTheDocument();
+    });
+  });
+
+  it("renders retry section header", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByText("Retry Configuration")).toBeInTheDocument();
+    });
+  });
+
+  it("renders RAG section header", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByText("RAG (Knowledge Retrieval)")).toBeInTheDocument();
+    });
+  });
 });

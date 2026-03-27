@@ -883,6 +883,22 @@ export const handlers = [
               timeoutMs: 30000,
             },
           ],
+          modelCascade: {
+            enabled: true,
+            strategy: "cascade",
+            evaluationStrategy: "structured_output",
+            enableInAgentMode: true,
+            steps: [
+              { type: "openai", parameters: { model: "gpt-4o-mini" }, confidenceThreshold: 0.7, timeoutMs: 10000 },
+              { type: "openai", parameters: { model: "gpt-4o" }, confidenceThreshold: null, timeoutMs: 30000 },
+            ],
+          },
+          retry: {
+            maxAttempts: 3,
+            backoffDelayMs: 1000,
+            backoffMultiplier: 2.0,
+            maxBackoffDelayMs: 10000,
+          },
         },
       ],
     });
