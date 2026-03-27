@@ -45,11 +45,11 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
     }
 
     @Override
-    public IExecutableWorkflow getExecutableWorkflow(final String workflowId, final Integer packageVersion) throws ServiceException {
+    public IExecutableWorkflow getExecutableWorkflow(final String workflowId, final Integer workflowVersion) throws ServiceException {
         try {
-            DocumentDescriptor packageDocumentDescriptor = workflowStoreService.getWorkflowDocumentDescriptor(workflowId, packageVersion);
-            WorkflowConfiguration knowledgeWorkflow = workflowStoreService.getKnowledgeWorkflow(workflowId, packageVersion);
-            return createExecutableWorkflow(packageDocumentDescriptor, knowledgeWorkflow);
+            DocumentDescriptor workflowDocumentDescriptor = workflowStoreService.getWorkflowDocumentDescriptor(workflowId, workflowVersion);
+            WorkflowConfiguration knowledgeWorkflow = workflowStoreService.getKnowledgeWorkflow(workflowId, workflowVersion);
+            return createExecutableWorkflow(workflowDocumentDescriptor, knowledgeWorkflow);
         } catch (WorkflowInitializationException e) {
             throw new ServiceException("Error while creating executableWorkflow!", e);
         } catch (WorkflowConfigurationException e) {

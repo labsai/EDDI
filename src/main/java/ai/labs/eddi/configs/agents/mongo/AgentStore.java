@@ -51,12 +51,12 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
         return super.update(id, version, agentConfiguration);
     }
 
-    public List<DocumentDescriptor> getAgentDescriptorsContainingWorkflow(String workflowId, Integer packageVersion, boolean includePreviousVersions)
+    public List<DocumentDescriptor> getAgentDescriptorsContainingWorkflow(String workflowId, Integer workflowVersion, boolean includePreviousVersions)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
 
         List<DocumentDescriptor> ret = new LinkedList<>();
         do {
-            String workflowUri = WORKFLOW_RESOURCE_URI + workflowId + VERSION_QUERY_PARAM + packageVersion;
+            String workflowUri = WORKFLOW_RESOURCE_URI + workflowId + VERSION_QUERY_PARAM + workflowVersion;
 
             // Search in current resources
             List<IResourceStore.IResourceId> currentIds = resourceStorage.findResourceIdsContaining(WORKFLOWS_FIELD, workflowUri);
@@ -89,8 +89,8 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
                 }
             }
 
-            packageVersion--;
-        } while (includePreviousVersions && packageVersion >= 1);
+            workflowVersion--;
+        } while (includePreviousVersions && workflowVersion >= 1);
 
         return ret;
     }

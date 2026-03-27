@@ -13,6 +13,44 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Comprehensive Cosmetic Rename: All `package*` Variables → `workflow*` (2026-03-27)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Eliminated all remaining v5 `package*` naming from internal variable names, method parameters, MCP tool descriptions, JSON output keys, and the backup/import/export pipeline. This is a purely cosmetic cleanup — no behavioral changes, but the v6 API surface now uses `workflowVersion` instead of `packageVersion` as a query parameter, and ZIP exports write `.workflow.json` instead of `.package.json`.
+
+**Breaking API changes:**
+- `@QueryParam("packageVersion")` → `@QueryParam("workflowVersion")` in `IRestOutputActions`, `IRestExpression`, `IRestAction`
+- MCP `list_agent_resources` JSON output: `packageCount`/`packages`/`packageVersion` → `workflowCount`/`workflows`/`workflowVersion`
+
+**Backward compatibility:**
+- ZIP import still accepts both `.package.json` (v5) and `.workflow.json` (v6)
+- Legacy URI patterns in `V6RenameMigration`, `AbstractBackupService`, `LegacyPathRewriteFilter` unchanged
+
+| File | Change |
+|---|---|
+| `LifecycleUtilities.java` | `packageVersion` → `workflowVersion`, `packageIndex` → `stepIndex` |
+| `IWorkflowStoreService.java` | `packageVersion` → `workflowVersion` |
+| `WorkflowStoreService.java` | `packageVersion` → `workflowVersion` |
+| `IWorkflowStoreClientLibrary.java` | `packageVersion` → `workflowVersion` |
+| `WorkflowStoreClientLibrary.java` | `packageVersion` → `workflowVersion`, `packageDocumentDescriptor` → `workflowDocumentDescriptor` |
+| `IAgentStore.java` | `packageVersion` → `workflowVersion` |
+| `AgentStore.java` | `packageVersion` → `workflowVersion` (method sig, URI build, loop decrement) |
+| `IRestOutputActions.java` | `@QueryParam("packageVersion")` → `@QueryParam("workflowVersion")` |
+| `RestOutputActions.java` | `packageVersion` → `workflowVersion` |
+| `IRestExpression.java` | `@QueryParam("packageVersion")` → `@QueryParam("workflowVersion")` |
+| `IRestAction.java` | `@QueryParam("packageVersion")` → `@QueryParam("workflowVersion")` |
+| `RestExpression.java` | `packageVersion` → `workflowVersion` |
+| `RestAction.java` | `packageVersion` → `workflowVersion` |
+| `RestOrphanAdmin.java` | `pkgConfig` → `workflowConfig` |
+| `McpAdminTools.java` | All `pkg*` → `wf*`/`workflow*`, tool descriptions cleaned, JSON keys updated |
+| `AbstractBackupService.java` | `WORKFLOW_EXT = "package"` → `"workflow"`, comment fix |
+| `RestExportService.java` | `packagePath` → `workflowPath` |
+| `RestImportService.java` | All `package*` → `workflow*`, import accepts `.workflow.json` + `.package.json` |
+| `ImportPreview.java` | Comment updated |
+
 ## Descriptor Type Rename: `ai.labs.package` → `ai.labs.workflow` (2026-03-27)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

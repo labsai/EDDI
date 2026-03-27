@@ -183,9 +183,9 @@ public class McpAdminTools {
         }
     }
 
-    @Tool(name = "list_workflows", description = "List all packages (workflow configurations). "
-            + "Returns a JSON array of package descriptors with name, description, and IDs.")
-    public String listWorkflows(@ToolArg(description = "Optional filter string to search package names") String filter,
+    @Tool(name = "list_workflows", description = "List all workflow configurations. "
+            + "Returns a JSON array of workflow descriptors with name, description, and IDs.")
+    public String listWorkflows(@ToolArg(description = "Optional filter string to search workflow names") String filter,
             @ToolArg(description = "Maximum number of results (default 20)") Integer limit) {
         requireRole(identity, authEnabled, "eddi-admin");
         try {
@@ -195,7 +195,7 @@ public class McpAdminTools {
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
             LOGGER.error("MCP list_workflows failed", e);
-            return errorJson("Failed to list packages: " + e.getMessage());
+            return errorJson("Failed to list workflows: " + e.getMessage());
         }
     }
 
@@ -347,8 +347,8 @@ public class McpAdminTools {
             result.put("configuration", config);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
-            LOGGER.error("MCP read_workflow failed for package " + workflowId, e);
-            return errorJson("Failed to read package: " + e.getMessage());
+            LOGGER.error("MCP read_workflow failed for workflow " + workflowId, e);
+            return errorJson("Failed to read workflow: " + e.getMessage());
         }
     }
 
@@ -536,29 +536,29 @@ public class McpAdminTools {
                 return errorJson("Agent not found: " + agentId + " version " + ver);
             }
 
-            // 3. Process each package
-            var pkgStore = getRestStore(IRestWorkflowStore.class);
+            // 3. Process each workflow
+            var workflowStore = getRestStore(IRestWorkflowStore.class);
             List<URI> originalWorkflowUris = new ArrayList<>(agentConfig.getWorkflows());
             List<URI> updatedWorkflowUris = new ArrayList<>();
             int updatedWorkflowCount = 0;
 
-            for (URI pkgUri : originalWorkflowUris) {
-                String pkgId = extractIdFromLocation(pkgUri.toString());
-                int pkgVersion = extractVersionFromLocation(pkgUri.toString());
-                if (pkgId == null) {
-                    updatedWorkflowUris.add(pkgUri); // keep as-is
+            for (URI wfUri : originalWorkflowUris) {
+                String wfId = extractIdFromLocation(wfUri.toString());
+                int wfVersion = extractVersionFromLocation(wfUri.toString());
+                if (wfId == null) {
+                    updatedWorkflowUris.add(wfUri); // keep as-is
                     continue;
                 }
 
-                WorkflowConfiguration pkgConfig = pkgStore.readWorkflow(pkgId, pkgVersion);
-                if (pkgConfig == null) {
-                    updatedWorkflowUris.add(pkgUri);
+                WorkflowConfiguration wfConfig = workflowStore.readWorkflow(wfId, wfVersion);
+                if (wfConfig == null) {
+                    updatedWorkflowUris.add(wfUri);
                     continue;
                 }
 
-                // Replace URIs in package extensions
-                boolean packageModified = false;
-                for (var ext : pkgConfig.getWorkflowSteps()) {
+                // Replace URIs in workflow extensions
+                boolean workflowModified = false;
+                for (var ext : wfConfig.getWorkflowSteps()) {
                     Object uriObj = ext.getConfig().get("uri");
                     if (uriObj != null) {
                         String currentUri = uriObj.toString();
@@ -567,28 +567,28 @@ public class McpAdminTools {
                             String newUri = mapping.get("newUri");
                             if (oldUri != null && newUri != null && currentUri.equals(oldUri)) {
                                 ext.getConfig().put("uri", newUri);
-                                packageModified = true;
+                                workflowModified = true;
                                 break;
                             }
                         }
                     }
                 }
 
-                if (packageModified) {
-                    // Save package ONCE with all replacements
-                    Response pkgResponse = pkgStore.updateWorkflow(pkgId, pkgVersion, pkgConfig);
-                    String pkgLocation = pkgResponse.getHeaderString("Location");
-                    if (pkgLocation != null) {
-                        updatedWorkflowUris.add(URI.create(pkgLocation));
+                if (workflowModified) {
+                    // Save workflow ONCE with all replacements
+                    Response wfResponse = workflowStore.updateWorkflow(wfId, wfVersion, wfConfig);
+                    String wfLocation = wfResponse.getHeaderString("Location");
+                    if (wfLocation != null) {
+                        updatedWorkflowUris.add(URI.create(wfLocation));
                     } else {
                         // Construct new URI with incremented version
-                        int newPkgVersion = pkgVersion + 1;
-                        String newPkgUri = pkgUri.toString().replaceAll("version=\\d+", "version=" + newPkgVersion);
-                        updatedWorkflowUris.add(URI.create(newPkgUri));
+                        int newWfVersion = wfVersion + 1;
+                        String newWfUri = wfUri.toString().replaceAll("version=\\d+", "version=" + newWfVersion);
+                        updatedWorkflowUris.add(URI.create(newWfUri));
                     }
                     updatedWorkflowCount++;
                 } else {
-                    updatedWorkflowUris.add(pkgUri); // unchanged
+                    updatedWorkflowUris.add(wfUri); // unchanged
                 }
             }
 
@@ -658,26 +658,26 @@ public class McpAdminTools {
                 LOGGER.debug("Could not read Agent descriptor for " + agentId, e);
             }
 
-            // Walk packages → extensions
-            var pkgStore = getRestStore(IRestWorkflowStore.class);
-            var packages = new ArrayList<Map<String, Object>>();
+            // Walk workflows → extensions
+            var workflowStore = getRestStore(IRestWorkflowStore.class);
+            var workflows = new ArrayList<Map<String, Object>>();
 
-            for (URI pkgUri : agentConfig.getWorkflows()) {
-                String pkgId = extractIdFromLocation(pkgUri.toString());
-                int pkgVersion = extractVersionFromLocation(pkgUri.toString());
-                if (pkgId == null)
+            for (URI wfUri : agentConfig.getWorkflows()) {
+                String wfId = extractIdFromLocation(wfUri.toString());
+                int wfVersion = extractVersionFromLocation(wfUri.toString());
+                if (wfId == null)
                     continue;
 
-                var pkgInfo = new LinkedHashMap<String, Object>();
-                pkgInfo.put("workflowId", pkgId);
-                pkgInfo.put("packageVersion", pkgVersion);
-                pkgInfo.put("workflowUri", pkgUri.toString());
+                var wfInfo = new LinkedHashMap<String, Object>();
+                wfInfo.put("workflowId", wfId);
+                wfInfo.put("workflowVersion", wfVersion);
+                wfInfo.put("workflowUri", wfUri.toString());
 
                 try {
-                    WorkflowConfiguration pkgConfig = pkgStore.readWorkflow(pkgId, pkgVersion);
-                    if (pkgConfig != null) {
+                    WorkflowConfiguration wfConfig = workflowStore.readWorkflow(wfId, wfVersion);
+                    if (wfConfig != null) {
                         var extensions = new ArrayList<Map<String, Object>>();
-                        for (var ext : pkgConfig.getWorkflowSteps()) {
+                        for (var ext : wfConfig.getWorkflowSteps()) {
                             var extInfo = new LinkedHashMap<String, Object>();
                             if (ext.getType() != null) {
                                 extInfo.put("type", ext.getType().toString());
@@ -692,14 +692,14 @@ public class McpAdminTools {
                             }
                             extensions.add(extInfo);
                         }
-                        pkgInfo.put("extensions", extensions);
-                        pkgInfo.put("extensionCount", extensions.size());
+                        wfInfo.put("extensions", extensions);
+                        wfInfo.put("extensionCount", extensions.size());
                     }
-                } catch (Exception pkgErr) {
-                    pkgInfo.put("error", "Failed to read package: " + pkgErr.getMessage());
+                } catch (Exception wfErr) {
+                    wfInfo.put("error", "Failed to read workflow: " + wfErr.getMessage());
                 }
 
-                packages.add(pkgInfo);
+                workflows.add(wfInfo);
             }
 
             var result = new LinkedHashMap<String, Object>();
@@ -707,8 +707,8 @@ public class McpAdminTools {
             result.put("agentVersion", ver);
             if (agentName != null)
                 result.put("agentName", agentName);
-            result.put("packageCount", packages.size());
-            result.put("packages", packages);
+            result.put("workflowCount", workflows.size());
+            result.put("workflows", workflows);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP list_agent_resources failed for Agent " + agentId, e);

@@ -7,7 +7,7 @@ import java.util.List;
  * /backup/import/preview.
  */
 public record ImportPreview(String agentOriginId, String agentName, List<ResourceDiff> resources) {
-    public record ResourceDiff(String originId, String resourceType, // "agent", "package", "behavior", "httpcalls", etc.
+    public record ResourceDiff(String originId, String resourceType, // "agent", "workflow", "rules", "apicalls", etc.
             String name, DiffAction action, // CREATE, UPDATE, SKIP
             String localId, // null if CREATE, existing ID if UPDATE/SKIP
             Integer localVersion // null if CREATE

@@ -173,23 +173,24 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     // Workflows & their extensions
                     AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString, AgentConfiguration.class);
                     for (URI workflowUri : agentConfig.getWorkflows()) {
-                        IResourceId packageResourceId = RestUtilities.extractResourceId(workflowUri);
-                        if (packageResourceId == null)
+                        IResourceId workflowResourceId = RestUtilities.extractResourceId(workflowUri);
+                        if (workflowResourceId == null)
                             continue;
 
-                        String workflowId = packageResourceId.getId();
-                        String packageVersion = String.valueOf(packageResourceId.getVersion());
-                        String packageName = readNameFromDescriptor(Paths.get(targetDirPath, workflowId, packageVersion), workflowId);
-                        diffs.add(buildResourceDiff(workflowId, "package", packageName));
+                        String workflowId = workflowResourceId.getId();
+                        String workflowVersion = String.valueOf(workflowResourceId.getVersion());
+                        String workflowName = readNameFromDescriptor(Paths.get(targetDirPath, workflowId, workflowVersion), workflowId);
+                        diffs.add(buildResourceDiff(workflowId, "workflow", workflowName));
 
-                        // Read package file to find extension URIs
-                        var dir = Paths.get(FileUtilities.buildPath(targetDirPath, workflowId, packageVersion));
-                        try (var pkgStream = Files.newDirectoryStream(dir, p -> p.toString().endsWith(".package.json"))) {
-                            for (Path packageFilePath : pkgStream) {
-                                String packageFileString = readFile(packageFilePath);
+                        // Read workflow file to find extension URIs
+                        var dir = Paths.get(FileUtilities.buildPath(targetDirPath, workflowId, workflowVersion));
+                        try (var wfStream = Files.newDirectoryStream(dir,
+                                p -> p.toString().endsWith(".workflow.json") || p.toString().endsWith(".package.json"))) {
+                            for (Path workflowFilePath : wfStream) {
+                                String workflowFileString = readFile(workflowFilePath);
                                 // Normalize legacy URIs from v5 ZIPs
-                                packageFileString = normalizeLegacyUris(packageFileString);
-                                addExtensionDiffs(diffs, packageFileString, dir);
+                                workflowFileString = normalizeLegacyUris(workflowFileString);
+                                addExtensionDiffs(diffs, workflowFileString, dir);
                             }
                         }
                     }
@@ -205,26 +206,26 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
-    private void addExtensionDiffs(List<ResourceDiff> diffs, String packageFileString, Path packageDir)
+    private void addExtensionDiffs(List<ResourceDiff> diffs, String workflowFileString, Path workflowDir)
             throws CallbackMatcher.CallbackMatcherException {
 
-        addDiffsForType(diffs, packageFileString, DICTIONARY_URI_PATTERN, DICTIONARY_EXT, packageDir);
-        addDiffsForType(diffs, packageFileString, BEHAVIOR_URI_PATTERN, BEHAVIOR_EXT, packageDir);
-        addDiffsForType(diffs, packageFileString, HTTPCALLS_URI_PATTERN, HTTPCALLS_EXT, packageDir);
-        addDiffsForType(diffs, packageFileString, LANGCHAIN_URI_PATTERN, LLM_EXT, packageDir);
-        addDiffsForType(diffs, packageFileString, PROPERTY_URI_PATTERN, PROPERTY_EXT, packageDir);
-        addDiffsForType(diffs, packageFileString, OUTPUT_URI_PATTERN, OUTPUT_EXT, packageDir);
+        addDiffsForType(diffs, workflowFileString, DICTIONARY_URI_PATTERN, DICTIONARY_EXT, workflowDir);
+        addDiffsForType(diffs, workflowFileString, BEHAVIOR_URI_PATTERN, BEHAVIOR_EXT, workflowDir);
+        addDiffsForType(diffs, workflowFileString, HTTPCALLS_URI_PATTERN, HTTPCALLS_EXT, workflowDir);
+        addDiffsForType(diffs, workflowFileString, LANGCHAIN_URI_PATTERN, LLM_EXT, workflowDir);
+        addDiffsForType(diffs, workflowFileString, PROPERTY_URI_PATTERN, PROPERTY_EXT, workflowDir);
+        addDiffsForType(diffs, workflowFileString, OUTPUT_URI_PATTERN, OUTPUT_EXT, workflowDir);
     }
 
-    private void addDiffsForType(List<ResourceDiff> diffs, String packageFileString, Pattern uriPattern, String ext, Path packageDir)
+    private void addDiffsForType(List<ResourceDiff> diffs, String workflowFileString, Pattern uriPattern, String ext, Path workflowDir)
             throws CallbackMatcher.CallbackMatcherException {
 
-        List<URI> uris = extractResourcesUris(packageFileString, uriPattern);
+        List<URI> uris = extractResourcesUris(workflowFileString, uriPattern);
         for (URI uri : uris) {
             IResourceId resourceId = RestUtilities.extractResourceId(uri);
             if (resourceId == null)
                 continue;
-            String name = readNameFromDescriptor(packageDir, resourceId.getId());
+            String name = readNameFromDescriptor(workflowDir, resourceId.getId());
             diffs.add(buildResourceDiff(resourceId.getId(), ext, name));
         }
     }
@@ -345,92 +346,93 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private void parseWorkflow(String targetDirPath, URI workflowUri, AgentConfiguration agentConfig, AsyncResponse response, boolean isMerge,
             Set<String> selectedSet) {
         try {
-            IResourceId packageResourceId = RestUtilities.extractResourceId(workflowUri);
-            if (packageResourceId == null) {
+            IResourceId workflowResourceId = RestUtilities.extractResourceId(workflowUri);
+            if (workflowResourceId == null) {
                 return;
             }
-            String workflowId = packageResourceId.getId();
-            String packageVersion = String.valueOf(packageResourceId.getVersion());
+            String workflowId = workflowResourceId.getId();
+            String workflowVersion = String.valueOf(workflowResourceId.getVersion());
 
-            var dir = Paths.get(FileUtilities.buildPath(targetDirPath, workflowId, packageVersion));
-            try (var directoryStream = Files.newDirectoryStream(dir, packageFilePath -> packageFilePath.toString().endsWith(".package.json"))) {
-                directoryStream.forEach(packageFilePath -> {
+            var dir = Paths.get(FileUtilities.buildPath(targetDirPath, workflowId, workflowVersion));
+            try (var directoryStream = Files.newDirectoryStream(dir,
+                    wfFilePath -> wfFilePath.toString().endsWith(".workflow.json") || wfFilePath.toString().endsWith(".package.json"))) {
+                directoryStream.forEach(workflowFilePath -> {
                     try {
-                        Path packagePath = packageFilePath.getParent();
-                        String packageFileString = readFile(packageFilePath);
+                        Path workflowPath = workflowFilePath.getParent();
+                        String workflowFileString = readFile(workflowFilePath);
 
                         // Normalize legacy eddi:// URIs from v5 ZIP exports to v6 canonical form
-                        packageFileString = normalizeLegacyUris(packageFileString);
+                        workflowFileString = normalizeLegacyUris(workflowFileString);
 
                         // loading old resources, creating/updating them,
-                        // updating document descriptor and replacing references in package config
+                        // updating document descriptor and replacing references in workflow config
 
                         // ... for dictionaries
-                        List<URI> dictionaryUris = extractResourcesUris(packageFileString, DICTIONARY_URI_PATTERN);
+                        List<URI> dictionaryUris = extractResourcesUris(workflowFileString, DICTIONARY_URI_PATTERN);
                         List<URI> newDictionaryUris = createOrUpdateResources(
-                                readResources(dictionaryUris, packagePath, DICTIONARY_EXT, DictionaryConfiguration.class), dictionaryUris, isMerge,
+                                readResources(dictionaryUris, workflowPath, DICTIONARY_EXT, DictionaryConfiguration.class), dictionaryUris, isMerge,
                                 selectedSet, this::createNewDictionaries, this::updateDictionary);
 
-                        updateDocumentDescriptor(packagePath, dictionaryUris, newDictionaryUris);
-                        packageFileString = replaceURIs(packageFileString, dictionaryUris, newDictionaryUris);
+                        updateDocumentDescriptor(workflowPath, dictionaryUris, newDictionaryUris);
+                        workflowFileString = replaceURIs(workflowFileString, dictionaryUris, newDictionaryUris);
 
                         // ... for behavior
-                        List<URI> behaviorUris = extractResourcesUris(packageFileString, BEHAVIOR_URI_PATTERN);
+                        List<URI> behaviorUris = extractResourcesUris(workflowFileString, BEHAVIOR_URI_PATTERN);
                         List<URI> newBehaviorUris = createOrUpdateResources(
-                                readResources(behaviorUris, packagePath, BEHAVIOR_EXT, RuleSetConfiguration.class), behaviorUris, isMerge,
+                                readResources(behaviorUris, workflowPath, BEHAVIOR_EXT, RuleSetConfiguration.class), behaviorUris, isMerge,
                                 selectedSet, this::createNewBehaviors, this::updateBehavior);
 
-                        updateDocumentDescriptor(packagePath, behaviorUris, newBehaviorUris);
-                        packageFileString = replaceURIs(packageFileString, behaviorUris, newBehaviorUris);
+                        updateDocumentDescriptor(workflowPath, behaviorUris, newBehaviorUris);
+                        workflowFileString = replaceURIs(workflowFileString, behaviorUris, newBehaviorUris);
 
                         // ... for http calls
-                        List<URI> httpCallsUris = extractResourcesUris(packageFileString, HTTPCALLS_URI_PATTERN);
+                        List<URI> httpCallsUris = extractResourcesUris(workflowFileString, HTTPCALLS_URI_PATTERN);
                         List<URI> newApiCallsUris = createOrUpdateResources(
-                                readResources(httpCallsUris, packagePath, HTTPCALLS_EXT, ApiCallsConfiguration.class), httpCallsUris, isMerge,
+                                readResources(httpCallsUris, workflowPath, HTTPCALLS_EXT, ApiCallsConfiguration.class), httpCallsUris, isMerge,
                                 selectedSet, this::createNewApiCalls, this::updateApiCalls);
 
-                        updateDocumentDescriptor(packagePath, httpCallsUris, newApiCallsUris);
-                        packageFileString = replaceURIs(packageFileString, httpCallsUris, newApiCallsUris);
+                        updateDocumentDescriptor(workflowPath, httpCallsUris, newApiCallsUris);
+                        workflowFileString = replaceURIs(workflowFileString, httpCallsUris, newApiCallsUris);
 
                         // ... for langchain
-                        List<URI> langchainUris = extractResourcesUris(packageFileString, LANGCHAIN_URI_PATTERN);
+                        List<URI> langchainUris = extractResourcesUris(workflowFileString, LANGCHAIN_URI_PATTERN);
                         List<URI> newLangchainUris = createOrUpdateResources(
-                                readResources(langchainUris, packagePath, LLM_EXT, LlmConfiguration.class), langchainUris, isMerge, selectedSet,
+                                readResources(langchainUris, workflowPath, LLM_EXT, LlmConfiguration.class), langchainUris, isMerge, selectedSet,
                                 this::createNewLlm, this::updateLangchain);
 
-                        updateDocumentDescriptor(packagePath, langchainUris, newLangchainUris);
-                        packageFileString = replaceURIs(packageFileString, langchainUris, newLangchainUris);
+                        updateDocumentDescriptor(workflowPath, langchainUris, newLangchainUris);
+                        workflowFileString = replaceURIs(workflowFileString, langchainUris, newLangchainUris);
 
                         // ... for property
-                        List<URI> propertyUris = extractResourcesUris(packageFileString, PROPERTY_URI_PATTERN);
+                        List<URI> propertyUris = extractResourcesUris(workflowFileString, PROPERTY_URI_PATTERN);
                         List<URI> newPropertyUris = createOrUpdateResources(
-                                readResources(propertyUris, packagePath, PROPERTY_EXT, PropertySetterConfiguration.class), propertyUris, isMerge,
+                                readResources(propertyUris, workflowPath, PROPERTY_EXT, PropertySetterConfiguration.class), propertyUris, isMerge,
                                 selectedSet, this::createNewProperties, this::updateProperty);
 
-                        updateDocumentDescriptor(packagePath, propertyUris, newPropertyUris);
-                        packageFileString = replaceURIs(packageFileString, propertyUris, newPropertyUris);
+                        updateDocumentDescriptor(workflowPath, propertyUris, newPropertyUris);
+                        workflowFileString = replaceURIs(workflowFileString, propertyUris, newPropertyUris);
 
                         // ... for output
-                        List<URI> outputUris = extractResourcesUris(packageFileString, OUTPUT_URI_PATTERN);
+                        List<URI> outputUris = extractResourcesUris(workflowFileString, OUTPUT_URI_PATTERN);
                         List<URI> newOutputUris = createOrUpdateResources(
-                                readResources(outputUris, packagePath, OUTPUT_EXT, OutputConfigurationSet.class), outputUris, isMerge, selectedSet,
+                                readResources(outputUris, workflowPath, OUTPUT_EXT, OutputConfigurationSet.class), outputUris, isMerge, selectedSet,
                                 this::createNewOutputs, this::updateOutput);
 
-                        updateDocumentDescriptor(packagePath, outputUris, newOutputUris);
-                        packageFileString = replaceURIs(packageFileString, outputUris, newOutputUris);
+                        updateDocumentDescriptor(workflowPath, outputUris, newOutputUris);
+                        workflowFileString = replaceURIs(workflowFileString, outputUris, newOutputUris);
 
-                        // creating updated package and replacing references in Agent config
+                        // creating updated workflow and replacing references in Agent config
                         URI newWorkflowUri;
                         if (isMerge && isSelected(selectedSet, workflowId)) {
-                            newWorkflowUri = createOrUpdateWorkflow(packageFileString, workflowId);
+                            newWorkflowUri = createOrUpdateWorkflow(workflowFileString, workflowId);
                         } else {
-                            newWorkflowUri = createNewWorkflow(packageFileString);
+                            newWorkflowUri = createNewWorkflow(workflowFileString);
                         }
 
                         // Set originId on the workflow's descriptor
                         setOriginIdOnDescriptor(newWorkflowUri, workflowId);
 
-                        updateDocumentDescriptor(packagePath, workflowUri, newWorkflowUri);
+                        updateDocumentDescriptor(workflowPath, workflowUri, newWorkflowUri);
                         agentConfig.setWorkflows(agentConfig.getWorkflows().stream().map(uri -> uri.equals(workflowUri) ? newWorkflowUri : uri)
                                 .collect(Collectors.toList()));
 
@@ -547,13 +549,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return createNewAgent(agentConfiguration);
     }
 
-    private URI createOrUpdateWorkflow(String packageFileString, String packageOriginId)
+    private URI createOrUpdateWorkflow(String workflowFileString, String workflowOriginId)
             throws RestInterfaceFactory.RestInterfaceFactoryException, IOException {
-        URI existingUri = findLocalUriByOriginId(packageOriginId);
+        URI existingUri = findLocalUriByOriginId(workflowOriginId);
         if (existingUri != null) {
             IResourceId localResId = RestUtilities.extractResourceId(existingUri);
             if (localResId != null) {
-                WorkflowConfiguration workflowConfig = jsonSerialization.deserialize(packageFileString, WorkflowConfiguration.class);
+                WorkflowConfiguration workflowConfig = jsonSerialization.deserialize(workflowFileString, WorkflowConfiguration.class);
                 IRestWorkflowStore restWorkflowStore = getRestResourceStore(IRestWorkflowStore.class);
                 Response updateResponse = restWorkflowStore.updateWorkflow(localResId.getId(), localResId.getVersion(), workflowConfig);
                 if (updateResponse.getStatus() == 200) {
@@ -562,7 +564,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 }
             }
         }
-        return createNewWorkflow(packageFileString);
+        return createNewWorkflow(workflowFileString);
     }
 
     private void setOriginIdOnDescriptor(URI resourceUri, String originId) {
@@ -594,12 +596,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return agentResponse.getLocation();
     }
 
-    private URI createNewWorkflow(String packageFileString) throws RestInterfaceFactory.RestInterfaceFactoryException, IOException {
-        WorkflowConfiguration workflowConfig = jsonSerialization.deserialize(packageFileString, WorkflowConfiguration.class);
+    private URI createNewWorkflow(String workflowFileString) throws RestInterfaceFactory.RestInterfaceFactoryException, IOException {
+        WorkflowConfiguration workflowConfig = jsonSerialization.deserialize(workflowFileString, WorkflowConfiguration.class);
         IRestWorkflowStore restWorkflowStore = getRestResourceStore(IRestWorkflowStore.class);
-        Response packageResponse = restWorkflowStore.createWorkflow(workflowConfig);
-        checkIfCreatedResponse(packageResponse);
-        return packageResponse.getLocation();
+        Response workflowResponse = restWorkflowStore.createWorkflow(workflowConfig);
+        checkIfCreatedResponse(workflowResponse);
+        return workflowResponse.getLocation();
     }
 
     private List<URI> createNewDictionaries(List<DictionaryConfiguration> dictionaryConfigurations)
@@ -773,8 +775,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         });
     }
 
-    private DocumentDescriptor readDocumentDescriptorFromFile(Path packagePath, IResourceId resourceId) throws IOException {
-        Path filePath = Paths.get(FileUtilities.buildPath(packagePath.toString(), resourceId.getId() + ".descriptor.json"));
+    private DocumentDescriptor readDocumentDescriptorFromFile(Path workflowPath, IResourceId resourceId) throws IOException {
+        Path filePath = Paths.get(FileUtilities.buildPath(workflowPath.toString(), resourceId.getId() + ".descriptor.json"));
         String oldDocumentDescriptorFile = readFile(filePath);
         return jsonSerialization.deserialize(oldDocumentDescriptorFile, DocumentDescriptor.class);
     }
@@ -802,7 +804,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     @SuppressWarnings("unchecked")
-    private <T> List<T> readResources(List<URI> uris, Path packagePath, String extension, Class<T> clazz) {
+    private <T> List<T> readResources(List<URI> uris, Path workflowPath, String extension, Class<T> clazz) {
         return uris.stream().map(uri -> {
             Path resourcePath = null;
             String resourceContent = null;
@@ -811,8 +813,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 if (resourceId == null) {
                     throw new IOException("resourceId was null");
                 }
-                resourcePath = createResourcePath(packagePath, resourceId.getId(), extension);
-                resourceContent = readFile(resourcePath);
+                resourceContent = readFile(createResourcePath(workflowPath, resourceId.getId(), extension));
                 if (uri.toString().startsWith(IRestPropertySetterStore.resourceBaseType)) {
                     var resourceAsMap = jsonSerialization.deserialize(resourceContent, Map.class);
                     var migratedPropertySetterDocument = migrationManager.migratePropertySetter().migrate(new Document(resourceAsMap));
@@ -840,10 +841,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 resourceContent = templateSyntaxMigrator.migrate(resourceContent);
 
                 return jsonSerialization.deserialize(resourceContent, clazz);
-            } catch (IOException e) {
-                log.error(e.getLocalizedMessage(), e);
+            } catch (Exception e) {
+                log.error(e.getLocalizedMessage());
                 log.error(String.format("uri is: %s", uri));
-                log.error(String.format("packagePath is: %s", packagePath));
+                log.error(String.format("workflowPath is: %s", workflowPath));
                 log.error(String.format("resourcePath is: %s", resourcePath));
                 log.error(String.format("resourceContent is:\n%s", resourceContent));
                 return null;
@@ -851,8 +852,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }).collect(Collectors.toList());
     }
 
-    private Path createResourcePath(Path packagePath, String resourceId, String extension) {
-        return Paths.get(FileUtilities.buildPath(packagePath.toString(), resourceId + "." + extension + ".json"));
+    private Path createResourcePath(Path workflowPath, String resourceId, String extension) {
+        return Paths.get(FileUtilities.buildPath(workflowPath.toString(), resourceId + "." + extension + ".json"));
     }
 
     private String readFile(Path path) throws IOException {

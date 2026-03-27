@@ -118,30 +118,30 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             for (IResourceId resourceId : workflowConfigurations.keySet()) {
                 WorkflowConfiguration workflowConfig = workflowConfigurations.get(resourceId);
                 String workflowConfigString = jsonSerialization.serialize(workflowConfig);
-                Path packagePath = writeDirAndDocument(resourceId.getId(), resourceId.getVersion(), workflowConfigString, agentPath, WORKFLOW_EXT);
-                writeDocumentDescriptor(packagePath, resourceId.getId(), resourceId.getVersion());
+                Path workflowPath = writeDirAndDocument(resourceId.getId(), resourceId.getVersion(), workflowConfigString, agentPath, WORKFLOW_EXT);
+                writeDocumentDescriptor(workflowPath, resourceId.getId(), resourceId.getVersion());
 
-                writeConfigs(packagePath,
+                writeConfigs(workflowPath,
                         convertConfigsToString(
                                 readConfigs(regularDictionaryStore, extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN))),
                         DICTIONARY_EXT);
 
-                writeConfigs(packagePath,
+                writeConfigs(workflowPath,
                         convertConfigsToString(readConfigs(behaviorStore, extractResourcesUris(workflowConfigString, BEHAVIOR_URI_PATTERN))),
                         BEHAVIOR_EXT);
 
-                writeConfigs(packagePath,
+                writeConfigs(workflowPath,
                         convertConfigsToString(readConfigs(httpCallsStore, extractResourcesUris(workflowConfigString, HTTPCALLS_URI_PATTERN))),
                         HTTPCALLS_EXT);
 
-                writeConfigs(packagePath,
+                writeConfigs(workflowPath,
                         convertConfigsToString(readConfigs(llmStore, extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN))), LLM_EXT);
 
-                writeConfigs(packagePath,
+                writeConfigs(workflowPath,
                         convertConfigsToString(readConfigs(propertySetterStore, extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN))),
                         PROPERTY_EXT);
 
-                writeConfigs(packagePath,
+                writeConfigs(workflowPath,
                         convertConfigsToString(readConfigs(outputStore, extractResourcesUris(workflowConfigString, OUTPUT_URI_PATTERN))), OUTPUT_EXT);
 
                 Path unusedPath = Files.createDirectories(Paths.get(tmpPath.toString(), agentId, "unused"));

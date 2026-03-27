@@ -180,8 +180,8 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
      * Extract all extension resource URIs from a workflow configuration. Follows
      * the same traversal as RestWorkflowStore.deleteWorkflowCascade().
      */
-    private void collectExtensionUris(WorkflowConfiguration pkgConfig, Set<String> referencedUris) {
-        for (WorkflowStep ext : pkgConfig.getWorkflowSteps()) {
+    private void collectExtensionUris(WorkflowConfiguration workflowConfig, Set<String> referencedUris) {
+        for (WorkflowStep ext : workflowConfig.getWorkflowSteps()) {
             // Main extension resource URI (config.uri)
             Map<String, Object> config = ext.getConfig();
             if (config != null) {

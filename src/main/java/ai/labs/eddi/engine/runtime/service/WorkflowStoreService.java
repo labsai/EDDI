@@ -23,18 +23,18 @@ public class WorkflowStoreService implements IWorkflowStoreService {
     }
 
     @Override
-    public WorkflowConfiguration getKnowledgeWorkflow(String workflowId, Integer packageVersion) throws ServiceException {
+    public WorkflowConfiguration getKnowledgeWorkflow(String workflowId, Integer workflowVersion) throws ServiceException {
         try {
-            return restWorkflowStore.readWorkflow(workflowId, packageVersion);
+            return restWorkflowStore.readWorkflow(workflowId, workflowVersion);
         } catch (Exception e) {
             throw new ServiceException(e.getLocalizedMessage(), e);
         }
     }
 
     @Override
-    public DocumentDescriptor getWorkflowDocumentDescriptor(String workflowId, Integer packageVersion) throws ServiceException {
+    public DocumentDescriptor getWorkflowDocumentDescriptor(String workflowId, Integer workflowVersion) throws ServiceException {
         try {
-            return restDocumentDescriptorStore.readDescriptor(workflowId, packageVersion);
+            return restDocumentDescriptorStore.readDescriptor(workflowId, workflowVersion);
         } catch (Exception e) {
             throw new ServiceException(e.getLocalizedMessage(), e);
         }

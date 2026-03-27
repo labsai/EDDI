@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
  */
 abstract class AbstractBackupService {
     static final String AGENT_EXT = "agent";
-    static final String WORKFLOW_EXT = "package";
+    static final String WORKFLOW_EXT = "workflow";
     static final String DICTIONARY_EXT = "regulardictionary";
     static final String BEHAVIOR_EXT = "behavior";
     static final String HTTPCALLS_EXT = "httpcalls";
@@ -60,7 +60,7 @@ abstract class AbstractBackupService {
 
     /**
      * Normalize legacy eddi:// URIs in a JSON string to their v6 canonical form.
-     * Used during ZIP import to transform old-format package configs.
+     * Used during ZIP import to transform old-format workflow configs.
      */
     static String normalizeLegacyUris(String jsonString) {
         if (jsonString == null || !jsonString.contains("eddi://")) {
