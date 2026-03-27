@@ -47,7 +47,7 @@ class McpScheduleToolsTest {
         when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(mock(IRestWorkflowStore.class));
         when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(mock(IRestDocumentDescriptorStore.class));
 
-        lenient().when(jsonSerialization.serialize(any())).thenAnswer(inv -> {
+        when(jsonSerialization.serialize(any())).thenAnswer(inv -> {
             // Simple serialization for assertions
             return inv.getArgument(0).toString();
         });

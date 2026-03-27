@@ -28,7 +28,7 @@ class ConfidenceEvaluator {
     private static final Logger LOGGER = Logger.getLogger(ConfidenceEvaluator.class);
 
     // JSON extraction patterns
-    private static final Pattern CONFIDENCE_JSON_PATTERN = Pattern.compile("\"confidence\"\\s*:\\s*(\\d+\\.?\\d*)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CONFIDENCE_JSON_PATTERN = Pattern.compile("\"confidence\"\\s*:\\s*(-?\\d+\\.?\\d*)", Pattern.CASE_INSENSITIVE);
     private static final Pattern RESPONSE_JSON_PATTERN = Pattern.compile("\"response\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"", Pattern.DOTALL);
 
     // Hedging/uncertainty phrases (case-insensitive match)

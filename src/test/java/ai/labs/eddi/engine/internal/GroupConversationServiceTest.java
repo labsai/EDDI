@@ -66,6 +66,9 @@ class GroupConversationServiceTest {
 
         when(conversationStore.create(any())).thenReturn("gc-1");
 
+        // jsonSerialization: extractResponse calls serialize() on ConversationOutput
+        lenient().when(jsonSerialization.serialize(any())).thenAnswer(inv -> inv.getArgument(0).toString());
+
         // Template engine: pass through (strip to first 80 chars)
         lenient().when(templatingEngine.processTemplate(anyString(), any(), any())).thenAnswer(inv -> {
             String tmpl = inv.getArgument(0, String.class);
@@ -114,8 +117,8 @@ class GroupConversationServiceTest {
             snapshot.setConversationOutputs(new ArrayList<>(List.of(output)));
             handler.onComplete(snapshot);
             return null;
-        }).when(conversationService).say(any(Environment.class), eq(agentId), anyString(), anyBoolean(), anyBoolean(), any(), any(InputData.class),
-                anyBoolean(), any(ConversationResponseHandler.class));
+        }).when(conversationService).say(any(Environment.class), eq(agentId), anyString(), any(), any(), any(), any(InputData.class), anyBoolean(),
+                any(ConversationResponseHandler.class));
     }
 
     // =========================================================
