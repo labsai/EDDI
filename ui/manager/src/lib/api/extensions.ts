@@ -49,3 +49,27 @@ export const EXTENSION_TYPE_INFO: Record<
 export function getExtensionLabel(type: string): string {
   return EXTENSION_TYPE_INFO[type]?.label ?? type;
 }
+
+/**
+ * Map from EDDI extension type to the resource slug used in RESOURCE_TYPES.
+ * Extension types without a standalone resource store (e.g. parser, output.template)
+ * are not included — they use embedded config or have no separate store.
+ */
+export const EXTENSION_TO_RESOURCE_SLUG: Record<string, string> = {
+  "ai.labs.rules": "rules",
+  "ai.labs.apicalls": "apicalls",
+  "ai.labs.llm": "llm",
+  "ai.labs.output": "output",
+  "ai.labs.property": "propertysetter",
+  "ai.labs.mcpcalls": "mcpcalls",
+};
+
+/** Check if an extension type has a standalone resource config store */
+export function hasResourceStore(extensionType: string): boolean {
+  return extensionType in EXTENSION_TO_RESOURCE_SLUG;
+}
+
+/** Get the resource slug for an extension type (undefined if no store) */
+export function getResourceSlugForExtension(extensionType: string): string | undefined {
+  return EXTENSION_TO_RESOURCE_SLUG[extensionType];
+}

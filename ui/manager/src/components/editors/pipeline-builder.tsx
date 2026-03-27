@@ -99,6 +99,14 @@ export interface PipelineBuilderProps {
   onChange: (items: PipelineItem[]) => void;
   onRemove: (index: number) => void;
   disabled?: boolean;
+  /** Cascade context: workflow ID for building resource links with parent reference */
+  workflowId?: string;
+  /** Cascade context: workflow version */
+  workflowVersion?: number;
+  /** Cascade context: agent ID (when navigating from agent-detail) */
+  agentId?: string;
+  /** Cascade context: agent version */
+  agentVer?: string;
 }
 
 /* ─── Main component ─── */
@@ -107,6 +115,10 @@ export function PipelineBuilder({
   onChange,
   onRemove,
   disabled = false,
+  workflowId,
+  workflowVersion,
+  agentId,
+  agentVer,
 }: PipelineBuilderProps) {
   const { t } = useTranslation();
   const sensors = useSensors(
@@ -171,6 +183,10 @@ export function PipelineBuilder({
               total={items.length}
               onRemove={() => onRemove(item.index)}
               disabled={disabled}
+              workflowId={workflowId}
+              workflowVersion={workflowVersion}
+              agentId={agentId}
+              agentVer={agentVer}
             />
           ))}
         </div>
@@ -186,12 +202,20 @@ function SortableExtensionItem({
   total,
   onRemove,
   disabled,
+  workflowId,
+  workflowVersion,
+  agentId,
+  agentVer,
 }: {
   item: PipelineItem;
   position: number;
   total: number;
   onRemove: () => void;
   disabled: boolean;
+  workflowId?: string;
+  workflowVersion?: number;
+  agentId?: string;
+  agentVer?: string;
 }) {
   const { t } = useTranslation();
   const {
@@ -251,7 +275,19 @@ function SortableExtensionItem({
         <p className="text-sm font-medium text-foreground">{label}</p>
         {parsed && (
           <Link
-            to={`/manage/resources/${parsed.slug}/${parsed.id}`}
+            to={(() => {
+              let path = `/manage/resources/${parsed.slug}/${parsed.id}`;
+              const params = new URLSearchParams();
+              if (workflowId && workflowVersion) {
+                params.set("pkgId", workflowId);
+                params.set("pkgVer", String(workflowVersion));
+              }
+              if (agentId) params.set("agentId", agentId);
+              if (agentVer) params.set("agentVer", agentVer);
+              const qs = params.toString();
+              if (qs) path += `?${qs}`;
+              return path;
+            })()}
             className="text-xs text-muted-foreground hover:text-primary truncate block transition-colors"
           >
             {parsed.id}

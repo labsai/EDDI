@@ -402,7 +402,7 @@ export function AgentDetailPage() {
                   <Settings className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0">
                     <Link
-                      to={`/manage/workflowview/${pkgId}`}
+                      to={`/manage/workflowview/${pkgId}?agentId=${id}&agentVer=${resolvedVersion}`}
                       className="text-sm font-medium text-foreground hover:text-primary truncate block transition-colors"
                     >
                       {pkgId}

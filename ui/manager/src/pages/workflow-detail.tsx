@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   Workflow,
@@ -11,7 +11,6 @@ import {
   Settings,
   Save,
   Undo2,
-  FileDown,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
@@ -26,13 +25,14 @@ import {
 
 import { parseResourceUri } from "@/lib/api/agents";
 import type { WorkflowExtension } from "@/lib/api/workflows";
-import type { ExtensionDescriptor } from "@/lib/api/extensions";
 import {
   PipelineBuilder,
   type PipelineItem,
 } from "@/components/editors/pipeline-builder";
-import { AddExtensionDialog } from "@/components/editors/add-extension-dialog";
-import { ImportOpenApiDialog } from "@/components/editors/import-openapi-dialog";
+import {
+  AddExtensionDialog,
+  type AddExtensionResult,
+} from "@/components/editors/add-extension-dialog";
 
 
 /* ─── Main page ─── */
@@ -40,10 +40,14 @@ export function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  // Cascade context from URL (when navigating from agent-detail)
+  const agentId = searchParams.get("agentId") ?? undefined;
+  const agentVer = searchParams.get("agentVer") ?? undefined;
 
   const [version, setVersion] = useState<number | undefined>(undefined);
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [showImportDialog, setShowImportDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [localExtensions, setLocalExtensions] = useState<
     WorkflowExtension[] | null
@@ -124,11 +128,11 @@ export function WorkflowDetailPage() {
   );
 
   const handleAddExtension = useCallback(
-    (descriptor: ExtensionDescriptor) => {
+    (result: AddExtensionResult) => {
       const newExt: WorkflowExtension = {
-        type: descriptor.type,
+        type: result.descriptor.type,
         extensions: {},
-        config: {},
+        config: result.configUri ? { uri: result.configUri } : {},
       };
       setLocalExtensions([...currentExtensions, newExt]);
       setShowAddDialog(false);
@@ -136,12 +140,6 @@ export function WorkflowDetailPage() {
     [currentExtensions]
   );
 
-  const handleImportOpenApi = useCallback(
-    (extensions: WorkflowExtension[]) => {
-      setLocalExtensions([...currentExtensions, ...extensions]);
-    },
-    [currentExtensions]
-  );
 
   const handleSave = useCallback(async () => {
     if (!isDirty || !localExtensions) return;
@@ -328,14 +326,7 @@ export function WorkflowDetailPage() {
             <Plus className="h-4 w-4" />
             {t("packageEditor.addExtension", "Add Extension")}
           </button>
-          <button
-            onClick={() => setShowImportDialog(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
-            data-testid="import-openapi-btn"
-          >
-            <FileDown className="h-4 w-4" />
-            {t("workflowEditor.importOpenApi", "Import from OpenAPI")}
-          </button>
+
         </div>
 
         <PipelineBuilder
@@ -343,6 +334,10 @@ export function WorkflowDetailPage() {
           onChange={handleReorder}
           onRemove={handleRemoveExtension}
           disabled={updateMutation.isPending}
+          workflowId={id}
+          workflowVersion={resolvedVersion}
+          agentId={agentId}
+          agentVer={agentVer}
         />
       </section>
 
@@ -353,12 +348,6 @@ export function WorkflowDetailPage() {
         onSelect={handleAddExtension}
       />
 
-      {/* Import from OpenAPI dialog */}
-      <ImportOpenApiDialog
-        open={showImportDialog}
-        onClose={() => setShowImportDialog(false)}
-        onImport={handleImportOpenApi}
-      />
 
       {/* Raw config (collapsible) */}
       <RawConfigSection config={pkg} />
