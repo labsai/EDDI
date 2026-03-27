@@ -60,15 +60,19 @@ Write-Host "  CSS: $($newCss.Name)"
 # ─── Step 3: Remove old Manager files (preserve chat-ui-*) ─────────────────
 Write-Host "`n[3/4] Cleaning old Manager assets..." -ForegroundColor Cyan
 
+$removedFiles = @()
+
 $oldJs = Get-ChildItem $ScriptsJs -Filter "index-*.js" -ErrorAction SilentlyContinue
 foreach ($f in $oldJs) {
     Write-Host "  Removing $($f.Name)" -ForegroundColor Yellow
+    $removedFiles += "src/main/resources/META-INF/resources/scripts/js/$($f.Name)"
     Remove-Item $f.FullName -Force
 }
 
 $oldCss = Get-ChildItem $ScriptsCss -Filter "index-*.css" -ErrorAction SilentlyContinue
 foreach ($f in $oldCss) {
     Write-Host "  Removing $($f.Name)" -ForegroundColor Yellow
+    $removedFiles += "src/main/resources/META-INF/resources/scripts/css/$($f.Name)"
     Remove-Item $f.FullName -Force
 }
 
@@ -112,9 +116,15 @@ if ($answer -match '^[Yy]') {
 
     Push-Location $EddiPath
     try {
+        # Stage the specific new files
         git add "src/main/resources/META-INF/resources/scripts/js/$($newJs.Name)"
         git add "src/main/resources/META-INF/resources/scripts/css/$($newCss.Name)"
         git add "src/main/resources/META-INF/resources/manage.html"
+
+        # Stage the specific old files that were deleted
+        foreach ($removed in $removedFiles) {
+            git add $removed
+        }
 
         git commit --no-verify -m $commitMsg
         if ($LASTEXITCODE -eq 0) {
