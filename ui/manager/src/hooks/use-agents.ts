@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { updateDescriptor } from "@/lib/api/descriptors";
 import {
   getAgentDescriptors,
@@ -18,6 +18,7 @@ import {
 } from "@/lib/api/agents";
 
 const AGENTS_KEY = ["agents"] as const;
+const PAGE_SIZE = 50;
 
 export function useAgentDescriptors(
   limit = 20,
@@ -27,6 +28,22 @@ export function useAgentDescriptors(
   return useQuery({
     queryKey: [...AGENTS_KEY, "descriptors", { limit, index, filter }],
     queryFn: () => getAgentDescriptors(limit, index, filter),
+  });
+}
+
+/** Infinite-scroll agent list with offset-based pagination */
+export function useInfiniteAgentDescriptors(filter = "") {
+  return useInfiniteQuery({
+    queryKey: [...AGENTS_KEY, "descriptors-infinite", { filter }],
+    queryFn: ({ pageParam = 0 }) => getAgentDescriptors(PAGE_SIZE, pageParam, filter),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      // If we got a full page, there are probably more
+      if (lastPage.length === PAGE_SIZE) {
+        return allPages.length * PAGE_SIZE;
+      }
+      return undefined; // no more pages
+    },
   });
 }
 

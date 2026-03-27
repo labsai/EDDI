@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Workflow, Search, Plus, ExternalLink, Trash2, Copy } from "lucide-react";
+import { Workflow, Search, Plus, ExternalLink, Trash2, Copy, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import {
-  useWorkflowDescriptors,
+  useInfiniteWorkflowDescriptors,
   useDeleteWorkflow,
   groupWorkflowsByName,
 } from "@/hooks/use-workflows";
@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
+import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";
 import {
   ViewToggle,
   getStoredViewMode,
@@ -24,18 +25,51 @@ import {
 } from "@/components/shared/view-toggle";
 import { Link } from "react-router-dom";
 
+type SortField = "name" | "version" | "modified";
+type SortDir = "asc" | "desc";
+
 export function WorkflowsPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("workflows"));
+  const [sortField, setSortField] = useState<SortField>("modified");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  const { data: packages, isLoading, isError, refetch } =
-    useWorkflowDescriptors(500, 0, search);
+  const {
+    data,
+    isLoading,
+    isError,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteWorkflowDescriptors(search);
+
   const deleteMutation = useDeleteWorkflow();
 
-  const enrichedWorkflows = packages ? groupWorkflowsByName(packages) : [];
+  // Flatten infinite pages → group by name → sort
+  const enrichedWorkflows = useMemo(() => {
+    const flat = data?.pages.flat() ?? [];
+    const grouped = groupWorkflowsByName(flat);
+    return [...grouped].sort((a, b) => {
+      let cmp = 0;
+      if (sortField === "name") cmp = (a.name ?? "").localeCompare(b.name ?? "");
+      else if (sortField === "version") cmp = a.version - b.version;
+      else cmp = new Date(a.lastModifiedOn).getTime() - new Date(b.lastModifiedOn).getTime();
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [data, sortField, sortDir]);
+
+  const toggleSort = useCallback((field: SortField) => {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir(field === "modified" ? "desc" : "asc");
+    }
+  }, [sortField]);
 
   function handleDelete(id: string, version: number) {
     setDeleteTarget({ id, version });
@@ -141,6 +175,7 @@ export function WorkflowsPage() {
         <>
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             {t("packages.count", { count: enrichedWorkflows.length })}
+            {hasNextPage && "+"}
           </p>
 
           {view === "card" ? (
@@ -168,17 +203,35 @@ export function WorkflowsPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border bg-secondary/50">
-                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      {t("common.name", "Name")}
+                    <th
+                      className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+                      onClick={() => toggleSort("name")}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {t("common.name", "Name")}
+                        {sortField === "name" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-30" />}
+                      </span>
                     </th>
                     <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       {t("common.id", "ID")}
                     </th>
-                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      {t("common.version", "Version")}
+                    <th
+                      className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+                      onClick={() => toggleSort("version")}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {t("common.version", "Version")}
+                        {sortField === "version" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-30" />}
+                      </span>
                     </th>
-                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      {t("common.modified", "Modified")}
+                    <th
+                      className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+                      onClick={() => toggleSort("modified")}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {t("common.modified", "Modified")}
+                        {sortField === "modified" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-30" />}
+                      </span>
                     </th>
                     <th className="px-5 py-3 text-end text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       {t("conversations.actions", "Actions")}
@@ -239,6 +292,13 @@ export function WorkflowsPage() {
               </table>
             </div>
           )}
+
+          {/* Infinite scroll sentinel */}
+          <InfiniteScrollSentinel
+            onLoadMore={() => fetchNextPage()}
+            isFetchingMore={isFetchingNextPage}
+            hasMore={!!hasNextPage}
+          />
         </>
       )}
 

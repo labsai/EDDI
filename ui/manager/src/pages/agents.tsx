@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Bot, Search, Plus, Upload, Wand2, ExternalLink, Trash2, Copy, Download } from "lucide-react";
+import { Bot, Search, Plus, Upload, Wand2, ExternalLink, Trash2, Copy, Download, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
-import { useAgentDescriptors, useDeleteAgent, useDuplicateAgent, groupAgentsByName } from "@/hooks/use-agents";
+import { useInfiniteAgentDescriptors, useDeleteAgent, useDuplicateAgent, groupAgentsByName } from "@/hooks/use-agents";
 import { AgentCard } from "@/components/agents/agent-card";
 import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
 import { ImportAgentDialog } from "@/components/agents/import-agent-dialog";
@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
+import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";
 import {
   ViewToggle,
   getStoredViewMode,
@@ -22,6 +23,9 @@ import {
 import { useExportAgent } from "@/hooks/use-backup";
 import { cn } from "@/lib/utils";
 
+type SortField = "name" | "version" | "modified";
+type SortDir = "asc" | "desc";
+
 export function AgentsPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
@@ -29,17 +33,48 @@ export function AgentsPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("agents"));
+  const [sortField, setSortField] = useState<SortField>("modified");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  const { data: agents, isLoading, isError, refetch } = useAgentDescriptors(500, 0, search);
+  const {
+    data,
+    isLoading,
+    isError,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteAgentDescriptors(search);
+
   const deleteMutation = useDeleteAgent();
   const duplicateMutation = useDuplicateAgent();
   const exportMutation = useExportAgent();
 
+  // Flatten infinite pages → single array → group by name → sort
+  const groupedAgents = useMemo(() => {
+    const flat = data?.pages.flat() ?? [];
+    const grouped = groupAgentsByName(flat);
+    return [...grouped].sort((a, b) => {
+      let cmp = 0;
+      if (sortField === "name") cmp = (a.name ?? "").localeCompare(b.name ?? "");
+      else if (sortField === "version") cmp = a.version - b.version;
+      else cmp = new Date(a.lastModifiedOn).getTime() - new Date(b.lastModifiedOn).getTime();
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [data, sortField, sortDir]);
+
+  const toggleSort = useCallback((field: SortField) => {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir(field === "modified" ? "desc" : "asc");
+    }
+  }, [sortField]);
+
   function handleImportSuccess() {
     toast.success(t("agents.importSuccess", "Agent imported successfully"));
   }
-
-  const groupedAgents = agents ? groupAgentsByName(agents) : [];
 
   function handleDelete(id: string, version: number) {
     setDeleteTarget({ id, version });
@@ -167,6 +202,7 @@ export function AgentsPage() {
           {/* Results count */}
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             {t("agents.count", { count: groupedAgents.length })}
+            {hasNextPage && "+"}
           </p>
 
           {view === "card" ? (
@@ -196,17 +232,35 @@ export function AgentsPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border bg-secondary/50">
-                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      {t("common.name", "Name")}
+                    <th
+                      className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+                      onClick={() => toggleSort("name")}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {t("common.name", "Name")}
+                        {sortField === "name" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-30" />}
+                      </span>
                     </th>
                     <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       {t("common.id", "ID")}
                     </th>
-                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      {t("common.version", "Version")}
+                    <th
+                      className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+                      onClick={() => toggleSort("version")}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {t("common.version", "Version")}
+                        {sortField === "version" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-30" />}
+                      </span>
                     </th>
-                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      {t("common.modified", "Modified")}
+                    <th
+                      className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+                      onClick={() => toggleSort("modified")}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {t("common.modified", "Modified")}
+                        {sortField === "modified" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-30" />}
+                      </span>
                     </th>
                     <th className="px-5 py-3 text-end text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       {t("conversations.actions", "Actions")}
@@ -275,6 +329,13 @@ export function AgentsPage() {
               </table>
             </div>
           )}
+
+          {/* Infinite scroll sentinel */}
+          <InfiniteScrollSentinel
+            onLoadMore={() => fetchNextPage()}
+            isFetchingMore={isFetchingNextPage}
+            hasMore={!!hasNextPage}
+          />
         </>
       )}
 

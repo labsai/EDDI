@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getWorkflowDescriptors,
   getWorkflow,
@@ -12,11 +12,27 @@ import { parseResourceUri, updateAgent, type AgentDescriptor } from "@/lib/api/a
 import { updateDescriptor } from "@/lib/api/descriptors";
 
 const WORKFLOWS_KEY = ["workflows"] as const;
+const PAGE_SIZE = 50;
 
 export function useWorkflowDescriptors(limit = 100, index = 0, filter = "") {
   return useQuery({
     queryKey: [...WORKFLOWS_KEY, "descriptors", { limit, index, filter }],
     queryFn: () => getWorkflowDescriptors(limit, index, filter),
+  });
+}
+
+/** Infinite-scroll workflow list with offset-based pagination */
+export function useInfiniteWorkflowDescriptors(filter = "") {
+  return useInfiniteQuery({
+    queryKey: [...WORKFLOWS_KEY, "descriptors-infinite", { filter }],
+    queryFn: ({ pageParam = 0 }) => getWorkflowDescriptors(PAGE_SIZE, pageParam, filter),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      if (lastPage.length === PAGE_SIZE) {
+        return allPages.length * PAGE_SIZE;
+      }
+      return undefined;
+    },
   });
 }
 
