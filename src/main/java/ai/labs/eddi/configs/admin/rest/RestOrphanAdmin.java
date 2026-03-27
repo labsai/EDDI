@@ -29,8 +29,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * Algorithm:
  * </p>
  * <ol>
- * <li>Enumerate all agents → collect referenced package URIs</li>
- * <li>Enumerate all packages → collect referenced extension resource URIs</li>
+ * <li>Enumerate all agents → collect referenced workflow URIs</li>
+ * <li>Enumerate all workflows → collect referenced extension resource URIs</li>
  * <li>For each store type, enumerate all resources via document
  * descriptors</li>
  * <li>Any resource whose URI is NOT in the referenced set = orphan</li>
@@ -49,7 +49,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
      * descriptorTypeLabel}. The descriptor type is used to query
      * IDocumentDescriptorStore.readDescriptors().
      */
-    private static final String[][] SCANNABLE_STORE_TYPES = {{"ai.labs.package", "Workflow"}, {"ai.labs.rules", "Rules"},
+    private static final String[][] SCANNABLE_STORE_TYPES = {{"ai.labs.workflow", "Workflow"}, {"ai.labs.rules", "Rules"},
             {"ai.labs.apicalls", "API Calls"}, {"ai.labs.output", "Output Set"}, {"ai.labs.llm", "LLM"}, {"ai.labs.property", "Property Setter"},
             {"ai.labs.dictionary", "Dictionary"}, {"ai.labs.parser", "Parser"},};
 
@@ -125,13 +125,13 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
 
     /**
      * Build the complete set of all URIs that are referenced by at least one Agent
-     * or package.
+     * or workflow.
      */
     private Set<String> buildReferencedUrisSet() {
         Set<String> referencedUris = new HashSet<>();
 
         try {
-            // Step 1a: Get all agents and collect their package URIs
+            // Step 1a: Get all agents and collect their workflow URIs
             List<DocumentDescriptor> agentDescriptors = readAllDescriptors("ai.labs.agent", false);
             for (DocumentDescriptor agentDescriptor : agentDescriptors) {
                 try {
@@ -152,20 +152,20 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                 }
             }
 
-            // Step 1b: Get all packages and collect their extension resource URIs
-            List<DocumentDescriptor> packageDescriptors = readAllDescriptors("ai.labs.package", false);
-            for (DocumentDescriptor pkgDescriptor : packageDescriptors) {
+            // Step 1b: Get all workflows and collect their extension resource URIs
+            List<DocumentDescriptor> workflowDescriptors = readAllDescriptors("ai.labs.workflow", false);
+            for (DocumentDescriptor workflowDescriptor : workflowDescriptors) {
                 try {
-                    var resourceId = RestUtilities.extractResourceId(pkgDescriptor.getResource());
+                    var resourceId = RestUtilities.extractResourceId(workflowDescriptor.getResource());
                     if (resourceId == null || resourceId.getId() == null)
                         continue;
 
-                    WorkflowConfiguration pkgConfig = workflowStore.read(resourceId.getId(), resourceId.getVersion());
-                    collectExtensionUris(pkgConfig, referencedUris);
+                    WorkflowConfiguration workflowConfig = workflowStore.read(resourceId.getId(), resourceId.getVersion());
+                    collectExtensionUris(workflowConfig, referencedUris);
                 } catch (IResourceStore.ResourceNotFoundException e) {
                     // Workflow descriptor exists but resource doesn't — skip
                 } catch (Exception e) {
-                    log.debugf("Error reading package %s: %s", pkgDescriptor.getResource(), e.getMessage());
+                    log.debugf("Error reading workflow %s: %s", workflowDescriptor.getResource(), e.getMessage());
                 }
             }
 

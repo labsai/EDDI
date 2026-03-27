@@ -4,11 +4,11 @@ import java.net.URI;
 
 /**
  * Represents an orphaned resource that is not referenced by any Agent or
- * package.
+ * workflow.
  */
 public class OrphanInfo {
     private URI resourceUri;
-    private String type; // e.g., "ai.labs.package", "ai.labs.behavior"
+    private String type; // e.g., "ai.labs.workflow", "ai.labs.rules"
     private String name; // human-readable name from descriptor
     private boolean deleted; // soft-deleted?
 

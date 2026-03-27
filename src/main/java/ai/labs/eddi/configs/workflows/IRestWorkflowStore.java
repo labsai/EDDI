@@ -28,13 +28,13 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
     @Path("/jsonSchema")
     @Produces(MediaType.APPLICATION_JSON)
     @APIResponse(responseCode = "200", description = "JSON Schema (for validation).")
-    @Operation(description = "Read JSON Schema for package definition.")
+    @Operation(description = "Read JSON Schema for workflow definition.")
     Response readJsonSchema();
 
     @GET
     @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Read list of package descriptors.")
+    @Operation(description = "Read list of workflow descriptors.")
     List<DocumentDescriptor> readWorkflowDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
             @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
 
@@ -42,7 +42,7 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
     @Path("descriptors")
     @Consumes(MediaType.TEXT_PLAIN)
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Read list of package descriptors including a given resourceUri.")
+    @Operation(description = "Read list of workflow descriptors including a given resourceUri.")
     List<DocumentDescriptor> readWorkflowDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
             @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit,
             @Parameter(name = "body", description = "eddi://ai.labs.TYPE/PATH/ID?version=VERSION") @DefaultValue("") String containingResourceUri,
@@ -51,14 +51,14 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Read package.")
+    @Operation(description = "Read workflow.")
     WorkflowConfiguration readWorkflow(@PathParam("id") String id,
             @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    @Operation(description = "Update package.")
+    @Operation(description = "Update workflow.")
     Response updateWorkflow(@PathParam("id") String id,
             @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
             WorkflowConfiguration workflowConfiguration);
@@ -66,18 +66,18 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
     @PUT
     @Path("/{id}/updateResourceUri")
     @Consumes(MediaType.TEXT_PLAIN)
-    @Operation(description = "Update references to other resources within this package resource.")
+    @Operation(description = "Update references to other resources within this workflow resource.")
     Response updateResourceInWorkflow(@PathParam("id") String id,
             @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version, URI resourceURI);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    @Operation(description = "Create package.")
+    @Operation(description = "Create workflow.")
     Response createWorkflow(WorkflowConfiguration workflowConfiguration);
 
     @POST
     @Path("/{id}")
-    @Operation(description = "Duplicate this package.")
+    @Operation(description = "Duplicate this workflow.")
     Response duplicateWorkflow(@PathParam("id") String id, @QueryParam("version") Integer version,
             @QueryParam("deepCopy") @DefaultValue("false") Boolean deepCopy);
 

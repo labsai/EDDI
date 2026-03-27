@@ -13,6 +13,28 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Descriptor Type Rename: `ai.labs.package` → `ai.labs.workflow` (2026-03-27)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Fixed a latent bug where `DescriptorStore.readDescriptors()` was queried with the legacy type `"ai.labs.package"`, which builds a regex `eddi://ai.labs.package.*` against the `resource` URI field. Since the V6 rename migration already rewrites all resource URIs to `eddi://ai.labs.workflow/...`, these queries would silently return zero results on migrated databases.
+
+| File | Change |
+|---|---|
+| `RestWorkflowStore.java` | `readDescriptors("ai.labs.package", ...)` → `"ai.labs.workflow"` |
+| `RestOrphanAdmin.java` | `SCANNABLE_STORE_TYPES` + `buildReferencedUrisSet()` — updated type + cleaned variable names/comments |
+| `IRestWorkflowStore.java` | 8 OpenAPI `@Operation` descriptions: "package" → "workflow" |
+| `OrphanInfo.java` | Javadoc comment |
+| `RestOrphanAdminTest.java` | All test assertions aligned to `"ai.labs.workflow"` |
+
+> **Note:** `V6RenameMigration.java` and `AbstractBackupService.java` correctly retain `"ai.labs.package"` references — they handle legacy v5 import/migration and must keep old names.
+
+**Testing:** ✅ `./mvnw compile` + `./mvnw test` — all pass.
+
+---
+
 ## Platform Remediation: Thread Safety, A2A Hardening, Code Quality & Audit DLQ (2026-03-27)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

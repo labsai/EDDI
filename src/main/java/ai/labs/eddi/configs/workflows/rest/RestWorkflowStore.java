@@ -61,7 +61,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
 
     @Override
     public List<DocumentDescriptor> readWorkflowDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.package", filter, index, limit);
+        return restVersionInfo.readDescriptors("ai.labs.workflow", filter, index, limit);
     }
 
     @Override
@@ -97,8 +97,8 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         boolean updated = false;
         WorkflowConfiguration workflowConfig = readWorkflow(id, version);
         for (WorkflowStep workflowStep : workflowConfig.getWorkflowSteps()) {
-            Map<String, Object> packageConfig = workflowStep.getConfig();
-            if (updateResourceURI(resourceURI, resourceURIWithoutVersion, packageConfig)) {
+            Map<String, Object> workflowStepConfig = workflowStep.getConfig();
+            if (updateResourceURI(resourceURI, resourceURIWithoutVersion, workflowStepConfig)) {
                 updated = true;
             }
 
@@ -166,9 +166,9 @@ public class RestWorkflowStore implements IRestWorkflowStore {
                     }
                 }
             } catch (IResourceStore.ResourceNotFoundException e) {
-                log.warnf("Workflow %s (v%d) not found for cascade — deleting package only", id, version);
+                log.warnf("Workflow %s (v%d) not found for cascade — deleting workflow only", id, version);
             } catch (IResourceStore.ResourceStoreException e) {
-                log.warnf("Error reading package %s for cascade: %s", id, e.getMessage());
+                log.warnf("Error reading workflow %s for cascade: %s", id, e.getMessage());
             }
         }
         return restVersionInfo.delete(id, version, permanent);
@@ -195,10 +195,10 @@ public class RestWorkflowStore implements IRestWorkflowStore {
 
     private void deleteResourceSafely(URI resourceUri, boolean permanent) {
         try {
-            // Check if this resource is referenced by other packages
+            // Check if this resource is referenced by other workflows
             var referencingWorkflows = workflowStore.getWorkflowDescriptorsContainingResource(resourceUri.toString(), false);
             if (referencingWorkflows.size() > 1) {
-                log.infof("Skipping cascade-delete of resource %s — " + "still referenced by %d other package(s)", resourceUri,
+                log.infof("Skipping cascade-delete of resource %s — " + "still referenced by %d other workflow(s)", resourceUri,
                         referencingWorkflows.size() - 1);
                 return;
             }

@@ -60,24 +60,16 @@ class RestOrphanAdminTest {
     }
 
     /**
-     * Maps descriptor query types to the correct URI scheme type. The document
-     * store queries by type (e.g., "ai.labs.package") but the resourceURI scheme
-     * may differ (e.g., "ai.labs.workflow").
+     * Maps descriptor query types to the correct URI scheme type.
      */
     private String uriType(String descriptorType) {
-        return switch (descriptorType) {
-            case "ai.labs.package" -> "ai.labs.workflow";
-            case "ai.labs.behavior" -> "ai.labs.rules";
-            case "ai.labs.httpcalls" -> "ai.labs.apicalls";
-            case "ai.labs.regulardictionary" -> "ai.labs.dictionary";
-            default -> descriptorType;
-        };
+        return descriptorType;
     }
 
     private String storePath(String type) {
         return switch (type) {
             case "ai.labs.agent" -> "agentstore/agents";
-            case "ai.labs.package" -> "workflowstore/workflows";
+            case "ai.labs.workflow" -> "workflowstore/workflows";
             case "ai.labs.rules" -> "rulestore/rulesets";
             case "ai.labs.apicalls" -> "apicallstore/apicalls";
             case "ai.labs.output" -> "outputstore/outputsets";
@@ -107,8 +99,8 @@ class RestOrphanAdminTest {
             when(AgentStore.read(AGENT1_ID, 1)).thenReturn(agentConfig);
 
             // One package referencing one behavior
-            DocumentDescriptor pkgDesc = descriptor("ai.labs.package", PKG1_ID, 1, "TestPkg");
-            when(documentDescriptorStore.readDescriptors(eq("ai.labs.package"), eq(""), anyInt(), anyInt(), eq(false))).thenReturn(List.of(pkgDesc))
+            DocumentDescriptor pkgDesc = descriptor("ai.labs.workflow", PKG1_ID, 1, "TestPkg");
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.workflow"), eq(""), anyInt(), anyInt(), eq(false))).thenReturn(List.of(pkgDesc))
                     .thenReturn(Collections.emptyList());
 
             WorkflowConfiguration pkgConfig = new WorkflowConfiguration();
@@ -122,7 +114,7 @@ class RestOrphanAdminTest {
             // the one referenced behavior
             // All other stores are empty
             setupStoreReturns(
-                    Map.of("ai.labs.package", List.of(pkgDesc), "ai.labs.rules", List.of(descriptor("ai.labs.rules", BEH1_ID, 1, "TestBeh"))));
+                    Map.of("ai.labs.workflow", List.of(pkgDesc), "ai.labs.rules", List.of(descriptor("ai.labs.rules", BEH1_ID, 1, "TestBeh"))));
 
             OrphanReport report = restOrphanAdmin.scanOrphans(false);
 
@@ -145,8 +137,8 @@ class RestOrphanAdminTest {
             when(AgentStore.read(AGENT1_ID, 1)).thenReturn(agentConfig);
 
             // PKG1 references BEH1 (so BEH1 is not orphaned), ORPHAN_BEH is not referenced
-            DocumentDescriptor pkgDesc = descriptor("ai.labs.package", PKG1_ID, 1, "UsedPkg");
-            when(documentDescriptorStore.readDescriptors(eq("ai.labs.package"), eq(""), anyInt(), anyInt(), eq(false))).thenReturn(List.of(pkgDesc))
+            DocumentDescriptor pkgDesc = descriptor("ai.labs.workflow", PKG1_ID, 1, "UsedPkg");
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.workflow"), eq(""), anyInt(), anyInt(), eq(false))).thenReturn(List.of(pkgDesc))
                     .thenReturn(Collections.emptyList());
 
             WorkflowConfiguration pkgConfig = new WorkflowConfiguration();
@@ -158,9 +150,9 @@ class RestOrphanAdminTest {
 
             // Store scans: package store has PKG1 (used) + ORPHAN_PKG (orphan)
             // Behavior store has BEH1 (used) + ORPHAN_BEH (orphan)
-            DocumentDescriptor orphanPkgDesc = descriptor("ai.labs.package", ORPHAN_PKG_ID, 1, "OrphanPkg");
+            DocumentDescriptor orphanPkgDesc = descriptor("ai.labs.workflow", ORPHAN_PKG_ID, 1, "OrphanPkg");
             DocumentDescriptor orphanBehDesc = descriptor("ai.labs.rules", ORPHAN_BEH_ID, 1, "OrphanBeh");
-            setupStoreReturns(Map.of("ai.labs.package", List.of(pkgDesc, orphanPkgDesc), "ai.labs.rules",
+            setupStoreReturns(Map.of("ai.labs.workflow", List.of(pkgDesc, orphanPkgDesc), "ai.labs.rules",
                     List.of(descriptor("ai.labs.rules", BEH1_ID, 1, "UsedBeh"), orphanBehDesc)));
 
             OrphanReport report = restOrphanAdmin.scanOrphans(false);
@@ -169,7 +161,7 @@ class RestOrphanAdminTest {
             assertEquals(0, report.getDeletedCount()); // scan only, no purge
 
             List<String> orphanTypes = report.getOrphans().stream().map(OrphanInfo::getType).sorted().toList();
-            assertTrue(orphanTypes.contains("ai.labs.package"));
+            assertTrue(orphanTypes.contains("ai.labs.workflow"));
             assertTrue(orphanTypes.contains("ai.labs.rules"));
         }
 
@@ -179,7 +171,7 @@ class RestOrphanAdminTest {
             // No agents at all
             when(documentDescriptorStore.readDescriptors(eq("ai.labs.agent"), eq(""), anyInt(), anyInt(), eq(false)))
                     .thenReturn(Collections.emptyList());
-            when(documentDescriptorStore.readDescriptors(eq("ai.labs.package"), eq(""), anyInt(), anyInt(), eq(false)))
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.workflow"), eq(""), anyInt(), anyInt(), eq(false)))
                     .thenReturn(Collections.emptyList());
 
             // All other stores also empty
@@ -208,8 +200,8 @@ class RestOrphanAdminTest {
             when(AgentStore.read(AGENT1_ID, 1)).thenReturn(agentConfig);
 
             // One orphan package in the store
-            when(documentDescriptorStore.readDescriptors(eq("ai.labs.package"), eq(""), anyInt(), anyInt(), eq(true)))
-                    .thenReturn(List.of(descriptor("ai.labs.package", ORPHAN_PKG_ID, 1, "OrphanPkg"))).thenReturn(Collections.emptyList());
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.workflow"), eq(""), anyInt(), anyInt(), eq(true)))
+                    .thenReturn(List.of(descriptor("ai.labs.workflow", ORPHAN_PKG_ID, 1, "OrphanPkg"))).thenReturn(Collections.emptyList());
 
             // All other stores empty
             for (String type : List.of("ai.labs.rules", "ai.labs.apicalls", "ai.labs.output", "ai.labs.llm", "ai.labs.property", "ai.labs.dictionary",
@@ -232,7 +224,7 @@ class RestOrphanAdminTest {
      * empty lists.
      */
     private void setupStoreReturns(Map<String, List<DocumentDescriptor>> storeDescriptors) throws Exception {
-        for (String type : List.of("ai.labs.package", "ai.labs.rules", "ai.labs.apicalls", "ai.labs.output", "ai.labs.llm", "ai.labs.property",
+        for (String type : List.of("ai.labs.workflow", "ai.labs.rules", "ai.labs.apicalls", "ai.labs.output", "ai.labs.llm", "ai.labs.property",
                 "ai.labs.dictionary", "ai.labs.parser")) {
             List<DocumentDescriptor> descs = storeDescriptors.getOrDefault(type, Collections.emptyList());
             // First call returns the descriptors, subsequent calls return empty (pagination
