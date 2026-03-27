@@ -1,5 +1,5 @@
 import type React from "react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Plus,
@@ -125,6 +125,16 @@ export function AddExtensionDialog({
     resetDialog();
     onClose();
   }, [onClose, resetDialog]);
+
+  // Esc key closes the dialog
+  useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") handleClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, handleClose]);
 
   // Step 1: User picks an extension type
   const handlePickType = useCallback(

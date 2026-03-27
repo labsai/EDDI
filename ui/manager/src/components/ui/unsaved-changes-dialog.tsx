@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 
@@ -23,6 +24,16 @@ export function UnsavedChangesDialog({
   title,
 }: UnsavedChangesDialogProps) {
   const { t } = useTranslation();
+
+  // Esc key cancels
+  useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onCancel();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, onCancel]);
 
   if (!open) return null;
 
