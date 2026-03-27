@@ -33,6 +33,7 @@ import {
   AddExtensionDialog,
   type AddExtensionResult,
 } from "@/components/editors/add-extension-dialog";
+import { useLatestVersions } from "@/hooks/use-latest-versions";
 
 
 /* ─── Main page ─── */
@@ -99,6 +100,16 @@ export function WorkflowDetailPage() {
     extension: ext,
   }));
 
+  // Collect all config URIs for version staleness detection
+  const configUris = useMemo(
+    () =>
+      currentExtensions
+        .map((ext) => (ext.config?.uri as string) ?? "")
+        .filter((uri) => uri.includes("://")),
+    [currentExtensions]
+  );
+  const { data: latestVersions } = useLatestVersions(configUris);
+
   // Reset local state when server data changes (version switch)
   useEffect(() => {
     setLocalExtensions(null);
@@ -136,6 +147,21 @@ export function WorkflowDetailPage() {
       };
       setLocalExtensions([...currentExtensions, newExt]);
       setShowAddDialog(false);
+    },
+    [currentExtensions]
+  );
+
+  const handleUpdateVersion = useCallback(
+    (index: number, newUri: string) => {
+      const updated = [...currentExtensions];
+      const ext = updated[index];
+      if (ext) {
+        updated[index] = {
+          ...ext,
+          config: { ...ext.config, uri: newUri },
+        };
+        setLocalExtensions(updated);
+      }
     },
     [currentExtensions]
   );
@@ -338,6 +364,8 @@ export function WorkflowDetailPage() {
           workflowVersion={resolvedVersion}
           agentId={agentId}
           agentVer={agentVer}
+          latestVersions={latestVersions}
+          onUpdateVersion={handleUpdateVersion}
         />
       </section>
 

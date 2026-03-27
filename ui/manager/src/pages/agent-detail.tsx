@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
@@ -24,6 +24,7 @@ import {
   X,
   ChevronDown,
   ChevronRight,
+  ArrowUpCircle,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
@@ -43,6 +44,7 @@ import {
 import { useExportAgent } from "@/hooks/use-backup";
 import { useWorkflowDescriptors, useUpdateAgentWorkflows } from "@/hooks/use-workflows";
 import { parseResourceUri, type EnvironmentStatus } from "@/lib/api/agents";
+import { useLatestVersions } from "@/hooks/use-latest-versions";
 
 /* ─── Status icons (labels resolved via i18n in component) ─── */
 const statusIcons = {
@@ -96,6 +98,13 @@ export function AgentDetailPage() {
   const statusLabel = statusLabels[status] ?? status;
   const isDeployed = status === "READY";
   const isBusy = deployMutation.isPending || undeployMutation.isPending || status === "IN_PROGRESS";
+
+  // Version staleness detection for workflow references
+  const workflowUris = useMemo(
+    () => (agent?.workflows ?? []).filter((u) => u.includes("://")),
+    [agent?.workflows]
+  );
+  const { data: latestVersions } = useLatestVersions(workflowUris);
 
   // Clear save message after 3s
   useEffect(() => {
@@ -181,6 +190,23 @@ export function AgentDetailPage() {
       }
     );
     setShowAddWorkflow(false);
+  }
+
+  function handleUpdateWorkflowVersion(oldUri: string, newVersion: number) {
+    if (!agent?.workflows) return;
+    const updated = agent.workflows.map((u) => {
+      if (u === oldUri) {
+        return u.replace(/([?&]version=)\d+/, `$1${newVersion}`);
+      }
+      return u;
+    });
+    updateWorkflowsMutation.mutate(
+      { agentId: id!, version: resolvedVersion, workflows: updated },
+      {
+        onSuccess: () => toast.success(t("agentDetail.workflowUpdated", "Workflow updated to latest version")),
+        onError: (err) => toast.error(getErrorMessage(err)),
+      }
+    );
   }
 
   const handleVersionChange = useCallback((v: number) => {
@@ -393,23 +419,49 @@ export function AgentDetailPage() {
 
           {agent.workflows?.map((pkgUri) => {
             const { id: pkgId, version: pkgVersion } = parseResourceUri(pkgUri);
+            const latestVer = latestVersions?.[pkgId];
+            const isStale = latestVer !== undefined && latestVer > pkgVersion;
             return (
               <div
                 key={pkgUri}
-                className="flex items-center justify-between px-5 py-3 hover:bg-secondary/50 transition-colors"
+                className={cn(
+                  "flex items-center justify-between px-5 py-3 transition-colors",
+                  isStale
+                    ? "bg-amber-50/50 dark:bg-amber-900/10 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                    : "hover:bg-secondary/50"
+                )}
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <Settings className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0">
-                    <Link
-                      to={`/manage/workflowview/${pkgId}?agentId=${id}&agentVer=${resolvedVersion}`}
-                      className="text-sm font-medium text-foreground hover:text-primary truncate block transition-colors"
-                    >
-                      {pkgId}
-                      <ExternalLink className="ms-1 inline h-3 w-3 opacity-40" />
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      <Link
+                        to={`/manage/workflowview/${pkgId}?agentId=${id}&agentVer=${resolvedVersion}`}
+                        className="text-sm font-medium text-foreground hover:text-primary truncate transition-colors"
+                      >
+                        {pkgId}
+                        <ExternalLink className="ms-1 inline h-3 w-3 opacity-40" />
+                      </Link>
+                      {isStale && (
+                        <button
+                          onClick={() => handleUpdateWorkflowVersion(pkgUri, latestVer!)}
+                          disabled={updateWorkflowsMutation.isPending}
+                          className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors shrink-0 disabled:opacity-50"
+                          title={t("agentDetail.updateToLatest", "Update to latest version")}
+                          data-testid={`update-workflow-${pkgId}`}
+                        >
+                          <ArrowUpCircle className="h-3 w-3" />
+                          v{latestVer}
+                        </button>
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       v{pkgVersion}
+                      {isStale && (
+                        <span className="ms-1 text-amber-600 dark:text-amber-400">
+                          ({t("agentDetail.outdated", "outdated")})
+                        </span>
+                      )}
                     </p>
                   </div>
                 </div>

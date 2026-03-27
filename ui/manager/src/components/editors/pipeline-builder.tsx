@@ -29,6 +29,7 @@ import {
   Settings,
   FileCode,
   Puzzle,
+  ArrowUpCircle,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { WorkflowExtension } from "@/lib/api/workflows";
@@ -107,6 +108,10 @@ export interface PipelineBuilderProps {
   agentId?: string;
   /** Cascade context: agent version */
   agentVer?: string;
+  /** Map of resourceId → latest version (for stale detection) */
+  latestVersions?: Record<string, number>;
+  /** Called when user clicks "Update" on a stale resource */
+  onUpdateVersion?: (index: number, newUri: string) => void;
 }
 
 /* ─── Main component ─── */
@@ -119,6 +124,8 @@ export function PipelineBuilder({
   workflowVersion,
   agentId,
   agentVer,
+  latestVersions,
+  onUpdateVersion,
 }: PipelineBuilderProps) {
   const { t } = useTranslation();
   const sensors = useSensors(
@@ -187,6 +194,8 @@ export function PipelineBuilder({
               workflowVersion={workflowVersion}
               agentId={agentId}
               agentVer={agentVer}
+              latestVersions={latestVersions}
+              onUpdateVersion={onUpdateVersion}
             />
           ))}
         </div>
@@ -206,6 +215,8 @@ function SortableExtensionItem({
   workflowVersion,
   agentId,
   agentVer,
+  latestVersions,
+  onUpdateVersion,
 }: {
   item: PipelineItem;
   position: number;
@@ -216,6 +227,8 @@ function SortableExtensionItem({
   workflowVersion?: number;
   agentId?: string;
   agentVer?: string;
+  latestVersions?: Record<string, number>;
+  onUpdateVersion?: (index: number, newUri: string) => void;
 }) {
   const { t } = useTranslation();
   const {
@@ -240,6 +253,23 @@ function SortableExtensionItem({
   const configUri = ext.config?.["uri"] as string | undefined;
   const parsed = configUri ? parseExtensionUri(configUri) : null;
 
+  // Version staleness check
+  let isStale = false;
+  let currentVer = 0;
+  let latestVer = 0;
+  if (configUri && parsed && latestVersions) {
+    const versionMatch = configUri.match(/[?&]version=(\d+)/);
+    currentVer = versionMatch ? parseInt(versionMatch[1]!, 10) : 1;
+    latestVer = latestVersions[parsed.id] ?? currentVer;
+    isStale = latestVer > currentVer;
+  }
+
+  function handleUpdateVersion() {
+    if (!configUri || !onUpdateVersion) return;
+    const newUri = configUri.replace(/([?&]version=)\d+/, `$1${latestVer}`);
+    onUpdateVersion(item.index, newUri);
+  }
+
   return (
     <div
       ref={setNodeRef}
@@ -247,7 +277,9 @@ function SortableExtensionItem({
       className={`flex items-center gap-3 px-5 py-3 transition-colors ${
         isDragging
           ? "bg-primary/5 shadow-lg rounded-lg"
-          : "hover:bg-secondary/50"
+          : isStale
+            ? "bg-amber-50/50 dark:bg-amber-900/10 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+            : "hover:bg-secondary/50"
       }`}
       role="listitem"
       data-testid={`pipeline-item-${item.index}`}
@@ -274,25 +306,40 @@ function SortableExtensionItem({
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-foreground">{label}</p>
         {parsed && (
-          <Link
-            to={(() => {
-              let path = `/manage/resources/${parsed.slug}/${parsed.id}`;
-              const params = new URLSearchParams();
-              if (workflowId && workflowVersion) {
-                params.set("pkgId", workflowId);
-                params.set("pkgVer", String(workflowVersion));
-              }
-              if (agentId) params.set("agentId", agentId);
-              if (agentVer) params.set("agentVer", agentVer);
-              const qs = params.toString();
-              if (qs) path += `?${qs}`;
-              return path;
-            })()}
-            className="text-xs text-muted-foreground hover:text-primary truncate block transition-colors"
-          >
-            {parsed.id}
-            <ExternalLink className="ms-1 inline h-3 w-3 opacity-40" />
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              to={(() => {
+                let path = `/manage/resources/${parsed.slug}/${parsed.id}`;
+                const params = new URLSearchParams();
+                if (workflowId && workflowVersion) {
+                  params.set("pkgId", workflowId);
+                  params.set("pkgVer", String(workflowVersion));
+                }
+                if (agentId) params.set("agentId", agentId);
+                if (agentVer) params.set("agentVer", agentVer);
+                const qs = params.toString();
+                if (qs) path += `?${qs}`;
+                return path;
+              })()}
+              className="text-xs text-muted-foreground hover:text-primary truncate transition-colors"
+            >
+              {parsed.id}
+              <span className="ms-1 text-muted-foreground/60">v{currentVer}</span>
+              <ExternalLink className="ms-1 inline h-3 w-3 opacity-40" />
+            </Link>
+            {isStale && (
+              <button
+                onClick={handleUpdateVersion}
+                disabled={disabled}
+                className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors shrink-0"
+                title={t("packageEditor.updateToLatest", "Update to latest version")}
+                data-testid={`update-version-${item.index}`}
+              >
+                <ArrowUpCircle className="h-3 w-3" />
+                v{latestVer}
+              </button>
+            )}
+          </div>
         )}
       </div>
 
