@@ -13,6 +13,54 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## LLM Provider Expansion — 7 → 12 Providers (2026-03-27)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Expanded EDDI from 7 to 12 model providers for enterprise completeness.
+
+| Change | Details |
+|---|---|
+| **OpenAI `baseUrl`** | Added `baseUrl` parameter to `OpenAILanguageModelBuilder` — enables DeepSeek and Cohere via OpenAI-compatible endpoints (zero new dependencies) |
+| **Mistral AI** | New `MistralAiLanguageModelBuilder` — uses `JdkHttpClient` (same as OpenAI/Anthropic), supports `apiKey`, `modelName`, `temperature`, `maxTokens`, `timeout`, `logRequests`, `logResponses` |
+| **Azure OpenAI** | New `AzureOpenAiLanguageModelBuilder` — Azure SDK HTTP pipeline (NOT JdkHttpClient), uses `deploymentName` not `modelName`, combined `logRequestsAndResponses`, requires `endpoint`, auth via `apiKey` or `nonAzureApiKey` |
+| **Amazon Bedrock** | New `BedrockLanguageModelBuilder` — AWS SDK credential chain (no `apiKey`), `region` → `Region.of()`, `modelId` for model selection. Supports streaming |
+| **Oracle GenAI** | New `OracleGenAiLanguageModelBuilder` — OCI `ConfigFileAuthenticationDetailsProvider` (reads `~/.oci/config`), sync-only (no streaming), `modelId`, `compartmentId`, `configProfile` |
+| **pom.xml** | Added `langchain4j-mistral-ai` (stable), `langchain4j-azure-open-ai` (stable), `langchain4j-bedrock` (stable), `langchain4j-community-oci-genai` (beta) |
+| **LlmModule** | Registered 4 new type keys: `mistral`, `azure-openai`, `bedrock`, `oracle-genai` |
+
+**Provider summary (12 total):**
+
+| Type Key | Builder | Native Risk |
+|---|---|---|
+| `openai` | OpenAILanguageModelBuilder | ✅ None |
+| `anthropic` | AnthropicLanguageModelBuilder | ✅ None |
+| `gemini` | GeminiLanguageModelBuilder | ✅ None |
+| `gemini-vertex` | VertexGeminiLanguageModelBuilder | ✅ None |
+| `ollama` | OllamaLanguageModelBuilder | ✅ None |
+| `huggingface` | HuggingFaceLanguageModelBuilder | ✅ None |
+| `jlama` | JlamaLanguageModelBuilder | ✅ None |
+| `mistral` | MistralAiLanguageModelBuilder | ✅ None |
+| `azure-openai` | AzureOpenAiLanguageModelBuilder | ⚠️ Medium |
+| `bedrock` | BedrockLanguageModelBuilder | ✅ Low |
+| `oracle-genai` | OracleGenAiLanguageModelBuilder | ✅ Low |
+| _(OpenAI + baseUrl)_ | _(DeepSeek, Cohere)_ | ✅ None |
+
+**Design decisions:**
+- DeepSeek and Cohere use existing OpenAI builder with `baseUrl` param — zero new dependencies
+- Mistral uses stable `langchain4j-libs.version` (1.12.2) + `JdkHttpClient`
+- Azure OpenAI uses stable version but has medium native image risk (Kotlin+Jackson reflection) — ship for JVM mode, fix in Phase 12
+- Bedrock uses stable version with AWS SDK v2 built-in GraalVM support
+- Oracle GenAI uses `langchain4j-beta.version` (community module not yet in stable)
+
+**Files:** 4 new builders, 1 modified builder (OpenAI), 1 modified module registration, 1 modified pom.xml.
+
+**Testing:** ✅ `./mvnw compile` + `./mvnw test` — all pass.
+
+---
+
 ## Phase 8c-β: pgvector Persistent Vector Store (2026-03-27)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

@@ -27,6 +27,10 @@ public class LlmModule {
     public static final String LLM_TYPE_GEMINI = "gemini";
     public static final String LLM_TYPE_OLLAMA = "ollama";
     public static final String LLM_TYPE_JLAMA = "jlama";
+    public static final String LLM_TYPE_MISTRAL = "mistral";
+    public static final String LLM_TYPE_AZURE_OPENAI = "azure-openai";
+    public static final String LLM_TYPE_BEDROCK = "bedrock";
+    public static final String LLM_TYPE_ORACLE_GENAI = "oracle-genai";
 
     private final Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders;
     private final Instance<ILifecycleTask> lifecycleTaskInstance;
@@ -59,6 +63,12 @@ public class LlmModule {
         languageModelApiConnectorBuilders.put(LLM_TYPE_GEMINI, () -> langModelBuilderInstance.select(GeminiLanguageModelBuilder.class).get());
         languageModelApiConnectorBuilders.put(LLM_TYPE_OLLAMA, () -> langModelBuilderInstance.select(OllamaLanguageModelBuilder.class).get());
         languageModelApiConnectorBuilders.put(LLM_TYPE_JLAMA, () -> langModelBuilderInstance.select(JlamaLanguageModelBuilder.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_MISTRAL, () -> langModelBuilderInstance.select(MistralAiLanguageModelBuilder.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_AZURE_OPENAI,
+                () -> langModelBuilderInstance.select(AzureOpenAiLanguageModelBuilder.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_BEDROCK, () -> langModelBuilderInstance.select(BedrockLanguageModelBuilder.class).get());
+        languageModelApiConnectorBuilders.put(LLM_TYPE_ORACLE_GENAI,
+                () -> langModelBuilderInstance.select(OracleGenAiLanguageModelBuilder.class).get());
 
         lifecycleTaskProviders.put(LlmTask.ID, () -> lifecycleTaskInstance.select(LlmTask.class).get());
         LOGGER.debug("Added LLM Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
