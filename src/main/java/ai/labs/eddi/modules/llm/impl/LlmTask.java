@@ -1,6 +1,8 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.apicalls.model.ApiCall;
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -63,6 +65,7 @@ public class LlmTask implements ILifecycleTask {
     private static final String KEY_INCLUDE_FIRST_AGENT_MESSAGE = "includeFirstAgentMessage";
     private static final String KEY_CONVERT_TO_OBJECT = "convertToObject";
     private static final String KEY_ADD_TO_OUTPUT = "addToOutput";
+    private static final String HTTPCALLS_TYPE = "eddi://ai.labs.httpcalls";
     private static final String MATCH_ALL_OPERATOR = "*";
 
     static final String MEMORY_OUTPUT_IDENTIFIER = "output";
@@ -81,6 +84,11 @@ public class LlmTask implements ILifecycleTask {
     private final StreamingLegacyChatExecutor streamingLegacyChatExecutor;
     private final AgentOrchestrator agentOrchestrator;
     private final RagContextProvider ragContextProvider;
+
+    // Retained for httpCall RAG discovery + execution (Phase 8c-0)
+    private final IApiCallExecutor apiCallExecutor;
+    private final IRestAgentStore restAgentStore;
+    private final IRestWorkflowStore restWorkflowStore;
 
     private static final Logger LOGGER = Logger.getLogger(LlmTask.class);
 
@@ -108,6 +116,9 @@ public class LlmTask implements ILifecycleTask {
                 textSummarizerTool, pdfReaderTool, weatherTool, toolExecutionService, mcpToolProviderManager, a2aToolProviderManager, restAgentStore,
                 restWorkflowStore, resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter);
         this.ragContextProvider = ragContextProvider;
+        this.apiCallExecutor = apiCallExecutor;
+        this.restAgentStore = restAgentStore;
+        this.restWorkflowStore = restWorkflowStore;
     }
 
     @Override
@@ -167,11 +178,24 @@ public class LlmTask implements ILifecycleTask {
 
         // === RAG Context Injection ===
         String userInput = extractUserInput(memory);
+        String taskId = task.getId() != null ? task.getId() : "default";
 
         // Phase 8c-0: Zero-infrastructure RAG via named httpCall
-        // TODO Phase 8c-0: execute task.getHttpCallRag() via IApiCallExecutor,
-        // inject response as context. Requires wiring the httpCall discovery
-        // pattern from AgentOrchestrator.discoverHttpCallTools().
+        String httpCallRag = task.getHttpCallRag();
+        if (!isNullOrEmpty(httpCallRag) && userInput != null) {
+            try {
+                String httpCallContext = executeHttpCallRag(memory, httpCallRag, userInput, templateDataObjects);
+                if (httpCallContext != null) {
+                    systemMessage += "\n\n## Search Results:\n" + httpCallContext;
+                    LOGGER.infof("httpCall RAG context injected for task '%s': %d chars", taskId, httpCallContext.length());
+                    var traceData = dataFactory.createData("rag:httpcall:trace:" + taskId,
+                            Map.of("httpCall", httpCallRag, "contextLength", httpCallContext.length()));
+                    currentStep.storeData(traceData);
+                }
+            } catch (Exception e) {
+                LOGGER.warnf(e, "httpCall RAG failed for '%s': %s", httpCallRag, e.getMessage());
+            }
+        }
 
         // Vector store RAG: retrieve from knowledge bases in the workflow
         if (userInput != null) {
@@ -179,10 +203,10 @@ public class LlmTask implements ILifecycleTask {
                 String ragContext = ragContextProvider.retrieveContext(memory, task, userInput);
                 if (ragContext != null) {
                     systemMessage += "\n\n## Relevant Context:\n" + ragContext;
-                    LOGGER.infof("RAG context injected for task '%s': %d chars", task.getId(), ragContext.length());
+                    LOGGER.infof("RAG context injected for task '%s': %d chars", taskId, ragContext.length());
                 }
             } catch (Exception e) {
-                LOGGER.warnf(e, "RAG context retrieval failed for task '%s': %s", task.getId(), e.getMessage());
+                LOGGER.warnf(e, "RAG context retrieval failed for task '%s': %s", taskId, e.getMessage());
             }
         }
 
@@ -438,6 +462,57 @@ public class LlmTask implements ILifecycleTask {
         if (inputData != null && inputData.getResult() != null) {
             return inputData.getResult();
         }
+        return null;
+    }
+
+    /**
+     * Phase 8c-0: Zero-infrastructure RAG via named httpCall. Discovers the named
+     * httpCall from the workflow, executes it with the user's query available in
+     * template data, and returns the serialized response for context injection.
+     *
+     * @param memory
+     *            conversation memory (for agent/workflow context and template data)
+     * @param httpCallName
+     *            the name of the ApiCall to execute (from task.httpCallRag)
+     * @param userInput
+     *            the user's current input (added to template data as "userInput")
+     * @param templateDataObjects
+     *            mutable template data map
+     * @return the serialized JSON response, or null if the httpCall was not found
+     */
+    private String executeHttpCallRag(IConversationMemory memory, String httpCallName, String userInput, Map<String, Object> templateDataObjects) {
+
+        // Discover all httpCall configs from the workflow
+        var stepConfigs = WorkflowTraversal.discoverConfigs(memory, HTTPCALLS_TYPE, ApiCallsConfiguration.class, restAgentStore, restWorkflowStore,
+                resourceClientLibrary);
+
+        // Search for the named ApiCall across all httpCall configurations
+        for (var stepConfig : stepConfigs) {
+            ApiCallsConfiguration httpCallsConfig = stepConfig.config();
+            String targetServerUrl = httpCallsConfig.getTargetServerUrl();
+
+            for (ApiCall apiCall : httpCallsConfig.getHttpCalls()) {
+                if (httpCallName.equals(apiCall.getName())) {
+                    // Found the named httpCall — execute it
+                    try {
+                        // Make current user input available to httpCall templates
+                        templateDataObjects.put("userInput", userInput);
+
+                        Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateDataObjects, targetServerUrl);
+                        String serialized = jsonSerialization.serialize(result);
+
+                        LOGGER.infof("httpCall RAG '%s' executed: keys=%s, size=%d", httpCallName, result.keySet(), serialized.length());
+                        return serialized;
+
+                    } catch (Exception e) {
+                        LOGGER.warnf(e, "httpCall RAG execution failed for '%s': %s", httpCallName, e.getMessage());
+                        return null;
+                    }
+                }
+            }
+        }
+
+        LOGGER.warnf("httpCall RAG: no ApiCall named '%s' found in workflow", httpCallName);
         return null;
     }
 

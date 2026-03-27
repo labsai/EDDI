@@ -903,4 +903,130 @@ class LlmTaskTest {
             verify(dataFactory).createData(eq("audit:cascade_confidence"), any());
         }
     }
+
+    @Nested
+    @DisplayName("httpCall RAG Tests")
+    class HttpCallRagTests {
+
+        @Test
+        @DisplayName("httpCallRag null — should execute normally without RAG context")
+        void testHttpCallRag_null_noOp() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "hello");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            // No user input in memory step (returns null from extractUserInput)
+            when(currentStep.getLatestData("input")).thenReturn(null);
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("ragTask");
+            task.setType("openai");
+            task.setHttpCallRag(null); // Explicitly null
+            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            langChainTask.execute(memory, llmConfig);
+
+            // Should execute normally — no httpCall RAG trace stored
+            verify(dataFactory, never()).createData(contains("rag:httpcall:trace"), any());
+            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
+        }
+
+        @Test
+        @DisplayName("httpCallRag set but no user input — should skip gracefully")
+        void testHttpCallRag_noUserInput_skips() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "hello");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            // No user input in conversation step
+            when(currentStep.getLatestData("input")).thenReturn(null);
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("ragTask");
+            task.setType("openai");
+            task.setHttpCallRag("search-api"); // Set but no user input → skip
+            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            // Should NOT throw
+            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
+
+            // No httpCall RAG trace (skipped due to null input)
+            verify(dataFactory, never()).createData(contains("rag:httpcall:trace"), any());
+        }
+
+        @Test
+        @DisplayName("httpCallRag set with user input but no matching httpCall — should warn and continue")
+        void testHttpCallRag_notFound_graceful() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "search query");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            // Provide user input
+            var inputData = mock(IData.class);
+            when(currentStep.getLatestData("input")).thenReturn(inputData);
+            when(inputData.getResult()).thenReturn("search query");
+
+            // Mock agent context (needed for WorkflowTraversal)
+            when(memory.getAgentId()).thenReturn(null); // No agent context = empty discovery
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("ragTask");
+            task.setType("openai");
+            task.setHttpCallRag("nonexistent-search"); // No matching httpCall in workflow
+            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            // Should NOT throw — graceful degradation
+            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
+
+            // No httpCall RAG trace (not found)
+            verify(dataFactory, never()).createData(contains("rag:httpcall:trace"), any());
+            // Task should still execute normally (storeData for langchain output)
+            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
+        }
+    }
 }

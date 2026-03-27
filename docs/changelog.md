@@ -13,6 +13,41 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Phase 8c-β: pgvector Persistent Vector Store (2026-03-27)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Added persistent vector store support via pgvector to the RAG knowledge base system, completing the EmbeddingStoreFactory stub.
+
+| Component | Change |
+|---|---|
+| **pom.xml** | Added `langchain4j-pgvector` dependency (1.12.2-beta22) |
+| **EmbeddingStoreFactory** | Injected `SecretResolver` for vault-based password resolution. Updated cache key to include `storeParameters` (TreeMap-based). Implemented `buildPgVector()` with sensible defaults (host=localhost, port=5432, table=`eddi_kb_{kbId}`, dimension=1536, createTable=true). Added `sanitizeTableName()` for safe PostgreSQL table names |
+| **EmbeddingStoreFactoryTest** | Updated for `SecretResolver` mock injection. Added 5 new tests: storeParameter cache key collision, same params caching, and 3 table name sanitization tests |
+
+**Design decision:** Using `langchain4j-beta.version` (1.12.2-beta22) since `langchain4j-pgvector` is not yet published in the stable release channel.
+
+---
+
+## Phase 8c-0: httpCall RAG — Zero-Infrastructure RAG (2026-03-27)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Implemented zero-infrastructure RAG via named httpCall. When `task.httpCallRag` is set, the LlmTask discovers the named httpCall from the workflow, executes it with the user's query in template data, and injects the response as context into the system message before the LLM call.
+
+| Component | Change |
+|---|---|
+| **LlmTask** | Stored `apiCallExecutor`, `restAgentStore`, `restWorkflowStore` as fields (were only forwarded to AgentOrchestrator). Replaced TODO stub with httpCallRag execution. Added `executeHttpCallRag()` method that uses `WorkflowTraversal.discoverConfigs()` to find the named ApiCall, executes it, serializes response, and injects as `## Search Results:` context. Stores audit trace (`rag:httpcall:trace:{taskId}`) |
+| **LlmTaskTest** | Added `HttpCallRagTests` nested class with 3 tests: null is no-op, no user input skips gracefully, non-existent httpCall warns but continues |
+
+**Design decision:** httpCall RAG runs *before* vector store RAG in the pipeline. Both can be active simultaneously — httpCall provides "search results" while vector RAG provides "relevant context". Template data includes `userInput` for API call templating.
+
+---
+
 ## Phase 8c: RAG Foundation — Config-Driven Knowledge Base Retrieval (2026-03-27)
 
 **Repo:** EDDI (`feature/version-6.0.0`) — Commit `f10c0611`

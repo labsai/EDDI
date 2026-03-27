@@ -168,6 +168,12 @@
             <artifactId>langchain4j-agentic-a2a</artifactId>
             <version>${langchain4j-beta.version}</version>
         </dependency>
+        <!-- Phase 8c-β: pgvector — persistent vector store for RAG knowledge bases -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-pgvector</artifactId>
+            <version>${langchain4j-beta.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
