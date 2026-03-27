@@ -538,19 +538,33 @@ class McpSetupToolsTest {
         assertTrue(McpSetupTools.supportsResponseFormat("openai"));
         assertTrue(McpSetupTools.supportsResponseFormat("gemini"));
         assertTrue(McpSetupTools.supportsResponseFormat("gemini-vertex"));
+        assertTrue(McpSetupTools.supportsResponseFormat("mistral"));
+        assertTrue(McpSetupTools.supportsResponseFormat("azure-openai"));
         assertFalse(McpSetupTools.supportsResponseFormat("anthropic"));
         assertFalse(McpSetupTools.supportsResponseFormat("ollama"));
         assertFalse(McpSetupTools.supportsResponseFormat("jlama"));
+        assertFalse(McpSetupTools.supportsResponseFormat("bedrock"));
+        assertFalse(McpSetupTools.supportsResponseFormat("oracle-genai"));
     }
 
     @Test
-    void isLocalLlmProvider_recognizesOllamaAndJlama() {
+    void isLocalLlmProvider_recognizesNoApiKeyProviders() {
+        // Local inference — no apiKey needed
         assertTrue(McpSetupTools.isLocalLlmProvider("ollama"));
         assertTrue(McpSetupTools.isLocalLlmProvider("Ollama"));
         assertTrue(McpSetupTools.isLocalLlmProvider("jlama"));
         assertTrue(McpSetupTools.isLocalLlmProvider("JLAMA"));
+        // Cloud services with native auth (no apiKey param)
+        assertTrue(McpSetupTools.isLocalLlmProvider("bedrock"));
+        assertTrue(McpSetupTools.isLocalLlmProvider("Bedrock"));
+        assertTrue(McpSetupTools.isLocalLlmProvider("oracle-genai"));
+        assertTrue(McpSetupTools.isLocalLlmProvider("Oracle-GenAI"));
+        // Cloud services that require apiKey
         assertFalse(McpSetupTools.isLocalLlmProvider("anthropic"));
         assertFalse(McpSetupTools.isLocalLlmProvider("openai"));
+        assertFalse(McpSetupTools.isLocalLlmProvider("mistral"));
+        assertFalse(McpSetupTools.isLocalLlmProvider("azure-openai"));
+        // Edge cases
         assertFalse(McpSetupTools.isLocalLlmProvider(null));
         assertFalse(McpSetupTools.isLocalLlmProvider(""));
     }
@@ -589,6 +603,106 @@ class McpSetupToolsTest {
         assertNull(postResponse.getPropertyInstructions());
         assertNotNull(postResponse.getOutputBuildInstructions());
         assertNull(postResponse.getQrBuildInstructions());
+    }
+
+    // --- New LLM provider config tests ---
+
+    @Test
+    void createLlmConfig_bedrock_usesModelIdNoApiKey() {
+        var config = service.createLlmConfig("bedrock", "anthropic.claude-v2", null, "prompt", false, null, null, null, false, false, null);
+
+        var task = config.tasks().get(0);
+        var params = task.getParameters();
+        assertEquals("bedrock", task.getType());
+        assertEquals("anthropic.claude-v2", params.get("modelId"));
+        assertNull(params.get("modelName"), "Bedrock should use 'modelId' not 'modelName'");
+        assertNull(params.get("apiKey"), "Bedrock uses AWS credential chain, no apiKey");
+    }
+
+    @Test
+    void createLlmConfig_azureOpenai_usesDeploymentNameAndEndpoint() {
+        var config = service.createLlmConfig("azure-openai", "gpt-4o", "az-key", "prompt", false, null, "https://myinstance.openai.azure.com", null,
+                false, false, null);
+
+        var task = config.tasks().get(0);
+        var params = task.getParameters();
+        assertEquals("azure-openai", task.getType());
+        assertEquals("gpt-4o", params.get("deploymentName"));
+        assertEquals("az-key", params.get("apiKey"));
+        assertEquals("https://myinstance.openai.azure.com", params.get("endpoint"));
+        assertNull(params.get("modelName"), "Azure OpenAI should use 'deploymentName' not 'modelName'");
+        assertNull(params.get("baseUrl"), "Azure OpenAI should use 'endpoint' not 'baseUrl'");
+    }
+
+    @Test
+    void createLlmConfig_oracleGenai_usesModelNameNoApiKey() {
+        var config = service.createLlmConfig("oracle-genai", "cohere.command-r-plus", null, "prompt", false, null, null, null, false, false, null);
+
+        var task = config.tasks().get(0);
+        var params = task.getParameters();
+        assertEquals("oracle-genai", task.getType());
+        assertEquals("cohere.command-r-plus", params.get("modelName"));
+        assertNull(params.get("modelId"), "Oracle GenAI should use 'modelName' not 'modelId'");
+        assertNull(params.get("apiKey"), "Oracle GenAI uses OCI config, no apiKey");
+    }
+
+    @Test
+    void createLlmConfig_mistral_usesDefaultModelNameAndApiKey() {
+        var config = service.createLlmConfig("mistral", "mistral-large-latest", "ms-key", "prompt", false, null, null, null, false, false, null);
+
+        var task = config.tasks().get(0);
+        var params = task.getParameters();
+        assertEquals("mistral", task.getType());
+        assertEquals("mistral-large-latest", params.get("modelName"));
+        assertEquals("ms-key", params.get("apiKey"));
+    }
+
+    @Test
+    void setupAgent_bedrockNoApiKey_succeeds() throws Exception {
+        when(behaviorStore.createRuleSet(any())).thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1")).build());
+        when(langchainStore.createLlm(any())).thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1")).build());
+        when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
+
+        // Bedrock should NOT require an apiKey (uses AWS credential chain)
+        String result = tools.setupAgent("Bedrock Agent", "You are helpful", "bedrock", "anthropic.claude-v2", null, null, null, null, null, null,
+                null, null, false, null);
+
+        assertNotNull(result);
+        assertFalse(result.contains("\"error\""), "Bedrock setup should succeed without API key");
+        verify(langchainStore).createLlm(any());
+    }
+
+    @Test
+    void setupAgent_oracleGenaiNoApiKey_succeeds() throws Exception {
+        when(behaviorStore.createRuleSet(any())).thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1")).build());
+        when(langchainStore.createLlm(any())).thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1")).build());
+        when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
+
+        String result = tools.setupAgent("Oracle Agent", "You are helpful", "oracle-genai", "cohere.command-r-plus", null, null, null, null, null,
+                null, null, null, false, null);
+
+        assertNotNull(result);
+        assertFalse(result.contains("\"error\""), "Oracle GenAI setup should succeed without API key");
+    }
+
+    @Test
+    void setupAgent_azureOpenai_withEndpoint_succeeds() throws Exception {
+        when(behaviorStore.createRuleSet(any())).thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1")).build());
+        when(langchainStore.createLlm(any())).thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1")).build());
+        when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
+
+        tools.setupAgent("Azure Agent", "You are helpful", "azure-openai", "gpt-4o", "az-key", "https://myinstance.openai.azure.com", null, null,
+                null, null, null, null, false, null);
+
+        var lcCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
+        verify(langchainStore).createLlm(lcCaptor.capture());
+        var params = lcCaptor.getValue().tasks().get(0).getParameters();
+        assertEquals("azure-openai", lcCaptor.getValue().tasks().get(0).getType());
+        assertEquals("gpt-4o", params.get("deploymentName"));
+        assertEquals("https://myinstance.openai.azure.com", params.get("endpoint"));
     }
 
     // --- create_api_agent tests ---

@@ -80,13 +80,33 @@
 ###
 FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24
 
+### Red Hat Container Certification — required labels
+ARG EDDI_VERSION=6.0.0
+ARG EDDI_RELEASE=1
+
+LABEL name="labsai/eddi" \
+      vendor="LABS.AI" \
+      version="${EDDI_VERSION}" \
+      release="${EDDI_RELEASE}" \
+      summary="EDDI — Enterprise-grade Multi-Agent AI Orchestration Middleware" \
+      description="E.D.D.I is a prompt and conversation management middleware \
+      for Conversational AI APIs. It orchestrates multiple AI agents, manages stateful \
+      conversations, and integrates with LLM providers (OpenAI, Anthropic, Google Gemini, \
+      Ollama, Mistral, Azure OpenAI, Amazon Bedrock, and more) via a unified REST API. \
+      Built on Quarkus for cloud-native, high-performance operation." \
+      maintainer="LABS.AI GmbH <contact@labs.ai>" \
+      url="https://eddi.labs.ai" \
+      io.k8s.display-name="EDDI AI Platform" \
+      io.k8s.description="Multi-Agent AI Orchestration Middleware" \
+      io.openshift.tags="ai,conversational-ai,llm,chatbot,multi-agent,quarkus"
+
 ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en'
 
 USER root
 
 RUN mkdir -p /deployments/tmp/import && \
-    chown -R 185:0 /deployments/tmp && \
-    chmod -R 775 /deployments/tmp
+      chown -R 185:0 /deployments/tmp && \
+      chmod -R 775 /deployments/tmp
 
 COPY --chown=185 target/quarkus-app/lib/ /deployments/lib/
 COPY --chown=185 target/quarkus-app/*.jar /deployments/

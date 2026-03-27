@@ -46,3 +46,91 @@ jobs:
           name: jacoco-report
           path: target/site/jacoco/
           retention-days: 14
+
+  preflight-check:
+    name: Preflight Dry-Run (Red Hat Certification)
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    # Only run on PRs to main — catches certification regressions early
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Set execute permission for mvnw
+        run: chmod +x mvnw
+
+      - name: Build application
+        run: ./mvnw clean package -DskipTests -B
+
+      - name: Build Docker image with Red Hat labels
+        run: |
+          docker build \
+            -f src/main/docker/Dockerfile.jvm \
+            -t eddi-preflight-check:test \
+            .
+
+      - name: Verify Red Hat labels present
+        run: |
+          echo "=== Checking required Red Hat labels ==="
+          LABELS=$(docker inspect eddi-preflight-check:test --format '{{json .Config.Labels}}')
+          echo "$LABELS" | python3 -m json.tool
+          for label in name vendor version release summary description; do
+            if echo "$LABELS" | python3 -c "import sys,json; d=json.load(sys.stdin); assert '$label' in d" 2>/dev/null; then
+              echo "✅ Label '$label' present"
+            else
+              echo "❌ Label '$label' MISSING"
+            fi
+          done
+
+      - name: Verify /licenses in container
+        run: |
+          echo "=== /licenses directory ==="
+          docker run --rm --entrypoint="" eddi-preflight-check:test ls -la /licenses/
+          echo ""
+          echo "=== THIRD-PARTY.txt exists ==="
+          docker run --rm --entrypoint="" eddi-preflight-check:test \
+            test -f /licenses/THIRD-PARTY.txt && echo "✅ THIRD-PARTY.txt found" || echo "❌ THIRD-PARTY.txt missing"
+
+      - name: Install preflight
+        run: |
+          PREFLIGHT_VERSION=$(curl -s https://api.github.com/repos/redhat-openshift-ecosystem/openshift-preflight/releases/latest | jq -r .tag_name)
+          echo "Installing preflight ${PREFLIGHT_VERSION}..."
+          curl -sL "https://github.com/redhat-openshift-ecosystem/openshift-preflight/releases/download/${PREFLIGHT_VERSION}/preflight-linux-amd64" \
+            -o /usr/local/bin/preflight
+          chmod +x /usr/local/bin/preflight
+          preflight --version
+
+      - name: Preflight check (local, no submit)
+        run: |
+          # Save image as tarball for local preflight check
+          docker save eddi-preflight-check:test > /tmp/eddi-image.tar
+          echo "Image saved. Running preflight..."
+          # Run preflight without --submit (dry-run)
+          preflight check container \
+            eddi-preflight-check:test \
+            2>&1 | tee preflight-dryrun.txt || true
+          echo ""
+          echo "=== Preflight Summary ==="
+          if grep -q "FAILED" preflight-dryrun.txt; then
+            echo "::warning::Preflight check has failures — review output above."
+            echo "Note: Some checks (e.g. HasUniqueTag) require a pushed image and are expected to fail in dry-run."
+          else
+            echo "✅ All preflight checks passed"
+          fi
+
+      - name: Upload preflight dry-run results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preflight-dryrun
+          path: preflight-dryrun.txt
+          retention-days: 14

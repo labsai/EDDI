@@ -4,3 +4,4 @@
 !target/lib/*
 !target/quarkus-app/*
 !licenses/*
+!docs/*
