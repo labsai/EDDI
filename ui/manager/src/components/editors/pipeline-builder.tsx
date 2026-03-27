@@ -71,7 +71,7 @@ function parseExtensionUri(uri: string): { slug: string; id: string } | null {
         outputstore: "output",
         dictionarystore: "dictionary",
         propertysetterstore: "propertysetter",
-        parserstore: "parser",
+        mcpcallsstore: "mcpcalls",
       };
       const storeName = segments[0];
       const resourceId = segments[2];
