@@ -46,7 +46,7 @@ describe("WorkflowDetailPage", () => {
     await waitFor(() => {
       // MSW returns a package with 2 extensions (behavior + langchain)
       expect(screen.getByText("Rules")).toBeInTheDocument();
-      expect(screen.getByText("Lang Chain")).toBeInTheDocument();
+      expect(screen.getByText("LLM")).toBeInTheDocument();
     });
   });
 
