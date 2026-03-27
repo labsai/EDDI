@@ -670,7 +670,7 @@ Cost-optimized LLM execution via sequential model escalation with confidence-bas
 
 - [x] ~~**Phase 6E: quarkus-langchain4j → langchain4j Core**~~ ✅
 - [x] ~~**Phase 6D: Lombok Removal**~~ ✅
-- [ ] **Quarkus 3.33 LTS Upgrade** — waiting for GA (March 25, 2026). 3.32.3 has Java 25 `ALL-UNNAMED` module issue.
+- [x] ~~**Quarkus 3.34.1 Upgrade**~~ ✅ — upgraded past 3.33 LTS to 3.34.1. Java 25 `ALL-UNNAMED` module issue resolved.
 
 ### Phase 7 (continued)
 
@@ -772,7 +772,8 @@ Config-driven knowledge base retrieval integrated into the LLM pipeline. Knowled
 **Sub-phases completed:**
 - ✅ Phase 8c-0: httpCall-based RAG — `LlmTask.executeHttpCallRag()`, audit trace, graceful failure
 - ✅ Phase 8c-β: pgvector persistent vector store — `EmbeddingStoreFactory.buildPgVector()`, `SecretResolver`, `sanitizeTableName()`
-- Remaining: Manager UI RAG editor (Phase 13), additional stores (MongoDB Atlas, Qdrant)
+- ✅ Phase 8c-γ: RAG provider expansion — 7 embedding models (openai, azure-openai, ollama, mistral, bedrock, cohere, vertex) + 5 vector stores (in-memory, pgvector, mongodb-atlas, elasticsearch, qdrant) + REST ingestion endpoint (`POST /{id}/ingest`, `GET /{id}/ingestion/{ingestionId}/status`)
+- Remaining: Manager UI RAG editor (Phase 13)
 
 ### Phase 8a.2: MCP Resource CRUD + Batch Cascade ✅
 

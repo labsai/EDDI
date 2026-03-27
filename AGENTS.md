@@ -80,16 +80,20 @@ Follow this order unless the user explicitly requests something different.
 | 6     | DB-Agnostic Architecture | PostgreSQL adapter, MongoDB sync driver, Caffeine cache, Lombok removal, langchain4j core migration |
 | 7     | Security & Compliance    | Secrets Vault, Audit Ledger (EU AI Act), tenant quota stub                                          |
 | 8     | MCP Integration          | MCP Server (33 tools), MCP Client, agent discovery, managed conversations                           |
+| 8c    | RAG Foundation            | Config-driven vector store retrieval, pgvector, httpCall RAG                                         |
+| 10    | Group Conversations       | Multi-agent debate orchestration, 5 styles, group-of-groups                                          |
+| —     | A2A Protocol              | Agent-to-Agent peer communication, Agent Cards, skill discovery                                      |
+| —     | Multi-Model Cascading     | Sequential model escalation with confidence routing                                                  |
+| —     | LLM Provider Expansion    | 7 → 12 providers (Mistral, Azure OpenAI, Bedrock, Oracle GenAI)                                      |
+| —     | Quarkus 3.34.1            | LTS upgrade, Java 25 module fix                                                                      |
 
 ### In Progress / Upcoming
 
 | Phase | Area                      | Description                                             |
 | ----- | ------------------------- | ------------------------------------------------------- |
-| 8c    | RAG Foundation            | Config-driven vector store retrieval via langchain4j    |
 | 9     | DAG Pipeline              | Parallel tasks, circuit breakers, OpenTelemetry tracing |
 | 9b    | HITL Framework            | Human-in-the-loop pause/resume/approve                  |
-| 10    | Group Conversations       | Multi-agent orchestration, debate rounds, NATS-backed   |
-| 11a   | Persistent Memory         | Cross-conversation user memory, scheduled triggers      |
+| 11a   | Persistent Memory         | Cross-conversation user memory                          |
 | 11b   | Multi-Channel             | WhatsApp, Telegram, Slack adapters                      |
 | 12    | CI/CD                     | GitHub Actions migration (from CircleCI)                |
 | 13    | Debugging & Visualization | Time-traveling debugger, visual pipeline builder        |

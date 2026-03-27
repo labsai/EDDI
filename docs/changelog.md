@@ -13,6 +13,76 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Phase 8c-M: Manager UI RAG Sync — Full Provider Parity + Ingestion Fix (2026-03-28)
+
+**Repo:** EDDI-Manager (`feature/version-6.0.0`) + EDDI (backend fixes)
+
+**What changed:**
+
+Synchronized the Manager `RagEditor` UI with the backend's Phase 8c-γ provider expansion and fixed ingestion API contract mismatches.
+
+| Component | Change |
+|---|---|
+| **RagEditor** | Updated to 7 embedding providers (added azure-openai, mistral, bedrock, cohere) and 5 vector stores (added elasticsearch). Removed dead `isolationStrategy` field. Added context-sensitive provider parameter hints (e.g., `endpoint`+`deploymentName` for Azure, `region` for Bedrock). Added embedding param cache for seamless provider switching. Added missing `dimension` (pgvector) and `useTls` (qdrant) hints |
+| **IngestionPanel** | Fixed API contract: sends `text/plain` body with `version`+`documentName` query params (was: JSON body). Fixed status polling path to `/ingestion/{id}/status` |
+| **ConfigEditorLayout** | Extended `meta` type to include `version: number` for ingestion API |
+| **vite.config.ts** | Added `/ragstore` dev proxy entry |
+| **KeyValueEditor** | Fixed duplicate key collision bug (renaming a key to an existing key silently dropped entries) |
+| **EmbeddingStoreFactory** (backend) | Fixed MongoClient resource leak: cached `MongoClient` instances with proper cleanup on `clearCache()` |
+| **i18n** | Removed `ragEditor.isolation` from all 11 locale files |
+| **Tests** | Updated 19 tests: removed isolation test, added elasticsearch/azure-openai/provider-list/store-list coverage |
+| **MSW handlers** | Removed `isolationStrategy` from mock data, fixed ingestion status endpoint path |
+
+**Files:** 15 modified (1 backend, 14 Manager).
+
+## Phase 8c-γ: RAG Provider Expansion — 7 Embedding Models + 5 Vector Stores (2026-03-27)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Expanded the RAG subsystem from 2 embedding providers + 2 vector stores to 7 + 5, added a REST ingestion endpoint, and applied code quality improvements from the architecture review.
+
+| Component | Change |
+|---|---|
+| **pom.xml** | Added 5 new dependencies: `langchain4j-mongodb-atlas`, `langchain4j-elasticsearch`, `langchain4j-qdrant`, `langchain4j-cohere`, `langchain4j-vertex-ai` (all `${langchain4j-beta.version}`) |
+| **EmbeddingModelFactory** | 2→7 providers: added `azure-openai`, `mistral`, `bedrock`, `cohere`, `vertex`. Each extracted into private builder methods. Error messages list all supported providers |
+| **EmbeddingStoreFactory** | 2→5 stores: added `mongodb-atlas`, `elasticsearch`, `qdrant`. Added `requireParam()` fail-fast validation, `parseIntParam()` clear error handling, table name truncation to 63 chars. Factored `resolveParams()` utility |
+| **RagConfiguration** | Updated Javadoc for all 7 providers + 5 stores. Removed dead `isolationStrategy` field (collection-per-KB is the only supported strategy, enforced by cache key pattern) |
+| **IRestRagIngestion** (NEW) | JAX-RS interface: `POST /{id}/ingest`, `GET /{id}/ingestion/{ingestionId}/status`. OpenAPI documented, `@RolesAllowed(eddi-admin, eddi-editor)` |
+| **RestRagIngestion** (NEW) | Implementation: validates input, loads config, resolves KB ID (explicit → config name → config ID fallback), delegates to `RagIngestionService`, returns 202 Accepted |
+| **docs/rag.md** | Complete rewrite with all providers, ingestion curl examples, status polling docs |
+
+**New embedding providers:**
+
+| Provider | Default Model | Auth | Notes |
+|---|---|---|---|
+| `azure-openai` | `text-embedding-3-small` | `apiKey` + `endpoint` | Azure-hosted OpenAI |
+| `mistral` | `mistral-embed` | `apiKey` | Mistral AI |
+| `bedrock` | `amazon.titan-embed-text-v2:0` | AWS credential chain | `region` param |
+| `cohere` | `embed-english-v3.0` | `apiKey` | Multilingual support |
+| `vertex` | `text-embedding-005` | GCP credentials | Requires `project` param |
+
+**New vector stores:**
+
+| Store | Required Params | Notes |
+|---|---|---|
+| `mongodb-atlas` | `connectionString` | Atlas Vector Search, zero new infra for existing MongoDB users |
+| `elasticsearch` | — | `serverUrl`, optional `apiKey` or `userName`+`password` |
+| `qdrant` | — | gRPC, optional `apiKey` + TLS |
+
+**Code quality improvements:**
+- pgvector `password` now fails fast with clear message (was: silent empty string)
+- `sanitizeTableName` truncates to PostgreSQL's 63-char identifier limit
+- `parseIntParam()` wraps NumberFormatException with descriptive error
+- Removed dead `isolationStrategy` field from `RagConfiguration`
+
+**Tests:** 4 new test files (26 tests total): `RagIngestionServiceTest` (3), `RestRagIngestionTest` (6), updated `EmbeddingStoreFactoryTest` (13 — table truncation, pgvector validation, mongodb-atlas validation), updated `EmbeddingModelFactoryTest` (10 — mistral, cohere, vertex validation).
+
+**Files:** 3 new, 5 modified, 2 new test files, 2 updated test files.
+
+---
+
 ## Installer Security: Vault Master Key Auto-Generation (2026-03-27)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

@@ -65,7 +65,8 @@ class EmbeddingStoreFactoryTest {
         var config = new RagConfiguration();
         config.setStoreType("unsupported");
 
-        assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, "kb"));
+        var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, "kb"));
+        assertTrue(ex.getMessage().contains("Supported:"), "Error should list supported types");
     }
 
     @Test
@@ -136,6 +137,54 @@ class EmbeddingStoreFactoryTest {
         @Test
         void sanitizeTableName_alreadySafe() {
             assertEquals("eddi_kb_simple_name", EmbeddingStoreFactory.sanitizeTableName("simple_name"));
+        }
+
+        @Test
+        @DisplayName("Long KB names should be truncated to 63 chars")
+        void sanitizeTableName_longName_shouldTruncate() {
+            String longName = "a".repeat(100);
+            String result = EmbeddingStoreFactory.sanitizeTableName(longName);
+            assertTrue(result.length() <= 63, "Table name should be at most 63 chars, got: " + result.length());
+            assertTrue(result.startsWith("eddi_kb_"));
+        }
+    }
+
+    @Nested
+    @DisplayName("Fail-Fast Validation Tests")
+    class ValidationTests {
+
+        @Test
+        @DisplayName("pgvector without password should throw with clear message")
+        void pgvector_noPassword_shouldThrow() {
+            var config = new RagConfiguration();
+            config.setStoreType("pgvector");
+            config.setStoreParameters(Map.of("host", "localhost"));
+
+            var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, "kb"));
+            assertTrue(ex.getMessage().contains("password"), "Error should mention missing password");
+            assertTrue(ex.getMessage().contains("eddivault"), "Error should mention vault reference");
+        }
+
+        @Test
+        @DisplayName("Invalid port value should throw with clear message")
+        void pgvector_invalidPort_shouldThrow() {
+            var config = new RagConfiguration();
+            config.setStoreType("pgvector");
+            config.setStoreParameters(Map.of("password", "secret", "port", "not-a-number"));
+
+            var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, "kb"));
+            assertTrue(ex.getMessage().contains("port"), "Error should mention the invalid param");
+        }
+
+        @Test
+        @DisplayName("mongodb-atlas without connectionString should throw")
+        void mongoDbAtlas_noConnectionString_shouldThrow() {
+            var config = new RagConfiguration();
+            config.setStoreType("mongodb-atlas");
+            config.setStoreParameters(Map.of("databaseName", "eddi"));
+
+            var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, "kb"));
+            assertTrue(ex.getMessage().contains("connectionString"));
         }
     }
 }

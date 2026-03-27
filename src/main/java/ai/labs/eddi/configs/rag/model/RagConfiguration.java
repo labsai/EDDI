@@ -19,8 +19,22 @@ public class RagConfiguration {
     // --- Embedding Model ---
 
     /**
-     * Embedding model provider. Matches the LLM provider pattern. Values: "openai",
-     * "ollama", "vertex", "google", "huggingface", "jlama"
+     * Embedding model provider. Values:
+     * <ul>
+     * <li>{@code "openai"} — OpenAI (default). Params: {@code model},
+     * {@code apiKey}</li>
+     * <li>{@code "azure-openai"} — Azure OpenAI. Params: {@code endpoint},
+     * {@code apiKey}, {@code deploymentName}</li>
+     * <li>{@code "ollama"} — Ollama (local). Params: {@code model},
+     * {@code baseUrl}</li>
+     * <li>{@code "mistral"} — Mistral AI. Params: {@code model},
+     * {@code apiKey}</li>
+     * <li>{@code "bedrock"} — Amazon Bedrock Titan. Params: {@code model},
+     * {@code region}</li>
+     * <li>{@code "cohere"} — Cohere. Params: {@code model}, {@code apiKey}</li>
+     * <li>{@code "vertex"} — Google Vertex AI. Params: {@code project},
+     * {@code location}, {@code model}</li>
+     * </ul>
      */
     private String embeddingProvider = "openai";
 
@@ -28,11 +42,18 @@ public class RagConfiguration {
      * Provider-specific parameters. Keys vary by provider:
      * <ul>
      * <li>OpenAI: {"model": "text-embedding-3-small", "apiKey":
-     * "${vault:openai-key}"}</li>
+     * "${eddivault:tenant/agent/openai-key}"}</li>
+     * <li>Azure OpenAI: {"endpoint": "https://my.openai.azure.com/", "apiKey":
+     * "${eddivault:...}", "deploymentName": "text-embedding-3-small"}</li>
      * <li>Ollama: {"model": "nomic-embed-text", "baseUrl":
      * "http://localhost:11434"}</li>
-     * <li>Vertex: {"model": "text-embedding-005", "project": "my-project",
-     * "location": "us-central1"}</li>
+     * <li>Mistral: {"model": "mistral-embed", "apiKey": "${eddivault:...}"}</li>
+     * <li>Bedrock: {"model": "amazon.titan-embed-text-v2:0", "region":
+     * "us-east-1"}</li>
+     * <li>Cohere: {"model": "embed-english-v3.0", "apiKey":
+     * "${eddivault:...}"}</li>
+     * <li>Vertex: {"project": "my-project", "location": "us-central1", "model":
+     * "text-embedding-005"}</li>
      * </ul>
      */
     private Map<String, String> embeddingParameters;
@@ -40,33 +61,31 @@ public class RagConfiguration {
     // --- Vector Store ---
 
     /**
-     * Vector store type. Values: "in-memory" (default, for dev/test), "pgvector",
-     * "mongodb-atlas", "qdrant"
+     * Vector store type. Values:
+     * <ul>
+     * <li>{@code "in-memory"} (default) — Ephemeral, for dev/test</li>
+     * <li>{@code "pgvector"} — PostgreSQL + pgvector extension</li>
+     * <li>{@code "mongodb-atlas"} — MongoDB Atlas Vector Search</li>
+     * <li>{@code "elasticsearch"} — Elasticsearch vector search</li>
+     * <li>{@code "qdrant"} — Qdrant vector database</li>
+     * </ul>
      */
     private String storeType = "in-memory";
 
     /**
      * Store-specific connection parameters:
      * <ul>
-     * <li>pgvector: {"host": "localhost", "port": "5432", "database": "eddi",
-     * "table": "embeddings"}</li>
-     * <li>mongodb-atlas: {"indexName": "vector_index", "databaseName": "eddi"}</li>
-     * <li>qdrant: {"host": "localhost", "port": "6334", "collectionName":
-     * "kb-xxx"}</li>
+     * <li>pgvector: {"host", "port", "database", "user", "password", "table",
+     * "dimension"}</li>
+     * <li>mongodb-atlas: {"connectionString", "databaseName", "collectionName",
+     * "indexName"}</li>
+     * <li>elasticsearch: {"serverUrl", "indexName", "apiKey", "userName",
+     * "password"}</li>
+     * <li>qdrant: {"host", "port", "collectionName", "apiKey", "useTls"}</li>
      * <li>in-memory: {} (no params needed)</li>
      * </ul>
      */
     private Map<String, String> storeParameters;
-
-    /**
-     * Tenant/KB isolation strategy.
-     * <ul>
-     * <li>"collection" (default): each KB gets its own collection/table — stronger
-     * isolation</li>
-     * <li>"metadata": single store, filter by kbId metadata — simpler ops</li>
-     * </ul>
-     */
-    private String isolationStrategy = "collection";
 
     // --- Chunking (for ingestion) ---
 
@@ -127,14 +146,6 @@ public class RagConfiguration {
 
     public void setStoreParameters(Map<String, String> storeParameters) {
         this.storeParameters = storeParameters;
-    }
-
-    public String getIsolationStrategy() {
-        return isolationStrategy;
-    }
-
-    public void setIsolationStrategy(String isolationStrategy) {
-        this.isolationStrategy = isolationStrategy;
     }
 
     public String getChunkStrategy() {

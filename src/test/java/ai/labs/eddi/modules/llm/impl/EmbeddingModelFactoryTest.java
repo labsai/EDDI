@@ -4,6 +4,8 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
@@ -64,7 +66,8 @@ class EmbeddingModelFactoryTest {
     void unsupportedProvider_shouldThrow() {
         var config = createConfig("unsupported_provider", Map.of());
 
-        assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config));
+        var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config));
+        assertTrue(ex.getMessage().contains("Supported:"), "Error message should list supported providers");
     }
 
     @Test
@@ -84,6 +87,35 @@ class EmbeddingModelFactoryTest {
 
         EmbeddingModel model = factory.getOrCreate(config);
         assertNotNull(model);
+    }
+
+    @Nested
+    @DisplayName("New Provider Tests")
+    class NewProviderTests {
+
+        @Test
+        @DisplayName("Mistral provider should create model")
+        void mistralProvider_shouldCreateModel() {
+            var config = createConfig("mistral", Map.of("apiKey", "test-key"));
+            EmbeddingModel model = factory.getOrCreate(config);
+            assertNotNull(model);
+        }
+
+        @Test
+        @DisplayName("Vertex provider without project should throw")
+        void vertexProvider_noProject_shouldThrow() {
+            var config = createConfig("vertex", Map.of());
+            var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config));
+            assertTrue(ex.getMessage().contains("project"), "Error should mention missing project");
+        }
+
+        @Test
+        @DisplayName("Cohere provider should create model")
+        void cohereProvider_shouldCreateModel() {
+            var config = createConfig("cohere", Map.of("apiKey", "test-key"));
+            EmbeddingModel model = factory.getOrCreate(config);
+            assertNotNull(model);
+        }
     }
 
     private RagConfiguration createConfig(String provider, Map<String, String> params) {

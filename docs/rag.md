@@ -42,11 +42,10 @@ A `RagConfiguration` is a versioned resource at `/ragstore/rags/`. It defines:
   "embeddingProvider": "openai",
   "embeddingParameters": {
     "model": "text-embedding-3-small",
-    "apiKey": "${vault:openai-key}"
+    "apiKey": "${eddivault:tenant/agent/openai-key}"
   },
   "storeType": "in-memory",
   "storeParameters": {},
-  "isolationStrategy": "collection",
   "chunkStrategy": "recursive",
   "chunkSize": 512,
   "chunkOverlap": 64,
@@ -58,11 +57,10 @@ A `RagConfiguration` is a versioned resource at `/ragstore/rags/`. It defines:
 | Field | Default | Description |
 |---|---|---|
 | `name` | — | Display name / identifier for this knowledge base |
-| `embeddingProvider` | `openai` | Provider: `openai`, `ollama` |
-| `embeddingParameters` | — | Provider-specific params (model, apiKey, baseUrl) |
-| `storeType` | `in-memory` | Vector store: `in-memory` (dev), `pgvector` (persistent) |
+| `embeddingProvider` | `openai` | Provider (see Embedding Providers table below) |
+| `embeddingParameters` | — | Provider-specific params (model, apiKey, baseUrl, etc.) |
+| `storeType` | `in-memory` | Vector store (see Vector Stores table below) |
 | `storeParameters` | — | Store-specific connection params |
-| `isolationStrategy` | `collection` | `collection` (per-KB store) or `metadata` (shared store) |
 | `chunkStrategy` | `recursive` | Document chunking strategy |
 | `chunkSize` | `512` | Chunk size in characters |
 | `chunkOverlap` | `64` | Chunk overlap in characters |
@@ -120,6 +118,8 @@ Zero-infrastructure RAG: execute a named httpCall and inject its response as `##
 
 ## REST API
 
+### Configuration Management
+
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/ragstore/rags/jsonSchema` | JSON Schema for validation |
@@ -129,6 +129,45 @@ Zero-infrastructure RAG: execute a named httpCall and inject its response as `##
 | `PUT` | `/ragstore/rags/{id}?version=N` | Update a KB |
 | `POST` | `/ragstore/rags/{id}?version=N` | Duplicate a KB |
 | `DELETE` | `/ragstore/rags/{id}?version=N` | Delete a KB |
+
+### Document Ingestion
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/ragstore/rags/{id}/ingest?version=N&kbId=...&documentName=...` | Ingest a text document (returns 202 + ingestion ID) |
+| `GET` | `/ragstore/rags/{id}/ingestion/{ingestionId}/status` | Poll ingestion status |
+
+**Example: Ingest a document**
+
+```bash
+curl -X POST http://localhost:7070/ragstore/rags/abc123/ingest?version=1\&documentName=readme.txt \
+  -H "Content-Type: text/plain" \
+  -d "This is the document content to be chunked, embedded, and stored."
+```
+
+Response: `202 Accepted`
+```json
+{
+  "ingestionId": "550e8400-e29b-41d4-a716-446655440000",
+  "kbId": "product-docs",
+  "status": "pending"
+}
+```
+
+**Poll status:**
+```bash
+curl http://localhost:7070/ragstore/rags/abc123/ingestion/550e8400-e29b-41d4-a716-446655440000/status
+```
+
+Response:
+```json
+{
+  "ingestionId": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "completed"
+}
+```
+
+Status values: `pending` → `processing` → `completed` | `failed: <error message>`
 
 ## Observability
 
@@ -142,32 +181,38 @@ RAG operations write audit traces to conversation memory:
 
 These are visible in the conversation memory snapshot and the audit ledger.
 
-## Document Ingestion
-
-The `RagIngestionService` provides async document ingestion:
-
-1. Documents are split into chunks using the configured strategy
-2. Chunks are embedded using the configured embedding model
-3. Embeddings are stored in the configured vector store
-4. Status can be polled via ingestion ID
-
-Ingestion runs on virtual threads (Java 21+) for non-blocking operation.
-
 ## Embedding Providers
 
-| Provider | Model Default | Notes |
+| Provider | Default Model | Required Parameters | Notes |
+|---|---|---|---|
+| `openai` | `text-embedding-3-small` | `apiKey` | Use `${eddivault:...}` for keys |
+| `azure-openai` | `text-embedding-3-small` | `endpoint`, `apiKey`, `deploymentName` | Azure-hosted OpenAI models |
+| `ollama` | `nomic-embed-text` | — | `baseUrl` (default: `localhost:11434`) |
+| `mistral` | `mistral-embed` | `apiKey` | Mistral AI embedding model |
+| `bedrock` | `amazon.titan-embed-text-v2:0` | — | Uses AWS credentials chain; `region` (default: `us-east-1`) |
+| `cohere` | `embed-english-v3.0` | `apiKey` | Excellent multilingual support |
+| `vertex` | `text-embedding-005` | `project` | `location` (default: `us-central1`); uses GCP credentials |
+
+## Vector Stores
+
+| Store Type | Required Parameters | Notes |
 |---|---|---|
-| `openai` | `text-embedding-3-small` | Requires `apiKey` (use `${vault:...}`) |
-| `ollama` | `nomic-embed-text` | Requires `baseUrl` (default: `localhost:11434`) |
+| `in-memory` | — | Ephemeral, for dev/test only |
+| `pgvector` | `password` | PostgreSQL + pgvector; `host`, `port`, `database`, `user`, `table`, `dimension` |
+| `mongodb-atlas` | `connectionString` | MongoDB Atlas Vector Search; `databaseName`, `collectionName`, `indexName` |
+| `elasticsearch` | — | `serverUrl` (default: `localhost:9200`); optional `apiKey` or `userName`+`password`; `indexName` |
+| `qdrant` | — | `host` (default: `localhost`), `port` (default: `6334`); optional `apiKey`, `useTls`; `collectionName` |
 
 ## Status
 
 - ✅ **Phase 8c**: RAG Foundation — config-driven knowledge base retrieval
 - ✅ **Phase 8c-0**: httpCall-based RAG (zero infrastructure)
 - ✅ **Phase 8c-β**: Persistent vector stores (pgvector)
+- ✅ **Phase 8c-γ**: RAG provider expansion (7 embedding models + 5 vector stores)
+- ✅ **Phase 8c-M**: Manager UI — RAG editor with full provider parity + document ingestion
+- ✅ **REST ingestion endpoint**: `POST /ragstore/rags/{id}/ingest`
 
 ## Future Enhancements
 
-- Additional vector stores: MongoDB Atlas, Qdrant
-- **Manager UI**: RAG configuration editing in the admin dashboard
 - Advanced retrieval: re-ranking, hybrid search, metadata filtering
+- ONNX in-process embeddings (air-gapped / edge deployments)
