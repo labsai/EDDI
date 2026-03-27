@@ -67,7 +67,7 @@
     },
     "packages": {
       "title": "Workflows",
-      "subtitle": "Configure agent workflows and extensions"
+      "subtitle": "Configure agent workflows and task pipelines"
     },
     "conversations": {
       "title": "Conversations",
@@ -245,18 +245,18 @@
   "packageDetail": {
     "title": "Workflow Detail",
     "backToWorkflows": "Back to Workflows",
-    "extensions": "Extensions",
-    "noExtensions": "No extensions in this workflow",
+    "extensions": "Tasks",
+    "noExtensions": "No tasks in this workflow",
     "rawConfig": "Raw Configuration"
   },
   "packageEditor": {
     "title": "Workflow Editor",
-    "pipeline": "Extension Pipeline",
-    "noExtensions": "No extensions in this workflow",
-    "addHint": "Add extensions to build your processing pipeline",
-    "addExtension": "Add Extension",
-    "addHintDialog": "Select an extension type to add to the pipeline",
-    "reorder": "Reorder extension",
+    "pipeline": "Pipeline",
+    "noTasks": "No tasks in this workflow",
+    "addHint": "Add tasks to build your processing pipeline",
+    "addTask": "Add Task",
+    "addHintDialog": "Select a task type to add to the pipeline",
+    "reorder": "Reorder task",
     "saved": "Workflow saved successfully",
     "saveError": "Failed to save workflow"
   },

@@ -30,7 +30,7 @@ export function AgentsPage() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("agents"));
 
-  const { data: agents, isLoading, isError, refetch } = useAgentDescriptors(100, 0, search);
+  const { data: agents, isLoading, isError, refetch } = useAgentDescriptors(500, 0, search);
   const deleteMutation = useDeleteAgent();
   const duplicateMutation = useDuplicateAgent();
   const exportMutation = useExportAgent();

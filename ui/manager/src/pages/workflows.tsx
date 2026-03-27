@@ -32,7 +32,7 @@ export function WorkflowsPage() {
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("workflows"));
 
   const { data: packages, isLoading, isError, refetch } =
-    useWorkflowDescriptors(100, 0, search);
+    useWorkflowDescriptors(500, 0, search);
   const deleteMutation = useDeleteWorkflow();
 
   const enrichedWorkflows = packages ? groupWorkflowsByName(packages) : [];
