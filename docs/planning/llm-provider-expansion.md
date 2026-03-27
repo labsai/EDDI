@@ -1,6 +1,8 @@
-# LLM Provider Expansion — Final Plan
+# LLM Provider Expansion — Final Plan ✅ COMPLETED (2026-03-27)
 
 Expand EDDI from 7 to 12 model providers. All providers ship together for enterprise completeness.
+
+> **Status:** Fully implemented, code-reviewed, tested, and documented. See `docs/changelog.md` for details.
 
 ## Native Image Compatibility Assessment
 

@@ -859,6 +859,39 @@ Agents now auto-discover `httpcall` configurations from their workflow and expos
 
 See `AGENTS.md` for the full roadmap (Phases 7–14b) and `docs/project-philosophy.md` for the 7 architectural pillars.
 
+### LLM Provider Expansion: 7 → 12 Providers ✅
+
+Expanded EDDI from 7 to 12 model providers for enterprise completeness. 4 new `ILanguageModelBuilder` implementations plus OpenAI `baseUrl` for compatible services.
+
+| Provider | Builder | Auth Pattern | Streaming |
+|---|---|---|---|
+| **Mistral AI** | `MistralAiLanguageModelBuilder` | `apiKey` | ✅ |
+| **Azure OpenAI** | `AzureOpenAiLanguageModelBuilder` | `apiKey` + `endpoint` + `deploymentName` | ✅ |
+| **Amazon Bedrock** | `BedrockLanguageModelBuilder` | AWS credential chain (no apiKey) | ✅ |
+| **Oracle GenAI** | `OracleGenAiLanguageModelBuilder` | OCI config (`~/.oci/config`) | ❌ sync-only |
+
+**Downstream integration:**
+- `AgentSetupService`: `isLocalLlmProvider` (bedrock, oracle-genai bypass apiKey), `supportsResponseFormat` (mistral, azure-openai), `createLlmConfig` (provider-specific param mapping)
+- `McpSetupTools`: `@ToolArg` docs list all 11 provider types
+- `LlmModule`: 4 new type keys registered
+
+**API corrections (code review):**
+- Bedrock: `temperature()`/`maxTokens()` don't exist on builder → uses `defaultRequestParameters(BedrockChatRequestParameters)`
+- Oracle GenAI: package `dev.langchain4j.community.model.oracle.oci.genai` (not `.model.oci.genai`), uses `modelName` (not `modelId`)
+
+**Key files:**
+
+- `src/main/java/ai/labs/eddi/modules/llm/impl/builder/MistralAiLanguageModelBuilder.java` (NEW)
+- `src/main/java/ai/labs/eddi/modules/llm/impl/builder/AzureOpenAiLanguageModelBuilder.java` (NEW)
+- `src/main/java/ai/labs/eddi/modules/llm/impl/builder/BedrockLanguageModelBuilder.java` (NEW)
+- `src/main/java/ai/labs/eddi/modules/llm/impl/builder/OracleGenAiLanguageModelBuilder.java` (NEW)
+- `src/main/java/ai/labs/eddi/modules/llm/bootstrap/LlmModule.java`
+- `src/main/java/ai/labs/eddi/engine/setup/AgentSetupService.java`
+- `src/main/java/ai/labs/eddi/engine/mcp/McpSetupTools.java`
+- `src/test/java/ai/labs/eddi/engine/mcp/McpSetupToolsTest.java` — 11 new test cases
+- `docs/langchain.md` — all 12 providers documented with config examples
+- `docs/changelog.md` — full entry with design decisions
+
 ### Platform Remediation: Thread Safety, A2A Hardening, Code Quality & Audit DLQ ✅
 
 Critical architectural fixes from thorough v6 feature review. 12 files modified, 1 new file.

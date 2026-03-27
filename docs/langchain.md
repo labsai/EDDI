@@ -8,6 +8,8 @@ The **Langchain Lifecycle Task** is EDDI's unified integration point for Large L
 
 By default, it provides **simple chat** with any LLM provider. Optionally, you can enable **agent mode** to give your LLM access to built-in tools (calculator, web search, weather, etc.).
 
+EDDI supports **12 LLM providers** out of the box: OpenAI, Anthropic, Google Gemini, Mistral AI, Azure OpenAI, Amazon Bedrock, Oracle GenAI, Ollama, Hugging Face, and Jlama — plus any OpenAI-compatible endpoint (DeepSeek, Cohere, etc.) via the `baseUrl` parameter.
+
 The task automatically detects which mode to use based on your configuration—no manual switching required.
 
 ---
@@ -43,9 +45,13 @@ User Input → Parser → Behavior Rules → [LangChain Task] → Output Generat
 
 The Langchain task integrates with multiple LLM providers via the langchain4j library:
 
-- **OpenAI** (ChatGPT, GPT-4, GPT-4o)
+- **OpenAI** (ChatGPT, GPT-4, GPT-4o) — also supports **DeepSeek** and **Cohere** via `baseUrl`
 - **Anthropic** (Claude)
 - **Google Gemini** (`gemini` - AI Studio API, `gemini-vertex` - Vertex AI)
+- **Mistral AI** (Mistral Large, Codestral, Pixtral)
+- **Azure OpenAI** (GPT-4o via Azure-hosted endpoints)
+- **Amazon Bedrock** (Claude, Llama, Titan via AWS credential chain)
+- **Oracle GenAI** (Cohere Command R+ via OCI authentication)
 - **Ollama** (Local models)
 - **Hugging Face** (Various models)
 - **Jlama** (Local Java-based inference)
@@ -265,6 +271,132 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 ```
 
 **Note**: Jlama runs models locally in Java without requiring external services like Ollama.
+
+#### Mistral AI
+
+```json
+{
+  "tasks": [
+    {
+      "actions": ["send_message"],
+      "id": "mistralChat",
+      "type": "mistral",
+      "description": "Mistral AI chat",
+      "parameters": {
+        "apiKey": "your-mistral-api-key",
+        "modelName": "mistral-large-latest",
+        "temperature": "0.7",
+        "timeout": "15000",
+        "systemMessage": "You are a helpful assistant",
+        "addToOutput": "true"
+      }
+    }
+  ]
+}
+```
+
+#### Azure OpenAI
+
+```json
+{
+  "tasks": [
+    {
+      "actions": ["send_message"],
+      "id": "azureChat",
+      "type": "azure-openai",
+      "description": "Azure OpenAI chat",
+      "parameters": {
+        "apiKey": "your-azure-api-key",
+        "deploymentName": "gpt-4o",
+        "endpoint": "https://your-instance.openai.azure.com",
+        "temperature": "0.7",
+        "timeout": "15000",
+        "systemMessage": "You are a helpful assistant",
+        "addToOutput": "true"
+      }
+    }
+  ]
+}
+```
+
+**Note**: Azure OpenAI uses `deploymentName` (not `modelName`) and requires an `endpoint` URL for your Azure instance.
+
+#### Amazon Bedrock
+
+```json
+{
+  "tasks": [
+    {
+      "actions": ["send_message"],
+      "id": "bedrockChat",
+      "type": "bedrock",
+      "description": "Amazon Bedrock chat",
+      "parameters": {
+        "modelId": "anthropic.claude-v2",
+        "region": "us-east-1",
+        "temperature": "0.7",
+        "maxTokens": "1024",
+        "timeout": "30000",
+        "systemMessage": "You are a helpful assistant",
+        "addToOutput": "true"
+      }
+    }
+  ]
+}
+```
+
+**Note**: Bedrock uses `modelId` (not `modelName`) and does not require an `apiKey`. Authentication is via the AWS SDK default credential chain (environment variables, IAM roles, `~/.aws/credentials`).
+
+#### Oracle GenAI
+
+```json
+{
+  "tasks": [
+    {
+      "actions": ["send_message"],
+      "id": "oracleChat",
+      "type": "oracle-genai",
+      "description": "Oracle GenAI chat",
+      "parameters": {
+        "modelName": "cohere.command-r-plus",
+        "compartmentId": "ocid1.compartment.oc1..your-compartment-id",
+        "configProfile": "DEFAULT",
+        "temperature": "0.7",
+        "maxTokens": "1024",
+        "systemMessage": "You are a helpful assistant",
+        "addToOutput": "true"
+      }
+    }
+  ]
+}
+```
+
+**Note**: Oracle GenAI does not require an `apiKey`. Authentication is via OCI SDK (`~/.oci/config`). The `configProfile` parameter selects which OCI profile to use (defaults to `"DEFAULT"`).
+
+#### DeepSeek / Cohere (via OpenAI-Compatible Endpoints)
+
+```json
+{
+  "tasks": [
+    {
+      "actions": ["send_message"],
+      "id": "deepseekChat",
+      "type": "openai",
+      "description": "DeepSeek via OpenAI-compatible endpoint",
+      "parameters": {
+        "apiKey": "your-deepseek-api-key",
+        "modelName": "deepseek-chat",
+        "baseUrl": "https://api.deepseek.com",
+        "temperature": "0.7",
+        "systemMessage": "You are a helpful assistant",
+        "addToOutput": "true"
+      }
+    }
+  ]
+}
+```
+
+**Note**: Any OpenAI-compatible provider (DeepSeek, Cohere, etc.) can be used by setting the `baseUrl` parameter on the `openai` type. No additional dependencies are required.
 
 ---
 
@@ -753,7 +885,7 @@ Then reference this action in your Langchain task:
 The Langchain Lifecycle Task provides a flexible, unified interface for integrating LLMs into EDDI agents:
 
 1. ✅ **Simple by Default** - Start with basic chat, add tools when needed
-2. ✅ **Multi-Provider Support** - OpenAI, Anthropic, Google, Ollama, Hugging Face, Jlama
+2. ✅ **12 Provider Support** - OpenAI, Anthropic, Google, Mistral, Azure, Bedrock, Oracle, Ollama, Hugging Face, Jlama + OpenAI-compatible (DeepSeek, Cohere)
 3. ✅ **Built-in Tools** - 8 tools available when you enable agent mode
 4. ✅ **Tool Execution Pipeline** - Rate limiting, caching, cost tracking for every tool call
 5. ✅ **Security Hardened** - SSRF protection, sandboxed math evaluation, input validation

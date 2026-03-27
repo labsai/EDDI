@@ -117,7 +117,8 @@ public class RagContextProvider {
                 maxResults = defaults != null && defaults.getMaxResults() != null ? defaults.getMaxResults() : ragConfig.getMaxResults();
                 minScore = defaults != null && defaults.getMinScore() != null ? defaults.getMinScore() : ragConfig.getMinScore();
             } else {
-                // Find matching reference (kbRefs guaranteed non-null here by earlier check)
+                // Find matching reference (logically non-null here, but guard for null analysis)
+                if (kbRefs == null) continue;
                 var ref = kbRefs.stream().filter(r -> kbName.equals(r.getName())).findFirst().orElse(null);
                 if (ref == null)
                     continue; // This KB not referenced by task

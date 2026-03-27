@@ -690,42 +690,52 @@ public record LlmConfiguration(List<Task> tasks) {
         private Integer maxResults;
         private Double minScore;
 
+        @Deprecated
         public String getHttpCall() {
             return httpCall;
         }
 
+        @Deprecated
         public void setHttpCall(String httpCall) {
             this.httpCall = httpCall;
         }
 
+        @Deprecated
         public String getEmbeddingModel() {
             return embeddingModel;
         }
 
+        @Deprecated
         public void setEmbeddingModel(String embeddingModel) {
             this.embeddingModel = embeddingModel;
         }
 
+        @Deprecated
         public String getEmbeddingStore() {
             return embeddingStore;
         }
 
+        @Deprecated
         public void setEmbeddingStore(String embeddingStore) {
             this.embeddingStore = embeddingStore;
         }
 
+        @Deprecated
         public Integer getMaxResults() {
             return maxResults;
         }
 
+        @Deprecated
         public void setMaxResults(Integer maxResults) {
             this.maxResults = maxResults;
         }
 
+        @Deprecated
         public Double getMinScore() {
             return minScore;
         }
 
+        @Deprecated
         public void setMinScore(Double minScore) {
             this.minScore = minScore;
         }
