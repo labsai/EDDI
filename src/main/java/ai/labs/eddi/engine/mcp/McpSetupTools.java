@@ -48,7 +48,8 @@ public class McpSetupTools {
             @ToolArg(description = "System prompt / role for the LLM (required). "
                     + "Describes the agent's personality and purpose.") String systemPrompt,
             @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', 'gemini', "
-                    + "'gemini-vertex', 'huggingface', 'ollama', or 'jlama'") String provider,
+                    + "'gemini-vertex', 'huggingface', 'ollama', 'jlama', 'mistral', "
+                    + "'azure-openai', 'bedrock', or 'oracle-genai'") String provider,
             @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default), 'gpt-5.4', "
                     + "'gemini-3.1-pro-preview', 'deepseek-chat', 'llama3.2:1b' (ollama)") String model,
             @ToolArg(description = "API key for the LLM provider. Required for cloud providers "
@@ -94,7 +95,8 @@ public class McpSetupTools {
     public String createApIAgent(@ToolArg(description = "Agent name (required)") String name,
             @ToolArg(description = "System prompt for the LLM (required). " + "Include instructions on how to use the API.") String systemPrompt,
             @ToolArg(description = "OpenAPI 3.x spec as JSON/YAML string or a URL (required)") String openApiSpec,
-            @ToolArg(description = "LLM provider: 'anthropic' (default), 'openai', 'gemini', etc.") String provider,
+            @ToolArg(description = "LLM provider: 'anthropic' (default), 'openai', 'gemini', 'mistral', "
+                    + "'azure-openai', 'bedrock', 'oracle-genai', etc.") String provider,
             @ToolArg(description = "Model name (default: 'claude-sonnet-4-6')") String model,
             @ToolArg(description = "LLM API key (required for cloud providers). " + "Use vault reference: '${vault:key-name}'.") String apiKey,
             @ToolArg(description = "Override the API base URL from the spec (optional)") String apiBaseUrl,

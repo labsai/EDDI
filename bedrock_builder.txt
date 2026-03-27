@@ -1,0 +1,9 @@
+Compiled from "BedrockChatModel.java"
+public class dev.langchain4j.model.bedrock.BedrockChatModel$Builder extends dev.langchain4j.model.bedrock.AbstractBedrockChatModel$AbstractBuilder<dev.langchain4j.model.bedrock.BedrockChatModel$Builder> {
+  private software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient client;
+  private java.lang.Integer maxRetries;
+  public dev.langchain4j.model.bedrock.BedrockChatModel$Builder();
+  public dev.langchain4j.model.bedrock.BedrockChatModel$Builder client(software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient);
+  public dev.langchain4j.model.bedrock.BedrockChatModel$Builder maxRetries(java.lang.Integer);
+  public dev.langchain4j.model.bedrock.BedrockChatModel build();
+}

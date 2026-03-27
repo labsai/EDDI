@@ -1,0 +1,4 @@
+
+dev/langchain4j/model/bedrock/BedrockChatRequestParameters$Builder.class
+dev/langchain4j/model/bedrock/BedrockChatRequestParameters.class
+

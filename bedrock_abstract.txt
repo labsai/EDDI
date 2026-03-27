@@ -1,0 +1,29 @@
+Compiled from "AbstractBedrockChatModel.java"
+public abstract class dev.langchain4j.model.bedrock.AbstractBedrockChatModel$AbstractBuilder<T extends dev.langchain4j.model.bedrock.AbstractBedrockChatModel$AbstractBuilder<T>> {
+  protected software.amazon.awssdk.regions.Region region;
+  protected java.lang.String modelId;
+  protected java.time.Duration timeout;
+  protected java.lang.Boolean returnThinking;
+  protected java.lang.Boolean sendThinking;
+  protected dev.langchain4j.model.chat.request.ChatRequestParameters defaultRequestParameters;
+  protected java.lang.Boolean logRequests;
+  protected java.lang.Boolean logResponses;
+  protected org.slf4j.Logger logger;
+  protected java.util.List<dev.langchain4j.model.chat.listener.ChatModelListener> listeners;
+  protected java.util.Set<dev.langchain4j.model.chat.Capability> supportedCapabilities;
+  public dev.langchain4j.model.bedrock.AbstractBedrockChatModel$AbstractBuilder();
+  public T self();
+  public T defaultRequestParameters(dev.langchain4j.model.chat.request.ChatRequestParameters);
+  public T region(software.amazon.awssdk.regions.Region);
+  public T modelId(java.lang.String);
+  public T returnThinking(java.lang.Boolean);
+  public T sendThinking(java.lang.Boolean);
+  public T timeout(java.time.Duration);
+  public T logRequests(java.lang.Boolean);
+  public T logResponses(java.lang.Boolean);
+  public T logger(org.slf4j.Logger);
+  public T listeners(java.util.List<dev.langchain4j.model.chat.listener.ChatModelListener>);
+  public T listeners(dev.langchain4j.model.chat.listener.ChatModelListener...);
+  public T supportedCapabilities(java.util.Set<dev.langchain4j.model.chat.Capability>);
+  public T supportedCapabilities(dev.langchain4j.model.chat.Capability...);
+}

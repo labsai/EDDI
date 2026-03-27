@@ -2,7 +2,7 @@ services:
   eddi:
     image: labsai/eddi:6
     environment:
-      - "EDDI_VAULT_MASTER_KEY=local-dev-key-change-in-production"
+      - "EDDI_VAULT_MASTER_KEY=${EDDI_VAULT_MASTER_KEY:-}"
 #      - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"
     extra_hosts:
       - "host.docker.internal:host-gateway"

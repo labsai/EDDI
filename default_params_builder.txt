@@ -1,0 +1,20 @@
+Compiled from "DefaultChatRequestParameters.java"
+public class dev.langchain4j.model.chat.request.DefaultChatRequestParameters$Builder<T extends dev.langchain4j.model.chat.request.DefaultChatRequestParameters$Builder<T>> {
+  public dev.langchain4j.model.chat.request.DefaultChatRequestParameters$Builder();
+  public T overrideWith(dev.langchain4j.model.chat.request.ChatRequestParameters);
+  public T modelName(java.lang.String);
+  public T temperature(java.lang.Double);
+  public T topP(java.lang.Double);
+  public T topK(java.lang.Integer);
+  public T frequencyPenalty(java.lang.Double);
+  public T presencePenalty(java.lang.Double);
+  public T maxOutputTokens(java.lang.Integer);
+  public T stopSequences(java.util.List<java.lang.String>);
+  public T stopSequences(java.lang.String...);
+  public T toolSpecifications(java.util.List<dev.langchain4j.agent.tool.ToolSpecification>);
+  public T toolSpecifications(dev.langchain4j.agent.tool.ToolSpecification...);
+  public T toolChoice(dev.langchain4j.model.chat.request.ToolChoice);
+  public T responseFormat(dev.langchain4j.model.chat.request.ResponseFormat);
+  public T responseFormat(dev.langchain4j.model.chat.request.json.JsonSchema);
+  public dev.langchain4j.model.chat.request.ChatRequestParameters build();
+}

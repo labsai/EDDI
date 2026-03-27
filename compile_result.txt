@@ -1,0 +1,71 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ----------------------------< ai.labs:eddi >----------------------------
+[INFO] Building eddi 6.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- checkstyle:3.6.0:check (validate) @ eddi ---
+[INFO] Starting audit...
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\configs\apicalls\IRestApiCallsStore.java:76: Line is longer than 150 characters (found 166). [LineLength]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\configs\mcpcalls\IRestMcpCallsStore.java:76: Line is longer than 150 characters (found 174). [LineLength]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\api\IRestAgentEngine.java:38: Line is longer than 150 characters (found 154). [LineLength]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\api\IRestAgentEngine.java:48: Line is longer than 150 characters (found 154). [LineLength]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\api\IRestAgentEngine.java:82: Line is longer than 150 characters (found 168). [LineLength]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\api\IRestAgentEngineStreaming.java:34: Line is longer than 150 characters (found 164). [LineLength]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\api\IRestCoordinatorAdmin.java:59: Line is longer than 150 characters (found 152). [LineLength]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\api\IRestCoordinatorAdmin.java:66: Line is longer than 150 characters (found 176). [LineLength]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\api\IRestLogAdmin.java:36: Line is longer than 150 characters (found 156). [LineLength]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\api\IRestLogAdmin.java:43: Line is longer than 150 characters (found 165). [LineLength]
+[INFO] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\internal\GroupConversationService.java:445:9: switch without "default" clause. [MissingSwitchDefault]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:61:19: Name 'describe_discussion_styles' must match pattern '^[a-z][a-zA-Z0-9]*$'. [MethodName]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:107:19: Name 'list_groups' must match pattern '^[a-z][a-zA-Z0-9]*$'. [MethodName]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:123:19: Name 'read_group' must match pattern '^[a-z][a-zA-Z0-9]*$'. [MethodName]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:141:19: Name 'create_group' must match pattern '^[a-z][a-zA-Z0-9]*$'. [MethodName]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:213:19: Name 'update_group' must match pattern '^[a-z][a-zA-Z0-9]*$'. [MethodName]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:229:19: Name 'delete_group' must match pattern '^[a-z][a-zA-Z0-9]*$'. [MethodName]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:246:19: Name 'discuss_with_group' must match pattern '^[a-z][a-zA-Z0-9]*$'. [MethodName]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:261:19: Name 'read_group_conversation' must match pattern '^[a-z][a-zA-Z0-9]*$'. [MethodName]
+[WARN] C:\dev\git\EDDI\src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:274:19: Name 'list_group_conversations' must match pattern '^[a-z][a-zA-Z0-9]*$'. [MethodName]
+Audit done.
+[WARNING] src\main\java\ai\labs\eddi\configs\apicalls\IRestApiCallsStore.java:[76] (sizes) LineLength: Line is longer than 150 characters (found 166).
+[WARNING] src\main\java\ai\labs\eddi\configs\mcpcalls\IRestMcpCallsStore.java:[76] (sizes) LineLength: Line is longer than 150 characters (found 174).
+[WARNING] src\main\java\ai\labs\eddi\engine\api\IRestAgentEngine.java:[38] (sizes) LineLength: Line is longer than 150 characters (found 154).
+[WARNING] src\main\java\ai\labs\eddi\engine\api\IRestAgentEngine.java:[48] (sizes) LineLength: Line is longer than 150 characters (found 154).
+[WARNING] src\main\java\ai\labs\eddi\engine\api\IRestAgentEngine.java:[82] (sizes) LineLength: Line is longer than 150 characters (found 168).
+[WARNING] src\main\java\ai\labs\eddi\engine\api\IRestAgentEngineStreaming.java:[34] (sizes) LineLength: Line is longer than 150 characters (found 164).
+[WARNING] src\main\java\ai\labs\eddi\engine\api\IRestCoordinatorAdmin.java:[59] (sizes) LineLength: Line is longer than 150 characters (found 152).
+[WARNING] src\main\java\ai\labs\eddi\engine\api\IRestCoordinatorAdmin.java:[66] (sizes) LineLength: Line is longer than 150 characters (found 176).
+[WARNING] src\main\java\ai\labs\eddi\engine\api\IRestLogAdmin.java:[36] (sizes) LineLength: Line is longer than 150 characters (found 156).
+[WARNING] src\main\java\ai\labs\eddi\engine\api\IRestLogAdmin.java:[43] (sizes) LineLength: Line is longer than 150 characters (found 165).
+[WARNING] src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:[61,19] (naming) MethodName: Name 'describe_discussion_styles' must match pattern '^[a-z][a-zA-Z0-9]*$'.
+[WARNING] src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:[107,19] (naming) MethodName: Name 'list_groups' must match pattern '^[a-z][a-zA-Z0-9]*$'.
+[WARNING] src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:[123,19] (naming) MethodName: Name 'read_group' must match pattern '^[a-z][a-zA-Z0-9]*$'.
+[WARNING] src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:[141,19] (naming) MethodName: Name 'create_group' must match pattern '^[a-z][a-zA-Z0-9]*$'.
+[WARNING] src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:[213,19] (naming) MethodName: Name 'update_group' must match pattern '^[a-z][a-zA-Z0-9]*$'.
+[WARNING] src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:[229,19] (naming) MethodName: Name 'delete_group' must match pattern '^[a-z][a-zA-Z0-9]*$'.
+[WARNING] src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:[246,19] (naming) MethodName: Name 'discuss_with_group' must match pattern '^[a-z][a-zA-Z0-9]*$'.
+[WARNING] src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:[261,19] (naming) MethodName: Name 'read_group_conversation' must match pattern '^[a-z][a-zA-Z0-9]*$'.
+[WARNING] src\main\java\ai\labs\eddi\engine\mcp\McpGroupTools.java:[274,19] (naming) MethodName: Name 'list_group_conversations' must match pattern '^[a-z][a-zA-Z0-9]*$'.
+[WARNING] checkstyle:check violations detected but failOnViolation set to false
+[INFO] You have 19 Checkstyle violations.
+[INFO] 
+[INFO] --- jacoco:0.8.14:prepare-agent (default) @ eddi ---
+[INFO] argLine set to -javaagent:C:\\Users\\GregorJarisch\\.m2\\repository\\org\\jacoco\\org.jacoco.agent\\0.8.14\\org.jacoco.agent-0.8.14-runtime.jar=destfile=C:\\dev\\git\\EDDI\\target\\jacoco.exec --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-exports=java.base/jdk.internal.module=ALL-UNNAMED
+[INFO] 
+[INFO] --- formatter:2.24.1:format (default) @ eddi ---
+[INFO] Processed 722 files in 6s621ms (Formatted: 1, Skipped: 719, Unchanged: 2, Failed: 0, Readonly: 0)
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ eddi ---
+[INFO] Copying 28 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- quarkus:3.34.1:generate-code (default) @ eddi ---
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ eddi ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  36.086 s
+[INFO] Finished at: 2026-03-27T22:04:31+01:00
+[INFO] ------------------------------------------------------------------------

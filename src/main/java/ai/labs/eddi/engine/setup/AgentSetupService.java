@@ -400,6 +400,26 @@ public class AgentSetupService {
                     params.put("authToken", apiKey);
                 }
             }
+            case "bedrock" -> {
+                params.put("modelId", modelId);
+                // Auth via AWS credential chain (env vars, IAM roles, ~/.aws/credentials)
+            }
+            case "azure-openai" -> {
+                params.put("deploymentName", modelId);
+                if (apiKey != null && !apiKey.isBlank()) {
+                    params.put("apiKey", apiKey);
+                }
+                if (baseUrl != null && !baseUrl.isBlank()) {
+                    params.put("endpoint", baseUrl);
+                }
+                if (promptResponseJson != null && supportsResponseFormat(modelType)) {
+                    params.put("responseFormat", "json");
+                }
+            }
+            case "oracle-genai" -> {
+                params.put("modelName", modelId);
+                // Auth via OCI config file (~/.oci/config)
+            }
             default -> {
                 params.put("modelName", modelId);
                 if (apiKey != null && !apiKey.isBlank()) {
@@ -557,14 +577,19 @@ public class AgentSetupService {
         if (provider == null || provider.isBlank())
             return false;
         String normalized = provider.trim().toLowerCase();
-        return "ollama".equals(normalized) || "jlama".equals(normalized);
+        // Providers that don't require an apiKey parameter:
+        // - ollama/jlama: local inference
+        // - bedrock: AWS credential chain (env vars, IAM roles)
+        // - oracle-genai: OCI config file (~/.oci/config)
+        return "ollama".equals(normalized) || "jlama".equals(normalized) || "bedrock".equals(normalized) || "oracle-genai".equals(normalized);
     }
 
     /**
      * Check if the provider supports builder-level responseFormat=json.
      */
     public static boolean supportsResponseFormat(String modelType) {
-        return "openai".equals(modelType) || "gemini".equals(modelType) || "gemini-vertex".equals(modelType);
+        return "openai".equals(modelType) || "gemini".equals(modelType) || "gemini-vertex".equals(modelType) || "mistral".equals(modelType)
+                || "azure-openai".equals(modelType);
     }
 
     /**

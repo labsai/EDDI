@@ -11,7 +11,7 @@ services:
       QUARKUS_DATASOURCE_USERNAME: eddi
       QUARKUS_DATASOURCE_PASSWORD: eddi
       EDDI_DATASTORE_TYPE: postgres
-      EDDI_VAULT_MASTER_KEY: "local-dev-key-change-in-production"
+      EDDI_VAULT_MASTER_KEY: "${EDDI_VAULT_MASTER_KEY:-}"
     depends_on:
       postgres:
         condition: service_healthy
