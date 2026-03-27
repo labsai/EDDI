@@ -296,6 +296,16 @@ export function useSendMessage() {
         state.finishStreaming();
       } else {
         // --- Non-streaming path — pass context for secret input ---
+        // Add a placeholder typing indicator while waiting for the response
+        const typingId = `agent-typing-${Date.now()}`;
+        state.addMessage({
+          id: typingId,
+          role: "agent",
+          content: "",
+          timestamp: Date.now(),
+          isStreaming: true,
+        });
+
         let snapshot;
         if (isSecret) {
           snapshot = await sendMessageWithContext(
@@ -322,14 +332,19 @@ export function useSendMessage() {
         ];
         const output = extractOutput(lastOutput);
 
-        if (output) {
-          state.addMessage({
-            id: `agent-${Date.now()}`,
-            role: "agent",
-            content: output,
-            timestamp: Date.now(),
-          });
-        }
+        // Replace the typing placeholder with the real response
+        store.setState((s) => {
+          const msgs = s.messages.filter((m) => m.id !== typingId);
+          if (output) {
+            msgs.push({
+              id: `agent-${Date.now()}`,
+              role: "agent",
+              content: output,
+              timestamp: Date.now(),
+            });
+          }
+          return { messages: msgs };
+        });
 
         // Check for input field requests (e.g. password)
         const inputField = extractInputField(lastOutput);
@@ -359,18 +374,21 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore) {
       store.getState().finishStreaming();
       // Parse the snapshot from the done event to extract quickReplies
       // and conversation state (for structured JSON output mode).
+      console.log('[QR-DEBUG] SSE done event.data:', event.data?.substring(0, 500));
       if (event.data) {
         try {
           const snapshot = JSON.parse(event.data);
+          console.log('[QR-DEBUG] SSE done parsed outputs:', JSON.stringify(snapshot.conversationOutputs)?.substring(0, 500));
           if (snapshot.conversationOutputs?.length) {
             const lastOutput = snapshot.conversationOutputs[
               snapshot.conversationOutputs.length - 1
             ];
             const qr = extractQuickReplies(lastOutput);
+            console.log('[QR-DEBUG] SSE extracted QR:', qr);
             store.getState().setQuickReplies(qr);
           }
-        } catch {
-          // Ignore parse errors — done event data may be empty
+        } catch (e) {
+          console.error('[QR-DEBUG] SSE done parse error:', e);
         }
       }
       break;
