@@ -8,7 +8,8 @@ import {
   deleteWorkflow,
   type WorkflowConfiguration,
 } from "@/lib/api/workflows";
-import { parseResourceUri, type AgentDescriptor } from "@/lib/api/agents";
+import { parseResourceUri, updateAgent, type AgentDescriptor } from "@/lib/api/agents";
+import { updateDescriptor } from "@/lib/api/descriptors";
 
 const WORKFLOWS_KEY = ["workflows"] as const;
 
@@ -64,7 +65,6 @@ export function useCreateWorkflow() {
     }) => {
       const response = await createWorkflow(config);
       if ((name || description) && response.location) {
-        const { updateDescriptor } = await import("@/lib/api/descriptors");
         const { id, version } = parseLocationPath(response.location);
         await updateDescriptor(id, version, { name, description });
       }
@@ -117,7 +117,6 @@ export function useUpdateAgentWorkflows() {
       version: number;
       workflows: string[];
     }) => {
-      const { updateAgent } = await import("@/lib/api/agents");
       return updateAgent(agentId, version, { workflows });
     },
     onSuccess: () => {

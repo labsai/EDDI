@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { JsonEditor } from "./json-editor";
 import { VersionPicker, type VersionInfo } from "./version-picker";
-import { Save, Undo2, FileCode, FormInput, AlertCircle } from "lucide-react";
+import { Save, Undo2, FileCode, FormInput, AlertCircle, GitCompareArrows } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 export interface ConfigEditorLayoutProps {
@@ -44,6 +44,8 @@ export interface ConfigEditorLayoutProps {
   ) => React.ReactNode;
   /** Optional JSON Schema for Monaco validation and autocomplete */
   jsonSchema?: object;
+  /** Called when user wants to compare versions (opens diff dialog) */
+  onCompare?: () => void;
 }
 
 type EditorTab = "form" | "json";
@@ -71,6 +73,7 @@ export function ConfigEditorLayout({
   children,
   renderFormEditor,
   jsonSchema,
+  onCompare,
 }: ConfigEditorLayoutProps) {
   const { t } = useTranslation();
   const hasFormEditor = !!(renderFormEditor || children);
@@ -125,6 +128,17 @@ export function ConfigEditorLayout({
             onChange={onVersionChange}
             disabled={isDirty || isSaving}
           />
+          {onCompare && versions.length > 1 && (
+            <button
+              onClick={onCompare}
+              className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+              title={t("editor.compareVersions", "Compare Versions")}
+              data-testid="compare-versions-btn"
+            >
+              <GitCompareArrows className="h-3.5 w-3.5" />
+              {t("editor.compare", "Compare")}
+            </button>
+          )}
           {isDirty && (
             <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-400" data-testid="dirty-indicator">
               <AlertCircle className="h-3 w-3" />

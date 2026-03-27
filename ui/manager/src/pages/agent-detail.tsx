@@ -299,6 +299,30 @@ export function AgentDetailPage() {
                 : t("agents.deploy")}
           </button>
 
+          {/* Deploy & Chat — quick action to deploy to test and chat */}
+          {!isDeployed && !isBusy && (
+            <button
+              onClick={() => {
+                deployMutation.mutate(
+                  { environment: "test", agentId: id!, version: resolvedVersion },
+                  {
+                    onSuccess: () => {
+                      toast.success(t("agentDetail.deployAndChat", "Deploying to test..."));
+                      // Small delay to let deployment start, then navigate to chat
+                      setTimeout(() => navigate(`/manage/chat?agentId=${id}`), 800);
+                    },
+                    onError: (err) => toast.error(getErrorMessage(err)),
+                  }
+                );
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400"
+              data-testid="deploy-chat-btn"
+            >
+              <Rocket className="h-4 w-4" />
+              {t("agentDetail.deployAndChat", "Deploy & Chat")}
+            </button>
+          )}
+
           {/* Chat — only when deployed */}
           {isDeployed && (
             <Link

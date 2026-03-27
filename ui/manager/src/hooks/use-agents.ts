@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { updateDescriptor } from "@/lib/api/descriptors";
 import {
   getAgentDescriptors,
   getAgentDescriptorsWithVersions,
@@ -115,7 +116,6 @@ export function useCreateAgent() {
         const parts = url.pathname.split("/").filter(Boolean);
         const id = parts[parts.length - 1]!;
         const version = parseInt(url.searchParams.get("version") || "1", 10);
-        const { updateDescriptor } = await import("@/lib/api/descriptors");
         await updateDescriptor(id, version, { name, description });
       }
       return response;

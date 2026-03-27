@@ -38,6 +38,8 @@ import {
 } from "@/lib/api/resource-usage";
 import { useJsonSchema } from "@/hooks/use-json-schema";
 import type { CascadeContext } from "@/lib/api/cascade-save";
+import { VersionDiffDialog } from "@/components/editors/version-diff-dialog";
+import { getResource } from "@/lib/api/resources";
 import {
   BehaviorEditor,
   type BehaviorConfig,
@@ -158,6 +160,9 @@ export function ResourceDetailPage() {
   const [showUsageDialog, setShowUsageDialog] = useState(false);
   const [isCascading, setIsCascading] = useState(false);
   const [newResourceVersion, setNewResourceVersion] = useState<number | null>(null);
+
+  // Version diff dialog state
+  const [showDiff, setShowDiff] = useState(false);
 
   // Build version list from descriptors
   const versions = versionDescriptors
@@ -401,7 +406,22 @@ export function ResourceDetailPage() {
             }
             renderFormEditor={EDITOR_MAP[type ?? ""]}
             jsonSchema={jsonSchema}
+            onCompare={() => setShowDiff(true)}
           />
+          {/* Version diff dialog */}
+          {showDiff && (
+            <VersionDiffDialog
+              open={showDiff}
+              onClose={() => setShowDiff(false)}
+              typeName={typeName}
+              versions={versions}
+              currentVersion={currentVersion}
+              fetchVersion={async (ver: number) => {
+                const data = await getResource(rt, id ?? "", ver);
+                return JSON.stringify(data, null, 2);
+              }}
+            />
+          )}
           {showUsageDialog && (
             <UpdateUsageDialog
               usages={usages}
