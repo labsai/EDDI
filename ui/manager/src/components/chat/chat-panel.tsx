@@ -13,6 +13,7 @@ import {
 import { ChatMessage } from "./chat-message";
 import { ChatHistory } from "./chat-history";
 import { StreamingToggle } from "./streaming-toggle";
+import { DebugDrawer } from "@/components/debugger/debug-drawer";
 import { cn } from "@/lib/utils";
 import {
   Bot,
@@ -280,6 +281,14 @@ export function ChatPanel() {
             </div>
           )}
         </div>
+
+        {/* Debug drawer */}
+        {conversationId && (
+          <DebugDrawer
+            conversationId={conversationId}
+            agentId={selectedAgentId}
+          />
+        )}
 
         {/* Quick replies */}
         {quickReplies.length > 0 && !isProcessing && (

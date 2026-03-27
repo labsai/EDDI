@@ -1881,5 +1881,114 @@ export const scheduleHandlers = [
   http.delete("*/groups/:groupId/conversations/:convId", () => {
     return new HttpResponse(null, { status: 204 });
   }),
+
+  // --- Phase 13: Tool Metrics & Debug Endpoints ---
+
+  // Conversation costs
+  http.get("*/llm/tools/costs/conversation/:convId", () => {
+    return HttpResponse.json({
+      conversationId: "conv-mock",
+      totalCost: 0.015,
+      totalToolCalls: 7,
+      toolUsage: {
+        websearch: { calls: 3, totalCost: 0.003 },
+        fetch_weather: { calls: 4, totalCost: 0.002 },
+      },
+    });
+  }),
+
+  // Tool rate limit
+  http.get("*/llm/tools/ratelimit/:tool", ({ params }) => {
+    return HttpResponse.json({
+      toolName: params.tool as string,
+      limit: 60,
+      remaining: 42,
+      resetAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+  }),
+
+  // Cache stats
+  http.get("*/llm/tools/cache/stats", () => {
+    return HttpResponse.json({
+      totalHits: 23,
+      totalMisses: 12,
+      hitRate: 0.657,
+      perToolStats: {
+        fetch_weather: { hits: 15, misses: 5 },
+        websearch: { hits: 8, misses: 7 },
+      },
+    });
+  }),
+
+  // Tool history
+  http.get("*/llm/tools/history/:convId", () => {
+    return HttpResponse.json([
+      {
+        toolName: "fetch_weather",
+        args: { city: "Vienna" },
+        result: '{"temp": 22, "condition": "sunny"}',
+        durationMs: 156,
+        cost: 0.0005,
+        timestamp: new Date().toISOString(),
+      },
+      {
+        toolName: "websearch",
+        args: { query: "EDDI AI platform" },
+        result: '{"results": [{"title": "EDDI docs", "url": "https://docs.labs.ai"}]}',
+        durationMs: 342,
+        cost: 0.001,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+  }),
+
+  // Global tool costs
+  http.get("*/llm/tools/costs", () => {
+    return HttpResponse.json({
+      totalCost: 0.045,
+      totalCalls: 15,
+      perTool: {
+        fetch_weather: { calls: 8, cost: 0.012 },
+        websearch: { calls: 7, cost: 0.033 },
+      },
+    });
+  }),
+
+  // Rerun last conversation step (replay)
+  http.post("*/agents/:convId/rerunLastConversationStep", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Detailed conversation (memory inspector)
+  http.get("*/agents/:convId", ({ request }) => {
+    const url = new URL(request.url);
+    if (url.searchParams.get("returnDetailed") === "true") {
+      return HttpResponse.json({
+        conversationSteps: [
+          {
+            conversationStep: [
+              { key: "actions", value: ["greet"], timestamp: new Date().toISOString(), originWorkflowId: null },
+              { key: "output:text:en", value: "Hello!", timestamp: new Date().toISOString(), originWorkflowId: "wf-1" },
+            ],
+            timestamp: new Date().toISOString(),
+          },
+        ],
+        conversationProperties: { environment: "test" },
+      });
+    }
+    return HttpResponse.json({});
+  }),
+
+  // Recent logs (log viewer)
+  http.get("*/logs/recent", () => {
+    return HttpResponse.json([
+      { level: "INFO", message: "Agent started", loggerName: "ai.labs.AgentOrchestrator", timestamp: new Date().toISOString() },
+    ]);
+  }),
+
+  // Log SSE stream (log viewer) — return empty stream
+  http.get("*/logs/stream", () => {
+    return new HttpResponse(null, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+  }),
 ];
 

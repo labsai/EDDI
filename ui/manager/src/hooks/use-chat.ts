@@ -27,6 +27,7 @@ import {
   type AgentDescriptor,
   parseResourceUri,
 } from "@/lib/api/agents";
+import { useDebugStore } from "@/hooks/use-debug-events";
 
 // --- Zustand Store ---
 
@@ -365,6 +366,8 @@ export function useSendMessage() {
 }
 
 function handleSSEEvent(event: SSEEvent, store: typeof useChatStore) {
+  const debug = useDebugStore.getState();
+
   switch (event.type) {
     case "token":
       store.getState().setThinking(false);
@@ -372,6 +375,8 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore) {
       break;
     case "done":
       store.getState().finishStreaming();
+      // Finalize the debug turn so pipeline trace can display it
+      debug.finalizeTurn();
       // Parse the snapshot from the done event to extract quickReplies
       // and conversation state (for structured JSON output mode).
       if (event.data) {
@@ -394,13 +399,63 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore) {
         .getState()
         .appendToLastAgentMessage(`\n\n⚠️ Error: ${event.data}`);
       store.getState().finishStreaming();
+      debug.finalizeTurn();
       break;
-    case "task_start":
+    case "task_start": {
       store.getState().setThinking(true);
+      // Parse event data for structured pipeline info
+      let taskId = "unknown";
+      let taskType = "unknown";
+      let index = 0;
+      try {
+        const parsed = JSON.parse(event.data);
+        taskId = parsed.taskId ?? parsed.id ?? "unknown";
+        taskType = parsed.taskType ?? parsed.type ?? "unknown";
+        index = parsed.index ?? 0;
+      } catch {
+        // plain-text event data — use as taskType
+        taskType = event.data || "unknown";
+      }
+      debug.addEvent({
+        type: "task_start",
+        taskId,
+        taskType,
+        index,
+        timestamp: Date.now(),
+      });
       break;
-    case "task_complete":
+    }
+    case "task_complete": {
       store.getState().setThinking(false);
+      let taskId = "unknown";
+      let taskType = "unknown";
+      let index = 0;
+      let durationMs: number | undefined;
+      let actions: string[] | undefined;
+      let confidence: number | undefined;
+      try {
+        const parsed = JSON.parse(event.data);
+        taskId = parsed.taskId ?? parsed.id ?? "unknown";
+        taskType = parsed.taskType ?? parsed.type ?? "unknown";
+        index = parsed.index ?? 0;
+        durationMs = parsed.durationMs ?? parsed.duration;
+        actions = parsed.actions;
+        confidence = parsed.confidence;
+      } catch {
+        taskType = event.data || "unknown";
+      }
+      debug.addEvent({
+        type: "task_complete",
+        taskId,
+        taskType,
+        index,
+        durationMs,
+        actions,
+        confidence,
+        timestamp: Date.now(),
+      });
       break;
+    }
   }
 }
 

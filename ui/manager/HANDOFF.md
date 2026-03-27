@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-03-27  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: `pending` feat(v6): LLM editor Qute highlighting, Pre/Post Instructions, wizard UX, Add Task dialog
+> **Last commit**: `pending` feat(v6): Phase 13 — Agent Studio + Debugger suite (5 tabs, 3-panel workspace, 28 tests)
 
 ---
 
@@ -59,11 +59,12 @@
 | —     | **OpenAPI Endpoint Discovery**: Backend `discover-endpoints` via `McpApiToolBuilder`, editor-level import (Append/Replace with confirmation), workflow-level import dialog (parallel multi-config creation), URL validation, Enter key, collision-safe keys | `184c550` |
 | —     | **LangChain Editor Feature Parity**: Model Cascade (reorder, confidence, strategy), Budget & Costs, Execution (parallel, rate limits, tool iterations), Retry (exponential backoff), RAG (knowledge retrieval). 5 bug fixes, 5 UX improvements, deploy.ps1 script | `1a2be77` |
 | —     | **LLM Editor UX + Wizard Polish**: Custom `prompt` Monaco language (Qute-first: `{expression}`, `{#if}`, `{! comment !}`, `{| raw |}`; legacy `[[${...}]]`). Pre/Post Instructions redesigned with Section+ContentEditor. Model Params `HIDDEN_PARAM_KEYS`. Add Task dialog curated labels over backend displayName. Wizard: model datalist autocomplete per provider, base URL contextual hints, progress step labels | pending |
+| 13a–c | **Agent Studio + Debugger Suite**: Debug Drawer (Pipeline Trace, Cost Dashboard, Memory Inspector, Live Log Viewer, Prompt Viewer). Agent Studio 3-panel workspace (Pipeline Railroad, Editor, Chat+Debug). Zustand debug store, SSE event dispatch, tool metrics API. 5 test files (28 tests), 30+ i18n keys, full ARIA tab pattern, RTL-clean. | pending |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 325 pass (`npm run test`) — 32 files
+- **Unit/Component**: 350+ pass (`npm run test`) — 37 files (36 passing, 1 pre-existing failure)
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds
@@ -88,6 +89,10 @@
 - **Hooks**: `use-agents.ts`, `use-packages.ts`, `use-conversations.ts`, `use-chat.ts`, `use-resources.ts`, `use-backup.ts`, `use-extensions-store.ts`, `use-dashboard.ts`, `use-json-schema.ts`
 - **i18n**: `config.ts`, `en.json`, `de.json`, `fr.json`, `es.json`, `ar.json`, `zh.json`, `th.json`, `ja.json`, `ko.json`, `pt.json`, `hi.json`
 - **Tests**: `sidebar.test.tsx`, `top-bar.test.tsx`, `config.test.ts`, `agents.test.tsx`, `agents.test.ts`, `packages.test.tsx`, `conversations.test.tsx`, `chat.test.tsx`, `resources.test.tsx`, `backup.test.tsx`, `agent-wizard.test.tsx`, `package-detail.test.tsx`, `dashboard.test.tsx`, `import-agent-dialog.test.tsx`
+- **Debugger**: `debug-drawer.tsx` (5-tab drawer), `pipeline-trace.tsx`, `cost-dashboard.tsx`, `memory-inspector.tsx`, `live-log-viewer.tsx`, `prompt-viewer.tsx`
+- **Studio**: `pipeline-railroad.tsx`, `agent-studio.tsx` (3-panel workspace)
+- **Debugger Hooks**: `use-debug-events.ts` (Zustand), `use-tool-metrics.ts`, `api/tool-metrics.ts`, `api/audit.ts`, `api/logs.ts`
+- **Debugger Tests**: `debug-drawer.test.tsx`, `pipeline-trace.test.tsx`, `cost-dashboard.test.tsx`, `prompt-viewer.test.tsx`, `pipeline-railroad.test.tsx`
 - **E2E**: `e2e-helpers.ts`, `navigation.spec.ts`, `theme.spec.ts`, `rtl.spec.ts`, `dashboard.spec.ts`, `agents.spec.ts`, `agent-detail.spec.ts`, `packages.spec.ts`, `conversations.spec.ts`, `chat.spec.ts`, `resources.spec.ts`
 - **Integration Tests**: `e2e/integration/integration-helpers.ts`, `agents.integration.spec.ts`, `packages.integration.spec.ts`, `resources.integration.spec.ts`, `conversations.integration.spec.ts`, `deployment.integration.spec.ts`, `schemas.integration.spec.ts`
 - **MSW**: `handlers.ts` (agents, packages, conversations, resources, schemas, extension store mocks), `server.ts`, `browser.ts`
