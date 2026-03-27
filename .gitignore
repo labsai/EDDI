@@ -69,3 +69,5 @@ test-output.txt
 
 # AI session files (keep locally, don't push)
 .gemini/
+
+eddi-audit-deadletter.jsonl
