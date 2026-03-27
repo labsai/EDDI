@@ -36,6 +36,20 @@ export function useWorkflowVersions(id: string) {
   });
 }
 
+/**
+ * Parse a Location header path like "/workflowstore/workflows/abc123?version=1"
+ * into { id, version }. Unlike parseResourceUri, this handles plain URL paths
+ * rather than eddi:// resource URIs.
+ */
+function parseLocationPath(location: string): { id: string; version: number } {
+  // Use a dummy base to parse relative paths
+  const url = new URL(location, "http://dummy");
+  const parts = url.pathname.split("/").filter(Boolean);
+  const id = parts[parts.length - 1]!;
+  const version = parseInt(url.searchParams.get("version") || "1", 10);
+  return { id, version };
+}
+
 export function useCreateWorkflow() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -49,10 +63,9 @@ export function useCreateWorkflow() {
       description?: string;
     }) => {
       const response = await createWorkflow(config);
-      if (name || description) {
-        const { parseResourceUri } = await import("@/lib/api/agents");
+      if ((name || description) && response.location) {
         const { updateDescriptor } = await import("@/lib/api/descriptors");
-        const { id, version } = parseResourceUri(response.location);
+        const { id, version } = parseLocationPath(response.location);
         await updateDescriptor(id, version, { name, description });
       }
       return response;

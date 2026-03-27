@@ -108,8 +108,13 @@ export function useCreateAgent() {
       description?: string;
     }) => {
       const response = await createAgent(agent);
-      if (name || description) {
-        const { id, version } = parseResourceUri(response.location);
+      if ((name || description) && response.location) {
+        // Location header is a URL path (e.g. /agentstore/agents/id?version=1),
+        // not an eddi:// resource URI, so we parse it with a dummy base.
+        const url = new URL(response.location, "http://dummy");
+        const parts = url.pathname.split("/").filter(Boolean);
+        const id = parts[parts.length - 1]!;
+        const version = parseInt(url.searchParams.get("version") || "1", 10);
         const { updateDescriptor } = await import("@/lib/api/descriptors");
         await updateDescriptor(id, version, { name, description });
       }

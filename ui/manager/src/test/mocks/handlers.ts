@@ -302,6 +302,11 @@ const RESOURCE_SCHEMAS: Record<string, object> = {
 };
 
 export const handlers = [
+  // Descriptor PATCH — used by create-workflow/create-agent to set name/description
+  http.patch("*/descriptorstore/descriptors/:id", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
   // JSON Schema endpoints for agents and packages
   http.get("*/agentstore/agents/jsonSchema", () => {
     return HttpResponse.json({
@@ -407,15 +412,29 @@ export const handlers = [
     });
   }),
 
-  // Duplicate agent
-  http.post("*/agentstore/agents/:id", ({ request }) => {
+  // Create agent (bare POST without :id)
+  http.post("*/agentstore/agents", ({ request }) => {
     const url = new URL(request.url);
-    const deepCopy = url.searchParams.get("deepCopy");
-    const newId = `dup-${Date.now()}`;
+    // Check if this is a duplicate request (has :id param with version query)
+    const pathParts = url.pathname.split("/").filter(Boolean);
+    const lastPart = pathParts[pathParts.length - 1];
+    if (lastPart !== "agents") {
+      // This is a duplicate request (/agents/:id?version=X&deepCopy=Y)
+      const deepCopy = url.searchParams.get("deepCopy");
+      const newId = `dup-${Date.now()}`;
+      return new HttpResponse(null, {
+        status: 201,
+        headers: {
+          Location: `eddi://ai.labs.agent/agentstore/agents/${newId}?version=1${deepCopy ? "&deepCopy=true" : ""}`,
+        },
+      });
+    }
+    // Create new agent
+    const newId = `agent-${Date.now()}`;
     return new HttpResponse(null, {
       status: 201,
       headers: {
-        Location: `eddi://ai.labs.agent/agentstore/agents/${newId}?version=1${deepCopy ? "&deepCopy=true" : ""}`,
+        Location: `eddi://ai.labs.agent/agentstore/agents/${newId}?version=1`,
       },
     });
   }),
@@ -452,11 +471,14 @@ export const handlers = [
     });
   }),
 
-  // Create package
+  // Create workflow
   http.post("*/workflowstore/workflows", () => {
+    const newId = `wf-${Date.now()}`;
     return new HttpResponse(null, {
       status: 201,
-      headers: { Location: "/workflowstore/workflows/new-pkg?version=1" },
+      headers: {
+        Location: `eddi://ai.labs.workflow/workflowstore/workflows/${newId}?version=1`,
+      },
     });
   }),
 

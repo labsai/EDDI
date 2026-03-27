@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
+import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/api-client";
 import { useCreateAgent } from "@/hooks/use-agents";
 
 interface CreateAgentDialogProps {
@@ -24,11 +26,12 @@ export function CreateAgentDialog({ open, onClose }: CreateAgentDialogProps) {
         name,
         description,
       });
+      toast.success(t("agents.createSuccess", "Agent created successfully"));
       setName("");
       setDescription("");
       onClose();
-    } catch {
-      // Error handled by TanStack Query
+    } catch (err) {
+      toast.error(getErrorMessage(err));
     }
   }
 

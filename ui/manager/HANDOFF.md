@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-03-27  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: `1a2be77` feat(v6): LangChain editor feature parity — cascade, retry, RAG, execution, build script
+> **Last commit**: `pending` fix(v6): workflow & agent creation — parseResourceUri on Location header, toast feedback
 
 ---
 

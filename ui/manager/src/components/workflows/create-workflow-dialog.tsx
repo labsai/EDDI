@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
+import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/api-client";
 import { useCreateWorkflow } from "@/hooks/use-workflows";
 
 interface CreateWorkflowDialogProps {
@@ -19,14 +21,19 @@ export function CreateWorkflowDialog({ open, onClose }: CreateWorkflowDialogProp
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    await createMutation.mutateAsync({
-      config: { workflowSteps: [] },
-      name,
-      description,
-    });
-    setName("");
-    setDescription("");
-    onClose();
+    try {
+      await createMutation.mutateAsync({
+        config: { workflowSteps: [] },
+        name,
+        description,
+      });
+      toast.success(t("packages.createSuccess", "Workflow created successfully"));
+      setName("");
+      setDescription("");
+      onClose();
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    }
   }
 
   return (
