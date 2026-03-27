@@ -36,13 +36,17 @@ export const EXTENSION_TYPE_INFO: Record<
   string,
   { label: string; icon: string; order: number }
 > = {
-  "ai.labs.parser": { label: "Parser", icon: "FileText", order: 1 },
+  "ai.labs.parser": { label: "Input Parser", icon: "FileText", order: 1 },
+  "ai.labs.behavior": { label: "Rules", icon: "GitBranch", order: 2 },
   "ai.labs.rules": { label: "Rules", icon: "GitBranch", order: 2 },
-  "ai.labs.property": { label: "Property Setter", icon: "Settings", order: 3 },
+  "ai.labs.property": { label: "Property Extraction", icon: "Settings", order: 3 },
+  "ai.labs.httpcalls": { label: "API Calls", icon: "Globe", order: 4 },
   "ai.labs.apicalls": { label: "API Calls", icon: "Globe", order: 4 },
-  "ai.labs.llm": { label: "LLM", icon: "Brain", order: 5 },
-  "ai.labs.output": { label: "Output", icon: "MessageSquareText", order: 6 },
-  "ai.labs.output.template": { label: "Output Template", icon: "FileCode", order: 7 },
+  "ai.labs.llm": { label: "Lang Chain", icon: "Brain", order: 5 },
+  "ai.labs.output": { label: "Output Generation", icon: "MessageSquareText", order: 6 },
+  "ai.labs.templating": { label: "Templating", icon: "FileCode", order: 7 },
+  "ai.labs.output.template": { label: "Templating", icon: "FileCode", order: 7 },
+  "ai.labs.mcpcalls": { label: "MCP Calls", icon: "Plug", order: 8 },
 };
 
 /** Get a human-readable label for an extension type */
@@ -52,11 +56,13 @@ export function getExtensionLabel(type: string): string {
 
 /**
  * Map from EDDI extension type to the resource slug used in RESOURCE_TYPES.
- * Extension types without a standalone resource store (e.g. parser, output.template)
+ * Extension types without a standalone resource store (e.g. parser, templating)
  * are not included — they use embedded config or have no separate store.
  */
 export const EXTENSION_TO_RESOURCE_SLUG: Record<string, string> = {
+  "ai.labs.behavior": "rules",
   "ai.labs.rules": "rules",
+  "ai.labs.httpcalls": "apicalls",
   "ai.labs.apicalls": "apicalls",
   "ai.labs.llm": "llm",
   "ai.labs.output": "output",

@@ -341,7 +341,7 @@ export function WorkflowDetailPage() {
           <div className="flex items-center gap-2">
             <Workflow className="h-5 w-5 text-primary" />
             <h2 className="text-lg font-semibold text-foreground">
-              {t("packageEditor.pipeline", "Extension Pipeline")}
+              {t("packageEditor.pipeline", "Pipeline")}
             </h2>
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
               {currentExtensions.length}
@@ -353,7 +353,7 @@ export function WorkflowDetailPage() {
             data-testid="add-extension-btn"
           >
             <Plus className="h-4 w-4" />
-            {t("packageEditor.addExtension", "Add Extension")}
+            {t("packageEditor.addTask", "Add Task")}
           </button>
 
         </div>

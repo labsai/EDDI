@@ -154,12 +154,12 @@ export function PipelineBuilder({
       >
         <Puzzle className="h-10 w-10 opacity-50" />
         <p className="mt-3 text-sm">
-          {t("packageEditor.noExtensions", "No extensions in this package")}
+          {t("packageEditor.noTasks", "No tasks in this workflow")}
         </p>
         <p className="mt-1 text-xs text-muted-foreground/70">
           {t(
             "packageEditor.addHint",
-            "Add extensions to build your processing pipeline"
+            "Add tasks to build your processing pipeline"
           )}
         </p>
       </div>
@@ -180,7 +180,7 @@ export function PipelineBuilder({
           className="divide-y divide-border"
           data-testid="pipeline-list"
           role="list"
-          aria-label={t("packageEditor.pipeline", "Extension pipeline")}
+          aria-label={t("packageEditor.pipeline", "Pipeline")}
         >
           {items.map((item, idx) => (
             <SortableExtensionItem
@@ -290,7 +290,7 @@ function SortableExtensionItem({
         {...listeners}
         className="cursor-grab rounded-md p-1 text-muted-foreground hover:bg-secondary active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50"
         tabIndex={0}
-        aria-label={t("packageEditor.reorder", "Reorder extension")}
+        aria-label={t("packageEditor.reorder", "Reorder task")}
         disabled={disabled}
       >
         <GripVertical className="h-4 w-4" />

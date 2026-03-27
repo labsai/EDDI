@@ -261,7 +261,7 @@ export function AddExtensionDialog({
             )}
             <h3 className="text-lg font-semibold text-foreground">
               {step === "pick-type"
-                ? t("packageEditor.addExtension", "Add Extension")
+                ? t("packageEditor.addTask", "Add Task")
                 : t("packageEditor.chooseConfig", "Choose Config")}
             </h3>
           </div>
@@ -341,7 +341,7 @@ export function AddExtensionDialog({
               <p className="text-xs text-center text-muted-foreground">
                 {t(
                   "packageEditor.addHintDialog",
-                  "Select an extension type to add to the pipeline"
+                  "Select a task type to add to the pipeline"
                 )}
               </p>
             </div>
