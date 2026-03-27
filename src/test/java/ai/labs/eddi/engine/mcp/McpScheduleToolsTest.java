@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
+import io.quarkus.security.identity.SecurityIdentity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -53,7 +54,7 @@ class McpScheduleToolsTest {
         when(pollerService.getInstanceId()).thenReturn("test-instance");
 
         tools = new McpAdminTools(restInterfaceFactory, mock(IRestAgentAdministration.class), jsonSerialization, scheduleStore, fireExecutor,
-                pollerService);
+                pollerService, mock(SecurityIdentity.class), false);
     }
 
     // --- createSchedule ---
