@@ -64,6 +64,13 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     labelKey: "resources.types.mcpcalls",
     icon: "Plug",
   },
+  {
+    slug: "rag",
+    store: "ragstore",
+    plural: "rags",
+    labelKey: "resources.types.rag",
+    icon: "BookOpenCheck",
+  },
 ];
 
 /** Look up a resource type config by slug */

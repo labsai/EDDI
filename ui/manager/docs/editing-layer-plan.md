@@ -33,6 +33,8 @@ All extension types follow a **uniform CRUD pattern**:
 | Regular Dictionary | `/regulardictionarystore/regulardictionaries` | `RegularDictionaryConfiguration` |
 | Parser             | `/parserstore/parsers`                        | `ParserConfiguration`            |
 | Properties         | `/propertiesstore/properties`                 | `PropertiesConfiguration`        |
+| MCP Calls          | `/mcpcallsstore/mcpcalls`                     | `McpCallsConfiguration`          |
+| RAG Knowledge Base | `/ragstore/rags`                              | `RagConfiguration`               |
 
 ---
 

@@ -343,6 +343,10 @@
       "mcpcalls": {
         "name": "MCP Calls",
         "description": "تكوين اتصالات خادم MCP واستدعاءات الأدوات الحتمية"
+      },
+      "rag": {
+        "name": "Knowledge Bases",
+        "description": "Configure RAG knowledge bases for document retrieval"
       }
     }
   },
@@ -852,7 +856,43 @@
       "llm": "LLM",
       "output": "Output",
       "output.template": "Output Template",
-      "mcpcalls": "MCP Calls"
+      "mcpcalls": "MCP Calls",
+      "rag": "Knowledge Bases"
     }
+  },
+  "ragEditor": {
+    "general": "General",
+    "kbName": "Knowledge Base Name",
+    "kbNamePlaceholder": "e.g. product-docs, faq, internal-wiki",
+    "kbNameHint": "Used to reference this KB from LLM tasks",
+    "embeddingModel": "Embedding Model",
+    "provider": "Provider",
+    "embeddingParams": "Provider Parameters",
+    "embeddingParamsHint": "Model name, API key (use ${vault:...} for secrets), base URL, etc.",
+    "vectorStore": "Vector Store",
+    "storeType": "Store Type",
+    "storeParams": "Connection Parameters",
+    "isolation": "Isolation Strategy",
+    "chunking": "Document Chunking",
+    "chunkStrategy": "Strategy",
+    "chunkSize": "Chunk Size",
+    "chunkOverlap": "Chunk Overlap",
+    "overlapHint": "Overlap helps maintain context between chunks",
+    "chunkPreview": "Preview (how a document gets split)",
+    "chunkBlocks": "{{count}} chunks of ~{{size}} chars with {{overlap}} char overlap",
+    "retrievalDefaults": "Retrieval Defaults",
+    "retrievalHint": "These defaults can be overridden per-task in the LLM configuration.",
+    "maxResults": "Max Results (top-K)",
+    "minScore": "Min Similarity Score",
+    "ingestion": "Document Ingestion",
+    "dropFiles": "Drop documents here to ingest",
+    "dropHint": "Text, Markdown, or any text-based file",
+    "browse": "Browse",
+    "pasteText": "Or paste text content",
+    "pastePlaceholder": "Paste document text here...",
+    "ingestText": "Ingest Text",
+    "ingestionHistory": "Ingestion Status",
+    "saveFirstIngestion": "Save this knowledge base first to enable document ingestion.",
+    "addParam": "Add Parameter"
   }
 }

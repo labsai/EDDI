@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-03-27  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: `pending` feat(v6): Phase 13 — Agent Studio + Debugger suite (5 tabs, 3-panel workspace, 28 tests)
+> **Last commit**: `pending` feat(v6): Phase 8c Manager — RAG Knowledge Base editor, LangChain RAG section, 24 new tests
 
 ---
 
@@ -60,11 +60,12 @@
 | —     | **LangChain Editor Feature Parity**: Model Cascade (reorder, confidence, strategy), Budget & Costs, Execution (parallel, rate limits, tool iterations), Retry (exponential backoff), RAG (knowledge retrieval). 5 bug fixes, 5 UX improvements, deploy.ps1 script | `1a2be77` |
 | —     | **LLM Editor UX + Wizard Polish**: Custom `prompt` Monaco language (Qute-first: `{expression}`, `{#if}`, `{! comment !}`, `{| raw |}`; legacy `[[${...}]]`). Pre/Post Instructions redesigned with Section+ContentEditor. Model Params `HIDDEN_PARAM_KEYS`. Add Task dialog curated labels over backend displayName. Wizard: model datalist autocomplete per provider, base URL contextual hints, progress step labels | pending |
 | 13a–c | **Agent Studio + Debugger Suite**: Debug Drawer (Pipeline Trace, Cost Dashboard, Memory Inspector, Live Log Viewer, Prompt Viewer). Agent Studio 3-panel workspace (Pipeline Railroad, Editor, Chat+Debug). Zustand debug store, SSE event dispatch, tool metrics API. 5 test files (28 tests), 30+ i18n keys, full ARIA tab pattern, RTL-clean. | pending |
+| 8c-M | **RAG Knowledge Base Manager**: `RagEditor` (6-section form editor: General, Embedding Model, Vector Store tile selector, Chunking with visual preview, Retrieval Defaults with color-coded sliders, Document Ingestion with drag-drop + polling). LangChain editor Phase 8c upgrade (3-mode RAG: explicit KBs, auto-discovery toggle, httpCall zero-infra + legacy deprecation box). Pipeline trace `rag` teal color. `renderFormEditor` extended with `meta: { resourceId }` for ingestion API. Store-switch param cache, polling timeout, deterministic chunk preview. 8 resource types, 11 locales, 24 new tests (19 RAG + 5 LangChain RAG). | pending |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 350+ pass (`npm run test`) — 37 files (36 passing, 1 pre-existing failure)
+- **Unit/Component**: 375+ pass (`npm run test`) — 38 files (36 passing, 2 pre-existing failures)
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds
@@ -96,7 +97,7 @@
 - **E2E**: `e2e-helpers.ts`, `navigation.spec.ts`, `theme.spec.ts`, `rtl.spec.ts`, `dashboard.spec.ts`, `agents.spec.ts`, `agent-detail.spec.ts`, `packages.spec.ts`, `conversations.spec.ts`, `chat.spec.ts`, `resources.spec.ts`
 - **Integration Tests**: `e2e/integration/integration-helpers.ts`, `agents.integration.spec.ts`, `packages.integration.spec.ts`, `resources.integration.spec.ts`, `conversations.integration.spec.ts`, `deployment.integration.spec.ts`, `schemas.integration.spec.ts`
 - **MSW**: `handlers.ts` (agents, packages, conversations, resources, schemas, extension store mocks), `server.ts`, `browser.ts`
-- **Editors**: `json-editor.tsx` (with JSON schema support), `content-editor.tsx` (Monaco inline+fullscreen), `version-picker.tsx`, `config-editor-layout.tsx`, `update-usage-dialog.tsx`, `pipeline-builder.tsx`, `add-extension-dialog.tsx`, `behavior-editor.tsx`, `httpcalls-editor.tsx`, `langchain-editor.tsx`, `output-editor.tsx`, `propertysetter-editor.tsx`, `dictionary-editor.tsx`
+- **Editors**: `json-editor.tsx` (with JSON schema support), `content-editor.tsx` (Monaco inline+fullscreen), `version-picker.tsx`, `config-editor-layout.tsx`, `update-usage-dialog.tsx`, `pipeline-builder.tsx`, `add-extension-dialog.tsx`, `behavior-editor.tsx`, `httpcalls-editor.tsx`, `langchain-editor.tsx`, `output-editor.tsx`, `propertysetter-editor.tsx`, `dictionary-editor.tsx`, `mcpcalls-editor.tsx`, `rag-editor.tsx`
 - **Cascade**: `cascade-save.ts`, `resource-usage.ts`
 - **Auth**: `auth-context.ts`, `auth-provider.tsx` (optional Keycloak), `use-auth.ts`, `auth-config.ts`
 - **Keycloak**: `docker-compose.keycloak.yml` (local dev), `keycloak/eddi-realm.json` (auto-import realm)

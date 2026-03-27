@@ -23,6 +23,7 @@ const TASK_TYPE_COLORS: Record<string, string> = {
   propertysetter: "bg-cyan-500/80",
   mcpcalls: "bg-orange-500/80",
   dictionary: "bg-indigo-500/80",
+  rag: "bg-teal-500/80",
 };
 
 function getTaskColor(taskType: string): string {

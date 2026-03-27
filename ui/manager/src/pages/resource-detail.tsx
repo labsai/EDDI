@@ -70,12 +70,17 @@ import {
   McpCallsEditor,
   type McpCallsConfig,
 } from "@/components/editors/mcpcalls-editor";
+import {
+  RagEditor,
+  type RagConfig,
+} from "@/components/editors/rag-editor";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   GitBranch,
   Globe,
   MessageSquareText,
   BookOpen,
+  BookOpenCheck: BookOpen, // reuse BookOpen for Knowledge Bases
   Brain,
   Settings,
   Plug,
@@ -84,7 +89,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
 // Clean editor lookup — replaces the 6-level nested ternary
 const EDITOR_MAP: Record<
   string,
-  (parsed: unknown, onChange: (val: unknown) => void, readOnly: boolean) => ReactNode
+  (parsed: unknown, onChange: (val: unknown) => void, readOnly: boolean, meta: { resourceId: string }) => ReactNode
 > = {
   rules: (p, o, r) => (
     <BehaviorEditor data={p as BehaviorConfig} onChange={o} readOnly={r} />
@@ -106,6 +111,9 @@ const EDITOR_MAP: Record<
   ),
   mcpcalls: (p, o, r) => (
     <McpCallsEditor data={p as McpCallsConfig} onChange={o} readOnly={r} />
+  ),
+  rag: (p, o, r, meta) => (
+    <RagEditor data={p as RagConfig} onChange={o} readOnly={r} resourceId={meta.resourceId} />
   ),
 };
 

@@ -46,7 +46,8 @@ export interface ConfigEditorLayoutProps {
   renderFormEditor?: (
     parsedData: unknown,
     onChange: (updated: unknown) => void,
-    readOnly: boolean
+    readOnly: boolean,
+    meta: { resourceId: string },
   ) => React.ReactNode;
   /** Optional JSON Schema for Monaco validation and autocomplete */
   jsonSchema?: object;
@@ -264,7 +265,7 @@ export function ConfigEditorLayout({
               (() => {
                 try {
                   const parsed = JSON.parse(editedData);
-                  return renderFormEditor(parsed, handleFormChange, readOnly);
+                  return renderFormEditor(parsed, handleFormChange, readOnly, { resourceId });
                 } catch {
                   return (
                     <div className="text-sm text-destructive">

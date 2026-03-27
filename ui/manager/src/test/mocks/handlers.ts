@@ -299,6 +299,25 @@ const RESOURCE_SCHEMAS: Record<string, object> = {
       },
     },
   },
+  rag: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "RagConfiguration",
+    description: "Knowledge Base configuration for RAG (Retrieval-Augmented Generation)",
+    properties: {
+      name: { type: "string", description: "Display name for this knowledge base" },
+      embeddingProvider: { type: "string", description: "Embedding model provider: openai, ollama, vertex, google, huggingface, jlama" },
+      embeddingParameters: { type: "object", additionalProperties: { type: "string" }, description: "Provider-specific parameters (model, apiKey, baseUrl)" },
+      storeType: { type: "string", description: "Vector store type: in-memory, pgvector, mongodb-atlas, qdrant" },
+      storeParameters: { type: "object", additionalProperties: { type: "string" }, description: "Store-specific connection parameters" },
+      isolationStrategy: { type: "string", description: "Tenant isolation: collection or metadata" },
+      chunkStrategy: { type: "string", description: "Chunking strategy: recursive, paragraph, sentence" },
+      chunkSize: { type: "integer", description: "Chunk size in characters (default: 512)" },
+      chunkOverlap: { type: "integer", description: "Chunk overlap in characters (default: 64)" },
+      maxResults: { type: "integer", description: "Default max results to return (top-K)" },
+      minScore: { type: "number", description: "Default minimum similarity score (0.0-1.0)" },
+    },
+  },
 };
 
 export const handlers = [
@@ -689,6 +708,7 @@ export const handlers = [
       { type: "ai.labs.output", displayName: "Output", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
       { type: "ai.labs.output.template", displayName: "Output Template", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
       { type: "ai.labs.mcpcalls", displayName: "MCP Calls", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "ai.labs.rag", displayName: "RAG Knowledge Base", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
     ]);
   }),
 
@@ -1035,6 +1055,49 @@ export const handlers = [
     });
   }),
 
+  // RAG Knowledge Base mock data (BEFORE generic handlers)
+  http.get("*/ragstore/rags/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    return HttpResponse.json({
+      name: "product-docs",
+      embeddingProvider: "openai",
+      embeddingParameters: {
+        model: "text-embedding-3-small",
+        apiKey: "${vault:openai-key}",
+      },
+      storeType: "pgvector",
+      storeParameters: {
+        host: "localhost",
+        port: "5432",
+        database: "eddi",
+        table: "embeddings",
+        user: "${vault:pg-user}",
+        password: "${vault:pg-password}",
+      },
+      isolationStrategy: "collection",
+      chunkStrategy: "recursive",
+      chunkSize: 512,
+      chunkOverlap: 64,
+      maxResults: 5,
+      minScore: 0.6,
+    });
+  }),
+
+  // RAG ingestion endpoints (mock)
+  http.post("*/ragstore/rags/:id/ingest", () => {
+    return HttpResponse.json({
+      ingestionId: `ingest-${Date.now()}`,
+    });
+  }),
+
+  http.get("*/ragstore/rags/:id/ingest/:ingestionId", () => {
+    return HttpResponse.json({
+      status: "completed",
+    });
+  }),
+
   // Generic descriptor handlers for all resource types
   ...createResourceHandlers("rulestore", "rulesets", "rules"),
   ...createResourceHandlers("apicallstore", "apicalls", "apicalls"),
@@ -1051,6 +1114,7 @@ export const handlers = [
     "propertysetter"
   ),
   ...createResourceHandlers("mcpcallsstore", "mcpcalls", "mcpcalls"),
+  ...createResourceHandlers("ragstore", "rags", "rag"),
 ];
 
 function createResourceHandlers(

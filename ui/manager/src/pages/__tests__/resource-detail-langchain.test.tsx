@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, fireEvent } from "@testing-library/react";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -171,6 +171,87 @@ describe("LangChain Editor", () => {
     renderPage("llm");
     await waitFor(() => {
       expect(screen.getByText("RAG (Knowledge Retrieval)")).toBeInTheDocument();
+    });
+  });
+
+  // ─── RAG Section Interaction Tests ──────────────────────────
+
+  it("renders httpCall RAG input when RAG section is expanded", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByText("RAG (Knowledge Retrieval)")).toBeInTheDocument();
+    });
+
+    // Click the RAG section header to expand it
+    fireEvent.click(screen.getByText("RAG (Knowledge Retrieval)"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("httpcall-rag")).toBeInTheDocument();
+    });
+  });
+
+  it("renders enable-workflow-rag checkbox when RAG section is expanded", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByText("RAG (Knowledge Retrieval)")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("RAG (Knowledge Retrieval)"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("enable-workflow-rag")).toBeInTheDocument();
+    });
+  });
+
+  it("renders add KB reference button", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByText("RAG (Knowledge Retrieval)")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("RAG (Knowledge Retrieval)"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("add-kb-ref")).toBeInTheDocument();
+    });
+  });
+
+  it("adds a KB reference when button is clicked", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByText("RAG (Knowledge Retrieval)")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("RAG (Knowledge Retrieval)"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("add-kb-ref")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("add-kb-ref"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("kb-name-0")).toBeInTheDocument();
+    });
+  });
+
+  it("types a value into httpCall RAG input", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByText("RAG (Knowledge Retrieval)")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("RAG (Knowledge Retrieval)"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("httpcall-rag")).toBeInTheDocument();
+    });
+
+    const input = screen.getByTestId("httpcall-rag") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "search_docs" } });
+
+    await waitFor(() => {
+      expect(input.value).toBe("search_docs");
     });
   });
 });
