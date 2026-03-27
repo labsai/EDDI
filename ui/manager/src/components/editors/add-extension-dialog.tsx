@@ -329,7 +329,7 @@ export function AddExtensionDialog({
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-foreground">
-                        {ext.displayName || info?.label || ext.type}
+                        {info?.label || ext.displayName || ext.type}
                       </p>
                       <p className="text-xs text-muted-foreground truncate">
                         {ext.type}
@@ -369,8 +369,8 @@ export function AddExtensionDialog({
                   return <SelIcon className="h-4 w-4 text-primary" />;
                 })()}
                 <span className="text-sm font-medium text-foreground">
-                  {selectedType.displayName ||
-                    EXTENSION_TYPE_INFO[selectedType.type]?.label ||
+                  {EXTENSION_TYPE_INFO[selectedType.type]?.label ||
+                    selectedType.displayName ||
                     selectedType.type}
                 </span>
               </div>

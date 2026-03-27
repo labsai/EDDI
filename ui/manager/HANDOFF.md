@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-03-27  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: `pending` fix(v6): workflow & agent creation — parseResourceUri on Location header, toast feedback
+> **Last commit**: `pending` feat(v6): LLM editor Qute highlighting, Pre/Post Instructions, wizard UX, Add Task dialog
 
 ---
 
@@ -20,6 +20,7 @@
 **Agent Setup Wizard**: Two-mode wizard (Standard + API Agent) with backend setup endpoints. LangChain editor updated with enableHttpCallTools + MCP servers.
 **Group Discussion UI**: Groups page (card/list views), Group Detail (3-panel), Group Wizard (4-step), 7 components, API layer, hooks, 5 templates.
 **A2A Protocol UI**: Agent-detail A2A section (enable/disable, description, skills, endpoints, Agent Card preview). LangChain editor A2A Agents section (remote agents as tools).
+**LLM Editor UX**: System Prompt Qute syntax highlighting (Monarch tokenizer), Pre/Post Instructions as Section+ContentEditor, model params cleanup, Add Task dialog label fix, wizard model autocomplete + base URL hints + step labels.
 
 ### What's Done
 
@@ -57,6 +58,7 @@
 | —     | **MCP Tool Auto-Discovery**: Discover button in MCP editor, DiscoveredToolsPanel, whitelist/blacklist add | pending |
 | —     | **OpenAPI Endpoint Discovery**: Backend `discover-endpoints` via `McpApiToolBuilder`, editor-level import (Append/Replace with confirmation), workflow-level import dialog (parallel multi-config creation), URL validation, Enter key, collision-safe keys | `184c550` |
 | —     | **LangChain Editor Feature Parity**: Model Cascade (reorder, confidence, strategy), Budget & Costs, Execution (parallel, rate limits, tool iterations), Retry (exponential backoff), RAG (knowledge retrieval). 5 bug fixes, 5 UX improvements, deploy.ps1 script | `1a2be77` |
+| —     | **LLM Editor UX + Wizard Polish**: Custom `prompt` Monaco language (Qute-first: `{expression}`, `{#if}`, `{! comment !}`, `{| raw |}`; legacy `[[${...}]]`). Pre/Post Instructions redesigned with Section+ContentEditor. Model Params `HIDDEN_PARAM_KEYS`. Add Task dialog curated labels over backend displayName. Wizard: model datalist autocomplete per provider, base URL contextual hints, progress step labels | pending |
 
 ### Test Status
 

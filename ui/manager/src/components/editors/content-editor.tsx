@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import Editor, { type OnMount } from "@monaco-editor/react";
+import Editor, { type OnMount, type BeforeMount } from "@monaco-editor/react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Maximize2, Minimize2 } from "lucide-react";
 import { useTheme } from "@/components/layout/theme-provider";
 import { cn } from "@/lib/utils";
-import type { editor } from "monaco-editor";
+import type { editor, languages } from "monaco-editor";
+import type Monaco from "monaco-editor";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -16,8 +17,8 @@ export interface ContentEditorProps {
   onChange: (value: string) => void;
   /** Whether the editor is read-only */
   readOnly?: boolean;
-  /** Monaco language mode — defaults to "plaintext" */
-  language?: "plaintext" | "json" | "markdown";
+  /** Monaco language mode — defaults to "plaintext". Use "prompt" for system prompt highlighting. */
+  language?: "plaintext" | "json" | "markdown" | "prompt";
   /** Label shown in the fullscreen title bar */
   label?: string;
   /** Placeholder text shown when the editor is empty */
@@ -34,6 +35,139 @@ export interface ContentEditorProps {
 
 const LINE_HEIGHT = 19; // px — Monaco default line height at fontSize 13
 const PADDING_Y = 24; // px — top + bottom padding inside Monaco
+
+/** Whether the custom "prompt" language has been registered globally */
+let promptLanguageRegistered = false;
+
+/**
+ * Register a custom Monaco language "prompt" that highlights:
+ * - Quarkus Qute templates: {expression}, {#if}, {#for}, {/if}, {! comment !}, {| raw |}
+ * - Legacy EDDI templates: [[${...}]], ${vault:...}, ${...}
+ * - JSON-like structures, quoted strings, numbers, keywords
+ */
+function registerPromptLanguage(monaco: typeof Monaco) {
+  if (promptLanguageRegistered) return;
+  promptLanguageRegistered = true;
+
+  monaco.languages.register({ id: "prompt" });
+
+  monaco.languages.setMonarchTokensProvider("prompt", {
+    tokenizer: {
+      root: [
+        // ── Qute templates (highest priority) ─────────────────────────
+        // Qute comments: {! ... !}
+        [/\{!/, "comment.qute", "@quteComment"],
+
+        // Qute section tags: {#if}, {#for}, {#let}, {#else}, {/if}, {/for}, etc.
+        [/\{[#/][a-zA-Z][a-zA-Z0-9]*[^}]*\}/, "keyword.qute"],
+
+        // Qute raw blocks: {| ... |}
+        [/\{\|/, "string.qute", "@quteRaw"],
+
+        // Qute expressions: {name}, {item.price}, {item.name ?: 'default'}, {data.count}
+        [/\{[a-zA-Z_][a-zA-Z0-9_.?:' ]*\}/, "variable.qute"],
+
+        // ── Legacy EDDI templates ─────────────────────────────────────
+        // Legacy Thymeleaf: [[${...}]]
+        [/\[\[\$\{[^}]*\}\]\]/, "variable.legacy"],
+
+        // Vault / Spring-style: ${vault:...}, ${...}
+        [/\$\{[^}]*\}/, "variable.legacy"],
+
+        // ── Standard tokens ───────────────────────────────────────────
+        // JSON-style quoted strings
+        [/"(?:[^"\\]|\\.)*"/, "string"],
+        [/'(?:[^'\\]|\\.)*'/, "string"],
+
+        // Numbers
+        [/\b\d+(\.\d+)?\b/, "number"],
+
+        // JSON structural characters
+        [/[[\]]/, "delimiter.bracket"],
+        [/[{}]/, "delimiter.brace"],
+        [/:/, "delimiter"],
+        [/,/, "delimiter"],
+
+        // Boolean-like keywords
+        [/\b(?:true|false|null|undefined)\b/, "keyword"],
+      ],
+
+      // Qute comment state: consume until !}
+      quteComment: [
+        [/!}/, "comment.qute", "@pop"],
+        [/./, "comment.qute"],
+      ],
+
+      // Qute raw block state: consume until |}
+      quteRaw: [
+        [/\|}/, "string.qute", "@pop"],
+        [/./, "string.qute"],
+      ],
+    },
+  } as languages.IMonarchLanguage);
+
+  // Custom theme tokens
+  monaco.editor.defineTheme("prompt-dark", {
+    base: "vs-dark",
+    inherit: true,
+    rules: [
+      // Qute
+      { token: "variable.qute", foreground: "d4a843", fontStyle: "bold" },
+      { token: "keyword.qute", foreground: "c586c0", fontStyle: "bold" },
+      { token: "comment.qute", foreground: "6a9955", fontStyle: "italic" },
+      { token: "string.qute", foreground: "ce9178" },
+      // Legacy templates
+      { token: "variable.legacy", foreground: "d4a843" },
+      // Standard
+      { token: "string", foreground: "ce9178" },
+      { token: "number", foreground: "b5cea8" },
+      { token: "keyword", foreground: "569cd6" },
+      { token: "delimiter.bracket", foreground: "ffd700" },
+      { token: "delimiter.brace", foreground: "da70d6" },
+      { token: "delimiter", foreground: "808080" },
+    ],
+    colors: {},
+  });
+
+  monaco.editor.defineTheme("prompt-light", {
+    base: "vs",
+    inherit: true,
+    rules: [
+      // Qute
+      { token: "variable.qute", foreground: "9c6b10", fontStyle: "bold" },
+      { token: "keyword.qute", foreground: "af00db", fontStyle: "bold" },
+      { token: "comment.qute", foreground: "008000", fontStyle: "italic" },
+      { token: "string.qute", foreground: "a31515" },
+      // Legacy templates
+      { token: "variable.legacy", foreground: "9c6b10" },
+      // Standard
+      { token: "string", foreground: "a31515" },
+      { token: "number", foreground: "098658" },
+      { token: "keyword", foreground: "0000ff" },
+      { token: "delimiter.bracket", foreground: "b8860b" },
+      { token: "delimiter.brace", foreground: "800080" },
+      { token: "delimiter", foreground: "808080" },
+    ],
+    colors: {},
+  });
+}
+
+/** Resolve the Monaco language id and theme for a given language prop */
+function resolveLanguageAndTheme(
+  language: string,
+  resolvedTheme: string
+): { monacoLanguage: string; monacoTheme: string } {
+  if (language === "prompt") {
+    return {
+      monacoLanguage: "prompt",
+      monacoTheme: resolvedTheme === "dark" ? "prompt-dark" : "prompt-light",
+    };
+  }
+  return {
+    monacoLanguage: language,
+    monacoTheme: resolvedTheme === "dark" ? "vs-dark" : "vs",
+  };
+}
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -140,6 +274,12 @@ function FullscreenEditor({
     ed.focus();
   }, []);
 
+  const handleBeforeMount: BeforeMount = useCallback((monaco) => {
+    registerPromptLanguage(monaco);
+  }, []);
+
+  const { monacoLanguage, monacoTheme } = resolveLanguageAndTheme(language, resolvedTheme ?? "dark");
+
   const handleChange = useCallback(
     (val: string | undefined) => {
       if (val !== undefined) onChange(val);
@@ -220,11 +360,12 @@ function FullscreenEditor({
           <div className="flex-1 overflow-hidden">
             <Editor
               height="100%"
-              language={language}
-              theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+              language={monacoLanguage}
+              theme={monacoTheme}
               value={value}
               onChange={handleChange}
               onMount={handleMount}
+              beforeMount={handleBeforeMount}
               options={{
                 ...getBaseOptions(readOnly),
                 lineNumbers: "on",
@@ -295,6 +436,12 @@ export function ContentEditor({
     inlineEditorRef.current = ed;
   }, []);
 
+  const handleBeforeMount: BeforeMount = useCallback((monaco) => {
+    registerPromptLanguage(monaco);
+  }, []);
+
+  const { monacoLanguage, monacoTheme } = resolveLanguageAndTheme(language, resolvedTheme ?? "dark");
+
   const handleChange = useCallback(
     (val: string | undefined) => {
       if (val !== undefined) onChange(val);
@@ -345,11 +492,12 @@ export function ContentEditor({
 
         <Editor
           height={`${inlineHeight}px`}
-          language={language}
-          theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+          language={monacoLanguage}
+          theme={monacoTheme}
           value={value}
           onChange={handleChange}
           onMount={handleMount}
+          beforeMount={handleBeforeMount}
           options={{
             ...getBaseOptions(readOnly),
             lineNumbers: "on",

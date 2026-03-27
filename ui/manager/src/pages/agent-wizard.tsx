@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Wand2,
@@ -94,21 +94,73 @@ const INITIAL_STATE: WizardState = {
   environment: "production",
 };
 
+/** Popular model suggestions per provider — users can still type any custom model */
+const MODEL_SUGGESTIONS: Record<string, string[]> = {
+  anthropic: [
+    "claude-sonnet-4-6",
+    "claude-4-opus",
+    "claude-3-5-sonnet-20241022",
+    "claude-3-5-haiku-20241022",
+    "claude-3-opus-20240229",
+  ],
+  openai: [
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4-turbo",
+    "o3-mini",
+    "gpt-3.5-turbo",
+  ],
+  gemini: [
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
+  ],
+  "gemini-vertex": [
+    "gemini-2.0-flash",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
+  ],
+  ollama: [
+    "llama3.2:1b",
+    "llama3.2:3b",
+    "llama3.1:8b",
+    "mistral:7b",
+    "codellama:7b",
+    "gemma2:2b",
+    "phi3:mini",
+    "qwen2.5:7b",
+  ],
+  jlama: [
+    "tinyllama",
+    "llama-3.2-1b",
+  ],
+  huggingface: [
+    "meta-llama/Llama-3.2-1B",
+    "mistralai/Mistral-7B-v0.1",
+  ],
+};
+
+/** Whether a provider requires a base URL (local providers) or it's just optional */
+function isBaseUrlRequired(providerId: string): boolean {
+  return providerId === "ollama" || providerId === "jlama";
+}
+
 const STEPS_STANDARD = [
-  { id: "type", icon: Sparkles },
-  { id: "info", icon: Brain },
-  { id: "llm", icon: Settings2 },
-  { id: "features", icon: Wrench },
-  { id: "review", icon: Rocket },
+  { id: "type", icon: Sparkles, label: "Type" },
+  { id: "info", icon: Brain, label: "Identity" },
+  { id: "llm", icon: Settings2, label: "Model" },
+  { id: "features", icon: Wrench, label: "Features" },
+  { id: "review", icon: Rocket, label: "Review" },
 ] as const;
 
 const STEPS_API = [
-  { id: "type", icon: Sparkles },
-  { id: "info", icon: Brain },
-  { id: "apispec", icon: Globe },
-  { id: "llm", icon: Settings2 },
-  { id: "features", icon: Wrench },
-  { id: "review", icon: Rocket },
+  { id: "type", icon: Sparkles, label: "Type" },
+  { id: "info", icon: Brain, label: "Identity" },
+  { id: "apispec", icon: Globe, label: "API Spec" },
+  { id: "llm", icon: Settings2, label: "Model" },
+  { id: "features", icon: Wrench, label: "Features" },
+  { id: "review", icon: Rocket, label: "Review" },
 ] as const;
 
 /* ================================================================
@@ -320,30 +372,42 @@ export function AgentWizardPage() {
           const isComplete = i < currentStep;
           return (
             <div key={s.id} className="flex flex-1 items-center gap-2">
-              <button
-                onClick={() => i < currentStep && setCurrentStep(i)}
-                disabled={i > currentStep}
-                className={cn(
-                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 transition-all duration-300",
-                  isActive &&
-                    "border-primary bg-primary text-primary-foreground shadow-md shadow-primary/25 scale-110",
-                  isComplete &&
-                    "border-emerald-500 bg-emerald-500 text-white",
-                  !isActive &&
-                    !isComplete &&
-                    "border-border bg-card text-muted-foreground",
-                )}
-              >
-                {isComplete ? (
-                  <Check className="h-4 w-4" />
-                ) : (
-                  <Icon className="h-4 w-4" />
-                )}
-              </button>
+              <div className="flex flex-col items-center gap-1">
+                <button
+                  onClick={() => i < currentStep && setCurrentStep(i)}
+                  disabled={i > currentStep}
+                  className={cn(
+                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 transition-all duration-300",
+                    isActive &&
+                      "border-primary bg-primary text-primary-foreground shadow-md shadow-primary/25 scale-110",
+                    isComplete &&
+                      "border-emerald-500 bg-emerald-500 text-white",
+                    !isActive &&
+                      !isComplete &&
+                      "border-border bg-card text-muted-foreground",
+                  )}
+                >
+                  {isComplete ? (
+                    <Check className="h-4 w-4" />
+                  ) : (
+                    <Icon className="h-4 w-4" />
+                  )}
+                </button>
+                <span
+                  className={cn(
+                    "text-[10px] font-medium transition-colors duration-300 whitespace-nowrap",
+                    isActive && "text-primary",
+                    isComplete && "text-emerald-500",
+                    !isActive && !isComplete && "text-muted-foreground",
+                  )}
+                >
+                  {s.label}
+                </span>
+              </div>
               {i < steps.length - 1 && (
                 <div
                   className={cn(
-                    "h-0.5 flex-1 rounded-full transition-colors duration-300",
+                    "h-0.5 flex-1 rounded-full transition-colors duration-300 mb-5",
                     isComplete ? "bg-emerald-500" : "bg-border",
                   )}
                 />
@@ -669,6 +733,9 @@ function LlmStep({
 }) {
   const { t } = useTranslation();
   const prov = getProviderConfig(provider);
+  const suggestions = useMemo(() => MODEL_SUGGESTIONS[provider] ?? [], [provider]);
+  const datalistId = `model-suggestions-${provider}`;
+  const baseUrlRequired = isBaseUrlRequired(provider);
 
   return (
     <div>
@@ -702,7 +769,7 @@ function LlmStep({
           </div>
         </div>
 
-        {/* Model */}
+        {/* Model — combobox with autocomplete suggestions */}
         <div>
           <label
             htmlFor="wizard-model"
@@ -713,12 +780,25 @@ function LlmStep({
           <input
             id="wizard-model"
             type="text"
+            list={datalistId}
             value={model}
             onChange={(e) => onModelChange(e.target.value)}
             placeholder={prov?.defaultModel ?? ""}
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
             data-testid="wizard-model"
+            autoComplete="off"
           />
+          <datalist id={datalistId}>
+            {suggestions.map((m) => (
+              <option key={m} value={m} />
+            ))}
+          </datalist>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t(
+              "setupWizard.modelHint",
+              "Pick a suggested model or type any model name supported by your provider"
+            )}
+          </p>
         </div>
 
         {/* API Key */}
@@ -751,16 +831,21 @@ function LlmStep({
           </div>
         )}
 
-        {/* Base URL (optional) */}
+        {/* Base URL */}
         <div>
           <label
             htmlFor="wizard-baseurl"
             className="mb-1.5 block text-sm font-medium text-foreground"
           >
             {t("setupWizard.baseUrl", "Base URL")}{" "}
-            <span className="text-muted-foreground font-normal">
-              ({t("setupWizard.optional", "optional")})
-            </span>
+            {!baseUrlRequired && (
+              <span className="text-muted-foreground font-normal">
+                ({t("setupWizard.optional", "optional")})
+              </span>
+            )}
+            {baseUrlRequired && (
+              <span className="text-primary font-normal">*</span>
+            )}
           </label>
           <input
             id="wizard-baseurl"
@@ -770,11 +855,24 @@ function LlmStep({
             placeholder={
               provider === "ollama"
                 ? "http://localhost:11434"
-                : t("setupWizard.baseUrlPlaceholder", "Custom endpoint URL")
+                : provider === "jlama"
+                  ? "http://localhost:8080"
+                  : t("setupWizard.baseUrlPlaceholder", "Custom endpoint URL")
             }
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
             data-testid="wizard-baseurl"
           />
+          <p className="mt-1 text-xs text-muted-foreground">
+            {baseUrlRequired
+              ? t(
+                  "setupWizard.baseUrlHintLocal",
+                  "Required — the URL where your local model server is running"
+                )
+              : t(
+                  "setupWizard.baseUrlHintCloud",
+                  "Only needed if using a proxy, private deployment, or Azure OpenAI endpoint"
+                )}
+          </p>
         </div>
       </div>
     </div>

@@ -357,6 +357,22 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore) {
       break;
     case "done":
       store.getState().finishStreaming();
+      // Parse the snapshot from the done event to extract quickReplies
+      // and conversation state (for structured JSON output mode).
+      if (event.data) {
+        try {
+          const snapshot = JSON.parse(event.data);
+          if (snapshot.conversationOutputs?.length) {
+            const lastOutput = snapshot.conversationOutputs[
+              snapshot.conversationOutputs.length - 1
+            ];
+            const qr = extractQuickReplies(lastOutput);
+            store.getState().setQuickReplies(qr);
+          }
+        } catch {
+          // Ignore parse errors — done event data may be empty
+        }
+      }
       break;
     case "error":
       store

@@ -19,6 +19,7 @@ import {
   Gauge,
   DollarSign,
   Cpu,
+  FileCode,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
 
@@ -94,6 +95,9 @@ export interface LangchainConfig {
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
+
+/** Parameter keys that have dedicated UI controls and should not appear in the generic key-value grid */
+const HIDDEN_PARAM_KEYS = new Set(["systemMessage"]);
 
 const MODEL_TYPES = [
   "openai",
@@ -440,7 +444,7 @@ function TaskEditor({
               value={task.parameters?.systemMessage ?? ""}
               onChange={(v) => updateParam("systemMessage", v)}
               readOnly={readOnly}
-              language="plaintext"
+              language="prompt"
               label={t("langchainEditor.systemPrompt", "System Prompt")}
               placeholder={t(
                 "langchainEditor.systemPromptPlaceholder",
@@ -457,7 +461,7 @@ function TaskEditor({
           >
             <div className="grid grid-cols-2 gap-2">
               {Object.entries(task.parameters ?? {})
-                .filter(([k]) => k !== "systemMessage")
+                .filter(([k]) => !HIDDEN_PARAM_KEYS.has(k))
                 .map(([k, v]) => (
                   <div key={k} className="flex items-center gap-1.5">
                     <input
@@ -1539,37 +1543,92 @@ function TaskEditor({
             </div>
           </Section>
 
-          {/* Pre/Post Instructions (JSON preview) */}
-          {!!(task.preRequest || task.postResponse) && (
-            <Section
-              label={t(
-                "langchainEditor.prePostInstructions",
-                "Pre/Post Instructions"
-              )}
-              defaultOpen={false}
-            >
-              {!!task.preRequest && (
-                <div>
-                  <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {t("langchainEditor.preRequest", "Pre-Request")}
-                  </span>
-                  <pre className="max-h-32 overflow-auto rounded bg-muted p-2 text-[10px] text-foreground">
-                    {JSON.stringify(task.preRequest, null, 2)}
-                  </pre>
-                </div>
-              )}
-              {!!task.postResponse && (
-                <div>
-                  <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {t("langchainEditor.postResponse", "Post-Response")}
-                  </span>
-                  <pre className="max-h-32 overflow-auto rounded bg-muted p-2 text-[10px] text-foreground">
-                    {JSON.stringify(task.postResponse, null, 2)}
-                  </pre>
-                </div>
-              )}
-            </Section>
-          )}
+          {/* ══════ Pre/Post Instructions ══════ */}
+          <Section
+            label={t(
+              "langchainEditor.prePostInstructions",
+              "Pre/Post Instructions"
+            )}
+            icon={FileCode}
+            accent="text-teal-500"
+            defaultOpen={!!(task.preRequest || task.postResponse)}
+          >
+            <div className="space-y-3" data-testid="pre-post-section">
+              <p className="text-[10px] text-muted-foreground leading-relaxed">
+                {t(
+                  "langchainEditor.prePostDesc",
+                  "Configure JSON instructions that run before each request or after each response."
+                )}
+              </p>
+
+              {/* Pre-Request */}
+              <div>
+                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {t("langchainEditor.preRequest", "Pre-Request")}
+                </span>
+                <ContentEditor
+                  value={
+                    task.preRequest
+                      ? (typeof task.preRequest === "string"
+                          ? task.preRequest
+                          : JSON.stringify(task.preRequest, null, 2))
+                      : ""
+                  }
+                  onChange={(v) => {
+                    try {
+                      onChange({ ...task, preRequest: v ? JSON.parse(v) : undefined });
+                    } catch {
+                      // Keep raw string while user is typing
+                      onChange({ ...task, preRequest: v || undefined });
+                    }
+                  }}
+                  readOnly={readOnly}
+                  language="json"
+                  label={t("langchainEditor.preRequest", "Pre-Request")}
+                  placeholder={t(
+                    "langchainEditor.preRequestPlaceholder",
+                    '{"propertyInstructions": [...]}'
+                  )}
+                  testId="pre-request-editor"
+                  minLines={3}
+                  maxLines={12}
+                />
+              </div>
+
+              {/* Post-Response */}
+              <div>
+                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {t("langchainEditor.postResponse", "Post-Response")}
+                </span>
+                <ContentEditor
+                  value={
+                    task.postResponse
+                      ? (typeof task.postResponse === "string"
+                          ? task.postResponse
+                          : JSON.stringify(task.postResponse, null, 2))
+                      : ""
+                  }
+                  onChange={(v) => {
+                    try {
+                      onChange({ ...task, postResponse: v ? JSON.parse(v) : undefined });
+                    } catch {
+                      onChange({ ...task, postResponse: v || undefined });
+                    }
+                  }}
+                  readOnly={readOnly}
+                  language="json"
+                  label={t("langchainEditor.postResponse", "Post-Response")}
+                  placeholder={t(
+                    "langchainEditor.postResponsePlaceholder",
+                    '{"propertyInstructions": [], "outputBuildInstructions": [...]}'
+                  )}
+                  testId="post-response-editor"
+                  minLines={3}
+                  maxLines={12}
+                />
+              </div>
+            </div>
+          </Section>
         </div>
       )}
     </div>
