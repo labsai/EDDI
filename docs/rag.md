@@ -60,7 +60,7 @@ A `RagConfiguration` is a versioned resource at `/ragstore/rags/`. It defines:
 | `name` | — | Display name / identifier for this knowledge base |
 | `embeddingProvider` | `openai` | Provider: `openai`, `ollama` |
 | `embeddingParameters` | — | Provider-specific params (model, apiKey, baseUrl) |
-| `storeType` | `in-memory` | Vector store: `in-memory` (dev), `pgvector` (planned) |
+| `storeType` | `in-memory` | Vector store: `in-memory` (dev), `pgvector` (persistent) |
 | `storeParameters` | — | Store-specific connection params |
 | `isolationStrategy` | `collection` | `collection` (per-KB store) or `metadata` (shared store) |
 | `chunkStrategy` | `recursive` | Document chunking strategy |
@@ -106,7 +106,7 @@ Each reference names a KB from the workflow and optionally overrides retrieval p
 
 When `enableWorkflowRag` is `true`, the system discovers all RAG steps from the workflow automatically.
 
-#### Option 3: httpCall RAG (Phase 8c-0, Planned)
+#### Option 3: httpCall RAG (Phase 8c-0)
 
 ```json
 {
@@ -116,7 +116,7 @@ When `enableWorkflowRag` is `true`, the system discovers all RAG steps from the 
 }
 ```
 
-Zero-infrastructure RAG: execute a named httpCall and inject its response as context. No vector store needed.
+Zero-infrastructure RAG: execute a named httpCall and inject its response as `## Search Results:` context. The user's input is available as `{userInput}` in httpCall templates. No vector store needed. Both httpCall RAG and vector RAG can be active simultaneously.
 
 ## REST API
 
@@ -138,6 +138,7 @@ RAG operations write audit traces to conversation memory:
 |---|---|
 | `rag:trace:{taskId}` | Per-KB retrieval metadata (provider, storeType, maxResults, minScore, retrievedCount) |
 | `rag:context:{taskId}` | Formatted context string injected into the LLM |
+| `rag:httpcall:trace:{taskId}` | httpCall RAG execution metadata (httpCall name, context length) |
 
 These are visible in the conversation memory snapshot and the audit ledger.
 
@@ -159,8 +160,14 @@ Ingestion runs on virtual threads (Java 21+) for non-blocking operation.
 | `openai` | `text-embedding-3-small` | Requires `apiKey` (use `${vault:...}`) |
 | `ollama` | `nomic-embed-text` | Requires `baseUrl` (default: `localhost:11434`) |
 
-## Future Phases
+## Status
 
-- **Phase 8c-0**: httpCall-based RAG (zero infrastructure)
-- **Phase 8c-β**: Persistent vector stores (pgvector, MongoDB Atlas, Qdrant)
+- ✅ **Phase 8c**: RAG Foundation — config-driven knowledge base retrieval
+- ✅ **Phase 8c-0**: httpCall-based RAG (zero infrastructure)
+- ✅ **Phase 8c-β**: Persistent vector stores (pgvector)
+
+## Future Enhancements
+
+- Additional vector stores: MongoDB Atlas, Qdrant
 - **Manager UI**: RAG configuration editing in the admin dashboard
+- Advanced retrieval: re-ranking, hybrid search, metadata filtering

@@ -768,10 +768,10 @@ Config-driven knowledge base retrieval integrated into the LLM pipeline. Knowled
 
 **Documentation:** `docs/rag.md`
 
-**Remaining TODOs:**
-- Phase 8c-0: httpCall-based RAG execution path
-- Phase 8c-β: Persistent vector stores (pgvector)
-- Manager UI: RAG configuration editor
+**Sub-phases completed:**
+- ✅ Phase 8c-0: httpCall-based RAG — `LlmTask.executeHttpCallRag()`, audit trace, graceful failure
+- ✅ Phase 8c-β: pgvector persistent vector store — `EmbeddingStoreFactory.buildPgVector()`, `SecretResolver`, `sanitizeTableName()`
+- Remaining: Manager UI RAG editor (Phase 13), additional stores (MongoDB Atlas, Qdrant)
 
 ### Phase 8a.2: MCP Resource CRUD + Batch Cascade ✅
 
