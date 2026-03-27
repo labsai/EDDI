@@ -1,5 +1,6 @@
 package ai.labs.eddi.secrets.rest;
 
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -13,6 +14,7 @@ import java.util.List;
  */
 @Path("/secretstore/secrets")
 @Tag(name = "Secrets Vault")
+@RolesAllowed("eddi-admin")
 public interface IRestSecretStore {
 
     /**

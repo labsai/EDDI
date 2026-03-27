@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.api;
 
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -19,6 +20,7 @@ import static ai.labs.eddi.engine.model.Deployment.Environment;
  */
 @Path("/administration")
 @Tag(name = "Agent Administration")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestAgentAdministration {
     @POST
     @Path("/{environment}/deploy/{agentId}")

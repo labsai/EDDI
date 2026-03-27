@@ -4,6 +4,7 @@ import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -19,6 +20,7 @@ import java.util.List;
  */
 @Path("/dictionarystore/dictionaries")
 @Tag(name = "Dictionary")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestDictionaryStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.dictionary/dictionarystore/dictionaries/";
 

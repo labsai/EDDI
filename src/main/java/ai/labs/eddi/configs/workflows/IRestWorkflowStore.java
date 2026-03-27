@@ -3,6 +3,7 @@ package ai.labs.eddi.configs.workflows;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -19,6 +20,7 @@ import java.util.List;
  */
 @Path("/workflowstore/workflows")
 @Tag(name = "Workflows")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestWorkflowStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.workflow/workflowstore/workflows/";
 

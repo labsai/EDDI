@@ -3,6 +3,7 @@ package ai.labs.eddi.configs.descriptors;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.SimpleDocumentDescriptor;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
@@ -16,6 +17,7 @@ import java.util.List;
  */
 @Path("/descriptorstore/descriptors")
 @Tag(name = "Descriptors")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestDocumentDescriptorStore {
     String DESCRIPTOR_STORE_PATH = "/descriptorstore/descriptors/";
     String resourceURI = "eddi://ai.labs.descriptor" + DESCRIPTOR_STORE_PATH;

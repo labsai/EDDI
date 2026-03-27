@@ -7,8 +7,10 @@ import ai.labs.eddi.engine.setup.CreateApiAgentRequest;
 import ai.labs.eddi.engine.setup.SetupAgentRequest;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
@@ -26,11 +28,16 @@ public class McpSetupTools {
 
     private final AgentSetupService agentSetupService;
     private final IJsonSerialization jsonSerialization;
+    private final SecurityIdentity identity;
+    private final boolean authEnabled;
 
     @Inject
-    public McpSetupTools(AgentSetupService agentSetupService, IJsonSerialization jsonSerialization) {
+    public McpSetupTools(AgentSetupService agentSetupService, IJsonSerialization jsonSerialization, SecurityIdentity identity,
+            @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
         this.agentSetupService = agentSetupService;
         this.jsonSerialization = jsonSerialization;
+        this.identity = identity;
+        this.authEnabled = authEnabled;
     }
 
     @Tool(name = "setup_agent", description = "Create a fully working, deployed Agent in a single call. "
@@ -65,6 +72,7 @@ public class McpSetupTools {
                     + "Example: 'http://localhost:7070/mcp, http://tools.example.com/mcp'") String mcpServerUrls,
             @ToolArg(description = "Automatically deploy the Agent after creation? (default: true)") Boolean deploy,
             @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
+        requireRole(identity, authEnabled, "eddi-editor");
         try {
             var request = new SetupAgentRequest(name, systemPrompt, provider, model, apiKey, baseUrl, introMessage, enableBuiltInTools,
                     builtInToolsWhitelist, enableQuickReplies, enableSentimentAnalysis, mcpServerUrls, deploy, environment);
@@ -98,6 +106,7 @@ public class McpSetupTools {
             @ToolArg(description = "Enable sentiment analysis in Agent responses? (default: false)") Boolean enableSentimentAnalysis,
             @ToolArg(description = "Deploy after creation? (default: true)") Boolean deploy,
             @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
+        requireRole(identity, authEnabled, "eddi-editor");
         try {
             var request = new CreateApiAgentRequest(name, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints,
                     enableQuickReplies, enableSentimentAnalysis, deploy, environment);

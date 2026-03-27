@@ -69,8 +69,10 @@ class McpConversationToolsTest {
         RestAgentEngine = mock(IRestAgentEngine.class);
         // Default: lenient serialize returns empty JSON
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
+        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         tools = new McpConversationTools(conversationService, agentAdmin, AgentStore, restInterfaceFactory, jsonSerialization, boundedLogStore,
-                auditStore, AgentTriggerStore, userConversationStore, RestAgentEngine);
+                auditStore, AgentTriggerStore, userConversationStore, RestAgentEngine, mockIdentity, false);
     }
 
     // --- listAgents ---

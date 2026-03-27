@@ -1,6 +1,7 @@
 package ai.labs.eddi.configs.admin;
 
 import ai.labs.eddi.configs.admin.model.OrphanReport;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import org.eclipse.microprofile.openapi.annotations.Operation;
@@ -22,6 +23,7 @@ import org.jboss.resteasy.reactive.NoCache;
  */
 @Path("/administration/orphans")
 @Tag(name = "Orphan Admin")
+@RolesAllowed("eddi-admin")
 public interface IRestOrphanAdmin {
 
     @GET

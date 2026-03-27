@@ -3,6 +3,8 @@ package ai.labs.eddi.engine.mcp;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
+import io.quarkus.security.ForbiddenException;
+import io.quarkus.security.identity.SecurityIdentity;
 
 /**
  * Shared utility methods for MCP tool implementations.
@@ -13,6 +15,28 @@ final class McpToolUtils {
 
     private McpToolUtils() {
         // utility class
+    }
+
+    /**
+     * Check that the current caller has the required role. When authorization is
+     * disabled ({@code authEnabled=false}), no check is performed.
+     *
+     * @param identity
+     *            the current security identity
+     * @param authEnabled
+     *            whether authorization is enabled
+     * @param role
+     *            the required realm role
+     * @throws ForbiddenException
+     *             if the caller lacks the required role
+     */
+    static void requireRole(SecurityIdentity identity, boolean authEnabled, String role) {
+        if (!authEnabled) {
+            return;
+        }
+        if (identity == null || identity.isAnonymous() || !identity.hasRole(role)) {
+            throw new ForbiddenException("MCP operation requires role: " + role);
+        }
     }
 
     /**

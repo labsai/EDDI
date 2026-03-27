@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.triggermanagement;
 
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.*;
@@ -11,6 +12,7 @@ import java.util.List;
 
 @Path("/AgentTriggerStore/agenttriggers")
 @Tag(name = "Agent Administration")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestAgentTriggerStore {
     String resourceURI = "eddi://ai.labs.agentTrigger/AgentTriggerStore/agenttriggers/";
 

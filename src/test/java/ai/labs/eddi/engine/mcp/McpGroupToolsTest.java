@@ -36,7 +36,9 @@ class McpGroupToolsTest {
         jsonSerialization = mock(IJsonSerialization.class);
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
 
-        tools = new McpGroupTools(groupStore, groupConversationService, jsonSerialization);
+        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
+        tools = new McpGroupTools(groupStore, groupConversationService, jsonSerialization, mockIdentity, false);
     }
 
     // --- describe_discussion_styles ---

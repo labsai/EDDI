@@ -2,6 +2,7 @@ package ai.labs.eddi.backup;
 
 import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
@@ -17,6 +18,7 @@ import java.util.List;
  */
 @Path("backup/import")
 @Tag(name = "Backup")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestImportService {
     @POST
     @Path("/initialAgents")

@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.audit.rest;
 
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
@@ -15,6 +16,7 @@ import java.util.List;
 @Path("/auditstore")
 @Produces(MediaType.APPLICATION_JSON)
 @Tag(name = "Audit Trail")
+@RolesAllowed("eddi-admin")
 public interface IRestAuditStore {
 
     /**

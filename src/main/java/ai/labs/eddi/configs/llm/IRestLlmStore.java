@@ -3,6 +3,7 @@ package ai.labs.eddi.configs.llm;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -18,6 +19,7 @@ import java.util.List;
  */
 @Path("/llmstore/llms")
 @Tag(name = "LLM Configuration")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestLlmStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.llm";
     String resourceURI = resourceBaseType + "/llmstore/llms/";

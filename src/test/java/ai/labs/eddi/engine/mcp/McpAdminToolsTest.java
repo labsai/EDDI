@@ -60,7 +60,10 @@ class McpAdminToolsTest {
         var schedulePollerService = mock(SchedulePollerService.class);
 
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization, scheduleStore, scheduleFireExecutor, schedulePollerService);
+        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
+        tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization, scheduleStore, scheduleFireExecutor, schedulePollerService,
+                mockIdentity, false);
     }
 
     // --- deployAgent ---

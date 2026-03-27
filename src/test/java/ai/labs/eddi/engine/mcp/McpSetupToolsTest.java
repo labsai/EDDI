@@ -77,7 +77,9 @@ class McpSetupToolsTest {
         lenient().when(parserStore.createParser(any())).thenReturn(Response.created(URI.create("/parserstore/parsers/par-1?version=1")).build());
 
         service = new AgentSetupService(restInterfaceFactory, agentAdmin, "http://localhost:11434");
-        tools = new McpSetupTools(service, jsonSerialization);
+        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
+        tools = new McpSetupTools(service, jsonSerialization, mockIdentity, false);
     }
 
     @Test

@@ -3,6 +3,7 @@ package ai.labs.eddi.configs.agents;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -19,6 +20,7 @@ import java.util.List;
  */
 @Path("/agentstore/agents")
 @Tag(name = "Agents")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestAgentStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.agent/agentstore/agents/";
 

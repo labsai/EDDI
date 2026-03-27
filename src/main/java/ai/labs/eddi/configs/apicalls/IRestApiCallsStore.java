@@ -3,6 +3,7 @@ package ai.labs.eddi.configs.apicalls;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -18,6 +19,7 @@ import java.util.List;
  */
 @Path("/apicallstore/apicalls")
 @Tag(name = "API Calls")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestApiCallsStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.apicalls";
     String resourceURI = resourceBaseType + "/apicallstore/apicalls/";

@@ -3,6 +3,7 @@ package ai.labs.eddi.configs.rules;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -18,6 +19,7 @@ import java.util.List;
  */
 @Path("/rulestore/rulesets")
 @Tag(name = "Behavior Rules")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestRuleSetStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.rules";
     String resourceURI = resourceBaseType + "/rulestore/rulesets/";

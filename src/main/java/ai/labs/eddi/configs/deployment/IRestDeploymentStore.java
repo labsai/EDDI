@@ -1,6 +1,7 @@
 package ai.labs.eddi.configs.deployment;
 
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
@@ -15,6 +16,7 @@ import java.util.List;
  */
 @Path("/deploymentstore/deployments")
 @Tag(name = "Agent Administration")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestDeploymentStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)

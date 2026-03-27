@@ -2,6 +2,7 @@ package ai.labs.eddi.engine.schedule;
 
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
@@ -22,6 +23,7 @@ import java.util.List;
  */
 @Path("/schedulestore/schedules")
 @Tag(name = "Schedules")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestScheduleStore {
 
     @GET

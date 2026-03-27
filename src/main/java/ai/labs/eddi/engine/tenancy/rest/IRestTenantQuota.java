@@ -2,6 +2,7 @@ package ai.labs.eddi.engine.tenancy.rest;
 
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.TenantUsage;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -16,6 +17,7 @@ import java.util.List;
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Tenant Quotas")
+@RolesAllowed("eddi-admin")
 public interface IRestTenantQuota {
 
     /**

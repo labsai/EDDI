@@ -3,6 +3,7 @@ package ai.labs.eddi.engine.a2a;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.engine.a2a.A2AModels.AgentAuthentication;
 import ai.labs.eddi.engine.a2a.A2AModels.AgentCapabilities;
 import ai.labs.eddi.engine.a2a.A2AModels.AgentCard;
 import ai.labs.eddi.engine.a2a.A2AModels.AgentSkill;
@@ -14,6 +15,7 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -29,12 +31,18 @@ public class AgentCardService {
 
     private final IRestAgentStore restAgentStore;
     private final String baseUrl;
+    private final boolean authEnabled;
+    private final String oidcAuthServerUrl;
 
     @Inject
     public AgentCardService(IRestAgentStore restAgentStore,
-            @ConfigProperty(name = "eddi.a2a.base-url", defaultValue = "http://localhost:7070") String baseUrl) {
+            @ConfigProperty(name = "eddi.a2a.base-url", defaultValue = "http://localhost:7070") String baseUrl,
+            @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled,
+            @ConfigProperty(name = "quarkus.oidc.auth-server-url") Optional<String> oidcAuthServerUrl) {
         this.restAgentStore = restAgentStore;
         this.baseUrl = baseUrl;
+        this.authEnabled = authEnabled;
+        this.oidcAuthServerUrl = oidcAuthServerUrl.orElse(null);
     }
 
     /**
@@ -127,6 +135,13 @@ public class AgentCardService {
 
         var capabilities = new AgentCapabilities(false, false, true);
 
-        return new AgentCard(name, description, agentUrl, "EDDI", "6.0.0", capabilities, skills);
+        // Build authentication info if auth is enabled
+        AgentAuthentication authentication = null;
+        if (authEnabled) {
+            String credentials = oidcAuthServerUrl != null ? oidcAuthServerUrl + "/protocol/openid-connect/token" : null;
+            authentication = new AgentAuthentication(List.of("Bearer"), credentials);
+        }
+
+        return new AgentCard(name, description, agentUrl, "EDDI", "6.0.0", capabilities, skills, authentication);
     }
 }

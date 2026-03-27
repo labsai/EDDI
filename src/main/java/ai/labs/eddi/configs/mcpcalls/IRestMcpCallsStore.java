@@ -3,6 +3,7 @@ package ai.labs.eddi.configs.mcpcalls;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -18,6 +19,7 @@ import java.util.List;
  */
 @Path("/mcpcallsstore/mcpcalls")
 @Tag(name = "MCP Calls")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestMcpCallsStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.mcpcalls";
     String resourceURI = resourceBaseType + "/mcpcallsstore/mcpcalls/";

@@ -12,9 +12,11 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
@@ -38,12 +40,17 @@ public class McpGroupTools {
     private final IRestAgentGroupStore groupStore;
     private final IGroupConversationService groupConversationService;
     private final IJsonSerialization jsonSerialization;
+    private final SecurityIdentity identity;
+    private final boolean authEnabled;
 
     @Inject
-    public McpGroupTools(IRestAgentGroupStore groupStore, IGroupConversationService groupConversationService, IJsonSerialization jsonSerialization) {
+    public McpGroupTools(IRestAgentGroupStore groupStore, IGroupConversationService groupConversationService, IJsonSerialization jsonSerialization,
+            SecurityIdentity identity, @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
         this.groupStore = groupStore;
         this.groupConversationService = groupConversationService;
         this.jsonSerialization = jsonSerialization;
+        this.identity = identity;
+        this.authEnabled = authEnabled;
     }
 
     // --- Discovery ---
@@ -52,6 +59,7 @@ public class McpGroupTools {
             + "for each style (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, " + "DELPHI, DEBATE). Call this before create_group to choose the "
             + "right style.")
     public String describe_discussion_styles() {
+        requireRole(identity, authEnabled, "eddi-viewer");
         return """
                 ## Discussion Styles
 
@@ -98,6 +106,7 @@ public class McpGroupTools {
     @Tool(description = "List all agent group configurations. Returns " + "descriptors with name, ID, and last modified date.")
     public String list_groups(@ToolArg(description = "Filter by group name (optional)") String filter,
             @ToolArg(description = "Page index, 0-based (default 0)") String index, @ToolArg(description = "Page size (default 20)") String limit) {
+        requireRole(identity, authEnabled, "eddi-editor");
         try {
             int idx = parseIntOrDefault(index, 0);
             int lim = parseIntOrDefault(limit, 20);
@@ -113,6 +122,7 @@ public class McpGroupTools {
     @Tool(description = "Read a group configuration including its members, " + "discussion style, phases, and protocol settings.")
     public String read_group(@ToolArg(description = "Group configuration ID") String groupId,
             @ToolArg(description = "Version number (0 or omit for latest)") String version) {
+        requireRole(identity, authEnabled, "eddi-editor");
         try {
             int ver = parseIntOrDefault(version, 0);
             if (ver == 0) {
@@ -138,6 +148,7 @@ public class McpGroupTools {
             @ToolArg(description = "Discussion style: ROUND_TABLE, PEER_REVIEW, "
                     + "DEVIL_ADVOCATE, DELPHI, DEBATE (default ROUND_TABLE)") String style,
             @ToolArg(description = "Max rounds (default 2)") String maxRounds) {
+        requireRole(identity, authEnabled, "eddi-editor");
         try {
             AgentGroupConfiguration config = new AgentGroupConfiguration();
             config.setName(name);
@@ -202,6 +213,7 @@ public class McpGroupTools {
     public String update_group(@ToolArg(description = "Group ID") String groupId,
             @ToolArg(description = "Version number (0 for latest)") String version,
             @ToolArg(description = "Full JSON configuration body") String configJson) {
+        requireRole(identity, authEnabled, "eddi-editor");
         try {
             int ver = parseIntOrDefault(version, 0);
             AgentGroupConfiguration config = jsonSerialization.deserialize(configJson, AgentGroupConfiguration.class);
@@ -216,6 +228,7 @@ public class McpGroupTools {
     @Tool(description = "Delete an agent group configuration")
     public String delete_group(@ToolArg(description = "Group ID") String groupId,
             @ToolArg(description = "Version number (0 for latest)") String version) {
+        requireRole(identity, authEnabled, "eddi-editor");
         try {
             int ver = parseIntOrDefault(version, 0);
             groupStore.deleteGroup(groupId, ver, false);
@@ -233,6 +246,7 @@ public class McpGroupTools {
     public String discuss_with_group(@ToolArg(description = "Group configuration ID (from create_group " + "or list_groups)") String groupId,
             @ToolArg(description = "The question or topic for the group to " + "discuss") String question,
             @ToolArg(description = "User ID (optional, defaults to " + "'mcp-client')") String userId) {
+        requireRole(identity, authEnabled, "eddi-viewer");
         try {
             String user = userId != null && !userId.isBlank() ? userId : "mcp-client";
             GroupConversation gc = groupConversationService.discuss(groupId, question, user, 0);
@@ -246,6 +260,7 @@ public class McpGroupTools {
     @Tool(description = "Read a group conversation transcript including all " + "phases, agent contributions, and synthesized answer.")
     public String read_group_conversation(
             @ToolArg(description = "Group conversation ID (from " + "discuss_with_group or list_group_conversations)") String groupConversationId) {
+        requireRole(identity, authEnabled, "eddi-viewer");
         try {
             GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
             return jsonSerialization.serialize(gc);
@@ -258,6 +273,7 @@ public class McpGroupTools {
     @Tool(description = "List past group conversation transcripts for a " + "group. Returns conversation IDs, state, question, and " + "timestamps.")
     public String list_group_conversations(@ToolArg(description = "Group configuration ID") String groupId,
             @ToolArg(description = "Page index, 0-based (default 0)") String index, @ToolArg(description = "Page size (default 20)") String limit) {
+        requireRole(identity, authEnabled, "eddi-viewer");
         try {
             int idx = parseIntOrDefault(index, 0);
             int lim = parseIntOrDefault(limit, 20);

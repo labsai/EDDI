@@ -3,6 +3,7 @@ package ai.labs.eddi.configs.propertysetter;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -18,6 +19,7 @@ import java.util.List;
  */
 @Path("/propertysetterstore/propertysetters")
 @Tag(name = "Properties")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestPropertySetterStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.property";
     String resourceURI = resourceBaseType + "/propertysetterstore/propertysetters/";

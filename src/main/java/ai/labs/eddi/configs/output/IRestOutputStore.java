@@ -4,6 +4,7 @@ import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -19,6 +20,7 @@ import java.util.List;
  */
 @Path("/outputstore/outputsets")
 @Tag(name = "Output")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestOutputStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.output";
     String resourceURI = resourceBaseType + "/outputstore/outputsets/";

@@ -3,6 +3,7 @@ package ai.labs.eddi.configs.groups;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -20,6 +21,7 @@ import java.util.List;
  */
 @Path("/groupstore/groups")
 @Tag(name = "Agent Groups")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestAgentGroupStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.group";
     String resourceURI = resourceBaseType + "/groupstore/groups/";

@@ -100,7 +100,10 @@ class McpAdminToolsCrudTest {
         scheduleStore = mock(IScheduleStore.class);
         scheduleFireExecutor = mock(ScheduleFireExecutor.class);
         schedulePollerService = mock(SchedulePollerService.class);
-        tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization, scheduleStore, scheduleFireExecutor, schedulePollerService);
+        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
+        tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization, scheduleStore, scheduleFireExecutor, schedulePollerService,
+                mockIdentity, false);
     }
 
     // ==================== update_resource ====================

@@ -22,7 +22,16 @@ public final class A2AModels {
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record AgentCard(String name, String description, String url, String provider, String version, AgentCapabilities capabilities,
-            List<AgentSkill> skills) {
+            List<AgentSkill> skills, AgentAuthentication authentication) {
+    }
+
+    /**
+     * Authentication requirements for an A2A agent endpoint. When auth is enabled,
+     * consuming agents need to present a valid Bearer token obtained from the OIDC
+     * provider.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record AgentAuthentication(List<String> schemes, String credentials) {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
