@@ -135,14 +135,6 @@ public record LlmConfiguration(List<Task> tasks) {
          */
         private Integer conversationHistoryLimit = 10;
 
-        /**
-         * RAG configuration for knowledge augmentation
-         *
-         * @deprecated Use {@code knowledgeBases}, {@code enableWorkflowRag}, or
-         *             {@code httpCallRag} instead.
-         */
-        @Deprecated
-        private RetrievalAugmentorConfiguration retrievalAugmentor;
 
         // === RAG Configuration (Phase 8c) ===
 
@@ -373,17 +365,6 @@ public record LlmConfiguration(List<Task> tasks) {
             this.conversationHistoryLimit = conversationHistoryLimit;
         }
 
-        /** @deprecated Use {@code getKnowledgeBases()} instead. */
-        @Deprecated
-        public RetrievalAugmentorConfiguration getRetrievalAugmentor() {
-            return retrievalAugmentor;
-        }
-
-        /** @deprecated Use {@code setKnowledgeBases()} instead. */
-        @Deprecated
-        public void setRetrievalAugmentor(RetrievalAugmentorConfiguration retrievalAugmentor) {
-            this.retrievalAugmentor = retrievalAugmentor;
-        }
 
         public List<KnowledgeBaseReference> getKnowledgeBases() {
             return knowledgeBases;
@@ -676,70 +657,6 @@ public record LlmConfiguration(List<Task> tasks) {
         }
     }
 
-    /**
-     * Configuration for RAG (Retrieval-Augmented Generation)
-     *
-     * @deprecated Use {@link KnowledgeBaseReference} and {@link RagDefaults}
-     *             instead.
-     */
-    @Deprecated
-    public static class RetrievalAugmentorConfiguration {
-        private String httpCall;
-        private String embeddingModel;
-        private String embeddingStore;
-        private Integer maxResults;
-        private Double minScore;
-
-        @Deprecated
-        public String getHttpCall() {
-            return httpCall;
-        }
-
-        @Deprecated
-        public void setHttpCall(String httpCall) {
-            this.httpCall = httpCall;
-        }
-
-        @Deprecated
-        public String getEmbeddingModel() {
-            return embeddingModel;
-        }
-
-        @Deprecated
-        public void setEmbeddingModel(String embeddingModel) {
-            this.embeddingModel = embeddingModel;
-        }
-
-        @Deprecated
-        public String getEmbeddingStore() {
-            return embeddingStore;
-        }
-
-        @Deprecated
-        public void setEmbeddingStore(String embeddingStore) {
-            this.embeddingStore = embeddingStore;
-        }
-
-        @Deprecated
-        public Integer getMaxResults() {
-            return maxResults;
-        }
-
-        @Deprecated
-        public void setMaxResults(Integer maxResults) {
-            this.maxResults = maxResults;
-        }
-
-        @Deprecated
-        public Double getMinScore() {
-            return minScore;
-        }
-
-        @Deprecated
-        public void setMinScore(Double minScore) {
-            this.minScore = minScore;
-        }
-    }
 
     /**
      * Reference from an LLM task to a specific knowledge base in the workflow. The
