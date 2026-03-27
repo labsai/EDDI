@@ -20,6 +20,7 @@ import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.modules.llm.tools.impl.*;
+import ai.labs.eddi.modules.output.model.QuickReply;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.ChatMessage;
@@ -175,6 +176,11 @@ public class LlmTask implements ILifecycleTask {
         // Detect streaming mode — event sink is set when SSE endpoint is used
         ConversationEventSink eventSink = memory.getEventSink();
 
+        // When addToOutput is explicitly "false" (structured JSON with postResponse),
+        // do NOT stream or add the raw response — the postResponse will generate proper
+        // output.
+        boolean addToOutputExplicitlyFalse = "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT));
+
         // Execute: try agent mode first, fall back to legacy
         String responseContent;
         Map<String, Object> responseMetadata = new HashMap<>();
@@ -207,7 +213,7 @@ public class LlmTask implements ILifecycleTask {
 
                 // Stream final response if streaming is active and no agent result (agent mode
                 // already streams)
-                if (eventSink != null && responseContent != null && cascadeResult.agentResult() == null) {
+                if (eventSink != null && responseContent != null && cascadeResult.agentResult() == null && !addToOutputExplicitlyFalse) {
                     eventSink.onToken(responseContent);
                 }
 
@@ -234,7 +240,7 @@ public class LlmTask implements ILifecycleTask {
                     responseContent = agentResult.response();
                     toolTrace = agentResult.trace();
                     usedToolMode = true;
-                    if (eventSink != null && responseContent != null) {
+                    if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
                         eventSink.onToken(responseContent);
                     }
                 } else {
@@ -256,7 +262,7 @@ public class LlmTask implements ILifecycleTask {
                 toolTrace = agentResult.trace();
                 usedToolMode = true;
                 // Stream the final agent response if streaming is active
-                if (eventSink != null && responseContent != null) {
+                if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
                     eventSink.onToken(responseContent);
                 }
             } else if (eventSink != null) {
@@ -325,9 +331,12 @@ public class LlmTask implements ILifecycleTask {
             currentStep.storeData(traceData);
         }
 
-        // Add to output if configured (or if in agent mode with tools)
-        boolean shouldAddToOutput = usedToolMode
-                || (!isNullOrEmpty(processedParams.get(KEY_ADD_TO_OUTPUT)) && Boolean.parseBoolean(processedParams.get(KEY_ADD_TO_OUTPUT)));
+        // Add to output if configured (or if in agent mode with tools).
+        // When addToOutput is explicitly "false" (e.g. structured JSON output with
+        // postResponse),
+        // do NOT add the raw response — the postResponse will generate proper output.
+        boolean shouldAddToOutput = !addToOutputExplicitlyFalse
+                && (usedToolMode || Boolean.parseBoolean(processedParams.getOrDefault(KEY_ADD_TO_OUTPUT, "false")));
 
         if (shouldAddToOutput) {
             var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(), responseContent);
@@ -337,6 +346,47 @@ public class LlmTask implements ILifecycleTask {
         }
 
         prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, 200, false);
+
+        // If structured JSON mode (addToOutput=false, convertToObject=true),
+        // extract htmlResponseText and quickReplies from the parsed JSON object
+        // and add them to conversation output.
+        if (addToOutputExplicitlyFalse) {
+            var responseObjectName2 = task.getResponseObjectName();
+            if (isNullOrEmpty(responseObjectName2)) {
+                responseObjectName2 = task.getId();
+            }
+            Object parsedObj = templateDataObjects.get(responseObjectName2);
+            if (parsedObj instanceof Map<?, ?> parsedMap) {
+                // Extract htmlResponseText: stream via SSE and add to conversation output
+                Object htmlText = parsedMap.get("htmlResponseText");
+                if (htmlText != null) {
+                    String htmlStr = htmlText.toString();
+                    if (eventSink != null) {
+                        eventSink.onToken(htmlStr);
+                    }
+                    var outputItem = new TextOutputItem(htmlStr, 0);
+                    currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
+                }
+
+                // Extract quickReplies and add directly to conversation output
+                Object qrObj = parsedMap.get("quickReplies");
+                if (qrObj instanceof List<?> qrList && !qrList.isEmpty()) {
+                    List<QuickReply> quickReplies = new ArrayList<>();
+                    for (Object qr : qrList) {
+                        if (qr instanceof String qrStr) {
+                            quickReplies.add(new QuickReply(qrStr, "", false));
+                        } else if (qr instanceof Map<?, ?> qrMap) {
+                            String value = qrMap.containsKey("value") ? String.valueOf(qrMap.get("value")) : String.valueOf(qr);
+                            String expressions = qrMap.containsKey("expressions") ? String.valueOf(qrMap.get("expressions")) : "";
+                            quickReplies.add(new QuickReply(value, expressions, false));
+                        }
+                    }
+                    if (!quickReplies.isEmpty()) {
+                        currentStep.addConversationOutputList("quickReplies", quickReplies);
+                    }
+                }
+            }
+        }
     }
 
     private HashMap<String, String> runTemplateEngineOnParams(Map<String, String> parameters, Map<String, Object> templateDataObjects) {
