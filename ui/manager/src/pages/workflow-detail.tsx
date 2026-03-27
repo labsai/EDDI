@@ -34,7 +34,7 @@ import {
   type AddExtensionResult,
 } from "@/components/editors/add-extension-dialog";
 import { useLatestVersions } from "@/hooks/use-latest-versions";
-
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 
 /* ─── Main page ─── */
 export function WorkflowDetailPage() {
@@ -92,6 +92,9 @@ export function WorkflowDetailPage() {
   const isDirty =
     localExtensions !== null &&
     JSON.stringify(localExtensions) !== JSON.stringify(serverExtensions);
+
+  // Warn on tab close/reload when dirty
+  useUnsavedChangesGuard(isDirty);
 
   // Build pipeline items from current extensions
   const pipelineItems: PipelineItem[] = currentExtensions.map((ext, i) => ({

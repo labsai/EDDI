@@ -99,8 +99,8 @@ export function ConfigEditorLayout({
   // Discard confirmation state
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
 
-  // Navigation guard — blocks in-app nav + browser close when dirty
-  const blocker = useUnsavedChangesGuard(isDirty && !readOnly);
+  // Navigation guard — shows native browser prompt on close/reload when dirty
+  useUnsavedChangesGuard(isDirty && !readOnly);
 
   const handleDiscard = useCallback(() => {
     setEditedData(data);
@@ -283,14 +283,6 @@ export function ConfigEditorLayout({
         message={t("editor.discardMessage", "Are you sure you want to discard all unsaved changes? This action cannot be undone.")}
       />
 
-      {/* Navigation blocker dialog */}
-      {blocker.state === "blocked" && (
-        <UnsavedChangesDialog
-          open
-          onConfirm={() => blocker.proceed?.()}
-          onCancel={() => blocker.reset?.()}
-        />
-      )}
     </div>
   );
 }
