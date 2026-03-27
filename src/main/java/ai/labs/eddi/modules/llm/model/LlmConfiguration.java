@@ -137,8 +137,46 @@ public record LlmConfiguration(List<Task> tasks) {
 
         /**
          * RAG configuration for knowledge augmentation
+         *
+         * @deprecated Use {@code knowledgeBases}, {@code enableWorkflowRag}, or
+         *             {@code httpCallRag} instead.
          */
+        @Deprecated
         private RetrievalAugmentorConfiguration retrievalAugmentor;
+
+        // === RAG Configuration (Phase 8c) ===
+
+        /**
+         * Explicit knowledge base references. Each entry names a KB from the workflow
+         * and optionally overrides retrieval parameters.
+         *
+         * Resolution: at execution time, the RagContextProvider discovers all RAG steps
+         * from the workflow (WorkflowTraversal), then matches by name.
+         *
+         * Example JSON: "knowledgeBases": [ { "name": "product-docs", "maxResults": 5,
+         * "minScore": 0.7 }, { "name": "faq", "maxResults": 3 } ]
+         */
+        private List<KnowledgeBaseReference> knowledgeBases;
+
+        /**
+         * Convenience flag: auto-discover all RAG steps from the workflow. Only used
+         * when knowledgeBases is null/empty. Default: false (explicit wiring
+         * preferred).
+         */
+        private Boolean enableWorkflowRag = false;
+
+        /**
+         * Default retrieval parameters when using enableWorkflowRag=true. Ignored when
+         * knowledgeBases is set (each reference has its own overrides).
+         */
+        private RagDefaults ragDefaults;
+
+        /**
+         * Zero-infrastructure RAG: name of an httpCall in the workflow to execute
+         * before the LLM call. The httpCall's response is injected as context into the
+         * system message. This is Phase 8c-0 (quick-win, no vector store needed).
+         */
+        private String httpCallRag;
 
         /**
          * Retry configuration for API calls
@@ -335,12 +373,48 @@ public record LlmConfiguration(List<Task> tasks) {
             this.conversationHistoryLimit = conversationHistoryLimit;
         }
 
+        /** @deprecated Use {@code getKnowledgeBases()} instead. */
+        @Deprecated
         public RetrievalAugmentorConfiguration getRetrievalAugmentor() {
             return retrievalAugmentor;
         }
 
+        /** @deprecated Use {@code setKnowledgeBases()} instead. */
+        @Deprecated
         public void setRetrievalAugmentor(RetrievalAugmentorConfiguration retrievalAugmentor) {
             this.retrievalAugmentor = retrievalAugmentor;
+        }
+
+        public List<KnowledgeBaseReference> getKnowledgeBases() {
+            return knowledgeBases;
+        }
+
+        public void setKnowledgeBases(List<KnowledgeBaseReference> knowledgeBases) {
+            this.knowledgeBases = knowledgeBases;
+        }
+
+        public Boolean getEnableWorkflowRag() {
+            return enableWorkflowRag;
+        }
+
+        public void setEnableWorkflowRag(Boolean enableWorkflowRag) {
+            this.enableWorkflowRag = enableWorkflowRag;
+        }
+
+        public RagDefaults getRagDefaults() {
+            return ragDefaults;
+        }
+
+        public void setRagDefaults(RagDefaults ragDefaults) {
+            this.ragDefaults = ragDefaults;
+        }
+
+        public String getHttpCallRag() {
+            return httpCallRag;
+        }
+
+        public void setHttpCallRag(String httpCallRag) {
+            this.httpCallRag = httpCallRag;
         }
 
         public RetryConfiguration getRetry() {
@@ -604,7 +678,11 @@ public record LlmConfiguration(List<Task> tasks) {
 
     /**
      * Configuration for RAG (Retrieval-Augmented Generation)
+     *
+     * @deprecated Use {@link KnowledgeBaseReference} and {@link RagDefaults}
+     *             instead.
      */
+    @Deprecated
     public static class RetrievalAugmentorConfiguration {
         private String httpCall;
         private String embeddingModel;
@@ -650,6 +728,100 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setMinScore(Double minScore) {
             this.minScore = minScore;
+        }
+    }
+
+    /**
+     * Reference from an LLM task to a specific knowledge base in the workflow. The
+     * name must match a RagConfiguration.name in the workflow.
+     */
+    public static class KnowledgeBaseReference {
+        /** Name of the RagConfiguration resource in the workflow */
+        private String name;
+
+        /** Override: max results (null = use KB default) */
+        private Integer maxResults;
+
+        /** Override: min similarity score (null = use KB default) */
+        private Double minScore;
+
+        /** Override: injection strategy — "system_message" (default), "user_message" */
+        private String injectionStrategy;
+
+        /** Override: custom context template (null = use default formatting) */
+        private String contextTemplate;
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public Integer getMaxResults() {
+            return maxResults;
+        }
+
+        public void setMaxResults(Integer maxResults) {
+            this.maxResults = maxResults;
+        }
+
+        public Double getMinScore() {
+            return minScore;
+        }
+
+        public void setMinScore(Double minScore) {
+            this.minScore = minScore;
+        }
+
+        public String getInjectionStrategy() {
+            return injectionStrategy;
+        }
+
+        public void setInjectionStrategy(String injectionStrategy) {
+            this.injectionStrategy = injectionStrategy;
+        }
+
+        public String getContextTemplate() {
+            return contextTemplate;
+        }
+
+        public void setContextTemplate(String contextTemplate) {
+            this.contextTemplate = contextTemplate;
+        }
+    }
+
+    /**
+     * Default retrieval parameters for enableWorkflowRag=true mode.
+     */
+    public static class RagDefaults {
+        private Integer maxResults = 5;
+        private Double minScore = 0.6;
+        private String injectionStrategy = "system_message";
+
+        public Integer getMaxResults() {
+            return maxResults;
+        }
+
+        public void setMaxResults(Integer maxResults) {
+            this.maxResults = maxResults;
+        }
+
+        public Double getMinScore() {
+            return minScore;
+        }
+
+        public void setMinScore(Double minScore) {
+            this.minScore = minScore;
+        }
+
+        public String getInjectionStrategy() {
+            return injectionStrategy;
+        }
+
+        public void setInjectionStrategy(String injectionStrategy) {
+            this.injectionStrategy = injectionStrategy;
         }
     }
 

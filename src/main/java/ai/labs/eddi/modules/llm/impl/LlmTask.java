@@ -80,6 +80,7 @@ public class LlmTask implements ILifecycleTask {
     private final LegacyChatExecutor legacyChatExecutor;
     private final StreamingLegacyChatExecutor streamingLegacyChatExecutor;
     private final AgentOrchestrator agentOrchestrator;
+    private final RagContextProvider ragContextProvider;
 
     private static final Logger LOGGER = Logger.getLogger(LlmTask.class);
 
@@ -90,7 +91,8 @@ public class LlmTask implements ILifecycleTask {
             CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             IApiCallExecutor apiCallExecutor, ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager,
-            A2AToolProviderManager a2aToolProviderManager, IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore) {
+            A2AToolProviderManager a2aToolProviderManager, IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
+            RagContextProvider ragContextProvider) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -105,6 +107,7 @@ public class LlmTask implements ILifecycleTask {
         this.agentOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
                 textSummarizerTool, pdfReaderTool, weatherTool, toolExecutionService, mcpToolProviderManager, a2aToolProviderManager, restAgentStore,
                 restWorkflowStore, resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter);
+        this.ragContextProvider = ragContextProvider;
     }
 
     @Override
@@ -161,6 +164,27 @@ public class LlmTask implements ILifecycleTask {
         }
         boolean includeFirstAgentMessage = isNullOrEmpty(processedParams.get(KEY_INCLUDE_FIRST_AGENT_MESSAGE))
                 || Boolean.parseBoolean(processedParams.get(KEY_INCLUDE_FIRST_AGENT_MESSAGE));
+
+        // === RAG Context Injection ===
+        String userInput = extractUserInput(memory);
+
+        // Phase 8c-0: Zero-infrastructure RAG via named httpCall
+        // TODO Phase 8c-0: execute task.getHttpCallRag() via IApiCallExecutor,
+        // inject response as context. Requires wiring the httpCall discovery
+        // pattern from AgentOrchestrator.discoverHttpCallTools().
+
+        // Vector store RAG: retrieve from knowledge bases in the workflow
+        if (userInput != null) {
+            try {
+                String ragContext = ragContextProvider.retrieveContext(memory, task, userInput);
+                if (ragContext != null) {
+                    systemMessage += "\n\n## Relevant Context:\n" + ragContext;
+                    LOGGER.infof("RAG context injected for task '%s': %d chars", task.getId(), ragContext.length());
+                }
+            } catch (Exception e) {
+                LOGGER.warnf(e, "RAG context retrieval failed for task '%s': %s", task.getId(), e.getMessage());
+            }
+        }
 
         // Build conversation messages
         List<ChatMessage> messages = conversationHistoryBuilder.buildMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), logSizeLimit,
@@ -402,6 +426,19 @@ public class LlmTask implements ILifecycleTask {
             }
         });
         return processedParams;
+    }
+
+    /**
+     * Extracts the current user input text from conversation memory. Used as the
+     * query for RAG retrieval.
+     */
+    private String extractUserInput(IConversationMemory memory) {
+        var currentStep = memory.getCurrentStep();
+        IData<String> inputData = currentStep.getLatestData("input");
+        if (inputData != null && inputData.getResult() != null) {
+            return inputData.getResult();
+        }
+        return null;
     }
 
     @Override
