@@ -135,7 +135,6 @@ public record LlmConfiguration(List<Task> tasks) {
          */
         private Integer conversationHistoryLimit = 10;
 
-
         // === RAG Configuration (Phase 8c) ===
 
         /**
@@ -364,7 +363,6 @@ public record LlmConfiguration(List<Task> tasks) {
         public void setConversationHistoryLimit(Integer conversationHistoryLimit) {
             this.conversationHistoryLimit = conversationHistoryLimit;
         }
-
 
         public List<KnowledgeBaseReference> getKnowledgeBases() {
             return knowledgeBases;
@@ -656,7 +654,6 @@ public record LlmConfiguration(List<Task> tasks) {
             this.maxBackoffDelayMs = maxBackoffDelayMs;
         }
     }
-
 
     /**
      * Reference from an LLM task to a specific knowledge base in the workflow. The
