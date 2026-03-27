@@ -258,7 +258,9 @@
     "addHintDialog": "Pipeline に追加する拡張タイプを選択",
     "reorder": "拡張機能を並べ替え",
     "saved": "Workflow が正常に保存されました",
-    "saveError": "Workflow の保存に失敗しました"
+    "saveError": "Workflow の保存に失敗しました",
+    "noTasks": "[EN] No tasks in this workflow",
+    "addTask": "[EN] Add Task"
   },
   "conversations": {
     "searchPlaceholder": "会話 ID で検索...",

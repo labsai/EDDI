@@ -22,7 +22,7 @@ describe("WorkflowsPage", () => {
   it("shows subtitle text", () => {
     renderWithProviders(<WorkflowsPage />);
     expect(
-      screen.getByText("Configure agent workflows and extensions")
+      screen.getByText("Configure agent workflows and task pipelines")
     ).toBeInTheDocument();
   });
 });

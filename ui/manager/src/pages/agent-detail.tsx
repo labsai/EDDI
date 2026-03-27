@@ -43,8 +43,10 @@ import {
 } from "@/hooks/use-agents";
 import { useExportAgent } from "@/hooks/use-backup";
 import { useWorkflowDescriptors, useUpdateAgentWorkflows } from "@/hooks/use-workflows";
-import { parseResourceUri, type EnvironmentStatus } from "@/lib/api/agents";
+import { parseResourceUri, type EnvironmentStatus, deployAgent, getDeploymentStatus } from "@/lib/api/agents";
 import { useLatestVersions } from "@/hooks/use-latest-versions";
+import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
+import { useChatStore, useStartConversation } from "@/hooks/use-chat";
 
 /* ─── Status icons (labels resolved via i18n in component) ─── */
 const statusIcons = {
@@ -85,6 +87,7 @@ export function AgentDetailPage() {
   const duplicateMutation = useDuplicateAgent();
   const updateWorkflowsMutation = useUpdateAgentWorkflows();
   const exportMutation = useExportAgent();
+  const startConversationMutation = useStartConversation();
 
   const status = deployment?.status ?? "NOT_FOUND";
   const config = statusIcons[status];
@@ -249,9 +252,14 @@ export function AgentDetailPage() {
             <Bot className="h-8 w-8 text-primary" />
             <div>
               <h1 className="text-3xl font-bold text-foreground">
-                {t("agentDetail.title", "Agent Detail")}
+                {versions?.find(v => v.version === resolvedVersion)?.name || t("agentDetail.title", "Agent Detail")}
               </h1>
-              <p className="font-mono text-sm text-muted-foreground">ID: {id}</p>
+              <p className="font-mono text-sm text-muted-foreground">
+                {id}
+                <span className="ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
+                  v{resolvedVersion}
+                </span>
+              </p>
             </div>
           </div>
           {/* Version picker */}
@@ -299,23 +307,34 @@ export function AgentDetailPage() {
                 : t("agents.deploy")}
           </button>
 
-          {/* Deploy & Chat — quick action to deploy to test and chat */}
+          {/* Deploy & Chat — deploy to production and open chat drawer */}
           {!isDeployed && !isBusy && (
             <button
-              onClick={() => {
-                deployMutation.mutate(
-                  { environment: "test", agentId: id!, version: resolvedVersion },
-                  {
-                    onSuccess: () => {
-                      toast.success(t("agentDetail.deployAndChat", "Deploying to test..."));
-                      // Small delay to let deployment start, then navigate to chat
-                      setTimeout(() => navigate(`/manage/chat?agentId=${id}`), 800);
-                    },
-                    onError: (err) => toast.error(getErrorMessage(err)),
+              onClick={async () => {
+                const drawerStore = useChatDrawerStore.getState();
+                const chatStore = useChatStore.getState();
+                drawerStore.open(id!, id!);
+                drawerStore.setStep("deploying");
+                try {
+                  await deployAgent("production", id!, resolvedVersion);
+                  // Poll for readiness
+                  for (let i = 0; i < 15; i++) {
+                    await new Promise(r => setTimeout(r, 2000));
+                    const s = await getDeploymentStatus("production", id!, resolvedVersion);
+                    if (s.status === "READY") break;
+                    if (s.status === "ERROR") throw new Error("Deploy failed");
                   }
-                );
+                  drawerStore.setStep("starting");
+                  chatStore.clearMessages();
+                  chatStore.setSelectedAgent(id!, id!);
+                  await startConversationMutation.mutateAsync({ agentId: id! });
+                  drawerStore.setStep("ready");
+                } catch (err) {
+                  drawerStore.setStep("error", getErrorMessage(err));
+                }
               }}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400"
+              disabled={startConversationMutation.isPending}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed"
               data-testid="deploy-chat-btn"
             >
               <Rocket className="h-4 w-4" />
@@ -323,17 +342,32 @@ export function AgentDetailPage() {
             </button>
           )}
 
-          {/* Chat — only when deployed */}
-          {isDeployed && (
-            <Link
-              to={`/manage/chat?agentId=${id}`}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400"
-              data-testid="chat-btn"
-            >
-              <MessageSquare className="h-4 w-4" />
-              {t("agents.chat", "Chat")}
-            </Link>
-          )}
+          {/* Chat — open drawer (works when deployed or ready to deploy) */}
+          <button
+            onClick={async () => {
+              const drawerStore = useChatDrawerStore.getState();
+              const chatStore = useChatStore.getState();
+              drawerStore.open(id!, id!);
+              if (isDeployed) {
+                drawerStore.setStep("starting");
+                chatStore.clearMessages();
+                chatStore.setSelectedAgent(id!, id!);
+                try {
+                  await startConversationMutation.mutateAsync({ agentId: id! });
+                  drawerStore.setStep("ready");
+                } catch (err) {
+                  drawerStore.setStep("error", getErrorMessage(err));
+                }
+              }
+              // If not deployed, opens idle drawer — user can Deploy first
+            }}
+            disabled={startConversationMutation.isPending}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed"
+            data-testid="chat-btn"
+          >
+            <MessageSquare className="h-4 w-4" />
+            {t("agents.chat", "Chat")}
+          </button>
 
           {/* Duplicate */}
           <button

@@ -10,6 +10,7 @@ import {
   getResourceType,
   type ResourceTypeConfig,
 } from "@/lib/api/resources";
+import { updateDescriptor } from "@/lib/api/descriptors";
 import {
   cascadeSaveResource,
   type CascadeContext,
@@ -65,9 +66,25 @@ export function useCreateResource(slug: string) {
   const queryClient = useQueryClient();
   const rt = resolveType(slug);
   return useMutation({
-    mutationFn: (body: unknown = {}) => {
-      if (!rt) return Promise.reject(new Error(`Unknown resource type: ${slug}`));
-      return createResource(rt, body);
+    mutationFn: async ({
+      body = {},
+      name,
+      description,
+    }: {
+      body?: unknown;
+      name?: string;
+      description?: string;
+    }) => {
+      if (!rt) throw new Error(`Unknown resource type: ${slug}`);
+      const response = await createResource(rt, body);
+      if ((name || description) && response.location) {
+        const url = new URL(response.location, "http://dummy");
+        const parts = url.pathname.split("/").filter(Boolean);
+        const id = parts[parts.length - 1]!;
+        const version = parseInt(url.searchParams.get("version") || "1", 10);
+        await updateDescriptor(id, version, { name, description });
+      }
+      return response;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: resourceKeys(slug) });

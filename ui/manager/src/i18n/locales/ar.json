@@ -258,7 +258,9 @@
     "addHintDialog": "اختر نوع الإضافة للإضافة إلى pipeline",
     "reorder": "إعادة ترتيب الإضافة",
     "saved": "تم حفظ Workflow بنجاح",
-    "saveError": "فشل حفظ Workflow"
+    "saveError": "فشل حفظ Workflow",
+    "noTasks": "[EN] No tasks in this workflow",
+    "addTask": "[EN] Add Task"
   },
   "conversations": {
     "searchPlaceholder": "البحث بمعرّف المحادثة...",

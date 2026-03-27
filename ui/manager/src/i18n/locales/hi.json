@@ -258,7 +258,9 @@
     "addHintDialog": "Pipeline में जोड़ने के लिए एक्सटेंशन प्रकार चुनें",
     "reorder": "एक्सटेंशन पुनः क्रमित करें",
     "saved": "Workflow सफलतापूर्वक सहेजा गया",
-    "saveError": "Workflow सहेजने में विफल"
+    "saveError": "Workflow सहेजने में विफल",
+    "noTasks": "[EN] No tasks in this workflow",
+    "addTask": "[EN] Add Task"
   },
   "conversations": {
     "searchPlaceholder": "वार्तालाप ID से खोजें...",

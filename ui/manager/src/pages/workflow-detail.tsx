@@ -298,10 +298,19 @@ export function WorkflowDetailPage() {
             <Workflow className="h-8 w-8 text-primary" />
             <div>
               <h1 className="text-3xl font-bold text-foreground">
-                {t("packageEditor.title", "Workflow Editor")}
+                {(() => {
+                  const desc = versionDescriptors?.find(d => {
+                    const match = d.resource?.match(/\?version=(\d+)/);
+                    return match ? parseInt(match[1]!, 10) === resolvedVersion : false;
+                  });
+                  return desc?.name || t("packageEditor.title", "Workflow Editor");
+                })()}
               </h1>
               <p className="font-mono text-sm text-muted-foreground">
-                ID: {id}
+                {id}
+                <span className="ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
+                  v{resolvedVersion}
+                </span>
               </p>
             </div>
           </div>

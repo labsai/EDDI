@@ -258,7 +258,9 @@
     "addHintDialog": "Sélectionnez un type d'extension à ajouter",
     "reorder": "Réordonner l'extension",
     "saved": "Workflow enregistré avec succès",
-    "saveError": "Échec de l'enregistrement du workflow"
+    "saveError": "Échec de l'enregistrement du workflow",
+    "noTasks": "[EN] No tasks in this workflow",
+    "addTask": "[EN] Add Task"
   },
   "conversations": {
     "searchPlaceholder": "Rechercher par ID de conversation...",

@@ -30,7 +30,8 @@ describe("AgentDetailPage", () => {
   it("renders agent detail title", async () => {
     renderAgentDetail();
     await waitFor(() => {
-      expect(screen.getByText("Agent Detail")).toBeInTheDocument();
+      // MSW returns descriptor name "Support Agent" for agent1
+      expect(screen.getByText("Support Agent")).toBeInTheDocument();
     });
   });
 

@@ -77,6 +77,7 @@ export function useAgentVersions(agentId: string) {
         .map((d) => ({
           version: parseResourceUri(d.resource).version,
           lastModifiedOn: d.lastModifiedOn,
+          name: d.name,
         }))
         .sort((a, b) => b.version - a.version),
   });

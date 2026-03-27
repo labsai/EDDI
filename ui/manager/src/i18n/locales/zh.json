@@ -258,7 +258,9 @@
     "addHintDialog": "选择要添加的扩展类型",
     "reorder": "重新排序扩展",
     "saved": "Workflow 保存成功",
-    "saveError": "Workflow 保存失败"
+    "saveError": "Workflow 保存失败",
+    "noTasks": "[EN] No tasks in this workflow",
+    "addTask": "[EN] Add Task"
   },
   "conversations": {
     "searchPlaceholder": "按会话 ID 搜索...",

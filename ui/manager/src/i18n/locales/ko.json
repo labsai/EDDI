@@ -258,7 +258,9 @@
     "addHintDialog": "Pipeline에 추가할 확장 유형을 선택하세요",
     "reorder": "확장 기능 순서 변경",
     "saved": "Workflow가 성공적으로 저장되었습니다",
-    "saveError": "Workflow 저장 실패"
+    "saveError": "Workflow 저장 실패",
+    "noTasks": "[EN] No tasks in this workflow",
+    "addTask": "[EN] Add Task"
   },
   "conversations": {
     "searchPlaceholder": "대화 ID로 검색...",

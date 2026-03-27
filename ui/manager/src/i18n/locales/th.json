@@ -258,7 +258,9 @@
     "addHintDialog": "เลือกประเภทส่วนขยายที่จะเพิ่ม",
     "reorder": "จัดลำดับส่วนขยาย",
     "saved": "บันทึก Workflow สำเร็จ",
-    "saveError": "บันทึก Workflow ล้มเหลว"
+    "saveError": "บันทึก Workflow ล้มเหลว",
+    "noTasks": "[EN] No tasks in this workflow",
+    "addTask": "[EN] Add Task"
   },
   "conversations": {
     "searchPlaceholder": "ค้นหาด้วย ID การสนทนา...",

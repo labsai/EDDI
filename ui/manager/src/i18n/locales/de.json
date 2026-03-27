@@ -258,7 +258,9 @@
     "addHintDialog": "Erweiterungstyp zum Hinzufügen auswählen",
     "reorder": "Erweiterung verschieben",
     "saved": "Workflow erfolgreich gespeichert",
-    "saveError": "Workflow konnte nicht gespeichert werden"
+    "saveError": "Workflow konnte nicht gespeichert werden",
+    "noTasks": "[EN] No tasks in this workflow",
+    "addTask": "[EN] Add Task"
   },
   "conversations": {
     "searchPlaceholder": "Nach Gesprächs-ID suchen...",

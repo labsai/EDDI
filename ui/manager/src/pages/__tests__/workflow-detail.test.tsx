@@ -35,7 +35,8 @@ describe("WorkflowDetailPage", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("Workflow Editor")).toBeInTheDocument();
+      // MSW returns descriptor name "Support Workflow" for pkg1
+      expect(screen.getByText("Support Workflow")).toBeInTheDocument();
     });
   });
 
@@ -45,7 +46,7 @@ describe("WorkflowDetailPage", () => {
     await waitFor(() => {
       // MSW returns a package with 2 extensions (behavior + langchain)
       expect(screen.getByText("Rules")).toBeInTheDocument();
-      expect(screen.getByText("LLM")).toBeInTheDocument();
+      expect(screen.getByText("Lang Chain")).toBeInTheDocument();
     });
   });
 
@@ -53,7 +54,7 @@ describe("WorkflowDetailPage", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("Extension Pipeline")).toBeInTheDocument();
+      expect(screen.getByText("Pipeline")).toBeInTheDocument();
     });
   });
 

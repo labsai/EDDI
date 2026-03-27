@@ -366,9 +366,20 @@ export function ResourceDetailPage() {
         <div>
           <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
             <Icon className="h-8 w-8 text-primary" />
-            {typeName}
+            {(() => {
+              const desc = versionDescriptors?.find(d => {
+                const match = d.resource?.match(/\?version=(\d+)/);
+                return match ? parseInt(match[1]!, 10) === currentVersion : false;
+              });
+              return desc?.name || typeName;
+            })()}
           </h1>
-          <p className="mt-1 font-mono text-xs text-muted-foreground">{id}</p>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">
+            {id}
+            <span className="ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
+              v{currentVersion}
+            </span>
+          </p>
           {cascadeContext && (
             <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
               {t(

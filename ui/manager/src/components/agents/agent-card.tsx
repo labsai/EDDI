@@ -14,6 +14,9 @@ import {
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useDeploymentStatus, useDeployAgent, useUndeployAgent } from "@/hooks/use-agents";
 import { useExportAgent } from "@/hooks/use-backup";
+import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
+import { useChatStore, useStartConversation } from "@/hooks/use-chat";
+import { getErrorMessage } from "@/lib/api-client";
 import type { AgentDescriptor } from "@/lib/api/agents";
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -41,6 +44,7 @@ export function AgentCard({ agent, onDuplicate, onDelete }: AgentCardProps) {
   const deployMutation = useDeployAgent();
   const undeployMutation = useUndeployAgent();
   const exportMutation = useExportAgent();
+  const startConversation = useStartConversation();
 
   const status = deployment?.status ?? "NOT_FOUND";
   const config = statusIcons[status];
@@ -185,14 +189,28 @@ export function AgentCard({ agent, onDuplicate, onDelete }: AgentCardProps) {
         <div className="flex items-center gap-2">
           {/* Chat button — only when deployed */}
           {isDeployed && (
-            <Link
-              to={`/manage/chat?agentId=${agent.id}`}
+            <button
+              onClick={async () => {
+                const drawerStore = useChatDrawerStore.getState();
+                const chatStore = useChatStore.getState();
+                const agentName = agent.name || t("agents.unnamed", "Unnamed Agent");
+                drawerStore.open(agent.id, agentName);
+                drawerStore.setStep("starting");
+                chatStore.clearMessages();
+                chatStore.setSelectedAgent(agent.id, agentName);
+                try {
+                  await startConversation.mutateAsync({ agentId: agent.id });
+                  drawerStore.setStep("ready");
+                } catch (err) {
+                  drawerStore.setStep("error", getErrorMessage(err));
+                }
+              }}
               className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400"
               data-testid={`agent-chat-${agent.id}`}
             >
               <MessageSquare className="h-3.5 w-3.5" />
               {t("agents.chat", "Chat")}
-            </Link>
+            </button>
           )}
 
           <button
