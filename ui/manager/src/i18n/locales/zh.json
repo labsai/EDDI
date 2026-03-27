@@ -9,7 +9,8 @@
     "loading": "认证中…",
     "sessionExpired": "会话已过期，请重新登录。",
     "profile": "个人资料",
-    "guest": "访客"
+    "guest": "访客",
+    "userMenu": "用户菜单"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -28,7 +29,9 @@
     "resources": "资源",
     "sectionManagement": "管理",
     "sectionDevelopment": "开发",
-    "sectionOperations": "运维"
+    "sectionOperations": "运维",
+    "mainNavigation": "主导航",
+    "openMenu": "打开导航菜单"
   },
   "theme": {
     "light": "浅色",
@@ -97,7 +100,15 @@
     "edit": "编辑",
     "search": "搜索...",
     "noResults": "未找到结果",
-    "duplicate": "复制"
+    "duplicate": "复制",
+    "close": "关闭",
+    "skipToMain": "跳至主要内容",
+    "opensNewTab": "在新标签页中打开",
+    "moreActions": "更多操作",
+    "sortByName": "按名称排序",
+    "sortByVersion": "按版本排序",
+    "sortByModified": "按修改日期排序",
+    "apply": "应用"
   },
   "agents": {
     "deploy": "部署",

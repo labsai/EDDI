@@ -18,6 +18,8 @@ export function StreamingToggle() {
           : "border-border bg-muted text-muted-foreground"
       )}
       title={t("chat.streaming")}
+      aria-label={t("chat.streaming")}
+      aria-pressed={streamingEnabled}
       data-testid="streaming-toggle"
     >
       {streamingEnabled ? (

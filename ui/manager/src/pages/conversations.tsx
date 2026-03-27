@@ -117,6 +117,7 @@ export function ConversationsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t("conversations.searchPlaceholder")}
+            aria-label={t("conversations.searchPlaceholder")}
             className="w-full rounded-lg border border-input bg-background py-2.5 ps-10 pe-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
             data-testid="conversation-search"
           />
@@ -227,9 +228,10 @@ export function ConversationsPage() {
                           e.stopPropagation();
                           setDeleteTarget(convId);
                         }}
-                        className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive hover:bg-destructive/10 group-hover:opacity-100"
+                        className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive hover:bg-destructive/10 group-hover:opacity-100 focus:opacity-100"
+                        aria-label={t("conversations.deleteConversation", "Delete conversation")}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
                       </button>
                     </div>
 
@@ -356,8 +358,9 @@ export function ConversationsPage() {
                             className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                             onClick={() => setDeleteTarget(convId)}
                             disabled={deleteMutation.isPending}
+                            aria-label={t("conversations.deleteConversation", "Delete conversation")}
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <Trash2 className="h-4 w-4" aria-hidden="true" />
                           </Button>
                         </td>
                       </tr>

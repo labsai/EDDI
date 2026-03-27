@@ -125,13 +125,15 @@ export function ChatDrawer() {
         isOpen ? "w-[420px] opacity-100 border-s border-border" : "w-0 opacity-0"
       )}
       data-testid="chat-drawer"
+      role="complementary"
+      aria-label={t("chatDrawer.title", "Test Chat")}
     >
       {isOpen && (
         <>
           {/* Header */}
           <div className="flex items-center gap-2 border-b border-border px-4 py-2.5 shrink-0">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-              <Bot className="h-4 w-4 text-primary" />
+              <Bot className="h-4 w-4 text-primary" aria-hidden="true" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-foreground truncate">
@@ -149,9 +151,10 @@ export function ChatDrawer() {
                 onClick={handleNewConversation}
                 className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 title={t("chatDrawer.newConversation", "New Conversation")}
+                aria-label={t("chatDrawer.newConversation", "New Conversation")}
                 data-testid="drawer-new-conversation"
               >
-                <MessageSquarePlus className="h-4 w-4" />
+                <MessageSquarePlus className="h-4 w-4" aria-hidden="true" />
               </button>
             )}
 
@@ -160,9 +163,10 @@ export function ChatDrawer() {
               onClick={close}
               className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               title={t("common.close", "Close")}
+              aria-label={t("common.close", "Close")}
               data-testid="drawer-close"
             >
-              <X className="h-4 w-4" />
+              <X className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
 
@@ -205,7 +209,7 @@ export function ChatDrawer() {
             {/* Chat messages */}
             {(showChat || (step === "idle" && conversationId)) && (
               <>
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 overflow-y-auto" aria-live="polite" aria-relevant="additions">
                   {messages.length === 0 ? (
                     <div className="flex h-full items-center justify-center">
                       <div className="text-center">

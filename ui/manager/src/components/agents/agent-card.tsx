@@ -112,26 +112,38 @@ export function AgentCard({ agent, onDuplicate, onDelete }: AgentCardProps) {
         <div className="relative">
           <button
             onClick={() => setMenuOpen(!menuOpen)}
-            className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100"
+            className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100 focus:opacity-100"
             data-testid={`agent-menu-${agent.id}`}
+            aria-label={t("common.moreActions", "More actions")}
+            aria-haspopup="true"
+            aria-expanded={menuOpen}
           >
-            <MoreVertical className="h-4 w-4" />
+            <MoreVertical className="h-4 w-4" aria-hidden="true" />
           </button>
           {menuOpen && (
             <>
               <div
                 className="fixed inset-0 z-40"
                 onClick={() => setMenuOpen(false)}
+                aria-hidden="true"
               />
-              <div className="absolute inset-e-0 z-50 mt-1 w-44 rounded-lg border bg-popover py-1 shadow-lg">
+              <div
+                className="absolute inset-e-0 z-50 mt-1 w-44 rounded-lg border bg-popover py-1 shadow-lg"
+                role="menu"
+                aria-label={t("common.moreActions", "More actions")}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setMenuOpen(false);
+                }}
+              >
                 <button
                   onClick={() => {
                     onDuplicate(agent.id, agent.version);
                     setMenuOpen(false);
                   }}
                   className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-secondary"
+                  role="menuitem"
                 >
-                  <Copy className="h-4 w-4" />
+                  <Copy className="h-4 w-4" aria-hidden="true" />
                   {t("common.duplicate", "Duplicate")}
                 </button>
                 <button
@@ -141,8 +153,9 @@ export function AgentCard({ agent, onDuplicate, onDelete }: AgentCardProps) {
                   }}
                   disabled={exportMutation.isPending}
                   className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-secondary disabled:opacity-50"
+                  role="menuitem"
                 >
-                  <Download className="h-4 w-4" />
+                  <Download className="h-4 w-4" aria-hidden="true" />
                   {exportMutation.isPending
                     ? t("agents.exporting", "Exporting...")
                     : t("agents.export", "Export")}
@@ -153,8 +166,9 @@ export function AgentCard({ agent, onDuplicate, onDelete }: AgentCardProps) {
                     setMenuOpen(false);
                   }}
                   className="flex w-full items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-destructive/10"
+                  role="menuitem"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
                   {t("common.delete")}
                 </button>
               </div>
@@ -207,8 +221,9 @@ export function AgentCard({ agent, onDuplicate, onDelete }: AgentCardProps) {
               }}
               className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400"
               data-testid={`agent-chat-${agent.id}`}
+              aria-label={t("agents.chat", "Chat")}
             >
-              <MessageSquare className="h-3.5 w-3.5" />
+              <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
               {t("agents.chat", "Chat")}
             </button>
           )}

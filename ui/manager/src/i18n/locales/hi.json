@@ -9,7 +9,8 @@
     "loading": "प्रमाणीकरण हो रहा है…",
     "sessionExpired": "सत्र समाप्त हो गया। कृपया पुनः लॉगिन करें।",
     "profile": "प्रोफ़ाइल",
-    "guest": "अतिथि"
+    "guest": "अतिथि",
+    "userMenu": "उपयोगकर्ता मेनू"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -28,7 +29,9 @@
     "resources": "संसाधन",
     "sectionManagement": "प्रबंधन",
     "sectionDevelopment": "विकास",
-    "sectionOperations": "संचालन"
+    "sectionOperations": "संचालन",
+    "mainNavigation": "मुख्य नेविगेशन",
+    "openMenu": "नेविगेशन मेनू खोलें"
   },
   "theme": {
     "light": "लाइट",
@@ -97,7 +100,15 @@
     "edit": "संपादित करें",
     "search": "खोजें...",
     "noResults": "कोई परिणाम नहीं मिला",
-    "duplicate": "प्रतिलिपि"
+    "duplicate": "प्रतिलिपि",
+    "close": "बंद करें",
+    "skipToMain": "मुख्य सामग्री पर जाएं",
+    "opensNewTab": "नए टैब में खुलता है",
+    "moreActions": "अधिक कार्य",
+    "sortByName": "नाम से क्रमबद्ध करें",
+    "sortByVersion": "संस्करण से क्रमबद्ध करें",
+    "sortByModified": "संशोधन तिथि से क्रमबद्ध करें",
+    "apply": "लागू करें"
   },
   "agents": {
     "deploy": "Deploy",

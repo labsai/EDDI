@@ -84,23 +84,29 @@ export function VersionDiffDialog({
   return (
     <div className="fixed inset-0 z-50 flex flex-col" data-testid="version-diff-dialog">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
 
       {/* Dialog — full screen with padding */}
-      <div className="relative z-10 flex flex-col m-4 rounded-xl border bg-card shadow-2xl overflow-hidden flex-1">
+      <div
+        className="relative z-10 flex flex-col m-4 rounded-xl border bg-card shadow-2xl overflow-hidden flex-1"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="diff-dialog-title"
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-5 py-3 shrink-0">
           <div className="flex items-center gap-2">
-            <GitCompareArrows className="h-5 w-5 text-primary" />
-            <h3 className="text-lg font-semibold text-foreground">
+            <GitCompareArrows className="h-5 w-5 text-primary" aria-hidden="true" />
+            <h3 id="diff-dialog-title" className="text-lg font-semibold text-foreground">
               {t("editor.compareVersions", "Compare Versions")} — {typeName}
             </h3>
           </div>
           <button
             onClick={onClose}
             className="rounded-md p-1 text-muted-foreground hover:bg-secondary transition-colors"
+            aria-label={t("common.close", "Close")}
           >
-            <X className="h-5 w-5" />
+            <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
 
@@ -128,8 +134,9 @@ export function VersionDiffDialog({
             }}
             className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary transition-colors"
             title={t("editor.swapVersions", "Swap versions")}
+            aria-label={t("editor.swapVersions", "Swap versions")}
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
 

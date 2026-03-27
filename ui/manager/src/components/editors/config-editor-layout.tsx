@@ -226,10 +226,32 @@ export function ConfigEditorLayout({
       </div>
 
       {/* Tab bar */}
-      <div className="flex gap-1 rounded-lg bg-muted p-1" data-testid="editor-tabs" role="tablist">
+      <div
+        className="flex gap-1 rounded-lg bg-muted p-1"
+        data-testid="editor-tabs"
+        role="tablist"
+        aria-label={typeName}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+            e.preventDefault();
+            const next = e.key === "ArrowRight"
+              ? (activeTab === "form" ? "json" : "form")
+              : (activeTab === "json" ? "form" : "json");
+            setActiveTab(next as EditorTab);
+            // Focus the newly active tab
+            requestAnimationFrame(() => {
+              const btn = document.getElementById(`editor-tab-${next}`);
+              btn?.focus();
+            });
+          }
+        }}
+      >
         <button
+          id="editor-tab-form"
           role="tab"
           aria-selected={activeTab === "form"}
+          aria-controls="editor-tabpanel-form"
+          tabIndex={activeTab === "form" ? 0 : -1}
           onClick={() => setActiveTab("form")}
           className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
             activeTab === "form"
@@ -238,12 +260,15 @@ export function ConfigEditorLayout({
           }`}
           data-testid="tab-form"
         >
-          <FormInput className="h-4 w-4" />
+          <FormInput className="h-4 w-4" aria-hidden="true" />
           {t("editor.formTab", "Form")}
         </button>
         <button
+          id="editor-tab-json"
           role="tab"
           aria-selected={activeTab === "json"}
+          aria-controls="editor-tabpanel-json"
+          tabIndex={activeTab === "json" ? 0 : -1}
           onClick={() => setActiveTab("json")}
           className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
             activeTab === "json"
@@ -252,7 +277,7 @@ export function ConfigEditorLayout({
           }`}
           data-testid="tab-json"
         >
-          <FileCode className="h-4 w-4" />
+          <FileCode className="h-4 w-4" aria-hidden="true" />
           {t("editor.jsonTab", "JSON")}
         </button>
       </div>
@@ -260,7 +285,13 @@ export function ConfigEditorLayout({
       {/* Tab content */}
       <div className="rounded-xl border bg-card shadow-sm">
         {activeTab === "form" ? (
-          <div className="p-6" data-testid="form-view">
+          <div
+            id="editor-tabpanel-form"
+            role="tabpanel"
+            aria-labelledby="editor-tab-form"
+            className="p-6"
+            data-testid="form-view"
+          >
             {renderFormEditor ? (
               (() => {
                 try {
@@ -268,7 +299,7 @@ export function ConfigEditorLayout({
                   return renderFormEditor(parsed, handleFormChange, readOnly, { resourceId });
                 } catch {
                   return (
-                    <div className="text-sm text-destructive">
+                    <div className="text-sm text-destructive" role="alert">
                       {t(
                         "editor.invalidJson",
                         "Invalid JSON — switch to the JSON tab to fix."
@@ -281,7 +312,7 @@ export function ConfigEditorLayout({
               children
             ) : (
               <div className="flex flex-col items-center justify-center py-16 text-center">
-                <FormInput className="h-10 w-10 text-muted-foreground/50" />
+                <FormInput className="h-10 w-10 text-muted-foreground/50" aria-hidden="true" />
                 <p className="mt-3 text-sm text-muted-foreground">
                   {t(
                     "editor.formPlaceholder",
@@ -292,7 +323,13 @@ export function ConfigEditorLayout({
             )}
           </div>
         ) : (
-          <div className="p-2" data-testid="json-view">
+          <div
+            id="editor-tabpanel-json"
+            role="tabpanel"
+            aria-labelledby="editor-tab-json"
+            className="p-2"
+            data-testid="json-view"
+          >
             <JsonEditor
               value={editedData}
               onChange={readOnly ? undefined : handleJsonChange}

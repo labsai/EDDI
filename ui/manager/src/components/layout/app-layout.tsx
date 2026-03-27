@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
@@ -6,6 +7,7 @@ import { ChatDrawer } from "@/components/chat/chat-drawer";
 import { cn } from "@/lib/utils";
 
 export function AppLayout() {
+  const { t } = useTranslation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -24,6 +26,10 @@ export function AppLayout() {
 
   return (
     <div className="flex h-screen overflow-hidden" data-testid="app-layout">
+      {/* Skip to main content — keyboard accessibility */}
+      <a href="#main-content" className="skip-to-main">
+        {t("common.skipToMain", "Skip to main content")}
+      </a>
       {/* Desktop sidebar */}
       {!isMobile && (
         <Sidebar
@@ -56,6 +62,7 @@ export function AppLayout() {
           sidebarVisible={mobileSidebarOpen}
         />
         <main
+          id="main-content"
           className={cn(
             "flex-1 overflow-auto bg-background p-6",
             "transition-all duration-300"

@@ -9,7 +9,8 @@
     "loading": "جارٍ المصادقة…",
     "sessionExpired": "انتهت الجلسة. يرجى تسجيل الدخول مجدداً.",
     "profile": "الملف الشخصي",
-    "guest": "زائر"
+    "guest": "زائر",
+    "userMenu": "قائمة المستخدم"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -28,7 +29,9 @@
     "resources": "الموارد",
     "sectionManagement": "الإدارة",
     "sectionDevelopment": "التطوير",
-    "sectionOperations": "العمليات"
+    "sectionOperations": "العمليات",
+    "mainNavigation": "التنقل الرئيسي",
+    "openMenu": "فتح قائمة التنقل"
   },
   "theme": {
     "light": "فاتح",
@@ -97,7 +100,15 @@
     "edit": "تعديل",
     "search": "بحث...",
     "noResults": "لم يتم العثور على نتائج",
-    "duplicate": "تكرار"
+    "duplicate": "تكرار",
+    "close": "إغلاق",
+    "skipToMain": "انتقل إلى المحتوى الرئيسي",
+    "opensNewTab": "يفتح في علامة تبويب جديدة",
+    "moreActions": "المزيد من الإجراءات",
+    "sortByName": "ترتيب حسب الاسم",
+    "sortByVersion": "ترتيب حسب الإصدار",
+    "sortByModified": "ترتيب حسب تاريخ التعديل",
+    "apply": "تطبيق"
   },
   "agents": {
     "deploy": "نشر",

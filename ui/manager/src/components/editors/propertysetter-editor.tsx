@@ -176,15 +176,21 @@ function ValueEditorModal({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-8">
-        <div className="flex w-full max-w-3xl flex-col rounded-xl border bg-card shadow-2xl" style={{ height: "70vh" }}>
+        <div
+          className="flex w-full max-w-3xl flex-col rounded-xl border bg-card shadow-2xl"
+          style={{ height: "70vh" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="value-editor-title"
+        >
           <div className="flex items-center justify-between border-b border-border px-5 py-3">
-            <h3 className="text-sm font-semibold text-foreground">
+            <h3 id="value-editor-title" className="text-sm font-semibold text-foreground">
               {t("propertySetterEditor.editValue", "Edit Value")} — <code className="text-primary">{name}</code>
             </h3>
-            <button onClick={onClose} className="rounded-md p-1 text-muted-foreground hover:bg-secondary transition-colors">
-              <X className="h-4 w-4" />
+            <button onClick={onClose} className="rounded-md p-1 text-muted-foreground hover:bg-secondary transition-colors" aria-label={t("common.close", "Close")}>
+              <X className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
           <div className="flex-1 min-h-0">
@@ -248,8 +254,10 @@ function SetterEditor({
     <div className="rounded-xl border border-border bg-card shadow-sm" data-testid="setter-editor">
       <div className="flex items-center gap-2 p-3">
         <button type="button" onClick={() => setExpanded(!expanded)}
-          className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors">
-          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
+          aria-expanded={expanded}
+          aria-label={t("propertySetterEditor.toggleGroup", "Toggle property group")}>
+          {expanded ? <ChevronDown className="h-4 w-4" aria-hidden="true" /> : <ChevronRight className="h-4 w-4" aria-hidden="true" />}
         </button>
         <span className="text-sm font-medium text-foreground">
           {setter.actions.length > 0 ? setter.actions.join(", ") : t("propertySetterEditor.untitled", "(no actions)")}

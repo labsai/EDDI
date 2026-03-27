@@ -154,6 +154,7 @@ export function AgentsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t("common.search")}
+            aria-label={t("common.search")}
             className="w-full rounded-lg border border-input bg-background py-2.5 ps-10 pe-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
             data-testid="agent-search"
           />
@@ -233,34 +234,46 @@ export function AgentsPage() {
                 <thead>
                   <tr className="border-b border-border bg-secondary/50">
                     <th
-                      className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
-                      onClick={() => toggleSort("name")}
+                      className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                      aria-sort={sortField === "name" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
                     >
-                      <span className="inline-flex items-center gap-1">
+                      <button
+                        onClick={() => toggleSort("name")}
+                        className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                        aria-label={t("common.sortByName", "Sort by name")}
+                      >
                         {t("common.name", "Name")}
-                        {sortField === "name" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-30" />}
-                      </span>
+                        {sortField === "name" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" aria-hidden="true" /> : <ArrowDown className="h-3 w-3" aria-hidden="true" />) : <ArrowUpDown className="h-3 w-3 opacity-30" aria-hidden="true" />}
+                      </button>
                     </th>
                     <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       {t("common.id", "ID")}
                     </th>
                     <th
-                      className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
-                      onClick={() => toggleSort("version")}
+                      className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                      aria-sort={sortField === "version" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
                     >
-                      <span className="inline-flex items-center gap-1">
+                      <button
+                        onClick={() => toggleSort("version")}
+                        className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                        aria-label={t("common.sortByVersion", "Sort by version")}
+                      >
                         {t("common.version", "Version")}
-                        {sortField === "version" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-30" />}
-                      </span>
+                        {sortField === "version" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" aria-hidden="true" /> : <ArrowDown className="h-3 w-3" aria-hidden="true" />) : <ArrowUpDown className="h-3 w-3 opacity-30" aria-hidden="true" />}
+                      </button>
                     </th>
                     <th
-                      className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
-                      onClick={() => toggleSort("modified")}
+                      className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                      aria-sort={sortField === "modified" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
                     >
-                      <span className="inline-flex items-center gap-1">
+                      <button
+                        onClick={() => toggleSort("modified")}
+                        className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                        aria-label={t("common.sortByModified", "Sort by last modified")}
+                      >
                         {t("common.modified", "Modified")}
-                        {sortField === "modified" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-30" />}
-                      </span>
+                        {sortField === "modified" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" aria-hidden="true" /> : <ArrowDown className="h-3 w-3" aria-hidden="true" />) : <ArrowUpDown className="h-3 w-3 opacity-30" aria-hidden="true" />}
+                      </button>
                     </th>
                     <th className="px-5 py-3 text-end text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       {t("conversations.actions", "Actions")}

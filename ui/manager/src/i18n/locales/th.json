@@ -9,7 +9,8 @@
     "loading": "กำลังตรวจสอบสิทธิ์…",
     "sessionExpired": "เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง",
     "profile": "โปรไฟล์",
-    "guest": "ผู้เยี่ยมชม"
+    "guest": "ผู้เยี่ยมชม",
+    "userMenu": "เมนูผู้ใช้"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -28,7 +29,9 @@
     "resources": "ทรัพยากร",
     "sectionManagement": "การจัดการ",
     "sectionDevelopment": "การพัฒนา",
-    "sectionOperations": "การดำเนินงาน"
+    "sectionOperations": "การดำเนินงาน",
+    "mainNavigation": "การนำทางหลัก",
+    "openMenu": "เปิดเมนูนำทาง"
   },
   "theme": {
     "light": "สว่าง",
@@ -97,7 +100,15 @@
     "edit": "แก้ไข",
     "search": "ค้นหา...",
     "noResults": "ไม่พบผลลัพธ์",
-    "duplicate": "ทำซ้ำ"
+    "duplicate": "ทำซ้ำ",
+    "close": "ปิด",
+    "skipToMain": "ข้ามไปยังเนื้อหาหลัก",
+    "opensNewTab": "เปิดในแท็บใหม่",
+    "moreActions": "การดำเนินการเพิ่มเติม",
+    "sortByName": "เรียงตามชื่อ",
+    "sortByVersion": "เรียงตามเวอร์ชัน",
+    "sortByModified": "เรียงตามวันที่แก้ไข",
+    "apply": "นำไปใช้"
   },
   "agents": {
     "deploy": "Deploy",

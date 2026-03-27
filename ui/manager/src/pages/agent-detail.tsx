@@ -400,8 +400,9 @@ export function AgentDetailPage() {
             onClick={() => setShowDeleteDialog(true)}
             className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
             data-testid="delete-agent-btn"
+            aria-label={t("agents.deleteAgent", "Delete agent")}
           >
-            <Trash2 className="h-4 w-4" />
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -416,6 +417,8 @@ export function AgentDetailPage() {
               : "bg-destructive/10 text-destructive"
           )}
           data-testid="save-feedback"
+          role="status"
+          aria-live="polite"
         >
           {saveMessage.text}
         </div>
@@ -773,14 +776,16 @@ function RawConfigSection({ agent }: { agent: { workflows?: string[]; channels?:
       <button
         onClick={() => setExpanded(!expanded)}
         className="flex w-full items-center justify-between p-5 text-start"
+        aria-expanded={expanded}
+        aria-controls="raw-config-content"
       >
         <div className="flex items-center gap-2">
-          <Settings className="h-5 w-5 text-muted-foreground" />
+          <Settings className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
           <h2 className="text-lg font-semibold text-foreground">
             {t("agentDetail.rawConfig", "Raw Configuration")}
           </h2>
         </div>
-        <span className="text-sm text-muted-foreground">
+        <span className="text-sm text-muted-foreground" aria-hidden="true">
           {expanded ? "▲" : "▼"}
         </span>
       </button>

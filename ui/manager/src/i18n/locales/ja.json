@@ -9,7 +9,8 @@
     "loading": "認証中…",
     "sessionExpired": "セッションが期限切れです。再度ログインしてください。",
     "profile": "プロフィール",
-    "guest": "ゲスト"
+    "guest": "ゲスト",
+    "userMenu": "ユーザーメニュー"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -28,7 +29,9 @@
     "resources": "リソース",
     "sectionManagement": "管理",
     "sectionDevelopment": "開発",
-    "sectionOperations": "運用"
+    "sectionOperations": "運用",
+    "mainNavigation": "メインナビゲーション",
+    "openMenu": "ナビゲーションメニューを開く"
   },
   "theme": {
     "light": "ライト",
@@ -97,7 +100,15 @@
     "edit": "編集",
     "search": "検索...",
     "noResults": "結果が見つかりません",
-    "duplicate": "複製"
+    "duplicate": "複製",
+    "close": "閉じる",
+    "skipToMain": "メインコンテンツへスキップ",
+    "opensNewTab": "新しいタブで開く",
+    "moreActions": "その他の操作",
+    "sortByName": "名前で並べ替え",
+    "sortByVersion": "バージョンで並べ替え",
+    "sortByModified": "更新日で並べ替え",
+    "apply": "適用"
   },
   "agents": {
     "deploy": "デプロイ",

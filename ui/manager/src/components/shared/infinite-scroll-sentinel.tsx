@@ -43,9 +43,12 @@ export function InfiniteScrollSentinel({
   if (!hasMore) return null;
 
   return (
-    <div ref={ref} className="flex items-center justify-center py-6">
+    <div ref={ref} className="flex items-center justify-center py-6" aria-live="polite">
       {isFetchingMore && (
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <>
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden="true" />
+          <span className="sr-only">Loading more items…</span>
+        </>
       )}
     </div>
   );

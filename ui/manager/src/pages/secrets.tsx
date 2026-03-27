@@ -164,10 +164,11 @@ export function SecretsPage() {
       {/* Namespace selectors */}
       <div className="flex flex-wrap items-end gap-4">
         <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-muted-foreground">
+          <label htmlFor="secrets-tenant-input" className="text-xs font-medium text-muted-foreground">
             {t("secrets.tenantId", "Tenant ID")}
           </label>
           <input
+            id="secrets-tenant-input"
             type="text"
             value={tenantId}
             onChange={(e) => setTenantId(e.target.value)}
@@ -177,10 +178,11 @@ export function SecretsPage() {
           />
         </div>
         <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-medium text-muted-foreground">
+          <label htmlFor="secrets-agent-input" className="text-xs font-medium text-muted-foreground">
             {t("secrets.agentId", "Agent ID")}
           </label>
           <input
+            id="secrets-agent-input"
             type="text"
             value={agentId}
             onChange={(e) => setAgentId(e.target.value)}
@@ -267,8 +269,9 @@ export function SecretsPage() {
                         onClick={() => setDeleteTarget(s)}
                         className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
                         data-testid={`delete-${s.keyName}`}
+                        aria-label={t("secrets.deleteKey", { key: s.keyName, defaultValue: `Delete ${s.keyName}` })}
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                         {t("common.delete", "Delete")}
                       </button>
                     </td>
@@ -314,10 +317,32 @@ export function SecretsPage() {
 
       {/* ─── Create dialog ─── */}
       {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => {
+            setShowCreate(false);
+            setNewKeyName("");
+            setNewValue("");
+            setValueVisible(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setShowCreate(false);
+              setNewKeyName("");
+              setNewValue("");
+              setValueVisible(false);
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-secret-title"
+          >
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-foreground">
+              <h2 id="create-secret-title" className="text-lg font-semibold text-foreground">
                 {t("secrets.createTitle", "Add Secret")}
               </h2>
               <button
@@ -335,10 +360,11 @@ export function SecretsPage() {
 
             <div className="mt-4 space-y-4">
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                <label htmlFor="new-key-name" className="mb-1.5 block text-xs font-medium text-muted-foreground">
                   {t("secrets.keyNameLabel", "Key Name")}
                 </label>
                 <input
+                  id="new-key-name"
                   type="text"
                   value={newKeyName}
                   onChange={(e) => setNewKeyName(e.target.value)}
@@ -353,11 +379,12 @@ export function SecretsPage() {
                 />
               </div>
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                <label htmlFor="new-secret-value" className="mb-1.5 block text-xs font-medium text-muted-foreground">
                   {t("secrets.valueLabel", "Secret Value")}
                 </label>
                 <div className="relative">
                   <input
+                    id="new-secret-value"
                     type={valueVisible ? "text" : "password"}
                     value={newValue}
                     onChange={(e) => setNewValue(e.target.value)}
@@ -370,12 +397,13 @@ export function SecretsPage() {
                     type="button"
                     onClick={() => setValueVisible(!valueVisible)}
                     className="absolute inset-e-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    aria-label={valueVisible ? t("secrets.hideValue", "Hide value") : t("secrets.showValue", "Show value")}
                     data-testid="new-value-eye"
                   >
                     {valueVisible ? (
-                      <Eye className="h-4 w-4" />
+                      <Eye className="h-4 w-4" aria-hidden="true" />
                     ) : (
-                      <EyeOff className="h-4 w-4" />
+                      <EyeOff className="h-4 w-4" aria-hidden="true" />
                     )}
                   </button>
                 </div>
@@ -420,12 +448,25 @@ export function SecretsPage() {
 
       {/* ─── Delete confirmation dialog ─── */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl">
-            <h2 className="text-lg font-semibold text-foreground">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setDeleteTarget(null)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setDeleteTarget(null);
+          }}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-secret-title"
+            aria-describedby="delete-secret-desc"
+          >
+            <h2 id="delete-secret-title" className="text-lg font-semibold text-foreground">
               {t("secrets.confirmDeleteTitle", "Delete Secret")}
             </h2>
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p id="delete-secret-desc" className="mt-2 text-sm text-muted-foreground">
               {t("secrets.confirmDeleteMessage", {
                 key: deleteTarget.keyName,
                 defaultValue: `Are you sure you want to permanently delete "${deleteTarget.keyName}"? This cannot be undone.`,

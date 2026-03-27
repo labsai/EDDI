@@ -157,21 +157,27 @@ export function ImportOpenApiDialog({
       className="fixed inset-0 z-50 flex items-center justify-center"
       data-testid="import-openapi-dialog"
     >
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleClose} />
-      <div className="relative z-10 w-full max-w-lg rounded-xl border bg-card shadow-xl mx-4 max-h-[80vh] flex flex-col">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleClose} aria-hidden="true" />
+      <div
+        className="relative z-10 w-full max-w-lg rounded-xl border bg-card shadow-xl mx-4 max-h-[80vh] flex flex-col"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="import-openapi-title"
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border p-5 shrink-0">
           <div className="flex items-center gap-2">
-            <FileDown className="h-5 w-5 text-primary" />
-            <h3 className="text-lg font-semibold text-foreground">
+            <FileDown className="h-5 w-5 text-primary" aria-hidden="true" />
+            <h3 id="import-openapi-title" className="text-lg font-semibold text-foreground">
               {t("workflowEditor.importOpenApi", "Import from OpenAPI")}
             </h3>
           </div>
           <button
             onClick={handleClose}
             className="rounded-md p-1 text-muted-foreground hover:bg-secondary transition-colors"
+            aria-label={t("common.close", "Close")}
           >
-            <X className="h-5 w-5" />
+            <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
 

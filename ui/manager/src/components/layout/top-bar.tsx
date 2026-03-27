@@ -68,7 +68,7 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown on outside click
+  // Close dropdown on outside click or Escape key
   useEffect(() => {
     if (!userMenuOpen) return;
     const handleClick = (e: MouseEvent) => {
@@ -79,8 +79,17 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
         setUserMenuOpen(false);
       }
     };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setUserMenuOpen(false);
+      }
+    };
     document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
   }, [userMenuOpen]);
 
   const themeOptions = [
@@ -120,12 +129,13 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
         <button
           onClick={onMenuClick}
           data-testid="mobile-menu-toggle"
+          aria-label={t("nav.openMenu", "Open navigation menu")}
           className={cn(
             "rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground md:hidden",
             sidebarVisible && "hidden"
           )}
         >
-          <Menu className="h-5 w-5" />
+          <Menu className="h-5 w-5" aria-hidden="true" />
         </button>
 
         {/* Breadcrumbs */}
@@ -139,7 +149,7 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
               )}
               {idx === breadcrumbs.length - 1 ? (
-                <span className="font-medium text-foreground">
+                <span className="font-medium text-foreground" aria-current="page">
                   {crumb.label}
                 </span>
               ) : (
@@ -182,6 +192,8 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
               onClick={() => setTheme(option.value)}
               data-testid={`theme-${option.value}`}
               title={option.label}
+              aria-label={option.label}
+              aria-pressed={theme === option.value}
               className={cn(
                 "rounded-md p-1.5 transition-colors",
                 theme === option.value
@@ -189,7 +201,7 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              <option.icon className="h-4 w-4" />
+              <option.icon className="h-4 w-4" aria-hidden="true" />
             </button>
           ))}
         </div>
@@ -202,6 +214,9 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
               data-testid="user-menu-trigger"
               className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground transition-opacity hover:opacity-80"
               title={user.fullName || user.username}
+              aria-label={t("auth.userMenu", "User menu")}
+              aria-haspopup="true"
+              aria-expanded={userMenuOpen}
             >
               {initials}
             </button>
@@ -210,6 +225,8 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
               <div
                 className="absolute inset-e-0 top-full z-50 mt-2 w-56 rounded-lg border border-border bg-card p-1 shadow-lg"
                 data-testid="user-menu-dropdown"
+                role="menu"
+                aria-label={t("auth.userMenu", "User menu")}
               >
                 {/* User info */}
                 <div className="border-b border-border px-3 py-2.5">
@@ -231,6 +248,7 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
                       logout();
                     }}
                     data-testid="user-menu-logout"
+                    role="menuitem"
                     className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition-colors hover:bg-secondary"
                   >
                     <LogOut className="h-4 w-4" />

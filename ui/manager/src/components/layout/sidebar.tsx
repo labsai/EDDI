@@ -165,7 +165,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       </div>
 
       {/* Navigation with section groupings */}
-      <nav className="flex-1 overflow-y-auto p-2">
+      <nav className="flex-1 overflow-y-auto p-2" aria-label={t("nav.mainNavigation", "Main navigation")}>
         {navSections.map((section, idx) => (
           <div key={section.labelKey} className={cn(idx > 0 && "mt-4")}>
             {/* Section label (hidden when collapsed) */}
@@ -193,8 +193,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                       collapsed && "justify-center px-2"
                     )
                   }
+                  aria-label={collapsed ? t(item.labelKey) : undefined}
+                  title={collapsed ? t(item.labelKey) : undefined}
                 >
-                  <item.icon className="h-5 w-5 shrink-0" />
+                  <item.icon className="h-5 w-5 shrink-0" aria-hidden="true" />
                   {!collapsed && <span>{t(item.labelKey)}</span>}
                 </NavLink>
               ))}
@@ -223,12 +225,15 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 "hover:bg-sidebar-accent/10 hover:text-sidebar-accent",
                 collapsed && "justify-center px-2"
               )}
+              aria-label={collapsed ? `${t(link.labelKey, link.fallback)} (${t("common.opensNewTab", "opens in new tab")})` : undefined}
+              title={collapsed ? t(link.labelKey, link.fallback) : undefined}
             >
-              <link.icon className="h-5 w-5 shrink-0" />
+              <link.icon className="h-5 w-5 shrink-0" aria-hidden="true" />
               {!collapsed && (
                 <span className="flex items-center gap-1.5">
                   {t(link.labelKey, link.fallback)}
-                  <ExternalLink className="h-3 w-3 opacity-50" />
+                  <ExternalLink className="h-3 w-3 opacity-50" aria-hidden="true" />
+                  <span className="sr-only">({t("common.opensNewTab", "opens in new tab")})</span>
                 </span>
               )}
             </a>
@@ -266,9 +271,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                   onClick={logout}
                   data-testid="sidebar-logout"
                   title={t("auth.logout", "Logout")}
+                  aria-label={t("auth.logout", "Logout")}
                   className="ms-2 shrink-0 rounded-md p-1.5 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/10 hover:text-sidebar-accent"
                 >
-                  <LogOut className="h-4 w-4" />
+                  <LogOut className="h-4 w-4" aria-hidden="true" />
                 </button>
               </div>
             )}

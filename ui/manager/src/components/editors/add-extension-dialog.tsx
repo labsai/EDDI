@@ -246,10 +246,16 @@ export function AddExtensionDialog({
       <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
         onClick={handleClose}
+        aria-hidden="true"
       />
 
       {/* Dialog */}
-      <div className="relative z-10 w-full max-w-md rounded-xl border bg-card shadow-xl mx-4">
+      <div
+        className="relative z-10 w-full max-w-md rounded-xl border bg-card shadow-xl mx-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-ext-dialog-title"
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border p-5">
           <div className="flex items-center gap-2">
@@ -269,7 +275,7 @@ export function AddExtensionDialog({
             ) : (
               <Plus className="h-5 w-5 text-primary" />
             )}
-            <h3 className="text-lg font-semibold text-foreground">
+            <h3 id="add-ext-dialog-title" className="text-lg font-semibold text-foreground">
               {step === "pick-type"
                 ? t("packageEditor.addTask", "Add Task")
                 : t("packageEditor.chooseConfig", "Choose Config")}
@@ -278,8 +284,9 @@ export function AddExtensionDialog({
           <button
             onClick={handleClose}
             className="rounded-md p-1 text-muted-foreground hover:bg-secondary transition-colors"
+            aria-label={t("common.close", "Close")}
           >
-            <X className="h-5 w-5" />
+            <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
 

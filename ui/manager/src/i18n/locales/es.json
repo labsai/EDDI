@@ -9,7 +9,8 @@
     "loading": "Autenticando…",
     "sessionExpired": "Sesión expirada. Inicie sesión de nuevo.",
     "profile": "Perfil",
-    "guest": "Invitado"
+    "guest": "Invitado",
+    "userMenu": "Menú de usuario"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -28,7 +29,9 @@
     "resources": "Recursos",
     "sectionManagement": "Gestión",
     "sectionDevelopment": "Desarrollo",
-    "sectionOperations": "Operaciones"
+    "sectionOperations": "Operaciones",
+    "mainNavigation": "Navegación principal",
+    "openMenu": "Abrir menú de navegación"
   },
   "theme": {
     "light": "Claro",
@@ -97,7 +100,15 @@
     "edit": "Editar",
     "search": "Buscar...",
     "noResults": "No se encontraron resultados",
-    "duplicate": "Duplicar"
+    "duplicate": "Duplicar",
+    "close": "Cerrar",
+    "skipToMain": "Ir al contenido principal",
+    "opensNewTab": "abre en nueva pestaña",
+    "moreActions": "Más acciones",
+    "sortByName": "Ordenar por nombre",
+    "sortByVersion": "Ordenar por versión",
+    "sortByModified": "Ordenar por fecha de modificación",
+    "apply": "Aplicar"
   },
   "agents": {
     "deploy": "Desplegar",
