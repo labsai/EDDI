@@ -22,6 +22,7 @@ export default defineConfig({
       "/llmstore": "http://localhost:7070",
       "/propertysetterstore": "http://localhost:7070",
       "/mcpcallsstore": "http://localhost:7070",
+      "/ragstore": "http://localhost:7070",
       "/parserstore": "http://localhost:7070",
       "/extensionstore": "http://localhost:7070",
       "/conversationstore": "http://localhost:7070",

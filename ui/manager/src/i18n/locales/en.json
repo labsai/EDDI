@@ -881,7 +881,6 @@
     "vectorStore": "Vector Store",
     "storeType": "Store Type",
     "storeParams": "Connection Parameters",
-    "isolation": "Isolation Strategy",
     "chunking": "Document Chunking",
     "chunkStrategy": "Strategy",
     "chunkSize": "Chunk Size",

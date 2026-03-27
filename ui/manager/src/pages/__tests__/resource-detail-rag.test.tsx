@@ -63,6 +63,23 @@ describe("RAG Knowledge Base Editor", () => {
     });
   });
 
+  it("renders all 7 embedding providers in dropdown", async () => {
+    renderPage("rag");
+    await waitFor(() => {
+      const select = screen.getByTestId("embedding-provider") as HTMLSelectElement;
+      const options = Array.from(select.options).map((o) => o.value);
+      expect(options).toEqual([
+        "openai",
+        "azure-openai",
+        "ollama",
+        "mistral",
+        "bedrock",
+        "cohere",
+        "vertex",
+      ]);
+    });
+  });
+
   it("renders vector store selection with pgvector selected", async () => {
     renderPage("rag");
     await waitFor(() => {
@@ -70,14 +87,6 @@ describe("RAG Knowledge Base Editor", () => {
       expect(pgBtn).toBeInTheDocument();
       // pgvector should have the highlighted ring
       expect(pgBtn.className).toContain("ring");
-    });
-  });
-
-  it("renders isolation strategy dropdown", async () => {
-    renderPage("rag");
-    await waitFor(() => {
-      const select = screen.getByTestId("isolation-strategy") as HTMLSelectElement;
-      expect(select.value).toBe("collection");
     });
   });
 
@@ -97,12 +106,13 @@ describe("RAG Knowledge Base Editor", () => {
     });
   });
 
-  it("renders all four store type buttons", async () => {
+  it("renders all five store type buttons", async () => {
     renderPage("rag");
     await waitFor(() => {
       expect(screen.getByTestId("store-in-memory")).toBeInTheDocument();
       expect(screen.getByTestId("store-pgvector")).toBeInTheDocument();
       expect(screen.getByTestId("store-mongodb-atlas")).toBeInTheDocument();
+      expect(screen.getByTestId("store-elasticsearch")).toBeInTheDocument();
       expect(screen.getByTestId("store-qdrant")).toBeInTheDocument();
     });
   });
@@ -130,10 +140,24 @@ describe("RAG Knowledge Base Editor", () => {
     });
 
     const select = screen.getByTestId("embedding-provider") as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: "ollama" } });
+    fireEvent.change(select, { target: { value: "mistral" } });
 
     await waitFor(() => {
-      expect(select.value).toBe("ollama");
+      expect(select.value).toBe("mistral");
+    });
+  });
+
+  it("switches to azure-openai provider", async () => {
+    renderPage("rag");
+    await waitFor(() => {
+      expect(screen.getByTestId("embedding-provider")).toBeInTheDocument();
+    });
+
+    const select = screen.getByTestId("embedding-provider") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "azure-openai" } });
+
+    await waitFor(() => {
+      expect(select.value).toBe("azure-openai");
     });
   });
 
@@ -152,6 +176,20 @@ describe("RAG Knowledge Base Editor", () => {
       // pgvector should no longer have it
       const pgBtn = screen.getByTestId("store-pgvector");
       expect(pgBtn.className).not.toContain("ring");
+    });
+  });
+
+  it("switches to elasticsearch store", async () => {
+    renderPage("rag");
+    await waitFor(() => {
+      expect(screen.getByTestId("store-elasticsearch")).toBeInTheDocument();
+    });
+
+    const esBtn = screen.getByTestId("store-elasticsearch");
+    fireEvent.click(esBtn);
+
+    await waitFor(() => {
+      expect(esBtn.className).toContain("ring");
     });
   });
 

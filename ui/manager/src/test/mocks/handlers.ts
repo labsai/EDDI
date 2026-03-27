@@ -1076,7 +1076,6 @@ export const handlers = [
         user: "${vault:pg-user}",
         password: "${vault:pg-password}",
       },
-      isolationStrategy: "collection",
       chunkStrategy: "recursive",
       chunkSize: 512,
       chunkOverlap: 64,
@@ -1092,7 +1091,7 @@ export const handlers = [
     });
   }),
 
-  http.get("*/ragstore/rags/:id/ingest/:ingestionId", () => {
+  http.get("*/ragstore/rags/:id/ingestion/:ingestionId/status", () => {
     return HttpResponse.json({
       status: "completed",
     });

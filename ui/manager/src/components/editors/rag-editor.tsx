@@ -27,7 +27,6 @@ export interface RagConfig {
   embeddingParameters?: Record<string, string>;
   storeType?: string;
   storeParameters?: Record<string, string>;
-  isolationStrategy?: string;
   chunkStrategy?: string;
   chunkSize?: number;
   chunkOverlap?: number;
@@ -39,17 +38,53 @@ export interface RagConfig {
 
 const EMBEDDING_PROVIDERS = [
   { value: "openai", label: "OpenAI", hint: "text-embedding-3-small" },
+  { value: "azure-openai", label: "Azure OpenAI", hint: "text-embedding-3-small" },
   { value: "ollama", label: "Ollama", hint: "nomic-embed-text" },
-  { value: "vertex", label: "Vertex AI", hint: "text-embedding-005" },
-  { value: "google", label: "Google AI", hint: "text-embedding-004" },
-  { value: "huggingface", label: "HuggingFace", hint: "sentence-transformers/..." },
-  { value: "jlama", label: "Jlama (in-process)", hint: "BGE-small-en" },
+  { value: "mistral", label: "Mistral AI", hint: "mistral-embed" },
+  { value: "bedrock", label: "Amazon Bedrock", hint: "amazon.titan-embed-text-v2:0" },
+  { value: "cohere", label: "Cohere", hint: "embed-english-v3.0" },
+  { value: "vertex", label: "Google Vertex AI", hint: "text-embedding-005" },
 ] as const;
+
+/** Provider-specific parameter hints — shown as suggested keys in the embedding params editor */
+const EMBEDDING_PARAM_HINTS: Record<string, { key: string; placeholder: string }[]> = {
+  openai: [
+    { key: "model", placeholder: "text-embedding-3-small" },
+    { key: "apiKey", placeholder: "${vault:openai-key}" },
+  ],
+  "azure-openai": [
+    { key: "endpoint", placeholder: "https://my.openai.azure.com/" },
+    { key: "apiKey", placeholder: "${vault:azure-key}" },
+    { key: "deploymentName", placeholder: "text-embedding-3-small" },
+  ],
+  ollama: [
+    { key: "model", placeholder: "nomic-embed-text" },
+    { key: "baseUrl", placeholder: "http://localhost:11434" },
+  ],
+  mistral: [
+    { key: "model", placeholder: "mistral-embed" },
+    { key: "apiKey", placeholder: "${vault:mistral-key}" },
+  ],
+  bedrock: [
+    { key: "model", placeholder: "amazon.titan-embed-text-v2:0" },
+    { key: "region", placeholder: "us-east-1" },
+  ],
+  cohere: [
+    { key: "model", placeholder: "embed-english-v3.0" },
+    { key: "apiKey", placeholder: "${vault:cohere-key}" },
+  ],
+  vertex: [
+    { key: "project", placeholder: "my-gcp-project" },
+    { key: "location", placeholder: "us-central1" },
+    { key: "model", placeholder: "text-embedding-005" },
+  ],
+};
 
 const STORE_TYPES = [
   { value: "in-memory", label: "In-Memory", hint: "Dev/test only — data lost on restart" },
   { value: "pgvector", label: "PostgreSQL (pgvector)", hint: "Production — persistent vector store" },
   { value: "mongodb-atlas", label: "MongoDB Atlas", hint: "Atlas vector search" },
+  { value: "elasticsearch", label: "Elasticsearch", hint: "Elasticsearch vector search" },
   { value: "qdrant", label: "Qdrant", hint: "High-performance vector DB" },
 ] as const;
 
@@ -60,19 +95,29 @@ const STORE_PARAM_HINTS: Record<string, { key: string; placeholder: string }[]> 
     { key: "port", placeholder: "5432" },
     { key: "database", placeholder: "eddi" },
     { key: "table", placeholder: "embeddings" },
+    { key: "dimension", placeholder: "1536" },
     { key: "user", placeholder: "${vault:pg-user}" },
     { key: "password", placeholder: "${vault:pg-password}" },
   ],
   "mongodb-atlas": [
-    { key: "indexName", placeholder: "vector_index" },
-    { key: "databaseName", placeholder: "eddi" },
     { key: "connectionString", placeholder: "${vault:mongo-uri}" },
+    { key: "databaseName", placeholder: "eddi" },
+    { key: "collectionName", placeholder: "eddi_kb_product-docs" },
+    { key: "indexName", placeholder: "vector_index" },
+  ],
+  elasticsearch: [
+    { key: "serverUrl", placeholder: "http://localhost:9200" },
+    { key: "indexName", placeholder: "eddi_kb_product-docs" },
+    { key: "apiKey", placeholder: "${vault:es-key}" },
+    { key: "userName", placeholder: "elastic" },
+    { key: "password", placeholder: "${vault:es-password}" },
   ],
   qdrant: [
     { key: "host", placeholder: "localhost" },
     { key: "port", placeholder: "6334" },
     { key: "collectionName", placeholder: "kb-product-docs" },
     { key: "apiKey", placeholder: "${vault:qdrant-key}" },
+    { key: "useTls", placeholder: "false" },
   ],
 };
 
@@ -80,11 +125,6 @@ const CHUNK_STRATEGIES = [
   { value: "recursive", label: "Recursive (recommended)" },
   { value: "paragraph", label: "Paragraph" },
   { value: "sentence", label: "Sentence" },
-] as const;
-
-const ISOLATION_STRATEGIES = [
-  { value: "collection", label: "Collection — each KB gets isolated storage" },
-  { value: "metadata", label: "Metadata — shared store, filtered by KB ID" },
 ] as const;
 
 // ─── Section Component ──────────────────────────────────────────────────────
@@ -168,6 +208,8 @@ function KeyValueEditor({
 
   const updateKey = (newKey: string, idx: number) => {
     const arr = Object.entries(entries);
+    // Prevent duplicate keys (except our own position)
+    if (arr.some(([k], i) => i !== idx && k === newKey)) return;
     arr[idx] = [newKey, arr[idx]?.[1] ?? ""];
     onChange(Object.fromEntries(arr));
   };
@@ -267,9 +309,11 @@ interface IngestionStatus {
 
 function IngestionPanel({
   kbId,
+  version,
   readOnly,
 }: {
   kbId: string;
+  version: number;
   readOnly?: boolean;
 }) {
   const { t } = useTranslation();
@@ -285,7 +329,7 @@ function IngestionPanel({
         attempts++;
         try {
           const result = await api.get<{ status: string }>(
-            `/ragstore/rags/${kbId}/ingest/${ingestionId}`,
+            `/ragstore/rags/${kbId}/ingestion/${ingestionId}/status`,
           );
           setIngestions((prev) =>
             prev.map((ing) =>
@@ -320,10 +364,29 @@ function IngestionPanel({
       setIngestions((prev) => [...prev, { ingestionId: tempId, status: "uploading", documentName: name }]);
 
       try {
-        const result = await api.post<{ ingestionId: string }>(
-          `/ragstore/rags/${kbId}/ingest`,
-          { documentContent: content, documentName: name },
+        // Backend expects: POST /ragstore/rags/{id}/ingest?version=N&documentName=X
+        // with Content-Type: text/plain body
+        const params = new URLSearchParams({
+          version: String(version),
+          documentName: name,
+        });
+        const response = await fetch(
+          `${api.getBaseUrl()}/ragstore/rags/${kbId}/ingest?${params.toString()}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "text/plain",
+              ...api.getAuthHeader(),
+            },
+            body: content,
+          },
         );
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const result: { ingestionId: string } = await response.json();
         const id = result.ingestionId;
         setIngestions((prev) =>
           prev.map((ing) =>
@@ -340,7 +403,7 @@ function IngestionPanel({
         );
       }
     },
-    [kbId, pollStatus],
+    [kbId, version, pollStatus],
   );
 
   const handleFiles = useCallback(
@@ -487,17 +550,21 @@ export interface RagEditorProps {
   onChange: (data: RagConfig) => void;
   readOnly?: boolean;
   resourceId?: string;
+  version?: number;
 }
 
-export function RagEditor({ data, onChange, readOnly, resourceId }: RagEditorProps) {
+export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }: RagEditorProps) {
   const { t } = useTranslation();
 
   // Cache per-store-type params so switching back preserves values
   const storeParamCache = useRef<Record<string, Record<string, string>>>({});
+  // Cache per-provider embedding params so switching back preserves values
+  const embeddingParamCache = useRef<Record<string, Record<string, string>>>({});
 
   const selectedProvider = EMBEDDING_PROVIDERS.find((p) => p.value === data.embeddingProvider);
   const selectedStore = STORE_TYPES.find((s) => s.value === data.storeType);
-  const paramHints = STORE_PARAM_HINTS[data.storeType ?? "in-memory"] ?? [];
+  const storeHints = STORE_PARAM_HINTS[data.storeType ?? "in-memory"] ?? [];
+  const embeddingHints = EMBEDDING_PARAM_HINTS[data.embeddingProvider ?? "openai"] ?? [];
 
   // Deterministic chunk preview bar heights (stable across re-renders)
   const chunkCount = Math.min(6, Math.ceil(2048 / (data.chunkSize ?? 512)));
@@ -549,9 +616,27 @@ export function RagEditor({ data, onChange, readOnly, resourceId }: RagEditorPro
             </label>
             <select
               value={data.embeddingProvider ?? "openai"}
-              onChange={(e) =>
-                onChange({ ...data, embeddingProvider: e.target.value })
-              }
+              onChange={(e) => {
+                const newProvider = e.target.value;
+                // Save current embedding params before switching
+                if (data.embeddingProvider && data.embeddingParameters) {
+                  embeddingParamCache.current[data.embeddingProvider] = { ...data.embeddingParameters };
+                }
+                // Restore cached params or auto-populate from hints
+                const cached = embeddingParamCache.current[newProvider];
+                const hints = EMBEDDING_PARAM_HINTS[newProvider] ?? [];
+                const newParams = cached ?? Object.fromEntries(
+                  hints.map((h) => [
+                    h.key,
+                    h.placeholder.startsWith("${vault:") ? h.placeholder : "",
+                  ]),
+                );
+                onChange({
+                  ...data,
+                  embeddingProvider: newProvider,
+                  embeddingParameters: Object.keys(newParams).length > 0 ? newParams : undefined,
+                });
+              }}
               disabled={readOnly}
               className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
               data-testid="embedding-provider"
@@ -576,11 +661,7 @@ export function RagEditor({ data, onChange, readOnly, resourceId }: RagEditorPro
               entries={data.embeddingParameters ?? {}}
               onChange={(v) => onChange({ ...data, embeddingParameters: Object.keys(v).length > 0 ? v : undefined })}
               readOnly={readOnly}
-              hints={[
-                { key: "model", placeholder: selectedProvider?.hint ?? "model-name" },
-                { key: "apiKey", placeholder: "${vault:embedding-key}" },
-                { key: "baseUrl", placeholder: "http://localhost:11434" },
-              ]}
+              hints={embeddingHints}
             />
           </div>
         </div>
@@ -598,7 +679,7 @@ export function RagEditor({ data, onChange, readOnly, resourceId }: RagEditorPro
             <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {t("ragEditor.storeType", "Store Type")}
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {STORE_TYPES.map((st) => (
                 <button
                   key={st.value}
@@ -640,7 +721,7 @@ export function RagEditor({ data, onChange, readOnly, resourceId }: RagEditorPro
             </div>
           </div>
 
-          {paramHints.length > 0 && (
+          {storeHints.length > 0 && (
             <div>
               <label className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 <Server className="h-3 w-3" />
@@ -652,29 +733,10 @@ export function RagEditor({ data, onChange, readOnly, resourceId }: RagEditorPro
                   onChange({ ...data, storeParameters: Object.keys(v).length > 0 ? v : undefined })
                 }
                 readOnly={readOnly}
-                hints={paramHints}
+                hints={storeHints}
               />
             </div>
           )}
-
-          <div>
-            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {t("ragEditor.isolation", "Isolation Strategy")}
-            </label>
-            <select
-              value={data.isolationStrategy ?? "collection"}
-              onChange={(e) => onChange({ ...data, isolationStrategy: e.target.value })}
-              disabled={readOnly}
-              className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-              data-testid="isolation-strategy"
-            >
-              {ISOLATION_STRATEGIES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
       </Section>
 
@@ -883,7 +945,7 @@ export function RagEditor({ data, onChange, readOnly, resourceId }: RagEditorPro
         defaultOpen={false}
       >
         {resourceId ? (
-          <IngestionPanel kbId={resourceId} readOnly={readOnly} />
+          <IngestionPanel kbId={resourceId} version={version} readOnly={readOnly} />
         ) : (
           <p className="text-xs text-muted-foreground italic">
             {t("ragEditor.saveFirstIngestion", "Save this knowledge base first to enable document ingestion.")}

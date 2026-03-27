@@ -89,7 +89,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
 // Clean editor lookup — replaces the 6-level nested ternary
 const EDITOR_MAP: Record<
   string,
-  (parsed: unknown, onChange: (val: unknown) => void, readOnly: boolean, meta: { resourceId: string }) => ReactNode
+  (parsed: unknown, onChange: (val: unknown) => void, readOnly: boolean, meta: { resourceId: string; version: number }) => ReactNode
 > = {
   rules: (p, o, r) => (
     <BehaviorEditor data={p as BehaviorConfig} onChange={o} readOnly={r} />
@@ -113,7 +113,7 @@ const EDITOR_MAP: Record<
     <McpCallsEditor data={p as McpCallsConfig} onChange={o} readOnly={r} />
   ),
   rag: (p, o, r, meta) => (
-    <RagEditor data={p as RagConfig} onChange={o} readOnly={r} resourceId={meta.resourceId} />
+    <RagEditor data={p as RagConfig} onChange={o} readOnly={r} resourceId={meta.resourceId} version={meta.version} />
   ),
 };
 
