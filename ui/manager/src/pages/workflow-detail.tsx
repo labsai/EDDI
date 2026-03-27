@@ -11,6 +11,7 @@ import {
   Settings,
   Save,
   Undo2,
+  Rocket,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
@@ -35,6 +36,8 @@ import {
 } from "@/components/editors/add-extension-dialog";
 import { useLatestVersions } from "@/hooks/use-latest-versions";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
+import { getAgent, updateAgent } from "@/lib/api/agents";
 
 /* ─── Main page ─── */
 export function WorkflowDetailPage() {
@@ -95,6 +98,9 @@ export function WorkflowDetailPage() {
 
   // Warn on tab close/reload when dirty
   useUnsavedChangesGuard(isDirty);
+
+  // Save & Test support
+  const { saveAndDeploy, isRunning: isSaveAndDeploying } = useSaveAndDeploy();
 
   // Build pipeline items from current extensions
   const pipelineItems: PipelineItem[] = currentExtensions.map((ext, i) => ({
@@ -190,6 +196,45 @@ export function WorkflowDetailPage() {
       });
     }
   }, [isDirty, localExtensions, updateMutation, id, resolvedVersion, t]);
+
+  const handleSaveAndDeploy = useCallback(async () => {
+    if (!isDirty || !localExtensions || !agentId || !agentVer) return;
+    const agentVersion = parseInt(agentVer, 10);
+    if (isNaN(agentVersion)) return;
+
+    await saveAndDeploy({
+      agentId,
+      save: async () => {
+        // 1. Save workflow
+        const wfResult = await updateMutation.mutateAsync({
+          id: id!,
+          version: resolvedVersion,
+          config: { workflowSteps: localExtensions },
+        });
+        setLocalExtensions(null);
+
+        // Parse new workflow version from location header (/workflowstore/workflows/id?version=N)
+        const wfUrl = new URL(wfResult.location, "http://dummy");
+        const newWfVersion = parseInt(wfUrl.searchParams.get("version") ?? "1", 10);
+
+        // 2. Update parent agent's workflow reference
+        const agent = await getAgent(agentId, agentVersion);
+        const oldPkgUri = `eddi://ai.labs.workflow/workflowstore/workflows/${id}?version=${resolvedVersion}`;
+        const newPkgUri = `eddi://ai.labs.workflow/workflowstore/workflows/${id}?version=${newWfVersion}`;
+        const updatedAgent = {
+          ...agent,
+          workflows: (agent.workflows ?? []).map((u) =>
+            u === oldPkgUri ? newPkgUri : u
+          ),
+        };
+        const agentResult = await updateAgent(agentId, agentVersion, updatedAgent);
+        const agentUrl = new URL(agentResult.location, "http://dummy");
+        const newAgentVersion = parseInt(agentUrl.searchParams.get("version") ?? "1", 10);
+
+        return { newAgentVersion };
+      },
+    });
+  }, [isDirty, localExtensions, updateMutation, id, resolvedVersion, agentId, agentVer, saveAndDeploy]);
 
   const handleDiscard = useCallback(() => {
     setLocalExtensions(null);
@@ -314,7 +359,7 @@ export function WorkflowDetailPage() {
           {/* Save */}
           <button
             onClick={handleSave}
-            disabled={!isDirty || updateMutation.isPending}
+            disabled={!isDirty || updateMutation.isPending || isSaveAndDeploying}
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
             data-testid="save-btn"
           >
@@ -323,6 +368,21 @@ export function WorkflowDetailPage() {
               ? t("editor.saving", "Saving...")
               : t("editor.save", "Save")}
           </button>
+
+          {/* Save & Test */}
+          {agentId && agentVer && (
+            <button
+              onClick={handleSaveAndDeploy}
+              disabled={!isDirty || updateMutation.isPending || isSaveAndDeploying}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-emerald-700 active:scale-[0.98] disabled:opacity-50 dark:bg-emerald-600 dark:hover:bg-emerald-700"
+              data-testid="save-test-btn"
+            >
+              <Rocket className="h-4 w-4" />
+              {isSaveAndDeploying
+                ? t("editor.deploying", "Deploying…")
+                : t("editor.saveAndTest", "Save & Test")}
+            </button>
+          )}
 
           {/* Delete */}
           <button

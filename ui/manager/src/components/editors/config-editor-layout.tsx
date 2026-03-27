@@ -4,7 +4,7 @@ import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { JsonEditor } from "./json-editor";
 import { VersionPicker, type VersionInfo } from "./version-picker";
-import { Save, Undo2, FileCode, FormInput, AlertCircle, GitCompareArrows } from "lucide-react";
+import { Save, Undo2, FileCode, FormInput, AlertCircle, GitCompareArrows, Rocket } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 export interface ConfigEditorLayoutProps {
@@ -24,8 +24,12 @@ export interface ConfigEditorLayoutProps {
   onVersionChange: (version: number) => void;
   /** Called when user saves */
   onSave: (data: string) => void;
+  /** Called when user clicks "Save & Test" (save + deploy + open chat) */
+  onSaveAndDeploy?: (data: string) => void;
   /** Whether a save is in progress */
   isSaving?: boolean;
+  /** Whether a save-and-deploy is in progress */
+  isSaveAndDeploying?: boolean;
   /** Whether the save succeeded (for toast feedback) */
   saveSuccess?: boolean;
   /** Save error message */
@@ -68,7 +72,9 @@ export function ConfigEditorLayout({
   currentVersion,
   onVersionChange,
   onSave,
+  onSaveAndDeploy,
   isSaving = false,
+  isSaveAndDeploying = false,
   saveSuccess = false,
   saveError,
   readOnly = false,
@@ -117,6 +123,16 @@ export function ConfigEditorLayout({
     }
   }, [editedData, onSave]);
 
+  const handleSaveAndDeploy = useCallback(() => {
+    if (!onSaveAndDeploy) return;
+    try {
+      JSON.parse(editedData);
+      onSaveAndDeploy(editedData);
+    } catch {
+      // Invalid JSON
+    }
+  }, [editedData, onSaveAndDeploy]);
+
   const handleJsonChange = useCallback((val: string) => {
     setEditedData(val);
   }, []);
@@ -135,7 +151,7 @@ export function ConfigEditorLayout({
             versions={versions}
             current={currentVersion}
             onChange={onVersionChange}
-            disabled={isDirty || isSaving}
+            disabled={isDirty || isSaving || isSaveAndDeploying}
           />
           {onCompare && versions.length > 1 && (
             <button
@@ -172,7 +188,7 @@ export function ConfigEditorLayout({
             <>
               <button
                 onClick={() => setShowDiscardConfirm(true)}
-                disabled={!isDirty || isSaving}
+                disabled={!isDirty || isSaving || isSaveAndDeploying}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-input px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-all hover:bg-secondary active:scale-[0.98] disabled:opacity-50"
                 data-testid="discard-btn"
               >
@@ -181,7 +197,7 @@ export function ConfigEditorLayout({
               </button>
               <button
                 onClick={handleSave}
-                disabled={!isDirty || isSaving}
+                disabled={!isDirty || isSaving || isSaveAndDeploying}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
                 data-testid="save-btn"
               >
@@ -190,6 +206,19 @@ export function ConfigEditorLayout({
                   ? t("editor.saving", "Saving...")
                   : t("editor.save", "Save")}
               </button>
+              {onSaveAndDeploy && (
+                <button
+                  onClick={handleSaveAndDeploy}
+                  disabled={!isDirty || isSaving || isSaveAndDeploying}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-emerald-700 active:scale-[0.98] disabled:opacity-50 dark:bg-emerald-600 dark:hover:bg-emerald-700"
+                  data-testid="save-test-btn"
+                >
+                  <Rocket className="h-4 w-4" />
+                  {isSaveAndDeploying
+                    ? t("editor.deploying", "Deploying…")
+                    : t("editor.saveAndTest", "Save & Test")}
+                </button>
+              )}
             </>
           )}
         </div>

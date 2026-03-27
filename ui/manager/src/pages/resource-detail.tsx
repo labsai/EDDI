@@ -40,6 +40,8 @@ import { useJsonSchema } from "@/hooks/use-json-schema";
 import type { CascadeContext } from "@/lib/api/cascade-save";
 import { VersionDiffDialog } from "@/components/editors/version-diff-dialog";
 import { getResource } from "@/lib/api/resources";
+import { useAgentContext } from "@/hooks/use-agent-context";
+import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
 import {
   BehaviorEditor,
   type BehaviorConfig,
@@ -161,6 +163,10 @@ export function ResourceDetailPage() {
   const [isCascading, setIsCascading] = useState(false);
   const [newResourceVersion, setNewResourceVersion] = useState<number | null>(null);
 
+  // Agent context for Save & Test
+  const agentCtx = useAgentContext();
+  const { saveAndDeploy, isRunning: isSaveAndDeploying } = useSaveAndDeploy();
+
   // Version diff dialog state
   const [showDiff, setShowDiff] = useState(false);
 
@@ -238,6 +244,31 @@ export function ResourceDetailPage() {
       }
     },
     [id, currentVersion, cascadeSave, cascadeContext, rt, t]
+  );
+
+  const handleSaveAndDeploy = useCallback(
+    async (jsonString: string) => {
+      if (!cascadeContext || !agentCtx) return;
+      try {
+        const parsed = JSON.parse(jsonString);
+        await saveAndDeploy({
+          agentId: agentCtx.agentId,
+          save: async () => {
+            const result = await cascadeSave.mutateAsync({
+              id: id ?? "",
+              version: currentVersion,
+              body: parsed,
+              context: cascadeContext,
+            });
+            setCurrentVersion(result.newResourceVersion);
+            return { newAgentVersion: result.newAgentVersion ?? agentCtx.agentVer };
+          },
+        });
+      } catch {
+        // Error handled inside saveAndDeploy
+      }
+    },
+    [id, currentVersion, cascadeSave, cascadeContext, agentCtx, saveAndDeploy]
   );
 
   const handleCascadeConfirm = useCallback(
@@ -397,7 +428,9 @@ export function ResourceDetailPage() {
             currentVersion={currentVersion}
             onVersionChange={setCurrentVersion}
             onSave={handleSave}
+            onSaveAndDeploy={cascadeContext && agentCtx ? handleSaveAndDeploy : undefined}
             isSaving={cascadeSave.isPending}
+            isSaveAndDeploying={isSaveAndDeploying}
             saveSuccess={saveSuccess}
             saveError={
               cascadeSave.isError

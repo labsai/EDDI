@@ -1,9 +1,16 @@
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { MessageCircle } from "lucide-react";
 import { ChatPanel } from "@/components/chat/chat-panel";
+import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
 
 export function ChatPage() {
   const { t } = useTranslation();
+
+  // Close the chat drawer when user navigates to the full chat page
+  useEffect(() => {
+    useChatDrawerStore.getState().close();
+  }, []);
 
   return (
     <div className="flex h-[calc(100vh-(--spacing(16))-(--spacing(12)))] flex-col gap-4">

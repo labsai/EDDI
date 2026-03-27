@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
+import { ChatDrawer } from "@/components/chat/chat-drawer";
 import { cn } from "@/lib/utils";
 
 export function AppLayout() {
@@ -65,6 +66,7 @@ export function AppLayout() {
           </div>
         </main>
       </div>
+      <ChatDrawer />
     </div>
   );
 }
