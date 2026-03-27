@@ -15,13 +15,13 @@ import org.jboss.resteasy.reactive.Cache;
 public interface IRestManagerResource {
 
     @GET
-    @Cache(noCache = true)
+    @Cache(noCache = true, mustRevalidate = true)
     @Path("/manage")
     @Produces(MediaType.TEXT_HTML)
     Response fetchManagerResources();
 
     @GET
-    @Cache(noCache = true)
+    @Cache(noCache = true, mustRevalidate = true)
     @Path("/manage/{path:.*}")
     @Produces(MediaType.TEXT_HTML)
     Response fetchManagerResources(@PathParam("path") String path);

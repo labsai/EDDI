@@ -20,11 +20,11 @@ import org.jboss.resteasy.reactive.Cache;
 public interface IRestHtmlChatResource {
 
     @GET
-    @Cache(noCache = true)
+    @Cache(noCache = true, mustRevalidate = true)
     Response viewDefault();
 
     @GET
-    @Cache(noCache = true)
+    @Cache(noCache = true, mustRevalidate = true)
     @Path("{path:.*}")
     Response viewHtml(@PathParam("path") String path);
 }
