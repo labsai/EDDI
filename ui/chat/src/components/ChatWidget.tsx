@@ -144,6 +144,31 @@ export function ChatWidget() {
           break;
         case "done":
           dispatch({ type: "FINISH_STREAMING" });
+          // Parse the snapshot from the done event to extract quickReplies,
+          // conversation state, and undo/redo availability.
+          if (event.data) {
+            try {
+              const snapshot = JSON.parse(event.data);
+              if (snapshot.conversationOutputs?.length) {
+                const output = snapshot.conversationOutputs[
+                  snapshot.conversationOutputs.length - 1
+                ];
+                dispatch({
+                  type: "SET_QUICK_REPLIES",
+                  replies: output.quickReplies ?? [],
+                });
+              }
+              if (snapshot.conversationState) {
+                dispatch({
+                  type: "SET_CONVERSATION_STATE",
+                  state: snapshot.conversationState,
+                });
+              }
+            } catch {
+              // Ignore parse errors — done event data may be empty
+            }
+          }
+          dispatch({ type: "SET_PROCESSING", value: false });
           break;
         case "error":
           dispatch({
