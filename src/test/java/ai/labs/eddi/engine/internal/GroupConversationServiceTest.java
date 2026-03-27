@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDepthExceededException;
@@ -44,6 +45,7 @@ class GroupConversationServiceTest {
     private IConversationService conversationService;
     private IAgentFactory agentFactory;
     private ITemplatingEngine templatingEngine;
+    private IJsonSerialization jsonSerialization;
     private GroupConversationService service;
 
     private static final String GROUP_ID = "test-group";
@@ -57,8 +59,9 @@ class GroupConversationServiceTest {
         conversationService = mock(IConversationService.class);
         agentFactory = mock(IAgentFactory.class);
         templatingEngine = mock(ITemplatingEngine.class);
+        jsonSerialization = mock(IJsonSerialization.class);
 
-        service = new GroupConversationService(groupStore, conversationStore, conversationService, agentFactory, templatingEngine,
+        service = new GroupConversationService(groupStore, conversationStore, conversationService, agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), 3);
 
         when(conversationStore.create(any())).thenReturn("gc-1");
@@ -291,7 +294,7 @@ class GroupConversationServiceTest {
         @Test
         void groupMember_depthExceeded_skipsGracefully() throws Exception {
             var shallow = new GroupConversationService(groupStore, conversationStore, conversationService, agentFactory, templatingEngine,
-                    new SimpleMeterRegistry(), 0);
+                    jsonSerialization, new SimpleMeterRegistry(), 0);
 
             var parent = config(DiscussionStyle.ROUND_TABLE, 1, new GroupMember("sub-g1", "Team A", 1, null, MemberType.GROUP));
             parent.setModeratorAgentId("mod");

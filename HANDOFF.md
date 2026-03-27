@@ -835,6 +835,18 @@ Agents now auto-discover `httpcall` configurations from their workflow and expos
 
 See `AGENTS.md` for the full roadmap (Phases 7–14b) and `docs/project-philosophy.md` for the 7 architectural pillars.
 
+### Platform Remediation: Thread Safety, A2A Hardening, Code Quality & Audit DLQ ✅
+
+Critical architectural fixes from thorough v6 feature review. 12 files modified, 1 new file.
+
+| Change | Details |
+|---|---|
+| Virtual threads | `CascadingModelExecutor` + `GroupConversationService` — replaced `CachedThreadPool` |
+| A2A security | `@Authenticated` POST, circuit breaker, 1MB limit, JSON-RPC validation |
+| Code quality | `WorkflowTraversal` DRY, `JsonStringEncoder` escaping, `maxToolIterations`, `isRetryableError` HTTP status codes |
+| Observability | Audit dead-letter: NATS JetStream first (`eddi.deadletter.audit`), file fallback (configurable `eddi.audit.dead-letter-path`) |
+| Tests | 1291 total (1289 pass, 2 pre-existing isolation failures) |
+
 ### One-Command Install & Onboarding Wizard ✅
 
 New users can set up EDDI with `curl ... | bash` (Linux/macOS/WSL) or `iwr ... | iex` (Windows). Interactive 3-step wizard.

@@ -103,19 +103,31 @@ class AgentExecutionHelper {
     }
 
     /**
-     * Determines if an error is retryable by checking known types and traversing
-     * the cause chain.
+     * Determines if an error is retryable by checking: 1. Known exception types
+     * (typed matching — preferred) 2. HTTP status codes from HttpException or
+     * WebApplicationException (429, 502, 503, 504) 3. Message string patterns
+     * (fallback for wrapped/untyped exceptions)
      */
     private static boolean isRetryableError(Exception e) {
         Throwable current = e;
 
         while (current != null) {
+            // 1. Typed exception matching
             for (RetryableErrorType type : RetryableErrorType.values()) {
                 if (type.matches(current)) {
                     return true;
                 }
             }
 
+            // 2. HTTP status code matching from typed exceptions
+            if (current instanceof jakarta.ws.rs.WebApplicationException wae) {
+                int status = wae.getResponse().getStatus();
+                if (status == 429 || status == 502 || status == 503 || status == 504) {
+                    return true;
+                }
+            }
+
+            // 3. String-based fallback for wrapped exceptions
             String message = current.getMessage() != null ? current.getMessage().toLowerCase() : "";
 
             if (message.contains("timeout") || message.contains("rate limit") || message.contains("too many requests") || message.contains("503")

@@ -173,6 +173,12 @@ public record LlmConfiguration(List<Task> tasks) {
         /** Timeout for parallel execution (ms) */
         private Long parallelExecutionTimeoutMs = 30000L;
 
+        /**
+         * Maximum number of tool-calling loop iterations before forcing a final answer
+         * (default 10).
+         */
+        private Integer maxToolIterations;
+
         // === Multi-Model Cascade ===
 
         /**
@@ -409,6 +415,14 @@ public record LlmConfiguration(List<Task> tasks) {
             this.parallelExecutionTimeoutMs = parallelExecutionTimeoutMs;
         }
 
+        public Integer getMaxToolIterations() {
+            return maxToolIterations;
+        }
+
+        public void setMaxToolIterations(Integer maxToolIterations) {
+            this.maxToolIterations = maxToolIterations;
+        }
+
         public ModelCascadeConfig getModelCascade() {
             return modelCascade;
         }
@@ -598,11 +612,11 @@ public record LlmConfiguration(List<Task> tasks) {
         private Integer maxResults;
         private Double minScore;
 
-        public String getApiCall() {
+        public String getHttpCall() {
             return httpCall;
         }
 
-        public void setApiCall(String httpCall) {
+        public void setHttpCall(String httpCall) {
             this.httpCall = httpCall;
         }
 

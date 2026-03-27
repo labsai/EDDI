@@ -34,11 +34,9 @@ import java.util.concurrent.*;
  */
 class CascadingModelExecutor {
     private static final Logger LOGGER = Logger.getLogger(CascadingModelExecutor.class);
-    private static final ExecutorService TIMEOUT_EXECUTOR = Executors.newCachedThreadPool(r -> {
-        var t = new Thread(r, "eddi-cascade-timeout");
-        t.setDaemon(true);
-        return t;
-    });
+    // Virtual threads — lightweight, no pool sizing, no leak risk, ideal for
+    // I/O-bound model calls
+    private static final ExecutorService TIMEOUT_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
 
     /**
      * Result of a cascade execution.

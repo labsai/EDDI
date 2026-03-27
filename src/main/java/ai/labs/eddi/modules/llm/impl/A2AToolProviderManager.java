@@ -43,6 +43,16 @@ public class A2AToolProviderManager {
     record CachedAgentInfo(Map<String, Object> agentCard, long timestamp) {
     }
 
+    /** Circuit breaker state — tracks consecutive failures per agent URL. */
+    record CircuitState(int failures, long lastFailure) {
+    }
+
+    private static final int CIRCUIT_BREAKER_THRESHOLD = 3;
+    private static final long CIRCUIT_BREAKER_COOLDOWN_MS = 60_000;
+    private static final int MAX_RESPONSE_SIZE_BYTES = 1_048_576; // 1MB
+
+    private final Map<String, CircuitState> circuitBreakers = new ConcurrentHashMap<>();
+
     record A2AToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors) {
     }
 
@@ -70,8 +80,17 @@ public class A2AToolProviderManager {
             }
 
             try {
+                // Circuit breaker check
+                if (isCircuitOpen(config.getUrl())) {
+                    LOGGER.warnf("Circuit breaker open for A2A agent at %s — skipping discovery", config.getUrl());
+                    continue;
+                }
+
                 discoverAgentTools(config, toolSpecs, executors);
+                // Reset circuit on success
+                circuitBreakers.remove(config.getUrl());
             } catch (Exception e) {
+                recordFailure(config.getUrl());
                 LOGGER.warnf("Failed to discover tools from A2A agent at %s: %s", config.getUrl(), e.getMessage());
             }
         }
@@ -174,7 +193,20 @@ public class A2AToolProviderManager {
             return null;
         }
 
+        // Response size limit
+        if (response.body() != null && response.body().length() > MAX_RESPONSE_SIZE_BYTES) {
+            LOGGER.warnf("Agent Card response from %s exceeds %d bytes — rejecting", cardUrl, MAX_RESPONSE_SIZE_BYTES);
+            return null;
+        }
+
         Map<String, Object> card = MAPPER.readValue(response.body(), Map.class);
+
+        // Basic schema validation — must have "name" at minimum
+        if (!card.containsKey("name")) {
+            LOGGER.warnf("Agent Card from %s missing 'name' field — rejecting", cardUrl);
+            return null;
+        }
+
         agentCache.put(agentUrl, new CachedAgentInfo(card, System.currentTimeMillis()));
         return card;
     }
@@ -225,8 +257,17 @@ public class A2AToolProviderManager {
             return "A2A agent returned HTTP " + response.statusCode();
         }
 
-        // Extract text from response
+        // Response size limit
+        if (response.body() != null && response.body().length() > MAX_RESPONSE_SIZE_BYTES) {
+            return "A2A agent response exceeds size limit (" + MAX_RESPONSE_SIZE_BYTES + " bytes)";
+        }
+
+        // Validate JSON-RPC response schema
         Map<String, Object> rpcResponse = MAPPER.readValue(response.body(), Map.class);
+        if (!rpcResponse.containsKey("jsonrpc") || !"2.0".equals(rpcResponse.get("jsonrpc"))) {
+            return "Invalid A2A response: not a valid JSON-RPC 2.0 response";
+        }
+
         Map<String, Object> result = (Map<String, Object>) rpcResponse.get("result");
         if (result == null) {
             Map<String, Object> error = (Map<String, Object>) rpcResponse.get("error");
@@ -274,5 +315,29 @@ public class A2AToolProviderManager {
 
     private String sanitizeToolName(String name) {
         return name.toLowerCase().replaceAll("[^a-z0-9_]", "_").replaceAll("_+", "_").replaceAll("^_|_$", "");
+    }
+
+    // === Circuit Breaker ===
+
+    private boolean isCircuitOpen(String url) {
+        CircuitState state = circuitBreakers.get(url);
+        if (state == null)
+            return false;
+        if (state.failures() >= CIRCUIT_BREAKER_THRESHOLD) {
+            // Auto-reset after cooldown
+            if (System.currentTimeMillis() - state.lastFailure() > CIRCUIT_BREAKER_COOLDOWN_MS) {
+                circuitBreakers.remove(url);
+                return false;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private void recordFailure(String url) {
+        circuitBreakers.compute(url, (k, v) -> {
+            int failures = (v != null) ? v.failures() + 1 : 1;
+            return new CircuitState(failures, System.currentTimeMillis());
+        });
     }
 }

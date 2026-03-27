@@ -16,6 +16,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationStat
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.model.Context;
@@ -26,6 +27,7 @@ import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -59,6 +61,7 @@ public class GroupConversationService implements IGroupConversationService {
     private final IConversationService conversationService;
     private final IAgentFactory agentFactory;
     private final ITemplatingEngine templatingEngine;
+    private final IJsonSerialization jsonSerialization;
     private final int maxDepth;
     private final ExecutorService executorService;
 
@@ -69,19 +72,34 @@ public class GroupConversationService implements IGroupConversationService {
 
     @Inject
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
-            IAgentFactory agentFactory, ITemplatingEngine templatingEngine, MeterRegistry meterRegistry,
+            IAgentFactory agentFactory, ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, MeterRegistry meterRegistry,
             @ConfigProperty(name = "eddi.groups.max-depth", defaultValue = "3") int maxDepth) {
         this.groupStore = groupStore;
         this.conversationStore = conversationStore;
         this.conversationService = conversationService;
         this.agentFactory = agentFactory;
         this.templatingEngine = templatingEngine;
+        this.jsonSerialization = jsonSerialization;
         this.maxDepth = maxDepth;
-        this.executorService = Executors.newCachedThreadPool();
+        // Virtual threads — lightweight, no pool sizing, ideal for parallel agent calls
+        this.executorService = Executors.newVirtualThreadPerTaskExecutor();
 
         this.timerGroupDiscussion = meterRegistry.timer("eddi_group_discussion_duration");
         this.counterGroupDiscussion = meterRegistry.counter("eddi_group_discussion_count");
         this.counterGroupFailure = meterRegistry.counter("eddi_group_discussion_failure_count");
+    }
+
+    @PreDestroy
+    void shutdown() {
+        executorService.shutdown();
+        try {
+            if (!executorService.awaitTermination(10, TimeUnit.SECONDS)) {
+                executorService.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executorService.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Override
@@ -254,6 +272,9 @@ public class GroupConversationService implements IGroupConversationService {
     private void executeParallelPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
             ProtocolConfig protocol, String question, int phaseIdx) throws GroupDiscussionException {
 
+        // SAFETY: Snapshot the transcript so parallel tasks each see a consistent view.
+        // Results are appended sequentially below (futures are collected one-by-one in
+        // the for-loop), so there is no concurrent modification of gc.getTranscript().
         List<TranscriptEntry> snapshotTranscript = List.copyOf(gc.getTranscript());
 
         List<CompletableFuture<TranscriptEntry>> futures = speakers.stream().map(speaker -> CompletableFuture.supplyAsync(() -> {
@@ -666,7 +687,15 @@ public class GroupConversationService implements IGroupConversationService {
             return "";
         }
         var lastOutput = outputs.get(outputs.size() - 1);
-        return lastOutput != null ? lastOutput.toString() : "";
+        if (lastOutput == null) {
+            return "";
+        }
+        try {
+            return jsonSerialization.serialize(lastOutput);
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to serialize conversation output, falling back to toString(): %s", e.getMessage());
+            return lastOutput.toString();
+        }
     }
 
     private String buildPlainTextFallback(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript) {

@@ -92,10 +92,13 @@ public class RestA2AEndpoint {
     }
 
     /**
-     * JSON-RPC 2.0 endpoint for A2A task operations.
+     * JSON-RPC 2.0 endpoint for A2A task operations. Protected by OIDC when
+     * authentication is enabled (quarkus.oidc.tenant-enabled=true). GET endpoints
+     * (Agent Card discovery) remain public per A2A protocol spec.
      */
     @POST
     @Path("a2a/agents/{agentId}")
+    @io.quarkus.security.Authenticated
     public Response handleJsonRpc(@PathParam("agentId") String agentId, JsonRpcRequest request) {
         if (!a2aEnabled) {
             return jsonRpcError(request.id(), A2AModels.ERROR_METHOD_NOT_FOUND, "A2A is disabled");

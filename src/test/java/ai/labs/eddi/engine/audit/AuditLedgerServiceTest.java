@@ -12,6 +12,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 /**
  * Unit tests for {@link AuditLedgerService} and {@link AuditHmac}.
@@ -37,7 +38,7 @@ class AuditLedgerServiceTest {
 
         @Test
         void shouldEnqueueEntries() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "test-master-key");
+            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "test-master-key", new SimpleMeterRegistry());
             service.init();
 
             service.submit(createEntry("task-1", "conv-1"));
@@ -48,7 +49,7 @@ class AuditLedgerServiceTest {
 
         @Test
         void shouldFlushToStore() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "test-master-key");
+            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "test-master-key", new SimpleMeterRegistry());
             service.init();
 
             service.submit(createEntry("task-1", "conv-1"));
@@ -62,7 +63,7 @@ class AuditLedgerServiceTest {
 
         @Test
         void shouldNotFlushWhenQueueEmpty() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "test-master-key");
+            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "test-master-key", new SimpleMeterRegistry());
             service.init();
 
             service.flush();
@@ -72,7 +73,7 @@ class AuditLedgerServiceTest {
 
         @Test
         void shouldNotEnqueueWhenDisabled() {
-            var service = AuditLedgerService.createForTesting(auditStore, false, 60, "test-master-key");
+            var service = AuditLedgerService.createForTesting(auditStore, false, 60, "test-master-key", new SimpleMeterRegistry());
             service.init();
 
             service.submit(createEntry("task-1", "conv-1"));
@@ -88,7 +89,7 @@ class AuditLedgerServiceTest {
 
         @Test
         void shouldComputeHmacWhenKeyConfigured() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "test-master-key");
+            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "test-master-key", new SimpleMeterRegistry());
             service.init();
 
             service.submit(createEntry("task-1", "conv-1"));
@@ -102,7 +103,7 @@ class AuditLedgerServiceTest {
 
         @Test
         void shouldNotComputeHmacWhenKeyNotConfigured() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "");
+            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "", new SimpleMeterRegistry());
             service.init();
 
             service.submit(createEntry("task-1", "conv-1"));
@@ -174,7 +175,7 @@ class AuditLedgerServiceTest {
 
         @Test
         void shouldScrubSecretsFromStringValues() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "");
+            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "", new SimpleMeterRegistry());
             service.init();
 
             Map<String, Object> inputWithSecret = new LinkedHashMap<>();
@@ -232,7 +233,7 @@ class AuditLedgerServiceTest {
 
         @Test
         void shouldReQueueEntriesOnFirstFailure() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "");
+            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "", new SimpleMeterRegistry());
             service.init();
 
             doThrow(new RuntimeException("DB unavailable")).when(auditStore).appendBatch(any());
@@ -249,7 +250,7 @@ class AuditLedgerServiceTest {
 
         @Test
         void shouldDropEntriesAfterMaxRetries() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "");
+            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "", new SimpleMeterRegistry());
             service.init();
 
             doThrow(new RuntimeException("DB unavailable")).when(auditStore).appendBatch(any());
@@ -266,7 +267,7 @@ class AuditLedgerServiceTest {
 
         @Test
         void shouldResetRetryCounterOnSuccess() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "");
+            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "", new SimpleMeterRegistry());
             service.init();
 
             // First: fail once
@@ -289,7 +290,7 @@ class AuditLedgerServiceTest {
 
         @Test
         void shouldScrubSecretsInsideListOfStrings() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "");
+            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "", new SimpleMeterRegistry());
             service.init();
 
             Map<String, Object> input = new LinkedHashMap<>();
@@ -311,7 +312,7 @@ class AuditLedgerServiceTest {
 
         @Test
         void shouldScrubSecretsInsideNestedMaps() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "");
+            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "", new SimpleMeterRegistry());
             service.init();
 
             Map<String, Object> nested = new LinkedHashMap<>();

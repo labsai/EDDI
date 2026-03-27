@@ -2,9 +2,12 @@ package ai.labs.eddi.engine.audit;
 
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
+import io.nats.client.Connection;
+import io.nats.client.JetStream;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -12,6 +15,9 @@ import org.jboss.logging.Logger;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.nio.file.*;
+import java.time.Instant;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Async batch writer for the immutable audit ledger.
@@ -42,6 +48,9 @@ public class AuditLedgerService {
     private final boolean enabled;
     private final int flushIntervalSeconds;
     private final Optional<String> masterKeyConfig;
+    private final io.micrometer.core.instrument.Counter droppedCounter;
+    private final Instance<Connection> natsConnectionInstance;
+    private final String deadLetterPath;
 
     private byte[] hmacKey;
     private final ConcurrentLinkedQueue<AuditEntry> queue = new ConcurrentLinkedQueue<>();
@@ -51,19 +60,26 @@ public class AuditLedgerService {
     @Inject
     public AuditLedgerService(IAuditStore auditStore, @ConfigProperty(name = "eddi.audit.enabled", defaultValue = "true") boolean enabled,
             @ConfigProperty(name = "eddi.audit.flush-interval-seconds", defaultValue = "3") int flushIntervalSeconds,
-            @ConfigProperty(name = "eddi.vault.master-key") Optional<String> masterKeyConfig) {
+            @ConfigProperty(name = "eddi.vault.master-key") Optional<String> masterKeyConfig,
+            @ConfigProperty(name = "eddi.audit.dead-letter-path", defaultValue = "/opt/eddi/data/eddi-audit-deadletter.jsonl") String deadLetterPath,
+            io.micrometer.core.instrument.MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance) {
         this.auditStore = auditStore;
         this.enabled = enabled;
         this.flushIntervalSeconds = flushIntervalSeconds;
         this.masterKeyConfig = masterKeyConfig;
+        this.deadLetterPath = deadLetterPath;
+        this.droppedCounter = meterRegistry.counter("eddi_audit_entries_dropped_total");
+        this.natsConnectionInstance = natsConnectionInstance;
     }
 
     /**
      * Factory method for unit testing — creates a service without CDI. Call
      * {@link #init()} after construction.
      */
-    static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig) {
-        return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig));
+    static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
+            io.micrometer.core.instrument.MeterRegistry meterRegistry) {
+        return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig), "eddi-audit-deadletter.jsonl",
+                meterRegistry, null);
     }
 
     @PostConstruct
@@ -160,7 +176,10 @@ public class AuditLedgerService {
                     }
                     LOGGER.warnv("Re-queued {0} audit entries for retry", batch.size());
                 } else {
-                    LOGGER.errorv("Dropping {0} audit entries after {1} consecutive failures", batch.size(), MAX_FLUSH_RETRIES);
+                    LOGGER.errorv("Dropping {0} audit entries after {1} consecutive failures — writing to dead-letter log", batch.size(),
+                            MAX_FLUSH_RETRIES);
+                    droppedCounter.increment(batch.size());
+                    writeToDeadLetter(batch);
                     consecutiveFailures.set(0);
                 }
             }
@@ -218,5 +237,46 @@ public class AuditLedgerService {
             return list.stream().map(AuditLedgerService::scrubValue).toList();
         }
         return value;
+    }
+
+    /**
+     * Write dropped entries to a dead-letter destination. Tries NATS JetStream
+     * first (when nats profile is active and connection is available), falls back
+     * to a local file-based dead-letter log.
+     */
+    private void writeToDeadLetter(List<AuditEntry> entries) {
+        // Try NATS JetStream first
+        if (natsConnectionInstance != null && natsConnectionInstance.isResolvable()) {
+            try {
+                Connection conn = natsConnectionInstance.get();
+                if (conn.getStatus() == Connection.Status.CONNECTED) {
+                    JetStream js = conn.jetStream();
+                    for (AuditEntry entry : entries) {
+                        String payload = "{\"type\":\"audit_dead_letter\",\"timestamp\":\"" + Instant.now() + "\",\"conversationId\":\""
+                                + entry.conversationId() + "\",\"agentId\":\"" + entry.agentId() + "\",\"taskId\":\"" + entry.taskId()
+                                + "\",\"taskType\":\"" + entry.taskType() + "\"}";
+                        js.publish("eddi.deadletter.audit", payload.getBytes(StandardCharsets.UTF_8));
+                    }
+                    LOGGER.infov("Published {0} audit dead-letter entries to NATS JetStream", entries.size());
+                    return;
+                }
+            } catch (Exception e) {
+                LOGGER.warnv("NATS dead-letter publish failed, falling back to file: {0}", e.getMessage());
+            }
+        }
+
+        // Fallback: file-based dead-letter log
+        try {
+            Path dlPath = Path.of(deadLetterPath);
+            var lines = new ArrayList<String>(entries.size());
+            for (AuditEntry entry : entries) {
+                lines.add("{\"timestamp\":\"" + Instant.now() + "\",\"conversationId\":\"" + entry.conversationId() + "\",\"agentId\":\""
+                        + entry.agentId() + "\",\"taskId\":\"" + entry.taskId() + "\",\"taskType\":\"" + entry.taskType() + "\"}");
+            }
+            Files.write(dlPath, lines, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            LOGGER.infov("Wrote {0} entries to dead-letter log: {1}", entries.size(), dlPath.toAbsolutePath());
+        } catch (Exception e) {
+            LOGGER.errorv("Failed to write to dead-letter log: {0}", e.getMessage());
+        }
     }
 }

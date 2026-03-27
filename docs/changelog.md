@@ -13,6 +13,32 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Platform Remediation: Thread Safety, A2A Hardening, Code Quality & Audit DLQ (2026-03-27)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Critical architectural fixes identified during thorough feature review of v6. 12 files modified across 6 groups.
+
+| Group | Change |
+|---|---|
+| **Thread Safety** | Replaced unbounded `CachedThreadPool` with Java 21+ `VirtualThreadPerTaskExecutor` in `CascadingModelExecutor` and `GroupConversationService`. Added `@PreDestroy` lifecycle shutdown. |
+| **A2A Security** | `@Authenticated` on A2A POST endpoint (opt-in via OIDC). Circuit breaker (3 failures/60s cooldown), 1MB response size limit, JSON-RPC 2.0 schema validation, Agent Card `name` field validation in `A2AToolProviderManager`. |
+| **Code Quality** | Extracted `WorkflowTraversal` helper (eliminates ~80% duplicated traversal code). Safe JSON escaping via `JsonStringEncoder`. Configurable `maxToolIterations` in `LlmConfiguration.Task`. `isRetryableError` with typed HTTP status code matching (429/502/503/504). Renamed `getApiCall()`→`getHttpCall()` in `RetrievalAugmentorConfiguration`. |
+| **Observability** | Audit dead-letter queue: NATS JetStream first (subject `eddi.deadletter.audit` matches existing `EDDI_DEAD_LETTERS` stream), file fallback (configurable via `eddi.audit.dead-letter-path`, defaults to `/opt/eddi/data/`). Micrometer counter `eddi_audit_entries_dropped_total`. |
+| **GroupConversation** | `extractResponse` uses `IJsonSerialization` instead of `toString()`. |
+
+**Key design decisions:**
+- Dead-letter path defaults to `/opt/eddi/data/` for Docker volume persistence
+- NATS subject `eddi.deadletter.audit` reuses existing `EDDI_DEAD_LETTERS` stream (30-day retention)
+- Circuit breaker uses `ConcurrentHashMap<String, CircuitState>` record — no external library
+- `@Authenticated` opt-in: only activates when `quarkus.oidc.tenant-enabled=true`
+
+**Tests:** 1289/1291 pass (2 pre-existing `ConfidenceEvaluatorTest` isolation failures that pass individually). Updated `GroupConversationServiceTest` and `AuditLedgerServiceTest` constructors.
+
+---
+
 ## Multi-Model Cascading Routing (2026-03-26)
 
 **Repo:** EDDI (`feature/version-6.0.0`) — Commit `514821d4`

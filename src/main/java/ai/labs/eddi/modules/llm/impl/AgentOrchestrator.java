@@ -1,18 +1,16 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
-import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
-import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
-import ai.labs.eddi.engine.runtime.service.ServiceException;
+import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
@@ -31,7 +29,6 @@ import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
-import java.net.URI;
 import java.util.*;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -226,7 +223,7 @@ class AgentOrchestrator {
         // Execute with retry logic — the tool execution loop
         String response = AgentExecutionHelper.executeWithRetry(() -> {
             List<ChatMessage> currentMessages = new ArrayList<>(messages);
-            int maxIterations = 10;
+            int maxIterations = task.getMaxToolIterations() != null ? task.getMaxToolIterations() : 10;
 
             for (int i = 0; i < maxIterations; i++) {
                 ChatRequest.Builder requestBuilder = ChatRequest.builder().messages(currentMessages);
@@ -355,12 +352,6 @@ class AgentOrchestrator {
     }
 
     /**
-     * Holder for an ApiCall and its parent configuration's target server URL.
-     */
-    private record HttpCallToolEntry(ApiCall apiCall, String targetServerUrl) {
-    }
-
-    /**
      * Discovers httpcall configurations from the workflow and creates
      * ToolSpecification + ToolExecutor for each ApiCall.
      * <p>
@@ -373,111 +364,61 @@ class AgentOrchestrator {
         Map<String, ToolExecutor> executors = new HashMap<>();
 
         try {
-            // Load the agent configuration
-            String agentId = memory.getAgentId();
-            Integer agentVersion = memory.getAgentVersion();
-            if (agentId == null || agentVersion == null) {
-                LOGGER.debug("No agent context in memory — skipping httpcall tool discovery");
-                return new HttpCallToolsResult(toolSpecs, executors);
-            }
-            LOGGER.info("Discovering httpcall tools for agent: " + agentId + " v" + agentVersion);
+            LOGGER.infof("Discovering httpcall tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
 
-            // Use direct store read — ResourceClientLibrary doesn't map agent/workflow URIs
-            AgentConfiguration agentConfig = restAgentStore.readAgent(agentId, agentVersion);
+            var stepConfigs = WorkflowTraversal.discoverConfigs(memory, HTTPCALLS_TYPE, ApiCallsConfiguration.class, restAgentStore,
+                    restWorkflowStore, resourceClientLibrary);
 
-            if (agentConfig == null || agentConfig.getWorkflows() == null || agentConfig.getWorkflows().isEmpty()) {
-                LOGGER.debug("No agent config or workflows found — skipping httpcall tool discovery");
-                return new HttpCallToolsResult(toolSpecs, executors);
-            }
+            for (var stepConfig : stepConfigs) {
+                ApiCallsConfiguration httpCallsConfig = stepConfig.config();
+                String targetServerUrl = httpCallsConfig.getTargetServerUrl();
 
-            // Load each workflow and discover httpcall extensions
-            List<HttpCallToolEntry> entries = new ArrayList<>();
-            for (URI workflowUri : agentConfig.getWorkflows()) {
-                // Parse id and version from workflow URI:
-                // eddi://ai.labs.workflow/workflowstore/workflows/{id}?version={v}
-                String workflowPath = workflowUri.getPath();
-                if (workflowPath == null) {
-                    LOGGER.warn("Workflow URI has no path: " + workflowUri);
-                    continue;
-                }
-                String workflowId = workflowPath.substring(workflowPath.lastIndexOf('/') + 1);
-                String workflowQuery = workflowUri.getQuery();
-                if (workflowQuery == null || !workflowQuery.contains("version=")) {
-                    LOGGER.warn("Workflow URI has no version query: " + workflowUri);
-                    continue;
-                }
-                int workflowVersion = Integer.parseInt(workflowQuery.replaceAll(".*version=(\\d+).*", "$1"));
+                for (ApiCall apiCall : httpCallsConfig.getHttpCalls()) {
+                    if (apiCall.getName() == null || apiCall.getName().isBlank()) {
+                        continue;
+                    }
 
-                WorkflowConfiguration workflowConfig = restWorkflowStore.readWorkflow(workflowId, workflowVersion);
-                for (var step : workflowConfig.getWorkflowSteps()) {
-                    if (step.getType() != null && HTTPCALLS_TYPE.equals(step.getType().toString())) {
-                        String uri = (String) step.getConfig().get("uri");
-                        if (uri != null) {
-                            try {
-                                ApiCallsConfiguration httpCallsConfig = resourceClientLibrary.getResource(URI.create(uri),
-                                        ApiCallsConfiguration.class);
-                                for (ApiCall apiCall : httpCallsConfig.getHttpCalls()) {
-                                    entries.add(new HttpCallToolEntry(apiCall, httpCallsConfig.getTargetServerUrl()));
+                    ToolSpecification.Builder specBuilder = ToolSpecification.builder().name(apiCall.getName())
+                            .description(apiCall.getDescription() != null ? apiCall.getDescription() : "Execute " + apiCall.getName());
+
+                    if (apiCall.getParameters() != null && !apiCall.getParameters().isEmpty()) {
+                        var schemaBuilder = dev.langchain4j.model.chat.request.json.JsonObjectSchema.builder();
+                        for (var param : apiCall.getParameters().entrySet()) {
+                            schemaBuilder.addStringProperty(param.getKey(), param.getValue() != null ? param.getValue() : param.getKey());
+                        }
+                        schemaBuilder.required(new ArrayList<>(apiCall.getParameters().keySet()));
+                        specBuilder.parameters(schemaBuilder.build());
+                    }
+
+                    toolSpecs.add(specBuilder.build());
+
+                    executors.put(apiCall.getName(), (toolRequest, memoryId) -> {
+                        try {
+                            Map<String, Object> templateData = memoryItemConverter.convert(memory);
+
+                            if (toolRequest.arguments() != null && !toolRequest.arguments().isBlank()) {
+                                try {
+                                    @SuppressWarnings("unchecked")
+                                    Map<String, Object> args = jsonSerialization.deserialize(toolRequest.arguments(), Map.class);
+                                    templateData.putAll(args);
+                                } catch (IOException e) {
+                                    LOGGER.warn("Failed to parse tool arguments: " + toolRequest.arguments(), e);
                                 }
-                            } catch (ServiceException e) {
-                                LOGGER.warn("Failed to load httpcall config: " + uri, e);
                             }
+
+                            Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateData, targetServerUrl);
+
+                            String serialized = jsonSerialization.serialize(result);
+                            LOGGER.info("Httpcall tool '" + apiCall.getName() + "' result: keys=" + result.keySet() + " size=" + serialized.length());
+                            return serialized;
+                        } catch (Exception e) {
+                            LOGGER.error("Error executing httpcall tool '" + apiCall.getName() + "'", e);
+                            String errorMsg = e.getMessage() != null ? e.getMessage() : "Unknown error";
+                            String escaped = new String(JsonStringEncoder.getInstance().quoteAsString(errorMsg));
+                            return "{\"error\": \"" + escaped + "\"}";
                         }
-                    }
+                    });
                 }
-            }
-
-            // Create ToolSpecification + ToolExecutor for each ApiCall
-            for (HttpCallToolEntry entry : entries) {
-                ApiCall apiCall = entry.apiCall();
-                String targetServerUrl = entry.targetServerUrl();
-
-                if (apiCall.getName() == null || apiCall.getName().isBlank()) {
-                    continue;
-                }
-
-                ToolSpecification.Builder specBuilder = ToolSpecification.builder().name(apiCall.getName())
-                        .description(apiCall.getDescription() != null ? apiCall.getDescription() : "Execute " + apiCall.getName());
-
-                // Add parameters if defined
-                if (apiCall.getParameters() != null && !apiCall.getParameters().isEmpty()) {
-                    var schemaBuilder = dev.langchain4j.model.chat.request.json.JsonObjectSchema.builder();
-                    for (var param : apiCall.getParameters().entrySet()) {
-                        schemaBuilder.addStringProperty(param.getKey(), param.getValue() != null ? param.getValue() : param.getKey());
-                    }
-                    schemaBuilder.required(new ArrayList<>(apiCall.getParameters().keySet()));
-                    specBuilder.parameters(schemaBuilder.build());
-                }
-
-                toolSpecs.add(specBuilder.build());
-
-                // Create executor that uses real conversation memory
-                executors.put(apiCall.getName(), (toolRequest, memoryId) -> {
-                    try {
-                        Map<String, Object> templateData = memoryItemConverter.convert(memory);
-
-                        // Merge LLM-provided arguments into template data
-                        if (toolRequest.arguments() != null && !toolRequest.arguments().isBlank()) {
-                            try {
-                                @SuppressWarnings("unchecked")
-                                Map<String, Object> args = jsonSerialization.deserialize(toolRequest.arguments(), Map.class);
-                                templateData.putAll(args);
-                            } catch (IOException e) {
-                                LOGGER.warn("Failed to parse tool arguments: " + toolRequest.arguments(), e);
-                            }
-                        }
-
-                        Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateData, targetServerUrl);
-
-                        String serialized = jsonSerialization.serialize(result);
-                        LOGGER.info("Httpcall tool '" + apiCall.getName() + "' result: keys=" + result.keySet() + " size=" + serialized.length());
-                        return serialized;
-                    } catch (Exception e) {
-                        LOGGER.error("Error executing httpcall tool '" + apiCall.getName() + "'", e);
-                        String errorMsg = e.getMessage() != null ? e.getMessage().replace("\"", "'") : "Unknown error";
-                        return "{\"error\": \"" + errorMsg + "\"}";
-                    }
-                });
             }
 
             LOGGER.info("Discovered " + toolSpecs.size() + " httpcall tools from workflow");
@@ -503,70 +444,40 @@ class AgentOrchestrator {
         Map<String, ToolExecutor> executors = new HashMap<>();
 
         try {
-            String agentId = memory.getAgentId();
-            Integer agentVersion = memory.getAgentVersion();
-            if (agentId == null || agentVersion == null) {
-                LOGGER.debug("No agent context in memory — skipping mcpcalls tool discovery");
-                return new McpToolProviderManager.McpToolsResult(toolSpecs, executors);
-            }
-            LOGGER.info("Discovering mcpcalls tools for agent: " + agentId + " v" + agentVersion);
+            LOGGER.infof("Discovering mcpcalls tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
 
-            AgentConfiguration agentConfig = restAgentStore.readAgent(agentId, agentVersion);
-            if (agentConfig == null || agentConfig.getWorkflows() == null || agentConfig.getWorkflows().isEmpty()) {
-                return new McpToolProviderManager.McpToolsResult(toolSpecs, executors);
-            }
+            var stepConfigs = WorkflowTraversal.discoverConfigs(memory, MCPCALLS_TYPE, McpCallsConfiguration.class, restAgentStore, restWorkflowStore,
+                    resourceClientLibrary);
 
-            for (URI workflowUri : agentConfig.getWorkflows()) {
-                String workflowPath = workflowUri.getPath();
-                if (workflowPath == null)
-                    continue;
-                String workflowId = workflowPath.substring(workflowPath.lastIndexOf('/') + 1);
-                String workflowQuery = workflowUri.getQuery();
-                if (workflowQuery == null || !workflowQuery.contains("version="))
-                    continue;
-                int workflowVersion = Integer.parseInt(workflowQuery.replaceAll(".*version=(\\d+).*", "$1"));
+            for (var stepConfig : stepConfigs) {
+                McpCallsConfiguration mcpCallsConfig = stepConfig.config();
 
-                WorkflowConfiguration workflowConfig = restWorkflowStore.readWorkflow(workflowId, workflowVersion);
-                for (var step : workflowConfig.getWorkflowSteps()) {
-                    if (step.getType() != null && MCPCALLS_TYPE.equals(step.getType().toString())) {
-                        String uri = (String) step.getConfig().get("uri");
-                        if (uri == null)
-                            continue;
+                // Build server config from McpCallsConfiguration
+                McpServerConfig serverConfig = new McpServerConfig();
+                serverConfig.setUrl(mcpCallsConfig.getMcpServerUrl());
+                serverConfig.setName(mcpCallsConfig.getName());
+                serverConfig.setTransport(mcpCallsConfig.getTransport());
+                serverConfig.setApiKey(mcpCallsConfig.getApiKey());
+                serverConfig.setTimeoutMs(mcpCallsConfig.getTimeoutMs());
 
-                        try {
-                            McpCallsConfiguration mcpCallsConfig = resourceClientLibrary.getResource(URI.create(uri), McpCallsConfiguration.class);
+                // Discover tools from this MCP server
+                McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.discoverTools(List.of(serverConfig));
 
-                            // Build server config from McpCallsConfiguration
-                            McpServerConfig serverConfig = new McpServerConfig();
-                            serverConfig.setUrl(mcpCallsConfig.getMcpServerUrl());
-                            serverConfig.setName(mcpCallsConfig.getName());
-                            serverConfig.setTransport(mcpCallsConfig.getTransport());
-                            serverConfig.setApiKey(mcpCallsConfig.getApiKey());
-                            serverConfig.setTimeoutMs(mcpCallsConfig.getTimeoutMs());
+                // Apply whitelist/blacklist filtering
+                List<String> whitelist = mcpCallsConfig.getToolsWhitelist();
+                List<String> blacklist = mcpCallsConfig.getToolsBlacklist();
 
-                            // Discover tools from this MCP server
-                            McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.discoverTools(List.of(serverConfig));
+                for (ToolSpecification spec : result.toolSpecs()) {
+                    String name = spec.name();
+                    if (whitelist != null && !whitelist.isEmpty() && !whitelist.contains(name))
+                        continue;
+                    if (blacklist != null && blacklist.contains(name))
+                        continue;
 
-                            // Apply whitelist/blacklist filtering
-                            List<String> whitelist = mcpCallsConfig.getToolsWhitelist();
-                            List<String> blacklist = mcpCallsConfig.getToolsBlacklist();
-
-                            for (ToolSpecification spec : result.toolSpecs()) {
-                                String name = spec.name();
-                                if (whitelist != null && !whitelist.isEmpty() && !whitelist.contains(name))
-                                    continue;
-                                if (blacklist != null && blacklist.contains(name))
-                                    continue;
-
-                                toolSpecs.add(spec);
-                                ToolExecutor executor = result.executors().get(name);
-                                if (executor != null) {
-                                    executors.put(name, executor);
-                                }
-                            }
-                        } catch (ServiceException e) {
-                            LOGGER.warn("Failed to load mcpcalls config: " + uri, e);
-                        }
+                    toolSpecs.add(spec);
+                    ToolExecutor executor = result.executors().get(name);
+                    if (executor != null) {
+                        executors.put(name, executor);
                     }
                 }
             }
