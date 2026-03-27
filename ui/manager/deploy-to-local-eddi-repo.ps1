@@ -95,3 +95,39 @@ Write-Host "`n  Updated manage.html" -ForegroundColor Green
 Write-Host "`n[DONE] EDDI Manager deployed successfully!" -ForegroundColor Green
 Write-Host "  JS:  /scripts/js/$($newJs.Name)"
 Write-Host "  CSS: /scripts/css/$($newCss.Name)`n"
+
+# ─── Step 5 (optional): Commit in EDDI repo ────────────────────────────────
+$answer = Read-Host "Commit these assets in the EDDI repo? [y/N]"
+if ($answer -match '^[Yy]') {
+    Write-Host "`n[5/5] Committing in EDDI repo..." -ForegroundColor Cyan
+
+    # Get the latest Manager commit hash for the message
+    $managerHash = git -C $PSScriptRoot log -1 --format="%h" 2>$null
+    $managerSubject = git -C $PSScriptRoot log -1 --format="%s" 2>$null
+    $commitMsg = "chore: update Manager UI assets"
+    if ($managerHash) {
+        $commitMsg = "chore: update Manager UI assets (Manager@$managerHash)"
+    }
+
+
+    Push-Location $EddiPath
+    try {
+        git add "src/main/resources/META-INF/resources/scripts/js/$($newJs.Name)"
+        git add "src/main/resources/META-INF/resources/scripts/css/$($newCss.Name)"
+        git add "src/main/resources/META-INF/resources/manage.html"
+
+        git commit --no-verify -m $commitMsg
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  Committed: $commitMsg" -ForegroundColor Green
+            if ($managerSubject) {
+                Write-Host "  Manager:   $managerSubject" -ForegroundColor DarkGray
+            }
+        } else {
+            Write-Host "  Nothing to commit (files unchanged?)" -ForegroundColor Yellow
+        }
+    } finally {
+        Pop-Location
+    }
+} else {
+    Write-Host "Skipped EDDI commit." -ForegroundColor DarkGray
+}
