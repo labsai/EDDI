@@ -81,7 +81,30 @@ Secret → random DEK → AES-256-GCM encrypt → ciphertext
 
 The vault requires a master key (KEK) to encrypt/decrypt secrets. If not set, the vault is **disabled** — all `${eddivault:...}` references pass through unresolved and a prominent warning is logged at startup.
 
-Set the master key using **one** of these methods (in priority order):
+#### Installer (Recommended)
+
+The `install.sh` / `install.ps1` installer automatically generates a unique, cryptographically random vault master key during setup and stores it in `~/.eddi/.env`. No manual configuration is needed — the vault is **secure by default** for all installer-based deployments.
+
+The installer offers two options during the "Security" wizard step:
+
+1. **Auto-generate** (recommended) — creates a strong 32-character base64 key via `openssl rand`
+2. **Custom passphrase** — enter your own passphrase (minimum 16 characters)
+
+You can also provide a key non-interactively:
+
+```bash
+# Bash
+bash install.sh --vault-key=your-strong-passphrase-here
+
+# PowerShell
+.\install.ps1 -VaultKey "your-strong-passphrase-here"
+```
+
+Re-running the installer preserves your existing key — it reads from `~/.eddi/.env` and never overwrites it.
+
+#### Manual Configuration
+
+For manual Docker Compose deployments or local development, set the master key using **one** of these methods (in priority order):
 
 ```bash
 # 1. System property (highest priority)
@@ -105,7 +128,7 @@ eddi.vault.cache-ttl-minutes=5
 eddi.vault.cache-max-size=1000
 ```
 
-> **⚠️ Important:** The master key must be set via environment variable or secure configuration. If the master key is lost, all encrypted secrets become unrecoverable.
+> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file.
 
 ## Secret Input (Agent Conversations)
 

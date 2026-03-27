@@ -13,6 +13,36 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Installer Security: Vault Master Key Auto-Generation (2026-03-27)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Eliminated the critical security anti-pattern where all installer deployments shared the same hardcoded vault master key (`local-dev-key-change-in-production`). Every installation now gets a unique, cryptographically random encryption key.
+
+| Component | Change |
+|---|---|
+| **docker-compose.yml** | Hardcoded key → `${EDDI_VAULT_MASTER_KEY:-}` (empty default = vault disabled if not set) |
+| **docker-compose.postgres-only.yml** | Same variable substitution |
+| **docker-compose.postgres.yml** | Same variable substitution |
+| **install.sh** | New "Security" wizard step (2 of 5): auto-generate or custom passphrase (min 16 chars). `--vault-key=<key>` CLI arg, `.env` file persistence (`chmod 600`), `--env-file` in compose_cmd, macOS-compatible `sed` (replaces `grep -oP`) |
+| **install.ps1** | Mirrored: `-VaultKey` param, `New-VaultKey` (RNG + Base64), `SecureString` input, ACL-restricted `.env` file, `--env-file` in compose args |
+| **.gitignore** | Added `.env` to prevent accidental commit of vault keys |
+
+**Key generation:**
+- Bash: `openssl rand -base64 24` (32 chars), `/dev/urandom` fallback
+- PowerShell: `[System.Security.Cryptography.RandomNumberGenerator]::Fill()` + Base64
+
+**Backward compatibility:**
+- Re-install detects existing `~/.eddi/.env` and preserves the key
+- Non-interactive (`--defaults`, `curl | bash`) auto-generates a unique key
+- Manual `docker compose up` without `.env` → vault cleanly disabled (empty default)
+
+**Files:** 6 modified (`docker-compose.yml`, `docker-compose.postgres-only.yml`, `docker-compose.postgres.yml`, `install.sh`, `install.ps1`, `.gitignore`).
+
+---
+
 ## LLM Provider Expansion — 7 → 12 Providers (2026-03-27)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

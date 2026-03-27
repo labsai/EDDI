@@ -52,6 +52,7 @@ fabric.properties
 .history/
 
 # === Project-specific ===
+.env
 docker/data/
 /tmp/
 
@@ -71,3 +72,8 @@ test-output.txt
 .gemini/
 
 eddi-audit-deadletter.jsonl
+
+# Auto-generated license files (rebuilt during Maven build)
+licenses/third-party/
+licenses/licenses.xml
+licenses/THIRD-PARTY.txt

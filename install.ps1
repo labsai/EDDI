@@ -459,7 +459,8 @@ function Start-Eddi {
     if ($Local) {
         Write-Host "  Building local Docker image..."
         Write-Host ""
-        $buildArgs = @("compose") + ($ComposeFiles | ForEach-Object { @("-f", $_) }) + @("build")
+        $envFile = Join-Path $EddiDir ".env"
+        $buildArgs = @("compose", "--env-file", $envFile) + ($ComposeFiles | ForEach-Object { @("-f", $_) }) + @("build")
         & docker @buildArgs
         if ($LASTEXITCODE -eq 0) {
             Write-Host ""
@@ -470,7 +471,8 @@ function Start-Eddi {
     } else {
         Write-Host "  Pulling images (this may take a minute)..."
         Write-Host ""
-        $pullArgs = @("compose") + ($ComposeFiles | ForEach-Object { @("-f", $_) }) + @("pull")
+        $envFile = Join-Path $EddiDir ".env"
+        $pullArgs = @("compose", "--env-file", $envFile) + ($ComposeFiles | ForEach-Object { @("-f", $_) }) + @("pull")
         & docker @pullArgs
         if ($LASTEXITCODE -eq 0) {
             Write-Host ""
@@ -481,7 +483,8 @@ function Start-Eddi {
     }
 
     Write-Host "  Starting containers...   " -NoNewline
-    $upArgs = @("compose") + ($ComposeFiles | ForEach-Object { @("-f", $_) }) + @("up", "-d")
+    $envFile = Join-Path $EddiDir ".env"
+    $upArgs = @("compose", "--env-file", $envFile) + ($ComposeFiles | ForEach-Object { @("-f", $_) }) + @("up", "-d")
     & docker @upArgs 2>$null
     if ($LASTEXITCODE -eq 0) {
         Write-Host "✅" -ForegroundColor Green

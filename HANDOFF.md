@@ -440,6 +440,7 @@
 - [x] Fixed 8 pre-existing Lombok ghost-method bugs in OutputItem subclasses + OutputConfiguration
 - [x] Cleanup: removed dead secretResolver, unused imports
 - [x] Documentation: `docs/secrets-vault.md`
+- [x] Installer integration: vault master key auto-generated during install, stored in `~/.eddi/.env`
 - [x] All 810 tests pass (0 failures, 0 errors, 4 skipped)
 
 **Key files (new):**
@@ -872,11 +873,11 @@ Critical architectural fixes from thorough v6 feature review. 12 files modified,
 
 ### One-Command Install & Onboarding Wizard ✅
 
-New users can set up EDDI with `curl ... | bash` (Linux/macOS/WSL) or `iwr ... | iex` (Windows). Interactive 3-step wizard.
+New users can set up EDDI with `curl ... | bash` (Linux/macOS/WSL) or `iwr ... | iex` (Windows). Interactive 5-step wizard.
 
 | File                               | Description                                                                                                       |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `install.sh`                       | Bash installer: platform-aware Docker install, DB/Auth/Monitoring wizard, `eddi` CLI wrapper, Agent Father import |
+| `install.sh`                       | Bash installer: platform-aware Docker install, DB/Security/Auth/Monitoring/Ports wizard, `eddi` CLI wrapper, Agent Father import |
 | `install.ps1`                      | PowerShell installer: `winget` Docker Desktop auto-install, same wizard flow                                      |
 | `docker-compose.postgres-only.yml` | PostgreSQL-only compose (no MongoDB)                                                                              |
 | `docker-compose.auth.yml`          | Keycloak overlay                                                                                                  |
@@ -884,7 +885,9 @@ New users can set up EDDI with `curl ... | bash` (Linux/macOS/WSL) or `iwr ... |
 | `README.md`                        | Quick Start section                                                                                               |
 | `docs/getting-started.md`          | Option 0 — one-command install                                                                                    |
 
-**Edge cases handled:** Idempotent re-runs, CTRL+C cleanup, piped stdin (`curl|bash`), disk space warning, input validation, macOS `wc -l` whitespace, Docker auto-install (Linux/Windows).
+**Vault security:** Step 2/5 generates a unique, cryptographically random vault master key (or accepts a custom passphrase). The key is stored in `~/.eddi/.env` (chmod 600 / ACL-restricted) and passed to Docker Compose via `--env-file`. All compose files use `${EDDI_VAULT_MASTER_KEY:-}` variable substitution — no hardcoded keys.
+
+**Edge cases handled:** Idempotent re-runs (preserves existing vault key), CTRL+C cleanup, piped stdin (`curl|bash` auto-generates key), disk space warning, input validation, macOS `wc -l` whitespace, Docker auto-install (Linux/Windows), macOS-compatible `sed` (no `grep -oP`).
 
 ## Important Rules
 

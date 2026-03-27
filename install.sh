@@ -415,7 +415,7 @@ wizard_security() {
   local env_file="$EDDI_DIR/.env"
   if [[ -f "$env_file" ]]; then
     local existing_key
-    existing_key=$(grep -oP '^EDDI_VAULT_MASTER_KEY=\K.+' "$env_file" 2>/dev/null || true)
+    existing_key=$(sed -n 's/^EDDI_VAULT_MASTER_KEY=//p' "$env_file" 2>/dev/null || true)
     if [[ -n "$existing_key" ]]; then
       EDDI_VAULT_MASTER_KEY="$existing_key"
       info "Vault key preserved from previous install" >&2
@@ -582,7 +582,7 @@ EOF
 
 # Helper: run docker compose with the right -f flags
 compose_cmd() {
-  local flags=()
+  local flags=(--env-file "$EDDI_DIR/.env")
   for f in "${COMPOSE_FILES[@]}"; do
     flags+=(-f "$f")
   done
@@ -751,7 +751,7 @@ else
 fi
 
 # Build compose flags
-COMPOSE_FLAGS=""
+COMPOSE_FLAGS="--env-file $EDDI_DIR/.env"
 for f in $COMPOSE_FILES; do
   COMPOSE_FLAGS="$COMPOSE_FLAGS -f $f"
 done
