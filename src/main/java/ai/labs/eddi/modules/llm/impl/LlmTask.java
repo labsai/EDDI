@@ -347,8 +347,15 @@ public class LlmTask implements ILifecycleTask {
         }
 
         if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
-            var contentAsObject = jsonSerialization.deserialize(responseContent, Map.class);
-            templateDataObjects.put(responseObjectName, contentAsObject);
+            String trimmed = responseContent != null ? responseContent.trim() : "";
+            if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+                var contentAsObject = jsonSerialization.deserialize(responseContent, Map.class);
+                templateDataObjects.put(responseObjectName, contentAsObject);
+            } else {
+                // LLM returned plain text despite structured output instruction
+                LOGGER.warn("convertToObject=true but LLM response is not JSON, storing as string");
+                templateDataObjects.put(responseObjectName, responseContent);
+            }
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
         }
