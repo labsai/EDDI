@@ -295,6 +295,7 @@ export function ChatPanel() {
           <div className="flex flex-wrap gap-2 border-t border-border px-4 py-2">
             {quickReplies.map((reply, i) => (
               <button
+                type="button"
                 key={`${reply}-${i}`}
                 onClick={() => handleQuickReply(reply)}
                 className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/15"
@@ -501,7 +502,7 @@ function ChatInputWithSecretToggle({
   const canSend = value.trim().length > 0 && !disabled && !isProcessing;
 
   return (
-    <div className="border-t border-border bg-background p-4">
+    <div className="border-t border-border bg-background p-4" data-tour="chat-input-area">
       <div className="flex items-end gap-2">
         {/* 🔒 Secret mode toggle */}
         <button

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Bot, Search, Plus, Upload, Wand2, ExternalLink, Trash2, Copy, Download, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
@@ -22,6 +22,7 @@ import {
 } from "@/components/shared/view-toggle";
 import { useExportAgent } from "@/hooks/use-backup";
 import { cn } from "@/lib/utils";
+import { useOnboarding } from "@/hooks/use-onboarding";
 
 type SortField = "name" | "version" | "modified";
 type SortDir = "asc" | "desc";
@@ -35,6 +36,13 @@ export function AgentsPage() {
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("agents"));
   const [sortField, setSortField] = useState<SortField>("modified");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  // Auto-trigger agents onboarding chapter
+  const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
+  useEffect(() => {
+    const timer = setTimeout(() => maybeAutoStart("agents"), 500);
+    return () => clearTimeout(timer);
+  }, [maybeAutoStart]);
 
   const {
     data,
@@ -146,7 +154,7 @@ export function AgentsPage() {
       </div>
 
       {/* Search bar + View toggle */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3" data-tour="agents-search">
         <div className="relative flex-1">
           <Search className="absolute inset-s-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -163,6 +171,7 @@ export function AgentsPage() {
       </div>
 
       {/* Content */}
+      <div data-tour="agents-content">
       {isLoading && (
         <div
           className={cn(
@@ -351,6 +360,7 @@ export function AgentsPage() {
           />
         </>
       )}
+      </div>
 
       {/* Create dialog */}
       <CreateAgentDialog open={createOpen} onClose={() => setCreateOpen(false)} />

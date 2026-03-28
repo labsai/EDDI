@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Workflow, Search, Plus, ExternalLink, Trash2, Copy, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import {
 import { WorkflowCard } from "@/components/workflows/workflow-card";
 import { CreateWorkflowDialog } from "@/components/workflows/create-workflow-dialog";
 import { cn } from "@/lib/utils";
+import { useOnboarding } from "@/hooks/use-onboarding";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -36,6 +37,13 @@ export function WorkflowsPage() {
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("workflows"));
   const [sortField, setSortField] = useState<SortField>("modified");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  // Auto-trigger workflows onboarding chapter
+  const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
+  useEffect(() => {
+    const timer = setTimeout(() => maybeAutoStart("workflows"), 500);
+    return () => clearTimeout(timer);
+  }, [maybeAutoStart]);
 
   const {
     data,
@@ -121,7 +129,7 @@ export function WorkflowsPage() {
       </div>
 
       {/* Search bar + View toggle */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3" data-tour="workflows-search">
         <div className="relative flex-1">
           <Search className="absolute inset-s-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -137,6 +145,7 @@ export function WorkflowsPage() {
       </div>
 
       {/* Content */}
+      <div data-tour="workflows-content">
       {isLoading && (
         <div
           className={cn(
@@ -301,6 +310,7 @@ export function WorkflowsPage() {
           />
         </>
       )}
+      </div>
 
       {/* Create dialog */}
       <CreateWorkflowDialog

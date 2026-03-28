@@ -21,9 +21,16 @@ import {
   ShieldCheck,
   Gauge,
   Users,
+  HelpCircle,
+  Check,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { useOnboarding, ALL_CHAPTERS, type TourChapterId } from "@/hooks/use-onboarding";
+import { TOUR_CHAPTERS } from "@/components/onboarding/tour-chapters";
 
 const navSections = [
   {
@@ -282,6 +289,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         </div>
       )}
 
+      {/* Help & Tour menu */}
+      <HelpMenu collapsed={collapsed} />
+
       {/* Collapse toggle */}
       <div className="border-t border-sidebar-border p-2">
         <button
@@ -298,5 +308,114 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         </button>
       </div>
     </aside>
+  );
+}
+
+/* ─── Help & Tour dropdown menu ──────────────────── */
+
+const CHAPTER_ROUTES: Record<TourChapterId, string> = {
+  dashboard: "/manage",
+  agents: "/manage/agents",
+  workflows: "/manage/workflows",
+  chat: "/manage/chat",
+  resources: "/manage/resources",
+};
+
+function HelpMenu({ collapsed }: { collapsed: boolean }) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const completedChapters = useOnboarding((s) => s.completedChapters);
+  const restartChapter = useOnboarding((s) => s.restartChapter);
+  const resetAll = useOnboarding((s) => s.resetAll);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const handleChapterClick = (id: TourChapterId) => {
+    setOpen(false);
+    navigate(CHAPTER_ROUTES[id]);
+    // Small delay so page renders targets before tour starts
+    setTimeout(() => restartChapter(id), 300);
+  };
+
+  return (
+    <div ref={ref} className="relative border-t border-sidebar-border p-2">
+      <button
+        onClick={() => setOpen((p) => !p)}
+        className={cn(
+          "flex w-full items-center rounded-lg px-3 py-2.5 text-sidebar-foreground transition-all hover:bg-sidebar-accent/10 hover:text-sidebar-accent",
+          collapsed && "justify-center px-2"
+        )}
+        title={t("onboarding.help.title", "Help & Tour")}
+        aria-label={t("onboarding.help.title", "Help & Tour")}
+        data-testid="sidebar-help"
+      >
+        <HelpCircle className="h-5 w-5 shrink-0" />
+        {!collapsed && (
+          <span className="ms-3 text-sm font-medium">
+            {t("onboarding.help.title", "Help & Tour")}
+          </span>
+        )}
+      </button>
+
+      {/* Dropdown */}
+      {open && (
+        <div
+          className={cn(
+            "absolute z-50 mb-2 w-56 rounded-xl border border-sidebar-border bg-sidebar p-1.5 shadow-xl shadow-black/20",
+            collapsed ? "inset-s-14 bottom-0" : "inset-s-2 bottom-full"
+          )}
+          data-testid="help-menu-dropdown"
+        >
+          <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/40">
+            {t("onboarding.help.platformTour", "Platform Tour")}
+          </p>
+          {ALL_CHAPTERS.map((id) => {
+            const chapter = TOUR_CHAPTERS[id];
+            const done = completedChapters.has(id);
+            return (
+              <button
+                key={id}
+                onClick={() => handleChapterClick(id)}
+                className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-start text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent/10"
+                data-testid={`help-chapter-${id}`}
+              >
+                <span className="flex-1 truncate">{t(chapter.titleKey)}</span>
+                {done ? (
+                  <Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                ) : (
+                  <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-sidebar-foreground/30" />
+                )}
+              </button>
+            );
+          })}
+          <div className="mt-1 border-t border-sidebar-border pt-1">
+            <button
+              onClick={() => {
+                setOpen(false);
+                resetAll();
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-sidebar-foreground/50 transition-colors hover:text-sidebar-foreground hover:bg-sidebar-accent/10"
+              data-testid="help-reset-all"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              {t("onboarding.help.resetAll", "Reset All Tours")}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

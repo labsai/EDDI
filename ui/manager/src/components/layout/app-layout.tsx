@@ -4,6 +4,8 @@ import { Outlet } from "react-router-dom";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 import { ChatDrawer } from "@/components/chat/chat-drawer";
+import { WelcomeModal } from "@/components/onboarding/welcome-modal";
+import { GuidedTour } from "@/components/onboarding/guided-tour";
 import { cn } from "@/lib/utils";
 
 export function AppLayout() {
@@ -74,6 +76,8 @@ export function AppLayout() {
         </main>
       </div>
       <ChatDrawer />
+      <WelcomeModal />
+      <GuidedTour />
     </div>
   );
 }

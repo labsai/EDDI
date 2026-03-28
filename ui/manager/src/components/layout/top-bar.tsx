@@ -175,7 +175,7 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
       </div>
 
       {/* Right: Controls */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2" data-tour="topbar-personalize">
         {/* Language selector */}
         <div className="relative flex items-center gap-1">
           <Globe className="h-4 w-4 text-muted-foreground" />

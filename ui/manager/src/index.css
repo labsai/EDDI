@@ -126,4 +126,66 @@
     color: var(--color-primary);
     text-decoration: underline;
   }
+
+  /* ── Onboarding ─────────────────────────────── */
+
+  /* Spotlight overlay — box-shadow dims everything except the cutout rect */
+  .tour-spotlight {
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.65);
+    border-radius: 12px;
+    pointer-events: none;
+    transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .tour-spotlight::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border: 2px solid var(--color-primary);
+    border-radius: 14px;
+    animation: pulse-ring 2s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  @keyframes pulse-ring {
+    0%, 100% { opacity: 0.4; transform: scale(1); }
+    50% { opacity: 0.8; transform: scale(1.03); }
+  }
+
+  /* Tour tooltip entry animation */
+  .tour-tooltip {
+    animation: tooltip-enter 250ms ease-out;
+  }
+
+  @keyframes tooltip-enter {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Welcome modal backdrop — glassmorphism */
+  .welcome-modal-backdrop {
+    backdrop-filter: blur(8px);
+    background: rgba(0, 0, 0, 0.6);
+  }
+
+  .welcome-modal-card {
+    backdrop-filter: blur(16px);
+    background: rgba(24, 24, 27, 0.95);
+    border: 1px solid rgba(245, 158, 11, 0.15);
+  }
+
+  /* Carousel dot transitions */
+  .carousel-dot {
+    transition: all 200ms ease;
+  }
+
+  .carousel-dot-active {
+    background: var(--color-primary);
+    transform: scale(1.2);
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
 }

@@ -902,5 +902,89 @@
     "ingestionHistory": "Ingestion Status",
     "saveFirstIngestion": "Save this knowledge base first to enable document ingestion.",
     "addParam": "Add Parameter"
+  },
+  "onboarding": {
+    "welcome": {
+      "title": "Welcome to EDDI",
+      "subtitle": "Your AI Agent Command Center",
+      "introText": "EDDI Manager is your command center for building, testing, and operating conversational AI agents.",
+      "capabilitiesTitle": "What You Can Do",
+      "buildAgents": "Build Agents",
+      "buildAgentsDesc": "Create and configure AI agents with the wizard or from scratch",
+      "designWorkflows": "Design Workflows",
+      "designWorkflowsDesc": "Drag-and-drop pipeline builder with behavior rules, LLM chains, and tools",
+      "testRealtime": "Test in Real-Time",
+      "testRealtimeDesc": "Chat with your agents with streaming responses and built-in debugging",
+      "monitorOperate": "Monitor & Operate",
+      "monitorOperateDesc": "Conversations, audit trails, secrets, and quotas — all in one place",
+      "readyTitle": "Ready to Start?",
+      "readySubtitle": "You can restart any tour from the sidebar Help menu",
+      "startTour": "Start the Tour",
+      "exploreOwn": "I'll Explore on My Own"
+    },
+    "tour": {
+      "back": "Back",
+      "next": "Next",
+      "skip": "Skip Tour",
+      "finish": "Finish",
+      "stepOf": "Step {{current}} of {{total}}",
+      "dashboard": {
+        "title": "Dashboard Tour",
+        "step1Title": "Your Command Center",
+        "step1Desc": "The sidebar organizes everything into three zones: Management, Development, and Operations. You'll always know where to find things.",
+        "step2Title": "Platform at a Glance",
+        "step2Desc": "Live counts of your agents, workflows, and conversations. Click any card to jump straight to that section.",
+        "step3Title": "Quick Actions",
+        "step3Desc": "Jump straight to common tasks. The Agent Wizard is the fastest way to create your first agent — it takes under 2 minutes.",
+        "step4Title": "Make It Yours",
+        "step4Desc": "Switch between light, dark, and system themes. EDDI Manager speaks 11 languages — pick yours from the language selector."
+      },
+      "agents": {
+        "title": "Agents Tour",
+        "step1Title": "Agent Wizard",
+        "step1Desc": "The wizard walks you through creating a fully configured agent — choose a model, set a personality, enable tools, and deploy.",
+        "step2Title": "Manual Creation",
+        "step2Desc": "For power users: create a blank agent and configure it with full JSON control. Perfect for advanced setups.",
+        "step3Title": "Search & Filter",
+        "step3Desc": "Find agents instantly by name. Switch between card and list views with the toggle on the right.",
+        "step4Title": "Your Agent Fleet",
+        "step4Desc": "Each card shows the agent's name, version, and last modified time. Click any agent for its detail page with deploy, chat, and workflow controls."
+      },
+      "workflows": {
+        "title": "Workflows Tour",
+        "step1Title": "Create a Workflow",
+        "step1Desc": "Workflows define the processing pipeline — a sequence of tasks like LLM calls, behavior rules, and HTTP integrations.",
+        "step2Title": "Your Workflows",
+        "step2Desc": "Each workflow can be attached to one or more agents. Click to open the drag-and-drop pipeline editor.",
+        "step3Title": "Organize Your View",
+        "step3Desc": "Search by name and switch between card grid and sortable table views."
+      },
+      "chat": {
+        "title": "Chat Tour",
+        "step1Title": "Pick an Agent",
+        "step1Desc": "Select a deployed agent to start a conversation. Only agents that have been deployed appear here.",
+        "step2Title": "Streaming Mode",
+        "step2Desc": "Toggle real-time token streaming. When enabled, the response appears word by word — great for debugging latency.",
+        "step3Title": "Conversation History",
+        "step3Desc": "Open the sidebar to browse and resume previous conversations.",
+        "step4Title": "Start Chatting",
+        "step4Desc": "Type a message and press Enter. The agent responds using the LLM, tools, and workflows you've configured."
+      },
+      "resources": {
+        "title": "Resources Tour",
+        "step1Title": "Extension Library",
+        "step1Desc": "Resources are the building blocks of workflows. Each type controls a different part of the agent's behavior.",
+        "step2Title": "LLM Configurations",
+        "step2Desc": "Define which AI model powers your agent, its system prompt, tools, MCP servers, and cascade settings. This is the brain.",
+        "step3Title": "Rules & API Calls",
+        "step3Desc": "Behavior Rules control conversation flow. HTTP Calls connect to external APIs. Both can be used as LLM tools."
+      }
+    },
+    "help": {
+      "title": "Help & Tour",
+      "platformTour": "Platform Tour",
+      "resetAll": "Reset All Tours",
+      "resetConfirm": "Reset all tour progress?"
+    }
   }
 }

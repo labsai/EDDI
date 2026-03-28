@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { MessageCircle } from "lucide-react";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
+import { useOnboarding } from "@/hooks/use-onboarding";
 
 export function ChatPage() {
   const { t } = useTranslation();
@@ -11,6 +12,13 @@ export function ChatPage() {
   useEffect(() => {
     useChatDrawerStore.getState().close();
   }, []);
+
+  // Auto-trigger chat onboarding chapter
+  const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
+  useEffect(() => {
+    const timer = setTimeout(() => maybeAutoStart("chat"), 500);
+    return () => clearTimeout(timer);
+  }, [maybeAutoStart]);
 
   return (
     <div className="flex h-[calc(100vh-(--spacing(16))-(--spacing(12)))] flex-col gap-4">

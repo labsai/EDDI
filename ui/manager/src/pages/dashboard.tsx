@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
@@ -17,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { useOnboarding } from "@/hooks/use-onboarding";
 
 export function DashboardPage() {
   const { t } = useTranslation();
@@ -24,6 +26,14 @@ export function DashboardPage() {
   const { data: recentAgentsRaw, isLoading: agentsLoading } = useRecentAgents();
 
   const recentAgents = recentAgentsRaw ? groupAgentsByName(recentAgentsRaw).slice(0, 4) : [];
+
+  // Auto-trigger dashboard onboarding chapter on first visit
+  const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
+  useEffect(() => {
+    // Small delay so DOM elements are rendered for spotlight targeting
+    const timer = setTimeout(() => maybeAutoStart("dashboard"), 500);
+    return () => clearTimeout(timer);
+  }, [maybeAutoStart]);
 
   const statCards = [
     {
@@ -73,7 +83,7 @@ export function DashboardPage() {
       </div>
 
       {/* Stats cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" data-tour="dashboard-stats">
         {statsLoading
           ? Array.from({ length: 4 }).map((_, i) => (
               <Card key={i}>
@@ -112,7 +122,7 @@ export function DashboardPage() {
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {t("pages.dashboard.quickActions")}
         </h2>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2" data-tour="dashboard-actions">
           <Button variant="outline" asChild>
             <Link to="/manage/agents/wizard">
               <Wand2 className="h-4 w-4" />

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
@@ -14,6 +15,7 @@ import { RESOURCE_TYPES } from "@/lib/api/resources";
 import { useResourceDescriptors } from "@/hooks/use-resources";
 import { cn } from "@/lib/utils";
 import type { LucideIcon } from "lucide-react";
+import { useOnboarding } from "@/hooks/use-onboarding";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   GitBranch,
@@ -77,6 +79,13 @@ function ResourceTypeCard({
 
 export function ResourcesPage() {
   const { t } = useTranslation();
+
+  // Auto-trigger resources onboarding chapter
+  const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
+  useEffect(() => {
+    const timer = setTimeout(() => maybeAutoStart("resources"), 500);
+    return () => clearTimeout(timer);
+  }, [maybeAutoStart]);
 
   return (
     <div className="space-y-6">
