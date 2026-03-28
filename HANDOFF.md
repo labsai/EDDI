@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-27
+> **Last updated:** 2026-03-28
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -663,6 +663,30 @@ Cost-optimized LLM execution via sequential model escalation with confidence-bas
 - `src/main/java/ai/labs/eddi/engine/lifecycle/ConversationEventSink.java`
 - `src/main/java/ai/labs/eddi/modules/llm/impl/LlmTask.java`
 - `docs/model-cascade.md`
+
+### LLM Structured Output Hardening ✅
+
+Production-grade reliability for LLM structured JSON output via three-layer defense:
+
+| Layer | Mechanism |
+|---|---|
+| **System Prompt** | `## RESPONSE FORMAT (MANDATORY)` section appended when `convertToObject=true`. Includes exact schema if `responseSchema` parameter provided |
+| **API Level** | `ChatRequest.responseFormat(ResponseFormatType.JSON)` for providers that support it (OpenAI, Gemini, Mistral). Graceful fallback for unsupported providers |
+| **Validation** | Pre-parse `startsWith("{")` check before `deserialize()`. Non-JSON stored as plain string with warning |
+
+Additional fixes:
+- [x] Raw LLM response persisted BEFORE JSON conversion (debuggability)
+- [x] `jsonMode` flag derived from `convertToObject` (was incorrectly using `addToOutput`)
+- [x] Prometheus tag conflicts in `ToolExecutionService` — removed tagless aggregate timer/counters
+- [x] QR blank expression defense in `InputParserTask`
+
+**Key files:**
+- `LlmTask.java` — prompt reinforcement, raw storage, JSON validation, `responseSchema` param
+- `LegacyChatExecutor.java` — `ChatRequest` with `ResponseFormat.JSON` + graceful fallback
+- `ToolExecutionService.java` — per-tool tagged metrics only
+- `InputParserTask.java` — blank expression guard
+
+**Tests:** All 17 LlmTask tests pass. Compile verified.
 
 ## Next Up
 

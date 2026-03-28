@@ -118,7 +118,8 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | `logSizeLimit`             | int     | Conversation history limit                            | -1 (unlimited)    |
 | `includeFirstAgentMessage` | boolean | Include first agent message in context                | true              |
 | **Output Control**         |         |                                                       |                   |
-| `convertToObject`          | boolean | Parse response as JSON (requires valid JSON response) | false             |
+| `convertToObject`          | boolean | Parse response as JSON. Enables three-layer enforcement: system prompt reinforcement, native API JSON mode (OpenAI, Gemini, Mistral), and pre-parse validation | false             |
+| `responseSchema`           | string  | JSON schema for structured output. When set with `convertToObject=true`, the exact schema is injected into the system prompt so the LLM knows the expected format | ""                |
 | `addToOutput`              | boolean | Add response to conversation output                   | false             |
 | **Logging**                |         |                                                       |                   |
 | `logRequests`              | boolean | Log API requests                                      | false             |
@@ -829,6 +830,82 @@ Then reference this action in your Langchain task:
   ]
 }
 ```
+
+---
+
+## Structured Output (JSON Mode)
+
+When you need the LLM to return a specific JSON structure (e.g., for property extraction, API response formatting, or quick reply generation), use the `convertToObject` parameter with an optional `responseSchema`.
+
+### Three-Layer Enforcement
+
+EDDI uses three complementary mechanisms to ensure reliable JSON output:
+
+| Layer | Mechanism | Coverage |
+|---|---|---|
+| **1. System Prompt** | Appends `## RESPONSE FORMAT (MANDATORY)` section with schema to every request | All providers |
+| **2. Native API** | Sets `ResponseFormatType.JSON` on `ChatRequest` | OpenAI, Gemini, Mistral, Azure OpenAI |
+| **3. Validation** | Pre-parse `startsWith("{")` check before deserialization | All providers |
+
+If a provider doesn't support native JSON mode (e.g., Anthropic), EDDI gracefully falls back to prompt-only enforcement.
+
+### Basic JSON Mode
+
+```json
+{
+  "parameters": {
+    "convertToObject": "true",
+    "addToOutput": "false",
+    "systemMessage": "You are a customer support classifier."
+  }
+}
+```
+
+### With Response Schema
+
+For maximum reliability, specify the exact JSON structure you expect:
+
+```json
+{
+  "parameters": {
+    "convertToObject": "true",
+    "addToOutput": "false",
+    "responseSchema": "{\"htmlResponseText\": \"string — the formatted response\", \"quickReplies\": [\"string — suggested follow-up options\"], \"sentiment\": \"positive|negative|neutral\"}",
+    "systemMessage": "You are a customer support agent. Analyze the user's message and respond."
+  }
+}
+```
+
+The schema is injected into the system prompt as a JSON code block so the LLM sees the exact expected format.
+
+### Using with Output Configuration
+
+When `convertToObject=true`, the LLM's JSON response is stored in conversation memory as a parsed object. You can then reference its fields in the Output Configuration:
+
+```json
+{
+  "outputBuildInstructions": [{
+    "outputType": "text",
+    "outputValue": "{properties.aiOutputObject.htmlResponseText}"
+  }],
+  "qrBuildInstructions": [{
+    "pathToTargetArray": "properties.aiOutputObject.quickReplies",
+    "iterationObjectName": "quickReply",
+    "quickReplyValue": "{quickReply}",
+    "quickReplyExpressions": "trigger(quick_reply)"
+  }]
+}
+```
+
+### Debugging
+
+When `convertToObject=true`, the raw LLM response is **always** persisted in conversation memory (key: `langchain:data`) even if JSON parsing fails. This ensures you can inspect what the LLM actually returned via the conversation log.
+
+### Tips
+
+- **Streaming**: Not recommended with JSON mode — the UI would show raw JSON building up
+- **Provider compatibility**: OpenAI, Gemini, and Mistral support native JSON mode. Other providers rely on prompt-based enforcement
+- **Schema specificity**: The more specific your `responseSchema`, the more reliable the output. Use type hints (`"string"`, `"number"`, `"boolean"`) and descriptions
 
 ---
 

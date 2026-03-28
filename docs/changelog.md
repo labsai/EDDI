@@ -13,6 +13,42 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## LLM Structured Output Hardening — JSON Enforcement + Debuggability + Prometheus Fix (2026-03-28)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Production-grade hardening of the LLM structured JSON output pipeline. Three-layer defense for JSON compliance, improved debuggability, and resolved meter conflicts.
+
+| Component | Change |
+|---|---|
+| **LlmTask — System Prompt** | When `convertToObject=true`, appends `## RESPONSE FORMAT (MANDATORY)` section to system message on every request. If `responseSchema` parameter is provided, includes the exact JSON schema. Otherwise generic JSON instruction |
+| **LlmTask — `responseSchema` parameter** | New config parameter `responseSchema` — lets agent developers specify the exact JSON structure they expect. Injected into system prompt with ````json` block for LLM comprehension |
+| **LegacyChatExecutor — Native JSON Mode** | When `convertToObject=true`, builds `ChatRequest` with `ResponseFormatType.JSON` to enforce structured output at the API level (OpenAI, Gemini, Mistral). Graceful fallback: if provider throws, falls back to standard call (system prompt still enforces) |
+| **LlmTask — Raw Response Persistence** | Moved `langchainData` storage to BEFORE JSON deserialization. Raw LLM response now always persisted in memory, even if `jsonSerialization.deserialize()` fails |
+| **LlmTask — JSON Validation** | Pre-parse `startsWith("{")` / `startsWith("[")` check before `deserialize()`. Non-JSON responses stored as plain strings with warning instead of crashing the pipeline |
+| **LlmTask — `jsonMode` flag** | Fixed semantic bug: was using `addToOutputExplicitlyFalse` as JSON mode signal (wrong concern). Now derives `jsonMode` from `convertToObject` parameter (correct signal) |
+| **ToolExecutionService — Prometheus** | Removed ALL tagless aggregate metrics (timer field + counter field). Only per-tool tagged metrics remain (`eddi.tool.execution.duration[tool=X]`, `eddi.tool.execution.success[tool=X]`, `eddi.tool.execution.failure[tool=X]`). Aggregates via `sum()` in PromQL. Fixed `IllegalArgumentException: same name different tags` crash |
+| **InputParserTask — QR Defense** | Blank expression guard: if QR `expressions` is null/blank, auto-generates expression from value (sanitized alphanumeric) instead of creating empty expression that breaks behavior rules |
+
+**Three-layer JSON enforcement:**
+1. **System Prompt** — `## RESPONSE FORMAT (MANDATORY)` section with optional schema
+2. **API Level** — `ChatRequest.responseFormat(ResponseFormat.JSON)` for compatible providers
+3. **Validation** — Pre-parse check + graceful fallback to plain string
+
+**Design decisions:**
+- `responseSchema` is prompt-injected (not native `JsonSchema` on `ChatRequest`) because not all providers support structured schemas, and the system prompt approach works universally
+- Native `ResponseFormatType.JSON` is set on `ChatRequest` for providers that support it — this physically constrains the model's token generation, not just instruction following
+- Graceful fallback: if `ChatRequest` JSON mode throws (unsupported provider), catch `LifecycleException` and retry with standard call. System prompt reinforcement still provides enforcement
+- `jsonMode` derived from `convertToObject=true` (not `addToOutput=false`) — semantically correct signal for JSON mode
+
+**Files:** 3 modified (`LlmTask.java`, `LegacyChatExecutor.java`, `ToolExecutionService.java`), 1 modified (`InputParserTask.java`).
+
+**Testing:** ✅ All existing LlmTask tests pass (17 tests). Compile verified. No behavioral regressions.
+
+---
+
 ## Production Readiness Audit — 17 Fixes Across 3 Repos (2026-03-28)
 
 **Repos:** EDDI, EDDI-Manager, eddi-chat-ui (`feature/version-6.0.0`)
