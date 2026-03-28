@@ -48,6 +48,8 @@ export async function startConversation(
 /**
  * Read an existing conversation (GET).
  * Used after start (to pick up welcome messages) and to resume.
+ * @param _environment - Unused in v6 API (kept for caller compatibility)
+ * @param _agentId - Unused in v6 API (kept for caller compatibility)
  */
 export async function readConversation(
   _environment: string,
@@ -70,6 +72,8 @@ export async function readConversation(
  * Send a message (non-streaming) to a direct agent.
  * Returns the conversation snapshot with the agent's reply in `conversationOutputs`.
  * When `context` is provided, sends as JSON `InputData` instead of plain text.
+ * @param _environment - Unused in v6 API (kept for caller compatibility)
+ * @param _agentId - Unused in v6 API (kept for caller compatibility)
  */
 export async function sendMessage(
   _environment: string,
@@ -106,6 +110,8 @@ export async function sendMessage(
 /**
  * Send a message via SSE streaming.
  * Yields parsed SSE events as they arrive.
+ * @param _environment - Unused in v6 API (kept for caller compatibility)
+ * @param _agentId - Unused in v6 API (kept for caller compatibility)
  */
 export async function* sendMessageStreaming(
   _environment: string,
