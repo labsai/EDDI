@@ -123,7 +123,7 @@ function DictSection({ title, count, children, onAdd, addLabel, readOnly }: {
       <div className="flex items-center justify-between mb-2">
         <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {title}
-          <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">{count}</span>
+          <span className="ms-1.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">{count}</span>
         </h4>
         {!readOnly && (
           <button type="button" onClick={onAdd}

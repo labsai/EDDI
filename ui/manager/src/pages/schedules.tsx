@@ -745,7 +745,7 @@ export function SchedulesPage() {
                       <td className="px-5 py-3">
                         <StatusBadge schedule={s} />
                         {s.failCount > 0 && (
-                          <span className="ml-1.5 text-xs text-amber-500">
+                          <span className="ms-1.5 text-xs text-amber-500">
                             ×{s.failCount}
                           </span>
                         )}

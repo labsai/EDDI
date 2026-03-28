@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Database,
@@ -320,17 +320,27 @@ function IngestionPanel({
   const [ingestions, setIngestions] = useState<IngestionStatus[]>([]);
   const [textContent, setTextContent] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  const mountedRef = useRef(true);
+
+  // Cleanup: mark unmounted so polling stops updating state
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const pollStatus = useCallback(
     (ingestionId: string) => {
       let attempts = 0;
       const MAX_POLL_ATTEMPTS = 30; // ~60 seconds at 2s intervals
       const poll = async () => {
+        if (!mountedRef.current) return;
         attempts++;
         try {
           const result = await api.get<{ status: string }>(
             `/ragstore/rags/${kbId}/ingestion/${ingestionId}/status`,
           );
+          if (!mountedRef.current) return;
           setIngestions((prev) =>
             prev.map((ing) =>
               ing.ingestionId === ingestionId ? { ...ing, status: result.status } : ing,
@@ -346,6 +356,7 @@ function IngestionPanel({
             );
           }
         } catch {
+          if (!mountedRef.current) return;
           setIngestions((prev) =>
             prev.map((ing) =>
               ing.ingestionId === ingestionId ? { ...ing, status: "failed: polling error" } : ing,

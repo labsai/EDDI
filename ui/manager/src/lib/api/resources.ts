@@ -128,9 +128,12 @@ export function updateResource(
 export function deleteResource(
   rt: ResourceTypeConfig,
   id: string,
-  version: number
+  version: number,
+  options?: { permanent?: boolean }
 ): Promise<void> {
-  return api.delete(`${basePath(rt)}/${id}?version=${version}`);
+  const params = new URLSearchParams({ version: String(version) });
+  if (options?.permanent !== false) params.set("permanent", "true");
+  return api.delete(`${basePath(rt)}/${id}?${params}`);
 }
 
 export function duplicateResource(

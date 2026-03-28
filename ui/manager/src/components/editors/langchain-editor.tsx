@@ -23,120 +23,23 @@ import {
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
 
-// ─── Types matching LangChainConfiguration backend model ─────────────────────
+// Re-export types so existing imports still work
+export type {
+  A2AAgentConfig,
+  CascadeStep,
+  ModelCascadeConfig,
+  LangchainTask,
+  KnowledgeBaseReference,
+  LangchainConfig,
+} from "./langchain/types";
 
-export interface A2AAgentConfig {
-  url?: string;
-  name?: string;
-  apiKey?: string;
-  timeoutMs?: number;
-  skillsFilter?: string[];
-}
-
-export interface CascadeStep {
-  type?: string;
-  parameters?: Record<string, string>;
-  confidenceThreshold?: number | null;
-  timeoutMs?: number;
-}
-
-export interface ModelCascadeConfig {
-  enabled?: boolean;
-  strategy?: string;
-  evaluationStrategy?: string;
-  enableInAgentMode?: boolean;
-  steps?: CascadeStep[];
-}
-
-export interface LangchainTask {
-  actions?: string[];
-  id?: string;
-  type?: string;
-  description?: string;
-  parameters?: Record<string, string>;
-  responseObjectName?: string;
-  responseMetadataObjectName?: string;
-  preRequest?: unknown;
-  postResponse?: unknown;
-  tools?: string[];
-  a2aAgents?: A2AAgentConfig[];
-  enableBuiltInTools?: boolean;
-  enableHttpCallTools?: boolean;
-  enableMcpCallTools?: boolean;
-  builtInToolsWhitelist?: string[];
-  conversationHistoryLimit?: number;
-  /** @deprecated Use knowledgeBases, enableWorkflowRag, or httpCallRag instead */
-  retrievalAugmentor?: {
-    httpCall?: string;
-    embeddingModel?: string;
-    embeddingStore?: string;
-    maxResults?: number;
-    minScore?: number;
-  };
-  // Phase 8c RAG fields
-  knowledgeBases?: KnowledgeBaseReference[];
-  enableWorkflowRag?: boolean;
-  ragDefaults?: {
-    maxResults?: number;
-    minScore?: number;
-    injectionStrategy?: string;
-  };
-  httpCallRag?: string;
-  retry?: {
-    maxAttempts?: number;
-    backoffDelayMs?: number;
-    backoffMultiplier?: number;
-    maxBackoffDelayMs?: number;
-  };
-  maxBudgetPerConversation?: number;
-  enableCostTracking?: boolean;
-  enableToolCaching?: boolean;
-  enableRateLimiting?: boolean;
-  defaultRateLimit?: number;
-  toolRateLimits?: Record<string, number>;
-  enableParallelExecution?: boolean;
-  parallelExecutionTimeoutMs?: number;
-  maxToolIterations?: number;
-  modelCascade?: ModelCascadeConfig;
-}
-
-export interface KnowledgeBaseReference {
-  name?: string;
-  maxResults?: number;
-  minScore?: number;
-  injectionStrategy?: string;
-  contextTemplate?: string;
-}
-
-export interface LangchainConfig {
-  tasks: LangchainTask[];
-}
-
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-/** Parameter keys that have dedicated UI controls and should not appear in the generic key-value grid */
-const HIDDEN_PARAM_KEYS = new Set(["systemMessage"]);
-
-const MODEL_TYPES = [
-  "openai",
-  "anthropic",
-  "gemini",
-  "gemini-vertex",
-  "ollama",
-  "huggingface",
-  "jlama",
-] as const;
-
-const BUILT_IN_TOOLS = [
-  "calculator",
-  "datetime",
-  "websearch",
-  "dataformatter",
-  "webscraper",
-  "textsummarizer",
-  "pdfreader",
-  "weather",
-] as const;
+import {
+  type LangchainTask,
+  type LangchainConfig,
+  HIDDEN_PARAM_KEYS,
+  MODEL_TYPES,
+  BUILT_IN_TOOLS,
+} from "./langchain/types";
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -163,16 +66,16 @@ function ActionTags({
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap gap-1.5">
-        {actions.map((a, i) => (
+        {actions.map((a) => (
           <span
-            key={i}
+            key={a}
             className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
           >
             {a}
             {!readOnly && (
               <button
                 type="button"
-                onClick={() => onChange(actions.filter((_, j) => j !== i))}
+                onClick={() => onChange(actions.filter((x) => x !== a))}
                 className="rounded p-0.5 hover:bg-primary/20 transition-colors"
                 aria-label={`Remove ${a}`}
               >
@@ -274,16 +177,16 @@ function SkillsFilterInput({
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap gap-1">
-        {skills.map((s, i) => (
+        {skills.map((s) => (
           <span
-            key={i}
+            key={s}
             className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
           >
             {s}
             {!readOnly && (
               <button
                 type="button"
-                onClick={() => onChange(skills.filter((_, j) => j !== i))}
+                onClick={() => onChange(skills.filter((x) => x !== s))}
                 className="rounded p-0.5 hover:bg-primary/20 transition-colors"
               >
                 <X className="h-2.5 w-2.5" />
@@ -1341,7 +1244,7 @@ function TaskEditor({
                                   const val = e.target.value;
                                   steps[si] = {
                                     ...step,
-                                    confidenceThreshold: val === "" ? null : (parseFloat(val) || 0),
+                                    confidenceThreshold: val === "" ? null : (isNaN(parseFloat(val)) ? 0 : parseFloat(val)),
                                   };
                                   onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
                                 }}

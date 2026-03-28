@@ -76,7 +76,7 @@ function KeycloakAuthProvider({
             .then(() => {
               if (mounted && keycloak.token) {
                 api.setAuthToken(keycloak.token);
-                console.log("[EDDI Auth] Token refreshed");
+                if (import.meta.env.DEV) console.log("[EDDI Auth] Token refreshed");
               }
             })
             .catch(() => {
@@ -129,7 +129,7 @@ function KeycloakAuthProvider({
         }
 
         setLoading(false);
-        console.log("[EDDI Auth] Keycloak initialized, authenticated:", auth);
+        if (import.meta.env.DEV) console.log("[EDDI Auth] Keycloak initialized, authenticated:", auth);
       } catch (error) {
         if (!mounted) return;
         console.error("[EDDI Auth] Keycloak init failed:", error);

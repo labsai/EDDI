@@ -24,7 +24,7 @@
 | **UI**             | React 19 + TypeScript 5 (strict)                                       |
 | **Styling**        | Tailwind CSS v4 + CSS variables (black/gold)                           |
 | **State (server)** | TanStack Query v5                                                      |
-| **State (UI)**     | `useState` / `useCallback` (no Zustand needed)                         |
+| **State (UI)**     | Zustand (chat/debug), `useState` / `useCallback` elsewhere             |
 | **Routing**        | React Router v7                                                        |
 | **i18n**           | react-i18next (11 locales: en, de, fr, es, ar, zh, th, ja, ko, pt, hi) |
 | **Test (unit)**    | Vitest + React Testing Library + MSW                                   |
@@ -122,18 +122,18 @@ To add a new editor: create the component, add the type check in the ternary, ad
 
 #### 2. Resource Type Config
 
-All 6 extension types are in `src/lib/api/resources.ts` as `RESOURCE_TYPES`:
+All 8 resource types are in `src/lib/api/resources.ts` as `RESOURCE_TYPES`:
 
 | Slug               | Store                    | Plural                |
 | ------------------ | ------------------------ | --------------------- |
-| `behavior`         | `behaviorstore`          | `behaviorsets`        |
-| `httpcalls`        | `httpcallsstore`         | `httpcalls`           |
+| `rules`            | `rulestore`              | `rulesets`            |
+| `apicalls`         | `apicallstore`           | `apicalls`            |
 | `output`           | `outputstore`            | `outputsets`          |
-| **`dictionaries`** | `regulardictionarystore` | `regulardictionaries` |
-| `langchain`        | `langchainstore`         | `langchains`          |
+| `dictionary`       | `dictionarystore`        | `dictionaries`        |
+| `llm`              | `llmstore`               | `llms`                |
 | `propertysetter`   | `propertysetterstore`    | `propertysetters`     |
-
-> **⚠️ Important**: The URL slug for dictionaries is `dictionaries`, not `regulardictionary`.
+| `mcpcalls`         | `mcpcallsstore`          | `mcpcalls`            |
+| `rag`              | `ragstore`               | `rags`                |
 
 #### 3. MSW Mock Handlers
 

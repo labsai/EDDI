@@ -1,8 +1,8 @@
 # EDDI Manager — Handoff Document
 
-> **Last updated**: 2026-03-27  
+> **Last updated**: 2026-03-28  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: `pending` feat(v6): Phase 8c Manager — RAG Knowledge Base editor, LangChain RAG section, 24 new tests
+> **Last commit**: `pending` fix(v6): Production readiness audit — 17 fixes across 3 repos
 
 ---
 
@@ -61,11 +61,12 @@
 | —     | **LLM Editor UX + Wizard Polish**: Custom `prompt` Monaco language (Qute-first: `{expression}`, `{#if}`, `{! comment !}`, `{| raw |}`; legacy `[[${...}]]`). Pre/Post Instructions redesigned with Section+ContentEditor. Model Params `HIDDEN_PARAM_KEYS`. Add Task dialog curated labels over backend displayName. Wizard: model datalist autocomplete per provider, base URL contextual hints, progress step labels | pending |
 | 13a–c | **Agent Studio + Debugger Suite**: Debug Drawer (Pipeline Trace, Cost Dashboard, Memory Inspector, Live Log Viewer, Prompt Viewer). Agent Studio 3-panel workspace (Pipeline Railroad, Editor, Chat+Debug). Zustand debug store, SSE event dispatch, tool metrics API. 5 test files (28 tests), 30+ i18n keys, full ARIA tab pattern, RTL-clean. | pending |
 | 8c-M | **RAG Knowledge Base Manager**: `RagEditor` (6-section form editor: General, Embedding Model with 7 providers + context-sensitive param hints, Vector Store tile selector with 5 stores + param cache, Chunking with visual preview, Retrieval Defaults with color-coded sliders, Document Ingestion with drag-drop + text/plain API + polling). IngestionPanel fixed: text/plain body + query params (version, documentName). ConfigEditorLayout `meta` extended with `version`. Embedding param cache on provider switch. KeyValueEditor duplicate-key guard. `ragstore` vite proxy. 11 locales cleaned (removed `isolation`). 19 RAG tests. | pending |
+| Audit | **Production Readiness Audit** — 17 fixes: LLM provider sync (7→11), Caffeine cache for EmbeddingModel+StoreFactory, N+1 deployment fix (Promise.allSettled), rag-editor unmount leak, ErrorBoundary (4 tests), RTL compliance (3 files), ApiClient per-request headers, type extraction (langchain/types.ts), AGENTS.md docs sync, permanent delete API, DEV-only console.log guards | pending |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 375+ pass (`npm run test`) — 38 files (36 passing, 2 pre-existing failures)
+- **Unit/Component**: 379+ pass (`npm run test`) — 39 files (39 passing)
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds

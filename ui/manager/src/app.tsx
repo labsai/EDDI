@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { DashboardPage } from "@/pages/dashboard";
 import { AgentsPage } from "@/pages/agents";
 import { AgentDetailPage } from "@/pages/agent-detail";
@@ -26,6 +27,7 @@ import { AgentStudioPage } from "@/pages/agent-studio";
 
 export function App() {
   return (
+    <ErrorBoundary>
     <Routes>
       <Route element={<AppLayout />}>
         <Route path="/manage" element={<DashboardPage />} />
@@ -61,5 +63,6 @@ export function App() {
         <Route path="*" element={<Navigate to="/manage" replace />} />
       </Route>
     </Routes>
+    </ErrorBoundary>
   );
 }

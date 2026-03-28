@@ -25,6 +25,7 @@ import {
   getAgentDescriptors,
   getDeploymentStatus,
   type AgentDescriptor,
+  type DeploymentStatus,
   parseResourceUri,
 } from "@/lib/api/agents";
 import { useDebugStore } from "@/hooks/use-debug-events";
@@ -175,7 +176,7 @@ export function useDeployedAgents() {
   return useQuery({
     queryKey: [...CHAT_KEY, "deployedAgents"],
     queryFn: async () => {
-      const descriptors = await getAgentDescriptors(100, 0, "");
+      const descriptors = await getAgentDescriptors(500, 0, "");
       // Deduplicate by name, keep latest version
       const grouped = new Map<
         string,
@@ -190,19 +191,20 @@ export function useDeployedAgents() {
       }
       const agents = Array.from(grouped.values());
 
-      // Check deployment status for each
-      const deployed: (AgentDescriptor & { id: string; version: number })[] = [];
-      for (const agent of agents) {
-        try {
+      // Check deployment status in parallel (avoids N+1 sequential requests)
+      const results = await Promise.allSettled(
+        agents.map(async (agent) => {
           const status = await getDeploymentStatus("production", agent.id, agent.version);
-          if (status.status === "READY") {
-            deployed.push(agent);
-          }
-        } catch {
-          // skip agents whose status can't be fetched
-        }
-      }
-      return deployed;
+          return { agent, status };
+        })
+      );
+
+      return results
+        .filter(
+          (r): r is PromiseFulfilledResult<{ agent: typeof agents[number]; status: DeploymentStatus }> =>
+            r.status === "fulfilled" && r.value.status.status === "READY"
+        )
+        .map((r) => r.value.agent);
     },
     staleTime: 60_000,
   });

@@ -57,16 +57,21 @@ class ApiClient {
   private async request<T>(
     method: string,
     path: string,
-    body?: unknown
+    body?: unknown,
+    requestHeaders?: Record<string, string>
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
+
+    const mergedHeaders = { ...this.headers, ...requestHeaders };
 
     let response: Response;
     try {
       response = await fetch(url, {
         method,
-        headers: this.headers,
-        body: body ? JSON.stringify(body) : undefined,
+        headers: mergedHeaders,
+        body: body !== undefined
+          ? (typeof body === "string" ? body : JSON.stringify(body))
+          : undefined,
       });
     } catch (networkError) {
       // Network failure (offline, DNS, CORS, etc.)
@@ -125,16 +130,16 @@ class ApiClient {
     return this.request<T>("GET", path);
   }
 
-  post<T>(path: string, body?: unknown): Promise<T> {
-    return this.request<T>("POST", path, body);
+  post<T>(path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+    return this.request<T>("POST", path, body, headers);
   }
 
-  put<T>(path: string, body?: unknown): Promise<T> {
-    return this.request<T>("PUT", path, body);
+  put<T>(path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+    return this.request<T>("PUT", path, body, headers);
   }
 
-  patch<T>(path: string, body?: unknown): Promise<T> {
-    return this.request<T>("PATCH", path, body);
+  patch<T>(path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+    return this.request<T>("PATCH", path, body, headers);
   }
 
   delete<T>(path: string): Promise<T> {
