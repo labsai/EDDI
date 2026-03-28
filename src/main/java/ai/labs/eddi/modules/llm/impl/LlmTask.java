@@ -64,6 +64,7 @@ public class LlmTask implements ILifecycleTask {
     private static final String KEY_INCLUDE_FIRST_AGENT_MESSAGE = "includeFirstAgentMessage";
     private static final String KEY_CONVERT_TO_OBJECT = "convertToObject";
     private static final String KEY_ADD_TO_OUTPUT = "addToOutput";
+    private static final String KEY_RESPONSE_SCHEMA = "responseSchema";
     private static final String HTTPCALLS_TYPE = "eddi://ai.labs.httpcalls";
     private static final String MATCH_ALL_OPERATOR = "*";
 
@@ -210,11 +211,20 @@ public class LlmTask implements ILifecycleTask {
         }
 
         // When structured JSON output is expected, reinforce the format instruction.
-        // This is appended on every request to minimize LLM non-compliance.
+        // If a responseSchema is provided, include it explicitly so the LLM knows the
+        // exact shape.
         if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
-            systemMessage += "\n\nIMPORTANT: You MUST respond with valid JSON only. "
-                    + "Do NOT include any text, explanation, or markdown outside the JSON object. "
-                    + "Your entire response must be a single JSON object starting with '{'.";
+            String schema = processedParams.get(KEY_RESPONSE_SCHEMA);
+            if (!isNullOrEmpty(schema)) {
+                systemMessage += "\n\n## RESPONSE FORMAT (MANDATORY)\n"
+                        + "You MUST respond with a single valid JSON object matching this exact schema:\n" + "```json\n" + schema + "\n```\n"
+                        + "Do NOT include ANY text before or after the JSON. " + "Do NOT wrap in markdown code fences. "
+                        + "Output ONLY the raw JSON object.";
+            } else {
+                systemMessage += "\n\n## RESPONSE FORMAT (MANDATORY)\n" + "You MUST respond with a single valid JSON object. "
+                        + "Do NOT include ANY text before or after the JSON. " + "Do NOT wrap in markdown code fences. "
+                        + "Output ONLY the raw JSON object starting with '{'.";
+            }
         }
 
         // Build conversation messages
@@ -235,6 +245,12 @@ public class LlmTask implements ILifecycleTask {
         // do NOT stream or add the raw response — the postResponse will generate proper
         // output.
         boolean addToOutputExplicitlyFalse = "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT));
+
+        // When convertToObject is true, use native JSON response format on the API
+        // level
+        // (supported by OpenAI, Gemini, Mistral). Falls back gracefully for providers
+        // that don't support it.
+        boolean jsonMode = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
 
         // Execute: try agent mode first, fall back to legacy
         String responseContent;
@@ -299,7 +315,7 @@ public class LlmTask implements ILifecycleTask {
                         eventSink.onToken(responseContent);
                     }
                 } else {
-                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task);
+                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
                     responseContent = chatResult.response();
                     responseMetadata = chatResult.responseMetadata();
                 }
@@ -328,14 +344,14 @@ public class LlmTask implements ILifecycleTask {
                 } else {
                     // Streaming not supported by this builder — fall back to sync, emit as single
                     // chunk
-                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task);
+                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
                     responseContent = chatResult.response();
                     responseMetadata = chatResult.responseMetadata();
                     eventSink.onToken(responseContent);
                 }
             } else {
                 // Standard non-streaming legacy mode
-                var chatResult = legacyChatExecutor.execute(chatModel, messages, task);
+                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
                 responseContent = chatResult.response();
                 responseMetadata = chatResult.responseMetadata();
             }

@@ -4,7 +4,6 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.modules.llm.model.ToolExecutionTrace;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -48,15 +47,13 @@ public class ToolExecutionService {
         return costTracker;
     }
 
-    // Metrics — all per-tool counters use the "tool" tag for Prometheus
+    // Metrics — all per-tool counters/timers use the "tool" tag for Prometheus
     // compatibility.
     // Aggregate totals can be computed via sum() in PromQL.
-    private Timer toolExecutionTimer;
     private Counter parallelExecutionCounter;
 
     @PostConstruct
     public void init() {
-        this.toolExecutionTimer = meterRegistry.timer("eddi.tool.execution.duration");
         this.parallelExecutionCounter = meterRegistry.counter("eddi.tool.execution.parallel");
 
         LOGGER.info("Tool execution service initialized with metrics");
@@ -68,76 +65,73 @@ public class ToolExecutionService {
     public String executeTool(Object toolInstance, Method method, Object[] args, String conversationId, ToolExecutionTrace trace) {
         String toolName = method.getDeclaringClass().getSimpleName();
         String arguments = serializeArguments(args);
+        long startTime = System.currentTimeMillis();
 
-        return toolExecutionTimer.record(() -> {
-            long startTime = System.currentTimeMillis();
-
-            try {
-                // 1. Check rate limit
-                if (!rateLimiter.tryAcquire(toolName)) {
-                    String error = "Rate limit exceeded for tool: " + toolName;
-                    long executionTime = System.currentTimeMillis() - startTime;
-                    trace.addFailedToolCall(toolName, arguments, error, executionTime, 0.0);
-
-                    meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
-                    meterRegistry.counter("eddi.tool.execution.ratelimited", "tool", toolName).increment();
-
-                    return "Error: " + error;
-                }
-
-                // 2. Check cache
-                String cachedResult = cacheService.get(toolName, arguments);
-                if (cachedResult != null) {
-                    long executionTime = System.currentTimeMillis() - startTime;
-                    double cost = 0.0; // No cost for cached results
-                    trace.addToolCall(toolName, arguments, cachedResult, executionTime, cost, true);
-
-                    meterRegistry.counter("eddi.tool.execution.success", "tool", toolName).increment();
-                    meterRegistry.counter("eddi.tool.execution.cached", "tool", toolName).increment();
-
-                    LOGGER.info(String.format("Tool '%s' served from cache (%dms)", toolName, executionTime));
-                    return cachedResult;
-                }
-
-                // 3. Track cost
-                double cost = costTracker.trackToolCall(toolName, conversationId);
-
-                // 4. Execute tool
-                Object result = method.invoke(toolInstance, args);
-                String resultString = result != null ? result.toString() : "null";
-
+        try {
+            // 1. Check rate limit
+            if (!rateLimiter.tryAcquire(toolName)) {
+                String error = "Rate limit exceeded for tool: " + toolName;
                 long executionTime = System.currentTimeMillis() - startTime;
-
-                // 5. Cache result
-                cacheService.put(toolName, arguments, resultString);
-
-                // 6. Update trace
-                trace.addToolCall(toolName, arguments, resultString, executionTime, cost, false);
-
-                // 7. Record success metrics
-                meterRegistry.counter("eddi.tool.execution.success", "tool", toolName).increment();
-                meterRegistry.timer("eddi.tool.execution.duration", "tool", toolName).record(executionTime, TimeUnit.MILLISECONDS);
-
-                LOGGER.info(String.format("Tool '%s' executed successfully (%dms, $%.4f)", toolName, executionTime, cost));
-
-                return resultString;
-
-            } catch (Exception e) {
-                long executionTime = System.currentTimeMillis() - startTime;
-                // Cost was already tracked in step 3 above (if we got past rate limit and
-                // cache)
-                String error = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-
                 trace.addFailedToolCall(toolName, arguments, error, executionTime, 0.0);
 
-                // Record failure metrics
                 meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
+                meterRegistry.counter("eddi.tool.execution.ratelimited", "tool", toolName).increment();
 
-                LOGGER.error(String.format("Tool '%s' failed (%dms): %s", toolName, executionTime, error), e);
-
-                return "Error executing tool: " + error;
+                return "Error: " + error;
             }
-        });
+
+            // 2. Check cache
+            String cachedResult = cacheService.get(toolName, arguments);
+            if (cachedResult != null) {
+                long executionTime = System.currentTimeMillis() - startTime;
+                double cost = 0.0; // No cost for cached results
+                trace.addToolCall(toolName, arguments, cachedResult, executionTime, cost, true);
+
+                meterRegistry.counter("eddi.tool.execution.success", "tool", toolName).increment();
+                meterRegistry.counter("eddi.tool.execution.cached", "tool", toolName).increment();
+
+                LOGGER.info(String.format("Tool '%s' served from cache (%dms)", toolName, executionTime));
+                return cachedResult;
+            }
+
+            // 3. Track cost
+            double cost = costTracker.trackToolCall(toolName, conversationId);
+
+            // 4. Execute tool
+            Object result = method.invoke(toolInstance, args);
+            String resultString = result != null ? result.toString() : "null";
+
+            long executionTime = System.currentTimeMillis() - startTime;
+
+            // 5. Cache result
+            cacheService.put(toolName, arguments, resultString);
+
+            // 6. Update trace
+            trace.addToolCall(toolName, arguments, resultString, executionTime, cost, false);
+
+            // 7. Record success metrics
+            meterRegistry.counter("eddi.tool.execution.success", "tool", toolName).increment();
+            meterRegistry.timer("eddi.tool.execution.duration", "tool", toolName).record(executionTime, TimeUnit.MILLISECONDS);
+
+            LOGGER.info(String.format("Tool '%s' executed successfully (%dms, $%.4f)", toolName, executionTime, cost));
+
+            return resultString;
+
+        } catch (Exception e) {
+            long executionTime = System.currentTimeMillis() - startTime;
+            // Cost was already tracked in step 3 above (if we got past rate limit and
+            // cache)
+            String error = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+
+            trace.addFailedToolCall(toolName, arguments, error, executionTime, 0.0);
+
+            // Record failure metrics
+            meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
+
+            LOGGER.error(String.format("Tool '%s' failed (%dms): %s", toolName, executionTime, error), e);
+
+            return "Error executing tool: " + error;
+        }
     }
 
     /**
