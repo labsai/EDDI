@@ -39,7 +39,16 @@ function useBreadcrumbs() {
     conversations: t("nav.conversations"),
     chat: t("nav.chat"),
     resources: t("nav.resources"),
+    groups: t("nav.groups", "Groups"),
+    coordinator: t("nav.coordinator", "Coordinator"),
+    schedules: t("nav.schedules", "Schedules"),
+    logs: t("nav.logs", "Logs"),
+    orphans: t("nav.orphans", "Orphans"),
+    secrets: t("nav.secrets", "Secrets"),
+    audit: t("nav.audit", "Audit Trail"),
+    quotas: t("nav.quotas", "Quotas"),
     wizard: t("wizard.title", "Agent Wizard"),
+    workflowview: t("nav.packages"),
   };
 
   let currentPath = "/manage";

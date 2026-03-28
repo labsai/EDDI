@@ -1097,6 +1097,296 @@ export const handlers = [
     });
   }),
 
+  // --- Group Store Mock Handlers ---
+  http.get("*/groupstore/groups/descriptors", () => {
+    return HttpResponse.json([
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp1?version=1",
+        name: "Product Review Panel",
+        description: "Peer-review discussion for product decisions",
+        createdOn: Date.now() - 86400000,
+        lastModifiedOn: Date.now(),
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp2?version=1",
+        name: "Strategy Debate",
+        description: "Devil's advocate debate on business strategy",
+        createdOn: Date.now() - 172800000,
+        lastModifiedOn: Date.now() - 3600000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp3?version=2",
+        name: "Research Round Table",
+        description: "Open discussion for research synthesis",
+        createdOn: Date.now() - 259200000,
+        lastModifiedOn: Date.now() - 7200000,
+      },
+    ]);
+  }),
+
+  http.get("*/groupstore/groups/styles", () => {
+    return HttpResponse.json({
+      ROUND_TABLE: { label: "Round Table", phases: ["OPINION", "SYNTHESIS"] },
+      PEER_REVIEW: { label: "Peer Review", phases: ["OPINION", "CRITIQUE", "REVISION", "SYNTHESIS"] },
+      DEVIL_ADVOCATE: { label: "Devil's Advocate", phases: ["OPINION", "CHALLENGE", "DEFENSE", "SYNTHESIS"] },
+      DELPHI: { label: "Delphi", phases: ["OPINION", "REVISION", "SYNTHESIS"] },
+      DEBATE: { label: "Debate", phases: ["ARGUE", "REBUTTAL", "SYNTHESIS"] },
+      CUSTOM: { label: "Custom", phases: [] },
+    });
+  }),
+
+  http.get("*/groupstore/groups/jsonSchema", () => {
+    return HttpResponse.json({
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      title: "AgentGroupConfiguration",
+      properties: {
+        name: { type: "string", description: "Group name" },
+        description: { type: "string", description: "Group description" },
+        members: { type: "array", items: { type: "object" }, description: "Group members" },
+        moderatorAgentId: { type: "string", description: "Moderator agent ID" },
+        style: { type: "string", description: "Discussion style" },
+        maxRounds: { type: "integer", description: "Maximum rounds" },
+      },
+    });
+  }),
+
+  http.get("*/groupstore/groups/:id", () => {
+    return HttpResponse.json({
+      name: "Product Review Panel",
+      description: "Peer-review discussion for product decisions",
+      members: [
+        { agentId: "agent1", displayName: "Support Agent", speakingOrder: 1, role: "Reviewer", memberType: "AGENT" },
+        { agentId: "agent2", displayName: "FAQ Agent", speakingOrder: 2, role: "Critic", memberType: "AGENT" },
+      ],
+      moderatorAgentId: "agent1",
+      style: "PEER_REVIEW",
+      maxRounds: 3,
+      phases: [
+        { name: "Initial Opinions", type: "OPINION", participants: "*", turnOrder: "SEQUENTIAL", contextScope: "NONE", targetEachPeer: false, inputTemplate: null, repeats: 1 },
+        { name: "Critique", type: "CRITIQUE", participants: "*", turnOrder: "SEQUENTIAL", contextScope: "FULL", targetEachPeer: true, inputTemplate: null, repeats: 1 },
+        { name: "Synthesis", type: "SYNTHESIS", participants: "moderator", turnOrder: "SEQUENTIAL", contextScope: "FULL", targetEachPeer: false, inputTemplate: null, repeats: 1 },
+      ],
+      protocol: {
+        agentTimeoutSeconds: 60,
+        onAgentFailure: "SKIP",
+        maxRetries: 2,
+        onMemberUnavailable: "SKIP",
+      },
+    });
+  }),
+
+  http.post("*/groupstore/groups", () => {
+    const newId = `grp-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `eddi://ai.labs.group/groupstore/groups/${newId}?version=1`,
+      },
+    });
+  }),
+
+  http.put("*/groupstore/groups/:id", ({ request, params }) => {
+    const url = new URL(request.url);
+    const currentVersion = parseInt(url.searchParams.get("version") ?? "1", 10);
+    return new HttpResponse(null, {
+      status: 200,
+      headers: {
+        Location: `eddi://ai.labs.group/groupstore/groups/${params.id}?version=${currentVersion + 1}`,
+      },
+    });
+  }),
+
+  http.delete("*/groupstore/groups/:id", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Group conversations
+  http.get("*/groups/:groupId/conversations", () => {
+    return HttpResponse.json([]);
+  }),
+
+  http.post("*/groups/:groupId/conversations", ({ params }) => {
+    return HttpResponse.json({
+      id: `gc-${Date.now()}`,
+      groupId: params.groupId,
+      userId: "manager-user",
+      state: "IN_PROGRESS",
+      originalQuestion: "What should we prioritize for Q2?",
+      transcript: [],
+      memberConversationIds: {},
+      currentPhaseIndex: 0,
+      currentPhaseName: "Initial Opinions",
+      synthesizedAnswer: null,
+      depth: 0,
+      created: new Date().toISOString(),
+      lastModified: new Date().toISOString(),
+    });
+  }),
+
+  // --- Schedule Store Mock Handlers ---
+  http.get("*/schedulestore/schedules", () => {
+    return HttpResponse.json([
+      {
+        id: "sched-1",
+        name: "Daily Health Check",
+        triggerType: "CRON",
+        agentId: "agent1",
+        agentVersion: 0,
+        environment: "production",
+        cronExpression: "0 9 * * MON-FRI",
+        cronDescription: "At 09:00 AM, Monday through Friday",
+        message: "Run daily health check",
+        conversationStrategy: "new",
+        enabled: true,
+        nextFire: Date.now() + 43200000,
+        lastFired: Date.now() - 43200000,
+        fireStatus: "COMPLETED",
+        failCount: 0,
+        timeZone: "UTC",
+        createdAt: Date.now() - 604800000,
+        updatedAt: Date.now() - 43200000,
+      },
+      {
+        id: "sched-2",
+        name: "Heartbeat Monitor",
+        triggerType: "HEARTBEAT",
+        agentId: "agent2",
+        agentVersion: 1,
+        environment: "production",
+        heartbeatIntervalSeconds: 300,
+        message: "Heartbeat ping",
+        conversationStrategy: "persistent",
+        persistentConversationId: "conv-heartbeat-001",
+        enabled: true,
+        nextFire: Date.now() + 1800000,
+        lastFired: Date.now() - 1800000,
+        fireStatus: "PENDING",
+        failCount: 0,
+        createdAt: Date.now() - 2592000000,
+        updatedAt: Date.now() - 1800000,
+      },
+      {
+        id: "sched-3",
+        name: "Failed Report",
+        triggerType: "CRON",
+        agentId: "agent1",
+        agentVersion: 0,
+        environment: "production",
+        cronExpression: "0 8 * * 1",
+        cronDescription: "Every Monday at 8:00 AM",
+        message: "Generate weekly summary report",
+        conversationStrategy: "new",
+        enabled: false,
+        lastFired: Date.now() - 604800000,
+        fireStatus: "DEAD_LETTERED",
+        failCount: 3,
+        timeZone: "Europe/Vienna",
+        createdAt: Date.now() - 2592000000,
+        updatedAt: Date.now() - 604800000,
+      },
+    ]);
+  }),
+
+  http.get("*/schedulestore/schedules/admin/failed", () => {
+    return HttpResponse.json([
+      {
+        id: "fire-fail-1",
+        scheduleId: "sched-3",
+        scheduleName: "Failed Report",
+        agentId: "agent1",
+        firedAt: Date.now() - 604800000,
+        success: false,
+        error: "Agent not deployed in production environment",
+      },
+    ]);
+  }),
+
+  http.get("*/schedulestore/schedules/:id", () => {
+    return HttpResponse.json({
+      id: "sched-1",
+      name: "Daily Health Check",
+      triggerType: "CRON",
+      agentId: "agent1",
+      agentVersion: 0,
+      environment: "production",
+      cronExpression: "0 9 * * MON-FRI",
+      cronDescription: "At 09:00 AM, Monday through Friday",
+      message: "Run daily health check",
+      conversationStrategy: "new",
+      enabled: true,
+      nextFire: Date.now() + 43200000,
+      lastFired: Date.now() - 43200000,
+      fireStatus: "COMPLETED",
+      failCount: 0,
+      timeZone: "UTC",
+      createdAt: Date.now() - 604800000,
+      updatedAt: Date.now() - 43200000,
+    });
+  }),
+
+  http.post("*/schedulestore/schedules", () => {
+    return new HttpResponse(null, {
+      status: 201,
+      headers: { Location: `/schedulestore/schedules/sched-${Date.now()}` },
+    });
+  }),
+
+  http.put("*/schedulestore/schedules/:id", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.delete("*/schedulestore/schedules/:id", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.post("*/schedulestore/schedules/:id/enable", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/schedulestore/schedules/:id/disable", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/schedulestore/schedules/:id/fire", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/schedulestore/schedules/:id/retry", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/schedulestore/schedules/:id/dismiss", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.get("*/schedulestore/schedules/:id/fires", () => {
+    return HttpResponse.json([
+      {
+        id: "fire-1",
+        scheduleId: "sched-1",
+        scheduleName: "Daily Health Check",
+        agentId: "agent1",
+        conversationId: "conv-fire-001",
+        firedAt: Date.now() - 43200000,
+        completedAt: Date.now() - 43195000,
+        durationMs: 5000,
+        success: true,
+      },
+      {
+        id: "fire-2",
+        scheduleId: "sched-1",
+        scheduleName: "Daily Health Check",
+        agentId: "agent1",
+        conversationId: "conv-fire-002",
+        firedAt: Date.now() - 129600000,
+        completedAt: Date.now() - 129594000,
+        durationMs: 6000,
+        success: true,
+      },
+    ]);
+  }),
+
   // Generic descriptor handlers for all resource types
   ...createResourceHandlers("rulestore", "rulesets", "rules"),
   ...createResourceHandlers("apicallstore", "apicalls", "apicalls"),
