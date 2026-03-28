@@ -2,6 +2,8 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.secrets.SecretResolver;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.elasticsearch.ElasticsearchEmbeddingStore;
@@ -15,6 +17,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,6 +29,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * Each knowledge base gets its own store instance (collection-per-KB
  * isolation). Supported store types: {@code in-memory}, {@code pgvector},
  * {@code mongodb-atlas}, {@code elasticsearch}, {@code qdrant}.
+ * <p>
+ * Cache is bounded (max 50 entries, 30-minute idle TTL) to prevent memory leaks
+ * in multi-tenant or dynamic-config environments.
  */
 @ApplicationScoped
 public class EmbeddingStoreFactory {
@@ -33,7 +39,8 @@ public class EmbeddingStoreFactory {
     private static final Logger LOGGER = Logger.getLogger(EmbeddingStoreFactory.class);
     private static final int MAX_PG_IDENTIFIER_LENGTH = 63;
 
-    private final Map<String, EmbeddingStore<TextSegment>> cache = new ConcurrentHashMap<>();
+    private final Cache<String, EmbeddingStore<TextSegment>> cache = Caffeine.newBuilder().maximumSize(50).expireAfterAccess(Duration.ofMinutes(30))
+            .build();
     private final Map<String, MongoClient> mongoClientCache = new ConcurrentHashMap<>();
     private final SecretResolver secretResolver;
 
@@ -51,7 +58,7 @@ public class EmbeddingStoreFactory {
         // store)
         String paramsKey = config.getStoreParameters() != null ? new TreeMap<>(config.getStoreParameters()).toString() : "";
         String cacheKey = config.getStoreType() + ":" + kbId + ":" + paramsKey;
-        return cache.computeIfAbsent(cacheKey, k -> build(config, kbId));
+        return cache.get(cacheKey, k -> build(config, kbId));
     }
 
     private EmbeddingStore<TextSegment> build(RagConfiguration config, String kbId) {
@@ -278,7 +285,7 @@ public class EmbeddingStoreFactory {
      * Clears the store cache. Useful for testing or config hot-reload.
      */
     public void clearCache() {
-        cache.clear();
+        cache.invalidateAll();
         mongoClientCache.values().forEach(client -> {
             try {
                 client.close();

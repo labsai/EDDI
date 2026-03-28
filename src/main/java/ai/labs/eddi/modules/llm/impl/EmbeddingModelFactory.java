@@ -2,6 +2,8 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.secrets.SecretResolver;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.langchain4j.model.bedrock.BedrockTitanEmbeddingModel;
 import dev.langchain4j.model.cohere.CohereEmbeddingModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -14,9 +16,9 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 import software.amazon.awssdk.regions.Region;
 
+import java.time.Duration;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Creates and caches {@link EmbeddingModel} instances based on
@@ -25,13 +27,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>
  * Supported providers: {@code openai}, {@code azure-openai}, {@code ollama},
  * {@code mistral}, {@code bedrock}, {@code cohere}, {@code vertex}.
+ * <p>
+ * Cache is bounded (max 50 entries, 30-minute idle TTL) to prevent memory leaks
+ * in multi-tenant or dynamic-config environments.
  */
 @ApplicationScoped
 public class EmbeddingModelFactory {
 
     private static final Logger LOGGER = Logger.getLogger(EmbeddingModelFactory.class);
 
-    private final Map<String, EmbeddingModel> cache = new ConcurrentHashMap<>();
+    private final Cache<String, EmbeddingModel> cache = Caffeine.newBuilder().maximumSize(50).expireAfterAccess(Duration.ofMinutes(30)).build();
     private final SecretResolver secretResolver;
 
     @Inject
@@ -46,7 +51,7 @@ public class EmbeddingModelFactory {
     public EmbeddingModel getOrCreate(RagConfiguration config) {
         String paramKey = config.getEmbeddingParameters() != null ? new TreeMap<>(config.getEmbeddingParameters()).toString() : "";
         String cacheKey = config.getEmbeddingProvider() + ":" + paramKey;
-        return cache.computeIfAbsent(cacheKey, k -> build(config));
+        return cache.get(cacheKey, k -> build(config));
     }
 
     private EmbeddingModel build(RagConfiguration config) {
@@ -115,6 +120,6 @@ public class EmbeddingModelFactory {
      * Clears the model cache. Useful for testing or config hot-reload.
      */
     public void clearCache() {
-        cache.clear();
+        cache.invalidateAll();
     }
 }

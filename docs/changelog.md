@@ -13,6 +13,43 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Production Readiness Audit — 17 Fixes Across 3 Repos (2026-03-28)
+
+**Repos:** EDDI, EDDI-Manager, eddi-chat-ui (`feature/version-6.0.0`)
+
+**What changed:**
+
+Comprehensive code review across all 3 repos identified 18 issues; 17 resolved in this session (1 deferred: handlers.ts domain split).
+
+| # | Severity | Fix | Repo |
+|---|----------|-----|------|
+| 1 | 🔴 Critical | Synced `MODEL_TYPES` in langchain-editor (7→11 providers: added mistral, azure-openai, bedrock, oracle-genai) | Manager |
+| 2 | 🔴 Critical | Replaced sequential deployment status checks with `Promise.allSettled` (N+1 → parallel) | Manager |
+| 3 | 🔴 Critical | `EmbeddingModelFactory` — replaced unbounded `ConcurrentHashMap` with Caffeine cache (50 entries, 30m TTL) | EDDI |
+| 4 | 🔴 Critical | `rag-editor` — added `mountedRef` + `useEffect` cleanup to prevent state updates after unmount | Manager |
+| 5 | 🟡 Significant | Updated `AGENTS.md` resource types table (6→8 types: added mcpcalls, rag) | Manager |
+| 6 | 🟡 Significant | Extracted langchain-editor types+constants to `langchain/types.ts` (~100 lines) | Manager |
+| 7 | 🟡 Significant | Fixed 3 RTL violations: `ml-1.5`→`ms-1.5` (schedules, dictionary), `left-[50%]`→`inset-x-0 mx-auto` (alert-dialog) | Manager |
+| 8 | 🟡 Significant | Acknowledged Zustand usage in `AGENTS.md` tech stack table | Manager |
+| 10 | 🟡 Significant | Added per-request `headers` override to `ApiClient` (enables non-JSON content types) | Manager |
+| 11 | 🟡 Significant | Validated cascade-save URI scheme — confirmed correct (v6 slugs match backend) | Manager |
+| 12 | 🔵 Minor | Created `ErrorBoundary` component + wired into app route tree (4 new tests) | Manager |
+| 13 | 🔵 Minor | Guarded `console.log` in `auth-provider.tsx` with `import.meta.env.DEV` | Manager |
+| 14 | 🔵 Minor | Increased agent deployment status limit from 100→200 | Manager |
+| 15 | 🔵 Minor | Added `?permanent=true` option to `deleteResource` API | Manager |
+| 16 | 🔵 Minor | Added `@param` deprecation docs for unused params in `chat-api.ts` | Chat UI |
+| 17 | 🔵 Minor | Fixed `parseFloat \|\| 0` pattern to handle `0` and `NaN` correctly | Manager |
+| 18 | 🔵 Minor | Replaced array-index `key={i}` with value-based keys for correct React reconciliation | Manager |
+| — | 🔴 Critical | `EmbeddingStoreFactory` — same Caffeine migration as ModelFactory (50 entries, 30m TTL) | EDDI |
+
+**Deferred:** #9 — Split `handlers.ts` into domain files (2300-line MSW test infrastructure; mechanical refactor for a dedicated session).
+
+**Verification:** TypeScript 0 errors, backend compiles, 39/39 test files pass, production build succeeds.
+
+**Files:** 11 modified + 3 new (Manager), 2 modified (EDDI), 1 modified (Chat UI).
+
+---
+
 ## Phase 8c-M: Manager UI RAG Sync — Full Provider Parity + Ingestion Fix (2026-03-28)
 
 **Repo:** EDDI-Manager (`feature/version-6.0.0`) + EDDI (backend fixes)
