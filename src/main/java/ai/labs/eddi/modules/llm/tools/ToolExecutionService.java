@@ -48,17 +48,15 @@ public class ToolExecutionService {
         return costTracker;
     }
 
-    // Metrics
+    // Metrics — all per-tool counters use the "tool" tag for Prometheus
+    // compatibility.
+    // Aggregate totals can be computed via sum() in PromQL.
     private Timer toolExecutionTimer;
-    private Counter toolExecutionSuccessCounter;
-    private Counter toolExecutionFailureCounter;
     private Counter parallelExecutionCounter;
 
     @PostConstruct
     public void init() {
         this.toolExecutionTimer = meterRegistry.timer("eddi.tool.execution.duration");
-        this.toolExecutionSuccessCounter = meterRegistry.counter("eddi.tool.execution.success");
-        this.toolExecutionFailureCounter = meterRegistry.counter("eddi.tool.execution.failure");
         this.parallelExecutionCounter = meterRegistry.counter("eddi.tool.execution.parallel");
 
         LOGGER.info("Tool execution service initialized with metrics");
@@ -81,7 +79,7 @@ public class ToolExecutionService {
                     long executionTime = System.currentTimeMillis() - startTime;
                     trace.addFailedToolCall(toolName, arguments, error, executionTime, 0.0);
 
-                    toolExecutionFailureCounter.increment();
+                    meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
                     meterRegistry.counter("eddi.tool.execution.ratelimited", "tool", toolName).increment();
 
                     return "Error: " + error;
@@ -94,7 +92,7 @@ public class ToolExecutionService {
                     double cost = 0.0; // No cost for cached results
                     trace.addToolCall(toolName, arguments, cachedResult, executionTime, cost, true);
 
-                    toolExecutionSuccessCounter.increment();
+                    meterRegistry.counter("eddi.tool.execution.success", "tool", toolName).increment();
                     meterRegistry.counter("eddi.tool.execution.cached", "tool", toolName).increment();
 
                     LOGGER.info(String.format("Tool '%s' served from cache (%dms)", toolName, executionTime));
@@ -117,7 +115,6 @@ public class ToolExecutionService {
                 trace.addToolCall(toolName, arguments, resultString, executionTime, cost, false);
 
                 // 7. Record success metrics
-                toolExecutionSuccessCounter.increment();
                 meterRegistry.counter("eddi.tool.execution.success", "tool", toolName).increment();
                 meterRegistry.timer("eddi.tool.execution.duration", "tool", toolName).record(executionTime, TimeUnit.MILLISECONDS);
 
@@ -134,7 +131,6 @@ public class ToolExecutionService {
                 trace.addFailedToolCall(toolName, arguments, error, executionTime, 0.0);
 
                 // Record failure metrics
-                toolExecutionFailureCounter.increment();
                 meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
 
                 LOGGER.error(String.format("Tool '%s' failed (%dms): %s", toolName, executionTime, error), e);
@@ -174,7 +170,7 @@ public class ToolExecutionService {
         try {
             // 1. Check rate limit
             if (enableRateLimiting && !rateLimiter.tryAcquire(toolName, rateLimit)) {
-                toolExecutionFailureCounter.increment();
+                meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
                 meterRegistry.counter("eddi.tool.execution.ratelimited", "tool", toolName).increment();
                 return "Error: Rate limit exceeded for tool: " + toolName;
             }
@@ -183,7 +179,7 @@ public class ToolExecutionService {
             if (enableCaching) {
                 String cachedResult = cacheService.get(toolName, arguments);
                 if (cachedResult != null) {
-                    toolExecutionSuccessCounter.increment();
+                    meterRegistry.counter("eddi.tool.execution.success", "tool", toolName).increment();
                     meterRegistry.counter("eddi.tool.execution.cached", "tool", toolName).increment();
                     return cachedResult;
                 }
@@ -203,7 +199,6 @@ public class ToolExecutionService {
             }
 
             long executionTime = System.currentTimeMillis() - startTime;
-            toolExecutionSuccessCounter.increment();
             meterRegistry.counter("eddi.tool.execution.success", "tool", toolName).increment();
             meterRegistry.timer("eddi.tool.execution.duration", "tool", toolName).record(executionTime, TimeUnit.MILLISECONDS);
 
@@ -213,7 +208,6 @@ public class ToolExecutionService {
             long executionTime = System.currentTimeMillis() - startTime;
             String error = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
 
-            toolExecutionFailureCounter.increment();
             meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
 
             LOGGER.error(String.format("Tool '%s' failed (%dms): %s", toolName, executionTime, error), e);
