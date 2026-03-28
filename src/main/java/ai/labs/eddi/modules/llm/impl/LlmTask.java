@@ -209,6 +209,14 @@ public class LlmTask implements ILifecycleTask {
             }
         }
 
+        // When structured JSON output is expected, reinforce the format instruction.
+        // This is appended on every request to minimize LLM non-compliance.
+        if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
+            systemMessage += "\n\nIMPORTANT: You MUST respond with valid JSON only. "
+                    + "Do NOT include any text, explanation, or markdown outside the JSON object. "
+                    + "Your entire response must be a single JSON object starting with '{'.";
+        }
+
         // Build conversation messages
         List<ChatMessage> messages = conversationHistoryBuilder.buildMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), logSizeLimit,
                 includeFirstAgentMessage);
@@ -346,6 +354,11 @@ public class LlmTask implements ILifecycleTask {
             responseObjectName = task.getId();
         }
 
+        // Always store the raw LLM response in memory first — ensures debuggability
+        // even if subsequent JSON conversion or postResponse processing fails.
+        var langchainData = dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), responseContent);
+        currentStep.storeData(langchainData);
+
         if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
             String trimmed = responseContent != null ? responseContent.trim() : "";
             if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
@@ -359,9 +372,6 @@ public class LlmTask implements ILifecycleTask {
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
         }
-
-        var langchainData = dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), responseContent);
-        currentStep.storeData(langchainData);
 
         // Write audit:* memory keys for the audit ledger (only if auditing is enabled)
         if (memory.getAuditCollector() != null) {
