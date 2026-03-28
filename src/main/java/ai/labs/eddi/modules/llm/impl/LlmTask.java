@@ -22,7 +22,6 @@ import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.modules.llm.tools.impl.*;
-import ai.labs.eddi.modules.output.model.QuickReply;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.ChatMessage;
@@ -394,47 +393,6 @@ public class LlmTask implements ILifecycleTask {
         }
 
         prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, 200, false);
-
-        // If structured JSON mode (addToOutput=false, convertToObject=true),
-        // extract htmlResponseText and quickReplies from the parsed JSON object
-        // and add them to conversation output.
-        if (addToOutputExplicitlyFalse) {
-            var responseObjectName2 = task.getResponseObjectName();
-            if (isNullOrEmpty(responseObjectName2)) {
-                responseObjectName2 = task.getId();
-            }
-            Object parsedObj = templateDataObjects.get(responseObjectName2);
-            if (parsedObj instanceof Map<?, ?> parsedMap) {
-                // Extract htmlResponseText: stream via SSE and add to conversation output
-                Object htmlText = parsedMap.get("htmlResponseText");
-                if (htmlText != null) {
-                    String htmlStr = htmlText.toString();
-                    if (eventSink != null) {
-                        eventSink.onToken(htmlStr);
-                    }
-                    var outputItem = new TextOutputItem(htmlStr, 0);
-                    currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
-                }
-
-                // Extract quickReplies and add directly to conversation output
-                Object qrObj = parsedMap.get("quickReplies");
-                if (qrObj instanceof List<?> qrList && !qrList.isEmpty()) {
-                    List<QuickReply> quickReplies = new ArrayList<>();
-                    for (Object qr : qrList) {
-                        if (qr instanceof String qrStr) {
-                            quickReplies.add(new QuickReply(qrStr, "", false));
-                        } else if (qr instanceof Map<?, ?> qrMap) {
-                            String value = qrMap.containsKey("value") ? String.valueOf(qrMap.get("value")) : String.valueOf(qr);
-                            String expressions = qrMap.containsKey("expressions") ? String.valueOf(qrMap.get("expressions")) : "";
-                            quickReplies.add(new QuickReply(value, expressions, false));
-                        }
-                    }
-                    if (!quickReplies.isEmpty()) {
-                        currentStep.addConversationOutputList("quickReplies", quickReplies);
-                    }
-                }
-            }
-        }
     }
 
     private HashMap<String, String> runTemplateEngineOnParams(Map<String, String> parameters, Map<String, Object> templateDataObjects) {

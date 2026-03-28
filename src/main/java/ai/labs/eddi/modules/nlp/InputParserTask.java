@@ -149,7 +149,8 @@ public class InputParserTask implements ILifecycleTask {
     private static List<QuickReply> extractQuickReplies(List<Map<String, Object>> quickReplyOutputList) {
         return quickReplyOutputList.stream().filter(Objects::nonNull).map(quickReplyData -> {
             String value = quickReplyData.get("value").toString();
-            String expressions = quickReplyData.get("expressions") != null ? quickReplyData.get("expressions").toString() : generateExpression(value);
+            Object exprObj = quickReplyData.get("expressions");
+            String expressions = (exprObj != null && !exprObj.toString().isBlank()) ? exprObj.toString() : generateExpression(value);
             return new QuickReply(value, expressions, (Boolean) quickReplyData.get("default"));
         }).toList();
     }
