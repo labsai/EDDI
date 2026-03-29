@@ -42,9 +42,9 @@ describe("LogsPage", () => {
     expect(screen.getByTestId("tab-history")).toBeInTheDocument();
   });
 
-  it("shows SSE connection status badge", () => {
+  it("shows stream badge for SSE connection", () => {
     renderLogs();
-    expect(screen.getByTestId("sse-status")).toBeInTheDocument();
+    expect(screen.getByTestId("stream-badge")).toBeInTheDocument();
   });
 
   it("renders agent filter input", () => {

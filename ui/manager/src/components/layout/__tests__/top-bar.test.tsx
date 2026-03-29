@@ -41,4 +41,12 @@ describe("TopBar", () => {
 
     expect(document.documentElement.classList.contains("dark")).toBe(true);
   });
+
+  it("renders platform status indicator", () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+
+    expect(screen.getByTestId("platform-status")).toBeInTheDocument();
+  });
 });

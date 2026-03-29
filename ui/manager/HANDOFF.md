@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-03-29  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: `pending` feat(v6): Platform hardening — secrets UX, audit/logs/coordinator power features, debug drawer, context-aware nav
+> **Last commit**: `pending` feat(v6): Global platform status indicator + unified stream badges
 
 ---
 
@@ -64,6 +64,7 @@
 | Audit | **Production Readiness Audit** — 17 fixes: LLM provider sync (7→11), Caffeine cache for EmbeddingModel+StoreFactory, N+1 deployment fix (Promise.allSettled), rag-editor unmount leak, ErrorBoundary (4 tests), RTL compliance (3 files), ApiClient per-request headers, type extraction (langchain/types.ts), AGENTS.md docs sync, permanent delete API, DEV-only console.log guards | pending |
 | 13d | **Onboarding Flow**: Multi-chapter interactive tour (Dashboard, Agents, Workflows, Chat, Resources). Welcome Modal (3-panel carousel, glassmorphism). Spotlight overlay (box-shadow cutout). Tour tooltip (smart placement, progress bar, keyboard nav). Per-chapter localStorage persistence. Sidebar Help menu (chapter list, completion badges, restart). Focus trap, body scroll lock, WCAG keyboard support. Zustand store, 18 tests, 60+ i18n keys across 11 locales. | pending |
 | Hard | **Platform Hardening**: Secrets vault agent selector dropdown. Audit page: auto-refresh, recent entries, JSON export. Logs page: level stats bar, inline text search, export, copy-to-clipboard. Coordinator: auto-refresh interval, throughput rate, error category breakdown, expandable dead-letter payloads. Debug drawer in side-panel chat. Context-aware back-navigation (resource→workflow→agent). MSW handler dedup. Vite proxy additions. 10 new tests (logs.test.tsx, audit/coordinator/secrets test extensions). | pending |
+| PlatS | **Global Platform Status**: Always-visible top-bar health indicator polling `/administration/logs/instance` every 15s. Click/tap popover with instance ID, latency (color-coded), last-checked time. Reusable `StreamBadge` component for SSE connections. Logs page: replaced big SSE badge with StreamBadge. Coordinator: replaced ● Live span with StreamBadge. Secrets: removed vault health badge (covered by global indicator). `usePlatformStatus` hook (TanStack Query). 16 i18n keys across 11 locales. | pending |
 
 ### Test Status
 

@@ -988,5 +988,22 @@
       "resetAll": "Reset All Tours",
       "resetConfirm": "Reset all tour progress?"
     }
+  },
+  "platform": {
+    "status": "プラットフォーム状態",
+    "online": "オンライン",
+    "offline": "オフライン",
+    "checking": "接続確認中…",
+    "connected": "接続済み",
+    "disconnected": "切断",
+    "instance": "インスタンス",
+    "latency": "レイテンシ",
+    "lastChecked": "最終確認",
+    "justNow": "たった今",
+    "secondsAgo": "{{count}}秒前"
+  },
+  "stream": {
+    "live": "ライブ",
+    "reconnecting": "再接続中…"
   }
 }

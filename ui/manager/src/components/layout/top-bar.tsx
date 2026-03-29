@@ -13,6 +13,7 @@ import {
 import { useTheme } from "./theme-provider";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { PlatformStatus } from "./platform-status";
 
 interface TopBarProps {
   onMenuClick: () => void;
@@ -173,6 +174,9 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
           ))}
         </nav>
       </div>
+
+      {/* Center: Platform Status */}
+      <PlatformStatus />
 
       {/* Right: Controls */}
       <div className="flex items-center gap-2" data-tour="topbar-personalize">

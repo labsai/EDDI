@@ -88,14 +88,6 @@ describe("SecretsPage", () => {
     });
   });
 
-  it("shows vault health badge", async () => {
-    renderSecrets();
-    await waitFor(() => {
-      expect(screen.getByTestId("vault-health")).toBeInTheDocument();
-      expect(screen.getByText("Vault Online")).toBeInTheDocument();
-    });
-  });
-
   it("opens create dialog when Add Secret is clicked", async () => {
     renderSecrets();
     const user = userEvent.setup();

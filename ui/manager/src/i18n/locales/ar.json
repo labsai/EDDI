@@ -988,5 +988,22 @@
       "resetAll": "Reset All Tours",
       "resetConfirm": "Reset all tour progress?"
     }
+  },
+  "platform": {
+    "status": "حالة المنصة",
+    "online": "متصل",
+    "offline": "غير متصل",
+    "checking": "جارٍ التحقق…",
+    "connected": "متصل",
+    "disconnected": "غير متصل",
+    "instance": "المثيل",
+    "latency": "زمن الاستجابة",
+    "lastChecked": "آخر فحص",
+    "justNow": "الآن",
+    "secondsAgo": "منذ {{count}}ث"
+  },
+  "stream": {
+    "live": "مباشر",
+    "reconnecting": "إعادة الاتصال…"
   }
 }

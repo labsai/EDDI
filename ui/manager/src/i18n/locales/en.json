@@ -110,6 +110,23 @@
     "sortByModified": "Sort by last modified",
     "apply": "Apply"
   },
+  "platform": {
+    "status": "Platform Status",
+    "online": "Online",
+    "offline": "Offline",
+    "checking": "Checking connection…",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "instance": "Instance",
+    "latency": "Latency",
+    "lastChecked": "Last checked",
+    "justNow": "just now",
+    "secondsAgo": "{{count}}s ago"
+  },
+  "stream": {
+    "live": "Live",
+    "reconnecting": "Reconnecting…"
+  },
   "agents": {
     "deploy": "Deploy",
     "undeploy": "Undeploy",

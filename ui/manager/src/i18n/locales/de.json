@@ -988,5 +988,22 @@
       "resetAll": "Reset All Tours",
       "resetConfirm": "Reset all tour progress?"
     }
+  },
+  "platform": {
+    "status": "Plattformstatus",
+    "online": "Online",
+    "offline": "Offline",
+    "checking": "Verbindung wird geprüft…",
+    "connected": "Verbunden",
+    "disconnected": "Getrennt",
+    "instance": "Instanz",
+    "latency": "Latenz",
+    "lastChecked": "Zuletzt geprüft",
+    "justNow": "gerade eben",
+    "secondsAgo": "vor {{count}}s"
+  },
+  "stream": {
+    "live": "Live",
+    "reconnecting": "Verbindung wird wiederhergestellt…"
   }
 }

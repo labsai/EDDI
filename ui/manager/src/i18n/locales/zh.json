@@ -988,5 +988,22 @@
       "resetAll": "Reset All Tours",
       "resetConfirm": "Reset all tour progress?"
     }
+  },
+  "platform": {
+    "status": "平台状态",
+    "online": "在线",
+    "offline": "离线",
+    "checking": "检查连接…",
+    "connected": "已连接",
+    "disconnected": "已断开",
+    "instance": "实例",
+    "latency": "延迟",
+    "lastChecked": "上次检查",
+    "justNow": "刚刚",
+    "secondsAgo": "{{count}}秒前"
+  },
+  "stream": {
+    "live": "实时",
+    "reconnecting": "重新连接中…"
   }
 }

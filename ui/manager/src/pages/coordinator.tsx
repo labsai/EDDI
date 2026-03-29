@@ -4,8 +4,6 @@ import {
   Activity,
   Trash2,
   RotateCcw,
-  Wifi,
-  WifiOff,
   Server,
   Cloud,
   AlertTriangle,
@@ -16,6 +14,7 @@ import {
   Gauge,
   Eye,
 } from "lucide-react";
+import { StreamBadge } from "@/components/ui/stream-badge";
 import { toast } from "sonner";
 import {
   useCoordinatorStatus,
@@ -203,7 +202,7 @@ export function CoordinatorPage() {
           {/* Connection Status */}
           <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-connection-card">
             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              {isConnected ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
+              <Activity className="h-4 w-4" />
               {t("coordinator.connection", "Connection")}
             </div>
             <div className="mt-2 flex items-center gap-2">
@@ -215,11 +214,9 @@ export function CoordinatorPage() {
               }`}>
                 {currentStatus.connectionStatus}
               </span>
-              {sseConnected && (
-                <span className="ms-auto text-xs text-muted-foreground" title="SSE Live">
-                  ● Live
-                </span>
-              )}
+              <span className="ms-auto">
+                <StreamBadge connected={sseConnected} />
+              </span>
             </div>
           </div>
 

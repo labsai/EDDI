@@ -988,5 +988,22 @@
       "resetAll": "Reset All Tours",
       "resetConfirm": "Reset all tour progress?"
     }
+  },
+  "platform": {
+    "status": "สถานะแพลตฟอร์ม",
+    "online": "ออนไลน์",
+    "offline": "ออฟไลน์",
+    "checking": "กำลังตรวจสอบ…",
+    "connected": "เชื่อมต่อแล้ว",
+    "disconnected": "ไม่ได้เชื่อมต่อ",
+    "instance": "อินสแตนซ์",
+    "latency": "เวลาแฝง",
+    "lastChecked": "ตรวจสอบล่าสุด",
+    "justNow": "เมื่อสักครู่",
+    "secondsAgo": "{{count}} วินาทีที่แล้ว"
+  },
+  "stream": {
+    "live": "สด",
+    "reconnecting": "กำลังเชื่อมต่อใหม่…"
   }
 }

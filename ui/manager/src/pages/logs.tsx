@@ -5,8 +5,6 @@ import {
   Pause,
   Play,
   Trash2,
-  Wifi,
-  WifiOff,
   ChevronDown,
   ChevronRight,
   History,
@@ -16,6 +14,7 @@ import {
   Copy,
   Download,
 } from "lucide-react";
+import { StreamBadge } from "@/components/ui/stream-badge";
 import { useLogStream, useHistoryLogs, useInstanceId } from "@/hooks/use-logs";
 import type { LogEntry } from "@/lib/api/logs";
 import type { HistoryFilters } from "@/lib/api/logs";
@@ -237,24 +236,8 @@ function LiveTab() {
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Toolbar */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        {/* Connection status */}
-        <div
-          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
-            sseConnected
-              ? "border-green-500/30 bg-green-500/10 text-green-400"
-              : "border-red-500/30 bg-red-500/10 text-red-400"
-          }`}
-          data-testid="sse-status"
-        >
-          {sseConnected ? (
-            <Wifi className="h-3 w-3" />
-          ) : (
-            <WifiOff className="h-3 w-3" />
-          )}
-          {sseConnected
-            ? t("logs.connected", "Connected")
-            : t("logs.disconnected", "Disconnected")}
-        </div>
+        {/* SSE stream status */}
+        <StreamBadge connected={sseConnected} />
 
         {/* Instance badge */}
         {instanceInfo && (

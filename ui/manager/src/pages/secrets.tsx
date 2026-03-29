@@ -5,8 +5,6 @@ import {
   KeyRound,
   Plus,
   Trash2,
-  ShieldCheck,
-  ShieldAlert,
   Loader2,
   Clock,
   Hash,
@@ -20,7 +18,6 @@ import {
   useSecrets,
   useStoreSecret,
   useDeleteSecret,
-  useVaultHealth,
 } from "@/hooks/use-secrets";
 import { useAgentDescriptors } from "@/hooks/use-agents";
 import { parseResourceUri } from "@/lib/api/agents";
@@ -58,7 +55,6 @@ export function SecretsPage() {
     isLoading,
     refetch,
   } = useSecrets(tenantId, agentId);
-  const { data: health } = useVaultHealth();
   const storeMut = useStoreSecret();
   const deleteMut = useDeleteSecret();
 
@@ -143,26 +139,6 @@ export function SecretsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {/* Vault health badge */}
-          {health && (
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${
-                health.available
-                  ? "bg-green-500/10 text-green-600 dark:text-green-400"
-                  : "bg-destructive/10 text-destructive"
-              }`}
-              data-testid="vault-health"
-            >
-              {health.available ? (
-                <ShieldCheck className="h-3.5 w-3.5" />
-              ) : (
-                <ShieldAlert className="h-3.5 w-3.5" />
-              )}
-              {health.available
-                ? t("secrets.vaultUp", "Vault Online")
-                : t("secrets.vaultDown", "Vault Offline")}
-            </span>
-          )}
           <button
             onClick={() => setShowCreate(true)}
             disabled={!agentId}

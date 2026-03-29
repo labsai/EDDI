@@ -988,5 +988,22 @@
       "resetAll": "Reset All Tours",
       "resetConfirm": "Reset all tour progress?"
     }
+  },
+  "platform": {
+    "status": "प्लेटफ़ॉर्म स्थिति",
+    "online": "ऑनलाइन",
+    "offline": "ऑफ़लाइन",
+    "checking": "कनेक्शन जाँच…",
+    "connected": "कनेक्टेड",
+    "disconnected": "डिस्कनेक्टेड",
+    "instance": "इंस्टेंस",
+    "latency": "विलंब",
+    "lastChecked": "अंतिम जाँच",
+    "justNow": "अभी",
+    "secondsAgo": "{{count}} सेकंड पहले"
+  },
+  "stream": {
+    "live": "लाइव",
+    "reconnecting": "पुनः कनेक्ट हो रहा है…"
   }
 }
