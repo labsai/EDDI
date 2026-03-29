@@ -1,0 +1,53 @@
+# EDDI + PostgreSQL + NATS (multi-replica) — combined example
+#
+# Production-ready: PostgreSQL backend with NATS JetStream for
+# durable messaging across multiple EDDI replicas.
+#
+# Usage: kubectl apply -k k8s/examples/postgres-ha/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: eddi
+
+resources:
+  # PostgreSQL overlay (includes base + PostgreSQL)
+  - ../../overlays/postgres
+
+  # NATS for multi-replica messaging
+  - ../../overlays/nats/nats-statefulset.yaml
+  - ../../overlays/nats/nats-service.yaml
+
+  # Production hardening
+  - ../../overlays/production/eddi-hpa.yaml
+  - ../../overlays/production/eddi-pdb.yaml
+  - ../../overlays/production/network-policy.yaml
+
+patches:
+  # Enable NATS messaging
+  - target:
+      kind: ConfigMap
+      name: eddi-config
+    patch: |
+      - op: replace
+        path: /data/EDDI_MESSAGING_TYPE
+        value: "nats"
+      - op: add
+        path: /data/EDDI_NATS_URL
+        value: "nats://nats:4222"
+  # Production resource limits + replicas
+  - target:
+      kind: Deployment
+      name: eddi
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: "4"
+            memory: 2Gi
+      - op: replace
+        path: /spec/replicas
+        value: 2
