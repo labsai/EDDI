@@ -1,5 +1,6 @@
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
@@ -79,6 +80,22 @@ public interface IConversationMemory extends Serializable {
      * {@code ConversationService} before lifecycle execution.
      */
     default void setAuditCollector(IAuditEntryCollector auditCollector) {
+        // no-op by default
+    }
+
+    /**
+     * Get the user memory configuration for this conversation. Returns {@code null}
+     * when persistent user memory is disabled.
+     */
+    default AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
+        return null;
+    }
+
+    /**
+     * Set the user memory configuration. Called from {@code Conversation.init()}
+     * when the agent has user memory enabled.
+     */
+    default void setUserMemoryConfig(AgentConfiguration.UserMemoryConfig config) {
         // no-op by default
     }
 

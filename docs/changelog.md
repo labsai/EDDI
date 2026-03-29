@@ -13,6 +13,37 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## EDDI Operator v2 — Architecture Plan (2026-03-29)
+
+**Repo:** EDDI-operator (planning only — no code changes yet)
+
+**What changed:**
+
+Designed a complete rewrite of the [labsai/EDDI-operator](https://github.com/labsai/eddi-operator) from the legacy Ansible-based operator to a modern Java/Quarkus-native operator using the Java Operator SDK (JOSDK).
+
+| Decision | Resolution |
+|---|---|
+| **API Group** | `eddi.labs.ai` (scoped to EDDI, avoids generic `labs.ai` collision) |
+| **CRD Version** | `v1beta1` (production-usable but evolvable) |
+| **Java Version** | 21 (Red Hat LTS, stable GraalVM native) — separate from EDDI server (Java 25) |
+| **Tech Stack** | JOSDK 5.3.2 + QOSDK 7.7.3 + Quarkus 3.34.x |
+| **Repo Cleanup** | Full rewrite, no old code preserved |
+| **OLM Target** | OLM v0 (stable) with File-Based Catalogs |
+
+**Architecture highlights:**
+- 20+ Dependent Resources with conditional activation via JOSDK `@Workflow` + `@Dependent` annotations
+- `CRDPresentActivationCondition` for auto-detecting OpenShift (Route) vs vanilla K8s (Ingress)
+- Dual database strategy: managed (operator-deployed StatefulSets) + external (existing CloudNativePG/Atlas/etc.)
+- Red Hat certification: two-step (container image → operator bundle) via preflight tool
+- 5-phase capability roadmap: Level 1 (Basic Install) → Level 5 (Auto Pilot)
+- 3-tier testing: unit (MockKubernetesServer), integration (Testcontainers + K3s), E2E (CRC)
+
+**Status:** Plan approved. Execution deferred to a future session.
+
+**Artifacts:** Full implementation plan in conversation `db7daba3`.
+
+---
+
 ## Red Hat v6 Container Certification Automation (2026-03-29)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

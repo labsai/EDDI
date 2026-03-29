@@ -1,6 +1,9 @@
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Properties;
+import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
@@ -14,6 +17,8 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
+import ai.labs.eddi.configs.properties.model.Property.Visibility;
+import org.jboss.logging.Logger;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -29,6 +34,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * @author ginccc
  */
 public class Conversation implements IConversation {
+    private static final Logger LOGGER = Logger.getLogger(Conversation.class);
     private static final String KEY_USER_INFO = "userInfo";
     private static final String KEY_CONTEXT = "context";
     private static final String KEY_SECRET_INPUT = "secretInput";
@@ -67,6 +73,13 @@ public class Conversation implements IConversation {
 
         addConversationStartAction(conversationMemory.getCurrentStep());
         loadLongTermProperties(conversationMemory);
+
+        // Phase 11a: Load user memories after legacy properties
+        AgentConfiguration.UserMemoryConfig memoryConfig = propertiesHandler.getUserMemoryConfig();
+        if (memoryConfig != null) {
+            conversationMemory.setUserMemoryConfig(memoryConfig);
+            loadUserMemories(conversationMemory, context);
+        }
 
         try {
             var lifecycleData = prepareLifecycleData("", context, null);
@@ -310,6 +323,106 @@ public class Conversation implements IConversation {
         }
 
         propertiesHandler.mergeProperties(longTermConversationProperties);
+
+        // Phase 11a: Upsert entries with explicit visibility to usermemories store
+        storeUserMemories();
+    }
+
+    /**
+     * Loads structured user memories that are visible to this agent and merges them
+     * into conversation properties for template access via {@code {properties.*}}.
+     */
+    private void loadUserMemories(IConversationMemory memory, Map<String, Context> context) {
+        IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
+        AgentConfiguration.UserMemoryConfig config = memory.getUserMemoryConfig();
+        if (store == null || config == null)
+            return;
+
+        try {
+            String userId = memory.getUserId();
+            String agentId = memory.getAgentId();
+            List<String> groupIds = extractGroupIds(context);
+
+            List<UserMemoryEntry> entries = store.getVisibleEntries(userId, agentId, groupIds, config.getRecallOrder(), config.getMaxRecallEntries());
+
+            for (UserMemoryEntry entry : entries) {
+                Property prop = entryToProperty(entry);
+                memory.getConversationProperties().put(entry.key(), prop);
+            }
+
+            if (!entries.isEmpty()) {
+                LOGGER.debugf("[MEMORY] Loaded %d user memories for user='%s', agent='%s'", entries.size(), userId, agentId);
+            }
+        } catch (IResourceStore.ResourceStoreException e) {
+            LOGGER.warnf("Failed to load user memories: %s", e.getMessage());
+        }
+    }
+
+    /**
+     * Stores longTerm properties with explicit visibility to the structured
+     * usermemories collection.
+     */
+    private void storeUserMemories() {
+        IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
+        AgentConfiguration.UserMemoryConfig config = conversationMemory.getUserMemoryConfig();
+        if (store == null || config == null)
+            return;
+
+        Visibility defaultVisibility;
+        try {
+            defaultVisibility = Visibility.valueOf(config.getDefaultVisibility());
+        } catch (IllegalArgumentException e) {
+            defaultVisibility = Visibility.self;
+        }
+
+        try {
+            for (Property property : conversationMemory.getConversationProperties().values()) {
+                if (property.getScope() == Scope.longTerm && property.getVisibility() != null) {
+                    UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, conversationMemory.getUserId(), conversationMemory.getAgentId(),
+                            conversationMemory.getConversationId(), defaultVisibility);
+                    store.upsert(entry);
+                }
+            }
+        } catch (IResourceStore.ResourceStoreException e) {
+            LOGGER.warnf("Failed to store user memories: %s", e.getMessage());
+        }
+    }
+
+    /**
+     * Extracts groupId(s) from the conversation context map.
+     * GroupConversationService puts "groupId" in the context when creating member
+     * conversations.
+     */
+    private static List<String> extractGroupIds(Map<String, Context> context) {
+        if (context == null)
+            return List.of();
+        Context groupCtx = context.get("groupId");
+        if (groupCtx != null && groupCtx.getValue() != null) {
+            return List.of(String.valueOf(groupCtx.getValue()));
+        }
+        return List.of();
+    }
+
+    private static Property entryToProperty(UserMemoryEntry entry) {
+        Object value = entry.value();
+        Property prop;
+        if (value instanceof String s) {
+            prop = new Property(entry.key(), s, Scope.longTerm);
+        } else if (value instanceof Map<?, ?>) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) value;
+            prop = new Property(entry.key(), map, Scope.longTerm);
+        } else if (value instanceof Integer i) {
+            prop = new Property(entry.key(), i, Scope.longTerm);
+        } else if (value instanceof Float f) {
+            prop = new Property(entry.key(), f, Scope.longTerm);
+        } else if (value instanceof Boolean b) {
+            prop = new Property(entry.key(), b, Scope.longTerm);
+        } else {
+            prop = new Property(entry.key(), value != null ? value.toString() : null, Scope.longTerm);
+        }
+        prop.setVisibility(entry.visibility());
+        return prop;
     }
 
     private List<IData<Context>> createContextData(Map<String, Context> context) {

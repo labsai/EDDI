@@ -1,11 +1,13 @@
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -16,6 +18,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
+import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -71,12 +74,14 @@ class AgentOrchestrator {
     private final IApiCallExecutor apiCallExecutor;
     private final IJsonSerialization jsonSerialization;
     private final IMemoryItemConverter memoryItemConverter;
+    private final IUserMemoryStore userMemoryStore;
 
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager, A2AToolProviderManager a2aToolProviderManager,
             IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore, IResourceClientLibrary resourceClientLibrary,
-            IApiCallExecutor apiCallExecutor, IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter) {
+            IApiCallExecutor apiCallExecutor, IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter,
+            IUserMemoryStore userMemoryStore) {
         this.calculatorTool = calculatorTool;
         this.dateTimeTool = dateTimeTool;
         this.webSearchTool = webSearchTool;
@@ -94,6 +99,7 @@ class AgentOrchestrator {
         this.apiCallExecutor = apiCallExecutor;
         this.jsonSerialization = jsonSerialization;
         this.memoryItemConverter = memoryItemConverter;
+        this.userMemoryStore = userMemoryStore;
     }
 
     /**
@@ -118,7 +124,7 @@ class AgentOrchestrator {
             IConversationMemory memory) throws LifecycleException {
 
         // Collect enabled built-in tools
-        List<Object> enabledTools = collectEnabledTools(task);
+        List<Object> enabledTools = collectEnabledTools(task, memory);
 
         // Discover httpcall tools from workflow (auto-discovery)
         boolean enableHttpCallTools = task.getEnableHttpCallTools() == null || task.getEnableHttpCallTools();
@@ -300,7 +306,7 @@ class AgentOrchestrator {
     /**
      * Collects enabled built-in tools based on task configuration.
      */
-    List<Object> collectEnabledTools(LlmConfiguration.Task task) {
+    List<Object> collectEnabledTools(LlmConfiguration.Task task, IConversationMemory memory) {
         List<Object> tools = new ArrayList<>();
 
         if (task.getEnableBuiltInTools() == null || !task.getEnableBuiltInTools()) {
@@ -327,6 +333,8 @@ class AgentOrchestrator {
                 tools.add(pdfReaderTool);
             if (whitelist.contains("weather"))
                 tools.add(weatherTool);
+            if (whitelist.contains("usermemory"))
+                addUserMemoryToolIfEnabled(tools, memory);
         } else {
             // No whitelist — add all built-in tools
             tools.add(calculatorTool);
@@ -337,10 +345,30 @@ class AgentOrchestrator {
             tools.add(textSummarizerTool);
             tools.add(pdfReaderTool);
             tools.add(weatherTool);
+            // Auto-add user memory tool if agent has it enabled
+            addUserMemoryToolIfEnabled(tools, memory);
         }
 
         LOGGER.info("Enabled " + tools.size() + " built-in tools for agent");
         return tools;
+    }
+
+    /**
+     * Constructs and adds a UserMemoryTool if the agent has persistent user memory
+     * enabled. The tool is created per-invocation with conversation-specific
+     * context.
+     */
+    private void addUserMemoryToolIfEnabled(List<Object> tools, IConversationMemory memory) {
+        AgentConfiguration.UserMemoryConfig config = memory.getUserMemoryConfig();
+        if (config == null || userMemoryStore == null)
+            return;
+
+        // Extract groupIds from memory context
+        List<String> groupIds = List.of();
+
+        var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config);
+        tools.add(tool);
+        LOGGER.infof("[MEMORY] UserMemoryTool enabled for agent='%s', user='%s'", memory.getAgentId(), memory.getUserId());
     }
 
     // --- Httpcall auto-discovery from workflow ---

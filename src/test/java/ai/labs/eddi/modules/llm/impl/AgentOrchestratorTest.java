@@ -2,6 +2,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -40,6 +41,7 @@ class AgentOrchestratorTest {
     private TextSummarizerTool textSummarizerTool;
     private PdfReaderTool pdfReaderTool;
     private WeatherTool weatherTool;
+    private IConversationMemory mockMemory;
 
     @BeforeEach
     void setUp() {
@@ -55,7 +57,12 @@ class AgentOrchestratorTest {
         orchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool, textSummarizerTool,
                 pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
                 mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class),
-                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
+                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class));
+
+        // Mock memory for collectEnabledTools (no user memory config = no
+        // UserMemoryTool added)
+        mockMemory = mock(IConversationMemory.class);
+        when(mockMemory.getUserMemoryConfig()).thenReturn(null);
     }
 
     // ==================== Tool Collection Tests ====================
@@ -66,7 +73,7 @@ class AgentOrchestratorTest {
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(false);
 
-        List<Object> tools = orchestrator.collectEnabledTools(task);
+        List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
 
         assertTrue(tools.isEmpty(), "Should return empty list when tools disabled");
     }
@@ -77,7 +84,7 @@ class AgentOrchestratorTest {
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(null);
 
-        List<Object> tools = orchestrator.collectEnabledTools(task);
+        List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
 
         assertTrue(tools.isEmpty(), "Should return empty list when enableBuiltInTools is null");
     }
@@ -89,7 +96,7 @@ class AgentOrchestratorTest {
         task.setEnableBuiltInTools(true);
         task.setBuiltInToolsWhitelist(null);
 
-        List<Object> tools = orchestrator.collectEnabledTools(task);
+        List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
 
         assertEquals(8, tools.size(), "Should return all 8 tools");
         assertTrue(tools.contains(calculatorTool));
@@ -109,7 +116,7 @@ class AgentOrchestratorTest {
         task.setEnableBuiltInTools(true);
         task.setBuiltInToolsWhitelist(List.of());
 
-        List<Object> tools = orchestrator.collectEnabledTools(task);
+        List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
 
         assertEquals(8, tools.size(), "Should return all tools when whitelist is empty");
     }
@@ -121,7 +128,7 @@ class AgentOrchestratorTest {
         task.setEnableBuiltInTools(true);
         task.setBuiltInToolsWhitelist(List.of("calculator", "datetime"));
 
-        List<Object> tools = orchestrator.collectEnabledTools(task);
+        List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
 
         assertEquals(2, tools.size(), "Should return only whitelisted tools");
         assertTrue(tools.contains(calculatorTool));
@@ -137,7 +144,7 @@ class AgentOrchestratorTest {
         task.setEnableBuiltInTools(true);
         task.setBuiltInToolsWhitelist(List.of("weather"));
 
-        List<Object> tools = orchestrator.collectEnabledTools(task);
+        List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
 
         assertEquals(1, tools.size(), "Should return only weather tool");
         assertTrue(tools.contains(weatherTool));
@@ -151,7 +158,7 @@ class AgentOrchestratorTest {
         task.setBuiltInToolsWhitelist(
                 List.of("calculator", "datetime", "websearch", "dataformatter", "webscraper", "textsummarizer", "pdfreader", "weather"));
 
-        List<Object> tools = orchestrator.collectEnabledTools(task);
+        List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
 
         assertEquals(8, tools.size(), "Should return all 8 tools");
     }
@@ -163,7 +170,7 @@ class AgentOrchestratorTest {
         task.setEnableBuiltInTools(true);
         task.setBuiltInToolsWhitelist(List.of("calculator", "unknown_tool", "weather"));
 
-        List<Object> tools = orchestrator.collectEnabledTools(task);
+        List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
 
         assertEquals(2, tools.size(), "Should return only known whitelisted tools");
         assertTrue(tools.contains(calculatorTool));
@@ -425,7 +432,7 @@ class AgentOrchestratorTest {
         var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
                 textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
                 mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
-                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
+                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class));
 
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");
@@ -451,7 +458,7 @@ class AgentOrchestratorTest {
         var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
                 textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
                 mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
-                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
+                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class));
 
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");
@@ -501,7 +508,7 @@ class AgentOrchestratorTest {
         var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
                 textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
                 mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
-                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
+                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class));
 
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");
@@ -545,7 +552,7 @@ class AgentOrchestratorTest {
         var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
                 textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
                 mock(A2AToolProviderManager.class), restAgentStore, mock(IRestWorkflowStore.class), mock(IResourceClientLibrary.class),
-                mock(IApiCallExecutor.class), mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
+                mock(IApiCallExecutor.class), mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class));
 
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");
@@ -573,7 +580,7 @@ class AgentOrchestratorTest {
         var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
                 textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
                 mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
-                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class));
+                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class));
 
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");

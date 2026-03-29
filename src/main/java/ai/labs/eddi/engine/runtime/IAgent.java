@@ -1,5 +1,6 @@
 package ai.labs.eddi.engine.runtime;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.IConversation.IConversationOutputRenderer;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -27,4 +28,12 @@ public interface IAgent {
 
     IConversation continueConversation(IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
             IConversationOutputRenderer outputProvider) throws InstantiationException, IllegalAccessException;
+
+    /**
+     * User memory config from agent deployment. {@code null} when memory is
+     * disabled.
+     */
+    default AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
+        return null;
+    }
 }

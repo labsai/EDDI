@@ -15,6 +15,7 @@ import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
@@ -95,7 +96,8 @@ class LlmTaskTest {
         langChainTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter, templatingEngine, jsonSerialization, prePostUtils,
                 languageModelApiConnectorBuilders, secretResolver, calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
                 textSummarizerTool, pdfReaderTool, weatherTool, apiCallExecutor, toolExecutionService, mock(McpToolProviderManager.class),
-                mock(A2AToolProviderManager.class), mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(RagContextProvider.class));
+                mock(A2AToolProviderManager.class), mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(RagContextProvider.class),
+                mock(IUserMemoryStore.class));
     }
 
     static Stream<Arguments> provideParameters() {

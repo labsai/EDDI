@@ -1,6 +1,8 @@
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IPropertiesStore;
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
@@ -68,6 +70,7 @@ public class ConversationService implements IConversationService {
     private final IConversationMemoryStore conversationMemoryStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IPropertiesStore propertiesStore;
+    private final IUserMemoryStore userMemoryStore;
     private final IConversationCoordinator conversationCoordinator;
     private final IRuntime runtime;
     private final IContextLogger contextLogger;
@@ -97,7 +100,7 @@ public class ConversationService implements IConversationService {
 
     @Inject
     public ConversationService(IAgentFactory agentFactory, IConversationMemoryStore conversationMemoryStore,
-            IConversationDescriptorStore conversationDescriptorStore, IPropertiesStore propertiesStore,
+            IConversationDescriptorStore conversationDescriptorStore, IPropertiesStore propertiesStore, IUserMemoryStore userMemoryStore,
             IConversationCoordinator conversationCoordinator, IConversationSetup conversationSetup, ICacheFactory cacheFactory, IRuntime runtime,
             IContextLogger contextLogger, AuditLedgerService auditLedgerService, TenantQuotaService tenantQuotaService, MeterRegistry meterRegistry,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
@@ -105,6 +108,7 @@ public class ConversationService implements IConversationService {
         this.conversationMemoryStore = conversationMemoryStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.propertiesStore = propertiesStore;
+        this.userMemoryStore = userMemoryStore;
         this.conversationCoordinator = conversationCoordinator;
         this.conversationSetup = conversationSetup;
         this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
@@ -158,7 +162,8 @@ public class ConversationService implements IConversationService {
             }
 
             userId = conversationSetup.computeAnonymousUserIdIfEmpty(userId, context.get(USER_ID));
-            IConversation conversation = latestAgent.startConversation(userId, context, createPropertiesHandler(userId), null);
+            IConversation conversation = latestAgent.startConversation(userId, context,
+                    createPropertiesHandler(userId, latestAgent.getUserMemoryConfig()), null);
 
             var conversationMemory = conversation.getConversationMemory();
             var conversationId = storeConversationMemory(conversationMemory, environment);
@@ -290,8 +295,8 @@ public class ConversationService implements IConversationService {
                 conversationMemory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
             }
 
-            final IConversation conversation = agent.continueConversation(conversationMemory, createPropertiesHandler(conversationMemory.getUserId()),
-                    returnConversationMemory -> {
+            final IConversation conversation = agent.continueConversation(conversationMemory,
+                    createPropertiesHandler(conversationMemory.getUserId(), agent.getUserMemoryConfig()), returnConversationMemory -> {
                         SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
                                 returnDetailed, returnCurrentStepOnly, returningFields);
                         memorySnapshot.setEnvironment(environment);
@@ -414,8 +419,8 @@ public class ConversationService implements IConversationService {
                 conversationMemory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
             }
 
-            final IConversation conversation = agent.continueConversation(conversationMemory, createPropertiesHandler(conversationMemory.getUserId()),
-                    returnConversationMemory -> {
+            final IConversation conversation = agent.continueConversation(conversationMemory,
+                    createPropertiesHandler(conversationMemory.getUserId(), agent.getUserMemoryConfig()), returnConversationMemory -> {
                         SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
                                 returnDetailed, returnCurrentStepOnly, returningFields);
                         memorySnapshot.setEnvironment(environment);
@@ -610,7 +615,7 @@ public class ConversationService implements IConversationService {
 
     // --- Internal helpers ---
 
-    IPropertiesHandler createPropertiesHandler(final String userId) {
+    IPropertiesHandler createPropertiesHandler(final String userId, final AgentConfiguration.UserMemoryConfig memoryConfig) {
         return new IPropertiesHandler() {
             @Override
             public Properties loadProperties() throws ResourceStoreException {
@@ -631,6 +636,16 @@ public class ConversationService implements IConversationService {
             @Override
             public void mergeProperties(Properties properties) throws ResourceStoreException {
                 propertiesStore.mergeProperties(userId, properties);
+            }
+
+            @Override
+            public AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
+                return memoryConfig;
+            }
+
+            @Override
+            public IUserMemoryStore getUserMemoryStore() {
+                return userMemoryStore;
             }
         };
     }

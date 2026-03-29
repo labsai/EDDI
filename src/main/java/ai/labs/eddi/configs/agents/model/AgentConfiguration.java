@@ -93,4 +93,236 @@ public class AgentConfiguration {
     public void setDescription(String description) {
         this.description = description;
     }
+
+    // === Persistent User Memory (Phase 11a) ===
+
+    /** Master switch — when false, agent behaves exactly as before. */
+    private boolean enableUserMemory = false;
+
+    /**
+     * Memory configuration — only meaningful when {@code enableUserMemory} is true.
+     */
+    private UserMemoryConfig userMemoryConfig;
+
+    public boolean isEnableUserMemory() {
+        return enableUserMemory;
+    }
+
+    public void setEnableUserMemory(boolean enableUserMemory) {
+        this.enableUserMemory = enableUserMemory;
+    }
+
+    public UserMemoryConfig getUserMemoryConfig() {
+        return userMemoryConfig;
+    }
+
+    public void setUserMemoryConfig(UserMemoryConfig userMemoryConfig) {
+        this.userMemoryConfig = userMemoryConfig;
+    }
+
+    /**
+     * Configuration for persistent user memory. Controls visibility defaults,
+     * recall behavior, write guardrails, and background Dream consolidation.
+     *
+     * @since 6.0.0
+     */
+    public static class UserMemoryConfig {
+        private String defaultVisibility = "self";
+        private int maxRecallEntries = 50;
+        private int maxEntriesPerUser = 500;
+        private String onCapReached = "evict_oldest";
+        private String recallOrder = "most_recent";
+        private List<String> autoRecallCategories = List.of("preference", "fact");
+        private Guardrails guardrails = new Guardrails();
+        private DreamConfig dream = new DreamConfig();
+
+        public String getDefaultVisibility() {
+            return defaultVisibility;
+        }
+        public void setDefaultVisibility(String defaultVisibility) {
+            this.defaultVisibility = defaultVisibility;
+        }
+
+        public int getMaxRecallEntries() {
+            return maxRecallEntries;
+        }
+        public void setMaxRecallEntries(int maxRecallEntries) {
+            this.maxRecallEntries = maxRecallEntries;
+        }
+
+        public int getMaxEntriesPerUser() {
+            return maxEntriesPerUser;
+        }
+        public void setMaxEntriesPerUser(int maxEntriesPerUser) {
+            this.maxEntriesPerUser = maxEntriesPerUser;
+        }
+
+        public String getOnCapReached() {
+            return onCapReached;
+        }
+        public void setOnCapReached(String onCapReached) {
+            this.onCapReached = onCapReached;
+        }
+
+        public String getRecallOrder() {
+            return recallOrder;
+        }
+        public void setRecallOrder(String recallOrder) {
+            this.recallOrder = recallOrder;
+        }
+
+        public List<String> getAutoRecallCategories() {
+            return autoRecallCategories;
+        }
+        public void setAutoRecallCategories(List<String> autoRecallCategories) {
+            this.autoRecallCategories = autoRecallCategories;
+        }
+
+        public Guardrails getGuardrails() {
+            return guardrails;
+        }
+        public void setGuardrails(Guardrails guardrails) {
+            this.guardrails = guardrails;
+        }
+
+        public DreamConfig getDream() {
+            return dream;
+        }
+        public void setDream(DreamConfig dream) {
+            this.dream = dream;
+        }
+    }
+
+    /**
+     * Write guardrails for memory operations (LLM tools, REST, MCP).
+     */
+    public static class Guardrails {
+        private int maxKeyLength = 100;
+        private int maxValueLength = 1000;
+        private int maxWritesPerTurn = 10;
+        private List<String> allowedCategories = List.of("preference", "fact", "context");
+
+        public int getMaxKeyLength() {
+            return maxKeyLength;
+        }
+        public void setMaxKeyLength(int maxKeyLength) {
+            this.maxKeyLength = maxKeyLength;
+        }
+
+        public int getMaxValueLength() {
+            return maxValueLength;
+        }
+        public void setMaxValueLength(int maxValueLength) {
+            this.maxValueLength = maxValueLength;
+        }
+
+        public int getMaxWritesPerTurn() {
+            return maxWritesPerTurn;
+        }
+        public void setMaxWritesPerTurn(int maxWritesPerTurn) {
+            this.maxWritesPerTurn = maxWritesPerTurn;
+        }
+
+        public List<String> getAllowedCategories() {
+            return allowedCategories;
+        }
+        public void setAllowedCategories(List<String> allowedCategories) {
+            this.allowedCategories = allowedCategories;
+        }
+    }
+
+    /**
+     * Background Dream consolidation configuration. Uses
+     * {@code ScheduleFireExecutor} with SERVICE trigger type.
+     */
+    public static class DreamConfig {
+        private boolean enabled = false;
+        private String schedule = "0 3 * * *";
+        private boolean detectContradictions = true;
+        private String contradictionResolution = "keep_newest";
+        private int pruneStaleAfterDays = 90;
+        private boolean summarizeInteractions = false;
+        private String llmProvider = "openai";
+        private String llmModel = "gpt-4o-mini";
+        private double maxCostPerRun = 5.00;
+        private int batchSize = 50;
+        private int maxUsersPerRun = 1000;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getSchedule() {
+            return schedule;
+        }
+        public void setSchedule(String schedule) {
+            this.schedule = schedule;
+        }
+
+        public boolean isDetectContradictions() {
+            return detectContradictions;
+        }
+        public void setDetectContradictions(boolean detectContradictions) {
+            this.detectContradictions = detectContradictions;
+        }
+
+        public String getContradictionResolution() {
+            return contradictionResolution;
+        }
+        public void setContradictionResolution(String contradictionResolution) {
+            this.contradictionResolution = contradictionResolution;
+        }
+
+        public int getPruneStaleAfterDays() {
+            return pruneStaleAfterDays;
+        }
+        public void setPruneStaleAfterDays(int pruneStaleAfterDays) {
+            this.pruneStaleAfterDays = pruneStaleAfterDays;
+        }
+
+        public boolean isSummarizeInteractions() {
+            return summarizeInteractions;
+        }
+        public void setSummarizeInteractions(boolean summarizeInteractions) {
+            this.summarizeInteractions = summarizeInteractions;
+        }
+
+        public String getLlmProvider() {
+            return llmProvider;
+        }
+        public void setLlmProvider(String llmProvider) {
+            this.llmProvider = llmProvider;
+        }
+
+        public String getLlmModel() {
+            return llmModel;
+        }
+        public void setLlmModel(String llmModel) {
+            this.llmModel = llmModel;
+        }
+
+        public double getMaxCostPerRun() {
+            return maxCostPerRun;
+        }
+        public void setMaxCostPerRun(double maxCostPerRun) {
+            this.maxCostPerRun = maxCostPerRun;
+        }
+
+        public int getBatchSize() {
+            return batchSize;
+        }
+        public void setBatchSize(int batchSize) {
+            this.batchSize = batchSize;
+        }
+
+        public int getMaxUsersPerRun() {
+            return maxUsersPerRun;
+        }
+        public void setMaxUsersPerRun(int maxUsersPerRun) {
+            this.maxUsersPerRun = maxUsersPerRun;
+        }
+    }
 }

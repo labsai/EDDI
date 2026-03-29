@@ -1,5 +1,6 @@
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConversationMemory;
@@ -23,6 +24,7 @@ public class Agent implements IAgent {
     private final List<IExecutableWorkflow> executableWorkflows;
 
     private Deployment.Status deploymentStatus;
+    private AgentConfiguration.UserMemoryConfig userMemoryConfig;
 
     public Agent(String agentId, Integer agentVersion) {
         this.agentId = agentId;
@@ -64,5 +66,14 @@ public class Agent implements IAgent {
 
     public void setDeploymentStatus(Deployment.Status deploymentStatus) {
         this.deploymentStatus = deploymentStatus;
+    }
+
+    @Override
+    public AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
+        return userMemoryConfig;
+    }
+
+    public void setUserMemoryConfig(AgentConfiguration.UserMemoryConfig userMemoryConfig) {
+        this.userMemoryConfig = userMemoryConfig;
     }
 }

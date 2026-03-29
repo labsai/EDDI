@@ -1,5 +1,6 @@
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
@@ -31,6 +32,11 @@ public class ConversationMemory implements IConversationMemory {
 
     /** Transient — never serialized to MongoDB. Set per-turn for audit capture. */
     private transient IAuditEntryCollector auditCollector;
+
+    /**
+     * Transient — never serialized to MongoDB. Set once during Conversation.init().
+     */
+    private transient AgentConfiguration.UserMemoryConfig userMemoryConfig;
 
     public ConversationMemory(String conversationId, String agentId, Integer agentVersion, String userId) {
         this(agentId, agentVersion, userId);
@@ -182,6 +188,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setAuditCollector(IAuditEntryCollector auditCollector) {
         this.auditCollector = auditCollector;
+    }
+
+    @Override
+    public AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
+        return userMemoryConfig;
+    }
+
+    @Override
+    public void setUserMemoryConfig(AgentConfiguration.UserMemoryConfig config) {
+        this.userMemoryConfig = config;
     }
 
     public static final class ConversationStepStack implements IConversationStepStack {

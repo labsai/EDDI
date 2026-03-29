@@ -12,6 +12,7 @@ public class Property {
     private Float valueFloat;
     private Boolean valueBoolean;
     private Scope scope = Scope.conversation;
+    private Visibility visibility; // null = self (backward compat)
 
     public Property(String name, String valueString, Scope scope) {
         this.name = name;
@@ -53,6 +54,20 @@ public class Property {
         step, conversation, longTerm, secret
     }
 
+    /**
+     * Controls which agents can see a {@code longTerm} property. Only meaningful
+     * when {@code scope == longTerm}. {@code null} is treated as {@code self} for
+     * backward compatibility.
+     */
+    public enum Visibility {
+        /** Only the agent that stored it can see it (default). */
+        self,
+        /** All agents in the same group can see it. */
+        group,
+        /** All agents for this user can see it. */
+        global
+    }
+
     public Property() {
     }
 
@@ -66,6 +81,12 @@ public class Property {
         this.valueFloat = valueFloat;
         this.valueBoolean = valueBoolean;
         this.scope = scope;
+    }
+
+    public Property(String name, String valueString, Map<String, Object> valueObject, List<Object> valueList, Integer valueInt, Float valueFloat,
+            Boolean valueBoolean, Scope scope, Visibility visibility) {
+        this(name, valueString, valueObject, valueList, valueInt, valueFloat, valueBoolean, scope);
+        this.visibility = visibility;
     }
 
     public String getName() {
@@ -132,6 +153,19 @@ public class Property {
         this.scope = scope;
     }
 
+    public Visibility getVisibility() {
+        return visibility;
+    }
+
+    public void setVisibility(Visibility visibility) {
+        this.visibility = visibility;
+    }
+
+    /** Effective visibility — never null, defaults to {@link Visibility#self}. */
+    public Visibility effectiveVisibility() {
+        return visibility != null ? visibility : Visibility.self;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o)
@@ -142,11 +176,12 @@ public class Property {
         return java.util.Objects.equals(name, that.name) && java.util.Objects.equals(valueString, that.valueString)
                 && java.util.Objects.equals(valueObject, that.valueObject) && java.util.Objects.equals(valueList, that.valueList)
                 && java.util.Objects.equals(valueInt, that.valueInt) && java.util.Objects.equals(valueFloat, that.valueFloat)
-                && java.util.Objects.equals(valueBoolean, that.valueBoolean) && java.util.Objects.equals(scope, that.scope);
+                && java.util.Objects.equals(valueBoolean, that.valueBoolean) && java.util.Objects.equals(scope, that.scope)
+                && java.util.Objects.equals(visibility, that.visibility);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(name, valueString, valueObject, valueList, valueInt, valueFloat, valueBoolean, scope);
+        return java.util.Objects.hash(name, valueString, valueObject, valueList, valueInt, valueFloat, valueBoolean, scope, visibility);
     }
 }

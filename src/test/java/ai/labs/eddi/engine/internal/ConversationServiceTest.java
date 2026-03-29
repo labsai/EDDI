@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.properties.IPropertiesStore;
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.caching.ICache;
@@ -52,6 +53,7 @@ class ConversationServiceTest {
     private ICache<String, ConversationState> conversationStateCache;
     private AuditLedgerService auditLedgerService;
     private TenantQuotaService tenantQuotaService;
+    private IUserMemoryStore userMemoryStore;
 
     private static final Environment ENV = Environment.production;
     private static final String AGENT_ID = "test-agent-id";
@@ -74,6 +76,7 @@ class ConversationServiceTest {
         conversationStateCache = mock(ICache.class);
         auditLedgerService = mock(AuditLedgerService.class);
         tenantQuotaService = mock(TenantQuotaService.class);
+        userMemoryStore = mock(IUserMemoryStore.class);
         when(tenantQuotaService.checkConversationQuota()).thenReturn(QuotaCheckResult.OK);
         when(tenantQuotaService.checkApiCallQuota()).thenReturn(QuotaCheckResult.OK);
         when(auditLedgerService.isEnabled()).thenReturn(false);
@@ -83,8 +86,8 @@ class ConversationServiceTest {
         when(contextLogger.createLoggingContext(any(), any(), any(), any())).thenReturn(new HashMap<>());
 
         conversationService = new ConversationService(AgentFactory, conversationMemoryStore, conversationDescriptorStore, propertiesStore,
-                conversationCoordinator, conversationSetup, cacheFactory, runtime, contextLogger, auditLedgerService, tenantQuotaService,
-                meterRegistry, AGENT_TIMEOUT);
+                userMemoryStore, conversationCoordinator, conversationSetup, cacheFactory, runtime, contextLogger, auditLedgerService,
+                tenantQuotaService, meterRegistry, AGENT_TIMEOUT);
     }
 
     // --- startConversation tests ---
@@ -338,7 +341,7 @@ class ConversationServiceTest {
 
     @Test
     void createPropertiesHandler_loadsAndMergesProperties() throws Exception {
-        var handler = conversationService.createPropertiesHandler(USER_ID);
+        var handler = conversationService.createPropertiesHandler(USER_ID, null);
 
         when(propertiesStore.readProperties(USER_ID)).thenReturn(null);
 
