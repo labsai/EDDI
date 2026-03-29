@@ -50,7 +50,7 @@ EDDI supports three context types:
 Once passed to EDDI, context can be:
 
 - **Matched in Behavior Rules**: Conditions check context values
-- **Used in Output Templates**: `[[${context.userName}]]`
+- **Used in Output Templates**: `{context.userName}`
 - **Included in HTTP Call Bodies**: Pass to external APIs
 - **Stored as Properties**: Save to conversation memory
 
@@ -73,7 +73,7 @@ Your App → POST /agents/conv456
    GET /api/accounts/${context.userId}/balance
 
 → Output Template uses context:
-   "Hello! Your premium account balance is $[[${httpCalls.balance.amount}]]"
+   "Hello! Your premium account balance is ${httpCalls.balance.amount}"
 
 → Response to Your App:
    "Hello! Your premium account balance is $1,250.00"

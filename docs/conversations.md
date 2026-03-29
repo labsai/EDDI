@@ -113,7 +113,7 @@ In this section we will explain how to **send/receive messages** from an Agent. 
 | conversationStep.value         | (`String`) the element value of the conversationStep e.g in case of `actionq` as `key` it could be an array string `[ "current_weather_in_city" ]`.                                                                                                                                |
 | timestamp.timestamp            | (`dateTime`) the timestamp in (ISO 8601) format                                                                                                                                                                                                                                    |
 
-> **Note** `conversationProperties` can also be used in output templating e.g: `[[${properties.city}]].`
+> **Note** `conversationProperties` can also be used in output templating e.g: `{properties.city}.`
 
 ### Sample Response
 

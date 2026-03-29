@@ -1,6 +1,6 @@
 # The Agent Father: A Deep Dive
 
-**Version: ≥5.5.x**
+**Version: 6.0.0**
 
 ## Overview
 
@@ -271,7 +271,7 @@ Another HTTP call creates a package:
   "request": {
     "method": "POST",
     "path": "/packagestore/packages",
-    "body": "{\"packageExtensions\": [{\"type\": \"eddi://ai.labs.llm\", \"extensions\": {\"uri\": \"[[${memory.current.httpCalls.langchainConfigUri}]]\"}}]}"
+    "body": "{\"packageExtensions\": [{\"type\": \"eddi://ai.labs.llm\", \"extensions\": {\"uri\": \"{memory.current.httpCalls.langchainConfigUri}\"}}]}"
   },
   "postResponse": {
     "propertyInstructions": [
@@ -294,7 +294,7 @@ Another HTTP call creates a package:
   "request": {
     "method": "POST",
     "path": "/langchainstore/langchains",
-    "body": "{\"tasks\": [{\"actions\": [\"send_message\"], \"type\": \"[[${context.llmProvider.toLowerCase()}]]\", \"parameters\": {\"apiKey\": \"[[${context.apiKey}]]\", \"modelName\": \"gpt-4o\", \"systemMessage\": \"[[${context.agentDescription}]]\", \"addToOutput\": \"true\"}}]}"
+    "body": "{\"tasks\": [{\"actions\": [\"send_message\"], \"type\": \"{context.llmProvider.toLowerCase()}\", \"parameters\": {\"apiKey\": \"{context.apiKey}\", \"modelName\": \"gpt-4o\", \"systemMessage\": \"{context.agentDescription}\", \"addToOutput\": \"true\"}}]}"
   }
 }
 ```
@@ -313,8 +313,8 @@ Another HTTP call creates a package:
   "actions": ["httpcall(update-agent)"],
   "request": {
     "method": "PUT",
-    "path": "/agentstore/agents/[[${context.newAgentId}]]",
-    "body": "{\"packages\": [\"eddi://ai.labs.package/packagestore/packages/[[${context.workflowId}]]?version=1\"]}"
+    "path": "/agentstore/agents/{context.newAgentId}",
+    "body": "{\"packages\": [\"eddi://ai.labs.package/packagestore/packages/{context.workflowId}?version=1\"]}"
   }
 }
 ```
@@ -327,7 +327,7 @@ Another HTTP call creates a package:
   "actions": ["httpcall(deploy-agent)"],
   "request": {
     "method": "POST",
-    "path": "/administration/production/deploy/[[${context.newAgentId}]]",
+    "path": "/administration/production/deploy/{context.newAgentId}",
     "queryParams": {
       "version": "1"
     }
@@ -341,9 +341,9 @@ Another HTTP call creates a package:
 
 ```
 "Your agent has been created successfully!
-Agent ID: [[${context.newAgentId}]]
+Agent ID: {context.newAgentId}
 You can start chatting with it at:
-http://localhost:7070/chat/production/[[${context.newAgentId}]]"
+http://localhost:7070/chat/production/{context.newAgentId}"
 ```
 
 ## Key Architectural Insights
@@ -382,8 +382,8 @@ HTTP call bodies use Qute templates, allowing **dynamic configuration**:
 
 ```json
 {
-  "apiKey": "[[${context.apiKey}]]",
-  "systemMessage": "[[${context.agentDescription}]]"
+  "apiKey": "{context.apiKey}",
+  "systemMessage": "{context.agentDescription}"
 }
 ```
 

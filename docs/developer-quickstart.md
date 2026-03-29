@@ -1,6 +1,6 @@
 # Developer Quickstart Guide
 
-**Version: ≥5.5.x**
+**Version: 6.0.0**
 
 This guide helps developers quickly understand EDDI's architecture and start building agents.
 
@@ -499,7 +499,7 @@ curl -X POST http://localhost:7070/agents/agent-abc-123/start \
 Access in output template:
 
 ```
-Hello [[${memory.current.context.userName}]]!
+Hello {context.userName}!
 ```
 
 ## Next Steps

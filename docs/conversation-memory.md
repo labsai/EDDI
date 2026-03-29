@@ -1,6 +1,6 @@
 # Conversation Memory and State Management
 
-**Version: ≥5.5.x**
+**Version: 6.0.0**
 
 ## Overview
 
@@ -190,28 +190,28 @@ memory.getCurrentStep().storeData(
 
 ```html
 <!-- Access current input -->
-You said: [[${memory.current.input}]]
+You said: {memory.current.input}
 
 <!-- Access previous step data -->
-Previously, you mentioned: [[${memory.previous.userPreference}]]
+Previously, you mentioned: {memory.previous.userPreference}
 
 <!-- Access context data -->
-Welcome, [[${memory.current.context.userName}]]!
+Welcome, {memory.current.context.userName}!
 
 <!-- Access HTTP call response -->
-The weather is: [[${memory.current.httpCalls.weatherResponse.temperature}]]
+The weather is: {memory.current.httpCalls.weatherResponse.temperature}
 
 <!-- Access LLM response -->
-AI says: [[${memory.current.llmResponse}]]
+AI says: {memory.current.llmResponse}
 ```
 
 ### In HTTP Call Body Templates
 
 ```json
 {
-  "userId": "[[${memory.current.context.userId}]]",
-  "message": "[[${memory.current.input}]]",
-  "conversationId": "[[${memory.conversationId}]]"
+  "userId": "{memory.current.context.userId}",
+  "message": "{memory.current.input}",
+  "conversationId": "{memory.conversationId}"
 }
 ```
 
@@ -241,11 +241,11 @@ AI says: [[${memory.current.llmResponse}]]
 Request → Check Cache → If Miss: Load from MongoDB → Execute Lifecycle → Save to MongoDB + Update Cache
 ```
 
-EDDI uses **Infinispan** for distributed caching:
+EDDI uses **Caffeine** for in-process caching:
 
 - Fast retrieval of frequently accessed conversations
 - Reduced MongoDB load
-- Supports horizontal scaling across multiple EDDI instances
+- Size-based eviction with configurable maximum entries
 
 ### MongoDB Structure
 
@@ -341,7 +341,7 @@ POST /agents/prod/myagent/conversation123
 Then access in agent logic:
 
 ```
-${memory.current.context.userId}
+{context.userId}
 ```
 
 ## Memory Flow Example
@@ -433,7 +433,7 @@ JsonObject weather = memory.getCurrentStep()
 
 // Applies template
 String output = applyTemplate(
-    "The weather in [[${weatherData.location}]] is [[${weatherData.description}]]",
+    "The weather in {weatherData.location} is {weatherData.description}",
     memory
 );
 // Result: "The weather in Paris is sunny with 22°C"
@@ -479,7 +479,7 @@ IData<JsonObject> httpData = memory.getCurrentStep()
 String userName = httpData.getResult().getString("name");
 
 // In Qute
-[[${memory.current.httpCalls.userProfile.name}]]
+{memory.current.httpCalls.userProfile.name}
 ```
 
 ### Iterating Over History
@@ -497,15 +497,98 @@ for (IConversationStep step : previousSteps) {
 
 ### Conditional Memory Access
 
-```javascript
-// In Qute, check if data exists
-[(${memory.current.weatherData != null ? memory.current.weatherData.temperature : 'N/A'})]
 ```
+{#if memory.current.weatherData}
+  Temperature: {memory.current.weatherData.temperature}
+{#else}
+  N/A
+{/if}
+```
+
+---
+
+## Template Variable Reference
+
+When tasks process templates (system prompts, HTTP call bodies, property instructions, output templates), `MemoryItemConverter.convert(memory)` produces a map with these top-level keys:
+
+| Key | Type | Source | Example Access |
+|---|---|---|---|
+| `context` | `Map<String, Object>` | Input context variables set per turn | `{context.language}` |
+| `properties` | `Map<String, Property>` | **All conversation properties** — includes both session-scoped and `longTerm` properties loaded from persistent storage | `{properties.preferred_language.valueString}` |
+| `memory` | `Map` with `current`, `last`, `past` | Conversation step data from the pipeline | `{memory.current.output}`, `{memory.last.input}` |
+| `userInfo` | `Map` with `userId` | Authenticated user identity | `{userInfo.userId}` |
+| `conversationInfo` | `Map` with `conversationId`, `agentId`, etc. | Conversation metadata | `{conversationInfo.agentId}` |
+| `conversationLog` | `String` | Formatted conversation history | `{conversationLog}` |
+
+> **Key insight**: `longTerm` properties are loaded into `conversationProperties` at conversation init and are immediately available via `{properties.key}` in any template. You do NOT need a separate template namespace for persistent data — properties IS the namespace.
+
+### When to Use Which
+
+| Need | Use | Why |
+|---|---|---|
+| Data from your application | `{context.X}` | Per-request, set by caller |
+| Persistent user preferences | `{properties.X.valueString}` | Survives across conversations (scope=longTerm) |
+| Current turn's input/output | `{memory.current.X}` | Step-level data from the pipeline |
+| Previous turn's data | `{memory.last.X}` | One step back |
+| Who the user is | `{userInfo.userId}` | Authenticated identity |
+| Which agent/conversation | `{conversationInfo.agentId}` | Conversation metadata |
+| Full conversation history | `{conversationLog}` | Formatted string of all turns |
+
+---
+
+## Conversation Lifecycle: Init and Teardown
+
+Understanding what happens at conversation boundaries is critical for features that manage persistent state.
+
+### Initialization (`Conversation.init()`)
+
+When a conversation starts or continues:
+
+```
+Conversation.init()
+  ├─→ Load conversation memory from store
+  ├─→ loadLongTermProperties()
+  │     └─→ IPropertiesHandler.loadProperties(userId)
+  │     └─→ Properties loaded into conversationProperties with scope=longTerm
+  │     └─→ Available as {properties.key} in all templates
+  └─→ Set conversation state to IN_PROGRESS
+```
+
+### Pipeline Execution
+
+The `LifecycleManager` runs all configured tasks in sequence:
+
+```
+LifecycleManager.executeLifecycle(memory)
+  ├─→ Input Parser
+  ├─→ Behavior Rules → emit actions
+  ├─→ PropertySetterTask → set properties based on actions
+  ├─→ HttpCallsTask → execute API calls based on actions
+  ├─→ LlmTask → call LLM based on actions
+  └─→ OutputGenerationTask → format response
+```
+
+### Teardown (`postConversationLifecycleTasks()`)
+
+After the pipeline completes:
+
+```
+Conversation.postConversationLifecycleTasks()
+  ├─→ storePropertiesPermanently()
+  │     ├─→ All longTerm properties saved via IPropertiesHandler
+  │     └─→ Secret properties scrubbed and vaulted via SecretsVault
+  ├─→ Save conversation memory to store
+  └─→ Set conversation state to READY
+```
+
+> **Key insight**: Persistent state is a **session concern** handled in `Conversation.java` init/teardown — NOT a pipeline task. If a feature needs to load/save cross-conversation state, it extends the Conversation init/teardown logic. The pipeline processes data for a single turn; session boundaries manage what persists between turns.
 
 ## Related Documentation
 
 - [Architecture Overview](architecture.md) - Understanding the big picture
+- [Properties](properties.md) - Property system, scopes, and persistence
 - [Behavior Rules](behavior-rules.md) - Using memory in conditions
 - [Output Templating](output-templating.md) - Accessing memory in outputs
 - [HTTP Calls](httpcalls.md) - Storing API responses in memory
-- [LangChain Integration](langchain.md) - Using conversation history with LLMs
+- [LLM Integration](langchain.md) - Using conversation history with LLMs
+- [Passing Context Information](passing-context-information.md) - Injecting external data

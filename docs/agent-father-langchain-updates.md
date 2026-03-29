@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Agent Father has been updated to support configuration of the new LangChain task features introduced in EDDI 5.6.0. Users can now configure built-in tools, tool whitelisting, and conversation history limits when creating connector agents.
+The Agent Father has been updated to support configuration of the new LangChain task features introduced in EDDI 6.0.0. Users can now configure built-in tools, tool whitelisting, and conversation history limits when creating connector agents.
 
 ## Changes Made
 
@@ -70,9 +70,9 @@ For each provider, the following files were updated:
 ### 4. HTTP Calls (`*.httpcalls.json`)
 
 - Updated langchain creation body to include three new parameters:
-  - `enableBuiltInTools`: `[(${properties.enableBuiltInTools})]`
-  - `builtInToolsWhitelist`: `[(${properties.builtInToolsWhitelist})]`
-  - `conversationHistoryLimit`: `[(${properties.conversationHistoryLimit})]`
+  - `enableBuiltInTools`: `{properties.enableBuiltInTools}`
+  - `builtInToolsWhitelist`: `{properties.builtInToolsWhitelist}`
+  - `conversationHistoryLimit`: `{properties.conversationHistoryLimit}`
 
 ## User Experience Flow
 
@@ -156,5 +156,5 @@ When a user creates an agent with tools enabled, the HTTP call will generate a c
 
 ## Version
 
-Updated for EDDI 5.6.0
+Updated for EDDI 6.0.0
 Agent Father version: 3.0.1

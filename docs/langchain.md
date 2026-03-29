@@ -1,10 +1,10 @@
-# Langchain Lifecycle Task
+# LLM Integration
 
-**Version: ≥5.6.x**
+**Version: 6.0.0**
 
 ## Overview
 
-The **Langchain Lifecycle Task** is EDDI's unified integration point for Large Language Models (LLMs).
+The **LLM Lifecycle Task** (formerly "Langchain") is EDDI's unified integration point for Large Language Models (LLMs).
 
 By default, it provides **simple chat** with any LLM provider. Optionally, you can enable **agent mode** to give your LLM access to built-in tools (calculator, web search, weather, etc.).
 
@@ -946,6 +946,43 @@ When `convertToObject=true`, the raw LLM response is **always** persisted in con
 
 ---
 
+## Tool Execution Context
+
+Understanding how tools execute is critical for designing new built-in tools and avoiding common pitfalls.
+
+### Execution Path
+
+All LLM tools execute **inside a conversation pipeline**. The full execution path is:
+
+```
+LlmTask.execute(memory)
+  └─→ AgentOrchestrator.buildToolList(memory, config)
+      └─→ Constructs tool instances with conversation context
+  └─→ LLM invokes tool
+  └─→ ToolExecutionService.executeToolWrapped()
+      └─→ Rate Limiter → Cache Check → Execute → Cost Tracker → Result
+```
+
+### Implicit Context
+
+`IConversationMemory` is **always available** when tools execute. Tools that need conversation state (e.g., `userId`, `agentId`, `groupIds`) receive it via constructor injection from `AgentOrchestrator`, which has the memory object at tool-list build time.
+
+This means:
+- **No ThreadLocal** or request-scoped beans needed
+- **No `userId` parameter** on LLM tools — the conversation always knows who the user is
+- Only external interfaces (MCP, REST) that operate **outside** a conversation need explicit user identification
+
+### LLM Tools vs MCP Tools
+
+| Aspect | LLM Tools (built-in) | MCP Tools |
+|---|---|---|
+| Execution context | Inside conversation pipeline | Outside conversation |
+| User identification | Implicit from `IConversationMemory` | Explicit `userId` parameter |
+| Registration | `builtInToolsWhitelist` in langchain config | `McpMemoryTools.java` |
+| Audience | The LLM agent itself | External AI agents or admin tooling |
+
+---
+
 ## See Also
 
 - [Behavior Rules](behavior-rules.md) - Triggering LLM tasks conditionally
@@ -959,7 +996,7 @@ When `convertToObject=true`, the raw LLM response is **always** persisted in con
 
 ## Summary
 
-The Langchain Lifecycle Task provides a flexible, unified interface for integrating LLMs into EDDI agents:
+The LLM Lifecycle Task provides a flexible, unified interface for integrating LLMs into EDDI agents:
 
 1. ✅ **Simple by Default** - Start with basic chat, add tools when needed
 2. ✅ **12 Provider Support** - OpenAI, Anthropic, Google, Mistral, Azure, Bedrock, Oracle, Ollama, Hugging Face, Jlama + OpenAI-compatible (DeepSeek, Cohere)

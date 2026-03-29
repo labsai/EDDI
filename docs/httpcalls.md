@@ -168,7 +168,7 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
           "token": "<token>"
         },
         "contentType": "application/json",
-        "body": "{\"text\": \"[[${memory.current.input}]]\",\"message_type\": \"incoming\",\"user_id\": \"[[${memory.current.userInfo.userId}]]\",\"platform\": \"eddi\"}"
+        "body": "{\"text\": \"{memory.current.input}\",\"message_type\": \"incoming\",\"user_id\": \"{memory.current.userInfo.userId}\",\"platform\": \"eddi\"}"
       }
     },
     {
@@ -190,7 +190,7 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
           "token": "<token>"
         },
         "contentType": "application/json",
-        "body": "{\"text\": \"[[${output}]]\",\"message_type\": \"outgoing\",\"user_id\": \"[[${memory.current.userInfo.userId}]]\",\"platform\": \"eddi\"}"
+        "body": "{\"text\": \"{output}\",\"message_type\": \"outgoing\",\"user_id\": \"{memory.current.userInfo.userId}\",\"platform\": \"eddi\"}"
       },
       "postResponse": {
         "propertyInstructions": [
@@ -222,8 +222,8 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
               "pathToTargetArray": "savedObjName.data.topics",
               "iterationObjectName": "topic",
               "templateFilterExpression": "${topic.subType} != 'specialSubType'",
-              "quickReplyValue": "[(${topic.name})]",
-              "quickReplyExpressions": "property(topic_id([(${topic.id})]))"
+              "quickReplyValue": "{topic.name}",
+              "quickReplyExpressions": "property(topic_id({topic.id}))"
             }
           }
         ]
@@ -370,7 +370,7 @@ _Response Headers_
 
 ### 3 - Create the **httpCall**
 
-Note that we can pass user input to the http call using _**`[[${memory.current.input}]]`**_
+Note that we can pass user input to the http call using _**`{memory.current.input}`**_
 
 _Request URL_
 
@@ -395,7 +395,7 @@ _Request Body_
         "queryParams": {
           "APPID": "c3366d78c7c0f76d63eb4cdf1384ddbf",
           "units": "metric",
-          "q": "[[${memory.current.input}]]"
+          "q": "{memory.current.input}"
         },
         "method": "get",
         "contentType": "",
@@ -466,7 +466,7 @@ _Request Body_
           "valueAlternatives": [
             {
               "type": "text",
-              "text": "The current weather situation of [[${memory.current.input}]] is [[${memory.current.httpCalls.currentWeather.weather[0].description}]] at [[${memory.current.httpCalls.currentWeather.main.temp}]] °C"
+              "text": "The current weather situation of {memory.current.input} is {memory.current.httpCalls.currentWeather.weather[0].description} at {memory.current.httpCalls.currentWeather.main.temp} °C"
             }
           ]
         }

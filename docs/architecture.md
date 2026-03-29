@@ -363,6 +363,20 @@ Extensions are the **actual agent logic**:
 }
 ```
 
+### What Lives Where: A Decision Guide
+
+When adding a new feature, use this guide to decide where configuration belongs:
+
+| Question | Config Level | Example |
+|---|---|---|
+| Does it affect the entire agent across all conversations? | **Agent level** (`AgentConfiguration`) | `enableUserMemory`, `enableStreaming` |
+| Does it control how a pipeline step behaves? | **Extension level** (e.g., `langchain.json`, `property.json`) | LLM parameters, property instructions |
+| Does it define which extensions run and in what order? | **Workflow level** (`package.json`) | Extension types and URIs |
+| Is it a user-facing runtime setting? | **Agent level** | User memory config, audit settings |
+| Is it a tool/capability the LLM can use? | **Extension level** (in `langchain.json`) | `builtInToolsWhitelist` |
+
+**Rule of thumb**: If a feature is a **cross-conversation concern** (e.g., persistent memory, user preferences, GDPR compliance), it belongs at the **agent level**. If it's a **per-turn processing concern** (e.g., LLM parameters, HTTP call config), it belongs at the **extension level**.
+
 ---
 
 ## Key Components
@@ -764,7 +778,7 @@ Each workflow runs its extensions in order: **Parser → Behavior → Property �
 |---|---|---|---|
 | **Parser** | Raw user text | Expressions (semantic representation) | `expressionsAsActions: true` — parser expressions become actions |
 | **Behavior Rules** | Actions and expressions | New actions that drive subsequent tasks | IF-THEN condition engine — the routing logic |
-| **Property Setter** | Current memory data | Stored properties (conversation-scoped or long-term) | Slot-filling using `[[${memory.current.input}]]` templates |
+| **Property Setter** | Current memory data | Stored properties (conversation-scoped or long-term) | Slot-filling using `{memory.current.input}` templates |
 | **HTTP Calls** | Actions, template variables | Response data stored in memory | Pre/post request property instructions, retry support |
 | **LLM** | Conversation memory, system prompt, tools | LLM response text | Legacy chat (simple) or Agent mode (tool-calling loop) |
 | **Output Templates** | Actions from current step | Text responses + quickReplies | Template variables, response variation via `valueAlternatives` |

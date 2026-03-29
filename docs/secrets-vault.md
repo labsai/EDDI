@@ -199,7 +199,7 @@ The default Agent Father agent demonstrates vault integration during API key set
 // Property setter — auto-vaults the input
 {
   "name": "apiKey",
-  "valueString": "[[${memory.current.input}]]",
+  "valueString": "{memory.current.input}",
   "scope": "secret"
 }
 ```

@@ -1,6 +1,6 @@
 # Security
 
-**Version: ≥5.6.x**
+**Version: 6.0.0**
 
 This document describes the security measures applied to EDDI's AI Agent Tooling system, particularly for tools that execute in response to LLM-generated arguments, as well as the Keycloak-based authentication layer.
 

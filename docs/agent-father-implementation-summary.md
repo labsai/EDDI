@@ -56,9 +56,9 @@ All 96 JSON files in agent-father-3.0.1 validated successfully with no syntax er
 
 - Updated all 7 provider langchain creation HTTP calls
 - Added three new parameters to the JSON body:
-  - `enableBuiltInTools`: `[(${properties.enableBuiltInTools})]`
-  - `builtInToolsWhitelist`: `[(${properties.builtInToolsWhitelist})]`
-  - `conversationHistoryLimit`: `[(${properties.conversationHistoryLimit})]`
+  - `enableBuiltInTools`: `{properties.enableBuiltInTools}`
+  - `builtInToolsWhitelist`: `{properties.builtInToolsWhitelist}`
+  - `conversationHistoryLimit`: `{properties.conversationHistoryLimit}`
 
 ---
 
@@ -292,6 +292,6 @@ Closes #[issue-number]
 ---
 
 **Implementation Date:** 2025  
-**EDDI Version:** 5.6.0  
+**EDDI Version:** 6.0.0  
 **Agent Father Version:** 3.0.1  
 **Status:** ✅ COMPLETE

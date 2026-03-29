@@ -1,6 +1,6 @@
 # Putting It All Together
 
-**Version: ≥5.5.x**
+**Version: 6.0.0**
 
 This guide shows how all of EDDI's components work together to create a complete, functional agent. We'll build a real-world example step-by-step, explaining how each piece connects.
 
@@ -223,17 +223,17 @@ curl -X POST http://localhost:7070/httpcallsstore/httpcalls \
           "method": "GET",
           "path": "/availability",
           "queryParams": {
-            "city": "[[${context.city}]]",
-            "checkIn": "[[${context.checkInDate}]]",
-            "checkOut": "[[${context.checkOutDate}]]"
+            "city": "{context.city}",
+            "checkIn": "{context.checkInDate}",
+            "checkOut": "{context.checkOutDate}"
           }
         },
         "postResponse": {
           "qrBuildInstruction": {
             "pathToTargetArray": "availableRooms.rooms",
             "iterationObjectName": "room",
-            "quickReplyValue": "[(${room.name})]",
-            "quickReplyExpressions": "property(room_id([(${room.id})]))"
+            "quickReplyValue": "{room.name}",
+            "quickReplyExpressions": "property(room_id({room.id}))"
           }
         }
       },
@@ -246,7 +246,7 @@ curl -X POST http://localhost:7070/httpcallsstore/httpcalls \
           "method": "POST",
           "path": "/bookings",
           "contentType": "application/json",
-          "body": "{\\"roomId\\": \\"[[${context.selectedRoom}]]\\", \\"userId\\": \\"[[${context.userId}]]\\", \\"checkIn\\": \\"[[${context.checkInDate}]]\\", \\"checkOut\\": \\"[[${context.checkOutDate}]]\\"}"
+          "body": "{\\\"roomId\\\": \\\"{context.selectedRoom}\\\", \\\"userId\\\": \\\"{context.userId}\\\", \\\"checkIn\\\": \\\"{context.checkInDate}\\\", \\\"checkOut\\\": \\\"{context.checkOutDate}\\\"}"
         },
         "postResponse": {
           "propertyInstructions": [
@@ -303,7 +303,7 @@ curl -X POST http://localhost:7070/outputstore/outputsets \
             "valueAlternatives": [
               {
                 "type": "text",
-                "text": "Great! I found [[${memory.current.httpCalls.availableRooms.rooms.size()}]] available rooms in [[${context.city}]]. Here are your options:"
+                "text": "Great! I found {memory.current.httpCalls.availableRooms.rooms.size()} available rooms in {context.city}. Here are your options:"
               }
             ]
           }
@@ -316,7 +316,7 @@ curl -X POST http://localhost:7070/outputstore/outputsets \
             "valueAlternatives": [
               {
                 "type": "text",
-                "text": "🎉 Booking confirmed! Your booking ID is [[${context.bookingId}]]. Total price: $[[${context.totalPrice}]]. We'\''ve sent a confirmation email. Have a great stay!"
+                "text": "🎉 Booking confirmed! Your booking ID is {context.bookingId}. Total price: ${context.totalPrice}. We'\''ve sent a confirmation email. Have a great stay!"
               }
             ]
           }
@@ -553,8 +553,8 @@ User: "check availability in Paris"
     ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ 5. OUTPUT TEMPLATING                                         │
-│    Template: "I found [[${availableRooms.rooms.size()}]]    │
-│              rooms in [[${context.city}]]"                   │
+│    Template: "I found {availableRooms.rooms.size()}           │
+│              rooms in {context.city}"                         │
 │    Result: "I found 5 rooms in Paris"                        │
 └─────────────────────────────────────────────────────────────┘
     ↓
@@ -596,7 +596,7 @@ Everything stores data in and reads from conversation memory:
 
 - HTTP Calls store responses: `memory.current.httpCalls.availableRooms`
 - Properties store extracted data: `context.city`
-- Outputs read data: `[[${context.bookingId}]]`
+- Outputs read data: `{context.bookingId}`
 
 ### 5. Context Bridges External Systems
 

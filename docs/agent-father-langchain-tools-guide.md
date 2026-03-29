@@ -341,5 +341,5 @@ When Agent Father creates the langchain configuration, it generates:
 ---
 
 **Last Updated:** March 2026  
-**EDDI Version:** 5.6.0  
+**EDDI Version:** 6.0.0  
 **Agent Father Version:** 3.0.1

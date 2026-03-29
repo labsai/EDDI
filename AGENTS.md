@@ -20,10 +20,11 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 ### Key Architecture
 
-- **Config-driven engine**: Agent logic is JSON configs, Java is the processing engine
+- **Config-driven engine**: Agent logic is JSON configs, Java is the processing engine. When designing a new feature, always ask: "should this be configurable by the agent designer?" If yes, expose it as a config field with sensible defaults — don't hardcode behavior or pick a single "best" approach.
 - **Lifecycle pipeline**: Input → Parse → Behavior Rules → Actions → Tasks → Output
 - **Stateless tasks, stateful memory**: `ILifecycleTask` implementations are singletons; all state lives in `IConversationMemory`
 - **Action-based orchestration**: Tasks emit/listen for string-based actions, never call each other directly
+- **Self-contained platform**: EDDI is a closed platform, not a library consumed by third-party code. Internal interfaces (`IPropertiesStore`, `IResourceStore`, etc.) have no external consumers. Deprecation and replacement of internal APIs is safe — the only backward-compat concern is old JSON configs stored in MongoDB or imported via ZIP.
 - **CI**: CircleCI (compile → test → Docker build → integration tests → push to Docker Hub), migrating to GitHub Actions
 
 ---
@@ -137,6 +138,8 @@ The **single source of truth** for a conversation:
 - **Writing**: `currentStep.storeData(new Data<>("key", value))`. Set `data.setPublic(true)` for output-visible data
 - **`ConversationProperties`** — long-term state (e.g., `agentName`, `userId`). Slot-filling uses `PropertySetterTask`
 
+> **Critical distinction**: Conversation memory has **two audiences**. (1) **Pipeline tasks** (BehaviorRules, PropertySetter, etc.) see the **full memory** — all steps, all data keys. (2) **The LLM** sees only a **windowed view** assembled by `ConversationHistoryBuilder` — last N conversationOutputs converted to ChatMessages. When you think about "conversation too long," these are two different problems: the LLM context window (what the model sees) and the MongoDB document size (storage/load time). Most context management strategies only affect #1.
+
 #### The Configuration-as-Code Model
 
 Agent definitions are versioned MongoDB documents. A "Agent" is a list of "Workflows". A "Workflow" bundles "Workflow Extensions" (JSON configs).
@@ -145,8 +148,105 @@ Agent definitions are versioned MongoDB documents. A "Agent" is a list of "Workf
 
 - **`behavior.json`** → `BehaviorRulesEvaluationTask` — the **primary orchestrator**. Its `actions` list is the event that triggers other tasks.
 - **`httpcalls.json`** → `HttpCallsTask` — **Tool Definitions** with templated API calls.
-- **`property.json`** → `PropertySetterTask` — **Memory I/O** for slot-filling.
+- **`property.json`** → `PropertySetterTask` — **EDDI's importance extraction mechanism.** Config-driven slot-filling that explicitly selects which data to preserve as `longTerm` properties. These properties survive the LLM context window boundary — they're loaded at conversation init and available in all templates regardless of how many turns have passed. When designing context management or memory features, PropertySetter is **not just slot-filling** — it's how EDDI ensures critical facts outlive the conversation window.
 - **`langchain.json`** → `LangchainTask` — **Agent Definition** (prompt, model, tools, or legacy chat).
+
+#### The Template Data Model
+
+When tasks process templates (system prompts, HTTP call bodies, property instructions), `MemoryItemConverter.convert(memory)` produces a map with these top-level keys:
+
+| Key | Type | Source | Example Access |
+|---|---|---|---|
+| `context` | `Map<String, Object>` | Input context variables set per turn | `{{context.language}}` |
+| `properties` | `Map<String, Property>` | **All conversation properties** — includes both session-scoped and `longTerm` properties loaded from persistent storage | `{{properties.preferred_language.valueString}}` |
+| `memory` | `Map` with `current`, `last`, `past` | Conversation step data from the pipeline | `{{memory.current.output}}`, `{{memory.last.input}}` |
+| `userInfo` | `Map` with `userId` | Authenticated user identity | `{{userInfo.userId}}` |
+| `conversationInfo` | `Map` with `conversationId`, `agentId`, etc. | Conversation metadata | `{{conversationInfo.agentId}}` |
+| `conversationLog` | `String` | Formatted conversation history | `{{conversationLog}}` |
+
+> **Key insight**: `longTerm` properties are loaded into `conversationProperties` at conversation init and are immediately available via `{properties.key}` in any template. You do NOT need a separate template namespace for persistent data — properties IS the namespace.
+
+#### The Property Lifecycle
+
+Properties have a well-defined lifecycle managed by `Conversation.java`:
+
+```
+1. Conversation.init()
+   └─→ loadLongTermProperties()
+       └─→ IPropertiesHandler.loadProperties(userId)
+       └─→ Loaded into conversationProperties with scope=longTerm
+       └─→ Available as {properties.key} in all templates
+
+2. Pipeline runs
+   └─→ PropertySetterTask sets properties based on actions
+       └─→ scope=step (cleared per turn)
+       └─→ scope=conversation (lives for session)
+       └─→ scope=longTerm (persisted across conversations)
+       └─→ scope=secret (auto-vaulted via SecretsVault)
+
+3. Conversation turn ends
+   └─→ storePropertiesPermanently()
+       └─→ All longTerm properties saved via IPropertiesHandler
+       └─→ Secret properties scrubbed and vaulted
+```
+
+> **Key insight**: Persistent state is a **session concern** handled in `Conversation.java` init/teardown — NOT a pipeline task. If your feature needs to load/save cross-conversation state, extend the Conversation init/teardown logic. Do NOT create a new `ILifecycleTask` for session-level concerns.
+
+#### Built-in Tool Execution Context
+
+LLM tools (annotated with `@Tool` from langchain4j) always execute **inside a conversation pipeline**. The execution path is:
+
+```
+LlmTask.execute(memory)
+  └─→ AgentOrchestrator.buildToolList(memory, config)
+      └─→ Constructs tool instances with conversation context
+  └─→ LLM invokes tool
+  └─→ ToolExecutionService.executeToolWrapped()
+      └─→ Rate Limiter → Cache Check → Execute → Cost Tracker → Result
+```
+
+`IConversationMemory` is always available when tools execute. Tools that need conversation state (e.g., `userId`, `agentId`) can receive it via constructor injection from `AgentOrchestrator`, which has the memory object at tool-list build time. There is no need for `ThreadLocal`, request-scoped beans, or tool parameters for implicit context.
+
+> **Key insight**: LLM tools operate inside a conversation — they should NEVER take `userId` as a parameter. The conversation always knows who the user is. Only external interfaces (MCP, REST) that operate outside a conversation need explicit user identification.
+
+#### Not Everything Is a Lifecycle Task
+
+A common mistake when adding new features is to reflexively create a new `ILifecycleTask`. Before doing so, ask:
+
+| Question | If yes → | If no → |
+|---|---|---|
+| Does it process data **during** a pipeline turn? | `ILifecycleTask` | Not a task |
+| Does it need to react to **actions** from BehaviorRules? | `ILifecycleTask` | Not a task |
+| Does it load/save state at **session boundaries**? | Extend `Conversation.java` init/teardown | — |
+| Is it background/scheduled work? | Use `ScheduleFireExecutor` | — |
+| Is it a new LLM capability? | Add to `builtInTools` in existing `LlmConfiguration` | — |
+| Is it a new REST/MCP endpoint? | Add REST resource or MCP tool class | — |
+| Does it add a new agent-level setting? | Add field to `AgentConfiguration` | — |
+
+#### Reusable Infrastructure — Use Before Building
+
+Several infrastructure components are already built and should be reused, not duplicated:
+
+| Infrastructure | What it does | Use it for |
+|---|---|---|
+| **`ScheduleFireExecutor`** + **`SchedulePollerService`** | Cluster-aware scheduled task execution with fire logging, retries, and configurable conversation strategies (persistent vs new) | ANY background/scheduled work: Dream consolidation, async summarization, maintenance jobs. Never build custom schedulers. |
+| **`ToolExecutionService.executeToolWrapped()`** | Rate limiting → cache check → execute → cost tracking pipeline for LLM tool calls | Any operation that needs rate limiting, caching, or cost tracking. |
+| **`CostTracker`** (via ToolExecutionService) | Dollar-based LLM cost tracking per conversation | Cost ceilings for background LLM jobs (use `maxCostPerRun` instead of `maxLlmCallsPerRun` — dollar amounts are more meaningful than call counts because different operations cost vastly different amounts). |
+| **`SecretResolver`** | Vault-based secret resolution for API keys and credentials | Any feature that needs secrets (LLM providers, external APIs). |
+| **Micrometer `MeterRegistry`** | Metrics collection (counters, timers, gauges) exposed at `/q/metrics` | Always add metrics to new features for observability. |
+
+#### Group Conversations — Context Flow
+
+`GroupConversationService` orchestrates multi-agent discussions. When an agent participates in a group, the group context flows into its conversation:
+
+- `AgentGroupConfiguration` defines members (agents or nested groups), discussion style, and phases
+- `GroupConversationService.discuss()` creates individual conversations for each member agent
+- Group context (groupId, discussion phase, peer responses) is injected via the conversation's `Context` map
+- `GroupConversationEventSink` streams SSE events for real-time group discussion visibility
+
+When a feature needs to know which group an agent belongs to (e.g., persistent memory with `group` visibility), the groupId comes from the `GroupConversation` context — not from `AgentConfiguration`. The group is a runtime concern, not a static configuration.
+
+Adding a new `ILifecycleTask` is the **heaviest** option — it requires a configuration POJO, store interface, MongoDB store, REST interface, REST implementation, ExtensionDescriptor, and unit tests. Many features fit better as extensions to existing infrastructure.
 
 ### 4.3 New Feature Checklist
 
@@ -403,6 +503,18 @@ When implementing a new feature, provide:
 - Use JBoss Logger, not System.out
 - Include conversation context in logs
 - Use appropriate levels: DEBUG (verbose), INFO (important events), ERROR (failures)
+
+#### Production-Scale Thinking
+
+When designing any new feature, always consider these before finalizing the design:
+
+- **Race conditions**: If multiple agents/conversations can write the same data, what happens on concurrent writes? Use appropriate upsert key granularity.
+- **Unbounded growth**: Can users/LLMs create unlimited entries? Add configurable caps with clear UX for when limits are reached (actionable error messages, not silent failures).
+- **LLM abuse**: If an LLM can invoke a tool, it can invoke it 100 times in one turn with garbage data. Add per-turn write limits, value size limits, and input validation.
+- **Cost at scale**: If a feature uses LLM calls in background jobs, what happens with 10,000 users? Use dollar-based cost ceilings (`maxCostPerRun`) instead of call counts — call counts are meaningless because different operations cost vastly different amounts. Add incremental processing (only process what changed since last run) and round-robin fairness.
+- **Implicit context**: If code runs inside a conversation, don't pass `userId`/`agentId` as explicit parameters — the conversation always knows who the user is. Only external interfaces (REST, MCP) need explicit identification.
+- **Unification over duplication**: Before creating a parallel system (e.g., new store alongside old store), ask: can the new system replace the old one? Prefer unified systems with legacy compat methods over dual storage. When two features need similar infrastructure (e.g., LLM-based summarization for both Dream consolidation and conversation context), build one shared service, not two parallel implementations.
+- **Full data is never deleted by optimization**: Context management strategies (summarization, windowing) are about what the LLM *sees*, not what is *stored*. The full conversation is always preserved in MongoDB. Summaries are derived views, not destructive transformations. If an agent needs to access the full original, it should be able to (via tools, REST API, or debugger).
 
 ### Key Files
 

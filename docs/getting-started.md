@@ -1,6 +1,6 @@
 # Getting started
 
-**Version: ≥5.0.x**
+**Version: 6.0.0**
 
 Welcome to **EDDI**!
 
