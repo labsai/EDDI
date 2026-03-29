@@ -4,6 +4,7 @@
 - [Architecture Overview](architecture.md)
 - [Project Philosophy](project-philosophy.md)
 - [Conversation Memory & State Management](conversation-memory.md)
+- [Properties](properties.md)
 - [Getting started](getting-started.md)
 - [Developer Quickstart Guide](developer-quickstart.md)
 - [Putting It All Together](putting-it-all-together.md)
@@ -20,6 +21,8 @@
 - [Behavior Rules](behavior-rules.md)
 - [HTTP Calls / API Calls](httpcalls.md)
 - [LLM Integration](langchain.md)
+- [RAG (Retrieval-Augmented Generation)](rag.md)
+- [Model Cascade](model-cascade.md)
 - [Security](security.md)
 - [Secrets Vault](secrets-vault.md)
 - [Audit Ledger](audit-ledger.md)
@@ -27,6 +30,7 @@
 - [Output Configuration](output-configuration.md)
 - [Output Templating](output-templating.md)
 - [Conversations](conversations.md)
+- [Group Conversations](group-conversations.md)
 - [Passing context information](passing-context-information.md)
 - [Semantic Parser](semantic-parser.md)
 
@@ -38,13 +42,13 @@
 - [Agent Father: Implementation Summary](agent-father-implementation-summary.md)
 - [Agent Father: LangChain Updates](agent-father-langchain-updates.md)
 - [Agent Father: Tools Configuration Fix](agent-father-tools-configuration-fix.md)
+- [A2A Protocol](a2a-protocol.md)
 
 ## Deployment & Infrastructure
 
-- [Git Commit Guide](git-commit-guide.md)
 - [Docker](docker.md)
+- [Kubernetes](kubernetes.md)
 - [Setting Up EDDI on AWS with MongoDB Atlas](setup-eddi-on-aws-with-mongodb-atlas.md)
 - [RedHat Openshift](redhat-openshift.md)
-- [Metrics](metrics.md)
-- [Tasks / Roadmap](tasks.md)
+- [Metrics & Monitoring](metrics.md)
 - [FAQs](how-to....md)
