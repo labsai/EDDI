@@ -79,6 +79,15 @@ cd EDDI
 open http://localhost:7070
 ```
 
+> **💡 Secrets Vault:** If you plan to store API keys through the Manager UI or use `${eddivault:...}` references, set the vault master key first:
+>
+> ```bash
+> export EDDI_VAULT_MASTER_KEY=my-dev-passphrase   # Linux/macOS
+> $env:EDDI_VAULT_MASTER_KEY = "my-dev-passphrase"  # Windows PowerShell
+> ```
+>
+> Without this, the vault is disabled and secret endpoints return HTTP 503. Any passphrase works for local dev. See [Secrets Vault](secrets-vault.md) for full details.
+
 ### Configuring AI Tools
 
 If you plan to use the **Web Search** or **Weather** tools in your agents, you need to set up API keys in your environment or `application.properties`.
