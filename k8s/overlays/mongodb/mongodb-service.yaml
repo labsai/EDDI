@@ -1,0 +1,21 @@
+# MongoDB headless Service — for StatefulSet DNS discovery
+# EDDI connects to mongodb:27017 via the connection string in eddi-config ConfigMap.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  labels:
+    app.kubernetes.io/name: mongodb
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: eddi
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: mongodb
+    app.kubernetes.io/component: database
+  ports:
+    - name: mongo
+      port: 27017
+      targetPort: mongo
+      protocol: TCP

@@ -1,0 +1,43 @@
+# EDDI + PostgreSQL overlay
+# Usage: kubectl apply -k k8s/overlays/postgres/
+#
+# This overlay:
+#   1. Deploys PostgreSQL 16 as a StatefulSet with persistent storage
+#   2. Patches the EDDI ConfigMap to activate the postgres profile
+#   3. Injects JDBC credentials from postgres-secrets
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: eddi
+
+resources:
+  - ../../base
+  - postgres-statefulset.yaml
+  - postgres-service.yaml
+  - postgres-secret.yaml
+
+# Patch the EDDI ConfigMap to switch to PostgreSQL mode
+patches:
+  - target:
+      kind: ConfigMap
+      name: eddi-config
+    patch: |
+      - op: replace
+        path: /data/EDDI_DATASTORE_TYPE
+        value: "postgres"
+      - op: add
+        path: /data/QUARKUS_PROFILE
+        value: "postgres"
+      - op: add
+        path: /data/QUARKUS_DATASOURCE_JDBC_URL
+        value: "jdbc:postgresql://postgres:5432/eddi"
+  # Inject PG credentials into EDDI from postgres-secrets
+  - target:
+      kind: Deployment
+      name: eddi
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          secretRef:
+            name: postgres-secrets
