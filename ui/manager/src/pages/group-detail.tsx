@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Users, Trash2, MessageSquareQuote, Clock, PanelRightOpen, PanelRightClose } from "lucide-react";
 import { toast } from "sonner";
@@ -31,6 +31,8 @@ const STATE_COLORS: Record<string, string> = {
 
 export function GroupDetailPage() {
   const { id: groupId } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  const version = searchParams.get("version") ? Number(searchParams.get("version")) : undefined;
   const { t } = useTranslation();
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [showConfig, setShowConfig] = useState(true);
@@ -40,7 +42,7 @@ export function GroupDetailPage() {
     isLoading: configLoading,
     isError: configError,
     refetch: refetchConfig,
-  } = useGroup(groupId || "");
+  } = useGroup(groupId || "", version);
 
   const {
     data: conversations,

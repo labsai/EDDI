@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -13,11 +13,15 @@ import {
   EyeOff,
   ChevronDown,
   Bot,
+  Info,
+  AlertTriangle,
+  ExternalLink,
 } from "lucide-react";
 import {
   useSecrets,
   useStoreSecret,
   useDeleteSecret,
+  useVaultHealth,
 } from "@/hooks/use-secrets";
 import { useAgentDescriptors } from "@/hooks/use-agents";
 import { parseResourceUri } from "@/lib/api/agents";
@@ -42,6 +46,13 @@ export function SecretsPage() {
     });
   }, [agentDescriptors]);
 
+  // Auto-select first agent when agents load and none is selected
+  useEffect(() => {
+    if (!agentId && agents.length > 0) {
+      setAgentId(agents[0]!.id);
+    }
+  }, [agents, agentId]);
+
   /* ─── Dialog state ─── */
   const [showCreate, setShowCreate] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
@@ -49,14 +60,16 @@ export function SecretsPage() {
   const [valueVisible, setValueVisible] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SecretMetadata | null>(null);
 
-  /* ─── Queries ─── */
+  /* ─── Queries (auto-fetches when agentId changes) ─── */
   const {
     data: secrets,
     isLoading,
-    refetch,
   } = useSecrets(tenantId, agentId);
+  const { data: vaultHealth } = useVaultHealth();
   const storeMut = useStoreSecret();
   const deleteMut = useDeleteSecret();
+
+  const vaultDown = vaultHealth?.available === false;
 
   /* ─── Handlers ─── */
   const handleCreate = useCallback(() => {
@@ -123,6 +136,8 @@ export function SecretsPage() {
     }
   };
 
+  const selectedAgentName = agents.find((a) => a.id === agentId)?.name;
+
   return (
     <div className="space-y-6 p-6" data-testid="secrets-page">
       {/* Header */}
@@ -141,8 +156,14 @@ export function SecretsPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => setShowCreate(true)}
-            disabled={!agentId}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            disabled={!agentId || vaultDown}
+            title={vaultDown
+              ? t("secrets.vaultNotConfigured", "Secrets vault is not configured")
+              : !agentId
+                ? t("secrets.selectAgentFirst", "Select an agent first — secrets are scoped per agent")
+                : undefined
+            }
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
             data-testid="create-secret-button"
           >
             <Plus className="h-4 w-4" />
@@ -150,6 +171,47 @@ export function SecretsPage() {
           </button>
         </div>
       </div>
+
+      {/* Vault status banner */}
+      {vaultDown ? (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-4 space-y-2" data-testid="vault-not-configured">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+            <span className="text-sm font-semibold text-destructive">
+              {vaultHealth?.error || t("secrets.vaultNotConfigured", "Secrets Vault is not configured")}
+            </span>
+          </div>
+          {vaultHealth?.reason && (
+            <p className="text-xs text-muted-foreground">{vaultHealth.reason}</p>
+          )}
+          {vaultHealth?.action && (
+            <div className="rounded-md bg-muted/50 px-3 py-2">
+              <code className="text-xs text-foreground break-all">{vaultHealth.action}</code>
+            </div>
+          )}
+          {vaultHealth?.docs && (
+            <a
+              href={vaultHealth.docs}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            >
+              <ExternalLink className="h-3 w-3" />
+              {t("secrets.viewDocs", "View documentation")}
+            </a>
+          )}
+        </div>
+      ) : (
+        <div className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <p className="text-xs text-muted-foreground">
+            {t(
+              "secrets.scopeExplanation",
+              "Secrets are scoped per agent — each agent has its own isolated vault namespace. Select an agent below to view and manage its secrets.",
+            )}
+          </p>
+        </div>
+      )}
 
       {/* Namespace selectors */}
       <div className="flex flex-wrap items-end gap-4">
@@ -190,24 +252,25 @@ export function SecretsPage() {
             <ChevronDown className="pointer-events-none absolute inset-e-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           </div>
         </div>
-        <button
-          onClick={() => refetch()}
-          disabled={!agentId || isLoading}
-          className="inline-flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
-          data-testid="refresh-button"
-        >
-          {isLoading ? (
+        {isLoading && (
+          <div className="flex h-9 items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <KeyRound className="h-4 w-4" />
-          )}
-          {t("secrets.refresh", "Load Secrets")}
-        </button>
+            {t("common.loading", "Loading…")}
+          </div>
+        )}
       </div>
 
       {/* Secrets table */}
-      {secrets && secrets.length > 0 && (
+      {agentId && secrets && secrets.length > 0 && (
         <div className="rounded-xl border border-border bg-card shadow-sm">
+          <div className="border-b border-border px-4 py-3">
+            <h2 className="text-sm font-semibold text-foreground">
+              {t("secrets.tableTitle", {
+                agent: selectedAgentName || agentId,
+                defaultValue: `Secrets for ${selectedAgentName || agentId}`,
+              })}
+            </h2>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -282,8 +345,8 @@ export function SecretsPage() {
         </div>
       )}
 
-      {/* Empty state */}
-      {secrets && secrets.length === 0 && (
+      {/* Empty state — agent selected but no secrets */}
+      {agentId && secrets && secrets.length === 0 && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border p-12 text-center">
           <KeyRound className="h-12 w-12 text-muted-foreground/30" />
           <p className="mt-4 text-lg font-medium text-foreground">
@@ -291,15 +354,18 @@ export function SecretsPage() {
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
             {t(
-              "secrets.emptyHint",
-              "Create a secret or change the namespace filters above.",
+              "secrets.emptyHintAgent",
+              {
+                agent: selectedAgentName || agentId,
+                defaultValue: `No secrets stored for ${selectedAgentName || agentId} yet. Click "Add Secret" to create one.`,
+              },
             )}
           </p>
         </div>
       )}
 
       {/* Not loaded yet (no agentId) */}
-      {!agentId && !secrets && (
+      {!agentId && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border p-12 text-center">
           <KeyRound className="h-12 w-12 text-muted-foreground/30" />
           <p className="mt-4 text-lg font-medium text-foreground">
@@ -355,6 +421,18 @@ export function SecretsPage() {
               >
                 <X className="h-4 w-4" />
               </button>
+            </div>
+
+            {/* Show which agent the secret is for */}
+            <div className="mt-3 flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+              <Bot className="h-3.5 w-3.5 shrink-0" />
+              <span>
+                {t("secrets.creatingFor", {
+                  tenant: tenantId,
+                  agent: selectedAgentName || agentId,
+                  defaultValue: `Creating secret for ${selectedAgentName || agentId} (tenant: ${tenantId})`,
+                })}
+              </span>
             </div>
 
             <div className="mt-4 space-y-4">

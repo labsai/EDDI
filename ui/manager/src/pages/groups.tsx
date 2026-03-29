@@ -201,7 +201,7 @@ export function GroupsPage() {
                     >
                       <td className="px-5 py-3">
                         <Link
-                          to={`/manage/groups/${group.id}`}
+                          to={`/manage/groups/${group.id}?version=${group.version}`}
                           className="text-sm font-medium text-foreground hover:text-primary transition-colors"
                         >
                           {group.name || t("groups.unnamed", "Unnamed Group")}

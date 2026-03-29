@@ -90,12 +90,7 @@ export function PlatformStatus() {
               ? t("platform.online", "Online")
               : t("platform.offline", "Offline")}
         </span>
-        {/* Latency — desktop only, inline when online */}
-        {isOnline && latencyMs !== null && (
-          <span className="hidden text-[10px] opacity-60 sm:inline">
-            {latencyMs}ms
-          </span>
-        )}
+
       </button>
 
       {/* Popover */}

@@ -6,7 +6,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 export interface PlatformStatus {
   /** Current connection state */
   status: "checking" | "online" | "offline";
-  /** EDDI instance identifier (from /administration/logs/instance) */
+  /** EDDI instance identifier (from /administration/logs/instance-id) */
   instanceId: string | null;
   /** Last measured round-trip latency in ms */
   latencyMs: number | null;
@@ -26,7 +26,7 @@ async function checkPlatformHealth(): Promise<{
 }> {
   const start = performance.now();
   const res = await fetch(
-    `${window.location.origin}/administration/logs/instance`,
+    `${window.location.origin}/administration/logs/instance-id`,
     { signal: AbortSignal.timeout(5000) },
   );
   const latencyMs = Math.round(performance.now() - start);
@@ -45,7 +45,7 @@ const QUERY_KEY = ["platform", "health"] as const;
 
 /**
  * Global platform health hook.
- * Polls /administration/logs/instance every 15s.
+ * Polls /administration/logs/instance-id every 15s.
  * Returns connection status, instance ID, and latency.
  */
 export function usePlatformStatus(): PlatformStatus {
@@ -74,7 +74,7 @@ export function usePlatformStatus(): PlatformStatus {
     },
     refetchInterval: 15_000,
     staleTime: 10_000,
-    retry: false,
+    retry: 1,
   });
 
   // Track errors via effect since TanStack Query v5 removed onError callback

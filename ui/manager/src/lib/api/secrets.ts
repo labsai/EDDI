@@ -24,6 +24,14 @@ export interface VaultHealth {
   status: "UP" | "DOWN";
   provider: string;
   available: boolean;
+  /** Present when 503 — human-readable error title */
+  error?: string;
+  /** Present when 503 — why the vault is unavailable */
+  reason?: string;
+  /** Present when 503 — how to fix it */
+  action?: string;
+  /** Present when 503 — documentation URL */
+  docs?: string;
 }
 
 /* ─── API Functions ─── */
@@ -56,6 +64,9 @@ export async function storeSecret(
     },
   );
   if (!res.ok) {
+    if (res.status === 503) {
+      throw new Error("Secrets vault is not configured. Set up a secret provider in the EDDI backend.");
+    }
     const err = await res.json().catch(() => ({ error: "Unknown error" }));
     throw new Error(err.error || `Failed to store secret (HTTP ${res.status})`);
   }
@@ -73,13 +84,33 @@ export async function deleteSecret(
     { method: "DELETE" },
   );
   if (!res.ok && res.status !== 204) {
+    if (res.status === 503) {
+      throw new Error("Secrets vault is not configured. Set up a secret provider in the EDDI backend.");
+    }
     const err = await res.json().catch(() => ({ error: "Unknown error" }));
     throw new Error(err.error || `Failed to delete secret (HTTP ${res.status})`);
   }
 }
 
-/** Get vault health status. */
+/** Get vault health status. Parses the body on both 200 and 503. */
 export async function getVaultHealth(): Promise<VaultHealth> {
-  const res = await fetch(`${window.location.origin}${BASE}/health`);
-  return res.json();
+  try {
+    const res = await fetch(`${window.location.origin}${BASE}/health`);
+    const data = await res.json();
+    if (res.status === 503) {
+      // Backend returns { error, reason, action, docs } on 503
+      return {
+        status: "DOWN",
+        provider: data.provider ?? "unknown",
+        available: false,
+        error: data.error,
+        reason: data.reason,
+        action: data.action,
+        docs: data.docs,
+      };
+    }
+    return data;
+  } catch {
+    return { status: "DOWN", provider: "unknown", available: false };
+  }
 }

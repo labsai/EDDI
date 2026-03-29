@@ -1685,7 +1685,7 @@ export const logAdminHandlers = [
     );
   }),
 
-  http.get("*/administration/logs/instance", () => {
+  http.get("*/administration/logs/instance-id", () => {
     return HttpResponse.json({ instanceId: "eddi-host-a1b2" });
   }),
 ];

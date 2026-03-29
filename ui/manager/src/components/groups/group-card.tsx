@@ -107,7 +107,7 @@ export function GroupCard({
       {/* Group info */}
       <div className="mt-4 flex-1">
         <Link
-          to={`/manage/groups/${group.id}`}
+          to={`/manage/groups/${group.id}?version=${group.version}`}
           className="text-lg font-semibold text-foreground hover:text-primary transition-colors"
         >
           {group.name || t("groups.unnamed", "Unnamed Group")}

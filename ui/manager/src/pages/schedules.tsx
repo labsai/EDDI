@@ -101,12 +101,12 @@ function StatusBadge({ schedule }: { schedule: ScheduleConfiguration }) {
 function TypeBadge({ type }: { type: TriggerType }) {
   const { t } = useTranslation();
   return type === "HEARTBEAT" ? (
-    <span className="inline-flex items-center gap-1 rounded-full bg-pink-500/10 px-2.5 py-0.5 text-xs font-semibold text-pink-400">
+    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
       <Timer className="h-3 w-3" />
       {t("schedules.typeHeartbeat", "Heartbeat")}
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs font-semibold text-violet-400">
+    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
       <CalendarClock className="h-3 w-3" />
       {t("schedules.typeCron", "Cron")}
     </span>
@@ -125,7 +125,7 @@ function FireLogsRow({ scheduleId }: { scheduleId: string }) {
       <td colSpan={8} className="px-5 py-0">
         <button
           onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-1.5 py-2 text-xs text-muted-foreground transition-colors hover:text-accent"
+          className="flex items-center gap-1.5 py-2 text-xs text-muted-foreground transition-colors hover:text-primary"
           aria-expanded={expanded}
         >
           {expanded ? (
@@ -140,7 +140,7 @@ function FireLogsRow({ scheduleId }: { scheduleId: string }) {
           <div className="mb-3 rounded-lg border border-border/50 bg-muted/30">
             {isLoading ? (
               <div className="p-4 text-center">
-                <div className="mx-auto h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                <div className="mx-auto h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
               </div>
             ) : !logs || logs.length === 0 ? (
               <p className="p-4 text-center text-xs text-muted-foreground">
@@ -313,7 +313,7 @@ function CreateScheduleDialog({
                 "schedules.namePlaceholder",
                 "e.g. Daily health check"
               )}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-accent focus:outline-none"
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none"
             />
           </div>
 
@@ -332,7 +332,7 @@ function CreateScheduleDialog({
                   }}
                   className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
                     triggerType === tt
-                      ? "bg-accent text-white shadow-sm"
+                      ? "bg-primary text-primary-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
@@ -357,7 +357,7 @@ function CreateScheduleDialog({
                 value={cronExpression}
                 onChange={(e) => setCronExpression(e.target.value)}
                 placeholder="0 9 * * MON-FRI"
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-accent focus:outline-none"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none"
               />
               <p className="mt-1 text-xs text-muted-foreground">
                 {t("schedules.cronHelp", "5-field format: minute hour day-of-month month day-of-week")}
@@ -373,7 +373,7 @@ function CreateScheduleDialog({
                 min={60}
                 value={heartbeatInterval}
                 onChange={(e) => setHeartbeatInterval(Number(e.target.value))}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
               />
             </div>
           )}
@@ -390,7 +390,7 @@ function CreateScheduleDialog({
                 "schedules.agentIdPlaceholder",
                 "Enter agent ID..."
               )}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-accent focus:outline-none"
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none"
             />
           </div>
 
@@ -402,7 +402,7 @@ function CreateScheduleDialog({
             <select
               value={environment}
               onChange={(e) => setEnvironment(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
             >
               <option value="production">{t("schedules.envProduction", "Production")}</option>
               
@@ -422,7 +422,7 @@ function CreateScheduleDialog({
                 "schedules.messagePlaceholder",
                 "Message to send to agent"
               )}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-accent focus:outline-none"
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none"
             />
           </div>
 
@@ -437,7 +437,7 @@ function CreateScheduleDialog({
                 onChange={(e) =>
                   setStrategy(e.target.value as "new" | "persistent")
                 }
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
               >
                 <option value="new">{t("schedules.strategyNew", "New (fresh conversation each fire)")}</option>
                 <option value="persistent">
@@ -459,7 +459,7 @@ function CreateScheduleDialog({
           <button
             onClick={handleCreate}
             disabled={!isValid || createMutation.isPending}
-            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/90 disabled:opacity-50"
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             {createMutation.isPending
               ? t("schedules.creating", "Creating...")
@@ -544,7 +544,7 @@ export function SchedulesPage() {
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Clock className="h-7 w-7 text-accent" />
+          <Clock className="h-7 w-7 text-primary" />
           <div>
             <h1 className="text-2xl font-bold text-foreground">
               {t("schedules.title", "Schedules")}
@@ -559,7 +559,7 @@ export function SchedulesPage() {
         </div>
         <button
           onClick={() => setShowCreate(true)}
-          className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/90"
+          className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           data-testid="create-schedule-btn"
         >
           <Plus className="h-4 w-4" />
@@ -664,7 +664,7 @@ export function SchedulesPage() {
 
         {isLoading ? (
           <div className="p-8 text-center">
-            <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+            <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
         ) : !schedules || schedules.length === 0 ? (
           <div
@@ -771,7 +771,7 @@ export function SchedulesPage() {
                                 ? t("schedules.disable", "Disable")
                                 : t("schedules.enable", "Enable")
                             }
-                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent/10 hover:text-accent disabled:opacity-50"
+                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:opacity-50"
                             data-testid={`toggle-${s.id}`}
                           >
                             {s.enabled ? (
@@ -786,7 +786,7 @@ export function SchedulesPage() {
                             onClick={() => handleFire(s.id!)}
                             disabled={fireMutation.isPending}
                             title={t("schedules.fireNow", "Fire Now")}
-                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent/10 hover:text-accent disabled:opacity-50"
+                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:opacity-50"
                             data-testid={`fire-${s.id}`}
                           >
                             <Play className="h-4 w-4" />
