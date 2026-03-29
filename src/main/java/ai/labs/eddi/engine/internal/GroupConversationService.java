@@ -363,6 +363,7 @@ public class GroupConversationService implements IGroupConversationService {
         if (privateConvId == null) {
             try {
                 Map<String, Context> groupContext = new LinkedHashMap<>();
+                groupContext.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
                 groupContext.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
                 groupContext.put("groupDepth", new Context(Context.ContextType.string, String.valueOf(gc.getDepth())));
                 var result = conversationService.startConversation(DEFAULT_ENV, member.agentId(), gc.getUserId(), groupContext);
@@ -378,6 +379,7 @@ public class GroupConversationService implements IGroupConversationService {
         inputData.setInput(input);
         Map<String, Context> context = new LinkedHashMap<>();
         context.put("groupTranscript", new Context(Context.ContextType.object, gc.getTranscript()));
+        context.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
         context.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
         context.put("groupDepth", new Context(Context.ContextType.string, String.valueOf(gc.getDepth())));
         inputData.setContext(context);

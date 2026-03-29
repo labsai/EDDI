@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -363,12 +364,20 @@ class AgentOrchestrator {
         if (config == null || userMemoryStore == null)
             return;
 
-        // Extract groupIds from memory context
+        // Extract groupIds from conversation properties (injected by
+        // GroupConversationService)
         List<String> groupIds = List.of();
+        var props = memory.getConversationProperties();
+        if (props != null) {
+            Object groupIdProp = props.get("groupId");
+            if (groupIdProp instanceof Property p && p.getValueString() != null) {
+                groupIds = List.of(p.getValueString());
+            }
+        }
 
         var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config);
         tools.add(tool);
-        LOGGER.infof("[MEMORY] UserMemoryTool enabled for agent='%s', user='%s'", memory.getAgentId(), memory.getUserId());
+        LOGGER.infof("[MEMORY] UserMemoryTool enabled for agent='%s', user='%s', groups=%s", memory.getAgentId(), memory.getUserId(), groupIds);
     }
 
     // --- Httpcall auto-discovery from workflow ---

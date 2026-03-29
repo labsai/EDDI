@@ -947,6 +947,25 @@ New users can set up EDDI with `curl ... | bash` (Linux/macOS/WSL) or `iwr ... |
 
 **Edge cases handled:** Idempotent re-runs (preserves existing vault key), CTRL+C cleanup, piped stdin (`curl|bash` auto-generates key), disk space warning, input validation, macOS `wc -l` whitespace, Docker auto-install (Linux/Windows), macOS-compatible `sed` (no `grep -oP`).
 
+### Phase 11a: Persistent User Memory ✅
+
+Cross-conversation, agent-scoped fact retention with LLM tools, REST API, MCP management, and background consolidation.
+
+| Component | Key Files |
+|---|---|
+| **Data Model** | `UserMemoryEntry.java`, `Property.java` (Visibility enum) |
+| **Unified Store** | `IUserMemoryStore.java`, `MongoUserMemoryStore.java`, `PostgresUserMemoryStore.java` |
+| **Agent Config** | `AgentConfiguration.java` (UserMemoryConfig, Guardrails, DreamConfig) |
+| **LLM Tool** | `UserMemoryTool.java` (`@Vetoed`, 4 tools: remember/recall/search/forget) |
+| **REST API** | `IRestUserMemoryStore.java`, `RestUserMemoryStore.java` (9 endpoints + validation) |
+| **MCP Tools** | `McpMemoryTools.java` (8 tools, GDPR-compliant) |
+| **Dream** | `DreamService.java` (stale pruning, contradiction detection, Micrometer metrics) |
+| **Integration** | `AgentOrchestrator.java` (groupId extraction), `GroupConversationService.java` (groupId context) |
+| **Docs** | `docs/user-memory.md`, `docs/changelog.md`, `docs/SUMMARY.md` |
+| **Tests** | 45 new: `UserMemoryToolTest` (16), `DreamServiceTest` (9), `UserMemoryEntryTest` (22), `RestUserMemoryStoreTest` (15) |
+
+**Total tests:** 1406 (all pass). **Last commit:** Phase 11a code review fixes.
+
 ## Important Rules
 
 - All work on **`feature/version-6.0.0`** branch (never `main`)

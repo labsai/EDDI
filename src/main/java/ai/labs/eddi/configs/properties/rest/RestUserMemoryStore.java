@@ -89,6 +89,18 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
 
     @Override
     public Response upsertMemory(UserMemoryEntry entry) {
+        if (entry == null) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "Request body is required")).build();
+        }
+        if (entry.userId() == null || entry.userId().isBlank()) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "userId is required")).build();
+        }
+        if (entry.key() == null || entry.key().isBlank()) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "key is required")).build();
+        }
+        if (entry.key().length() > 255) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "key must not exceed 255 characters")).build();
+        }
         try {
             String id = userMemoryStore.upsert(entry);
             return Response.ok(Map.of("id", id)).build();

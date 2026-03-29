@@ -5,6 +5,7 @@
 - [Project Philosophy](project-philosophy.md)
 - [Conversation Memory & State Management](conversation-memory.md)
 - [Properties](properties.md)
+- [Persistent User Memory](user-memory.md)
 - [Getting started](getting-started.md)
 - [Developer Quickstart Guide](developer-quickstart.md)
 - [Putting It All Together](putting-it-all-together.md)

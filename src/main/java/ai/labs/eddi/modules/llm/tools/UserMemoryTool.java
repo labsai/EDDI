@@ -7,6 +7,7 @@ import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
+import jakarta.enterprise.inject.Vetoed;
 import org.jboss.logging.Logger;
 
 import java.util.List;
@@ -25,6 +26,7 @@ import java.util.stream.Collectors;
  * @author ginccc
  * @since 6.0.0
  */
+@Vetoed // Instantiated per-invocation by AgentOrchestrator — must NOT be a CDI bean
 public class UserMemoryTool {
 
     private static final Logger LOGGER = Logger.getLogger(UserMemoryTool.class);

@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import io.quarkiverse.mcp.server.Tool;
@@ -165,9 +166,7 @@ public class McpMemoryTools {
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         try {
-            var vis = visibility != null && !visibility.isBlank()
-                    ? ai.labs.eddi.configs.properties.model.Property.Visibility.valueOf(visibility.toLowerCase())
-                    : ai.labs.eddi.configs.properties.model.Property.Visibility.self;
+            var vis = visibility != null && !visibility.isBlank() ? Visibility.valueOf(visibility.toLowerCase()) : Visibility.self;
 
             var entry = UserMemoryEntry.fromToolCall(userId, agentId, null, List.of(), key, value, category, vis);
 

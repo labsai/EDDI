@@ -91,6 +91,7 @@ class DreamServiceTest {
     void process_shouldSkipContradictionDetectionWhenDisabled() throws Exception {
         dreamConfig.setPruneStaleAfterDays(0);
         dreamConfig.setDetectContradictions(false);
+        when(store.getAllEntries("user-1")).thenReturn(List.of());
 
         var result = dreamService.process("user-1", dreamConfig);
 
@@ -131,5 +132,41 @@ class DreamServiceTest {
 
         assertTrue(result.isSuccess());
         assertEquals(0, result.entriesSummarized(), "V1 summarization should always return 0");
+    }
+
+    @Test
+    void process_shouldLoadEntriesOnlyOnce() throws Exception {
+        Instant now = Instant.now();
+        var entries = List.of(
+                new UserMemoryEntry("1", "user-1", "fact1", "value1", "fact", Visibility.self, "agent-1", List.of(), "conv-1", false, 0, now, now));
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+
+        // Both pruning and contradiction detection enabled — entries should be loaded
+        // only once
+        dreamConfig.setPruneStaleAfterDays(30);
+        dreamConfig.setDetectContradictions(true);
+
+        dreamService.process("user-1", dreamConfig);
+
+        // getAllEntries should be called exactly once (shared across both operations)
+        verify(store, times(1)).getAllEntries("user-1");
+    }
+
+    @Test
+    void process_shouldReloadAfterPruning() throws Exception {
+        Instant stale = Instant.now().minus(Duration.ofDays(60));
+        var entries = List.of(new UserMemoryEntry("1", "user-1", "old_fact", "value1", "fact", Visibility.self, "agent-1", List.of(), "conv-1", false,
+                0, stale, stale));
+        when(store.getAllEntries("user-1")).thenReturn(entries).thenReturn(List.of());
+
+        dreamConfig.setPruneStaleAfterDays(30);
+        dreamConfig.setDetectContradictions(true);
+
+        var result = dreamService.process("user-1", dreamConfig);
+
+        assertTrue(result.isSuccess());
+        assertEquals(1, result.entriesPruned());
+        // After pruning, entries are reloaded for contradiction detection
+        verify(store, times(2)).getAllEntries("user-1");
     }
 }

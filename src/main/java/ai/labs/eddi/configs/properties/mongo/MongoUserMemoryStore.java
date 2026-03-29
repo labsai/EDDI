@@ -137,13 +137,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         RuntimeUtilities.checkNotNull(entry.key(), FIELD_KEY);
 
         Bson filter = buildUpsertFilter(entry);
-        Document setDoc = entryToDocument(entry);
         Instant now = Instant.now();
-        setDoc.put(FIELD_UPDATED_AT, now.toString());
-
-        Document setOnInsertDoc = new Document();
-        setOnInsertDoc.put(FIELD_CREATED_AT, now.toString());
-        setOnInsertDoc.put(FIELD_ACCESS_COUNT, 0);
 
         Bson update = Updates.combine(Updates.set(FIELD_VALUE, entry.value()), Updates.set(FIELD_CATEGORY, entry.category()),
                 Updates.set(FIELD_VISIBILITY, entry.visibility().name()), Updates.set(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()),

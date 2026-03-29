@@ -3,7 +3,6 @@ package ai.labs.eddi.engine.runtime.internal;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
-import ai.labs.eddi.datastore.IResourceStore;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -14,7 +13,9 @@ import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Background dream consolidation service for persistent user memories. Handles
@@ -30,7 +31,8 @@ import java.util.List;
  *
  * <p>
  * This service operates per-user and is invoked by the schedule system when an
- * agent has {@code dream.enabled=true} in its {@link UserMemoryConfig}.
+ * agent has {@code dream.enabled=true} in its
+ * {@link AgentConfiguration.UserMemoryConfig}.
  *
  * <p>
  * Cost ceiling: {@code maxCostPerRun} checked between batches. Round-robin:
@@ -85,14 +87,19 @@ public class DreamService {
         try {
             LOGGER.infof("[DREAM] Starting dream cycle for user='%s'", userId);
 
+            // Load entries once — shared across pruning and contradiction detection
+            List<UserMemoryEntry> allEntries = userMemoryStore.getAllEntries(userId);
+
             // 1. Prune stale entries (deterministic, zero LLM cost)
             if (dreamConfig.getPruneStaleAfterDays() > 0) {
-                pruned = pruneStaleEntries(userId, dreamConfig.getPruneStaleAfterDays());
+                pruned = pruneStaleEntries(userId, allEntries, dreamConfig.getPruneStaleAfterDays());
             }
 
             // 2. Detect contradictions (future: LLM-driven)
             if (dreamConfig.isDetectContradictions()) {
-                contradictions = detectContradictions(userId);
+                // Use remaining entries after pruning for contradiction detection
+                List<UserMemoryEntry> remainingEntries = pruned > 0 ? userMemoryStore.getAllEntries(userId) : allEntries;
+                contradictions = detectContradictions(userId, remainingEntries);
             }
 
             // 3. Summarize interactions (future: LLM-driven)
@@ -119,9 +126,8 @@ public class DreamService {
      * Remove entries that haven't been accessed in the specified number of days.
      * This is a deterministic operation with zero LLM cost.
      */
-    private int pruneStaleEntries(String userId, int staleAfterDays) throws IResourceStore.ResourceStoreException {
+    private int pruneStaleEntries(String userId, List<UserMemoryEntry> allEntries, int staleAfterDays) {
         Instant cutoff = Instant.now().minus(Duration.ofDays(staleAfterDays));
-        List<UserMemoryEntry> allEntries = userMemoryStore.getAllEntries(userId);
 
         int pruned = 0;
         for (UserMemoryEntry entry : allEntries) {
@@ -148,17 +154,14 @@ public class DreamService {
      * key, different values). V2 (future): LLM-driven semantic contradiction
      * detection.
      */
-    private int detectContradictions(String userId) throws IResourceStore.ResourceStoreException {
-        List<UserMemoryEntry> allEntries = userMemoryStore.getAllEntries(userId);
-
-        // V1: Find entries with the same key but different values
-        var keyValues = new java.util.HashMap<String, UserMemoryEntry>();
+    private int detectContradictions(String userId, List<UserMemoryEntry> allEntries) {
+        var keyValues = new HashMap<String, UserMemoryEntry>();
         int contradictions = 0;
 
         for (UserMemoryEntry entry : allEntries) {
             if (keyValues.containsKey(entry.key())) {
                 UserMemoryEntry existing = keyValues.get(entry.key());
-                if (!java.util.Objects.equals(existing.value(), entry.value())) {
+                if (!Objects.equals(existing.value(), entry.value())) {
                     contradictions++;
                     contradictionsFoundCounter.increment();
                     LOGGER.infof("[DREAM] Contradiction found for user='%s', key='%s': '%s' vs '%s'", userId, entry.key(), existing.value(),

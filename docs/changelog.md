@@ -73,9 +73,49 @@ Automated the Red Hat container certification process for EDDI v6. License gener
 
 **Required secrets for certification:** `REDHAT_API_TOKEN`, `REDHAT_CERT_PROJECT_ID`, `DOCKER_USERNAME`, `DOCKER_PASSWORD`, optionally `QUAY_USERNAME`, `QUAY_PASSWORD`.
 
-**Files:** 3 new, 6 modified, 1 new properties file.
+## Phase 11a: Persistent User Memory — Cross-Conversation Fact Retention (2026-03-29)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Full persistent user memory system enabling agents to remember facts, preferences, and context about users across conversations.
+
+| Component | Change |
+|---|---|
+| **Data Model** | `UserMemoryEntry` record with `Visibility` (self/group/global), timestamps, access counts. `Property.effectiveVisibility()` bridge method |
+| **Unified Store** | `IUserMemoryStore` interface with legacy property delegation. `MongoUserMemoryStore` (MongoDB `usermemories` collection) and `PostgresUserMemoryStore` (JSONB table with partial unique indexes) |
+| **Agent Config** | `UserMemoryConfig`, `Guardrails`, `DreamConfig` nested in `AgentConfiguration`. `builtInToolsWhitelist` entry `usermemory` |
+| **Conversation** | Memory loading/persistence in `Conversation.java` init/teardown. Scoped by userId + agentId + groupIds |
+| **LLM Tools** | `UserMemoryTool` — 4 `@Tool` methods (rememberFact, recallMemories, searchMemory, forgetFact). `@Vetoed` from CDI (instantiated per-invocation). Guardrails: key/value length, write-rate, category validation |
+| **Orchestrator** | `AgentOrchestrator.addUserMemoryToolIfEnabled()` — extracts groupId from conversation properties |
+| **Group Context** | `GroupConversationService` now injects `groupId` into context maps for memory visibility |
+| **REST API** | `RestUserMemoryStore` — 9 endpoints with input validation (userId/key required, 255-char key limit) |
+| **MCP Tools** | `McpMemoryTools` — 8 tools with role-based access. `delete_all_user_memories` requires CONFIRM |
+| **Dream Service** | Background consolidation: stale pruning, contradiction detection. Loads entries once per user. Micrometer metrics |
+| **Deprecation** | `IPropertiesStore` marked `@Deprecated` with Javadoc pointing to `IUserMemoryStore` |
+
+**Design decisions:**
+- Tool is `@Vetoed` from CDI — instantiated manually per-invocation with conversation context
+- Full plumbing through `IAgent`/`Agent`/`AgentStoreClientLibrary` (avoids runtime DB queries)
+- Dream service invoked by schedule system via `SERVICE` trigger type
+- REST upsert validates userId, key presence and key length for defense-in-depth
+- Partial unique PostgreSQL indexes for correct `ON CONFLICT` upsert behavior
+
+**Tests:** 45 new tests
+- `UserMemoryToolTest` (16) — all 4 tools, guardrails, error paths
+- `DreamServiceTest` (9) — pruning, contradictions, metrics, double-load prevention
+- `UserMemoryEntryTest` (22) — factory methods, normalizeCategory, effectiveVisibility
+- `RestUserMemoryStoreTest` (15) — all 9 endpoints, input validation, 404 handling
+- Updated `AgentOrchestratorTest`, `LlmTaskTest` for constructor changes
+
+**Documentation:** `docs/user-memory.md` (new), `SUMMARY.md` updated.
+
+**Files:** 12 new, 8 modified. All 1406 tests pass.
 
 ---
+
+
 
 ## LLM Structured Output Hardening — JSON Enforcement + Debuggability + Prometheus Fix (2026-03-28)
 

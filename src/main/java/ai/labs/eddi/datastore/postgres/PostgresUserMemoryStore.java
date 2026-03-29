@@ -55,6 +55,10 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                 ON usermemories (user_id, updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_um_user_category
                 ON usermemories (user_id, category);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_um_upsert_global
+                ON usermemories (user_id, key) WHERE visibility = 'global';
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_um_upsert_agent
+                ON usermemories (user_id, key, source_agent_id) WHERE visibility != 'global';
             """;
 
     private final DataSource dataSource;
