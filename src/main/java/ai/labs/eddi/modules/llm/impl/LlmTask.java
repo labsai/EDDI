@@ -85,6 +85,7 @@ public class LlmTask implements ILifecycleTask {
     private final StreamingLegacyChatExecutor streamingLegacyChatExecutor;
     private final AgentOrchestrator agentOrchestrator;
     private final RagContextProvider ragContextProvider;
+    private final TokenCounterFactory tokenCounterFactory;
 
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
@@ -101,7 +102,7 @@ public class LlmTask implements ILifecycleTask {
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             IApiCallExecutor apiCallExecutor, ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager,
             A2AToolProviderManager a2aToolProviderManager, IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
-            RagContextProvider ragContextProvider, IUserMemoryStore userMemoryStore) {
+            RagContextProvider ragContextProvider, IUserMemoryStore userMemoryStore, TokenCounterFactory tokenCounterFactory) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -117,6 +118,7 @@ public class LlmTask implements ILifecycleTask {
                 textSummarizerTool, pdfReaderTool, weatherTool, toolExecutionService, mcpToolProviderManager, a2aToolProviderManager, restAgentStore,
                 restWorkflowStore, resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter, userMemoryStore);
         this.ragContextProvider = ragContextProvider;
+        this.tokenCounterFactory = tokenCounterFactory;
         this.apiCallExecutor = apiCallExecutor;
         this.restAgentStore = restAgentStore;
         this.restWorkflowStore = restWorkflowStore;
@@ -228,10 +230,21 @@ public class LlmTask implements ILifecycleTask {
             }
         }
 
-        // Build conversation messages
-        List<ChatMessage> messages = conversationHistoryBuilder.buildMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), logSizeLimit,
-                includeFirstAgentMessage);
+        // Build conversation messages — token-aware or step-count
+        Integer maxContextTokens = task.getMaxContextTokens();
+        int anchorFirstSteps = task.getAnchorFirstSteps() != null ? task.getAnchorFirstSteps() : 2;
 
+        List<ChatMessage> messages;
+        if (maxContextTokens != null && maxContextTokens > 0) {
+            // Token-aware windowing (Strategy 1)
+            var estimator = tokenCounterFactory.getEstimator(task.getType(), processedParams.get("model"));
+            messages = conversationHistoryBuilder.buildTokenAwareMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), maxContextTokens,
+                    anchorFirstSteps, includeFirstAgentMessage, estimator);
+        } else {
+            // Legacy step-count windowing
+            messages = conversationHistoryBuilder.buildMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), logSizeLimit,
+                    includeFirstAgentMessage);
+        }
         if (messages.isEmpty()) {
             return;
         }

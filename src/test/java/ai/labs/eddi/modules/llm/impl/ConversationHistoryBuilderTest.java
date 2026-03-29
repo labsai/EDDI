@@ -204,4 +204,181 @@ class ConversationHistoryBuilderTest {
             assertTrue(messages.size() >= 2, "Should have at least 2 messages (2 user inputs)");
         }
     }
+
+    // ==================== Token-Aware Window Tests ====================
+
+    @Nested
+    @DisplayName("buildTokenAwareMessages")
+    class TokenAwareWindowTests {
+
+        private TokenCounterFactory.ApproximateTokenCountEstimator estimator;
+
+        @BeforeEach
+        void setUp() {
+            estimator = new TokenCounterFactory.ApproximateTokenCountEstimator();
+        }
+
+        @Test
+        @DisplayName("short conversation — everything fits, no windowing")
+        void shortConversation_everythingFits() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var outputs = new ArrayList<ConversationOutput>();
+            for (int i = 0; i < 3; i++) {
+                var output = new ConversationOutput();
+                output.put("input", "Message " + i);
+                outputs.add(output);
+            }
+            when(memory.getConversationOutputs()).thenReturn(outputs);
+
+            // Large budget — everything should fit
+            List<ChatMessage> messages = builder.buildTokenAwareMessages(memory, "System", null, 10000, 2, true, estimator);
+
+            // System + 3 user messages
+            assertEquals(4, messages.size());
+            assertInstanceOf(SystemMessage.class, messages.getFirst());
+            assertEquals("System", ((SystemMessage) messages.getFirst()).text());
+        }
+
+        @Test
+        @DisplayName("long conversation — token budget limits messages")
+        void longConversation_budgetLimits() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var outputs = new ArrayList<ConversationOutput>();
+            for (int i = 0; i < 50; i++) {
+                var output = new ConversationOutput();
+                output.put("input", "This is a somewhat longer message number " + i + " with extra text");
+                outputs.add(output);
+            }
+            when(memory.getConversationOutputs()).thenReturn(outputs);
+
+            // Small budget: ~200 tokens ≈ ~800 chars
+            List<ChatMessage> messages = builder.buildTokenAwareMessages(memory, "System", null, 200, 2, true, estimator);
+
+            // Should have system + anchored messages + gap marker + some recent messages
+            // Total should be less than if we included everything
+            assertTrue(messages.size() < 52, "Should not include all 50 messages");
+            assertTrue(messages.size() >= 4, "Should have at least system + 2 anchored + 1 recent");
+        }
+
+        @Test
+        @DisplayName("anchored steps always included even in long conversations")
+        void anchoredStepsAlwaysIncluded() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var outputs = new ArrayList<ConversationOutput>();
+            var output0 = new ConversationOutput();
+            output0.put("input", "ANCHOR_FIRST");
+            outputs.add(output0);
+            var output1 = new ConversationOutput();
+            output1.put("input", "ANCHOR_SECOND");
+            outputs.add(output1);
+
+            for (int i = 2; i < 30; i++) {
+                var output = new ConversationOutput();
+                output.put("input", "Middle message " + i + " with padding text to use tokens");
+                outputs.add(output);
+            }
+            when(memory.getConversationOutputs()).thenReturn(outputs);
+
+            // Budget small enough to require windowing
+            List<ChatMessage> messages = builder.buildTokenAwareMessages(memory, null, null, 100, 2, true, estimator);
+
+            // First two non-system messages should be the anchored ones
+            assertTrue(messages.size() >= 2, "Should have at least the anchored messages");
+
+            // Find the anchored messages by content
+            boolean foundFirst = messages.stream().filter(m -> m instanceof UserMessage)
+                    .anyMatch(m -> ((UserMessage) m).singleText().contains("ANCHOR_FIRST"));
+            boolean foundSecond = messages.stream().filter(m -> m instanceof UserMessage)
+                    .anyMatch(m -> ((UserMessage) m).singleText().contains("ANCHOR_SECOND"));
+
+            assertTrue(foundFirst, "First anchored message should always be present");
+            assertTrue(foundSecond, "Second anchored message should always be present");
+        }
+
+        @Test
+        @DisplayName("gap marker inserted between anchored and recent when turns are omitted")
+        void gapMarkerInserted() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var outputs = new ArrayList<ConversationOutput>();
+            for (int i = 0; i < 20; i++) {
+                var output = new ConversationOutput();
+                output.put("input", "Message number " + i + " with padding text to use token budget");
+                outputs.add(output);
+            }
+            when(memory.getConversationOutputs()).thenReturn(outputs);
+
+            // Budget small enough that not all 20 messages fit
+            List<ChatMessage> messages = builder.buildTokenAwareMessages(memory, null, null, 150, 2, true, estimator);
+
+            // Look for gap marker (a SystemMessage containing "omitted")
+            boolean hasGapMarker = messages.stream().filter(m -> m instanceof SystemMessage)
+                    .anyMatch(m -> ((SystemMessage) m).text().contains("omitted"));
+
+            assertTrue(hasGapMarker, "Gap marker should be present when turns are omitted");
+        }
+
+        @Test
+        @DisplayName("no gap marker when all messages fit within budget")
+        void noGapMarkerWhenAllFit() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var outputs = new ArrayList<ConversationOutput>();
+            for (int i = 0; i < 3; i++) {
+                var output = new ConversationOutput();
+                output.put("input", "Short " + i);
+                outputs.add(output);
+            }
+            when(memory.getConversationOutputs()).thenReturn(outputs);
+
+            List<ChatMessage> messages = builder.buildTokenAwareMessages(memory, "System", null, 10000, 2, true, estimator);
+
+            // No gap marker when everything fits
+            boolean hasGapMarker = messages.stream().filter(m -> m instanceof SystemMessage)
+                    .anyMatch(m -> ((SystemMessage) m).text().contains("omitted"));
+
+            assertFalse(hasGapMarker, "No gap marker when all messages fit");
+        }
+
+        @Test
+        @DisplayName("anchorFirstSteps=0 — no anchoring, just recent window")
+        void zeroAnchor_noAnchoring() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var outputs = new ArrayList<ConversationOutput>();
+            for (int i = 0; i < 20; i++) {
+                var output = new ConversationOutput();
+                output.put("input", "Message " + i + " with padding text to fill token budget up");
+                outputs.add(output);
+            }
+            when(memory.getConversationOutputs()).thenReturn(outputs);
+
+            // Zero anchoring — should only include recent messages
+            List<ChatMessage> messages = builder.buildTokenAwareMessages(memory, "System", null, 150, 0, true, estimator);
+
+            // Should have system + recent messages (no anchored first messages)
+            assertInstanceOf(SystemMessage.class, messages.getFirst());
+            assertTrue(messages.size() >= 2, "Should have at least system + some recent");
+            assertTrue(messages.size() < 22, "Should not include all messages");
+        }
+
+        @Test
+        @DisplayName("prompt replacement works in token-aware mode")
+        void promptReplacement() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var output = new ConversationOutput();
+            output.put("input", "Original user message");
+            when(memory.getConversationOutputs()).thenReturn(List.of(output));
+
+            List<ChatMessage> messages = builder.buildTokenAwareMessages(memory, "System", "Custom prompt", 10000, 0, true, estimator);
+
+            var lastMessage = messages.getLast();
+            assertInstanceOf(UserMessage.class, lastMessage);
+            assertTrue(((UserMessage) lastMessage).singleText().contains("Custom prompt"));
+        }
+    }
 }

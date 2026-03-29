@@ -135,6 +135,24 @@ public record LlmConfiguration(List<Task> tasks) {
          */
         private Integer conversationHistoryLimit = 10;
 
+        // === Conversation Window Management (Strategy 1: Token-Aware Window) ===
+
+        /**
+         * Maximum token budget for conversation history (excluding system prompt). When
+         * set (> 0), replaces step-count-based conversationHistoryLimit with
+         * token-aware packing. -1 = unlimited (use conversationHistoryLimit instead).
+         * Default: -1 (backward compatible — uses step count).
+         */
+        private Integer maxContextTokens = -1;
+
+        /**
+         * Number of opening conversation steps to always include regardless of window
+         * position. These steps typically contain the user's initial requirements and
+         * goals. 0 = no anchoring. Default: 2. Only applies when maxContextTokens is
+         * set (token-aware mode).
+         */
+        private Integer anchorFirstSteps = 2;
+
         // === RAG Configuration (Phase 8c) ===
 
         /**
@@ -362,6 +380,22 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setConversationHistoryLimit(Integer conversationHistoryLimit) {
             this.conversationHistoryLimit = conversationHistoryLimit;
+        }
+
+        public Integer getMaxContextTokens() {
+            return maxContextTokens;
+        }
+
+        public void setMaxContextTokens(Integer maxContextTokens) {
+            this.maxContextTokens = maxContextTokens;
+        }
+
+        public Integer getAnchorFirstSteps() {
+            return anchorFirstSteps;
+        }
+
+        public void setAnchorFirstSteps(Integer anchorFirstSteps) {
+            this.anchorFirstSteps = anchorFirstSteps;
         }
 
         public List<KnowledgeBaseReference> getKnowledgeBases() {

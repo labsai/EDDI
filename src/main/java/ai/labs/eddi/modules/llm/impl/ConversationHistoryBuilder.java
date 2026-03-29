@@ -4,6 +4,7 @@ import ai.labs.eddi.engine.memory.ConversationLogGenerator;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.ConversationLog;
 import dev.langchain4j.data.message.*;
+import dev.langchain4j.model.TokenCountEstimator;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
@@ -17,11 +18,19 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * <p>
  * Handles system message prepending, prompt replacement, log size limits, and
  * multi-modal content types (text, pdf, audio, video).
+ * <p>
+ * Supports two windowing modes:
+ * <ul>
+ * <li><strong>Step-count</strong> (legacy): include last N conversation steps
+ * verbatim</li>
+ * <li><strong>Token-aware</strong> (Strategy 1): pack messages into a token
+ * budget with anchored opening steps</li>
+ * </ul>
  */
 class ConversationHistoryBuilder {
 
     /**
-     * Build the full list of ChatMessages for an LLM call.
+     * Build the full list of ChatMessages for an LLM call (step-count mode).
      *
      * @param memory
      *            conversation memory to read history from
@@ -58,6 +67,131 @@ class ConversationHistoryBuilder {
         messages.addAll(chatMessages);
 
         return messages;
+    }
+
+    /**
+     * Build the full list of ChatMessages with token-aware windowing.
+     * <p>
+     * Algorithm:
+     * <ol>
+     * <li>Generate ALL conversation messages (no step-count limit)</li>
+     * <li>Reserve token budget for anchored steps (first N)</li>
+     * <li>Fill remaining budget from most recent steps backward</li>
+     * <li>If a gap exists between anchored and recent, insert a marker</li>
+     * <li>Assemble: system + anchored + gap marker + recent + current</li>
+     * </ol>
+     * <p>
+     * The gap marker text is:
+     * {@code [... turns X-Y omitted from context — the full conversation is
+     * preserved and can be recalled if needed ...]}
+     *
+     * @param memory
+     *            conversation memory to read history from
+     * @param systemMessage
+     *            system message (may be null/empty)
+     * @param prompt
+     *            optional prompt to replace last user message (may be null/empty)
+     * @param maxContextTokens
+     *            maximum token budget for conversation history (excluding system
+     *            prompt)
+     * @param anchorFirstSteps
+     *            number of opening conversation steps to always include
+     * @param includeFirstAgentMessage
+     *            whether to include the initial Agent greeting
+     * @param estimator
+     *            token count estimator to use for counting tokens
+     * @return ordered list of ChatMessages fitting within the token budget
+     */
+    List<ChatMessage> buildTokenAwareMessages(IConversationMemory memory, String systemMessage, String prompt, int maxContextTokens,
+            int anchorFirstSteps, boolean includeFirstAgentMessage, TokenCountEstimator estimator) {
+
+        // Generate ALL conversation messages (unlimited)
+        var allMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(-1, includeFirstAgentMessage).getMessages().stream()
+                .map(this::convertMessage).toList());
+
+        // If a custom prompt is defined, replace the last user input with it
+        if (!isNullOrEmpty(prompt)) {
+            if (!allMessages.isEmpty()) {
+                allMessages.removeLast();
+            }
+            allMessages.add(UserMessage.from(prompt));
+        }
+
+        // If conversation is short enough, try to fit everything
+        int totalTokens = estimateTokens(estimator, allMessages);
+        if (totalTokens <= maxContextTokens) {
+            // Everything fits — no windowing needed
+            var messages = new LinkedList<ChatMessage>();
+            if (!isNullOrEmpty(systemMessage)) {
+                messages.add(new SystemMessage(systemMessage));
+            }
+            messages.addAll(allMessages);
+            return messages;
+        }
+
+        // === Token-aware windowing with anchored opening ===
+
+        // Step 1: Reserve budget for anchored steps
+        int effectiveAnchor = Math.min(anchorFirstSteps, allMessages.size());
+        var anchoredMessages = new ArrayList<ChatMessage>();
+        int anchoredTokens = 0;
+
+        for (int i = 0; i < effectiveAnchor; i++) {
+            ChatMessage msg = allMessages.get(i);
+            int msgTokens = estimator.estimateTokenCountInMessage(msg);
+            anchoredTokens += msgTokens;
+            anchoredMessages.add(msg);
+        }
+
+        // Step 2: Fill remaining budget from most recent steps backward
+        int remainingBudget = maxContextTokens - anchoredTokens;
+        var recentMessages = new ArrayList<ChatMessage>();
+        int recentTokens = 0;
+        int recentStartIndex = allMessages.size(); // exclusive — will be decremented
+
+        for (int i = allMessages.size() - 1; i >= effectiveAnchor; i--) {
+            ChatMessage msg = allMessages.get(i);
+            int msgTokens = estimator.estimateTokenCountInMessage(msg);
+            if (recentTokens + msgTokens > remainingBudget) {
+                break; // budget exhausted
+            }
+            recentTokens += msgTokens;
+            recentMessages.addFirst(msg);
+            recentStartIndex = i;
+        }
+
+        // Step 3: Assemble result
+        var messages = new LinkedList<ChatMessage>();
+        if (!isNullOrEmpty(systemMessage)) {
+            messages.add(new SystemMessage(systemMessage));
+        }
+
+        messages.addAll(anchoredMessages);
+
+        // Insert gap marker if there are omitted turns between anchor and recent
+        if (recentStartIndex > effectiveAnchor) {
+            int omittedFrom = effectiveAnchor + 1; // 1-based for human readability
+            int omittedTo = recentStartIndex; // exclusive, so this is the last omitted
+            String gapMarker = String.format(
+                    "[... turns %d-%d omitted from context — the full conversation is preserved and can be recalled if needed ...]", omittedFrom,
+                    omittedTo);
+            messages.add(new SystemMessage(gapMarker));
+        }
+
+        messages.addAll(recentMessages);
+
+        return messages;
+    }
+
+    /**
+     * Estimate total token count for a list of messages.
+     */
+    private int estimateTokens(TokenCountEstimator estimator, List<ChatMessage> messages) {
+        int total = 0;
+        for (ChatMessage msg : messages) {
+            total += estimator.estimateTokenCountInMessage(msg);
+        }
+        return total;
     }
 
     /**

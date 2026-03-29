@@ -97,7 +97,7 @@ class LlmTaskTest {
                 languageModelApiConnectorBuilders, secretResolver, calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
                 textSummarizerTool, pdfReaderTool, weatherTool, apiCallExecutor, toolExecutionService, mock(McpToolProviderManager.class),
                 mock(A2AToolProviderManager.class), mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(RagContextProvider.class),
-                mock(IUserMemoryStore.class));
+                mock(IUserMemoryStore.class), mock(TokenCounterFactory.class));
     }
 
     static Stream<Arguments> provideParameters() {

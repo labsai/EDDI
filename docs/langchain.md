@@ -646,6 +646,70 @@ The Langchain task supports advanced pre-request and post-response processing fo
 - **responseObjectName**: Name for storing the full response object in memory
 - **responseMetadataObjectName**: Name for storing response metadata (token usage, finish reason) in memory
 
+## Conversation Window Management
+
+EDDI provides two modes for controlling how much conversation history is sent to the LLM:
+
+### Step-Count Window (Default)
+
+The default mode uses `conversationHistoryLimit` (or `logSizeLimit` parameter) to include the last N conversation steps. This is simple and backward compatible.
+
+### Token-Aware Window with Anchored Opening
+
+For production workloads where token costs matter, EDDI supports **token-budget windowing** that also **anchors the first N steps** to preserve the opening context.
+
+```
+[System prompt]
+[Turn 1: user's opening message]        ← anchored (always included)
+[Turn 1: agent's opening response]      ← anchored (always included)
+[... turns 3-40 omitted ...]            ← gap marker
+[Turn 41: user message]                 ← recent window (fills remaining budget)
+[Turn 42: agent response]               ← recent window
+[Turn 43: user message]                 ← current
+```
+
+#### Configuration
+
+| Parameter          | Type    | Description                                                                                    | Default |
+| ------------------ | ------- | ---------------------------------------------------------------------------------------------- | ------- |
+| `maxContextTokens` | int     | Maximum token budget for conversation history (excluding system prompt). -1 = use step count. | -1      |
+| `anchorFirstSteps` | int     | Number of opening conversation steps to always include regardless of window position.          | 2       |
+
+#### Example
+
+```json
+{
+  "tasks": [
+    {
+      "actions": ["*"],
+      "id": "costAwareAgent",
+      "type": "openai",
+      "parameters": {
+        "apiKey": "your-api-key",
+        "modelName": "gpt-4o",
+        "systemMessage": "You are a project planner."
+      },
+      "enableBuiltInTools": true,
+      "maxContextTokens": 4000,
+      "anchorFirstSteps": 2
+    }
+  ]
+}
+```
+
+This agent:
+- Uses at most **4000 tokens** of conversation history (excluding the system prompt)
+- **Always includes** the first 2 conversation steps (the user's initial requirements)
+- Fills the remaining budget with the most recent messages
+- Inserts a gap marker between anchored and recent messages when turns are omitted
+
+#### Token Counting
+
+- **OpenAI / Azure OpenAI**: Uses tiktoken-based tokenizer (accurate, model-specific)
+- **All other providers**: Uses an approximate tokenizer (characters ÷ 4)
+
+When `maxContextTokens` is -1 (default), the existing `conversationHistoryLimit` step-count behavior applies. **Full backward compatibility is guaranteed.**
+
 ---
 
 ## API Endpoints
