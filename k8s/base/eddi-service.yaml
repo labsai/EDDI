@@ -1,0 +1,19 @@
+# EDDI Service — exposes the API within the cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: eddi
+  labels:
+    app.kubernetes.io/name: eddi
+    app.kubernetes.io/component: server
+    app.kubernetes.io/part-of: eddi
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: eddi
+    app.kubernetes.io/component: server
+  ports:
+    - name: http
+      port: 7070
+      targetPort: http
+      protocol: TCP

@@ -1,0 +1,21 @@
+# EDDI — Base Kustomize configuration
+# Usage: kubectl apply -k k8s/base/
+#
+# This deploys EDDI only (no database).
+# For a complete stack, use one of the overlays:
+#   kubectl apply -k k8s/overlays/mongodb/
+#   kubectl apply -k k8s/overlays/postgres/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: eddi
+
+resources:
+  - namespace.yaml
+  - eddi-configmap.yaml
+  - eddi-secret.yaml
+  - eddi-deployment.yaml
+  - eddi-service.yaml
+
+commonAnnotations:
+  app.kubernetes.io/managed-by: kustomize
