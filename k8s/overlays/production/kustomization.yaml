@@ -1,0 +1,33 @@
+# Production hardening overlay
+# Applies: HPA, PDB, NetworkPolicy, and tighter resource limits
+#
+# ⚠️  This is a COMPONENT overlay — it does NOT include the base EDDI manifests.
+# You MUST apply it together with a database overlay.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: eddi
+
+resources:
+  - eddi-hpa.yaml
+  - eddi-pdb.yaml
+  - network-policy.yaml
+
+patches:
+  # Bump resource limits for production
+  - target:
+      kind: Deployment
+      name: eddi
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: "4"
+            memory: 2Gi
+      - op: replace
+        path: /spec/replicas
+        value: 2

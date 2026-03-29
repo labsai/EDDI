@@ -1,0 +1,71 @@
+# EDDI Manager UI Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eddi-manager
+  labels:
+    app.kubernetes.io/name: eddi-manager
+    app.kubernetes.io/component: ui
+    app.kubernetes.io/part-of: eddi
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: eddi-manager
+      app.kubernetes.io/component: ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: eddi-manager
+        app.kubernetes.io/component: ui
+        app.kubernetes.io/part-of: eddi
+    spec:
+      containers:
+        - name: manager
+          image: labsai/eddi-config-ui:latest
+          ports:
+            - containerPort: 7071
+              name: http
+          env:
+            - name: EDDI_API_URL
+              value: "http://eddi:7070"
+            - name: PORT
+              value: "7071"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+---
+# Manager Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: eddi-manager
+  labels:
+    app.kubernetes.io/name: eddi-manager
+    app.kubernetes.io/component: ui
+    app.kubernetes.io/part-of: eddi
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: eddi-manager
+    app.kubernetes.io/component: ui
+  ports:
+    - name: http
+      port: 7071
+      targetPort: http
