@@ -13,6 +13,39 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Red Hat v6 Container Certification Automation (2026-03-29)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Automated the Red Hat container certification process for EDDI v6. License generation, Docker compliance labels, and CI/CD preflight checks are now fully automated.
+
+| Component | Change |
+|---|---|
+| **pom.xml** | Added `license-maven-plugin` v2.7.1 in `license-gen` profile — generates `THIRD-PARTY.txt` and downloads license text files on demand (`mvn package -Plicense-gen`) |
+| **THIRD-PARTY.properties** | New file for manually specifying licenses of deps that don't declare them (e.g., Jinjava → Apache 2.0) |
+| **Dockerfile.jvm** | Added all Red Hat certification-required labels (`name`, `vendor`, `version`, `release`, `summary`, `description`) + OpenShift labels (`io.k8s.*`, `io.openshift.tags`). Version/release parameterized via `ARG` for CI injection |
+| **.dockerignore** | Added `!docs/*` allowlist |
+| **.gitignore** | Ignore auto-generated license files (`licenses/third-party/`, `licenses/licenses.xml`, `licenses/THIRD-PARTY.txt`) |
+| **redhat-certify.yml** | NEW workflow: manual-dispatch certification release — builds app with `-Plicense-gen`, builds Docker image with labels, pushes to registry (Docker Hub or Quay.io), runs preflight check, optionally submits to Red Hat Partner Connect |
+| **ci.yml** | Added `preflight-check` job on PRs — verifies Red Hat labels, `/licenses` directory, and runs preflight dry-run |
+| **docker-publish.yml** | Added `-Plicense-gen` and `--build-arg EDDI_VERSION`/`EDDI_RELEASE` for certification-compliant images |
+| **docs/redhat-openshift.md** | Complete rewrite: certification workflow, license automation, required secrets, preflight quality gate |
+| **README.md** | Added Red Hat OpenShift docs link + `-Plicense-gen` build command |
+
+**Design decisions:**
+- License plugin in Maven profile (`-Plicense-gen`) rather than default build — keeps dev builds fast
+- GNU.org URLs rewritten to SPDX mirrors (GNU returns 403 to automated downloads)
+- `errorRemedy=ignore` for remaining download failures — non-blocking
+- Preflight dry-run on PRs is a warning-only gate (some checks require a pushed image)
+
+**Required secrets for certification:** `REDHAT_API_TOKEN`, `REDHAT_CERT_PROJECT_ID`, `DOCKER_USERNAME`, `DOCKER_PASSWORD`, optionally `QUAY_USERNAME`, `QUAY_PASSWORD`.
+
+**Files:** 3 new, 6 modified, 1 new properties file.
+
+---
+
 ## LLM Structured Output Hardening — JSON Enforcement + Debuggability + Prometheus Fix (2026-03-28)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

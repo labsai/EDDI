@@ -30,7 +30,7 @@ jobs:
 
       - name: Build and package
         run: >
-          ./mvnw clean package -DskipTests -B
+          ./mvnw clean package -DskipTests -Plicense-gen -B
           -Dquarkus.container-image.build=true
           "-Dquarkus.container-image.additional-tags=6.0.0-b${{ github.run_number }},6.0.0,latest"
           "-Dquarkus.docker.build-args.EDDI_VERSION=6.0.0"

@@ -47,7 +47,7 @@ jobs:
         run: chmod +x mvnw
 
       - name: Build application (generates licenses automatically)
-        run: ./mvnw clean package -DskipTests -B
+        run: ./mvnw clean package -DskipTests -Plicense-gen -B
 
       - name: Verify licenses generated
         run: |

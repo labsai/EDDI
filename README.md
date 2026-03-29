@@ -121,6 +121,7 @@ Notable features include:
 - **[Developer Quickstart](docs/developer-quickstart.md)** - Build your first agent in 5 minutes
 - **[Architecture Overview](docs/architecture.md)** - Deep dive into EDDI's design and components
 - **[Kubernetes Deployment](docs/kubernetes.md)** - Deploy on Kubernetes with Kustomize or Helm
+- **[Red Hat OpenShift](docs/redhat-openshift.md)** - Red Hat certification, automated release & operator
 - **[Behavior Rules](docs/behavior-rules.md)** - Configuring agent logic
 - **[LangChain Integration](docs/langchain.md)** - Connecting to LLM APIs
 - **[LangChain Tools Guide](docs/agent-father-langchain-tools-guide.md)** - Built-in AI agent tools configuration
@@ -223,6 +224,12 @@ Or build without the container image (for use with `install.sh --local`):
 
 ```bash
 ./mvnw package -DskipTests
+```
+
+To generate third-party license files (required for Red Hat certification Docker builds):
+
+```bash
+./mvnw package -Plicense-gen -DskipTests
 ```
 
 ## Download from Docker hub registry

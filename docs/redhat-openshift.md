@@ -42,13 +42,21 @@ To trigger a certification release, go to **Actions → Red Hat Certification Re
 
 ### License Automation
 
-Licenses are automatically generated during every Maven build using the [MojoHaus license-maven-plugin](https://www.mojohaus.org/license-maven-plugin/):
+Licenses are generated on-demand using the [MojoHaus license-maven-plugin](https://www.mojohaus.org/license-maven-plugin/) via the `license-gen` Maven profile:
+
+```bash
+./mvnw package -Plicense-gen -DskipTests
+```
+
+This generates:
 
 - `licenses/THIRD-PARTY.txt` — Lists all runtime dependencies with their license names
 - `licenses/third-party/` — Downloaded license text files for each dependency
 - `licenses/licenses.xml` — Machine-readable license index
 
-These files are regenerated every build and are **not committed to git** — they're always fresh and accurate in the Docker image.
+The profile is **not activated during normal dev builds** to keep them fast. CI workflows (`redhat-certify.yml`, `ci.yml` preflight, `docker-publish.yml`) activate it automatically.
+
+These files are **not committed to git** — they're always fresh and accurate in the Docker image.
 
 ### Preflight Quality Gate
 

@@ -69,7 +69,7 @@ jobs:
         run: chmod +x mvnw
 
       - name: Build application
-        run: ./mvnw clean package -DskipTests -B
+        run: ./mvnw clean package -DskipTests -Plicense-gen -B
 
       - name: Build Docker image with Red Hat labels
         run: |
