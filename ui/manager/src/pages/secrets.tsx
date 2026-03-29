@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -13,6 +13,8 @@ import {
   X,
   Eye,
   EyeOff,
+  ChevronDown,
+  Bot,
 } from "lucide-react";
 import {
   useSecrets,
@@ -20,6 +22,8 @@ import {
   useDeleteSecret,
   useVaultHealth,
 } from "@/hooks/use-secrets";
+import { useAgentDescriptors } from "@/hooks/use-agents";
+import { parseResourceUri } from "@/lib/api/agents";
 import type { SecretMetadata } from "@/lib/api/secrets";
 
 const DEFAULT_TENANT = "default";
@@ -30,6 +34,16 @@ export function SecretsPage() {
   /* ─── Namespace state ─── */
   const [tenantId, setTenantId] = useState(DEFAULT_TENANT);
   const [agentId, setAgentId] = useState("");
+
+  /* ─── Agent descriptors for the selector ─── */
+  const { data: agentDescriptors } = useAgentDescriptors(100);
+  const agents = useMemo(() => {
+    if (!agentDescriptors) return [];
+    return agentDescriptors.map((d) => {
+      const { id } = parseResourceUri(d.resource);
+      return { id, name: d.name || id };
+    });
+  }, [agentDescriptors]);
 
   /* ─── Dialog state ─── */
   const [showCreate, setShowCreate] = useState(false);
@@ -178,18 +192,27 @@ export function SecretsPage() {
           />
         </div>
         <div className="flex flex-col gap-1.5">
-          <label htmlFor="secrets-agent-input" className="text-xs font-medium text-muted-foreground">
+          <label htmlFor="secrets-agent-select" className="text-xs font-medium text-muted-foreground">
             {t("secrets.agentId", "Agent ID")}
           </label>
-          <input
-            id="secrets-agent-input"
-            type="text"
-            value={agentId}
-            onChange={(e) => setAgentId(e.target.value)}
-            placeholder={t("secrets.agentIdPlaceholder", "Enter agent ID...")}
-            className="h-9 w-64 rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            data-testid="agent-id-input"
-          />
+          <div className="relative">
+            <select
+              id="secrets-agent-select"
+              value={agentId}
+              onChange={(e) => setAgentId(e.target.value)}
+              className="h-9 w-72 appearance-none rounded-lg border border-input bg-background pe-8 ps-9 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+              data-testid="agent-id-input"
+            >
+              <option value="">{t("secrets.selectAgent", "Select an agent…")}</option>
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} ({a.id})
+                </option>
+              ))}
+            </select>
+            <Bot className="pointer-events-none absolute inset-s-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <ChevronDown className="pointer-events-none absolute inset-e-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          </div>
         </div>
         <button
           onClick={() => refetch()}

@@ -360,14 +360,34 @@ export function ResourceDetailPage() {
 
   return (
     <div className="space-y-6">
-      {/* Back link */}
-      <BackLink
-        to={`/manage/resources/${type}`}
-        label={t("resources.backToList", {
-          type: typeName,
-          defaultValue: `Back to ${typeName}`,
-        })}
-      />
+      {/* Back link — context-aware: cascade context → back to workflow, otherwise → back to list */}
+      {(() => {
+        const pkgId = searchParams.get("pkgId");
+        const agId = searchParams.get("agentId");
+        const agVer = searchParams.get("agentVer");
+        if (pkgId) {
+          // Navigated from a workflow — go back to the workflow detail
+          const params = new URLSearchParams();
+          if (agId) params.set("agentId", agId);
+          if (agVer) params.set("agentVer", agVer);
+          const qs = params.toString();
+          return (
+            <BackLink
+              to={`/manage/workflowview/${pkgId}${qs ? `?${qs}` : ""}`}
+              label={t("resources.backToWorkflow", "Back to Workflow")}
+            />
+          );
+        }
+        return (
+          <BackLink
+            to={`/manage/resources/${type}`}
+            label={t("resources.backToList", {
+              type: typeName,
+              defaultValue: `Back to ${typeName}`,
+            })}
+          />
+        );
+      })()}
 
       {/* Header with actions */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

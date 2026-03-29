@@ -176,4 +176,49 @@ describe("AuditPage", () => {
       expect(screen.getByTestId("summary-strip")).toBeInTheDocument();
     });
   });
+
+  // ─── Hardening: new features ───────────────────────────────
+
+  it("renders recent entries button", () => {
+    renderAudit();
+    expect(screen.getByTestId("recent-entries-btn")).toBeInTheDocument();
+  });
+
+  it("renders export button (disabled when no results)", () => {
+    renderAudit();
+    const btn = screen.getByTestId("export-btn");
+    expect(btn).toBeInTheDocument();
+    expect(btn).toBeDisabled();
+  });
+
+  it("clicking Recent switches to conversation mode and triggers search", async () => {
+    renderAudit();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("recent-entries-btn"));
+    // After clicking recent, the search should fire (conversation-input should have 'recent')
+    const input = screen.getByTestId("conversation-input") as HTMLInputElement;
+    expect(input.value).toBe("recent");
+  });
+
+  it("shows auto-refresh toggle after search", async () => {
+    renderAudit();
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("conversation-input"), "conv1");
+    await user.click(screen.getByTestId("search-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("auto-refresh-toggle")).toBeInTheDocument();
+    });
+  });
+
+  it("export button becomes enabled after search returns results", async () => {
+    renderAudit();
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("conversation-input"), "conv1");
+    await user.click(screen.getByTestId("search-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("export-btn")).not.toBeDisabled();
+    });
+  });
 });

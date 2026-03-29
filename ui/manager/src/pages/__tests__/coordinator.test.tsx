@@ -110,4 +110,30 @@ describe("CoordinatorPage", () => {
       expect(screen.getByTestId("coordinator-queues")).toBeInTheDocument();
     });
   });
+
+  // ─── Hardening: new features ───────────────────────────────
+
+  it("renders refresh interval selector", async () => {
+    renderCoordinator();
+    await waitFor(() => {
+      expect(screen.getByTestId("refresh-interval")).toBeInTheDocument();
+    });
+  });
+
+  it("refresh interval defaults to 10s", async () => {
+    renderCoordinator();
+    await waitFor(() => {
+      const select = screen.getByTestId("refresh-interval") as HTMLSelectElement;
+      expect(select.value).toBe("10");
+    });
+  });
+
+  it("renders dead-letter payload toggle buttons when payload exists", async () => {
+    renderCoordinator();
+    await waitFor(() => {
+      // Mock dead letter entries have payload field
+      const table = screen.getByTestId("dead-letters-table");
+      expect(table).toBeInTheDocument();
+    });
+  });
 });

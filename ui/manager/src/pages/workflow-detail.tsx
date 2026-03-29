@@ -471,6 +471,21 @@ export function WorkflowDetailPage() {
 
 function BackLink() {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
+  const parentAgentId = searchParams.get("agentId");
+
+  if (parentAgentId) {
+    return (
+      <Link
+        to={`/manage/agentview/${parentAgentId}`}
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        {t("packageDetail.backToAgent", "Back to Agent")}
+      </Link>
+    );
+  }
+
   return (
     <Link
       to="/manage/workflows"

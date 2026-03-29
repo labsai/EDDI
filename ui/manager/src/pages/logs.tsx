@@ -12,6 +12,9 @@ import {
   History,
   Radio,
   Loader2,
+  Search,
+  Copy,
+  Download,
 } from "lucide-react";
 import { useLogStream, useHistoryLogs, useInstanceId } from "@/hooks/use-logs";
 import type { LogEntry } from "@/lib/api/logs";
@@ -182,6 +185,46 @@ function LiveTab() {
   const { entries, sseConnected, paused, setPaused, clearEntries } =
     useLogStream(filters);
   const { data: instanceInfo } = useInstanceId();
+  const [textSearch, setTextSearch] = useState("");
+
+  // Filter entries by text search
+  const filteredEntries = useMemo(() => {
+    if (!textSearch.trim()) return entries;
+    const q = textSearch.toLowerCase();
+    return entries.filter(
+      (e) =>
+        (e.message ?? "").toLowerCase().includes(q) ||
+        (e.loggerName ?? "").toLowerCase().includes(q)
+    );
+  }, [entries, textSearch]);
+
+  // Level stats
+  const levelStats = useMemo(() => {
+    const stats = { error: 0, warn: 0, info: 0, debug: 0 };
+    for (const e of entries) {
+      const lvl = (e.level ?? "").toUpperCase();
+      if (lvl === "ERROR" || lvl === "SEVERE" || lvl === "FATAL") stats.error++;
+      else if (lvl === "WARNING" || lvl === "WARN") stats.warn++;
+      else if (lvl === "INFO") stats.info++;
+      else stats.debug++;
+    }
+    return stats;
+  }, [entries]);
+
+  // Export logs
+  const handleExportLogs = useCallback(() => {
+    if (filteredEntries.length === 0) return;
+    const text = filteredEntries
+      .map((e) => `[${formatTimestamp(e.timestamp)}] [${e.level}] ${e.message}`)
+      .join("\n");
+    const blob = new Blob([text], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `logs-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [filteredEntries]);
 
   // Auto-scroll to top (newest first)
   useEffect(() => {
@@ -276,7 +319,53 @@ function LiveTab() {
           <Trash2 className="h-3.5 w-3.5" />
           {t("logs.clear", "Clear")}
         </button>
+
+        {/* Export */}
+        <button
+          onClick={handleExportLogs}
+          disabled={filteredEntries.length === 0}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+          data-testid="export-logs-btn"
+        >
+          <Download className="h-3.5 w-3.5" />
+          {t("logs.export", "Export")}
+        </button>
       </div>
+
+      {/* Level stats bar */}
+      {entries.length > 0 && (
+        <div className="mb-3 flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2" data-testid="level-stats">
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-400">
+            <span className="h-2 w-2 rounded-full bg-red-500" />
+            {levelStats.error} {t("logs.errors", "errors")}
+          </span>
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-400">
+            <span className="h-2 w-2 rounded-full bg-amber-500" />
+            {levelStats.warn} {t("logs.warnings", "warns")}
+          </span>
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-400">
+            <span className="h-2 w-2 rounded-full bg-blue-500" />
+            {levelStats.info} {t("logs.infos", "info")}
+          </span>
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-400">
+            <span className="h-2 w-2 rounded-full bg-gray-500" />
+            {levelStats.debug} {t("logs.debugs", "debug")}
+          </span>
+          <div className="flex-1" />
+          {/* Text search */}
+          <div className="relative">
+            <Search className="pointer-events-none absolute inset-s-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              value={textSearch}
+              onChange={(e) => setTextSearch(e.target.value)}
+              placeholder={t("logs.searchLogs", "Search logs…")}
+              className="h-7 w-48 rounded-md border border-input bg-background ps-7 pe-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              data-testid="text-search"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Log entries */}
       <div
@@ -296,7 +385,7 @@ function LiveTab() {
           </div>
         ) : (
           <div className="divide-y divide-border/50 font-mono text-xs">
-            {entries.map((entry, idx) => (
+            {filteredEntries.map((entry, idx) => (
               <LogRow key={`${entry.timestamp}-${idx}`} entry={entry} />
             ))}
           </div>
@@ -305,7 +394,9 @@ function LiveTab() {
 
       {/* Entry count */}
       <div className="mt-2 text-end text-xs text-muted-foreground">
-        {t("logs.entryCount", { count: entries.length, defaultValue: `${entries.length} entries` })}
+        {textSearch && filteredEntries.length !== entries.length
+          ? t("logs.filteredCount", { shown: filteredEntries.length, total: entries.length, defaultValue: `${filteredEntries.length} of ${entries.length} entries` })
+          : t("logs.entryCount", { count: entries.length, defaultValue: `${entries.length} entries` })}
       </div>
     </div>
   );
@@ -465,8 +556,13 @@ function LogRow({ entry }: { entry: LogEntry }) {
     : { main: entry.message, frames: "" };
   const frameCount = isStacktrace ? countFrames(frames) : 0;
 
+  const handleCopy = useCallback(() => {
+    const text = `[${formatTimestamp(entry.timestamp)}] [${entry.level}] ${entry.message}`;
+    navigator.clipboard.writeText(text);
+  }, [entry]);
+
   return (
-    <div className="px-3 py-2 hover:bg-muted/30 transition-colors">
+    <div className="group px-3 py-2 hover:bg-muted/30 transition-colors">
       <div className="flex items-start gap-3">
         <span className="shrink-0 text-muted-foreground">
           {formatTimestamp(entry.timestamp)}
@@ -485,6 +581,15 @@ function LogRow({ entry }: { entry: LogEntry }) {
         <span className="min-w-0 flex-1 break-all text-foreground">
           {main}
         </span>
+        {/* Copy button — visible on hover */}
+        <button
+          onClick={handleCopy}
+          className="shrink-0 opacity-0 group-hover:opacity-100 rounded p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+          title={t("logs.copyEntry", "Copy log entry")}
+          data-testid="copy-log-btn"
+        >
+          <Copy className="h-3 w-3" />
+        </button>
       </div>
       {/* Collapsible stacktrace */}
       {isStacktrace && (

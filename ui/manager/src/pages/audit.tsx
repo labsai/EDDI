@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ShieldCheck,
@@ -16,6 +16,9 @@ import {
   Hash,
   Loader2,
   Shield,
+  RefreshCw,
+  Download,
+  Activity,
 } from "lucide-react";
 import { useAuditTrail, useAuditTrailByAgent } from "@/hooks/use-audit";
 import type { AuditEntry } from "@/lib/api/audit";
@@ -258,6 +261,40 @@ export function AuditPage() {
     [handleSearch],
   );
 
+  // Auto-refresh
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const activeQueryFn = mode === "conversation" ? convQuery.refetch : agentQuery.refetch;
+  const autoRefreshRef = useRef(autoRefresh);
+  autoRefreshRef.current = autoRefresh;
+
+  useEffect(() => {
+    if (!autoRefresh || !hasSearched) return;
+    const id = setInterval(() => {
+      if (autoRefreshRef.current) activeQueryFn();
+    }, 10_000);
+    return () => clearInterval(id);
+  }, [autoRefresh, hasSearched, activeQueryFn]);
+
+  // Load recent entries (quick-start mode)
+  const handleLoadRecent = useCallback(() => {
+    setMode("conversation");
+    setConversationId("recent");
+    setSearchValue("recent");
+    setSkip(0);
+  }, []);
+
+  // Export to JSON
+  const handleExport = useCallback(() => {
+    if (!entries || entries.length === 0) return;
+    const blob = new Blob([JSON.stringify(entries, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `audit-${searchValue || searchAgentId || "export"}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [entries, searchValue, searchAgentId]);
+
   return (
     <div className="space-y-6" data-testid="audit-page">
       {/* Header */}
@@ -266,13 +303,34 @@ export function AuditPage() {
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
             <ShieldCheck className="h-5 w-5 text-primary" />
           </div>
-          <div>
+          <div className="flex-1">
             <h1 className="text-2xl font-bold text-foreground">
               {t("audit.title", "Audit Trail")}
             </h1>
             <p className="text-sm text-muted-foreground">
               {t("audit.description", "Browse the immutable audit ledger for compliance and debugging.")}
             </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {/* Recent entries quick-load */}
+            <button
+              onClick={handleLoadRecent}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+              data-testid="recent-entries-btn"
+            >
+              <Activity className="h-4 w-4" />
+              {t("audit.recent", "Recent")}
+            </button>
+            {/* Export */}
+            <button
+              onClick={handleExport}
+              disabled={!entries || entries.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+              data-testid="export-btn"
+            >
+              <Download className="h-4 w-4" />
+              {t("audit.export", "Export")}
+            </button>
           </div>
         </div>
       </div>
@@ -347,6 +405,22 @@ export function AuditPage() {
             <Search className="h-4 w-4" />
             {t("audit.search", "Search")}
           </button>
+          {/* Auto-refresh toggle */}
+          {hasSearched && (
+            <button
+              onClick={() => setAutoRefresh((p) => !p)}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                autoRefresh
+                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                  : "bg-foreground/5 text-muted-foreground hover:text-foreground"
+              }`}
+              title={t("audit.autoRefreshToggle", "Toggle auto-refresh (every 10s)")}
+              data-testid="auto-refresh-toggle"
+            >
+              <RefreshCw className={`h-4 w-4 ${autoRefresh ? "animate-spin" : ""}`} />
+              {autoRefresh ? t("audit.autoRefreshOn", "Auto") : t("audit.autoRefreshOff", "Auto")}
+            </button>
+          )}
         </div>
       </div>
 

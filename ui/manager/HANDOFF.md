@@ -1,8 +1,8 @@
 # EDDI Manager — Handoff Document
 
-> **Last updated**: 2026-03-28  
+> **Last updated**: 2026-03-29  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: `pending` fix(v6): Production readiness audit — 17 fixes across 3 repos
+> **Last commit**: `pending` feat(v6): Platform hardening — secrets UX, audit/logs/coordinator power features, debug drawer, context-aware nav
 
 ---
 
@@ -63,11 +63,12 @@
 | 8c-M | **RAG Knowledge Base Manager**: `RagEditor` (6-section form editor: General, Embedding Model with 7 providers + context-sensitive param hints, Vector Store tile selector with 5 stores + param cache, Chunking with visual preview, Retrieval Defaults with color-coded sliders, Document Ingestion with drag-drop + text/plain API + polling). IngestionPanel fixed: text/plain body + query params (version, documentName). ConfigEditorLayout `meta` extended with `version`. Embedding param cache on provider switch. KeyValueEditor duplicate-key guard. `ragstore` vite proxy. 11 locales cleaned (removed `isolation`). 19 RAG tests. | pending |
 | Audit | **Production Readiness Audit** — 17 fixes: LLM provider sync (7→11), Caffeine cache for EmbeddingModel+StoreFactory, N+1 deployment fix (Promise.allSettled), rag-editor unmount leak, ErrorBoundary (4 tests), RTL compliance (3 files), ApiClient per-request headers, type extraction (langchain/types.ts), AGENTS.md docs sync, permanent delete API, DEV-only console.log guards | pending |
 | 13d | **Onboarding Flow**: Multi-chapter interactive tour (Dashboard, Agents, Workflows, Chat, Resources). Welcome Modal (3-panel carousel, glassmorphism). Spotlight overlay (box-shadow cutout). Tour tooltip (smart placement, progress bar, keyboard nav). Per-chapter localStorage persistence. Sidebar Help menu (chapter list, completion badges, restart). Focus trap, body scroll lock, WCAG keyboard support. Zustand store, 18 tests, 60+ i18n keys across 11 locales. | pending |
+| Hard | **Platform Hardening**: Secrets vault agent selector dropdown. Audit page: auto-refresh, recent entries, JSON export. Logs page: level stats bar, inline text search, export, copy-to-clipboard. Coordinator: auto-refresh interval, throughput rate, error category breakdown, expandable dead-letter payloads. Debug drawer in side-panel chat. Context-aware back-navigation (resource→workflow→agent). MSW handler dedup. Vite proxy additions. 10 new tests (logs.test.tsx, audit/coordinator/secrets test extensions). | pending |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 405 pass (`npm run test`) — 40 files (40 passing)
+- **Unit/Component**: 422 pass (`npm run test`) — 41 files (41 passing)
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds

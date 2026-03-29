@@ -4,6 +4,7 @@ import { useChatDrawerStore, type ChatDrawerStep } from "@/hooks/use-chat-drawer
 import { useChatStore, useStartConversation, useSendMessage } from "@/hooks/use-chat";
 import { ChatMessage } from "./chat-message";
 import { StreamingToggle } from "./streaming-toggle";
+import { DebugDrawer as DebugPanel } from "@/components/debugger/debug-drawer";
 import { cn } from "@/lib/utils";
 import {
   Bot,
@@ -238,6 +239,14 @@ export function ChatDrawer() {
                 {/* Quick replies */}
                 <QuickRepliesBar />
 
+                {/* Debug drawer — same as main chat */}
+                {conversationId && (
+                  <DebugPanel
+                    conversationId={conversationId}
+                    agentId={agentId}
+                  />
+                )}
+
                 {/* Input */}
                 <DrawerChatInput
                   disabled={!conversationId}
@@ -264,6 +273,7 @@ function QuickRepliesBar() {
     <div className="flex flex-wrap gap-1.5 border-t border-border px-3 py-2 shrink-0">
       {quickReplies.map((reply, i) => (
         <button
+          type="button"
           key={`${reply}-${i}`}
           onClick={() => sendMessage.mutate({ message: reply })}
           className="rounded-full border border-primary/30 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/15"

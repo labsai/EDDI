@@ -270,6 +270,8 @@ export function useSendMessage() {
         timestamp: Date.now(),
       });
       state.setProcessing(true);
+      // Clear stale quick replies immediately so old buttons don't flash
+      state.setQuickReplies([]);
 
       // Clear input field state after send
       if (isSecret) {
@@ -286,17 +288,46 @@ export function useSendMessage() {
           isStreaming: true,
         });
 
+        // Use AbortController so we can abort the underlying fetch when
+        // the "done" event arrives.  The Vite dev-proxy (and some
+        // production proxies) may not forward the SSE connection-close
+        // signal, which means the for-await loop on the ReadableStream
+        // reader never terminates — the mutationFn never returns and
+        // TanStack Query blocks all subsequent .mutate() calls.
+        const abort = new AbortController();
+
         const events = sendMessageStreaming(
           "production",
           selectedAgentId,
           conversationId,
-          { input: message }
+          { input: message },
+          abort.signal,
         );
 
-        for await (const event of events) {
-          handleSSEEvent(event, store);
+        try {
+          for await (const event of events) {
+            const isDone = handleSSEEvent(event, store);
+            if (isDone) {
+              // Stream is logically complete — abort the fetch so the
+              // reader.read() promise resolves immediately and the
+              // mutation can finish.
+              abort.abort();
+              break;
+            }
+          }
+        } catch (e) {
+          // AbortError is expected when we abort after "done"
+          if (e instanceof DOMException && e.name === "AbortError") {
+            // expected — swallow
+          } else {
+            throw e;
+          }
         }
-        state.finishStreaming();
+        // Safety-net: if the stream ended without a done event
+        // (e.g. connection drop), finalize it here.
+        if (store.getState().isProcessing) {
+          store.getState().finishStreaming();
+        }
       } else {
         // --- Non-streaming path — pass context for secret input ---
         // Add a placeholder typing indicator while waiting for the response
@@ -361,26 +392,47 @@ export function useSendMessage() {
         state.setProcessing(false);
       }
     },
-    onError: () => {
-      store.getState().setProcessing(false);
+    onError: (error) => {
+      const state = store.getState();
+      // Surface the error as a visible agent message so it's not silently
+      // swallowed (the user would otherwise see processing start then stop
+      // with no feedback).
+      const errorMsg =
+        error && typeof error === "object" && "message" in error
+          ? String((error as { message: string }).message)
+          : String(error);
+      state.addMessage({
+        id: `agent-error-${Date.now()}`,
+        role: "agent",
+        content: `\n\n⚠️ Error: ${errorMsg}`,
+        timestamp: Date.now(),
+      });
+      state.setProcessing(false);
+      state.setQuickReplies([]);
     },
   });
 }
 
-function handleSSEEvent(event: SSEEvent, store: typeof useChatStore) {
+/**
+ * Process a single SSE event from the streaming response.
+ * Returns `true` when the stream is logically complete ("done" or "error")
+ * so the caller can break out of the for-await loop.
+ */
+function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
   const debug = useDebugStore.getState();
 
   switch (event.type) {
     case "token":
       store.getState().setThinking(false);
       store.getState().appendToLastAgentMessage(event.data);
-      break;
-    case "done":
-      store.getState().finishStreaming();
+      return false;
+    case "done": {
       // Finalize the debug turn so pipeline trace can display it
       debug.finalizeTurn();
       // Parse the snapshot from the done event to extract quickReplies
-      // and conversation state (for structured JSON output mode).
+      // BEFORE calling finishStreaming (which sets isProcessing=false)
+      // so that stale quick reply buttons never flash.
+      let newQuickReplies: string[] = [];
       if (event.data) {
         try {
           const snapshot = JSON.parse(event.data);
@@ -388,21 +440,23 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore) {
             const lastOutput = snapshot.conversationOutputs[
               snapshot.conversationOutputs.length - 1
             ];
-            const qr = extractQuickReplies(lastOutput);
-            store.getState().setQuickReplies(qr);
+            newQuickReplies = extractQuickReplies(lastOutput);
           }
         } catch {
           // Ignore parse errors — done event data may be empty
         }
       }
-      break;
+      store.getState().setQuickReplies(newQuickReplies);
+      store.getState().finishStreaming();
+      return true;
+    }
     case "error":
       store
         .getState()
         .appendToLastAgentMessage(`\n\n⚠️ Error: ${event.data}`);
       store.getState().finishStreaming();
       debug.finalizeTurn();
-      break;
+      return true;
     case "task_start": {
       store.getState().setThinking(true);
       // Parse event data for structured pipeline info
@@ -425,7 +479,7 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore) {
         index,
         timestamp: Date.now(),
       });
-      break;
+      return false;
     }
     case "task_complete": {
       store.getState().setThinking(false);
@@ -456,8 +510,10 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore) {
         confidence,
         timestamp: Date.now(),
       });
-      break;
+      return false;
     }
+    default:
+      return false;
   }
 }
 

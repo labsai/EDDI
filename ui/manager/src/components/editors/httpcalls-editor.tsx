@@ -14,6 +14,11 @@ import {
   Check,
   FileDown,
   ShieldAlert,
+  ArrowRightLeft,
+  FileOutput,
+  MessageCircle,
+  Timer,
+  Shield,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
 import {
@@ -24,41 +29,44 @@ import { isValidUrl } from "@/lib/utils";
 
 // ─── Types matching HttpCallsConfiguration backend model ─────────────────────
 
+export interface HttpCodeValidator {
+  runOnHttpCode?: number[];
+  skipOnHttpCode?: number[];
+}
+
 export interface PropertyInstruction {
   name?: string;
-  value?: string;
   valueString?: string;
-  scope?: string;
+  valueObject?: Record<string, unknown>;
+  valueList?: unknown[];
+  valueInt?: number;
+  valueFloat?: number;
+  valueBoolean?: boolean;
+  scope?: "step" | "conversation" | "longTerm" | "secret";
   fromObjectPath?: string;
+  toObjectPath?: string;
+  convertToObject?: boolean;
   override?: boolean;
-  httpCodeValidator?: { runOnHttpCode: number[] };
+  runOnValidationError?: boolean;
+  httpCodeValidator?: HttpCodeValidator;
 }
 
 export interface OutputBuildingInstruction {
-  action?: string;
-  valueString?: string;
-  httpCodeValidator?: { runOnHttpCode: number[] };
+  pathToTargetArray?: string;
+  iterationObjectName?: string;
+  templateFilterExpression?: string;
+  outputType?: string;
+  outputValue?: string;
+  httpCodeValidator?: HttpCodeValidator;
 }
 
 export interface QuickRepliesBuildingInstruction {
-  action?: string;
-  quickReplies?: Array<{
-    value: string;
-    expressions: string;
-  }>;
-  httpCodeValidator?: { runOnHttpCode: number[] };
-}
-
-export interface RetryInstruction {
-  maxRetries?: number;
-  exponentialBackoffDelayInMillis?: number;
-  retryOnHttpCodes?: number[];
-  responseValuePathMatchers?: Array<{
-    valuePath?: string;
-    contains?: string;
-    equals?: string;
-    trueIfNoMatch?: boolean;
-  }>;
+  pathToTargetArray?: string;
+  iterationObjectName?: string;
+  templateFilterExpression?: string;
+  quickReplyValue?: string;
+  quickReplyExpressions?: string;
+  httpCodeValidator?: HttpCodeValidator;
 }
 
 export interface HttpPreRequest {
@@ -71,7 +79,7 @@ export interface HttpPostResponse {
   propertyInstructions?: PropertyInstruction[];
   outputBuildInstructions?: OutputBuildingInstruction[];
   qrBuildInstructions?: QuickRepliesBuildingInstruction[];
-  retryHttpCallInstruction?: RetryInstruction;
+  retryApiCallInstruction?: unknown;
 }
 
 export interface HttpRequest {
@@ -295,6 +303,701 @@ function Section({
         {label}
       </button>
       {open && <div className="space-y-2">{children}</div>}
+    </div>
+  );
+}
+
+// ─── HttpCodeValidator editor ────────────────────────────────────────────────
+
+function HttpCodeValidatorEditor({
+  validator,
+  onChange,
+  readOnly,
+}: {
+  validator?: HttpCodeValidator;
+  onChange: (v: HttpCodeValidator | undefined) => void;
+  readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+  const [showValidator, setShowValidator] = useState(!!validator && (!!validator.runOnHttpCode?.length || !!validator.skipOnHttpCode?.length));
+
+  const runCodes = validator?.runOnHttpCode ?? [];
+  const skipCodes = validator?.skipOnHttpCode ?? [];
+
+  const parseCodeList = (raw: string): number[] =>
+    raw.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
+
+  if (!showValidator && !readOnly) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setShowValidator(true);
+          onChange({ runOnHttpCode: [], skipOnHttpCode: [] });
+        }}
+        className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <Shield className="h-2.5 w-2.5" />
+        {t("httpcallsEditor.addHttpCodeValidator", "Add HTTP Code Filter")}
+      </button>
+    );
+  }
+  if (!showValidator && readOnly) return null;
+
+  return (
+    <div className="rounded-md border border-border/50 bg-muted/30 p-2 space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+          <Shield className="h-2.5 w-2.5" />
+          {t("httpcallsEditor.httpCodeFilter", "HTTP Code Filter")}
+        </span>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={() => { setShowValidator(false); onChange(undefined); }}
+            className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="mb-0.5 block text-[10px] text-muted-foreground">
+            {t("httpcallsEditor.runOnCodes", "Run on codes")}
+          </label>
+          <input
+            type="text"
+            value={runCodes.join(", ")}
+            onChange={(e) => onChange({ ...validator, runOnHttpCode: parseCodeList(e.target.value) })}
+            readOnly={readOnly}
+            placeholder="200, 201"
+            className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        <div>
+          <label className="mb-0.5 block text-[10px] text-muted-foreground">
+            {t("httpcallsEditor.skipOnCodes", "Skip on codes")}
+          </label>
+          <input
+            type="text"
+            value={skipCodes.join(", ")}
+            onChange={(e) => onChange({ ...validator, skipOnHttpCode: parseCodeList(e.target.value) })}
+            readOnly={readOnly}
+            placeholder="400, 500"
+            className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── PropertyInstruction row editor ──────────────────────────────────────────
+
+const SCOPE_OPTIONS = ["step", "conversation", "longTerm", "secret"] as const;
+
+function PropertyInstructionRow({
+  instruction,
+  onChange,
+  onRemove,
+  readOnly,
+}: {
+  instruction: PropertyInstruction;
+  onChange: (i: PropertyInstruction) => void;
+  onRemove: () => void;
+  readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+  const [showAdvanced, setShowAdvanced] = useState(
+    !!instruction.fromObjectPath || !!instruction.toObjectPath ||
+    !!instruction.convertToObject || !!instruction.runOnValidationError
+  );
+
+  return (
+    <div className="rounded-lg border border-border/60 bg-card/50 p-2.5 space-y-2" data-testid="property-instruction-row">
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          value={instruction.name ?? ""}
+          onChange={(e) => onChange({ ...instruction, name: e.target.value })}
+          readOnly={readOnly}
+          placeholder={t("httpcallsEditor.propName", "Property name")}
+          className="h-7 w-32 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+        <span className="text-xs text-muted-foreground">=</span>
+        <input
+          type="text"
+          value={instruction.valueString ?? ""}
+          onChange={(e) => onChange({ ...instruction, valueString: e.target.value })}
+          readOnly={readOnly}
+          placeholder={t("httpcallsEditor.propValue", "Value or template")}
+          className="h-7 flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+        <select
+          value={instruction.scope ?? "conversation"}
+          onChange={(e) => onChange({ ...instruction, scope: e.target.value as PropertyInstruction["scope"] })}
+          disabled={readOnly}
+          className="h-7 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+        >
+          {SCOPE_OPTIONS.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+        <label className="inline-flex items-center gap-1 text-[10px] text-foreground whitespace-nowrap" title={t("httpcallsEditor.overrideTitle", "Override existing value")}>
+          <input
+            type="checkbox"
+            checked={instruction.override ?? true}
+            onChange={(e) => onChange({ ...instruction, override: e.target.checked })}
+            disabled={readOnly}
+            className="h-3 w-3 accent-primary"
+          />
+          {t("httpcallsEditor.override", "Override")}
+        </label>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+
+      {/* Advanced toggle */}
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          className="text-[10px] text-muted-foreground hover:text-foreground transition-colors flex items-center gap-0.5"
+        >
+          {showAdvanced ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
+          {t("httpcallsEditor.advancedMapping", "Object Path Mapping")}
+        </button>
+        {showAdvanced && (
+          <div className="mt-1.5 space-y-1.5 ps-3">
+            <div className="grid grid-cols-2 gap-1.5">
+              <div>
+                <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                  {t("httpcallsEditor.fromPath", "From Object Path")}
+                </label>
+                <input
+                  type="text"
+                  value={instruction.fromObjectPath ?? ""}
+                  onChange={(e) => onChange({ ...instruction, fromObjectPath: e.target.value })}
+                  readOnly={readOnly}
+                  placeholder="response.data.items"
+                  className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                  {t("httpcallsEditor.toPath", "To Object Path")}
+                </label>
+                <input
+                  type="text"
+                  value={instruction.toObjectPath ?? ""}
+                  onChange={(e) => onChange({ ...instruction, toObjectPath: e.target.value })}
+                  readOnly={readOnly}
+                  placeholder="properties.result"
+                  className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <label className="inline-flex items-center gap-1 text-[10px] text-foreground">
+                <input
+                  type="checkbox"
+                  checked={instruction.convertToObject ?? false}
+                  onChange={(e) => onChange({ ...instruction, convertToObject: e.target.checked })}
+                  disabled={readOnly}
+                  className="h-3 w-3 accent-primary"
+                />
+                {t("httpcallsEditor.convertToObject", "Convert to Object")}
+              </label>
+              <label className="inline-flex items-center gap-1 text-[10px] text-foreground">
+                <input
+                  type="checkbox"
+                  checked={instruction.runOnValidationError ?? false}
+                  onChange={(e) => onChange({ ...instruction, runOnValidationError: e.target.checked })}
+                  disabled={readOnly}
+                  className="h-3 w-3 accent-primary"
+                />
+                {t("httpcallsEditor.runOnValidationError", "Run on Validation Error")}
+              </label>
+            </div>
+            <HttpCodeValidatorEditor
+              validator={instruction.httpCodeValidator}
+              onChange={(v) => onChange({ ...instruction, httpCodeValidator: v })}
+              readOnly={readOnly}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── PropertyInstructions list editor ────────────────────────────────────────
+
+function PropertyInstructionsEditor({
+  instructions,
+  onChange,
+  readOnly,
+}: {
+  instructions: PropertyInstruction[];
+  onChange: (list: PropertyInstruction[]) => void;
+  readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="space-y-1.5">
+      {instructions.length === 0 && (
+        <p className="text-[10px] italic text-muted-foreground">
+          {t("httpcallsEditor.noPropertyInstructions", "No property instructions")}
+        </p>
+      )}
+      {instructions.map((inst, i) => (
+        <PropertyInstructionRow
+          key={i}
+          instruction={inst}
+          onChange={(updated) => {
+            const list = [...instructions];
+            list[i] = updated;
+            onChange(list);
+          }}
+          onRemove={() => onChange(instructions.filter((_, j) => j !== i))}
+          readOnly={readOnly}
+        />
+      ))}
+      {!readOnly && (
+        <button
+          type="button"
+          onClick={() => onChange([...instructions, { name: "", valueString: "", scope: "conversation", override: true }])}
+          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Plus className="h-3 w-3" />
+          {t("httpcallsEditor.addPropertyInstruction", "Add Property Instruction")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── OutputBuildingInstruction row editor ────────────────────────────────────
+
+const OUTPUT_TYPES = ["text", "image", "other"] as const;
+
+function OutputBuildInstructionRow({
+  instruction,
+  onChange,
+  onRemove,
+  readOnly,
+}: {
+  instruction: OutputBuildingInstruction;
+  onChange: (i: OutputBuildingInstruction) => void;
+  onRemove: () => void;
+  readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="rounded-lg border border-border/60 bg-card/50 p-2.5 space-y-2" data-testid="output-build-instruction-row">
+      <div className="flex items-center gap-1.5">
+        <div className="flex-1 grid grid-cols-3 gap-1.5">
+          <div>
+            <label className="mb-0.5 block text-[10px] text-muted-foreground">
+              {t("httpcallsEditor.pathToTargetArray", "Path to Target Array")}
+            </label>
+            <input
+              type="text"
+              value={instruction.pathToTargetArray ?? ""}
+              onChange={(e) => onChange({ ...instruction, pathToTargetArray: e.target.value })}
+              readOnly={readOnly}
+              placeholder="aiOutput.outputs"
+              className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+          <div>
+            <label className="mb-0.5 block text-[10px] text-muted-foreground">
+              {t("httpcallsEditor.iterationObjName", "Iteration Object")}
+            </label>
+            <input
+              type="text"
+              value={instruction.iterationObjectName ?? "obj"}
+              onChange={(e) => onChange({ ...instruction, iterationObjectName: e.target.value })}
+              readOnly={readOnly}
+              placeholder="obj"
+              className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+          <div>
+            <label className="mb-0.5 block text-[10px] text-muted-foreground">
+              {t("httpcallsEditor.templateFilter", "Filter Expression")}
+            </label>
+            <input
+              type="text"
+              value={instruction.templateFilterExpression ?? ""}
+              onChange={(e) => onChange({ ...instruction, templateFilterExpression: e.target.value })}
+              readOnly={readOnly}
+              placeholder={t("httpcallsEditor.filterPlaceholder", "Optional filter...")}
+              className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+        </div>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="mt-3 rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+      <div className="grid grid-cols-3 gap-1.5">
+        <div>
+          <label className="mb-0.5 block text-[10px] text-muted-foreground">
+            {t("httpcallsEditor.outputType", "Output Type")}
+          </label>
+          <select
+            value={instruction.outputType ?? "text"}
+            onChange={(e) => onChange({ ...instruction, outputType: e.target.value })}
+            disabled={readOnly}
+            className="h-6 w-full rounded border border-input bg-background px-1 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+          >
+            {OUTPUT_TYPES.map((ot) => (
+              <option key={ot} value={ot}>{ot}</option>
+            ))}
+          </select>
+        </div>
+        <div className="col-span-2">
+          <label className="mb-0.5 block text-[10px] text-muted-foreground">
+            {t("httpcallsEditor.outputValue", "Output Value")}
+          </label>
+          <input
+            type="text"
+            value={instruction.outputValue ?? ""}
+            onChange={(e) => onChange({ ...instruction, outputValue: e.target.value })}
+            readOnly={readOnly}
+            placeholder="{aiOutput.htmlResponseText}"
+            className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+      </div>
+      <HttpCodeValidatorEditor
+        validator={instruction.httpCodeValidator}
+        onChange={(v) => onChange({ ...instruction, httpCodeValidator: v })}
+        readOnly={readOnly}
+      />
+    </div>
+  );
+}
+
+// ─── OutputBuildInstructions list editor ─────────────────────────────────────
+
+function OutputBuildInstructionsEditor({
+  instructions,
+  onChange,
+  readOnly,
+}: {
+  instructions: OutputBuildingInstruction[];
+  onChange: (list: OutputBuildingInstruction[]) => void;
+  readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="space-y-1.5">
+      {instructions.length === 0 && (
+        <p className="text-[10px] italic text-muted-foreground">
+          {t("httpcallsEditor.noOutputInstructions", "No output build instructions")}
+        </p>
+      )}
+      {instructions.map((inst, i) => (
+        <OutputBuildInstructionRow
+          key={i}
+          instruction={inst}
+          onChange={(updated) => {
+            const list = [...instructions];
+            list[i] = updated;
+            onChange(list);
+          }}
+          onRemove={() => onChange(instructions.filter((_, j) => j !== i))}
+          readOnly={readOnly}
+        />
+      ))}
+      {!readOnly && (
+        <button
+          type="button"
+          onClick={() => onChange([...instructions, { iterationObjectName: "obj", outputType: "text", outputValue: "", httpCodeValidator: {} }])}
+          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Plus className="h-3 w-3" />
+          {t("httpcallsEditor.addOutputInstruction", "Add Output Instruction")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── QuickRepliesBuildingInstruction row editor ──────────────────────────────
+
+function QrBuildInstructionRow({
+  instruction,
+  onChange,
+  onRemove,
+  readOnly,
+}: {
+  instruction: QuickRepliesBuildingInstruction;
+  onChange: (i: QuickRepliesBuildingInstruction) => void;
+  onRemove: () => void;
+  readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="rounded-lg border border-border/60 bg-card/50 p-2.5 space-y-2" data-testid="qr-build-instruction-row">
+      <div className="flex items-center gap-1.5">
+        <div className="flex-1 grid grid-cols-3 gap-1.5">
+          <div>
+            <label className="mb-0.5 block text-[10px] text-muted-foreground">
+              {t("httpcallsEditor.pathToTargetArray", "Path to Target Array")}
+            </label>
+            <input
+              type="text"
+              value={instruction.pathToTargetArray ?? ""}
+              onChange={(e) => onChange({ ...instruction, pathToTargetArray: e.target.value })}
+              readOnly={readOnly}
+              placeholder="aiOutput.quickReplies"
+              className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+          <div>
+            <label className="mb-0.5 block text-[10px] text-muted-foreground">
+              {t("httpcallsEditor.iterationObjName", "Iteration Object")}
+            </label>
+            <input
+              type="text"
+              value={instruction.iterationObjectName ?? "obj"}
+              onChange={(e) => onChange({ ...instruction, iterationObjectName: e.target.value })}
+              readOnly={readOnly}
+              placeholder="obj"
+              className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+          <div>
+            <label className="mb-0.5 block text-[10px] text-muted-foreground">
+              {t("httpcallsEditor.templateFilter", "Filter Expression")}
+            </label>
+            <input
+              type="text"
+              value={instruction.templateFilterExpression ?? ""}
+              onChange={(e) => onChange({ ...instruction, templateFilterExpression: e.target.value })}
+              readOnly={readOnly}
+              placeholder={t("httpcallsEditor.filterPlaceholder", "Optional filter...")}
+              className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+        </div>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="mt-3 rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        <div>
+          <label className="mb-0.5 block text-[10px] text-muted-foreground">
+            {t("httpcallsEditor.qrValue", "Quick Reply Value")}
+          </label>
+          <input
+            type="text"
+            value={instruction.quickReplyValue ?? ""}
+            onChange={(e) => onChange({ ...instruction, quickReplyValue: e.target.value })}
+            readOnly={readOnly}
+            placeholder="{obj.value}"
+            className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        <div>
+          <label className="mb-0.5 block text-[10px] text-muted-foreground">
+            {t("httpcallsEditor.qrExpressions", "Quick Reply Expressions")}
+          </label>
+          <input
+            type="text"
+            value={instruction.quickReplyExpressions ?? ""}
+            onChange={(e) => onChange({ ...instruction, quickReplyExpressions: e.target.value })}
+            readOnly={readOnly}
+            placeholder="{obj.expressions}"
+            className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+      </div>
+      <HttpCodeValidatorEditor
+        validator={instruction.httpCodeValidator}
+        onChange={(v) => onChange({ ...instruction, httpCodeValidator: v })}
+        readOnly={readOnly}
+      />
+    </div>
+  );
+}
+
+// ─── QuickRepliesBuildInstructions list editor ───────────────────────────────
+
+function QrBuildInstructionsEditor({
+  instructions,
+  onChange,
+  readOnly,
+}: {
+  instructions: QuickRepliesBuildingInstruction[];
+  onChange: (list: QuickRepliesBuildingInstruction[]) => void;
+  readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="space-y-1.5">
+      {instructions.length === 0 && (
+        <p className="text-[10px] italic text-muted-foreground">
+          {t("httpcallsEditor.noQrInstructions", "No quick reply build instructions")}
+        </p>
+      )}
+      {instructions.map((inst, i) => (
+        <QrBuildInstructionRow
+          key={i}
+          instruction={inst}
+          onChange={(updated) => {
+            const list = [...instructions];
+            list[i] = updated;
+            onChange(list);
+          }}
+          onRemove={() => onChange(instructions.filter((_, j) => j !== i))}
+          readOnly={readOnly}
+        />
+      ))}
+      {!readOnly && (
+        <button
+          type="button"
+          onClick={() => onChange([...instructions, { pathToTargetArray: "", iterationObjectName: "obj", quickReplyValue: "", quickReplyExpressions: "", httpCodeValidator: {} }])}
+          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Plus className="h-3 w-3" />
+          {t("httpcallsEditor.addQrInstruction", "Add Quick Reply Instruction")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── PreRequest editor ───────────────────────────────────────────────────────
+
+function PreRequestEditor({
+  preRequest,
+  onChange,
+  readOnly,
+}: {
+  preRequest?: HttpPreRequest;
+  onChange: (pr: HttpPreRequest | undefined) => void;
+  readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+  const data = preRequest ?? { propertyInstructions: [] };
+
+  return (
+    <div className="space-y-3">
+      {/* Delay */}
+      <div className="flex items-center gap-2">
+        <Timer className="h-3.5 w-3.5 text-muted-foreground" />
+        <label className="text-xs text-muted-foreground whitespace-nowrap">
+          {t("httpcallsEditor.delayMs", "Delay (ms)")}
+        </label>
+        <input
+          type="number"
+          value={data.delayBeforeExecutingInMillis ?? 0}
+          onChange={(e) => onChange({ ...data, delayBeforeExecutingInMillis: parseInt(e.target.value, 10) || 0 })}
+          readOnly={readOnly}
+          min={0}
+          className="h-7 w-24 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+      </div>
+
+      {/* Property Instructions */}
+      <div>
+        <h6 className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <ArrowRightLeft className="h-3 w-3" />
+          {t("httpcallsEditor.propertyInstructions", "Property Instructions")}
+        </h6>
+        <PropertyInstructionsEditor
+          instructions={data.propertyInstructions ?? []}
+          onChange={(list) => onChange({ ...data, propertyInstructions: list })}
+          readOnly={readOnly}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ─── PostResponse editor ─────────────────────────────────────────────────────
+
+function PostResponseEditor({
+  postResponse,
+  onChange,
+  readOnly,
+}: {
+  postResponse?: HttpPostResponse;
+  onChange: (pr: HttpPostResponse | undefined) => void;
+  readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+  const data = postResponse ?? { propertyInstructions: [], outputBuildInstructions: [], qrBuildInstructions: [] };
+
+  return (
+    <div className="space-y-4">
+      {/* Property Instructions */}
+      <div>
+        <h6 className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <ArrowRightLeft className="h-3 w-3" />
+          {t("httpcallsEditor.propertyInstructions", "Property Instructions")}
+        </h6>
+        <PropertyInstructionsEditor
+          instructions={data.propertyInstructions ?? []}
+          onChange={(list) => onChange({ ...data, propertyInstructions: list })}
+          readOnly={readOnly}
+        />
+      </div>
+
+      {/* Output Build Instructions */}
+      <div>
+        <h6 className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <FileOutput className="h-3 w-3" />
+          {t("httpcallsEditor.outputBuildInstructions", "Output Build Instructions")}
+        </h6>
+        <OutputBuildInstructionsEditor
+          instructions={data.outputBuildInstructions ?? []}
+          onChange={(list) => onChange({ ...data, outputBuildInstructions: list })}
+          readOnly={readOnly}
+        />
+      </div>
+
+      {/* Quick Reply Build Instructions */}
+      <div>
+        <h6 className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <MessageCircle className="h-3 w-3" />
+          {t("httpcallsEditor.qrBuildInstructions", "Quick Reply Build Instructions")}
+        </h6>
+        <QrBuildInstructionsEditor
+          instructions={data.qrBuildInstructions ?? []}
+          onChange={(list) => onChange({ ...data, qrBuildInstructions: list })}
+          readOnly={readOnly}
+        />
+      </div>
     </div>
   );
 }
@@ -623,37 +1326,35 @@ function HttpCallEditor({
             </div>
           </Section>
 
-          {/* Pre/Post Instructions (shown as JSON for now) */}
-          {(call.preRequest || call.postResponse) && (
-            <Section
-              label={t(
-                "httpcallsEditor.prePostInstructions",
-                "Pre/Post Instructions"
-              )}
-              defaultOpen={false}
-            >
-              {call.preRequest && (
-                <div>
-                  <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {t("httpcallsEditor.preRequest", "Pre-Request")}
-                  </span>
-                  <pre className="max-h-32 overflow-auto rounded bg-muted p-2 text-[10px] text-foreground">
-                    {JSON.stringify(call.preRequest, null, 2)}
-                  </pre>
-                </div>
-              )}
-              {call.postResponse && (
-                <div>
-                  <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {t("httpcallsEditor.postResponse", "Post-Response")}
-                  </span>
-                  <pre className="max-h-32 overflow-auto rounded bg-muted p-2 text-[10px] text-foreground">
-                    {JSON.stringify(call.postResponse, null, 2)}
-                  </pre>
-                </div>
-              )}
-            </Section>
-          )}
+          {/* Pre-Request */}
+          <Section
+            label={t("httpcallsEditor.preRequest", "Pre-Request")}
+            defaultOpen={
+              !!(call.preRequest?.propertyInstructions?.length || call.preRequest?.delayBeforeExecutingInMillis)
+            }
+          >
+            <PreRequestEditor
+              preRequest={call.preRequest}
+              onChange={(pr) => onChange({ ...call, preRequest: pr })}
+              readOnly={readOnly}
+            />
+          </Section>
+
+          {/* Post-Response */}
+          <Section
+            label={t("httpcallsEditor.postResponse", "Post-Response")}
+            defaultOpen={
+              !!(call.postResponse?.propertyInstructions?.length ||
+                call.postResponse?.outputBuildInstructions?.length ||
+                call.postResponse?.qrBuildInstructions?.length)
+            }
+          >
+            <PostResponseEditor
+              postResponse={call.postResponse}
+              onChange={(pr) => onChange({ ...call, postResponse: pr })}
+              readOnly={readOnly}
+            />
+          </Section>
         </div>
       )}
     </div>

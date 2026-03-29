@@ -26,6 +26,16 @@ function renderSecrets() {
   );
 }
 
+/** Select an agent from the dropdown (now a <select> instead of text input) */
+async function selectAgent(user: ReturnType<typeof userEvent.setup>, agentId = "agent1") {
+  // Wait for agent descriptors to load into the <select>
+  const select = screen.getByTestId("agent-id-input");
+  await waitFor(() => {
+    expect(select.querySelectorAll("option").length).toBeGreaterThan(1);
+  });
+  await user.selectOptions(select, agentId);
+}
+
 describe("SecretsPage", () => {
   it("renders the page title and description", () => {
     renderSecrets();
@@ -59,17 +69,17 @@ describe("SecretsPage", () => {
     expect(btn).toBeDisabled();
   });
 
-  it("enables Add Secret button after entering agent ID", async () => {
+  it("enables Add Secret button after selecting agent", async () => {
     renderSecrets();
     const user = userEvent.setup();
-    await user.type(screen.getByTestId("agent-id-input"), "agent1");
+    await selectAgent(user);
     expect(screen.getByTestId("create-secret-button")).not.toBeDisabled();
   });
 
-  it("loads and displays secrets after entering agent ID and clicking refresh", async () => {
+  it("loads and displays secrets after selecting agent and clicking refresh", async () => {
     renderSecrets();
     const user = userEvent.setup();
-    await user.type(screen.getByTestId("agent-id-input"), "agent1");
+    await selectAgent(user);
     await user.click(screen.getByTestId("refresh-button"));
 
     await waitFor(() => {
@@ -89,7 +99,7 @@ describe("SecretsPage", () => {
   it("opens create dialog when Add Secret is clicked", async () => {
     renderSecrets();
     const user = userEvent.setup();
-    await user.type(screen.getByTestId("agent-id-input"), "agent1");
+    await selectAgent(user);
     await user.click(screen.getByTestId("create-secret-button"));
 
     expect(screen.getByTestId("new-key-input")).toBeInTheDocument();
@@ -100,7 +110,7 @@ describe("SecretsPage", () => {
   it("create dialog has password input with autocomplete off", async () => {
     renderSecrets();
     const user = userEvent.setup();
-    await user.type(screen.getByTestId("agent-id-input"), "agent1");
+    await selectAgent(user);
     await user.click(screen.getByTestId("create-secret-button"));
 
     const keyInput = screen.getByTestId("new-key-input");
@@ -113,7 +123,7 @@ describe("SecretsPage", () => {
   it("eye toggle reveals secret value", async () => {
     renderSecrets();
     const user = userEvent.setup();
-    await user.type(screen.getByTestId("agent-id-input"), "agent1");
+    await selectAgent(user);
     await user.click(screen.getByTestId("create-secret-button"));
 
     const valueInput = screen.getByTestId("new-value-input");
@@ -126,7 +136,7 @@ describe("SecretsPage", () => {
   it("confirm create button is disabled until key and value are entered", async () => {
     renderSecrets();
     const user = userEvent.setup();
-    await user.type(screen.getByTestId("agent-id-input"), "agent1");
+    await selectAgent(user);
     await user.click(screen.getByTestId("create-secret-button"));
 
     const confirmBtn = screen.getByTestId("confirm-create-button");
@@ -141,7 +151,7 @@ describe("SecretsPage", () => {
     renderSecrets();
     const user = userEvent.setup();
 
-    await user.type(screen.getByTestId("agent-id-input"), "agent1");
+    await selectAgent(user);
     await user.click(screen.getByTestId("refresh-button"));
 
     await waitFor(() => {

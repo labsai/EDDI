@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Activity,
@@ -10,6 +10,11 @@ import {
   Cloud,
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  RefreshCw,
+  Gauge,
+  Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -30,12 +35,69 @@ export function CoordinatorPage() {
   const discardMutation = useDiscardDeadLetter();
   const purgeMutation = usePurgeDeadLetters();
   const [confirmPurge, setConfirmPurge] = useState(false);
+  const [refreshInterval, setRefreshInterval] = useState(10);
+  const [expandedPayloads, setExpandedPayloads] = useState<Set<string>>(new Set());
 
   // Use live SSE status if available, otherwise fall back to polling
   const currentStatus = liveStatus ?? status;
 
   const isNats = currentStatus?.coordinatorType === "nats";
   const isConnected = currentStatus?.connected ?? false;
+
+  // Auto-refresh status polling
+  const intervalRef = useRef<number | null>(null);
+  const { refetch: refetchStatus } = useCoordinatorStatus();
+  const { refetch: refetchDL } = useDeadLetters();
+
+  useEffect(() => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = window.setInterval(() => {
+      refetchStatus();
+      refetchDL();
+    }, refreshInterval * 1000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [refreshInterval, refetchStatus, refetchDL]);
+
+  // Throughput rate — approximate tasks/sec from totalProcessed
+  const prevProcessed = useRef<{ count: number; time: number } | null>(null);
+  const [throughput, setThroughput] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!currentStatus) return;
+    const now = Date.now();
+    if (prevProcessed.current) {
+      const dt = (now - prevProcessed.current.time) / 1000;
+      if (dt > 0) {
+        const rate = (currentStatus.totalProcessed - prevProcessed.current.count) / dt;
+        setThroughput(Math.max(0, rate));
+      }
+    }
+    prevProcessed.current = { count: currentStatus.totalProcessed, time: now };
+  }, [currentStatus]);
+
+  const togglePayload = useCallback((id: string) => {
+    setExpandedPayloads((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Dead-letter error category breakdown
+  const errorCategories = useMemo(() => {
+    if (!deadLetters || deadLetters.length === 0) return [];
+    const cats = new Map<string, number>();
+    for (const dl of deadLetters) {
+      const cat = dl.error.includes("timeout") ? "Timeout"
+        : dl.error.includes("503") || dl.error.includes("502") ? "Backend Unavailable"
+        : dl.error.includes("401") || dl.error.includes("403") ? "Auth Error"
+        : dl.error.includes("rate") ? "Rate Limited"
+        : "Other";
+      cats.set(cat, (cats.get(cat) ?? 0) + 1);
+    }
+    return [...cats.entries()].sort((a, b) => b[1] - a[1]);
+  }, [deadLetters]);
 
   const handleReplay = (id: string) => {
     replayMutation.mutate(id, {
@@ -66,7 +128,7 @@ export function CoordinatorPage() {
       {/* Page Header */}
       <div className="flex items-center gap-3">
         <Activity className="h-7 w-7 text-accent" />
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold text-foreground">
             {t("coordinator.title", "Coordinator Dashboard")}
           </h1>
@@ -74,7 +136,40 @@ export function CoordinatorPage() {
             {t("coordinator.subtitle", "Monitor conversation processing and manage dead-letter entries")}
           </p>
         </div>
+        {/* Auto-refresh selector */}
+        <div className="flex items-center gap-2">
+          <RefreshCw className="h-4 w-4 text-muted-foreground animate-spin" style={{ animationDuration: `${refreshInterval}s` }} />
+          <select
+            value={refreshInterval}
+            onChange={(e) => setRefreshInterval(Number(e.target.value))}
+            className="h-8 appearance-none rounded-lg border border-input bg-background pe-6 ps-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            data-testid="refresh-interval"
+          >
+            <option value={5}>5s</option>
+            <option value={10}>10s</option>
+            <option value={30}>30s</option>
+            <option value={60}>60s</option>
+          </select>
+          {throughput !== null && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2.5 py-1 text-xs font-semibold text-accent" data-testid="throughput-badge">
+              <Gauge className="h-3.5 w-3.5" />
+              {throughput < 0.1 ? "<0.1" : throughput.toFixed(1)} {t("coordinator.tasksPerSec", "tasks/s")}
+            </span>
+          )}
+        </div>
       </div>
+
+      {/* Error category breakdown */}
+      {errorCategories.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {errorCategories.map(([cat, count]) => (
+            <span key={cat} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
+              <span className="h-2 w-2 rounded-full bg-red-400" />
+              {cat}: {count}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Status Cards */}
       {statusLoading && !currentStatus ? (
@@ -244,8 +339,25 @@ export function CoordinatorPage() {
                     <td className="px-5 py-3">
                       <code className="text-sm text-foreground">{entry.conversationId}</code>
                     </td>
-                    <td className="max-w-[300px] truncate px-5 py-3 text-sm text-red-400" title={entry.error}>
-                      {entry.error}
+                    <td className="max-w-[300px] px-5 py-3 text-sm text-red-400">
+                      <div className="truncate" title={entry.error}>{entry.error}</div>
+                      {/* Expandable payload viewer */}
+                      {entry.payload && (
+                        <button
+                          onClick={() => togglePayload(entry.id)}
+                          className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                          data-testid={`toggle-payload-${entry.id}`}
+                        >
+                          {expandedPayloads.has(entry.id) ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                          <Eye className="h-3 w-3" />
+                          {t("coordinator.payload", "Payload")}
+                        </button>
+                      )}
+                      {expandedPayloads.has(entry.id) && entry.payload && (
+                        <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-card/50 p-2 text-xs text-foreground/80 border border-border/50">
+                          {(() => { try { return JSON.stringify(JSON.parse(entry.payload), null, 2); } catch { return entry.payload; } })()}
+                        </pre>
+                      )}
                     </td>
                     <td className="px-5 py-3 text-sm text-muted-foreground tabular-nums">
                       {new Date(entry.timestamp).toLocaleString()}

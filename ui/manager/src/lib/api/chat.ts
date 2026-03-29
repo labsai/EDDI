@@ -127,7 +127,8 @@ export async function* sendMessageStreaming(
   _environment: string,
   _agentId: string,
   conversationId: string,
-  inputData: InputData
+  inputData: InputData,
+  signal?: AbortSignal,
 ): AsyncGenerator<SSEEvent> {
   const response = await fetch(
     `${api.getBaseUrl()}/agents/${conversationId}/stream`,
@@ -138,6 +139,7 @@ export async function* sendMessageStreaming(
         ...api.getAuthHeader(),
       },
       body: JSON.stringify(inputData),
+      signal,
     }
   );
 

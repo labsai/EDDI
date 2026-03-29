@@ -23,6 +23,9 @@ export default defineConfig({
       "/propertysetterstore": "http://localhost:7070",
       "/mcpcallsstore": "http://localhost:7070",
       "/ragstore": "http://localhost:7070",
+      "/groupstore": "http://localhost:7070",
+      "/groups": "http://localhost:7070",
+      "/logs": "http://localhost:7070",
       "/parserstore": "http://localhost:7070",
       "/extensionstore": "http://localhost:7070",
       "/conversationstore": "http://localhost:7070",
@@ -33,7 +36,24 @@ export default defineConfig({
       "/deploymentstore": "http://localhost:7070",
       "/propertiesstore": "http://localhost:7070",
       "/administration": "http://localhost:7070",
-      "/agents": "http://localhost:7070",
+      // The /agents path includes the /agents/{id}/stream SSE endpoint.
+      // We must disable http-proxy buffering so the stream closes cleanly.
+      "/agents": {
+        target: "http://localhost:7070",
+        configure: (proxy) => {
+          proxy.on("proxyReq", (_proxyReq, req) => {
+            // When the client aborts (AbortController), destroy the upstream
+            // socket so the backend sees the disconnect immediately.
+            if (req.socket) {
+              req.socket.on("close", () => {
+                if (_proxyReq.socket && !_proxyReq.socket.destroyed) {
+                  _proxyReq.socket.destroy();
+                }
+              });
+            }
+          });
+        },
+      },
       "/backup": "http://localhost:7070",
       "/managerresource": "http://localhost:7070",
       "/managedagents": "http://localhost:7070",

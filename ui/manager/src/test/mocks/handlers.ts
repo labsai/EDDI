@@ -320,6 +320,33 @@ const RESOURCE_SCHEMAS: Record<string, object> = {
   },
 };
 
+// ─── Audit mock data generator ─────────────────────────────────────
+const TASK_TYPES = ["langchain", "behavior", "output", "httpcalls", "propertysetter", "expressions"];
+function generateMockAuditEntries(conversationId: string, count: number) {
+  const now = Date.now();
+  return Array.from({ length: count }, (_, i) => ({
+    id: `audit-${conversationId}-${i}`,
+    conversationId,
+    agentId: "agent1",
+    agentVersion: 1,
+    userId: "manager-user",
+    environment: i % 3 === 0 ? "production" : "test",
+    stepIndex: Math.floor(i / 2),
+    taskId: `task-${i}`,
+    taskType: TASK_TYPES[i % TASK_TYPES.length]!,
+    taskIndex: i % 2,
+    durationMs: 50 + Math.floor(Math.random() * 500),
+    input: i === 0 ? { "input:initial": "Tell me about the weather" } : null,
+    output: i % 2 === 0 ? { "output:text": "Here's the latest weather information..." } : null,
+    llmDetail: TASK_TYPES[i % TASK_TYPES.length] === "langchain" ? { model: "gpt-4o-mini", provider: "openai", tokens: { input: 128, output: 64 } } : null,
+    toolCalls: i === 3 ? { calls: [{ name: "fetch_weather", args: { city: "Vienna" }, result: "sunny 22°C" }] } : null,
+    actions: ["greet", "respond"].slice(0, (i % 2) + 1),
+    cost: TASK_TYPES[i % TASK_TYPES.length] === "langchain" ? 0.003 + Math.random() * 0.01 : 0,
+    timestamp: new Date(now - (count - i) * 60000).toISOString(),
+    hmac: i % 4 === 0 ? "a1b2c3d4e5f6" : null,
+  }));
+}
+
 export const handlers = [
   // Descriptor PATCH — used by create-workflow/create-agent to set name/description
   http.patch("*/descriptorstore/descriptors/:id", () => {
@@ -2072,6 +2099,110 @@ export const scheduleHandlers = [
       },
       { status: 201 },
     );
+  }),
+
+  // ==========================================
+  // === Secrets Vault Mocks ===
+  // ==========================================
+
+  // Vault health check (health endpoint is only here, not in secretsHandlers)
+  http.get("*/secretstore/secrets/health", () => {
+    return HttpResponse.json({
+      status: "UP",
+      provider: "mock-vault",
+      available: true,
+    });
+  }),
+
+  // List/Store/Delete secrets are in the secretsHandlers export (used by server.ts)
+
+  // ==========================================
+  // === Coordinator Mocks ===
+  // ==========================================
+
+  // Coordinator status
+  http.get("*/administration/coordinator/status", () => {
+    return HttpResponse.json({
+      coordinatorType: "nats",
+      connected: true,
+      connectionStatus: "CONNECTED",
+      activeConversations: 3,
+      totalProcessed: 1247,
+      totalDeadLettered: 2,
+      queueDepths: {
+        "conv-abc123": 1,
+        "conv-def456": 0,
+      },
+    });
+  }),
+
+  // Coordinator dead-letters
+  http.get("*/administration/coordinator/dead-letters", () => {
+    return HttpResponse.json([
+      {
+        id: "dl-001",
+        conversationId: "conv-failed-1",
+        error: "LLM provider timeout after 30s — model gpt-4o-mini did not respond",
+        timestamp: Date.now() - 3600000,
+        payload: JSON.stringify({ input: "What is the weather?", agentId: "agent1", step: 2 }),
+      },
+      {
+        id: "dl-002",
+        conversationId: "conv-failed-2",
+        error: "HttpCallTask failed: 503 Service Unavailable from https://api.weather.com",
+        timestamp: Date.now() - 7200000,
+        payload: JSON.stringify({ input: "Book a flight", agentId: "agent2", step: 1 }),
+      },
+    ]);
+  }),
+
+  // Replay dead-letter
+  http.post("*/administration/coordinator/dead-letters/:id/replay", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Discard dead-letter
+  http.delete("*/administration/coordinator/dead-letters/:id", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Purge all dead-letters
+  http.delete("*/administration/coordinator/dead-letters", () => {
+    return HttpResponse.json(2);
+  }),
+
+  // Coordinator SSE stream
+  http.get("*/administration/coordinator/stream", () => {
+    return new HttpResponse(null, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+  }),
+
+  // ==========================================
+  // === Audit Trail Mocks ===
+  // ==========================================
+
+  // Audit by conversation
+  http.get("*/auditstore/:conversationId", ({ request, params }) => {
+    const url = new URL(request.url);
+    // Don't match /count sub-path
+    if (url.pathname.endsWith("/count")) return;
+    const convId = params.conversationId as string;
+    // Don't match the /agent/ path
+    if (convId === "agent") return;
+    if (convId === "recent") {
+      // Recent entries endpoint
+      return HttpResponse.json(generateMockAuditEntries("conv-recent-1", 10));
+    }
+    return HttpResponse.json(generateMockAuditEntries(convId, 5));
+  }),
+
+  // Audit by agent
+  http.get("*/auditstore/agent/:agentId", () => {
+    return HttpResponse.json(generateMockAuditEntries("conv-from-agent", 8));
+  }),
+
+  // Audit count
+  http.get("*/auditstore/:conversationId/count", () => {
+    return HttpResponse.json(5);
   }),
 
   // ==========================================
