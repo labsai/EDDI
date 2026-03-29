@@ -13,6 +13,35 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Phase 11b: Token-Aware Conversation Window (2026-03-30)
+
+**Repo:** EDDI (backend)
+
+**What changed:**
+
+Implemented Strategy 1 from `docs/planning/conversation-window-management.md` — token-budget-based conversation windowing with anchored opening steps. This replaces fixed step-count limits with intelligent token-aware packing for LLM context management.
+
+| Decision | Resolution |
+|---|---|
+| When to activate | `maxContextTokens > 0` triggers token-aware mode; `-1` (default) uses legacy step-count |
+| Token counting | `OpenAiTokenCountEstimator` for OpenAI/Azure, `chars/4` approximation for all other providers |
+| Anchoring | First N steps always included regardless of window position (default N=2) |
+| Gap marker | `SystemMessage` inserted between anchored and recent when turns are omitted |
+| API compatibility | langchain4j 1.12.2 uses `TokenCountEstimator` (not `Tokenizer`) |
+
+**Files:**
+
+- `LlmConfiguration.java` — Added `maxContextTokens` and `anchorFirstSteps` fields
+- `TokenCounterFactory.java` — **NEW** — Resolves model-specific tokenizers with caching
+- `ConversationHistoryBuilder.java` — Added `buildTokenAwareMessages()` method
+- `LlmTask.java` — Injects `TokenCounterFactory`, branches on config
+- `TokenCounterFactoryTest.java` — **NEW** — 13 tests
+- `ConversationHistoryBuilderTest.java` — Added 7 token-aware window tests
+- `LlmTaskTest.java` — Updated constructor mock
+- `docs/langchain.md` — Added "Conversation Window Management" section
+
+---
+
 ## EDDI Operator v2 — Architecture Plan (2026-03-29)
 
 **Repo:** EDDI-operator (planning only — no code changes yet)

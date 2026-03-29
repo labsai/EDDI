@@ -966,6 +966,23 @@ Cross-conversation, agent-scoped fact retention with LLM tools, REST API, MCP ma
 
 **Total tests:** 1406 (all pass). **Last commit:** Phase 11a code review fixes.
 
+### Phase 11b: Token-Aware Conversation Window (Strategy 1) ✅
+
+Config-driven token-budget windowing with anchored opening steps, replacing fixed step-count limits for LLM context management.
+
+| Component | Key Files |
+|---|---|
+| **Config** | `LlmConfiguration.java` (`maxContextTokens`, `anchorFirstSteps` fields) |
+| **Token Counting** | `TokenCounterFactory.java` (OpenAI tiktoken + approximate chars/4 fallback) |
+| **Window Builder** | `ConversationHistoryBuilder.java` (`buildTokenAwareMessages()` — anchor + gap marker + recent) |
+| **Integration** | `LlmTask.java` (branch: token-aware vs step-count based on config) |
+| **Docs** | `docs/langchain.md` (new "Conversation Window Management" section) |
+| **Tests** | `TokenCounterFactoryTest.java` (13 tests), `ConversationHistoryBuilderTest.java` (+7 token-aware tests), `LlmTaskTest.java` (updated constructor) |
+
+**Design:** `maxContextTokens=-1` (default) preserves existing step-count behavior. When set > 0, first N steps are anchored, remaining budget filled from most recent backward, gap marker inserted for omitted turns.
+
+**Total tests:** 1244+ (all pass). **Last commit:** Phase 11b - Token-aware conversation window.
+
 ## Important Rules
 
 - All work on **`feature/version-6.0.0`** branch (never `main`)
