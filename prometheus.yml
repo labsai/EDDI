@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'eddi'
+    metrics_path: '/q/metrics'
+    static_configs:
+      - targets: ['eddi:7070']
+        labels:
+          environment: 'production'
+
+  # Uncomment to monitor Prometheus itself
+  # - job_name: 'prometheus'
+  #   static_configs:
+  #     - targets: ['localhost:9090']
