@@ -10,6 +10,7 @@ import org.jboss.logging.Logger;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
@@ -31,6 +32,23 @@ public class RestSecretStore implements IRestSecretStore {
     }
 
     /**
+     * Check if the vault is unavailable and return an actionable 503 response.
+     * Returns empty if the vault is available (caller should proceed normally).
+     */
+    private Optional<Response> vaultUnavailableResponse() {
+        if (!secretProvider.isAvailable()) {
+            return Optional.of(Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of("error", "Secrets Vault is not configured", "reason", "The EDDI_VAULT_MASTER_KEY environment variable is not set.",
+                            "action",
+                            "Set the EDDI_VAULT_MASTER_KEY environment variable and restart EDDI. "
+                                    + "For local development, use: set EDDI_VAULT_MASTER_KEY=any-passphrase-at-least-8-chars",
+                            "docs", "https://docs.labs.ai/secrets-vault"))
+                    .build());
+        }
+        return Optional.empty();
+    }
+
+    /**
      * Validate that a path parameter is safe (alphanumeric + dots, hyphens,
      * underscores). Prevents path traversal and injection attacks.
      */
@@ -42,6 +60,10 @@ public class RestSecretStore implements IRestSecretStore {
 
     @Override
     public Response storeSecret(String tenantId, String agentId, String keyName, SecretRequest body) {
+        var unavailable = vaultUnavailableResponse();
+        if (unavailable.isPresent())
+            return unavailable.get();
+
         try {
             validateId(tenantId, "tenantId");
             validateId(agentId, "agentId");
@@ -82,6 +104,10 @@ public class RestSecretStore implements IRestSecretStore {
 
     @Override
     public Response deleteSecret(String tenantId, String agentId, String keyName) {
+        var unavailable = vaultUnavailableResponse();
+        if (unavailable.isPresent())
+            return unavailable.get();
+
         try {
             validateId(tenantId, "tenantId");
             validateId(agentId, "agentId");
@@ -102,6 +128,10 @@ public class RestSecretStore implements IRestSecretStore {
 
     @Override
     public Response getSecretMetadata(String tenantId, String agentId, String keyName) {
+        var unavailable = vaultUnavailableResponse();
+        if (unavailable.isPresent())
+            return unavailable.get();
+
         try {
             validateId(tenantId, "tenantId");
             validateId(agentId, "agentId");
@@ -121,18 +151,22 @@ public class RestSecretStore implements IRestSecretStore {
     }
 
     @Override
-    public List<?> listSecrets(String tenantId, String agentId) {
+    public Response listSecrets(String tenantId, String agentId) {
+        var unavailable = vaultUnavailableResponse();
+        if (unavailable.isPresent())
+            return unavailable.get();
+
         try {
             validateId(tenantId, "tenantId");
             validateId(agentId, "agentId");
         } catch (IllegalArgumentException e) {
-            return List.of();
+            return Response.ok(List.of()).build();
         }
         try {
-            return secretProvider.listKeys(tenantId, agentId);
+            return Response.ok(secretProvider.listKeys(tenantId, agentId)).build();
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.errorv("Failed to list secrets: {0}/{1} — {2}", tenantId, agentId, e.getMessage());
-            return List.of();
+            return Response.ok(List.of()).build();
         }
     }
 

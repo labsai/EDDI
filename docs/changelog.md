@@ -13,6 +13,35 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Secrets Vault UX: 503 with Actionable Error When Vault Unconfigured (2026-03-30)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+When EDDI runs without `EDDI_VAULT_MASTER_KEY` set and a user tries to manage secrets via the REST API, the server previously returned a generic `500 Internal Server Error` with `"Failed to store secret"` — no indication of what's actually wrong. The `listSecrets` endpoint silently returned an empty list, hiding the issue entirely.
+
+| Endpoint | Before | After |
+|---|---|---|
+| `PUT /secretstore/secrets/{t}/{a}/{k}` | 500 "Failed to store secret" | 503 with `error`, `reason`, `action`, `docs` |
+| `GET /secretstore/secrets/{t}/{a}` | Empty list (silent) | 503 with actionable message |
+| `DELETE /secretstore/secrets/{t}/{a}/{k}` | 500 generic | 503 with actionable message |
+| `GET /secretstore/secrets/{t}/{a}/{k}` | 500 generic | 503 with actionable message |
+
+The 503 response body now includes:
+- `error`: "Secrets Vault is not configured"
+- `reason`: "The EDDI_VAULT_MASTER_KEY environment variable is not set."
+- `action`: Instructions for local dev (`set EDDI_VAULT_MASTER_KEY=any-passphrase-at-least-8-chars`)
+- `docs`: Link to vault documentation
+
+**For local development**, just set the env var before starting Quarkus: `set EDDI_VAULT_MASTER_KEY=my-dev-key` (Windows) or `export EDDI_VAULT_MASTER_KEY=my-dev-key` (Linux/Mac). The install script handles this automatically for Docker deployments.
+
+**API change:** `listSecrets` return type changed from `List<?>` to `Response` to support proper HTTP status codes.
+
+**Files:** 2 modified (`RestSecretStore.java`, `IRestSecretStore.java`).
+
+---
+
 ## Phase 11b: Token-Aware Conversation Window (2026-03-30)
 
 **Repo:** EDDI (backend)

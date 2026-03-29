@@ -6,8 +6,6 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
-import java.util.List;
-
 /**
  * REST interface for managing secrets in the vault. Secrets are stored
  * encrypted; plaintext values are NEVER returned by any endpoint.
@@ -79,7 +77,7 @@ public interface IRestSecretStore {
     @GET
     @Path("/{tenantId}/{agentId}")
     @Produces(MediaType.APPLICATION_JSON)
-    List<?> listSecrets(@PathParam("tenantId") String tenantId, @PathParam("agentId") String agentId);
+    Response listSecrets(@PathParam("tenantId") String tenantId, @PathParam("agentId") String agentId);
 
     /**
      * Health check for the vault.
