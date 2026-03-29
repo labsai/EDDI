@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "eddi.fullname" . }}
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  type: {{ .Values.eddi.service.type }}
+  selector:
+    {{- include "eddi.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+  ports:
+    - name: http
+      port: {{ .Values.eddi.service.port }}
+      targetPort: http
+      protocol: TCP

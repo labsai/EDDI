@@ -1,0 +1,70 @@
+{{- if .Values.mongodb.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "eddi.fullname" . }}-mongodb
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  serviceName: {{ include "eddi.fullname" . }}-mongodb
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "eddi.fullname" . }}-mongodb
+      app.kubernetes.io/component: database
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "eddi.fullname" . }}-mongodb
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: eddi
+    spec:
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: mongodb
+          image: "{{ .Values.mongodb.image.repository }}:{{ .Values.mongodb.image.tag }}"
+          ports:
+            - containerPort: 27017
+              name: mongo
+          volumeMounts:
+            - name: mongodb-data
+              mountPath: /data/db
+          resources:
+            {{- toYaml .Values.mongodb.resources | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["mongosh", "--eval", "db.adminCommand('ping')"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+  volumeClaimTemplates:
+    - metadata:
+        name: mongodb-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.mongodb.storage.storageClassName }}
+        storageClassName: {{ .Values.mongodb.storage.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.mongodb.storage.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "eddi.fullname" . }}-mongodb
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: {{ include "eddi.fullname" . }}-mongodb
+    app.kubernetes.io/component: database
+  ports:
+    - name: mongo
+      port: 27017
+      targetPort: mongo
+{{- end }}

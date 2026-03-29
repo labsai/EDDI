@@ -1,0 +1,58 @@
+
+  ███████╗██████╗ ██████╗ ██╗
+  ██╔════╝██╔══██╗██╔══██╗██║
+  █████╗  ██║  ██║██║  ██║██║
+  ██╔══╝  ██║  ██║██║  ██║██║
+  ███████╗██████╔╝██████╔╝██║
+  ╚══════╝╚═════╝ ╚═════╝ ╚═╝
+  Multi-Agent AI Orchestration Middleware
+
+{{- if not .Values.eddi.vaultMasterKey }}
+
+  ⚠️  WARNING: Vault master key is not set!
+  EDDI will start but secret encryption is DISABLED.
+  Set it with:
+
+    helm upgrade {{ .Release.Name }} ./helm/eddi \
+      --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+      --namespace {{ .Release.Namespace }}
+
+  ⚠️  Save this key! If lost, encrypted secrets are UNRECOVERABLE.
+
+{{- else }}
+
+  ✅ Vault master key is configured.
+
+{{- end }}
+
+  📡 Access EDDI:
+
+    kubectl port-forward svc/{{ include "eddi.fullname" . }} 7070:7070 -n {{ .Release.Namespace }}
+    open http://localhost:7070
+
+{{- if .Values.manager.enabled }}
+
+  🖥️  Access Manager UI:
+
+    kubectl port-forward svc/{{ include "eddi.fullname" . }}-manager 7071:7071 -n {{ .Release.Namespace }}
+    open http://localhost:7071
+
+{{- end }}
+
+{{- if .Values.keycloak.enabled }}
+
+  🔐 Access Keycloak:
+
+    kubectl port-forward svc/{{ include "eddi.fullname" . }}-keycloak 8080:8080 -n {{ .Release.Namespace }}
+    open http://localhost:8080
+    Login: {{ .Values.keycloak.adminUsername }} / {{ .Values.keycloak.adminPassword }}
+
+{{- end }}
+
+  📊 Components:
+    Database:    {{ if .Values.mongodb.enabled }}MongoDB{{ else if .Values.postgres.enabled }}PostgreSQL{{ else }}None (external){{ end }}
+    Messaging:   {{ .Values.eddi.messagingType }}
+    Auth (OIDC): {{ if .Values.eddi.oidc.enabled }}Enabled{{ else }}Disabled{{ end }}
+    Autoscaling: {{ if .Values.autoscaling.enabled }}Enabled ({{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas){{ else }}Disabled{{ end }}
+
+  📖 Full docs: https://github.com/labsai/EDDI/blob/main/docs/kubernetes.md
