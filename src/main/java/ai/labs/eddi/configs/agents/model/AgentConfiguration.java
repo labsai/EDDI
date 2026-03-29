@@ -139,6 +139,7 @@ public class AgentConfiguration {
         public String getDefaultVisibility() {
             return defaultVisibility;
         }
+
         public void setDefaultVisibility(String defaultVisibility) {
             this.defaultVisibility = defaultVisibility;
         }
@@ -146,6 +147,7 @@ public class AgentConfiguration {
         public int getMaxRecallEntries() {
             return maxRecallEntries;
         }
+
         public void setMaxRecallEntries(int maxRecallEntries) {
             this.maxRecallEntries = maxRecallEntries;
         }
@@ -153,6 +155,7 @@ public class AgentConfiguration {
         public int getMaxEntriesPerUser() {
             return maxEntriesPerUser;
         }
+
         public void setMaxEntriesPerUser(int maxEntriesPerUser) {
             this.maxEntriesPerUser = maxEntriesPerUser;
         }
@@ -160,6 +163,7 @@ public class AgentConfiguration {
         public String getOnCapReached() {
             return onCapReached;
         }
+
         public void setOnCapReached(String onCapReached) {
             this.onCapReached = onCapReached;
         }
@@ -167,6 +171,7 @@ public class AgentConfiguration {
         public String getRecallOrder() {
             return recallOrder;
         }
+
         public void setRecallOrder(String recallOrder) {
             this.recallOrder = recallOrder;
         }
@@ -174,6 +179,7 @@ public class AgentConfiguration {
         public List<String> getAutoRecallCategories() {
             return autoRecallCategories;
         }
+
         public void setAutoRecallCategories(List<String> autoRecallCategories) {
             this.autoRecallCategories = autoRecallCategories;
         }
@@ -181,6 +187,7 @@ public class AgentConfiguration {
         public Guardrails getGuardrails() {
             return guardrails;
         }
+
         public void setGuardrails(Guardrails guardrails) {
             this.guardrails = guardrails;
         }
@@ -188,6 +195,7 @@ public class AgentConfiguration {
         public DreamConfig getDream() {
             return dream;
         }
+
         public void setDream(DreamConfig dream) {
             this.dream = dream;
         }
@@ -205,6 +213,7 @@ public class AgentConfiguration {
         public int getMaxKeyLength() {
             return maxKeyLength;
         }
+
         public void setMaxKeyLength(int maxKeyLength) {
             this.maxKeyLength = maxKeyLength;
         }
@@ -212,6 +221,7 @@ public class AgentConfiguration {
         public int getMaxValueLength() {
             return maxValueLength;
         }
+
         public void setMaxValueLength(int maxValueLength) {
             this.maxValueLength = maxValueLength;
         }
@@ -219,6 +229,7 @@ public class AgentConfiguration {
         public int getMaxWritesPerTurn() {
             return maxWritesPerTurn;
         }
+
         public void setMaxWritesPerTurn(int maxWritesPerTurn) {
             this.maxWritesPerTurn = maxWritesPerTurn;
         }
@@ -226,6 +237,7 @@ public class AgentConfiguration {
         public List<String> getAllowedCategories() {
             return allowedCategories;
         }
+
         public void setAllowedCategories(List<String> allowedCategories) {
             this.allowedCategories = allowedCategories;
         }
@@ -242,8 +254,8 @@ public class AgentConfiguration {
         private String contradictionResolution = "keep_newest";
         private int pruneStaleAfterDays = 90;
         private boolean summarizeInteractions = false;
-        private String llmProvider = "openai";
-        private String llmModel = "gpt-4o-mini";
+        private String llmProvider = "anthropic";
+        private String llmModel = "claude-sonnet-4-6";
         private double maxCostPerRun = 5.00;
         private int batchSize = 50;
         private int maxUsersPerRun = 1000;
@@ -251,6 +263,7 @@ public class AgentConfiguration {
         public boolean isEnabled() {
             return enabled;
         }
+
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
         }
@@ -258,6 +271,7 @@ public class AgentConfiguration {
         public String getSchedule() {
             return schedule;
         }
+
         public void setSchedule(String schedule) {
             this.schedule = schedule;
         }
@@ -265,6 +279,7 @@ public class AgentConfiguration {
         public boolean isDetectContradictions() {
             return detectContradictions;
         }
+
         public void setDetectContradictions(boolean detectContradictions) {
             this.detectContradictions = detectContradictions;
         }
@@ -272,6 +287,7 @@ public class AgentConfiguration {
         public String getContradictionResolution() {
             return contradictionResolution;
         }
+
         public void setContradictionResolution(String contradictionResolution) {
             this.contradictionResolution = contradictionResolution;
         }
@@ -279,6 +295,7 @@ public class AgentConfiguration {
         public int getPruneStaleAfterDays() {
             return pruneStaleAfterDays;
         }
+
         public void setPruneStaleAfterDays(int pruneStaleAfterDays) {
             this.pruneStaleAfterDays = pruneStaleAfterDays;
         }
@@ -286,6 +303,7 @@ public class AgentConfiguration {
         public boolean isSummarizeInteractions() {
             return summarizeInteractions;
         }
+
         public void setSummarizeInteractions(boolean summarizeInteractions) {
             this.summarizeInteractions = summarizeInteractions;
         }
@@ -293,6 +311,7 @@ public class AgentConfiguration {
         public String getLlmProvider() {
             return llmProvider;
         }
+
         public void setLlmProvider(String llmProvider) {
             this.llmProvider = llmProvider;
         }
@@ -300,6 +319,7 @@ public class AgentConfiguration {
         public String getLlmModel() {
             return llmModel;
         }
+
         public void setLlmModel(String llmModel) {
             this.llmModel = llmModel;
         }
@@ -307,6 +327,7 @@ public class AgentConfiguration {
         public double getMaxCostPerRun() {
             return maxCostPerRun;
         }
+
         public void setMaxCostPerRun(double maxCostPerRun) {
             this.maxCostPerRun = maxCostPerRun;
         }
@@ -314,6 +335,7 @@ public class AgentConfiguration {
         public int getBatchSize() {
             return batchSize;
         }
+
         public void setBatchSize(int batchSize) {
             this.batchSize = batchSize;
         }
@@ -321,6 +343,7 @@ public class AgentConfiguration {
         public int getMaxUsersPerRun() {
             return maxUsersPerRun;
         }
+
         public void setMaxUsersPerRun(int maxUsersPerRun) {
             this.maxUsersPerRun = maxUsersPerRun;
         }
