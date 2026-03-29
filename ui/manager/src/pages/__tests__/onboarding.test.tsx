@@ -27,6 +27,7 @@ function createWrapper() {
 
 function clearOnboardingStorage() {
   localStorage.removeItem("eddi-onboarding-welcomed");
+  localStorage.removeItem("eddi-tour-offers-dismissed");
   localStorage.removeItem("eddi-tour-dashboard");
   localStorage.removeItem("eddi-tour-agents");
   localStorage.removeItem("eddi-tour-workflows");
@@ -44,6 +45,7 @@ describe("Onboarding — Zustand Store", () => {
       showWelcome: true,
       activeChapter: null,
       currentStep: 0,
+      offeredChapter: null,
       completedChapters: new Set(),
     });
   });
@@ -117,6 +119,7 @@ describe("Onboarding — Zustand Store", () => {
     useOnboarding.getState().completeChapter();
     useOnboarding.getState().maybeAutoStart("chat");
     expect(useOnboarding.getState().activeChapter).toBeNull();
+    expect(useOnboarding.getState().offeredChapter).toBeNull();
   });
 
   it("maybeAutoStart does not start if welcome modal is showing", () => {
@@ -124,10 +127,17 @@ describe("Onboarding — Zustand Store", () => {
     expect(useOnboarding.getState().activeChapter).toBeNull();
   });
 
-  it("maybeAutoStart starts chapter if not completed and welcome dismissed", () => {
+  it("maybeAutoStart auto-starts dashboard directly", () => {
+    useOnboarding.getState().dismissWelcome();
+    useOnboarding.getState().maybeAutoStart("dashboard");
+    expect(useOnboarding.getState().activeChapter).toBe("dashboard");
+  });
+
+  it("maybeAutoStart shows offer for non-dashboard chapters instead of auto-starting", () => {
     useOnboarding.getState().dismissWelcome();
     useOnboarding.getState().maybeAutoStart("agents");
-    expect(useOnboarding.getState().activeChapter).toBe("agents");
+    expect(useOnboarding.getState().activeChapter).toBeNull();
+    expect(useOnboarding.getState().offeredChapter).toBe("agents");
   });
 
   it("maybeAutoStart does not start if another chapter is active", () => {
@@ -135,6 +145,31 @@ describe("Onboarding — Zustand Store", () => {
     useOnboarding.getState().startChapter("dashboard");
     useOnboarding.getState().maybeAutoStart("agents");
     expect(useOnboarding.getState().activeChapter).toBe("dashboard");
+    expect(useOnboarding.getState().offeredChapter).toBeNull();
+  });
+
+  it("acceptOffer starts the offered chapter", () => {
+    useOnboarding.getState().dismissWelcome();
+    useOnboarding.getState().maybeAutoStart("workflows");
+    expect(useOnboarding.getState().offeredChapter).toBe("workflows");
+    useOnboarding.getState().acceptOffer();
+    expect(useOnboarding.getState().activeChapter).toBe("workflows");
+    expect(useOnboarding.getState().offeredChapter).toBeNull();
+  });
+
+  it("dismissOffer marks chapter as done so offer doesn't reappear", () => {
+    useOnboarding.getState().dismissWelcome();
+    useOnboarding.getState().maybeAutoStart("chat");
+    useOnboarding.getState().dismissOffer();
+    expect(useOnboarding.getState().offeredChapter).toBeNull();
+    expect(useOnboarding.getState().completedChapters.has("chat")).toBe(true);
+  });
+
+  it("dismissAllOffers prevents all future offers", () => {
+    useOnboarding.getState().dismissWelcome();
+    useOnboarding.getState().dismissAllOffers();
+    useOnboarding.getState().maybeAutoStart("resources");
+    expect(useOnboarding.getState().offeredChapter).toBeNull();
   });
 
   it("restartChapter clears completion and starts chapter", () => {
@@ -161,6 +196,7 @@ describe("Onboarding — Zustand Store", () => {
     const state = useOnboarding.getState();
     expect(state.showWelcome).toBe(true);
     expect(state.activeChapter).toBeNull();
+    expect(state.offeredChapter).toBeNull();
     expect(state.completedChapters.size).toBe(0);
     expect(localStorage.getItem("eddi-onboarding-welcomed")).toBeNull();
     expect(localStorage.getItem("eddi-tour-dashboard")).toBeNull();
@@ -174,6 +210,7 @@ describe("Onboarding — Welcome Modal", () => {
       showWelcome: true,
       activeChapter: null,
       currentStep: 0,
+      offeredChapter: null,
       completedChapters: new Set(),
     });
   });
@@ -235,6 +272,7 @@ describe("Onboarding — Guided Tour", () => {
       showWelcome: false,
       activeChapter: null,
       currentStep: 0,
+      offeredChapter: null,
       completedChapters: new Set(),
     });
   });

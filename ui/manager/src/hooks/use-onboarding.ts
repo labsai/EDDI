@@ -22,6 +22,7 @@ export const ALL_CHAPTERS: TourChapterId[] = [
    localStorage keys
    ================================================================ */
 const WELCOME_KEY = "eddi-onboarding-welcomed";
+const OFFER_DISMISSED_KEY = "eddi-tour-offers-dismissed";
 const chapterKey = (id: TourChapterId) => `eddi-tour-${id}`;
 
 function isChapterDone(id: TourChapterId): boolean {
@@ -72,6 +73,30 @@ function clearWelcomed(): void {
   }
 }
 
+function areOffersDismissed(): boolean {
+  try {
+    return localStorage.getItem(OFFER_DISMISSED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function setOffersDismissed(): void {
+  try {
+    localStorage.setItem(OFFER_DISMISSED_KEY, "true");
+  } catch {
+    /* noop */
+  }
+}
+
+function clearOffersDismissed(): void {
+  try {
+    localStorage.removeItem(OFFER_DISMISSED_KEY);
+  } catch {
+    /* noop */
+  }
+}
+
 /* ================================================================
    Store interface
    ================================================================ */
@@ -82,6 +107,9 @@ interface OnboardingState {
   // Active tour state
   activeChapter: TourChapterId | null;
   currentStep: number;
+
+  // Offer bar — subtle prompt for non-dashboard chapters
+  offeredChapter: TourChapterId | null;
 
   // Per-chapter completion
   completedChapters: Set<TourChapterId>;
@@ -98,10 +126,16 @@ interface OnboardingState {
   completeChapter: () => void;
   restartChapter: (id: TourChapterId) => void;
 
+  // Actions — Offer bar
+  acceptOffer: () => void;
+  dismissOffer: () => void;
+  dismissAllOffers: () => void;
+
   // Queries
   isChapterCompleted: (id: TourChapterId) => boolean;
 
   // Auto-trigger — called by page components on mount
+  // Dashboard auto-starts tour; other pages show a subtle offer bar
   maybeAutoStart: (chapterId: TourChapterId) => void;
 
   // Reset all
@@ -122,6 +156,7 @@ export const useOnboarding = create<OnboardingState>((set, get) => {
     showWelcome: !hasBeenWelcomed(),
     activeChapter: null,
     currentStep: 0,
+    offeredChapter: null,
     completedChapters: initial,
 
     openWelcome: () => set({ showWelcome: true }),
@@ -132,14 +167,12 @@ export const useOnboarding = create<OnboardingState>((set, get) => {
     },
 
     startChapter: (id) => {
-      set({ activeChapter: id, currentStep: 0 });
+      set({ activeChapter: id, currentStep: 0, offeredChapter: null });
     },
 
     nextStep: () => {
       const { currentStep, activeChapter } = get();
       if (!activeChapter) return;
-      // Import would be circular; use inline lazy import check
-      // Guard: don't advance past the last step (handled by GuidedTour's handleNext)
       set({ currentStep: currentStep + 1 });
     },
 
@@ -171,25 +204,62 @@ export const useOnboarding = create<OnboardingState>((set, get) => {
       clearChapterDone(id);
       const next = new Set(get().completedChapters);
       next.delete(id);
-      set({ activeChapter: id, currentStep: 0, completedChapters: next });
+      set({ activeChapter: id, currentStep: 0, offeredChapter: null, completedChapters: next });
+    },
+
+    // --- Offer bar actions ---
+    acceptOffer: () => {
+      const { offeredChapter } = get();
+      if (offeredChapter) {
+        set({ activeChapter: offeredChapter, currentStep: 0, offeredChapter: null });
+      }
+    },
+
+    dismissOffer: () => {
+      const { offeredChapter, completedChapters } = get();
+      if (offeredChapter) {
+        // Mark as done so the offer doesn't re-appear on this page
+        markChapterDone(offeredChapter);
+        const next = new Set(completedChapters);
+        next.add(offeredChapter);
+        set({ offeredChapter: null, completedChapters: next });
+      }
+    },
+
+    dismissAllOffers: () => {
+      setOffersDismissed();
+      set({ offeredChapter: null });
     },
 
     isChapterCompleted: (id) => get().completedChapters.has(id),
 
     maybeAutoStart: (chapterId) => {
-      const { activeChapter, completedChapters, showWelcome } = get();
-      // Don't auto-start if: welcome modal is open, another tour is active, or chapter is done
-      if (showWelcome || activeChapter || completedChapters.has(chapterId)) return;
-      set({ activeChapter: chapterId, currentStep: 0 });
+      const { activeChapter, completedChapters, showWelcome, offeredChapter } = get();
+      // Don't show anything if: welcome modal is open, a tour is active,
+      // chapter is already done, or an offer is already showing
+      if (showWelcome || activeChapter || completedChapters.has(chapterId) || offeredChapter) return;
+
+      // Dashboard auto-starts (it's the primary tour triggered by the welcome modal)
+      if (chapterId === "dashboard") {
+        set({ activeChapter: chapterId, currentStep: 0 });
+        return;
+      }
+
+      // All other chapters: show a subtle offer bar instead of auto-starting
+      // Unless the user has dismissed all offers
+      if (areOffersDismissed()) return;
+      set({ offeredChapter: chapterId });
     },
 
     resetAll: () => {
       clearWelcomed();
+      clearOffersDismissed();
       for (const id of ALL_CHAPTERS) clearChapterDone(id);
       set({
         showWelcome: true,
         activeChapter: null,
         currentStep: 0,
+        offeredChapter: null,
         completedChapters: new Set(),
       });
     },

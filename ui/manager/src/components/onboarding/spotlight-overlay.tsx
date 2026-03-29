@@ -20,6 +20,9 @@ interface TargetRect {
  * Full-viewport dim overlay with a transparent cutout around the target element.
  * Uses the box-shadow technique: the overlay element IS the cutout, and a giant
  * box-shadow dims everything else.
+ *
+ * For elements taller/wider than the viewport, the cutout is clamped to the
+ * visible portion so it remains visible and the tooltip stays on screen.
  */
 export function SpotlightOverlay({
   targetSelector,
@@ -35,11 +38,21 @@ export function SpotlightOverlay({
       return;
     }
     const r = el.getBoundingClientRect();
+    const vh = window.innerHeight;
+    const vw = window.innerWidth;
+
+    // Clamp the rect to the visible viewport so oversized elements
+    // (e.g. long agent lists) don't push the spotlight out of bounds
+    const clampedTop = Math.max(0, r.top) - padding;
+    const clampedLeft = Math.max(0, r.left) - padding;
+    const clampedBottom = Math.min(vh, r.bottom) + padding;
+    const clampedRight = Math.min(vw, r.right) + padding;
+
     setRect({
-      top: r.top - padding,
-      left: r.left - padding,
-      width: r.width + padding * 2,
-      height: r.height + padding * 2,
+      top: clampedTop,
+      left: clampedLeft,
+      width: clampedRight - clampedLeft,
+      height: clampedBottom - clampedTop,
     });
   }, [targetSelector, padding]);
 
@@ -68,13 +81,15 @@ export function SpotlightOverlay({
     const el = document.querySelector(targetSelector);
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const inView =
-      r.top >= 0 &&
-      r.bottom <= window.innerHeight &&
-      r.left >= 0 &&
-      r.right <= window.innerWidth;
-    if (!inView) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    const vh = window.innerHeight;
+    const vw = window.innerWidth;
+
+    // Only check if the top of the element is in view (for tall lists,
+    // we just need the top portion visible, not the entire element)
+    const topVisible = r.top >= -50 && r.top <= vh - 100;
+    const leftVisible = r.left >= 0 && r.right <= vw;
+    if (!topVisible || !leftVisible) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
       // Re-measure after scroll animation
       setTimeout(measure, 400);
     }
@@ -85,8 +100,7 @@ export function SpotlightOverlay({
   return (
     <>
       {/* Clickable backdrop — covers the viewport behind the spotlight.
-          Clicking the dim area is a no-op (doesn't advance) to avoid
-          accidental step skips. Only the tooltip buttons advance. */}
+          Clicking the dim area is a no-op to avoid accidental step skips. */}
       <div
         className="fixed inset-0 z-9997"
         onClick={onOverlayClick}

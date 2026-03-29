@@ -6,6 +6,7 @@ import { TopBar } from "./top-bar";
 import { ChatDrawer } from "@/components/chat/chat-drawer";
 import { WelcomeModal } from "@/components/onboarding/welcome-modal";
 import { GuidedTour } from "@/components/onboarding/guided-tour";
+import { TourOfferBar } from "@/components/onboarding/tour-offer-bar";
 import { cn } from "@/lib/utils";
 
 export function AppLayout() {
@@ -78,6 +79,7 @@ export function AppLayout() {
       <ChatDrawer />
       <WelcomeModal />
       <GuidedTour />
+      <TourOfferBar />
     </div>
   );
 }

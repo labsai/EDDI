@@ -20,7 +20,9 @@ interface TourTooltipProps {
 }
 
 const TOOLTIP_WIDTH = 340;
+const TOOLTIP_HEIGHT_ESTIMATE = 200; // rough height of the tooltip card
 const TOOLTIP_GAP = 12;
+const EDGE_MARGIN = 16;
 
 /** Compute tooltip position based on target rect and preferred placement */
 function computePosition(
@@ -30,21 +32,40 @@ function computePosition(
   const vw = window.innerWidth;
   const vh = window.innerHeight;
 
+  // Clamp target rect to visible viewport for positioning purposes
+  // (important when target is a very tall list that extends below viewport)
+  const visTop = Math.max(0, targetRect.top);
+  const visBottom = Math.min(vh, targetRect.top + targetRect.height);
+  const visHeight = Math.max(0, visBottom - visTop);
+  const visCenterY = visTop + visHeight / 2;
+
+  const visLeft = Math.max(0, targetRect.left);
+  const visRight = Math.min(vw, targetRect.left + targetRect.width);
+  const visWidth = Math.max(0, visRight - visLeft);
+  const visCenterX = visLeft + visWidth / 2;
+
+  // Available space around the visible portion
+  const spaceBelow = vh - visBottom;
+  const spaceAbove = visTop;
+  const spaceRight = vw - visRight;
+  const spaceLeft = visLeft;
+
   // Auto-detect best placement based on available space
   let resolved: "top" | "bottom" | "left" | "right";
   if (placement === "auto") {
-    const spaceBelow = vh - (targetRect.top + targetRect.height);
-    const spaceAbove = targetRect.top;
-    const spaceRight = vw - (targetRect.left + targetRect.width);
-    const spaceLeft = targetRect.left;
-
-    if (spaceBelow >= 200) resolved = "bottom";
-    else if (spaceAbove >= 200) resolved = "top";
+    if (spaceBelow >= TOOLTIP_HEIGHT_ESTIMATE + TOOLTIP_GAP) resolved = "bottom";
+    else if (spaceAbove >= TOOLTIP_HEIGHT_ESTIMATE + TOOLTIP_GAP) resolved = "top";
     else if (spaceRight >= TOOLTIP_WIDTH + TOOLTIP_GAP * 2) resolved = "right";
     else if (spaceLeft >= TOOLTIP_WIDTH + TOOLTIP_GAP * 2) resolved = "left";
-    else resolved = "bottom";
+    else resolved = "bottom"; // fallback
   } else {
+    // Validate requested placement fits; fall back to auto if not
     resolved = placement;
+    if (resolved === "bottom" && spaceBelow < TOOLTIP_HEIGHT_ESTIMATE + TOOLTIP_GAP) {
+      if (spaceAbove >= TOOLTIP_HEIGHT_ESTIMATE + TOOLTIP_GAP) resolved = "top";
+    } else if (resolved === "top" && spaceAbove < TOOLTIP_HEIGHT_ESTIMATE + TOOLTIP_GAP) {
+      if (spaceBelow >= TOOLTIP_HEIGHT_ESTIMATE + TOOLTIP_GAP) resolved = "bottom";
+    }
   }
 
   let top = 0;
@@ -52,27 +73,32 @@ function computePosition(
 
   switch (resolved) {
     case "bottom":
-      top = targetRect.top + targetRect.height + TOOLTIP_GAP;
-      left = targetRect.left + targetRect.width / 2 - TOOLTIP_WIDTH / 2;
+      top = visBottom + TOOLTIP_GAP;
+      left = visCenterX - TOOLTIP_WIDTH / 2;
       break;
     case "top":
-      top = targetRect.top - TOOLTIP_GAP; // will be adjusted with transform
-      left = targetRect.left + targetRect.width / 2 - TOOLTIP_WIDTH / 2;
+      top = visTop - TOOLTIP_GAP; // will be adjusted with transform
+      left = visCenterX - TOOLTIP_WIDTH / 2;
       break;
     case "right":
-      top = targetRect.top + targetRect.height / 2;
-      left = targetRect.left + targetRect.width + TOOLTIP_GAP;
+      top = visCenterY - TOOLTIP_HEIGHT_ESTIMATE / 2;
+      left = visRight + TOOLTIP_GAP;
       break;
     case "left":
-      top = targetRect.top + targetRect.height / 2;
-      left = targetRect.left - TOOLTIP_WIDTH - TOOLTIP_GAP;
+      top = visCenterY - TOOLTIP_HEIGHT_ESTIMATE / 2;
+      left = visLeft - TOOLTIP_WIDTH - TOOLTIP_GAP;
       break;
   }
 
   // Clamp horizontal to viewport
-  left = Math.max(12, Math.min(left, vw - TOOLTIP_WIDTH - 12));
-  // Clamp vertical
-  top = Math.max(12, Math.min(top, vh - 60));
+  left = Math.max(EDGE_MARGIN, Math.min(left, vw - TOOLTIP_WIDTH - EDGE_MARGIN));
+  // Clamp vertical — account for tooltip height
+  if (resolved !== "top") {
+    top = Math.max(EDGE_MARGIN, Math.min(top, vh - TOOLTIP_HEIGHT_ESTIMATE - EDGE_MARGIN));
+  } else {
+    // For top, the tooltip hangs above via -translate-y-full, so clamp the anchor
+    top = Math.max(TOOLTIP_HEIGHT_ESTIMATE + EDGE_MARGIN, Math.min(top, vh - EDGE_MARGIN));
+  }
 
   return { top, left, resolved };
 }

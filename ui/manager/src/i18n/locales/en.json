@@ -1002,6 +1002,11 @@
       "platformTour": "Platform Tour",
       "resetAll": "Reset All Tours",
       "resetConfirm": "Reset all tour progress?"
+    },
+    "offer": {
+      "message": "New here? Take the {{page}}",
+      "accept": "Show me",
+      "dontAsk": "Don't ask again"
     }
   }
 }
