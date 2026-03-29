@@ -75,7 +75,33 @@ _**Prerequisite**: You need an up and running `Docker` environment. (For referen
     docker run --name eddi --network=eddi-network -p 7070:7070 -d labsai/eddi
     ```
 
-## Option 2 - Run from Source
+## Option 2 - Deploy on Kubernetes
+
+EDDI runs natively on any Kubernetes cluster (minikube, kind, GKE, EKS, AKS).
+
+**Quickstart (all-in-one):**
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
+bash k8s/create-secrets.sh  # generate vault key
+```
+
+**Using Kustomize overlays:**
+
+```bash
+kubectl apply -k k8s/overlays/mongodb/    # MongoDB backend
+kubectl apply -k k8s/overlays/postgres/   # PostgreSQL backend
+```
+
+**Using Helm:**
+
+```bash
+helm install eddi ./helm/eddi --namespace eddi --create-namespace
+```
+
+See the [Kubernetes Deployment Guide](kubernetes.md) for full details including auth, monitoring, NATS, Ingress, and production hardening.
+
+## Option 3 - Run from Source
 
 #### _Prerequisites:_
 

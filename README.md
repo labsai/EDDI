@@ -120,6 +120,7 @@ Notable features include:
 - **[Getting Started Guide](docs/getting-started.md)** - Setup and first steps
 - **[Developer Quickstart](docs/developer-quickstart.md)** - Build your first agent in 5 minutes
 - **[Architecture Overview](docs/architecture.md)** - Deep dive into EDDI's design and components
+- **[Kubernetes Deployment](docs/kubernetes.md)** - Deploy on Kubernetes with Kustomize or Helm
 - **[Behavior Rules](docs/behavior-rules.md)** - Configuring agent logic
 - **[LangChain Integration](docs/langchain.md)** - Connecting to LLM APIs
 - **[LangChain Tools Guide](docs/agent-father-langchain-tools-guide.md)** - Built-in AI agent tools configuration
@@ -265,7 +266,27 @@ docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compo
 <eddi-instance>/q/metrics
 ```
 
-## kubernetes integration
+## Kubernetes
+
+Deploy EDDI on any Kubernetes cluster:
+
+```bash
+# Quickstart (all-in-one)
+kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
+
+# Or using Kustomize overlays
+kubectl apply -k k8s/overlays/mongodb/    # MongoDB backend
+kubectl apply -k k8s/overlays/postgres/   # PostgreSQL backend
+
+# Or using Helm
+helm install eddi ./helm/eddi --namespace eddi --create-namespace
+```
+
+Modular overlays for auth (Keycloak), monitoring (Prometheus/Grafana), NATS messaging, Ingress, and production hardening (HPA, PDB, NetworkPolicy).
+
+See the [Kubernetes Deployment Guide](docs/kubernetes.md) for full details.
+
+### Health Endpoints
 
 Liveness endpoint:
 
