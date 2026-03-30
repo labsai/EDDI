@@ -2,13 +2,15 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
-import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ConversationSummaryConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -38,26 +40,48 @@ class ConversationSummarizerTest {
         return config;
     }
 
-    private IConversationMemory createMemoryWithOutputs(int numOutputs) {
-        var memory = new ConversationMemory("agent1", 1, "user1");
-        // First step is created automatically with the constructor
-        for (int i = 1; i < numOutputs; i++) {
+    /**
+     * Create a mock IConversationMemory with the specified number of conversation
+     * outputs. Each output has "input" and "output" keys populated with test data.
+     */
+    private IConversationMemory createMockMemory(int numOutputs) {
+        var memory = mock(IConversationMemory.class);
+        when(memory.getConversationId()).thenReturn("conv-test-001");
+
+        // Build conversation outputs
+        var outputs = new ArrayList<ConversationOutput>();
+        for (int i = 0; i < numOutputs; i++) {
             var output = new ConversationOutput();
             output.put("input", "User message " + (i + 1));
             output.put("output", List.of(Map.of("text", "Agent response " + (i + 1))));
-            memory.startNextStep(output);
+            outputs.add(output);
         }
-        // Set input/output on the first step as well
-        var firstOutput = memory.getConversationOutputs().get(0);
-        firstOutput.put("input", "User message 1");
-        firstOutput.put("output", List.of(Map.of("text", "Agent response 1")));
+        when(memory.getConversationOutputs()).thenReturn(outputs);
+
+        // Use a real map-backed properties implementation
+        var propsMap = new LinkedHashMap<String, Property>();
+
+        IConversationProperties props = mock(IConversationProperties.class);
+        doAnswer(inv -> {
+            String key = inv.getArgument(0);
+            Property val = inv.getArgument(1);
+            propsMap.put(key, val);
+            return null;
+        }).when(props).put(anyString(), any(Property.class));
+
+        when(props.get(anyString())).thenAnswer(inv -> propsMap.get(inv.getArgument(0, String.class)));
+        when(props.isEmpty()).thenAnswer(inv -> propsMap.isEmpty());
+        when(props.entrySet()).thenAnswer(inv -> propsMap.entrySet());
+
+        when(memory.getConversationProperties()).thenReturn(props);
+
         return memory;
     }
 
     @Test
     void updateIfNeeded_notEnoughTurns_doesNotSummarize() {
         // Given: 3 turns with recentWindow=5 — not enough to summarize
-        var memory = createMemoryWithOutputs(3);
+        var memory = createMockMemory(3);
         var config = createConfig(5);
 
         // When
@@ -71,7 +95,7 @@ class ConversationSummarizerTest {
     @Test
     void updateIfNeeded_exactlyAtWindow_doesNotSummarize() {
         // Given: 5 turns with recentWindow=5 — summarizeThroughStep=0
-        var memory = createMemoryWithOutputs(5);
+        var memory = createMockMemory(5);
         var config = createConfig(5);
 
         // When
@@ -84,7 +108,7 @@ class ConversationSummarizerTest {
     @Test
     void updateIfNeeded_firstSummarization_createsNewSummary() {
         // Given: 7 turns with recentWindow=5 → should summarize turns 1-2
-        var memory = createMemoryWithOutputs(7);
+        var memory = createMockMemory(7);
         var config = createConfig(5);
 
         when(summarizationService.summarize(anyString(), anyString(), eq("anthropic"), eq("claude-sonnet-4-6"))).thenReturn("Summary of turns 1-2");
@@ -100,13 +124,15 @@ class ConversationSummarizerTest {
 
     @Test
     void updateIfNeeded_incrementalUpdate_includesPreviousSummary() {
-        // Given: Start with summary covering steps 1-2
-        var memory = createMemoryWithOutputs(8);
+        // Given: 8 turns with recentWindow=5, summary already covers steps 1-2
+        var memory = createMockMemory(8);
         var config = createConfig(5);
 
-        memory.getConversationProperties().put(ConversationSummarizer.PROP_RUNNING_SUMMARY,
+        // Pre-set existing summary
+        var props = memory.getConversationProperties();
+        props.put(ConversationSummarizer.PROP_RUNNING_SUMMARY,
                 new Property(ConversationSummarizer.PROP_RUNNING_SUMMARY, "Previous summary", Scope.conversation));
-        memory.getConversationProperties().put(ConversationSummarizer.PROP_SUMMARY_THROUGH_STEP,
+        props.put(ConversationSummarizer.PROP_SUMMARY_THROUGH_STEP,
                 new Property(ConversationSummarizer.PROP_SUMMARY_THROUGH_STEP, 2, Scope.conversation));
 
         when(summarizationService.summarize(contains("Previous summary"), anyString(), anyString(), anyString()))
@@ -124,12 +150,13 @@ class ConversationSummarizerTest {
     @Test
     void updateIfNeeded_alreadySummarized_skips() {
         // Given: 7 turns with window=5, already summarized through step 2
-        var memory = createMemoryWithOutputs(7);
+        var memory = createMockMemory(7);
         var config = createConfig(5);
 
-        memory.getConversationProperties().put(ConversationSummarizer.PROP_SUMMARY_THROUGH_STEP,
+        var props = memory.getConversationProperties();
+        props.put(ConversationSummarizer.PROP_SUMMARY_THROUGH_STEP,
                 new Property(ConversationSummarizer.PROP_SUMMARY_THROUGH_STEP, 2, Scope.conversation));
-        memory.getConversationProperties().put(ConversationSummarizer.PROP_RUNNING_SUMMARY,
+        props.put(ConversationSummarizer.PROP_RUNNING_SUMMARY,
                 new Property(ConversationSummarizer.PROP_RUNNING_SUMMARY, "existing", Scope.conversation));
 
         // When: summarizeThroughStep = 7-5 = 2, same as already summarized
@@ -142,7 +169,7 @@ class ConversationSummarizerTest {
     @Test
     void updateIfNeeded_summarizationFails_doesNotStoreSummary() {
         // Given: 7 turns, summarization returns empty
-        var memory = createMemoryWithOutputs(7);
+        var memory = createMockMemory(7);
         var config = createConfig(5);
 
         when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString())).thenReturn("");
@@ -150,14 +177,14 @@ class ConversationSummarizerTest {
         // When
         summarizer.updateIfNeeded(memory, config, null);
 
-        // Then
+        // Then: no summary stored
         assertNull(ConversationSummarizer.readSummary(memory));
     }
 
     @Test
     void updateIfNeeded_withPropertiesExclusion_includesPropertiesInPrompt() {
         // Given
-        var memory = createMemoryWithOutputs(7);
+        var memory = createMockMemory(7);
         var config = createConfig(5);
         config.setExcludePropertiesFromSummary(true);
 
@@ -173,13 +200,13 @@ class ConversationSummarizerTest {
 
     @Test
     void readSummary_noProperty_returnsNull() {
-        var memory = createMemoryWithOutputs(1);
+        var memory = createMockMemory(1);
         assertNull(ConversationSummarizer.readSummary(memory));
     }
 
     @Test
     void readSummaryThroughStep_noProperty_returnsZero() {
-        var memory = createMemoryWithOutputs(1);
+        var memory = createMockMemory(1);
         assertEquals(0, ConversationSummarizer.readSummaryThroughStep(memory));
     }
 
@@ -222,5 +249,22 @@ class ConversationSummarizerTest {
         assertFalse(rendered.contains("First")); // skipped
         assertTrue(rendered.contains("Turn 2 — User: Second"));
         assertTrue(rendered.contains("Turn 3 — User: Third"));
+    }
+
+    @Test
+    void updateIfNeeded_idempotent_noDoubleSummarization() {
+        // Given: 7 turns with recentWindow=5
+        var memory = createMockMemory(7);
+        var config = createConfig(5);
+
+        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString())).thenReturn("Summary text");
+
+        // When: call twice
+        summarizer.updateIfNeeded(memory, config, null);
+        summarizer.updateIfNeeded(memory, config, null);
+
+        // Then: summarization service called only once (second call skips because
+        // already summarized)
+        verify(summarizationService, times(1)).summarize(anyString(), anyString(), anyString(), anyString());
     }
 }
