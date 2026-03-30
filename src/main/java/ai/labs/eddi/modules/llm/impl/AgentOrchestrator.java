@@ -20,6 +20,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
+import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -336,6 +337,8 @@ class AgentOrchestrator {
                 tools.add(weatherTool);
             if (whitelist.contains("usermemory"))
                 addUserMemoryToolIfEnabled(tools, memory);
+            if (whitelist.contains("conversationRecall"))
+                addConversationRecallToolIfEnabled(tools, task, memory);
         } else {
             // No whitelist — add all built-in tools
             tools.add(calculatorTool);
@@ -348,6 +351,8 @@ class AgentOrchestrator {
             tools.add(weatherTool);
             // Auto-add user memory tool if agent has it enabled
             addUserMemoryToolIfEnabled(tools, memory);
+            // Auto-add conversation recall tool if rolling summary is active
+            addConversationRecallToolIfEnabled(tools, task, memory);
         }
 
         LOGGER.info("Enabled " + tools.size() + " built-in tools for agent");
@@ -378,6 +383,28 @@ class AgentOrchestrator {
         var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config);
         tools.add(tool);
         LOGGER.infof("[MEMORY] UserMemoryTool enabled for agent='%s', user='%s', groups=%s", memory.getAgentId(), memory.getUserId(), groupIds);
+    }
+
+    /**
+     * Constructs and adds a ConversationRecallTool if a rolling summary is active.
+     * The tool is created per-invocation with the conversation's output list and
+     * the summary step boundary.
+     */
+    private void addConversationRecallToolIfEnabled(List<Object> tools, LlmConfiguration.Task task, IConversationMemory memory) {
+        // Only add if rolling summary is configured and a summary exists
+        var summaryConfig = task.getConversationSummary();
+        if (summaryConfig == null || !summaryConfig.isEnabled())
+            return;
+
+        String existingSummary = ConversationSummarizer.readSummary(memory);
+        if (existingSummary == null)
+            return;
+
+        int throughStep = ConversationSummarizer.readSummaryThroughStep(memory);
+        var tool = new ConversationRecallTool(List.copyOf(memory.getConversationOutputs()), throughStep, summaryConfig.getMaxRecallTurns());
+        tools.add(tool);
+        LOGGER.infof("[RECALL] ConversationRecallTool enabled: summaryThroughStep=%d, maxRecallTurns=%d", throughStep,
+                summaryConfig.getMaxRecallTurns());
     }
 
     // --- Httpcall auto-discovery from workflow ---

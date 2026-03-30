@@ -92,11 +92,6 @@ public class RestGroupConversation implements IRestGroupConversation {
                 }
 
                 @Override
-                public void onSynthesisComplete(GroupConversationEventSink.SynthesisCompleteEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_SYNTHESIS_COMPLETE, toJson(event));
-                }
-
-                @Override
                 public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
                     sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_COMPLETE, toJson(event));
                     closeQuietly(eventSink);
@@ -112,11 +107,13 @@ public class RestGroupConversation implements IRestGroupConversation {
             groupConversationService.startAndDiscussAsync(groupId, request.question(), userId, listener);
 
         } catch (IResourceStore.ResourceNotFoundException e) {
-            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR, "{\"error\":\"" + escapeJson(e.getMessage()) + "\"}");
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
+                    toJson(new GroupConversationEventSink.GroupErrorEvent(e.getMessage())));
             closeQuietly(eventSink);
         } catch (Exception e) {
             LOGGER.errorf("Group streaming discussion failed: %s", e.getMessage());
-            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR, "{\"error\":\"" + escapeJson(e.getMessage()) + "\"}");
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
+                    toJson(new GroupConversationEventSink.GroupErrorEvent(e.getMessage())));
             closeQuietly(eventSink);
         }
     }
@@ -180,11 +177,5 @@ public class RestGroupConversation implements IRestGroupConversation {
             LOGGER.warnf("Failed to serialize SSE event: %s", e.getMessage());
             return "{}";
         }
-    }
-
-    private String escapeJson(String text) {
-        if (text == null)
-            return "";
-        return text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r");
     }
 }

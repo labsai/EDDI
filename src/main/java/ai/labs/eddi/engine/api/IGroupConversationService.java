@@ -77,8 +77,6 @@ public interface IGroupConversationService {
         }
         default void onSynthesisStart(GroupConversationEventSink.SynthesisStartEvent event) {
         }
-        default void onSynthesisComplete(GroupConversationEventSink.SynthesisCompleteEvent event) {
-        }
         default void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
         }
         default void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {

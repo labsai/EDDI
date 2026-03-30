@@ -86,6 +86,7 @@ public class LlmTask implements ILifecycleTask {
     private final AgentOrchestrator agentOrchestrator;
     private final RagContextProvider ragContextProvider;
     private final TokenCounterFactory tokenCounterFactory;
+    private final ConversationSummarizer conversationSummarizer;
 
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
@@ -102,7 +103,8 @@ public class LlmTask implements ILifecycleTask {
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             IApiCallExecutor apiCallExecutor, ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager,
             A2AToolProviderManager a2aToolProviderManager, IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
-            RagContextProvider ragContextProvider, IUserMemoryStore userMemoryStore, TokenCounterFactory tokenCounterFactory) {
+            RagContextProvider ragContextProvider, IUserMemoryStore userMemoryStore, TokenCounterFactory tokenCounterFactory,
+            ConversationSummarizer conversationSummarizer) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -122,6 +124,7 @@ public class LlmTask implements ILifecycleTask {
         this.apiCallExecutor = apiCallExecutor;
         this.restAgentStore = restAgentStore;
         this.restWorkflowStore = restWorkflowStore;
+        this.conversationSummarizer = conversationSummarizer;
     }
 
     @Override
@@ -231,8 +234,24 @@ public class LlmTask implements ILifecycleTask {
         }
 
         // Build conversation messages — token-aware or step-count
+        // If rolling summary is active, inject summary prefix and skip summarized steps
         Integer maxContextTokens = task.getMaxContextTokens();
         int anchorFirstSteps = task.getAnchorFirstSteps() != null ? task.getAnchorFirstSteps() : 2;
+
+        String summaryPrefix = null;
+        int skipSteps = 0;
+        var summaryConfig = task.getConversationSummary();
+        if (summaryConfig != null && summaryConfig.isEnabled()) {
+            String existingSummary = ConversationSummarizer.readSummary(memory);
+            if (existingSummary != null) {
+                int throughStep = ConversationSummarizer.readSummaryThroughStep(memory);
+                summaryPrefix = "## CONVERSATION SUMMARY (turns 1-" + throughStep + " condensed)\n" + existingSummary + "\n\n"
+                        + "[You can use the recallConversationDetail tool to access full details from these summarized turns.]";
+                skipSteps = throughStep;
+                LOGGER.infof("[SUMMARY] Using rolling summary for task '%s': covers turns 1-%d, recent window from step %d", taskId, throughStep,
+                        throughStep + 1);
+            }
+        }
 
         List<ChatMessage> messages;
         if (maxContextTokens != null && maxContextTokens > 0) {
@@ -240,11 +259,11 @@ public class LlmTask implements ILifecycleTask {
             String resolvedModelName = resolveModelName(processedParams);
             var estimator = tokenCounterFactory.getEstimator(task.getType(), resolvedModelName);
             messages = conversationHistoryBuilder.buildTokenAwareMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), maxContextTokens,
-                    anchorFirstSteps, includeFirstAgentMessage, estimator);
+                    anchorFirstSteps, includeFirstAgentMessage, estimator, summaryPrefix, skipSteps);
         } else {
             // Legacy step-count windowing
             messages = conversationHistoryBuilder.buildMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), logSizeLimit,
-                    includeFirstAgentMessage);
+                    includeFirstAgentMessage, summaryPrefix, skipSteps);
         }
         if (messages.isEmpty()) {
             return;
@@ -441,6 +460,24 @@ public class LlmTask implements ILifecycleTask {
         }
 
         prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, 200, false);
+
+        // Strategy 2: Update rolling summary if configured
+        if (summaryConfig != null && summaryConfig.isEnabled()) {
+            try {
+                String propertiesContext = null;
+                if (summaryConfig.isExcludePropertiesFromSummary()) {
+                    var props = memory.getConversationProperties();
+                    if (props != null && !props.isEmpty()) {
+                        propertiesContext = props.entrySet().stream().filter(e -> !e.getKey().startsWith("conversation:"))
+                                .map(e -> e.getKey() + " = " + e.getValue().getValueString()).reduce((a, b) -> a + "\n" + b).orElse(null);
+                    }
+                }
+                conversationSummarizer.updateIfNeeded(memory, summaryConfig, propertiesContext);
+            } catch (Exception e) {
+                LOGGER.warnf(e, "[SUMMARY] Rolling summary update failed for conversation '%s'. Will retry next turn.", memory.getConversationId());
+                // Non-fatal — conversation continues, summary will catch up next turn
+            }
+        }
     }
 
     private HashMap<String, String> runTemplateEngineOnParams(Map<String, String> parameters, Map<String, Object> templateDataObjects) {

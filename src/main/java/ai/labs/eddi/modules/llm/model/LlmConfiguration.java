@@ -153,6 +153,16 @@ public record LlmConfiguration(List<Task> tasks) {
          */
         private Integer anchorFirstSteps = 2;
 
+        // === Conversation Window Management (Strategy 2: Rolling Summary) ===
+
+        /**
+         * Rolling conversation summary configuration. When enabled, older turns are
+         * compressed into a running summary and injected into the system message,
+         * keeping the recent window verbatim. A built-in {@code conversationRecall}
+         * tool allows the LLM to drill back into summarized turns.
+         */
+        private ConversationSummaryConfig conversationSummary;
+
         // === RAG Configuration (Phase 8c) ===
 
         /**
@@ -516,6 +526,14 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setModelCascade(ModelCascadeConfig modelCascade) {
             this.modelCascade = modelCascade;
+        }
+
+        public ConversationSummaryConfig getConversationSummary() {
+            return conversationSummary;
+        }
+
+        public void setConversationSummary(ConversationSummaryConfig conversationSummary) {
+            this.conversationSummary = conversationSummary;
         }
     }
 
@@ -909,6 +927,119 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setTimeoutMs(Long timeoutMs) {
             this.timeoutMs = timeoutMs;
+        }
+    }
+
+    /**
+     * Configuration for rolling conversation summary (Strategy 2).
+     * <p>
+     * When enabled, older conversation turns are incrementally compressed into a
+     * running summary. The LLM sees: {@code [system prompt + summary] +
+     * [recent N turns verbatim]}. A built-in {@code conversationRecall} tool allows
+     * the agent to drill back into summarized turns on demand.
+     */
+    public static class ConversationSummaryConfig {
+
+        /** Master switch — summary is only generated when enabled. */
+        private boolean enabled = false;
+
+        /** LLM provider for summarization (should be cheap/fast). */
+        private String llmProvider = "anthropic";
+
+        /** Model for summarization. Default: claude-sonnet-4-6. */
+        private String llmModel = "claude-sonnet-4-6";
+
+        /** Maximum tokens for the generated summary. */
+        private int maxSummaryTokens = 800;
+
+        /**
+         * When true, the summarization prompt tells the LLM to skip facts already
+         * captured as persistent properties — focusing only on reasoning, sequence, and
+         * implicit context.
+         */
+        private boolean excludePropertiesFromSummary = true;
+
+        /**
+         * Number of recent conversation steps to keep verbatim alongside the summary.
+         * Everything older is covered by the rolling summary.
+         */
+        private int recentWindowSteps = 5;
+
+        /**
+         * Maximum number of verbatim turns returned per
+         * {@code recallConversationDetail} tool invocation. Prevents flooding context
+         * with recalled history.
+         */
+        private int maxRecallTurns = 20;
+
+        /**
+         * Custom summarization prompt override. When null, a default structured prompt
+         * is used that preserves goals, decisions, reasoning, and tone.
+         */
+        private String summarizationPrompt;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getLlmProvider() {
+            return llmProvider;
+        }
+
+        public void setLlmProvider(String llmProvider) {
+            this.llmProvider = llmProvider;
+        }
+
+        public String getLlmModel() {
+            return llmModel;
+        }
+
+        public void setLlmModel(String llmModel) {
+            this.llmModel = llmModel;
+        }
+
+        public int getMaxSummaryTokens() {
+            return maxSummaryTokens;
+        }
+
+        public void setMaxSummaryTokens(int maxSummaryTokens) {
+            this.maxSummaryTokens = maxSummaryTokens;
+        }
+
+        public boolean isExcludePropertiesFromSummary() {
+            return excludePropertiesFromSummary;
+        }
+
+        public void setExcludePropertiesFromSummary(boolean excludePropertiesFromSummary) {
+            this.excludePropertiesFromSummary = excludePropertiesFromSummary;
+        }
+
+        public int getRecentWindowSteps() {
+            return recentWindowSteps;
+        }
+
+        public void setRecentWindowSteps(int recentWindowSteps) {
+            this.recentWindowSteps = recentWindowSteps;
+        }
+
+        public int getMaxRecallTurns() {
+            return maxRecallTurns;
+        }
+
+        public void setMaxRecallTurns(int maxRecallTurns) {
+            this.maxRecallTurns = maxRecallTurns;
+        }
+
+        public String getSummarizationPrompt() {
+            return summarizationPrompt;
+        }
+
+        public void setSummarizationPrompt(String summarizationPrompt) {
+            this.summarizationPrompt = summarizationPrompt;
         }
     }
 }

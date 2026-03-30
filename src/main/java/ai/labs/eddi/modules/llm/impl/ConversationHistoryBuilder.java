@@ -49,10 +49,47 @@ class ConversationHistoryBuilder {
      */
     List<ChatMessage> buildMessages(IConversationMemory memory, String systemMessage, String prompt, int logSizeLimit,
             boolean includeFirstAgentMessage) {
+        return buildMessages(memory, systemMessage, prompt, logSizeLimit, includeFirstAgentMessage, null, 0);
+    }
 
-        // Generate conversation history from memory
-        var chatMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(logSizeLimit, includeFirstAgentMessage).getMessages()
-                .stream().map(this::convertMessage).toList());
+    /**
+     * Build the full list of ChatMessages with optional summary injection
+     * (step-count mode).
+     *
+     * @param memory
+     *            conversation memory to read history from
+     * @param systemMessage
+     *            system message (may be null/empty)
+     * @param prompt
+     *            optional prompt to replace last user message (may be null/empty)
+     * @param logSizeLimit
+     *            conversation history limit (-1 = unlimited)
+     * @param includeFirstAgentMessage
+     *            whether to include the initial Agent greeting
+     * @param summaryPrefix
+     *            rolling summary text to prepend to system message (may be null)
+     * @param skipSteps
+     *            number of earliest conversation outputs to skip (already
+     *            summarized)
+     * @return ordered list of ChatMessages (system → history → user/prompt)
+     */
+    List<ChatMessage> buildMessages(IConversationMemory memory, String systemMessage, String prompt, int logSizeLimit,
+            boolean includeFirstAgentMessage, String summaryPrefix, int skipSteps) {
+
+        // Prepend summary to system message if present
+        if (!isNullOrEmpty(summaryPrefix)) {
+            systemMessage = (isNullOrEmpty(systemMessage) ? "" : systemMessage + "\n\n") + summaryPrefix;
+        }
+
+        // Generate conversation history from memory, applying skipSteps
+        // When skipSteps > 0, we generate a custom log starting from the skip boundary
+        List<ChatMessage> chatMessages;
+        if (skipSteps > 0) {
+            chatMessages = generateMessagesFromOutputs(memory, skipSteps, logSizeLimit, includeFirstAgentMessage);
+        } else {
+            chatMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(logSizeLimit, includeFirstAgentMessage).getMessages()
+                    .stream().map(this::convertMessage).toList());
+        }
 
         // If a custom prompt is defined, replace the last user input with it
         if (!isNullOrEmpty(prompt)) {
@@ -107,10 +144,52 @@ class ConversationHistoryBuilder {
      */
     List<ChatMessage> buildTokenAwareMessages(IConversationMemory memory, String systemMessage, String prompt, int maxContextTokens,
             int anchorFirstSteps, boolean includeFirstAgentMessage, TokenCountEstimator estimator) {
+        return buildTokenAwareMessages(memory, systemMessage, prompt, maxContextTokens, anchorFirstSteps, includeFirstAgentMessage, estimator, null,
+                0);
+    }
 
-        // Generate ALL conversation messages (unlimited)
-        var allMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(-1, includeFirstAgentMessage).getMessages().stream()
-                .map(this::convertMessage).toList());
+    /**
+     * Build the full list of ChatMessages with token-aware windowing and optional
+     * summary injection.
+     *
+     * @param memory
+     *            conversation memory to read history from
+     * @param systemMessage
+     *            system message (may be null/empty)
+     * @param prompt
+     *            optional prompt to replace last user message (may be null/empty)
+     * @param maxContextTokens
+     *            maximum token budget for conversation history (excluding system
+     *            prompt)
+     * @param anchorFirstSteps
+     *            number of opening conversation steps to always include
+     * @param includeFirstAgentMessage
+     *            whether to include the initial Agent greeting
+     * @param estimator
+     *            token count estimator to use for counting tokens
+     * @param summaryPrefix
+     *            rolling summary text to prepend to system message (may be null)
+     * @param skipSteps
+     *            number of earliest conversation outputs to skip (already
+     *            summarized)
+     * @return ordered list of ChatMessages fitting within the token budget
+     */
+    List<ChatMessage> buildTokenAwareMessages(IConversationMemory memory, String systemMessage, String prompt, int maxContextTokens,
+            int anchorFirstSteps, boolean includeFirstAgentMessage, TokenCountEstimator estimator, String summaryPrefix, int skipSteps) {
+
+        // Prepend summary to system message if present
+        if (!isNullOrEmpty(summaryPrefix)) {
+            systemMessage = (isNullOrEmpty(systemMessage) ? "" : systemMessage + "\n\n") + summaryPrefix;
+        }
+
+        // Generate conversation messages, skipping already-summarized turns
+        List<ChatMessage> allMessages;
+        if (skipSteps > 0) {
+            allMessages = generateMessagesFromOutputs(memory, skipSteps, -1, includeFirstAgentMessage);
+        } else {
+            allMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(-1, includeFirstAgentMessage).getMessages().stream()
+                    .map(this::convertMessage).toList());
+        }
 
         // If a custom prompt is defined, replace the last user input with it
         if (!isNullOrEmpty(prompt)) {
@@ -202,6 +281,72 @@ class ConversationHistoryBuilder {
             total += estimator.estimateTokenCountInMessage(msg);
         }
         return total;
+    }
+
+    /**
+     * Generate ChatMessages from conversation outputs, starting from a given step.
+     * Used when the rolling summary has consumed earlier turns and we only need the
+     * recent unsummarized section.
+     *
+     * @param memory
+     *            the conversation memory
+     * @param skipSteps
+     *            number of earliest conversation outputs to skip
+     * @param logSizeLimit
+     *            maximum number of steps to include (-1 = unlimited)
+     * @param includeFirstAgentMessage
+     *            whether to include an initial agent message (only relevant when
+     *            skipSteps == 0)
+     * @return mutable list of ChatMessages from the non-skipped section
+     */
+    private ArrayList<ChatMessage> generateMessagesFromOutputs(IConversationMemory memory, int skipSteps, int logSizeLimit,
+            boolean includeFirstAgentMessage) {
+
+        var outputs = memory.getConversationOutputs();
+        int startIndex = Math.min(skipSteps, outputs.size());
+
+        // Apply logSize limit to the remaining (non-skipped) window
+        if (logSizeLimit > 0) {
+            int windowStart = outputs.size() > (startIndex + logSizeLimit) ? outputs.size() - logSizeLimit : startIndex;
+            startIndex = Math.max(startIndex, windowStart);
+        }
+
+        var result = new ArrayList<ChatMessage>();
+        for (int i = startIndex; i < outputs.size(); i++) {
+            var output = outputs.get(i);
+            var input = output.get("input", String.class);
+            if (input != null) {
+                result.add(UserMessage.from(input));
+            }
+
+            Object outputObj = output.get("output");
+            if (outputObj instanceof List<?> outputList && !outputList.isEmpty()) {
+                String text = extractOutputTextFromList(outputList);
+                if (text != null && !text.isEmpty()) {
+                    result.add(AiMessage.from(text));
+                }
+            }
+        }
+
+        // When not skipping and includeFirstAgentMessage is false, drop the first
+        // message if it's an agent message (same behavior as ConversationLogGenerator)
+        if (skipSteps == 0 && !includeFirstAgentMessage && !result.isEmpty()) {
+            result.removeFirst();
+        }
+
+        return result;
+    }
+
+    /**
+     * Extract text from an output list (handles both Map and TextOutputItem forms).
+     */
+    @SuppressWarnings("unchecked")
+    private String extractOutputTextFromList(List<?> outputList) {
+        if (outputList.getFirst() instanceof java.util.Map) {
+            var mapList = (List<java.util.Map<String, Object>>) outputList;
+            return mapList.stream().filter(m -> m.get("text") != null).map(m -> m.get("text").toString()).collect(Collectors.joining(" "));
+        }
+        return null;
     }
 
     /**

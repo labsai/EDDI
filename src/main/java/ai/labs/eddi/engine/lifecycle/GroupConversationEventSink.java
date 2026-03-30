@@ -53,9 +53,6 @@ public final class GroupConversationEventSink {
     public record SynthesisStartEvent(String moderatorAgentId) {
     }
 
-    public record SynthesisCompleteEvent(String synthesizedAnswer) {
-    }
-
     public record GroupCompleteEvent(GroupConversation.GroupConversationState state, String synthesizedAnswer) {
     }
 

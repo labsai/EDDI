@@ -114,9 +114,6 @@ public class GroupConversationService implements IGroupConversationService {
     public GroupConversation discuss(String groupId, String question, String userId, int depth, GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
-        long startTime = System.nanoTime();
-        counterGroupDiscussion.increment();
-
         if (depth > maxDepth) {
             throw new GroupDepthExceededException("Maximum group discussion depth (%d) exceeded".formatted(maxDepth));
         }
@@ -133,11 +130,60 @@ public class GroupConversationService implements IGroupConversationService {
             throw new GroupDiscussionException("No phases defined for group: " + groupId);
         }
 
-        ProtocolConfig protocol = resolveProtocol(config);
         GroupConversation gc = createGroupConversation(groupId, question, userId, depth);
+        return executeDiscussion(gc, config, phases, question, listener);
+    }
+
+    @Override
+    public GroupConversation startAndDiscussAsync(String groupId, String question, String userId, GroupDiscussionEventListener listener)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+
+        // Validate early — so errors are returned synchronously
+        AgentGroupConfiguration config = groupStore.read(groupId, groupStore.getCurrentResourceId(groupId).getVersion());
+        if (config == null) {
+            throw new IResourceStore.ResourceNotFoundException("Group configuration not found: " + groupId);
+        }
+
+        List<DiscussionPhase> phases = resolvePhases(config);
+        if (phases.isEmpty()) {
+            throw new GroupDiscussionException("No phases defined for group: " + groupId);
+        }
+
+        // Create the conversation synchronously so we can return its ID
+        GroupConversation gc = createGroupConversation(groupId, question, userId, 0);
+
+        // Run the discussion in a virtual thread — reuse the same gc (no duplicate
+        // creation)
+        executorService.submit(() -> {
+            try {
+                executeDiscussion(gc, config, phases, question, listener);
+            } catch (Exception e) {
+                LOGGER.errorf("Async group discussion failed for %s: %s", groupId, e.getMessage());
+                if (listener != null) {
+                    listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
+                }
+            }
+        });
+
+        return gc;
+    }
+
+    /**
+     * Core discussion execution loop. Shared by both synchronous {@link #discuss}
+     * and asynchronous {@link #startAndDiscussAsync} to avoid duplicate
+     * conversation creation. Also fixes C2: emits phase_start before
+     * synthesis_start for correct semantic ordering.
+     */
+    private GroupConversation executeDiscussion(GroupConversation gc, AgentGroupConfiguration config, List<DiscussionPhase> phases, String question,
+            GroupDiscussionEventListener listener) throws GroupDiscussionException, IResourceStore.ResourceStoreException {
+
+        long startTime = System.nanoTime();
+        counterGroupDiscussion.increment();
+
+        ProtocolConfig protocol = resolveProtocol(config);
 
         if (listener != null) {
-            listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(gc.getId(), groupId, question,
+            listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(gc.getId(), gc.getGroupId(), question,
                     config.getStyle() != null ? config.getStyle().name() : "ROUND_TABLE", phases.size(),
                     config.getMembers().stream().map(GroupMember::agentId).toList()));
         }
@@ -151,16 +197,18 @@ public class GroupConversationService implements IGroupConversationService {
                     gc.setCurrentPhaseIndex(phaseIdx);
                     gc.setCurrentPhaseName(phase.name());
 
+                    // C2 fix: emit phase_start FIRST, then synthesis_start (correct semantic
+                    // ordering)
+                    if (listener != null) {
+                        listener.onPhaseStart(
+                                new GroupConversationEventSink.PhaseStartEvent(phaseIdx, phase.name(), phase.type().name(), phase.participants()));
+                    }
+
                     if (phase.type() == PhaseType.SYNTHESIS) {
                         gc.setState(GroupConversationState.SYNTHESIZING);
                         if (listener != null) {
                             listener.onSynthesisStart(new GroupConversationEventSink.SynthesisStartEvent(config.getModeratorAgentId()));
                         }
-                    }
-
-                    if (listener != null) {
-                        listener.onPhaseStart(
-                                new GroupConversationEventSink.PhaseStartEvent(phaseIdx, phase.name(), phase.type().name(), phase.participants()));
                     }
 
                     List<GroupMember> speakers = resolveParticipants(phase, config.getMembers(), config.getModeratorAgentId());
@@ -212,43 +260,6 @@ public class GroupConversationService implements IGroupConversationService {
         } finally {
             timerGroupDiscussion.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
         }
-    }
-
-    @Override
-    public GroupConversation startAndDiscussAsync(String groupId, String question, String userId, GroupDiscussionEventListener listener)
-            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-
-        // Validate early — so errors are returned synchronously
-        if (0 > maxDepth) {
-            throw new GroupDepthExceededException("Maximum group discussion depth (%d) exceeded".formatted(maxDepth));
-        }
-
-        AgentGroupConfiguration config = groupStore.read(groupId, groupStore.getCurrentResourceId(groupId).getVersion());
-        if (config == null) {
-            throw new IResourceStore.ResourceNotFoundException("Group configuration not found: " + groupId);
-        }
-
-        List<DiscussionPhase> phases = resolvePhases(config);
-        if (phases.isEmpty()) {
-            throw new GroupDiscussionException("No phases defined for group: " + groupId);
-        }
-
-        // Create the conversation synchronously so we can return its ID
-        GroupConversation gc = createGroupConversation(groupId, question, userId, 0);
-
-        // Run the discussion in a virtual thread
-        executorService.submit(() -> {
-            try {
-                discuss(groupId, question, userId, 0, listener);
-            } catch (Exception e) {
-                LOGGER.errorf("Async group discussion failed for %s: %s", groupId, e.getMessage());
-                if (listener != null) {
-                    listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
-                }
-            }
-        });
-
-        return gc;
     }
 
     @Override
