@@ -1,6 +1,5 @@
 package ai.labs.eddi.engine.internal;
 
-import ai.labs.eddi.configs.properties.IPropertiesStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
@@ -44,7 +43,6 @@ class ConversationServiceTest {
     private IAgentFactory AgentFactory;
     private IConversationMemoryStore conversationMemoryStore;
     private IConversationDescriptorStore conversationDescriptorStore;
-    private IPropertiesStore propertiesStore;
     private IConversationCoordinator conversationCoordinator;
     private IConversationSetup conversationSetup;
     private IRuntime runtime;
@@ -67,7 +65,6 @@ class ConversationServiceTest {
         AgentFactory = mock(IAgentFactory.class);
         conversationMemoryStore = mock(IConversationMemoryStore.class);
         conversationDescriptorStore = mock(IConversationDescriptorStore.class);
-        propertiesStore = mock(IPropertiesStore.class);
         conversationCoordinator = mock(IConversationCoordinator.class);
         conversationSetup = mock(IConversationSetup.class);
         runtime = mock(IRuntime.class);
@@ -85,9 +82,9 @@ class ConversationServiceTest {
         doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
         when(contextLogger.createLoggingContext(any(), any(), any(), any())).thenReturn(new HashMap<>());
 
-        conversationService = new ConversationService(AgentFactory, conversationMemoryStore, conversationDescriptorStore, propertiesStore,
-                userMemoryStore, conversationCoordinator, conversationSetup, cacheFactory, runtime, contextLogger, auditLedgerService,
-                tenantQuotaService, meterRegistry, AGENT_TIMEOUT);
+        conversationService = new ConversationService(AgentFactory, conversationMemoryStore, conversationDescriptorStore, userMemoryStore,
+                conversationCoordinator, conversationSetup, cacheFactory, runtime, contextLogger, auditLedgerService, tenantQuotaService,
+                meterRegistry, AGENT_TIMEOUT);
     }
 
     // --- startConversation tests ---
@@ -340,15 +337,13 @@ class ConversationServiceTest {
     // --- createPropertiesHandler tests ---
 
     @Test
-    void createPropertiesHandler_loadsAndMergesProperties() throws Exception {
+    void createPropertiesHandler_providesStoreAndUserId() {
         var handler = conversationService.createPropertiesHandler(USER_ID, null);
 
-        when(propertiesStore.readProperties(USER_ID)).thenReturn(null);
-
-        var props = handler.loadProperties();
-        assertNotNull(props);
-
-        verify(propertiesStore).readProperties(USER_ID);
+        assertNotNull(handler);
+        assertEquals(USER_ID, handler.getUserId());
+        assertNotNull(handler.getUserMemoryStore());
+        assertNull(handler.getUserMemoryConfig());
     }
 
     // --- sayStreaming tests ---

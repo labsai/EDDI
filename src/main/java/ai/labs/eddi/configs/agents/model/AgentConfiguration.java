@@ -96,20 +96,26 @@ public class AgentConfiguration {
 
     // === Persistent User Memory (Phase 11a) ===
 
-    /** Master switch — when false, agent behaves exactly as before. */
-    private boolean enableUserMemory = false;
+    /**
+     * Enables advanced memory features: LLM UserMemoryTool
+     * (remember/recall/forget), Dream consolidation, write guardrails, and custom
+     * recall settings. Basic longTerm property persistence always works regardless
+     * of this flag.
+     */
+    private boolean enableMemoryTools = false;
 
     /**
-     * Memory configuration — only meaningful when {@code enableUserMemory} is true.
+     * Memory configuration — only meaningful when {@code enableMemoryTools} is
+     * true.
      */
     private UserMemoryConfig userMemoryConfig;
 
-    public boolean isEnableUserMemory() {
-        return enableUserMemory;
+    public boolean isEnableMemoryTools() {
+        return enableMemoryTools;
     }
 
-    public void setEnableUserMemory(boolean enableUserMemory) {
-        this.enableUserMemory = enableUserMemory;
+    public void setEnableMemoryTools(boolean enableMemoryTools) {
+        this.enableMemoryTools = enableMemoryTools;
     }
 
     public UserMemoryConfig getUserMemoryConfig() {

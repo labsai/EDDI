@@ -16,9 +16,9 @@ import java.sql.*;
 import java.util.*;
 
 /**
- * PostgreSQL implementation of {@link IUserMemoryStore}. Stores structured
- * memory entries in a {@code usermemories} table with JSONB value column, and
- * delegates legacy property methods to the existing {@code properties} table.
+ * PostgreSQL implementation of {@link IUserMemoryStore}. All data lives in a
+ * single {@code usermemories} table with JSONB value column. Flat property
+ * methods operate on {@code global} entries.
  *
  * @author ginccc
  * @since 6.0.0
@@ -86,58 +86,55 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         }
     }
 
-    // === Legacy compat (delegates to existing properties table) ===
+    // === Flat property view (reads/writes global entries in usermemories) ===
 
     @Override
     public Properties readProperties(String userId) throws IResourceStore.ResourceStoreException {
-        String sql = "SELECT data FROM properties WHERE user_id = ?";
+        ensureSchema();
+        String sql = "SELECT key, value FROM usermemories WHERE user_id = ? AND visibility = 'global'";
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
+            Properties props = new Properties();
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    String json = rs.getString("data");
-                    Properties props = new Properties();
-                    if (json != null && !json.isEmpty() && !json.equals("{}")) {
-                        @SuppressWarnings("unchecked")
-                        var map = (Map<String, Object>) MAPPER.readValue(json, Map.class);
-                        if (map != null)
-                            props.putAll(map);
+                while (rs.next()) {
+                    String key = rs.getString("key");
+                    String valueJson = rs.getString("value");
+                    if (key != null && valueJson != null) {
+                        Object value = MAPPER.readValue(valueJson, Object.class);
+                        props.put(key, value);
                     }
-                    return props;
                 }
             }
+            return props.isEmpty() ? null : props;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to read properties for userId=" + userId, e);
         }
-        return null;
     }
 
     @Override
     public void mergeProperties(String userId, Properties properties) throws IResourceStore.ResourceStoreException {
         if (properties == null || properties.isEmpty())
             return;
-        Properties existing = readProperties(userId);
-        Properties current = (existing != null) ? existing : new Properties();
-        boolean create = (existing == null);
-        current.putAll(properties);
+        ensureSchema();
 
-        try {
-            String json = MAPPER.writeValueAsString(current);
-            if (create) {
-                String sql = "INSERT INTO properties (user_id, data) VALUES (?, ?::jsonb)";
-                try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-                    ps.setString(1, userId);
-                    ps.setString(2, json);
-                    ps.executeUpdate();
-                }
-            } else {
-                String sql = "UPDATE properties SET data = ?::jsonb WHERE user_id = ?";
-                try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-                    ps.setString(1, json);
-                    ps.setString(2, userId);
-                    ps.executeUpdate();
-                }
+        // Upsert each key-value pair as a global entry
+        String sql = """
+                INSERT INTO usermemories (user_id, key, value, category, visibility)
+                VALUES (?, ?, ?::jsonb, 'property', 'global')
+                ON CONFLICT (user_id, key) WHERE visibility = 'global'
+                DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+                """;
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            for (Map.Entry<String, Object> entry : properties.entrySet()) {
+                String key = entry.getKey();
+                if ("_id".equals(key) || "userId".equals(key))
+                    continue;
+                ps.setString(1, userId);
+                ps.setString(2, key);
+                ps.setString(3, MAPPER.writeValueAsString(entry.getValue()));
+                ps.addBatch();
             }
+            ps.executeBatch();
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to merge properties for userId=" + userId, e);
         }
@@ -145,7 +142,8 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
 
     @Override
     public void deleteProperties(String userId) throws IResourceStore.ResourceStoreException {
-        String sql = "DELETE FROM properties WHERE user_id = ?";
+        ensureSchema();
+        String sql = "DELETE FROM usermemories WHERE user_id = ? AND visibility = 'global'";
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
             ps.executeUpdate();

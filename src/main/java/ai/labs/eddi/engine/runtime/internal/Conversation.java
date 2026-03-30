@@ -2,7 +2,6 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.lifecycle.IConversation;
@@ -39,6 +38,13 @@ public class Conversation implements IConversation {
     private static final String KEY_CONTEXT = "context";
     private static final String KEY_SECRET_INPUT = "secretInput";
     private static final String SECRET_INPUT_PLACEHOLDER = "<secret input>";
+    private static final String CONVERSATION_START = "CONVERSATION_START";
+    private static final String CONVERSATION_END = "CONVERSATION_END";
+
+    // Default recall settings for agents without UserMemoryConfig
+    private static final String DEFAULT_RECALL_ORDER = "most_recent";
+    private static final int DEFAULT_MAX_RECALL_ENTRIES = 1000;
+
     private final List<IExecutableWorkflow> executableWorkflows;
     private final IConversationMemory conversationMemory;
     private final IPropertiesHandler propertiesHandler;
@@ -72,14 +78,16 @@ public class Conversation implements IConversation {
         setConversationState(ConversationState.READY);
 
         addConversationStartAction(conversationMemory.getCurrentStep());
-        loadLongTermProperties(conversationMemory);
 
-        // Phase 11a: Load user memories after legacy properties
+        // Set UserMemoryConfig on the memory (if advanced tools are enabled)
         AgentConfiguration.UserMemoryConfig memoryConfig = propertiesHandler.getUserMemoryConfig();
         if (memoryConfig != null) {
             conversationMemory.setUserMemoryConfig(memoryConfig);
-            loadUserMemories(conversationMemory, context);
         }
+
+        // Load all user properties from usermemories (always, regardless of
+        // enableMemoryTools)
+        loadUserProperties(conversationMemory, context);
 
         try {
             var lifecycleData = prepareLifecycleData("", context, null);
@@ -99,25 +107,52 @@ public class Conversation implements IConversation {
         currentStep.addConversationOutputList(ACTIONS.key(), conversationEndArray);
     }
 
-    private void loadLongTermProperties(IConversationMemory conversationMemory) throws LifecycleException {
-        try {
-            Properties properties = propertiesHandler.loadProperties();
+    /**
+     * Loads user properties from the {@code usermemories} collection. This replaces
+     * both the old {@code loadLongTermProperties()} (which read from the legacy
+     * {@code properties} collection) and the old {@code loadUserMemories()}.
+     * <p>
+     * Uses {@link IUserMemoryStore#getVisibleEntries} which handles visibility
+     * scoping (self + group + global). Recall order and max entries come from
+     * {@link AgentConfiguration.UserMemoryConfig} if available, or sensible
+     * defaults.
+     */
+    private void loadUserProperties(IConversationMemory memory, Map<String, Context> context) throws LifecycleException {
+        IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
+        if (store == null)
+            return;
 
-            if (properties.containsKey(KEY_USER_INFO)) {
-                Object userInfo = properties.get(KEY_USER_INFO);
-                if (userInfo instanceof Map<?, ?>) {
+        try {
+            String userId = memory.getUserId();
+            String agentId = memory.getAgentId();
+            List<String> groupIds = extractGroupIds(context);
+
+            // Use config-specific recall settings if available, else defaults
+            AgentConfiguration.UserMemoryConfig config = memory.getUserMemoryConfig();
+            String recallOrder = config != null ? config.getRecallOrder() : DEFAULT_RECALL_ORDER;
+            int maxEntries = config != null ? config.getMaxRecallEntries() : DEFAULT_MAX_RECALL_ENTRIES;
+
+            List<UserMemoryEntry> entries = store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries);
+
+            for (UserMemoryEntry entry : entries) {
+                Property prop = entryToProperty(entry);
+
+                // Special handling for userInfo (needs to be stored as conversation-scoped map)
+                if (KEY_USER_INFO.equals(entry.key()) && entry.value() instanceof Map<?, ?>) {
                     @SuppressWarnings("unchecked")
-                    var userInfoMap = (Map<String, Object>) userInfo;
-                    conversationMemory.getConversationProperties().put(KEY_USER_INFO, new Property(KEY_USER_INFO, userInfoMap, Scope.conversation));
+                    var userInfoMap = (Map<String, Object>) entry.value();
+                    memory.getConversationProperties().put(KEY_USER_INFO, new Property(KEY_USER_INFO, userInfoMap, Scope.conversation));
+                } else {
+                    memory.getConversationProperties().put(entry.key(), prop);
                 }
             }
 
-            conversationMemory.getConversationProperties().putAll(convertProperties(properties));
-
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-            throw new LifecycleException(e.getLocalizedMessage(), e);
+            if (!entries.isEmpty()) {
+                LOGGER.debugf("[MEMORY] Loaded %d user properties for user='%s', agent='%s'", entries.size(), userId, agentId);
+            }
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new LifecycleException("Failed to load user properties: " + e.getLocalizedMessage(), e);
         }
-
     }
 
     private ConversationState getConversationState() {
@@ -272,26 +307,6 @@ public class Conversation implements IConversation {
         }
     }
 
-    private Map<String, Property> convertProperties(Properties properties) {
-        return properties.keySet().stream().collect(Collectors.toMap(name -> name, name -> {
-            Object value = properties.get(name);
-            if (value instanceof String) {
-                return new Property(name, value.toString(), Scope.longTerm);
-            } else if (value instanceof Map<?, ?>) {
-                @SuppressWarnings("unchecked")
-                var valueMap = (Map<String, Object>) value;
-                return new Property(name, valueMap, Scope.longTerm);
-            } else if (value instanceof Integer valueInt) {
-                return new Property(name, valueInt, Scope.longTerm);
-            } else if (value instanceof Float valueFloat) {
-                return new Property(name, valueFloat, Scope.longTerm);
-            } else {
-                return new Property(name, (String) null, Scope.longTerm);
-            }
-        }, (a, b) -> b, LinkedHashMap::new));
-
-    }
-
     private void removeOldInvalidProperties() {
         IConversationProperties conversationProperties = conversationMemory.getConversationProperties();
         Map<String, Property> filteredConversationProperties = conversationProperties.entrySet().stream()
@@ -301,90 +316,44 @@ public class Conversation implements IConversation {
         conversationProperties.putAll(filteredConversationProperties);
     }
 
+    /**
+     * Persists all longTerm properties to the {@code usermemories} collection.
+     * <p>
+     * Visibility is applied at the persistence boundary:
+     * <ul>
+     * <li>If the property has explicit visibility → use it</li>
+     * <li>If the property has no visibility (null) → default to {@code global}
+     * (matches legacy flat properties behavior)</li>
+     * </ul>
+     */
     private void storePropertiesPermanently() throws IResourceStore.ResourceStoreException {
+        IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
+        if (store == null)
+            return;
 
-        Properties longTermConversationProperties = new Properties();
+        String userId = conversationMemory.getUserId();
+        String agentId = conversationMemory.getAgentId();
+        String conversationId = conversationMemory.getConversationId();
+
+        // Determine the agent's configured default visibility (from UserMemoryConfig).
+        // Falls back to global if no config (matches legacy unscoped behavior).
+        AgentConfiguration.UserMemoryConfig config = conversationMemory.getUserMemoryConfig();
+        Visibility configDefault = Visibility.global;
+        if (config != null) {
+            try {
+                configDefault = Visibility.valueOf(config.getDefaultVisibility());
+            } catch (IllegalArgumentException e) {
+                configDefault = Visibility.global;
+            }
+        }
+
         for (Property property : conversationMemory.getConversationProperties().values()) {
             if (property.getScope() == Scope.longTerm) {
-                var valueString = property.getValueString();
-                var valueObject = property.getValueObject();
-                var valueInt = property.getValueInt();
-                var valueFloat = property.getValueFloat();
-                if (valueString != null) {
-                    longTermConversationProperties.put(property.getName(), valueString);
-                } else if (valueObject != null) {
-                    longTermConversationProperties.put(property.getName(), valueObject);
-                } else if (valueInt != null) {
-                    longTermConversationProperties.put(property.getName(), valueInt);
-                } else if (valueFloat != null) {
-                    longTermConversationProperties.put(property.getName(), valueFloat);
-                }
+                // Apply visibility at persistence boundary only
+                Visibility vis = property.getVisibility() != null ? property.getVisibility() : configDefault;
+                UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis);
+                store.upsert(entry);
             }
-        }
-
-        propertiesHandler.mergeProperties(longTermConversationProperties);
-
-        // Phase 11a: Upsert entries with explicit visibility to usermemories store
-        storeUserMemories();
-    }
-
-    /**
-     * Loads structured user memories that are visible to this agent and merges them
-     * into conversation properties for template access via {@code {properties.*}}.
-     */
-    private void loadUserMemories(IConversationMemory memory, Map<String, Context> context) {
-        IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
-        AgentConfiguration.UserMemoryConfig config = memory.getUserMemoryConfig();
-        if (store == null || config == null)
-            return;
-
-        try {
-            String userId = memory.getUserId();
-            String agentId = memory.getAgentId();
-            List<String> groupIds = extractGroupIds(context);
-
-            List<UserMemoryEntry> entries = store.getVisibleEntries(userId, agentId, groupIds, config.getRecallOrder(), config.getMaxRecallEntries());
-
-            for (UserMemoryEntry entry : entries) {
-                Property prop = entryToProperty(entry);
-                memory.getConversationProperties().put(entry.key(), prop);
-            }
-
-            if (!entries.isEmpty()) {
-                LOGGER.debugf("[MEMORY] Loaded %d user memories for user='%s', agent='%s'", entries.size(), userId, agentId);
-            }
-        } catch (IResourceStore.ResourceStoreException e) {
-            LOGGER.warnf("Failed to load user memories: %s", e.getMessage());
-        }
-    }
-
-    /**
-     * Stores longTerm properties with explicit visibility to the structured
-     * usermemories collection.
-     */
-    private void storeUserMemories() {
-        IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
-        AgentConfiguration.UserMemoryConfig config = conversationMemory.getUserMemoryConfig();
-        if (store == null || config == null)
-            return;
-
-        Visibility defaultVisibility;
-        try {
-            defaultVisibility = Visibility.valueOf(config.getDefaultVisibility());
-        } catch (IllegalArgumentException e) {
-            defaultVisibility = Visibility.self;
-        }
-
-        try {
-            for (Property property : conversationMemory.getConversationProperties().values()) {
-                if (property.getScope() == Scope.longTerm && property.getVisibility() != null) {
-                    UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, conversationMemory.getUserId(), conversationMemory.getAgentId(),
-                            conversationMemory.getConversationId(), defaultVisibility);
-                    store.upsert(entry);
-                }
-            }
-        } catch (IResourceStore.ResourceStoreException e) {
-            LOGGER.warnf("Failed to store user memories: %s", e.getMessage());
         }
     }
 

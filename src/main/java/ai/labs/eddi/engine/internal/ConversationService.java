@@ -1,9 +1,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
-import ai.labs.eddi.configs.properties.IPropertiesStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -69,7 +67,6 @@ public class ConversationService implements IConversationService {
     private final IAgentFactory agentFactory;
     private final IConversationMemoryStore conversationMemoryStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
-    private final IPropertiesStore propertiesStore;
     private final IUserMemoryStore userMemoryStore;
     private final IConversationCoordinator conversationCoordinator;
     private final IRuntime runtime;
@@ -100,14 +97,13 @@ public class ConversationService implements IConversationService {
 
     @Inject
     public ConversationService(IAgentFactory agentFactory, IConversationMemoryStore conversationMemoryStore,
-            IConversationDescriptorStore conversationDescriptorStore, IPropertiesStore propertiesStore, IUserMemoryStore userMemoryStore,
+            IConversationDescriptorStore conversationDescriptorStore, IUserMemoryStore userMemoryStore,
             IConversationCoordinator conversationCoordinator, IConversationSetup conversationSetup, ICacheFactory cacheFactory, IRuntime runtime,
             IContextLogger contextLogger, AuditLedgerService auditLedgerService, TenantQuotaService tenantQuotaService, MeterRegistry meterRegistry,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.agentFactory = agentFactory;
         this.conversationMemoryStore = conversationMemoryStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
-        this.propertiesStore = propertiesStore;
         this.userMemoryStore = userMemoryStore;
         this.conversationCoordinator = conversationCoordinator;
         this.conversationSetup = conversationSetup;
@@ -618,24 +614,8 @@ public class ConversationService implements IConversationService {
     IPropertiesHandler createPropertiesHandler(final String userId, final AgentConfiguration.UserMemoryConfig memoryConfig) {
         return new IPropertiesHandler() {
             @Override
-            public Properties loadProperties() throws ResourceStoreException {
-                Properties properties = null;
-                if (!isNullOrEmpty(userId)) {
-                    properties = propertiesStore.readProperties(userId);
-                }
-
-                if (properties == null) {
-                    properties = new Properties();
-                } else {
-                    properties.remove("_id");
-                }
-
-                return properties;
-            }
-
-            @Override
-            public void mergeProperties(Properties properties) throws ResourceStoreException {
-                propertiesStore.mergeProperties(userId, properties);
+            public IUserMemoryStore getUserMemoryStore() {
+                return userMemoryStore;
             }
 
             @Override
@@ -644,8 +624,8 @@ public class ConversationService implements IConversationService {
             }
 
             @Override
-            public IUserMemoryStore getUserMemoryStore() {
-                return userMemoryStore;
+            public String getUserId() {
+                return userId;
             }
         };
     }

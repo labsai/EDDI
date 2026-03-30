@@ -8,23 +8,25 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Unified store for user memories and legacy properties. Replaces
- * {@link IPropertiesStore} as the primary storage interface.
+ * Unified store for all user-scoped persistent data. Supports both structured
+ * memory entries (with visibility, categories, agent scoping) and a flat
+ * key-value property view for REST and backward compatibility.
  *
  * <p>
- * Legacy compatibility methods ({@link #readProperties},
- * {@link #mergeProperties}, {@link #deleteProperties}) delegate to the existing
- * {@code properties} collection.
+ * Flat property methods ({@link #readProperties}, {@link #mergeProperties},
+ * {@link #deleteProperties}) provide a simplified view of {@code global}
+ * entries in the {@code usermemories} collection.
  *
  * <p>
- * Structured entry methods operate on the {@code usermemories} collection.
+ * Structured entry methods operate on the full {@code usermemories} collection
+ * with visibility, categories, and agent scoping.
  *
  * @author ginccc
  * @since 6.0.0
  */
 public interface IUserMemoryStore {
 
-    // === Legacy compat (replaces IPropertiesStore) ===
+    // === Flat property view (global entries) ===
 
     Properties readProperties(String userId) throws IResourceStore.ResourceStoreException;
 

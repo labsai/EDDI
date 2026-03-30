@@ -48,7 +48,7 @@ public class AgentStoreClientLibrary implements IAgentStoreClientLibrary {
         }
 
         // Persistent User Memory (Phase 11a)
-        if (agentConfig.isEnableUserMemory() && agentConfig.getUserMemoryConfig() != null) {
+        if (agentConfig.isEnableMemoryTools() && agentConfig.getUserMemoryConfig() != null) {
             ((Agent) agent).setUserMemoryConfig(agentConfig.getUserMemoryConfig());
         }
 

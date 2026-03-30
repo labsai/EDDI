@@ -28,11 +28,9 @@ import static com.mongodb.client.model.Sorts.descending;
 /**
  * MongoDB implementation of {@link IUserMemoryStore}.
  * <p>
- * Manages two collections:
- * <ul>
- * <li>{@code properties} — legacy property storage (backward compat)</li>
- * <li>{@code usermemories} — structured memory entries</li>
- * </ul>
+ * All data lives in a single {@code usermemories} collection. Flat property
+ * methods ({@link #readProperties}, {@link #mergeProperties},
+ * {@link #deleteProperties}) operate on {@code global} entries.
  *
  * @author ginccc
  * @since 6.0.0
@@ -43,7 +41,6 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
 
     private static final Logger LOGGER = Logger.getLogger(MongoUserMemoryStore.class);
 
-    private static final String COLLECTION_PROPERTIES = "properties";
     private static final String COLLECTION_MEMORIES = "usermemories";
     private static final String FIELD_USER_ID = "userId";
     private static final String FIELD_KEY = "key";
@@ -58,13 +55,11 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     private static final String FIELD_CREATED_AT = "createdAt";
     private static final String FIELD_UPDATED_AT = "updatedAt";
 
-    private final MongoCollection<Document> propertiesCollection;
     private final MongoCollection<Document> memoriesCollection;
 
     @Inject
     public MongoUserMemoryStore(MongoDatabase database) {
         RuntimeUtilities.checkNotNull(database, "database");
-        this.propertiesCollection = database.getCollection(COLLECTION_PROPERTIES);
         this.memoriesCollection = database.getCollection(COLLECTION_MEMORIES);
         ensureIndexes();
     }
@@ -86,16 +81,25 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
                 new IndexOptions().name("idx_user_category").background(true));
     }
 
-    // === Legacy compat ===
+    // === Flat property view (reads/writes global entries in usermemories) ===
 
     @Override
     public Properties readProperties(String userId) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(userId, FIELD_USER_ID);
-        Document document = propertiesCollection.find(eq(FIELD_USER_ID, userId)).first();
-        if (document == null) {
-            return null;
+
+        // Query all global entries for this user and convert to flat Properties map
+        Bson filter = and(eq(FIELD_USER_ID, userId), eq(FIELD_VISIBILITY, Visibility.global.name()));
+        Properties properties = new Properties();
+
+        for (Document doc : memoriesCollection.find(filter)) {
+            String key = doc.getString(FIELD_KEY);
+            Object value = doc.get(FIELD_VALUE);
+            if (key != null && value != null) {
+                properties.put(key, value);
+            }
         }
-        return new Properties(document);
+
+        return properties.isEmpty() ? null : properties;
     }
 
     @Override
@@ -106,26 +110,28 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
             return;
         }
 
-        Properties current = readProperties(userId);
-        boolean create = false;
-        if (current == null) {
-            current = new Properties();
-            current.put(FIELD_USER_ID, userId);
-            create = true;
-        }
-        current.putAll(properties);
-        Document doc = new Document(current);
-        if (create) {
-            propertiesCollection.insertOne(doc);
-        } else {
-            propertiesCollection.replaceOne(eq(FIELD_USER_ID, userId), doc);
+        // Upsert each key-value pair as a global entry in usermemories
+        Instant now = Instant.now();
+        for (Map.Entry<String, Object> entry : properties.entrySet()) {
+            String key = entry.getKey();
+            if ("_id".equals(key) || FIELD_USER_ID.equals(key))
+                continue;
+
+            Bson filter = and(eq(FIELD_USER_ID, userId), eq(FIELD_KEY, key), eq(FIELD_VISIBILITY, Visibility.global.name()));
+            Bson update = Updates.combine(Updates.set(FIELD_VALUE, entry.getValue()), Updates.set(FIELD_VISIBILITY, Visibility.global.name()),
+                    Updates.set(FIELD_UPDATED_AT, now.toString()), Updates.setOnInsert(FIELD_USER_ID, userId), Updates.setOnInsert(FIELD_KEY, key),
+                    Updates.setOnInsert(FIELD_CATEGORY, "property"), Updates.setOnInsert(FIELD_CREATED_AT, now.toString()),
+                    Updates.setOnInsert(FIELD_ACCESS_COUNT, 0));
+
+            memoriesCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
         }
     }
 
     @Override
     public void deleteProperties(String userId) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(userId, FIELD_USER_ID);
-        propertiesCollection.deleteOne(eq(FIELD_USER_ID, userId));
+        // Delete all global entries for this user
+        memoriesCollection.deleteMany(and(eq(FIELD_USER_ID, userId), eq(FIELD_VISIBILITY, Visibility.global.name())));
     }
 
     // === Structured entries ===
@@ -266,9 +272,6 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         RuntimeUtilities.checkNotNull(userId, FIELD_USER_ID);
         DeleteResult result = memoriesCollection.deleteMany(eq(FIELD_USER_ID, userId));
         LOGGER.infof("[MEMORY] GDPR delete-all for user '%s': %d entries removed", userId, result.getDeletedCount());
-
-        // Also delete legacy properties
-        propertiesCollection.deleteOne(eq(FIELD_USER_ID, userId));
     }
 
     @Override
