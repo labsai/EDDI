@@ -1,15 +1,18 @@
 import { useTranslation } from "react-i18next";
 import { MessageSquareQuote, Copy, CheckCircle2 } from "lucide-react";
-import { useState } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { PhaseHeader } from "./phase-header";
 import { AgentResponseCard } from "./agent-response-card";
 import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType } from "@/lib/api/groups";
+import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface DiscussionTranscriptProps {
   conversation: GroupConversation | null;
+  /** Live streaming state from SSE hook — takes priority over conversation */
+  streamState?: GroupStreamState;
   isLoading?: boolean;
 }
 
@@ -71,10 +74,42 @@ const STATE_VARIANTS: Record<string, { variant: "default" | "success" | "warning
 
 export function DiscussionTranscript({
   conversation,
+  streamState,
   isLoading,
 }: DiscussionTranscriptProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Determine the effective data source: streaming or static
+  const isStreaming = !!streamState && (streamState.isStreaming || streamState.state !== "CREATED");
+
+  // Build effective transcript, state, and metadata
+  const effectiveTranscript = useMemo(
+    () => (isStreaming ? streamState!.transcript : (conversation?.transcript ?? [])),
+    [isStreaming, streamState, conversation?.transcript]
+  );
+  const effectiveState = isStreaming ? streamState!.state : (conversation?.state ?? "CREATED");
+  const effectiveCurrentPhase = isStreaming ? streamState!.currentPhase?.name : conversation?.currentPhaseName;
+  const effectiveSynthesis = isStreaming ? streamState!.synthesizedAnswer : conversation?.synthesizedAnswer;
+  const effectiveQuestion = isStreaming
+    ? (effectiveTranscript.find((e) => e.type === "QUESTION")?.content ?? "")
+    : (conversation?.originalQuestion ?? "");
+  const effectiveCreated = isStreaming
+    ? new Date().toISOString()
+    : (conversation?.created ?? new Date().toISOString());
+  const activeSpeakers = isStreaming ? streamState!.activeSpeakers : new Set<string>();
+  const streamError = isStreaming ? streamState!.error : null;
+
+  // Memoize phases to avoid re-grouping on every render
+  const phases = useMemo(() => groupByPhase(effectiveTranscript), [effectiveTranscript]);
+
+  // Auto-scroll to bottom when new entries arrive during streaming
+  useEffect(() => {
+    if (isStreaming && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [isStreaming, effectiveTranscript.length]);
 
   if (isLoading) {
     return (
@@ -86,7 +121,7 @@ export function DiscussionTranscript({
     );
   }
 
-  if (!conversation) {
+  if (!isStreaming && !conversation) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8">
         <MessageSquareQuote className="h-12 w-12 text-muted-foreground/30 mb-3" />
@@ -97,8 +132,7 @@ export function DiscussionTranscript({
     );
   }
 
-  const phases = groupByPhase(conversation.transcript);
-  const stateVariant = STATE_VARIANTS[conversation.state] || STATE_VARIANTS.CREATED;
+  const stateVariant = STATE_VARIANTS[effectiveState] || STATE_VARIANTS.CREATED;
   const discussionStateLabels: Record<string, string> = {
     CREATED: t("groups.stateCreated", "Created"),
     IN_PROGRESS: t("conversations.stateInProgress", "In Progress"),
@@ -106,11 +140,11 @@ export function DiscussionTranscript({
     COMPLETED: t("groups.stateCompleted", "Completed"),
     FAILED: t("groups.stateFailed", "Failed"),
   };
-  const stateLabel = discussionStateLabels[conversation.state] ?? conversation.state;
+  const stateLabel = discussionStateLabels[effectiveState] ?? effectiveState;
 
   function handleCopySynthesis() {
-    if (conversation?.synthesizedAnswer) {
-      navigator.clipboard.writeText(conversation.synthesizedAnswer);
+    if (effectiveSynthesis) {
+      navigator.clipboard.writeText(effectiveSynthesis);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -132,39 +166,48 @@ export function DiscussionTranscript({
               <Badge variant={stateVariant!.variant} className="text-[10px]">
                 {stateLabel}
               </Badge>
+              {isStreaming && (
+                <Badge variant="outline" className="text-[10px] text-primary border-primary/30 animate-pulse">
+                  ● LIVE
+                </Badge>
+              )}
               <span className="text-[10px] text-muted-foreground ms-auto">
-                {new Date(conversation.created).toLocaleString()}
+                {new Date(effectiveCreated).toLocaleString()}
               </span>
             </div>
             <p className="text-base font-medium text-foreground">
-              {conversation.originalQuestion}
+              {effectiveQuestion}
             </p>
           </div>
         </div>
       </div>
 
       {/* Transcript body */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
         {phases.map((phase, idx) => (
           <PhaseHeader
             key={`${phase.phaseIndex}-${phase.phaseName}-${idx}`}
             name={phase.phaseName}
             type={phase.phaseType}
             entryCount={phase.entries.length}
-            isActive={conversation.state === "IN_PROGRESS" && phase.phaseIndex === conversation.currentPhaseIndex}
+            isActive={
+              (effectiveState === "IN_PROGRESS" || effectiveState === "SYNTHESIZING") &&
+              phase.phaseIndex === (isStreaming ? streamState!.currentPhase?.index : conversation?.currentPhaseIndex)
+            }
             defaultExpanded={true}
           >
             {phase.entries.map((entry, entryIdx) => (
               <AgentResponseCard
                 key={`${entry.speakerAgentId}-${entry.phaseIndex}-${entryIdx}`}
                 entry={entry}
+                isSpeaking={activeSpeakers.has(entry.speakerAgentId) && entry.content === null}
               />
             ))}
           </PhaseHeader>
         ))}
 
         {/* Synthesized answer highlight */}
-        {conversation.synthesizedAnswer && (
+        {effectiveSynthesis && (
           <div
             className={cn(
               "rounded-xl border-2 border-primary/40 bg-linear-to-b from-primary/10 to-primary/5 p-4 shadow-sm"
@@ -195,13 +238,13 @@ export function DiscussionTranscript({
               </button>
             </div>
             <div className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
-              {conversation.synthesizedAnswer}
+              {effectiveSynthesis}
             </div>
           </div>
         )}
 
         {/* In-progress indicator */}
-        {(conversation.state === "IN_PROGRESS" || conversation.state === "SYNTHESIZING") && (
+        {(effectiveState === "IN_PROGRESS" || effectiveState === "SYNTHESIZING") && (
           <div className="flex items-center gap-3 p-3 rounded-lg bg-primary/5 border border-primary/20">
             <div className="flex gap-1">
               <span className="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:0ms]" />
@@ -209,18 +252,31 @@ export function DiscussionTranscript({
               <span className="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
             </div>
             <span className="text-sm text-primary font-medium">
-              {conversation.state === "SYNTHESIZING"
+              {effectiveState === "SYNTHESIZING"
                 ? t("groups.synthesizing", "Moderator is synthesizing…")
                 : t("groups.discussing", "Agents are discussing…")}
             </span>
-            {conversation.currentPhaseName && (
+            {effectiveCurrentPhase && (
               <Badge variant="outline" className="text-[10px]">
-                {conversation.currentPhaseName}
+                {effectiveCurrentPhase}
               </Badge>
             )}
+            {isStreaming && activeSpeakers.size > 0 && (
+              <span className="text-[10px] text-muted-foreground">
+                {activeSpeakers.size} speaking
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Error state */}
+        {streamError && (
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/5 border border-destructive/20">
+            <span className="text-sm text-destructive font-medium">⚠️ {streamError}</span>
           </div>
         )}
       </div>
     </div>
   );
 }
+

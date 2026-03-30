@@ -2361,6 +2361,81 @@ export const scheduleHandlers = [
     }, { status: 201 });
   }),
 
+  // SSE stream group discussion
+  http.post("*/groups/:groupId/conversations/stream", ({ params }) => {
+    const groupId = String(params.groupId);
+    const convId = `gconv-stream-${Date.now()}`;
+
+    // Build SSE event string helper
+    const sseEvent = (name: string, data: object) =>
+      `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+
+    // Simulate a multi-phase discussion with delays
+    const events = [
+      sseEvent("group_start", {
+        conversationId: convId,
+        groupId,
+        question: "What are the key benefits of AI agents?",
+        style: "ROUND_TABLE",
+        phaseCount: 2,
+        agentIds: ["agent1", "agent2"],
+      }),
+      sseEvent("phase_start", { phaseIndex: 0, phaseName: "Initial Opinions", phaseType: "OPINION", participants: "ALL_MEMBERS" }),
+      sseEvent("speaker_start", { agentId: "agent1", displayName: "Support Agent", phaseIndex: 0, phaseName: "Initial Opinions" }),
+      sseEvent("speaker_complete", {
+        agentId: "agent1",
+        displayName: "Support Agent",
+        content: "AI agents provide 24/7 availability, consistent response quality, and can handle multiple conversations simultaneously. They reduce operational costs while improving customer satisfaction through instant responses.",
+        phaseIndex: 0,
+        phaseName: "Initial Opinions",
+      }),
+      sseEvent("speaker_start", { agentId: "agent2", displayName: "FAQ Agent", phaseIndex: 0, phaseName: "Initial Opinions" }),
+      sseEvent("speaker_complete", {
+        agentId: "agent2",
+        displayName: "FAQ Agent",
+        content: "From an information management perspective, AI agents excel at maintaining up-to-date knowledge bases, providing consistent answers across all channels, and learning from user interactions to improve over time.",
+        phaseIndex: 0,
+        phaseName: "Initial Opinions",
+      }),
+      sseEvent("phase_complete", { phaseIndex: 0, phaseName: "Initial Opinions" }),
+      sseEvent("phase_start", { phaseIndex: 1, phaseName: "Synthesis", phaseType: "SYNTHESIS", participants: "MODERATOR_ONLY" }),
+      sseEvent("synthesis_start", { moderatorAgentId: "moderator-agent" }),
+      sseEvent("speaker_start", { agentId: "moderator-agent", displayName: "Moderator", phaseIndex: 1, phaseName: "Synthesis" }),
+      sseEvent("speaker_complete", {
+        agentId: "moderator-agent",
+        displayName: "Moderator",
+        content: "Both agents highlight complementary benefits: operational efficiency (24/7 availability, cost reduction, scalability) and knowledge management (consistent answers, continuous learning, multi-channel support). Together, these benefits make AI agents a compelling solution for modern customer engagement.",
+        phaseIndex: 1,
+        phaseName: "Synthesis",
+      }),
+      sseEvent("phase_complete", { phaseIndex: 1, phaseName: "Synthesis" }),
+      sseEvent("group_complete", {
+        state: "COMPLETED",
+        synthesizedAnswer: "Both agents highlight complementary benefits: operational efficiency (24/7 availability, cost reduction, scalability) and knowledge management (consistent answers, continuous learning, multi-channel support). Together, these benefits make AI agents a compelling solution for modern customer engagement.",
+      }),
+    ];
+
+    // Stream events with simulated delays
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        for (const event of events) {
+          await new Promise((r) => setTimeout(r, 500 + Math.random() * 1000));
+          controller.enqueue(encoder.encode(event));
+        }
+        controller.close();
+      },
+    });
+
+    return new HttpResponse(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  }),
+
   // Delete group conversation
   http.delete("*/groups/:groupId/conversations/:convId", () => {
     return new HttpResponse(null, { status: 204 });

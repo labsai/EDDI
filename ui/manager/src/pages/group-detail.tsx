@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Users, Trash2, MessageSquareQuote, Clock, PanelRightOpen, PanelRightClose } from "lucide-react";
@@ -7,9 +7,9 @@ import {
   useGroup,
   useGroupConversations,
   useGroupConversation,
-  useStartDiscussion,
   useDeleteGroupConversation,
 } from "@/hooks/use-groups";
+import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
 import { DiscussionTranscript } from "@/components/groups/discussion-transcript";
 import { DiscussionInput } from "@/components/groups/discussion-input";
 import { GroupConfigPanel } from "@/components/groups/group-config-panel";
@@ -54,29 +54,32 @@ export function GroupDetailPage() {
     isLoading: convLoading,
   } = useGroupConversation(groupId || "", selectedConvId || "");
 
-  const startMutation = useStartDiscussion();
+  // SSE streaming hook
+  const { streamState, startStream, abortStream } = useGroupDiscussionStream();
+
   const deleteConvMutation = useDeleteGroupConversation();
 
-  // Auto-select the first conversation if none selected
+  // Auto-select the first conversation if none selected and not streaming
   useEffect(() => {
-    if (!selectedConvId && conversations && conversations.length > 0) {
+    if (!selectedConvId && !streamState.isStreaming && conversations && conversations.length > 0) {
       setSelectedConvId(conversations[0]!.id);
     }
-  }, [conversations, selectedConvId]);
+  }, [conversations, selectedConvId, streamState.isStreaming]);
 
-  function handleStartDiscussion(question: string) {
+  const handleStartDiscussion = useCallback((question: string) => {
     if (!groupId) return;
-    startMutation.mutate(
-      { groupId, question },
-      {
-        onSuccess: (gc) => {
-          toast.success(t("groups.discussionStarted", "Discussion started"));
-          setSelectedConvId(gc.id);
-        },
-        onError: () => toast.error(t("common.error")),
-      }
-    );
-  }
+    // Clear the selected conversation so we show the stream instead
+    setSelectedConvId(null);
+    startStream(groupId, question);
+    toast.success(t("groups.discussionStarted", "Discussion started — streaming live"));
+  }, [groupId, startStream, t]);
+
+  // When streaming completes, select the new conversation
+  useEffect(() => {
+    if (streamState.state === "COMPLETED" && streamState.conversationId && !streamState.isStreaming) {
+      setSelectedConvId(streamState.conversationId);
+    }
+  }, [streamState.state, streamState.conversationId, streamState.isStreaming]);
 
   function handleDeleteConversation(convId: string) {
     if (!groupId) return;
@@ -110,6 +113,9 @@ export function GroupDetailPage() {
   }
 
   const styleInfo = STYLE_INFO[groupConfig.style];
+
+  // Determine whether to show streaming or static transcript
+  const isStreamActive = streamState.isStreaming || (streamState.state !== "CREATED" && !selectedConvId);
 
   return (
     <div className="flex flex-col h-[calc(100vh-(--spacing(16))-(--spacing(12)))]">
@@ -170,10 +176,13 @@ export function GroupDetailPage() {
                 {conversations.map((conv) => (
                   <button
                     key={conv.id}
-                    onClick={() => setSelectedConvId(conv.id)}
+                    onClick={() => {
+                      if (streamState.isStreaming) abortStream();
+                      setSelectedConvId(conv.id);
+                    }}
                     className={cn(
                       "w-full text-start rounded-lg px-3 py-2 transition-all group/item",
-                      selectedConvId === conv.id
+                      selectedConvId === conv.id && !isStreamActive
                         ? "bg-primary/10 border border-primary/30"
                         : "hover:bg-secondary/50 border border-transparent"
                     )}
@@ -219,7 +228,7 @@ export function GroupDetailPage() {
           {/* Discussion input at bottom */}
           <DiscussionInput
             onSubmit={handleStartDiscussion}
-            isLoading={startMutation.isPending}
+            isLoading={streamState.isStreaming}
           />
         </div>
 
@@ -229,12 +238,13 @@ export function GroupDetailPage() {
           <div className="lg:hidden border-b border-border">
             <DiscussionInput
               onSubmit={handleStartDiscussion}
-              isLoading={startMutation.isPending}
+              isLoading={streamState.isStreaming}
             />
           </div>
           <div className="flex-1 min-h-0">
             <DiscussionTranscript
-              conversation={selectedConversation ?? null}
+              conversation={isStreamActive ? null : (selectedConversation ?? null)}
+              streamState={isStreamActive ? streamState : undefined}
               isLoading={convLoading && !!selectedConvId}
             />
           </div>
@@ -250,3 +260,4 @@ export function GroupDetailPage() {
     </div>
   );
 }
+

@@ -5,8 +5,69 @@ import { ENTRY_TYPE_INFO } from "@/lib/api/groups";
 
 interface AgentResponseCardProps {
   entry: TranscriptEntry;
+  /** Show typing indicator instead of content */
+  isSpeaking?: boolean;
   className?: string;
 }
+
+/**
+ * Parse transcript entry content, which may be:
+ * 1. JSON from backend `extractResponse()` — e.g. `{"output":[{"type":"text","text":"..."}],...}`
+ * 2. Plain text (already extracted, or from fixed backend)
+ * Returns the cleaned text string.
+ */
+function parseTranscriptContent(content: string): string {
+  if (!content) return "";
+
+  // Quick check: does it look like JSON?
+  const trimmed = content.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+
+      // Format 1: { "output": [{ "type": "text", "text": "..." }], ... }
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const texts: string[] = [];
+
+        // Check nested "output" array
+        if (Array.isArray(parsed.output)) {
+          for (const item of parsed.output) {
+            if (typeof item === "string") texts.push(item);
+            else if (item?.text) texts.push(String(item.text));
+          }
+        }
+
+        // Check flat "output:text:*" keys
+        if (texts.length === 0) {
+          for (const [key, val] of Object.entries(parsed)) {
+            if (!key.startsWith("output:text:")) continue;
+            if (typeof val === "string") texts.push(val);
+            else if (Array.isArray(val)) {
+              for (const item of val) {
+                if (typeof item === "string") texts.push(item);
+                else if (item?.text) texts.push(String(item.text));
+              }
+            } else if (val && typeof val === "object" && (val as Record<string, unknown>).text) {
+              texts.push(String((val as Record<string, unknown>).text));
+            }
+          }
+        }
+
+        if (texts.length > 0) return texts.join("\n");
+      }
+    } catch {
+      // Not valid JSON — treat as plain text
+    }
+  }
+
+  return content;
+}
+
+/** Check if content contains HTML tags */
+function hasHtml(content: string): boolean {
+  return /<[a-z][\s\S]*>/i.test(content);
+}
+
 function badgeVariant(
   type: TranscriptEntryType
 ): "default" | "secondary" | "success" | "warning" | "destructive" | "outline" {
@@ -29,11 +90,14 @@ function badgeVariant(
   }
 }
 
-export function AgentResponseCard({ entry, className }: AgentResponseCardProps) {
+export function AgentResponseCard({ entry, isSpeaking, className }: AgentResponseCardProps) {
   const info = ENTRY_TYPE_INFO[entry.type];
   const isUser = entry.speakerAgentId === "user";
   const isSynthesis = entry.type === "SYNTHESIS";
   const isError = entry.type === "ERROR" || entry.type === "SKIPPED";
+
+  const parsedContent = entry.content ? parseTranscriptContent(entry.content) : null;
+  const contentHasHtml = parsedContent ? hasHtml(parsedContent) : false;
 
   return (
     <div
@@ -79,10 +143,24 @@ export function AgentResponseCard({ entry, className }: AgentResponseCardProps) 
         </div>
 
         {/* Response body */}
-        {entry.content ? (
-          <div className="text-sm text-foreground/90 whitespace-pre-wrap leading-relaxed">
-            {entry.content}
+        {isSpeaking ? (
+          <div className="flex items-center gap-2 py-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:150ms]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
+            <span className="text-xs text-muted-foreground ms-1">responding…</span>
           </div>
+        ) : parsedContent ? (
+          contentHasHtml ? (
+            <div
+              className="text-sm text-foreground/90 leading-relaxed [&_ul]:ms-4 [&_ul]:list-disc [&_li]:mb-0.5 [&_strong]:font-semibold"
+              dangerouslySetInnerHTML={{ __html: parsedContent }}
+            />
+          ) : (
+            <div className="text-sm text-foreground/90 whitespace-pre-wrap leading-relaxed">
+              {parsedContent}
+            </div>
+          )
         ) : entry.errorReason ? (
           <div className="text-sm text-destructive/80 italic">
             {entry.errorReason}
@@ -96,3 +174,4 @@ export function AgentResponseCard({ entry, className }: AgentResponseCardProps) 
     </div>
   );
 }
+

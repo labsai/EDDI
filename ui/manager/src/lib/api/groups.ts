@@ -246,6 +246,147 @@ export function deleteGroupConversation(
   );
 }
 
+// ─── SSE Streaming ──────────────────────────────────────────────
+
+export type GroupSSEEventType =
+  | "group_start"
+  | "phase_start"
+  | "speaker_start"
+  | "speaker_complete"
+  | "phase_complete"
+  | "synthesis_start"
+  | "synthesis_complete"
+  | "group_complete"
+  | "group_error";
+
+export interface GroupSSEEvent {
+  type: GroupSSEEventType;
+  data: string;
+}
+
+/** Parsed event payloads for convenience */
+export interface GroupStartPayload {
+  conversationId: string;
+  groupId: string;
+  question: string;
+  style: string;
+  phaseCount: number;
+  agentIds: string[];
+}
+
+export interface PhaseStartPayload {
+  phaseIndex: number;
+  phaseName: string;
+  phaseType: string;
+  participants: string;
+}
+
+export interface SpeakerStartPayload {
+  agentId: string;
+  displayName: string;
+  phaseIndex: number;
+  phaseName: string;
+}
+
+export interface SpeakerCompletePayload {
+  agentId: string;
+  displayName: string;
+  content: string;
+  phaseIndex: number;
+  phaseName: string;
+}
+
+export interface PhaseCompletePayload {
+  phaseIndex: number;
+  phaseName: string;
+}
+
+export interface SynthesisStartPayload {
+  moderatorAgentId: string;
+}
+
+export interface GroupCompletePayload {
+  state: GroupConversationState;
+  synthesizedAnswer: string | null;
+}
+
+export interface GroupErrorPayload {
+  error: string;
+}
+
+/**
+ * Start a group discussion via SSE streaming.
+ * Returns an async generator yielding SSE events as they arrive.
+ * Same pattern as chat's `sendMessageStreaming()`.
+ */
+export async function* streamGroupDiscussion(
+  groupId: string,
+  question: string,
+  userId?: string,
+  signal?: AbortSignal,
+): AsyncGenerator<GroupSSEEvent> {
+  const response = await fetch(
+    `${api.getBaseUrl()}/groups/${groupId}/conversations/stream`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...api.getAuthHeader(),
+      },
+      body: JSON.stringify({ question, userId: userId || "manager-user" }),
+      signal,
+    }
+  );
+
+  if (!response.ok) {
+    throw {
+      status: response.status,
+      message: `Group streaming failed: ${response.statusText}`,
+      url: response.url,
+    };
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("No readable stream");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Parse SSE lines: "event: <type>\ndata: <data>\n\n"
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() ?? "";
+
+      for (const part of parts) {
+        if (!part.trim()) continue;
+        let eventType: GroupSSEEventType = "group_start";
+        let eventData = "";
+
+        for (const line of part.split("\n")) {
+          if (line.startsWith("event:")) {
+            eventType = line.slice(6).trim() as GroupSSEEventType;
+          } else if (line.startsWith("data:")) {
+            eventData = line.slice(5).trim();
+          }
+        }
+
+        if (eventData || eventType) {
+          yield { type: eventType, data: eventData };
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+
 // ─── Helpers ─────────────────────────────────────────────────────
 
 /** Parse group resource URI to extract id and version */
