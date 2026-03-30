@@ -1,6 +1,6 @@
 # EDDI v6.0 — Current Status
 
-> **Last updated:** 2026-03-28
+> **Last updated:** 2026-03-30
 > **Branch:** `feature/version-6.0.0`
 
 ## Completed
@@ -984,6 +984,25 @@ Config-driven token-budget windowing with anchored opening steps, replacing fixe
 **Code review fixes:** Model name resolution (fallback chain: modelName→model→modelId→deploymentName), anchor budget overflow warning + `Math.max(0, ...)`, gap marker shows count not indices, removed dead code, instance-level cache. 9 edge case tests added (empty conversation, anchor clamping, budget overflow, exact boundary, etc.).
 
 **Total tests:** 1459 (all pass). **Last commit:** Phase 11b code review fixes.
+
+### Phase 11b-S2: Rolling Summary + Conversation Recall Tool ✅
+
+Config-driven rolling summary that compresses older conversation turns into an incremental summary, injected as a context prefix. Includes a built-in LLM tool for drill-back into summarized turns.
+
+| Component | Key Files |
+|---|---|
+| **SummarizationService** | `SummarizationService.java` — stateless LLM summarization via ChatModelRegistry |
+| **ConversationSummarizer** | `ConversationSummarizer.java` — incremental engine, self-correcting, conversation-property storage |
+| **ConversationRecallTool** | `ConversationRecallTool.java` — built-in `@Vetoed` tool for LLM drill-back (natural language range parsing) |
+| **Config** | `LlmConfiguration.java` — `ConversationSummaryConfig` inner class (provider, model, window, recall limit) |
+| **History Builder** | `ConversationHistoryBuilder.java` — summary-aware `buildMessages()` / `buildTokenAwareMessages()` |
+| **Orchestrator** | `AgentOrchestrator.java` — auto-registers ConversationRecallTool when summary is active |
+| **LlmTask** | `LlmTask.java` — summary prefix injection before history build + post-response summarization trigger |
+| **Tests** | `SummarizationServiceTest` (5), `ConversationSummarizerTest` (11), `ConversationRecallToolTest` (12) |
+
+**Design:** Summaries stored as conversation-scoped properties (`conversation:running_summary`, `conversation:summary_through_step`) for O(1) retrieval. Synchronous trigger after LLM response. Self-correcting: if turn N fails, turn N+1 catches up. Defaults: `claude-sonnet-4-6` provider, `20` max recall turns, `5` recent window steps.
+
+**Total tests:** 1471 (all pass).
 
 ## Important Rules
 

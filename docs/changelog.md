@@ -13,6 +13,39 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Strategy 2: Rolling Summary + Conversation Recall Tool (2026-03-30)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Implemented the Rolling Summary strategy for conversation window management. When conversations grow beyond a configurable `recentWindowSteps` threshold, older turns are incrementally summarized by a dedicated LLM call and the summary is injected as a context prefix. The LLM always sees recent turns verbatim plus a compressed summary of earlier turns.
+
+| Component | Purpose |
+|---|---|
+| `SummarizationService` | Stateless `@ApplicationScoped` service for LLM-powered summarization via `ChatModelRegistry` |
+| `ConversationSummarizer` | Incremental rolling summary engine — stores summary in conversation properties, self-corrects on failure |
+| `ConversationRecallTool` | Built-in LLM tool for drill-back into summarized turns (supports natural language turn-range parsing) |
+| `ConversationSummaryConfig` | Per-task config: provider, model, window size, max recall turns, property exclusion |
+
+**Key design decisions:**
+- **Storage**: Summaries stored as conversation-scoped properties (`conversation:running_summary`, `conversation:summary_through_step`) — O(1) retrieval, survives turn boundaries
+- **Trigger**: Synchronous within `LlmTask.executeTask()` after LLM response — deterministic, no async complexity
+- **Self-correction**: If summarization fails for turn N, turn N+1 automatically catches up by including the missed data
+- **Defaults**: `claude-sonnet-4-6` for summarization, `20` max recall turns, `5` recent window steps
+
+**Files:**
+- `src/main/java/ai/labs/eddi/modules/llm/impl/SummarizationService.java` — NEW
+- `src/main/java/ai/labs/eddi/modules/llm/impl/ConversationSummarizer.java` — NEW
+- `src/main/java/ai/labs/eddi/modules/llm/tools/ConversationRecallTool.java` — NEW
+- `src/main/java/ai/labs/eddi/modules/llm/model/LlmConfiguration.java` — ConversationSummaryConfig added
+- `src/main/java/ai/labs/eddi/modules/llm/impl/ConversationHistoryBuilder.java` — summary-aware message building
+- `src/main/java/ai/labs/eddi/modules/llm/impl/AgentOrchestrator.java` — ConversationRecallTool registration
+- `src/main/java/ai/labs/eddi/modules/llm/impl/LlmTask.java` — summary injection + update trigger
+- Tests: `SummarizationServiceTest`, `ConversationSummarizerTest`, `ConversationRecallToolTest` (1471 tests, all pass)
+
+---
+
 ## Secrets Vault UX: 503 with Actionable Error When Vault Unconfigured (2026-03-30)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
