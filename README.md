@@ -2,7 +2,7 @@
 
 # E.D.D.I — Multi-Agent Orchestration Middleware for Conversational AI
 
-[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade)
+[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade) [![Docker Pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi)
 
 **E.D.D.I** (Enhanced Dialog Driven Interface) is a production-grade **multi-agent orchestration middleware** that coordinates between users, AI agents (LLMs), and business systems. It provides intelligent routing, conversation management, and API orchestration for building sophisticated AI-powered applications — all through configuration, not code.
 
@@ -19,6 +19,7 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - 🗣️ **Group Conversations** — Multi-agent debates with 5 built-in styles (Round Table, Peer Review, Devil's Advocate, Delphi, Debate)
 - 🪆 **Nested Groups** — Compose groups of groups for tournament brackets, red-team vs blue-team, and panel reviews
 - 👥 **Managed Conversations** — Intent-based auto-routing with one conversation per user per intent
+- 🧙 **Agent Father** — Meta-agent that creates other agents through conversation (ships out of the box)
 
 ### 🧠 LLM Provider Support (12 Providers)
 - 🟢 **OpenAI** · **Anthropic Claude** · **Google Gemini** · **Mistral AI**
@@ -26,10 +27,11 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - 🏠 **Ollama** · **Jlama** · **Hugging Face** — Run models locally or in your own cloud
 - 🔗 **OpenAI-compatible endpoints** — DeepSeek, Cohere, and any compatible API via `baseUrl`
 
-### 🔄 Smart Model Cascading
-- 📉 **Cost Optimization** — Try cheap/fast models first, escalate to powerful models only when needed
-- 📊 **4 Confidence Strategies** — Structured output, heuristic, judge model, or none
-- 💰 **Per-Conversation Budgets** — Automatic cost tracking with budget caps
+### 🔗 Protocol & Interoperability
+- 🧩 **MCP Server** (48+ tools) — Full EDDI control from Claude Desktop, IDE plugins, or any MCP client
+- 🧩 **MCP Client** — Connect agents to external MCP tool servers
+- 🤝 **A2A Protocol** — Agent-to-Agent peer communication with skill discovery and Agent Cards
+- 📋 **OpenAPI-to-Agent** — Paste an OpenAPI spec, get a fully deployed API-calling agent
 
 ### 🛠️ Built-In AI Agent Tools
 - 🔍 **Web Search** — DuckDuckGo or Google Custom Search
@@ -44,17 +46,16 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - 🌐 **httpCall RAG** — Zero-infrastructure RAG via any search API
 - 📥 **REST Ingestion API** — Async document ingestion with status tracking
 
-### 🔗 Protocol & Interoperability
-- 🧩 **MCP Server** (48+ tools) — Full EDDI control from Claude Desktop, IDE plugins, or any MCP client
-- 🧩 **MCP Client** — Connect agents to external MCP tool servers
-- 🤝 **A2A Protocol** — Agent-to-Agent peer communication with skill discovery and Agent Cards
-- 📋 **OpenAPI-to-Agent** — Paste an OpenAPI spec, get a fully deployed API-calling agent
-
-### 🧠 Memory & Context
+### 💭 Memory & Context
 - 💾 **Persistent User Memory** — Agents remember facts, preferences, and context across conversations
 - 🪟 **Token-Aware Windowing** — Intelligent context packing with anchored opening steps
 - 📝 **Property Extraction** — Config-driven slot-filling for structured data capture
 - 🔄 **Conversation State** — Full history with undo/redo support
+
+### 📈 Smart Model Cascading
+- 📉 **Cost Optimization** — Try cheap/fast models first, escalate to powerful models only when needed
+- 📊 **4 Confidence Strategies** — Structured output, heuristic, judge model, or none
+- 💰 **Per-Conversation Budgets** — Automatic cost tracking with budget caps
 
 ### 🔐 Enterprise Security
 - 🏦 **Secrets Vault** — Envelope encryption (PBKDF2 + AES) for API keys, never plaintext in DB
@@ -69,23 +70,29 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - 🔧 **Lifecycle Pipeline** — Pluggable task pipeline: Input → Parse → Rules → API/LLM → Output
 - 📦 **Composable Agents** — Agents assembled from reusable, version-controlled workflows and extensions
 - 🧪 **Behavior Rules** — IF-THEN logic engine for routing, orchestration, and business logic
+- 📤 **Import / Export** — Agents are portable as ZIP files with secret scrubbing on export
 
 ### 🚀 Cloud-Native & Observable
 - 🐳 **One-Command Install** — Interactive wizard sets up EDDI + database + starter agent via Docker
 - ☸️ **Kubernetes / OpenShift** — Kustomize overlays, Helm charts, HPA, PDB, NetworkPolicy
-- 📊 **Prometheus Metrics** — Built-in Micrometer instrumentation at `/q/metrics`
+- 📊 **Prometheus & Grafana** — Built-in Micrometer instrumentation at `/q/metrics`
 - 🩺 **Health Checks** — Liveness & readiness probes at `/q/health/live` and `/q/health/ready`
 - 🔄 **NATS JetStream** — Async event bus for distributed processing
 - ⚡ **Virtual Threads** — Java 25 virtual threads for true concurrency, no GIL
+- 🗃️ **DB-Agnostic** — Choose MongoDB or PostgreSQL, switch with one env var
 
 ### 🖥️ Manager Dashboard & Chat UI
-- 🎨 **React 19 Manager UI** — Modern admin dashboard for building, testing, and deploying agents
+- 🎨 **React 19 Manager UI** — Modern admin dashboard for agent building, testing, deployment, and monitoring
 - 💬 **Chat Widget** — Embeddable React chat UI with SSE streaming and Keycloak auth
-- 🗃️ **DB-Agnostic** — Choose MongoDB or PostgreSQL, switch without code changes
+- 🔍 **Audit Trail Viewer** — Timeline-based compliance and debugging UI
+- 📋 **Logs Panel** — Live SSE log streaming + searchable history
+- 🔑 **Secrets Manager** — Write-only UI for vault entries
 
 ---
 
 ## 🏁 Quick Start
+
+The fastest way to get EDDI running is the **one-command installer**. It sets up EDDI + your choice of database via Docker Compose, deploys the [Agent Father](docs/agent-father-deep-dive.md) starter agent, and walks you through creating your first AI agent.
 
 **Linux / macOS / WSL2:**
 
@@ -99,16 +106,56 @@ curl -fsSL https://raw.githubusercontent.com/labsai/EDDI/main/install.sh | bash
 iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1 | iex
 ```
 
-This starts an interactive wizard that sets up EDDI + your choice of database via Docker, deploys the **Agent Father** starter agent, and guides you through creating your first AI agent. Requires [Docker](https://docs.docker.com/get-docker/).
+Requires [Docker](https://docs.docker.com/get-docker/). The wizard auto-generates a unique vault encryption key for secret management.
 
-**Options:**
+<details>
+<summary><strong>🔧 Installer options</strong></summary>
 
 ```bash
 bash install.sh --defaults                 # All defaults, no prompts
 bash install.sh --db=postgres --with-auth  # PostgreSQL + Keycloak
-bash install.sh --full                     # Everything enabled
-bash install.sh --local                    # Build from local source
+bash install.sh --full                     # Everything enabled (DB + auth + monitoring)
+bash install.sh --local                    # Build Docker image from local source
 ```
+
+The `--local` flag is for contributors testing pre-release builds:
+
+```bash
+./mvnw package -DskipTests    # Build the Java app
+bash install.sh --local        # Build Docker image + start containers
+```
+
+</details>
+
+### 🐳 Docker Compose (Manual)
+
+If you prefer manual control over Docker Compose:
+
+```bash
+# Default (EDDI + MongoDB)
+docker compose up
+
+# PostgreSQL instead of MongoDB
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up
+
+# With Keycloak authentication
+docker compose -f docker-compose.yml -f docker-compose.auth.yml up
+
+# With Prometheus + Grafana monitoring
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up
+
+# Full stack (all overlays)
+docker compose -f docker-compose.yml -f docker-compose.auth.yml \
+  -f docker-compose.monitoring.yml -f docker-compose.nats.yml up
+```
+
+Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.postgres.yml` / `docker-compose.postgres-only.yml`, `docker-compose.local.yml` (build from source), `docker-compose.testing.yml` (integration tests).
+
+```bash
+docker pull labsai/eddi    # Pull latest from Docker Hub
+```
+
+→ [hub.docker.com/r/labsai/eddi](https://hub.docker.com/r/labsai/eddi)
 
 ---
 
@@ -155,6 +202,7 @@ Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming
 | **[Audit Ledger](docs/audit-ledger.md)** | EU AI Act-compliant audit trail |
 | **[Kubernetes](docs/kubernetes.md)** | Deploy with Kustomize or Helm |
 | **[Red Hat OpenShift](docs/redhat-openshift.md)** | Certified container, automated release |
+| **[Agent Father Deep Dive](docs/agent-father-deep-dive.md)** | How the meta-agent works |
 | **[Full Documentation](https://docs.labs.ai/)** | Complete documentation site |
 
 ---
@@ -203,26 +251,10 @@ Then open [http://localhost:7070](http://localhost:7070).
 ./mvnw package -Plicense-gen -DskipTests
 ```
 
-### Docker Hub
+### ☸️ Kubernetes
 
 ```bash
-docker pull labsai/eddi
-```
-
-→ [hub.docker.com/r/labsai/eddi](https://hub.docker.com/r/labsai/eddi)
-
-### Docker Compose
-
-```bash
-docker-compose up                                                                    # Default (MongoDB)
-docker-compose -f docker-compose.yml -f docker-compose.local.yml up                  # Local build
-docker-compose -f docker-compose.yml -f docker-compose.auth.yml -f docker-compose.monitoring.yml up  # Auth + monitoring
-```
-
-### Kubernetes
-
-```bash
-# Quickstart
+# Quickstart (one-file deployment)
 kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
 
 # Kustomize overlays
@@ -233,7 +265,7 @@ kubectl apply -k k8s/overlays/postgres/    # PostgreSQL backend
 helm install eddi ./helm/eddi --namespace eddi --create-namespace
 ```
 
-Includes overlays for auth (Keycloak), monitoring (Prometheus/Grafana), NATS messaging, Ingress, and production hardening.
+Includes overlays for auth (Keycloak), monitoring (Prometheus/Grafana), NATS messaging, Ingress, and production hardening (HPA, PDB, NetworkPolicy).
 See the [Kubernetes Guide](docs/kubernetes.md) for details.
 
 ---

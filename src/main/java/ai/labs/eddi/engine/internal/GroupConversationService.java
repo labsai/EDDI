@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
+
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
@@ -27,6 +28,7 @@ import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -105,6 +107,12 @@ public class GroupConversationService implements IGroupConversationService {
     @Override
     public GroupConversation discuss(String groupId, String question, String userId, int depth)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return discuss(groupId, question, userId, depth, null);
+    }
+
+    @Override
+    public GroupConversation discuss(String groupId, String question, String userId, int depth, GroupDiscussionEventListener listener)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         long startTime = System.nanoTime();
         counterGroupDiscussion.increment();
@@ -128,6 +136,12 @@ public class GroupConversationService implements IGroupConversationService {
         ProtocolConfig protocol = resolveProtocol(config);
         GroupConversation gc = createGroupConversation(groupId, question, userId, depth);
 
+        if (listener != null) {
+            listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(gc.getId(), groupId, question,
+                    config.getStyle() != null ? config.getStyle().name() : "ROUND_TABLE", phases.size(),
+                    config.getMembers().stream().map(GroupMember::agentId).toList()));
+        }
+
         try {
             // Execute each phase
             for (int phaseIdx = 0; phaseIdx < phases.size(); phaseIdx++) {
@@ -139,20 +153,32 @@ public class GroupConversationService implements IGroupConversationService {
 
                     if (phase.type() == PhaseType.SYNTHESIS) {
                         gc.setState(GroupConversationState.SYNTHESIZING);
+                        if (listener != null) {
+                            listener.onSynthesisStart(new GroupConversationEventSink.SynthesisStartEvent(config.getModeratorAgentId()));
+                        }
+                    }
+
+                    if (listener != null) {
+                        listener.onPhaseStart(
+                                new GroupConversationEventSink.PhaseStartEvent(phaseIdx, phase.name(), phase.type().name(), phase.participants()));
                     }
 
                     List<GroupMember> speakers = resolveParticipants(phase, config.getMembers(), config.getModeratorAgentId());
 
                     if (phase.targetEachPeer()) {
-                        executePeerTargetedPhase(gc, config, speakers, phase, protocol, question, phaseIdx);
+                        executePeerTargetedPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener);
                     } else if (phase.turnOrder() == TurnOrder.PARALLEL) {
-                        executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx);
+                        executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener);
                     } else {
-                        executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx);
+                        executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener);
                     }
 
                     gc.setLastModified(Instant.now());
                     conversationStore.update(gc);
+
+                    if (listener != null) {
+                        listener.onPhaseComplete(new GroupConversationEventSink.PhaseCompleteEvent(phaseIdx, phase.name()));
+                    }
                 }
             }
 
@@ -164,17 +190,65 @@ public class GroupConversationService implements IGroupConversationService {
             gc.setState(GroupConversationState.COMPLETED);
             gc.setLastModified(Instant.now());
             conversationStore.update(gc);
+
+            if (listener != null) {
+                listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(gc.getState(), gc.getSynthesizedAnswer()));
+            }
+
             return gc;
 
         } catch (GroupDiscussionException e) {
             failConversation(gc);
+            if (listener != null) {
+                listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
+            }
             throw e;
         } catch (Exception e) {
             failConversation(gc);
+            if (listener != null) {
+                listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
+            }
             throw new GroupDiscussionException("Group discussion failed: " + e.getMessage(), e);
         } finally {
             timerGroupDiscussion.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
         }
+    }
+
+    @Override
+    public GroupConversation startAndDiscussAsync(String groupId, String question, String userId, GroupDiscussionEventListener listener)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+
+        // Validate early — so errors are returned synchronously
+        if (0 > maxDepth) {
+            throw new GroupDepthExceededException("Maximum group discussion depth (%d) exceeded".formatted(maxDepth));
+        }
+
+        AgentGroupConfiguration config = groupStore.read(groupId, groupStore.getCurrentResourceId(groupId).getVersion());
+        if (config == null) {
+            throw new IResourceStore.ResourceNotFoundException("Group configuration not found: " + groupId);
+        }
+
+        List<DiscussionPhase> phases = resolvePhases(config);
+        if (phases.isEmpty()) {
+            throw new GroupDiscussionException("No phases defined for group: " + groupId);
+        }
+
+        // Create the conversation synchronously so we can return its ID
+        GroupConversation gc = createGroupConversation(groupId, question, userId, 0);
+
+        // Run the discussion in a virtual thread
+        executorService.submit(() -> {
+            try {
+                discuss(groupId, question, userId, 0, listener);
+            } catch (Exception e) {
+                LOGGER.errorf("Async group discussion failed for %s: %s", groupId, e.getMessage());
+                if (listener != null) {
+                    listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
+                }
+            }
+        });
+
+        return gc;
     }
 
     @Override
@@ -261,21 +335,35 @@ public class GroupConversationService implements IGroupConversationService {
     // =================================================================
 
     private void executeSequentialPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
-            ProtocolConfig protocol, String question, int phaseIdx) throws GroupDiscussionException {
+            ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener) throws GroupDiscussionException {
         for (GroupMember speaker : speakers) {
+            if (listener != null) {
+                listener.onSpeakerStart(
+                        new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
+            }
             String input = buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, null);
             TranscriptEntry entry = executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null);
             gc.getTranscript().add(entry);
+            if (listener != null) {
+                listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(speaker.agentId(), speaker.displayName(),
+                        entry.content(), phaseIdx, phase.name()));
+            }
         }
     }
 
     private void executeParallelPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
-            ProtocolConfig protocol, String question, int phaseIdx) throws GroupDiscussionException {
+            ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener) throws GroupDiscussionException {
 
         // SAFETY: Snapshot the transcript so parallel tasks each see a consistent view.
-        // Results are appended sequentially below (futures are collected one-by-one in
-        // the for-loop), so there is no concurrent modification of gc.getTranscript().
         List<TranscriptEntry> snapshotTranscript = List.copyOf(gc.getTranscript());
+
+        // Notify all speakers starting (parallel)
+        if (listener != null) {
+            for (GroupMember speaker : speakers) {
+                listener.onSpeakerStart(
+                        new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
+            }
+        }
 
         List<CompletableFuture<TranscriptEntry>> futures = speakers.stream().map(speaker -> CompletableFuture.supplyAsync(() -> {
             try {
@@ -288,11 +376,16 @@ public class GroupConversationService implements IGroupConversationService {
         }, executorService)).toList();
 
         int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : 60;
-        for (CompletableFuture<TranscriptEntry> future : futures) {
+        for (int i = 0; i < futures.size(); i++) {
             try {
-                gc.getTranscript().add(future.get(timeout, TimeUnit.SECONDS));
+                TranscriptEntry entry = futures.get(i).get(timeout, TimeUnit.SECONDS);
+                gc.getTranscript().add(entry);
+                if (listener != null) {
+                    listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(entry.speakerAgentId(), entry.speakerDisplayName(),
+                            entry.content(), phaseIdx, phase.name()));
+                }
             } catch (TimeoutException e) {
-                future.cancel(true);
+                futures.get(i).cancel(true);
                 gc.getTranscript().add(new TranscriptEntry("unknown", "Unknown", null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
                         Instant.now(), "Timeout", null));
             } catch (Exception e) {
@@ -306,7 +399,7 @@ public class GroupConversationService implements IGroupConversationService {
      * (N×(N-1) turns). Used for CRITIQUE style.
      */
     private void executePeerTargetedPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
-            ProtocolConfig protocol, String question, int phaseIdx) throws GroupDiscussionException {
+            ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener) throws GroupDiscussionException {
 
         // Collect all non-moderator members as targets
         List<GroupMember> allMembers = config.getMembers().stream()
@@ -317,9 +410,17 @@ public class GroupConversationService implements IGroupConversationService {
                 if (speaker.agentId().equals(target.agentId())) {
                     continue; // Don't critique yourself
                 }
+                if (listener != null) {
+                    listener.onSpeakerStart(
+                            new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
+                }
                 String input = buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, target);
                 TranscriptEntry entry = executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, target.agentId());
                 gc.getTranscript().add(entry);
+                if (listener != null) {
+                    listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(speaker.agentId(), speaker.displayName(),
+                            entry.content(), phaseIdx, phase.name()));
+                }
             }
         }
     }
@@ -680,6 +781,13 @@ public class GroupConversationService implements IGroupConversationService {
         counterGroupFailure.increment();
     }
 
+    /**
+     * Extracts the human-readable text from a conversation memory snapshot. Looks
+     * for the {@code output} array in the last ConversationOutput map and
+     * concatenates all text entries (same logic as the Manager's
+     * {@code extractOutput()}).
+     */
+    @SuppressWarnings("unchecked")
     private String extractResponse(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
         if (snapshot == null || snapshot.getConversationOutputs() == null) {
             return "";
@@ -692,6 +800,51 @@ public class GroupConversationService implements IGroupConversationService {
         if (lastOutput == null) {
             return "";
         }
+
+        var texts = new ArrayList<String>();
+
+        // Format 1: Nested "output" array — [{type: "text", text: "...", delay: 0}]
+        Object outputArray = lastOutput.get("output");
+        if (outputArray instanceof List<?> list) {
+            for (var item : list) {
+                if (item instanceof String s) {
+                    texts.add(s);
+                } else if (item instanceof Map<?, ?> map) {
+                    Object text = map.get("text");
+                    if (text instanceof String s) {
+                        texts.add(s);
+                    }
+                }
+            }
+            if (!texts.isEmpty()) {
+                return String.join("\n", texts);
+            }
+        }
+
+        // Format 2: Flat keys like "output:text:*"
+        for (var entry : lastOutput.entrySet()) {
+            if (entry.getKey() instanceof String key && key.startsWith("output:text:")) {
+                Object val = entry.getValue();
+                if (val instanceof String s) {
+                    texts.add(s);
+                } else if (val instanceof List<?> list) {
+                    for (var item : list) {
+                        if (item instanceof String s)
+                            texts.add(s);
+                        else if (item instanceof Map<?, ?> map && map.get("text") instanceof String s)
+                            texts.add(s);
+                    }
+                } else if (val instanceof Map<?, ?> map && map.get("text") instanceof String s) {
+                    texts.add(s);
+                }
+            }
+        }
+
+        if (!texts.isEmpty()) {
+            return String.join("\n", texts);
+        }
+
+        // Fallback: serialize the entire output map (backward compat)
         try {
             return jsonSerialization.serialize(lastOutput);
         } catch (Exception e) {

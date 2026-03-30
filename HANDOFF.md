@@ -977,11 +977,13 @@ Config-driven token-budget windowing with anchored opening steps, replacing fixe
 | **Window Builder** | `ConversationHistoryBuilder.java` (`buildTokenAwareMessages()` — anchor + gap marker + recent) |
 | **Integration** | `LlmTask.java` (branch: token-aware vs step-count based on config) |
 | **Docs** | `docs/langchain.md` (new "Conversation Window Management" section) |
-| **Tests** | `TokenCounterFactoryTest.java` (13 tests), `ConversationHistoryBuilderTest.java` (+7 token-aware tests), `LlmTaskTest.java` (updated constructor) |
+| **Tests** | `TokenCounterFactoryTest.java` (20 tests), `ConversationHistoryBuilderTest.java` (+16 token-aware tests), `LlmTaskTest.java` (updated constructor) |
 
-**Design:** `maxContextTokens=-1` (default) preserves existing step-count behavior. When set > 0, first N steps are anchored, remaining budget filled from most recent backward, gap marker inserted for omitted turns.
+**Design:** `maxContextTokens=-1` (default) preserves existing step-count behavior. When set > 0, first N steps are anchored, remaining budget filled from most recent backward, gap marker inserted for omitted messages.
 
-**Total tests:** 1244+ (all pass). **Last commit:** Phase 11b - Token-aware conversation window.
+**Code review fixes:** Model name resolution (fallback chain: modelName→model→modelId→deploymentName), anchor budget overflow warning + `Math.max(0, ...)`, gap marker shows count not indices, removed dead code, instance-level cache. 9 edge case tests added (empty conversation, anchor clamping, budget overflow, exact boundary, etc.).
+
+**Total tests:** 1459 (all pass). **Last commit:** Phase 11b code review fixes.
 
 ## Important Rules
 

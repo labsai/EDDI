@@ -42,6 +42,38 @@ The 503 response body now includes:
 
 ---
 
+## Phase 11b Code Review Fixes (2026-03-30)
+
+**Repo:** EDDI (backend)
+
+**What changed:**
+
+Critical code review of Phase 11b identified 2 bugs, 3 design concerns, and 10 missing test cases. All resolved.
+
+| Issue | Fix |
+|---|---|
+| **Bug: Wrong model name key** | Added `resolveModelName()` fallback chain (modelName→model→modelId→deploymentName) |
+| **Bug: Anchor budget overflow** | `Math.max(0, ...)` for remainingBudget + WARN log when anchored tokens exceed budget |
+| **Dead code** | Removed unused `estimateTokens()` delegation method |
+| **Static cache on singleton** | Changed to instance-level `estimatorCache` field |
+| **Gap marker confusion** | Shows count of omitted messages instead of index range |
+
+**Tests added (9 new edge cases):**
+
+- Empty conversation (with/without system message)
+- Single message with anchor=2 (clamping)
+- Null system message during windowing path
+- Anchored tokens exceeding budget (graceful degradation + gap marker)
+- Exact budget boundary
+- Anchor count larger than message count
+- Budget too small for recent (only anchor + gap marker returned)
+- Gap marker format validation (count, not index range)
+- Caching behavior (same model → same instance, shared unknown provider)
+
+**Total: 48 tests across TokenCounterFactoryTest (20) + ConversationHistoryBuilderTest (28). All 1459 tests pass.**
+
+---
+
 ## Phase 11b: Token-Aware Conversation Window (2026-03-30)
 
 **Repo:** EDDI (backend)
