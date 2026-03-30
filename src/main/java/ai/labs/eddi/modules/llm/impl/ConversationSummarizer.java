@@ -89,6 +89,7 @@ public class ConversationSummarizer {
      *            exclusion is disabled
      */
     public void updateIfNeeded(IConversationMemory memory, ConversationSummaryConfig config, String propertiesContext) {
+        config.validate();
         int totalSteps = memory.getConversationOutputs().size();
         int recentWindow = config.getRecentWindowSteps();
         int summarizeThroughStep = totalSteps - recentWindow;
@@ -117,6 +118,13 @@ public class ConversationSummarizer {
                     + (alreadySummarized + 1) + "-" + summarizeThroughStep + "):\n" + newTurnsText;
         } else {
             contentToSummarize = newTurnsText;
+        }
+
+        // Guard: don't call LLM with empty content (e.g., malformed outputs with no
+        // text)
+        if (contentToSummarize.isBlank()) {
+            LOGGER.debugf("[SUMMARY] No renderable content for turns %d-%d, skipping.", alreadySummarized, summarizeThroughStep);
+            return;
         }
 
         String instructions = buildPrompt(config, propertiesContext);
@@ -175,7 +183,7 @@ public class ConversationSummarizer {
         for (int i = fromStep; i < effectiveTo; i++) {
             var output = outputs.get(i);
             var input = output.get("input", String.class);
-            var outputText = extractOutputText(output);
+            var outputText = ConversationOutputUtils.extractOutputText(output);
 
             if (input != null) {
                 sb.append("Turn ").append(i + 1).append(" — User: ").append(input).append('\n');
@@ -186,22 +194,6 @@ public class ConversationSummarizer {
         }
 
         return sb.toString();
-    }
-
-    /**
-     * Extract the agent's output text from a ConversationOutput map.
-     */
-    @SuppressWarnings("unchecked")
-    private static String extractOutputText(ConversationOutput output) {
-        Object outputObj = output.get("output");
-        if (outputObj instanceof List<?> outputList && !outputList.isEmpty()) {
-            if (outputList.getFirst() instanceof java.util.Map) {
-                var mapList = (List<java.util.Map<String, Object>>) outputList;
-                return mapList.stream().filter(m -> m.get("text") != null).map(m -> m.get("text").toString()).reduce((a, b) -> a + " " + b)
-                        .orElse("");
-            }
-        }
-        return null;
     }
 
     /**

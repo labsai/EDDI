@@ -153,4 +153,44 @@ class ConversationRecallToolTest {
         assertTrue(result.contains("User message 1"));
         assertTrue(result.contains("Agent reply 1"));
     }
+
+    @Test
+    void recallConversationDetail_singleTurnPattern_returnsSingleTurn() {
+        var outputs = createOutputs(10);
+        var tool = new ConversationRecallTool(outputs, 8, 20);
+
+        String result = tool.recallConversationDetail("turn 5");
+
+        assertTrue(result.contains("Turn 5 — User:"), "Should include turn 5");
+        assertTrue(result.contains("User message 5"));
+        assertFalse(result.contains("Turn 4 — User:"), "Should NOT include turn 4");
+        assertFalse(result.contains("Turn 6 — User:"), "Should NOT include turn 6");
+    }
+
+    @Test
+    void recallConversationDetail_singleNumber_returnsSingleTurn() {
+        var outputs = createOutputs(10);
+        var tool = new ConversationRecallTool(outputs, 8, 20);
+
+        // Edge case: LLM just sends "3" — should recall turn 3
+        String result = tool.recallConversationDetail("3");
+
+        assertTrue(result.contains("Turn 3 — User:"), "Should include turn 3");
+        assertFalse(result.contains("Turn 2 — User:"), "Should NOT include turn 2");
+        assertFalse(result.contains("Turn 4 — User:"), "Should NOT include turn 4");
+    }
+
+    @Test
+    void recallConversationDetail_singleTurnBeyondSummary_clampedToSummaryBoundary() {
+        var outputs = createOutputs(10);
+        // summary covers turns 1-5
+        var tool = new ConversationRecallTool(outputs, 5, 20);
+
+        // Request turn 8 — beyond summarized section → should clamp to last summarized
+        // turn (5)
+        String result = tool.recallConversationDetail("turn 8");
+
+        assertTrue(result.contains("Turn 5"), "Should include the clamped turn");
+        assertFalse(result.contains("Turn 8"), "Should NOT include turn beyond summary boundary");
+    }
 }

@@ -41,6 +41,7 @@ public class SummarizationService {
     private final MeterRegistry meterRegistry;
 
     private Counter callCounter;
+    private Counter errorCounter;
     private Timer durationTimer;
 
     @Inject
@@ -52,6 +53,7 @@ public class SummarizationService {
     @PostConstruct
     void initMetrics() {
         callCounter = meterRegistry.counter("summarization.calls");
+        errorCounter = meterRegistry.counter("summarization.errors");
         durationTimer = meterRegistry.timer("summarization.duration");
     }
 
@@ -89,6 +91,7 @@ public class SummarizationService {
             return result != null ? result : "";
 
         } catch (Exception e) {
+            errorCounter.increment();
             LOGGER.warnf(e, "[SUMMARIZATION] Failed to summarize: provider=%s, model=%s, error=%s", llmProvider, llmModel, e.getMessage());
             return "";
         } finally {

@@ -321,32 +321,24 @@ class ConversationHistoryBuilder {
 
             Object outputObj = output.get("output");
             if (outputObj instanceof List<?> outputList && !outputList.isEmpty()) {
-                String text = extractOutputTextFromList(outputList);
+                String text = ConversationOutputUtils.extractOutputText(output);
                 if (text != null && !text.isEmpty()) {
                     result.add(AiMessage.from(text));
                 }
             }
         }
 
-        // When not skipping and includeFirstAgentMessage is false, drop the first
-        // message if it's an agent message (same behavior as ConversationLogGenerator)
+        // When at conversation start (skipSteps == 0) and includeFirstAgentMessage is
+        // false,
+        // drop the opening agent greeting. This does NOT apply when skipSteps > 0
+        // because
+        // after step-skipping the first message is mid-conversation, not the opening
+        // greeting.
         if (skipSteps == 0 && !includeFirstAgentMessage && !result.isEmpty()) {
             result.removeFirst();
         }
 
         return result;
-    }
-
-    /**
-     * Extract text from an output list (handles both Map and TextOutputItem forms).
-     */
-    @SuppressWarnings("unchecked")
-    private String extractOutputTextFromList(List<?> outputList) {
-        if (outputList.getFirst() instanceof java.util.Map) {
-            var mapList = (List<java.util.Map<String, Object>>) outputList;
-            return mapList.stream().filter(m -> m.get("text") != null).map(m -> m.get("text").toString()).collect(Collectors.joining(" "));
-        }
-        return null;
     }
 
     /**

@@ -1,13 +1,13 @@
 package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.modules.llm.impl.ConversationOutputUtils;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.inject.Vetoed;
 import org.jboss.logging.Logger;
 
 import java.util.List;
-import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -32,6 +32,11 @@ public class ConversationRecallTool {
     private static final Pattern TURN_RANGE_PATTERN = Pattern.compile("(?:turns?\\s+)?(\\d+)\\s*[-–—to]+\\s*(?:turns?\\s+)?(\\d+)",
             Pattern.CASE_INSENSITIVE);
 
+    /** Matches single turn patterns like "turn 5", "5" */
+    private static final Pattern SINGLE_TURN_PATTERN = Pattern.compile("(?:turns?\\s+)?(\\d+)\\b", Pattern.CASE_INSENSITIVE);
+
+    // Shallow copy is sufficient because ConversationOutput entries are immutable
+    // after creation.
     private final List<ConversationOutput> conversationOutputs;
     private final int summaryThroughStep;
     private final int maxRecallTurns;
@@ -53,9 +58,9 @@ public class ConversationRecallTool {
     @Tool("Look back at earlier parts of this conversation that have been summarized. "
             + "Use when the conversation summary mentions something you need more detail about, "
             + "or when the user refers to something from earlier in the conversation. "
-            + "Specify a turn range like 'turns 3-7' to get those specific turns, " + "or describe what you're looking for.")
+            + "Specify a turn range like 'turns 3-7' or a single turn like 'turn 5', " + "or describe what you're looking for.")
     public String recallConversationDetail(
-            @P("What to look for — describe the topic or question, " + "or specify a turn range like 'turns 3-7'") String query) {
+            @P("What to look for — describe the topic or question, " + "or specify a turn range like 'turns 3-7' or 'turn 5'") String query) {
 
         if (summaryThroughStep <= 0) {
             return "No conversation summary is active — all turns are already in context.";
@@ -64,12 +69,13 @@ public class ConversationRecallTool {
         LOGGER.debugf("[RECALL] Recalling conversation detail: query='%s', summaryThroughStep=%d", query, summaryThroughStep);
 
         // Try to parse a turn range from the query
-        Matcher matcher = TURN_RANGE_PATTERN.matcher(query);
-        int fromTurn, toTurn;
+        Matcher rangeMatcher = TURN_RANGE_PATTERN.matcher(query);
+        int fromTurn;
+        int toTurn;
 
-        if (matcher.find()) {
-            fromTurn = Integer.parseInt(matcher.group(1));
-            toTurn = Integer.parseInt(matcher.group(2));
+        if (rangeMatcher.find()) {
+            fromTurn = Integer.parseInt(rangeMatcher.group(1));
+            toTurn = Integer.parseInt(rangeMatcher.group(2));
 
             // Convert from 1-indexed (human) to 0-indexed (internal)
             fromTurn = Math.max(1, fromTurn) - 1;
@@ -78,9 +84,17 @@ public class ConversationRecallTool {
             // Ensure range is within summarized section
             fromTurn = Math.min(fromTurn, summaryThroughStep - 1);
         } else {
-            // No range specified — return the last N summarized turns
-            toTurn = summaryThroughStep;
-            fromTurn = Math.max(0, toTurn - maxRecallTurns);
+            // Try single-turn pattern: "turn 5" or just "5"
+            Matcher singleMatcher = SINGLE_TURN_PATTERN.matcher(query);
+            if (singleMatcher.find()) {
+                int turn = Integer.parseInt(singleMatcher.group(1));
+                fromTurn = Math.max(0, Math.min(turn - 1, summaryThroughStep - 1));
+                toTurn = Math.min(fromTurn + 1, summaryThroughStep);
+            } else {
+                // No range or turn specified — return the last N summarized turns
+                toTurn = summaryThroughStep;
+                fromTurn = Math.max(0, toTurn - maxRecallTurns);
+            }
         }
 
         // Enforce max recall limit
@@ -95,7 +109,7 @@ public class ConversationRecallTool {
         for (int i = fromTurn; i < toTurn && i < conversationOutputs.size(); i++) {
             var output = conversationOutputs.get(i);
             var input = output.get("input", String.class);
-            var outputText = extractOutputText(output);
+            var outputText = ConversationOutputUtils.extractOutputText(output);
 
             if (input != null) {
                 sb.append("**Turn ").append(i + 1).append(" — User:** ").append(input).append('\n');
@@ -112,21 +126,5 @@ public class ConversationRecallTool {
         }
 
         return sb.toString();
-    }
-
-    /**
-     * Extract the agent's output text from a ConversationOutput map.
-     */
-    @SuppressWarnings("unchecked")
-    private static String extractOutputText(ConversationOutput output) {
-        Object outputObj = output.get("output");
-        if (outputObj instanceof List<?> outputList && !outputList.isEmpty()) {
-            if (outputList.getFirst() instanceof Map) {
-                var mapList = (List<Map<String, Object>>) outputList;
-                return mapList.stream().filter(m -> m.get("text") != null).map(m -> m.get("text").toString()).reduce((a, b) -> a + " " + b)
-                        .orElse("");
-            }
-        }
-        return null;
     }
 }

@@ -978,6 +978,29 @@ public record LlmConfiguration(List<Task> tasks) {
          */
         private String summarizationPrompt;
 
+        /**
+         * Validate and sanitize configuration values. Enforces sensible floor values to
+         * prevent IndexOutOfBoundsException (negative window), wasteful LLM calls (zero
+         * window triggers every turn), and NPE (null provider).
+         */
+        public void validate() {
+            if (recentWindowSteps < 1) {
+                recentWindowSteps = 5;
+            }
+            if (maxRecallTurns < 1) {
+                maxRecallTurns = 20;
+            }
+            if (maxSummaryTokens < 100) {
+                maxSummaryTokens = 800;
+            }
+            if (llmProvider == null || llmProvider.isBlank()) {
+                llmProvider = "anthropic";
+            }
+            if (llmModel == null || llmModel.isBlank()) {
+                llmModel = "claude-sonnet-4-6";
+            }
+        }
+
         public boolean isEnabled() {
             return enabled;
         }

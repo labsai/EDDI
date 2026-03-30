@@ -16,19 +16,16 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
-import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
-import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.ChatMessage;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.inject.Provider;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
@@ -460,7 +457,12 @@ public class LlmTask implements ILifecycleTask {
 
         prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, 200, false);
 
-        // Strategy 2: Update rolling summary if configured
+        // Strategy 2: Update rolling summary if configured.
+        // IMPORTANT: Must run AFTER the current response is added to
+        // conversationOutputs,
+        // so totalSteps correctly includes this turn when computing
+        // summarizeThroughStep.
+        // Moving this earlier would cause the summary boundary to be off by 1.
         if (summaryConfig != null && summaryConfig.isEnabled()) {
             try {
                 String propertiesContext = null;
