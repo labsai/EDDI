@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import DOMPurify from "dompurify";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import type { TranscriptEntry, TranscriptEntryType } from "@/lib/api/groups";
@@ -7,6 +9,8 @@ interface AgentResponseCardProps {
   entry: TranscriptEntry;
   /** Show typing indicator instead of content */
   isSpeaking?: boolean;
+  /** When true, render HTML content (sanitized via DOMPurify). Off by default for safety. */
+  allowHtml?: boolean;
   className?: string;
 }
 
@@ -90,14 +94,16 @@ function badgeVariant(
   }
 }
 
-export function AgentResponseCard({ entry, isSpeaking, className }: AgentResponseCardProps) {
+export function AgentResponseCard({ entry, isSpeaking, allowHtml, className }: AgentResponseCardProps) {
+  const { t } = useTranslation();
   const info = ENTRY_TYPE_INFO[entry.type];
   const isUser = entry.speakerAgentId === "user";
   const isSynthesis = entry.type === "SYNTHESIS";
   const isError = entry.type === "ERROR" || entry.type === "SKIPPED";
 
   const parsedContent = entry.content ? parseTranscriptContent(entry.content) : null;
-  const contentHasHtml = parsedContent ? hasHtml(parsedContent) : false;
+  // Only render as HTML if opt-in is enabled AND content actually contains HTML tags
+  const renderAsHtml = allowHtml && parsedContent ? hasHtml(parsedContent) : false;
 
   return (
     <div
@@ -148,13 +154,13 @@ export function AgentResponseCard({ entry, isSpeaking, className }: AgentRespons
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]" />
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:150ms]" />
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
-            <span className="text-xs text-muted-foreground ms-1">responding…</span>
+            <span className="text-xs text-muted-foreground ms-1">{t("groups.responding", "responding…")}</span>
           </div>
         ) : parsedContent ? (
-          contentHasHtml ? (
+          renderAsHtml ? (
             <div
               className="text-sm text-foreground/90 leading-relaxed [&_ul]:ms-4 [&_ul]:list-disc [&_li]:mb-0.5 [&_strong]:font-semibold"
-              dangerouslySetInnerHTML={{ __html: parsedContent }}
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(parsedContent) }}
             />
           ) : (
             <div className="text-sm text-foreground/90 whitespace-pre-wrap leading-relaxed">

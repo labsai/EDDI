@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { Users, Trash2, MessageSquareQuote, Clock, PanelRightOpen, PanelRightClose } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -34,6 +35,7 @@ export function GroupDetailPage() {
   const [searchParams] = useSearchParams();
   const version = searchParams.get("version") ? Number(searchParams.get("version")) : undefined;
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [showConfig, setShowConfig] = useState(true);
 
@@ -74,12 +76,16 @@ export function GroupDetailPage() {
     toast.success(t("groups.discussionStarted", "Discussion started — streaming live"));
   }, [groupId, startStream, t]);
 
-  // When streaming completes, select the new conversation
+  // When streaming completes, select the new conversation and refresh the list
   useEffect(() => {
     if (streamState.state === "COMPLETED" && streamState.conversationId && !streamState.isStreaming) {
       setSelectedConvId(streamState.conversationId);
+      // M2 fix: refresh conversation list so sidebar shows the new discussion
+      if (groupId) {
+        queryClient.invalidateQueries({ queryKey: ["group-conversations", groupId] });
+      }
     }
-  }, [streamState.state, streamState.conversationId, streamState.isStreaming]);
+  }, [streamState.state, streamState.conversationId, streamState.isStreaming, groupId, queryClient]);
 
   function handleDeleteConversation(convId: string) {
     if (!groupId) return;

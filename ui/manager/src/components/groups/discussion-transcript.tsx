@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { MessageSquareQuote, Copy, CheckCircle2 } from "lucide-react";
+import { MessageSquareQuote, Copy, CheckCircle2, Code } from "lucide-react";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { PhaseHeader } from "./phase-header";
 import { AgentResponseCard } from "./agent-response-card";
@@ -79,6 +79,7 @@ export function DiscussionTranscript({
 }: DiscussionTranscriptProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
+  const [allowHtml, setAllowHtml] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Determine the effective data source: streaming or static
@@ -92,11 +93,16 @@ export function DiscussionTranscript({
   const effectiveState = isStreaming ? streamState!.state : (conversation?.state ?? "CREATED");
   const effectiveCurrentPhase = isStreaming ? streamState!.currentPhase?.name : conversation?.currentPhaseName;
   const effectiveSynthesis = isStreaming ? streamState!.synthesizedAnswer : conversation?.synthesizedAnswer;
-  const effectiveQuestion = isStreaming
-    ? (effectiveTranscript.find((e) => e.type === "QUESTION")?.content ?? "")
-    : (conversation?.originalQuestion ?? "");
+  // S3 fix: memoize question extraction to avoid scanning transcript on every render
+  const effectiveQuestion = useMemo(
+    () => isStreaming
+      ? (effectiveTranscript.find((e) => e.type === "QUESTION")?.content ?? "")
+      : (conversation?.originalQuestion ?? ""),
+    [isStreaming, effectiveTranscript, conversation?.originalQuestion]
+  );
+  // C6 fix: use stable startedAt from stream state instead of new Date() per render
   const effectiveCreated = isStreaming
-    ? new Date().toISOString()
+    ? (streamState!.startedAt ?? new Date().toISOString())
     : (conversation?.created ?? new Date().toISOString());
   const activeSpeakers = isStreaming ? streamState!.activeSpeakers : new Set<string>();
   const streamError = isStreaming ? streamState!.error : null;
@@ -171,6 +177,20 @@ export function DiscussionTranscript({
                   ● LIVE
                 </Badge>
               )}
+              {/* Allow HTML toggle — opt-in for trusted content */}
+              <button
+                onClick={() => setAllowHtml((v) => !v)}
+                className={cn(
+                  "flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] transition-colors border",
+                  allowHtml
+                    ? "bg-primary/10 border-primary/30 text-primary"
+                    : "border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                )}
+                title={t("groups.allowHtmlTooltip", "When enabled, renders HTML content (sanitized). Use only with trusted agents.")}
+              >
+                <Code className="h-3 w-3" />
+                HTML
+              </button>
               <span className="text-[10px] text-muted-foreground ms-auto">
                 {new Date(effectiveCreated).toLocaleString()}
               </span>
@@ -201,6 +221,7 @@ export function DiscussionTranscript({
                 key={`${entry.speakerAgentId}-${entry.phaseIndex}-${entryIdx}`}
                 entry={entry}
                 isSpeaking={activeSpeakers.has(entry.speakerAgentId) && entry.content === null}
+                allowHtml={allowHtml}
               />
             ))}
           </PhaseHeader>
@@ -263,7 +284,7 @@ export function DiscussionTranscript({
             )}
             {isStreaming && activeSpeakers.size > 0 && (
               <span className="text-[10px] text-muted-foreground">
-                {activeSpeakers.size} speaking
+                {t("groups.speakingCount", "{{count}} speaking", { count: activeSpeakers.size })}
               </span>
             )}
           </div>

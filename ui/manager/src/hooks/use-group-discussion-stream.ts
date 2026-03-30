@@ -31,6 +31,8 @@ export interface GroupStreamState {
   synthesizedAnswer: string | null;
   /** Error message if the discussion failed */
   error: string | null;
+  /** Timestamp when the stream was started (stable, not recalculated per render) */
+  startedAt: string | null;
 }
 
 const initialState: GroupStreamState = {
@@ -42,6 +44,7 @@ const initialState: GroupStreamState = {
   activeSpeakers: new Set(),
   synthesizedAnswer: null,
   error: null,
+  startedAt: null,
 };
 
 // ─── Hook ───────────────────────────────────────────────────────
@@ -69,6 +72,7 @@ export function useGroupDiscussionStream() {
       ...initialState,
       isStreaming: true,
       state: "IN_PROGRESS",
+      startedAt: new Date().toISOString(),
     });
 
     try {

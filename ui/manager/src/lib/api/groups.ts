@@ -255,7 +255,6 @@ export type GroupSSEEventType =
   | "speaker_complete"
   | "phase_complete"
   | "synthesis_start"
-  | "synthesis_complete"
   | "group_complete"
   | "group_error";
 
@@ -339,11 +338,8 @@ export async function* streamGroupDiscussion(
   );
 
   if (!response.ok) {
-    throw {
-      status: response.status,
-      message: `Group streaming failed: ${response.statusText}`,
-      url: response.url,
-    };
+    // M5 fix: throw a proper Error, not a plain object
+    throw new Error(`Group streaming failed: ${response.status} ${response.statusText}`);
   }
 
   const reader = response.body?.getReader();
@@ -372,7 +368,8 @@ export async function* streamGroupDiscussion(
           if (line.startsWith("event:")) {
             eventType = line.slice(6).trim() as GroupSSEEventType;
           } else if (line.startsWith("data:")) {
-            eventData = line.slice(5).trim();
+            // C3 fix: concatenate multiple data: lines per SSE spec (§9.2.4)
+            eventData += (eventData ? "\n" : "") + line.slice(5).trim();
           }
         }
 
