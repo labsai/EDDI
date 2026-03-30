@@ -236,8 +236,9 @@ public class LlmTask implements ILifecycleTask {
 
         List<ChatMessage> messages;
         if (maxContextTokens != null && maxContextTokens > 0) {
-            // Token-aware windowing (Strategy 1)
-            var estimator = tokenCounterFactory.getEstimator(task.getType(), processedParams.get("model"));
+            // Resolve model name from provider-specific parameter keys
+            String resolvedModelName = resolveModelName(processedParams);
+            var estimator = tokenCounterFactory.getEstimator(task.getType(), resolvedModelName);
             messages = conversationHistoryBuilder.buildTokenAwareMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), maxContextTokens,
                     anchorFirstSteps, includeFirstAgentMessage, estimator);
         } else {
@@ -537,6 +538,24 @@ public class LlmTask implements ILifecycleTask {
         }
 
         throw new WorkflowConfigurationException("No resource URI has been defined! [LlmConfiguration]");
+    }
+
+    /**
+     * Resolve the model name from provider-specific parameter keys. Different
+     * providers use different keys: OpenAI uses "modelName", Ollama uses "model",
+     * Bedrock/HuggingFace use "modelId", Azure uses "deploymentName".
+     */
+    private static String resolveModelName(Map<String, String> processedParams) {
+        String name = processedParams.get("modelName");
+        if (name != null)
+            return name;
+        name = processedParams.get("model");
+        if (name != null)
+            return name;
+        name = processedParams.get("modelId");
+        if (name != null)
+            return name;
+        return processedParams.get("deploymentName");
     }
 
     @Override

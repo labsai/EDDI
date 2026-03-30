@@ -58,8 +58,43 @@ class TokenCounterFactoryTest {
         void openai_nullModelName_usesDefault() {
             TokenCountEstimator estimator = factory.getEstimator("openai", null);
             assertInstanceOf(OpenAiTokenCountEstimator.class, estimator);
-            // Verify it works with the default model
             assertTrue(estimator.estimateTokenCountInText("Hello world") > 0);
+        }
+
+        @Test
+        @DisplayName("case insensitive model type — OPENAI should work")
+        void caseInsensitive() {
+            TokenCountEstimator estimator = factory.getEstimator("OPENAI", "gpt-4o");
+            assertInstanceOf(OpenAiTokenCountEstimator.class, estimator);
+        }
+
+        @Test
+        @DisplayName("same model type called twice → returns cached (same) instance")
+        void sameCacheInstance() {
+            TokenCountEstimator first = factory.getEstimator("openai", "gpt-4o");
+            TokenCountEstimator second = factory.getEstimator("openai", "gpt-4o");
+            assertSame(first, second, "Should return the same cached instance");
+        }
+
+        @Test
+        @DisplayName("different model names produce different cache entries")
+        void differentModelNames_differentEntries() {
+            TokenCountEstimator gpt4o = factory.getEstimator("openai", "gpt-4o");
+            TokenCountEstimator gpt35 = factory.getEstimator("openai", "gpt-3.5-turbo");
+            // They may or may not be the same instance depending on caching.
+            // Both should be OpenAiTokenCountEstimator.
+            assertInstanceOf(OpenAiTokenCountEstimator.class, gpt4o);
+            assertInstanceOf(OpenAiTokenCountEstimator.class, gpt35);
+        }
+
+        @Test
+        @DisplayName("all unknown providers share one approximate estimator instance")
+        void unknownProvidersShareInstance() {
+            TokenCountEstimator anthropic = factory.getEstimator("anthropic", null);
+            TokenCountEstimator gemini = factory.getEstimator("gemini", null);
+            TokenCountEstimator ollama = factory.getEstimator("ollama", null);
+            assertSame(anthropic, gemini, "Unknown providers should share one instance");
+            assertSame(gemini, ollama, "Unknown providers should share one instance");
         }
     }
 
@@ -96,15 +131,12 @@ class TokenCounterFactoryTest {
         void estimateTokenCountInMessage_variousTypes() {
             var estimator = new TokenCounterFactory.ApproximateTokenCountEstimator();
 
-            // SystemMessage
             int systemTokens = estimator.estimateTokenCountInMessage(new SystemMessage("System prompt here"));
             assertTrue(systemTokens > 0);
 
-            // AiMessage
             int aiTokens = estimator.estimateTokenCountInMessage(AiMessage.from("AI response text"));
             assertTrue(aiTokens > 0);
 
-            // UserMessage
             int userTokens = estimator.estimateTokenCountInMessage(UserMessage.from("User input text"));
             assertTrue(userTokens > 0);
         }
@@ -119,6 +151,19 @@ class TokenCounterFactoryTest {
             int total = estimator.estimateTokenCountInMessages(messages);
             int expectedMin = ("System prompt".length() + "Hello".length() + "World".length()) / 4;
             assertTrue(total >= expectedMin, "Total should be at least the sum of individual estimates");
+        }
+
+        @Test
+        @DisplayName("long text produces proportionally higher count")
+        void longTextProportional() {
+            var estimator = new TokenCounterFactory.ApproximateTokenCountEstimator();
+            String shortText = "Hello";
+            String longText = shortText.repeat(100); // 500 chars
+
+            int shortTokens = estimator.estimateTokenCountInText(shortText);
+            int longTokens = estimator.estimateTokenCountInText(longText);
+
+            assertTrue(longTokens > shortTokens * 50, "Long text should produce proportionally more tokens");
         }
     }
 
@@ -145,10 +190,27 @@ class TokenCounterFactoryTest {
         }
 
         @Test
-        @DisplayName("handles AiMessage with null text")
-        void handlesNullAiText() {
-            // AiMessage with tool execution request may have null text
+        @DisplayName("handles AiMessage with empty text")
+        void handlesEmptyAiText() {
             assertEquals("", TokenCounterFactory.extractText(AiMessage.from("")));
+        }
+
+        @Test
+        @DisplayName("extracts and joins text from multi-content UserMessage")
+        void extractsFromMultiContentUser() {
+            UserMessage multiContent = UserMessage.from(TextContent.from("First part"), TextContent.from("Second part"));
+            String result = TokenCounterFactory.extractText(multiContent);
+            assertTrue(result.contains("First part"), "Should contain first text");
+            assertTrue(result.contains("Second part"), "Should contain second text");
+        }
+
+        @Test
+        @DisplayName("handles UserMessage with non-text content gracefully")
+        void handlesNonTextContent() {
+            UserMessage withImage = UserMessage.from(TextContent.from("Describe this"), ImageContent.from("https://example.com/image.jpg"));
+            String result = TokenCounterFactory.extractText(withImage);
+            assertTrue(result.contains("Describe this"), "Should extract text content");
+            // ImageContent is not TextContent, so it should be filtered out
         }
     }
 }

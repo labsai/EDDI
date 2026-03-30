@@ -5,6 +5,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.ConversationLog;
 import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.TokenCountEstimator;
+import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
@@ -28,6 +29,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * </ul>
  */
 class ConversationHistoryBuilder {
+
+    private static final Logger LOGGER = Logger.getLogger(ConversationHistoryBuilder.class);
 
     /**
      * Build the full list of ChatMessages for an LLM call (step-count mode).
@@ -143,8 +146,16 @@ class ConversationHistoryBuilder {
             anchoredMessages.add(msg);
         }
 
+        // Warn if anchored messages alone exceed the token budget
+        if (anchoredTokens > maxContextTokens) {
+            LOGGER.warnf(
+                    "Anchored steps (%d) consume %d tokens, exceeding maxContextTokens=%d. "
+                            + "Consider reducing anchorFirstSteps or increasing maxContextTokens.",
+                    effectiveAnchor, anchoredTokens, maxContextTokens);
+        }
+
         // Step 2: Fill remaining budget from most recent steps backward
-        int remainingBudget = maxContextTokens - anchoredTokens;
+        int remainingBudget = Math.max(0, maxContextTokens - anchoredTokens);
         var recentMessages = new ArrayList<ChatMessage>();
         int recentTokens = 0;
         int recentStartIndex = allMessages.size(); // exclusive — will be decremented
@@ -168,13 +179,12 @@ class ConversationHistoryBuilder {
 
         messages.addAll(anchoredMessages);
 
-        // Insert gap marker if there are omitted turns between anchor and recent
+        // Insert gap marker if there are omitted messages between anchor and recent
         if (recentStartIndex > effectiveAnchor) {
-            int omittedFrom = effectiveAnchor + 1; // 1-based for human readability
-            int omittedTo = recentStartIndex; // exclusive, so this is the last omitted
+            int omittedCount = recentStartIndex - effectiveAnchor;
             String gapMarker = String.format(
-                    "[... turns %d-%d omitted from context — the full conversation is preserved and can be recalled if needed ...]", omittedFrom,
-                    omittedTo);
+                    "[... %d earlier messages omitted from context — the full conversation is preserved and can be recalled if needed ...]",
+                    omittedCount);
             messages.add(new SystemMessage(gapMarker));
         }
 

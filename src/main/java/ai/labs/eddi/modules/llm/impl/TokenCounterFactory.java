@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @ApplicationScoped
 public class TokenCounterFactory {
 
-    private static final Map<String, TokenCountEstimator> ESTIMATOR_CACHE = new ConcurrentHashMap<>();
+    private final Map<String, TokenCountEstimator> estimatorCache = new ConcurrentHashMap<>();
 
     /**
      * Get a token count estimator for the given model type.
@@ -38,21 +38,14 @@ public class TokenCounterFactory {
      */
     public TokenCountEstimator getEstimator(String modelType, String modelName) {
         if (modelType == null) {
-            return ESTIMATOR_CACHE.computeIfAbsent("__approximate__", k -> new ApproximateTokenCountEstimator());
+            return estimatorCache.computeIfAbsent("__approximate__", k -> new ApproximateTokenCountEstimator());
         }
 
         return switch (modelType.toLowerCase()) {
-            case "openai", "azure-openai" -> ESTIMATOR_CACHE.computeIfAbsent("openai:" + (modelName != null ? modelName : "gpt-4o"),
+            case "openai", "azure-openai" -> estimatorCache.computeIfAbsent("openai:" + (modelName != null ? modelName : "gpt-4o"),
                     k -> new OpenAiTokenCountEstimator(modelName != null ? modelName : "gpt-4o"));
-            default -> ESTIMATOR_CACHE.computeIfAbsent("__approximate__", k -> new ApproximateTokenCountEstimator());
+            default -> estimatorCache.computeIfAbsent("__approximate__", k -> new ApproximateTokenCountEstimator());
         };
-    }
-
-    /**
-     * Estimate token count for a single ChatMessage using the given estimator.
-     */
-    public int estimateTokens(TokenCountEstimator estimator, ChatMessage message) {
-        return estimator.estimateTokenCountInMessage(message);
     }
 
     /**
