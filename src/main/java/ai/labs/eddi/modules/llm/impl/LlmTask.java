@@ -97,8 +97,7 @@ public class LlmTask implements ILifecycleTask {
 
     @Inject
     public LlmTask(IResourceClientLibrary resourceClientLibrary, IDataFactory dataFactory, IMemoryItemConverter memoryItemConverter,
-            ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, PrePostUtils prePostUtils,
-            Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders, SecretResolver secretResolver,
+            ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, PrePostUtils prePostUtils, ChatModelRegistry chatModelRegistry,
             CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             IApiCallExecutor apiCallExecutor, ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager,
@@ -112,7 +111,7 @@ public class LlmTask implements ILifecycleTask {
         this.jsonSerialization = jsonSerialization;
         this.prePostUtils = prePostUtils;
 
-        this.chatModelRegistry = new ChatModelRegistry(languageModelApiConnectorBuilders, secretResolver);
+        this.chatModelRegistry = chatModelRegistry;
         this.conversationHistoryBuilder = new ConversationHistoryBuilder();
         this.legacyChatExecutor = new LegacyChatExecutor();
         this.streamingLegacyChatExecutor = new StreamingLegacyChatExecutor();

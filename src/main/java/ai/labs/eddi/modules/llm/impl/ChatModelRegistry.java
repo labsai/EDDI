@@ -4,6 +4,8 @@ import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import org.jboss.logging.Logger;
 
@@ -20,7 +22,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * Supports both synchronous ({@link ChatModel}) and streaming
  * ({@link StreamingChatModel}) models with separate caches.
  */
-class ChatModelRegistry {
+@ApplicationScoped
+public class ChatModelRegistry {
     private static final String KEY_INCLUDE_FIRST_AGENT_MESSAGE = "includeFirstAgentMessage";
     private static final String KEY_SYSTEM_MESSAGE = "systemMessage";
     private static final String KEY_PROMPT = "prompt";
@@ -38,6 +41,7 @@ class ChatModelRegistry {
     private final Map<ModelCacheKey, ChatModel> modelCache = new ConcurrentHashMap<>(1);
     private final Map<ModelCacheKey, StreamingChatModel> streamingModelCache = new ConcurrentHashMap<>(1);
 
+    @Inject
     ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders, SecretResolver secretResolver) {
         this.languageModelApiConnectorBuilders = languageModelApiConnectorBuilders;
         this.secretResolver = secretResolver;
