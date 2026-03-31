@@ -17,6 +17,7 @@ import {
   ListMinus,
   Check,
 } from "lucide-react";
+import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import {
   discoverMcpTools,
   type McpToolInfo,
@@ -613,14 +614,12 @@ export function McpCallsEditor({
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("mcpcallsEditor.apiKey", "API Key / Vault Reference")}
             </label>
-            <input
-              type="text"
+            <SecretKeyPicker
               value={data.apiKey ?? ""}
-              onChange={(e) => update({ apiKey: e.target.value })}
+              onChange={(v) => update({ apiKey: v })}
               readOnly={readOnly}
               placeholder="${vault:my-mcp-key}"
-              className="h-8 w-full rounded-md border border-input bg-background px-3 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              data-testid="mcp-apikey-input"
+              testId="mcp-apikey-input"
             />
           </div>
         </div>

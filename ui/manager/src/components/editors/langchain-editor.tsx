@@ -22,6 +22,7 @@ import {
   FileCode,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
+import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 
 // Re-export types so existing imports still work
 export type {
@@ -680,29 +681,17 @@ function TaskEditor({
                           placeholder={t("langchainEditor.a2aName", "Display Name")}
                           className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                         />
-                        <div className="relative">
-                          <input
-                            type="text"
-                            value={agent.apiKey ?? ""}
-                            onChange={(e) => {
-                              const agents = [...(task.a2aAgents ?? [])];
-                              agents[ai] = { ...agent, apiKey: e.target.value };
-                              onChange({ ...task, a2aAgents: agents });
-                            }}
-                            readOnly={readOnly}
-                            placeholder={t(
-                              "langchainEditor.a2aApiKey",
-                              "${vault:my-a2a-key}"
-                            )}
-                            dir="ltr"
-                            className="h-7 w-full rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                          />
-                          {agent.apiKey && !agent.apiKey.startsWith("${vault:") && (
-                            <div className="absolute inset-e-1.5 top-1/2 -translate-y-1/2" title="Use ${vault:...} for security">
-                              <AlertTriangle className="h-3 w-3 text-amber-500" />
-                            </div>
-                          )}
-                        </div>
+                        <SecretKeyPicker
+                          value={agent.apiKey ?? ""}
+                          onChange={(v) => {
+                            const agents = [...(task.a2aAgents ?? [])];
+                            agents[ai] = { ...agent, apiKey: v };
+                            onChange({ ...task, a2aAgents: agents });
+                          }}
+                          readOnly={readOnly}
+                          placeholder={t("langchainEditor.a2aApiKey", "${vault:my-a2a-key}")}
+                          testId={`a2a-apikey-${ai}`}
+                        />
                         <input
                           type="number"
                           value={agent.timeoutMs ?? 30000}

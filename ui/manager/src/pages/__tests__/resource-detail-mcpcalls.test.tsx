@@ -160,8 +160,9 @@ describe("MCP Calls Editor", () => {
     renderPage("mcpcalls");
 
     await waitFor(() => {
-      const input = screen.getByTestId("mcp-apikey-input") as HTMLInputElement;
-      expect(input.value).toBe("${vault:mcp-doc-key}");
+      // SecretKeyPicker auto-detects ${vault:...} and shows vault select
+      const select = screen.getByTestId("mcp-apikey-input-vault-select") as HTMLSelectElement;
+      expect(select.value).toBe("mcp-doc-key");
     });
   });
 

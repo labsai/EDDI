@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import {
   Activity,
   Trash2,
@@ -13,6 +14,9 @@ import {
   RefreshCw,
   Gauge,
   Eye,
+  Clock,
+  TrendingUp,
+  ExternalLink,
 } from "lucide-react";
 import { StreamBadge } from "@/components/ui/stream-badge";
 import { toast } from "sonner";
@@ -25,11 +29,27 @@ import {
   useCoordinatorSSE,
 } from "@/hooks/use-coordinator";
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function formatTime(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
+
+// ─── Main Page ───────────────────────────────────────────────────────────────
+
 export function CoordinatorPage() {
   const { t } = useTranslation();
-  const { data: status, isLoading: statusLoading } = useCoordinatorStatus();
-  const { data: deadLetters, isLoading: dlLoading } = useDeadLetters();
-  const { liveStatus, sseConnected } = useCoordinatorSSE();
+  const { data: status, isLoading: statusLoading, refetch: refetchStatus } = useCoordinatorStatus();
+  const { data: deadLetters, isLoading: dlLoading, refetch: refetchDL } = useDeadLetters();
+  const { liveStatus, sseConnected, eventHistory } = useCoordinatorSSE();
   const replayMutation = useReplayDeadLetter();
   const discardMutation = useDiscardDeadLetter();
   const purgeMutation = usePurgeDeadLetters();
@@ -45,8 +65,6 @@ export function CoordinatorPage() {
 
   // Auto-refresh status polling
   const intervalRef = useRef<number | null>(null);
-  const { refetch: refetchStatus } = useCoordinatorStatus();
-  const { refetch: refetchDL } = useDeadLetters();
 
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -72,6 +90,24 @@ export function CoordinatorPage() {
       }
     }
     prevProcessed.current = { count: currentStatus.totalProcessed, time: now };
+  }, [currentStatus]);
+
+  // Computed metrics
+  const successRate = useMemo(() => {
+    if (!currentStatus) return null;
+    const total = currentStatus.totalProcessed + currentStatus.totalDeadLettered;
+    if (total === 0) return 100;
+    return Math.round((currentStatus.totalProcessed / total) * 100);
+  }, [currentStatus]);
+
+  const activeQueueCount = useMemo(() => {
+    if (!currentStatus) return 0;
+    return Object.keys(currentStatus.queueDepths).length;
+  }, [currentStatus]);
+
+  const totalPending = useMemo(() => {
+    if (!currentStatus) return 0;
+    return Object.values(currentStatus.queueDepths).reduce((sum, d) => sum + d, 0);
   }, [currentStatus]);
 
   const togglePayload = useCallback((id: string) => {
@@ -158,6 +194,107 @@ export function CoordinatorPage() {
         </div>
       </div>
 
+      {/* ─── Hero: Connection Status ─── */}
+      {statusLoading && !currentStatus ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="animate-pulse rounded-xl border border-border bg-card p-5">
+              <div className="h-4 w-24 rounded bg-muted" />
+              <div className="mt-3 h-8 w-16 rounded bg-muted" />
+            </div>
+          ))}
+        </div>
+      ) : currentStatus ? (
+        <>
+          {/* Hero card — full-width connection status */}
+          <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-connection-card">
+            <div className="flex items-center gap-4">
+              <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${
+                isConnected ? "bg-emerald-500/10" : "bg-red-500/10"
+              }`}>
+                {isNats ? <Cloud className={`h-6 w-6 ${isConnected ? "text-emerald-500" : "text-red-500"}`} /> : <Server className={`h-6 w-6 ${isConnected ? "text-emerald-500" : "text-red-500"}`} />}
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex h-2.5 w-2.5 rounded-full ${
+                    isConnected ? "bg-emerald-500 animate-pulse" : "bg-red-500"
+                  }`} />
+                  <span className={`text-lg font-semibold ${
+                    isConnected ? "text-emerald-500" : "text-red-500"
+                  }`}>
+                    {currentStatus.connectionStatus}
+                  </span>
+                  <span className={`ms-2 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                    isNats
+                      ? "bg-blue-500/10 text-blue-500"
+                      : "bg-purple-500/10 text-purple-500"
+                  }`} data-testid="coordinator-type-card">
+                    {isNats ? "NATS JetStream" : "In-Memory"}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {t("coordinator.activeConversations", "Active conversations")}: {currentStatus.activeConversations}
+                </p>
+              </div>
+              <StreamBadge connected={sseConnected} />
+            </div>
+          </div>
+
+          {/* 3 metric cards */}
+          <div className="grid gap-4 sm:grid-cols-3">
+            {/* Tasks Processed */}
+            <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-processed-card">
+              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                {t("coordinator.processed", "Tasks Processed")}
+              </div>
+              <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
+                {currentStatus.totalProcessed.toLocaleString()}
+              </p>
+            </div>
+
+            {/* Dead-Lettered */}
+            <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-dead-letter-card">
+              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                {t("coordinator.deadLettered", "Dead-Lettered")}
+              </div>
+              <p className={`mt-2 text-2xl font-bold tabular-nums ${
+                currentStatus.totalDeadLettered > 0 ? "text-amber-500" : "text-foreground"
+              }`}>
+                {currentStatus.totalDeadLettered.toLocaleString()}
+              </p>
+            </div>
+
+            {/* Success Rate */}
+            <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-success-rate-card">
+              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <TrendingUp className="h-4 w-4 text-blue-500" />
+                {t("coordinator.successRate", "Success Rate")}
+              </div>
+              <p className={`mt-2 text-2xl font-bold tabular-nums ${
+                successRate !== null && successRate < 90 ? "text-amber-500" : "text-emerald-500"
+              }`}>
+                {successRate !== null ? `${successRate}%` : "—"}
+              </p>
+              {/* Ratio bar */}
+              {successRate !== null && currentStatus.totalProcessed + currentStatus.totalDeadLettered > 0 && (
+                <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-muted" data-testid="success-rate-bar">
+                  <div
+                    className="bg-emerald-500 transition-all"
+                    style={{ width: `${successRate}%` }}
+                  />
+                  <div
+                    className="bg-red-400 transition-all"
+                    style={{ width: `${100 - successRate}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      ) : null}
+
       {/* Error category breakdown */}
       {errorCategories.length > 0 && (
         <div className="flex flex-wrap gap-2">
@@ -170,94 +307,71 @@ export function CoordinatorPage() {
         </div>
       )}
 
-      {/* Status Cards */}
-      {statusLoading && !currentStatus ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="animate-pulse rounded-xl border border-border bg-card p-5">
-              <div className="h-4 w-24 rounded bg-muted" />
-              <div className="mt-3 h-8 w-16 rounded bg-muted" />
-            </div>
-          ))}
-        </div>
-      ) : currentStatus ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {/* Coordinator Type */}
-          <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-type-card">
-            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              {isNats ? <Cloud className="h-4 w-4" /> : <Server className="h-4 w-4" />}
-              {t("coordinator.type", "Coordinator Type")}
-            </div>
-            <div className="mt-2 flex items-center gap-2">
-              <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${
-                isNats
-                  ? "bg-blue-500/10 text-blue-500"
-                  : "bg-purple-500/10 text-purple-500"
-              }`}>
-                {isNats ? "NATS JetStream" : "In-Memory"}
-              </span>
-            </div>
-          </div>
-
-          {/* Connection Status */}
-          <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-connection-card">
-            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <Activity className="h-4 w-4" />
-              {t("coordinator.connection", "Connection")}
-            </div>
-            <div className="mt-2 flex items-center gap-2">
-              <span className={`inline-flex h-2.5 w-2.5 rounded-full ${
-                isConnected ? "bg-emerald-500 animate-pulse" : "bg-red-500"
-              }`} />
-              <span className={`text-lg font-semibold ${
-                isConnected ? "text-emerald-500" : "text-red-500"
-              }`}>
-                {currentStatus.connectionStatus}
-              </span>
-              <span className="ms-auto">
-                <StreamBadge connected={sseConnected} />
-              </span>
-            </div>
-          </div>
-
-          {/* Tasks Processed */}
-          <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-processed-card">
-            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <CheckCircle2 className="h-4 w-4" />
-              {t("coordinator.processed", "Tasks Processed")}
-            </div>
-            <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
-              {currentStatus.totalProcessed.toLocaleString()}
-            </p>
-          </div>
-
-          {/* Dead-Lettered */}
-          <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-dead-letter-card">
-            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <AlertTriangle className="h-4 w-4" />
-              {t("coordinator.deadLettered", "Dead-Lettered")}
-            </div>
-            <p className={`mt-2 text-2xl font-bold tabular-nums ${
-              currentStatus.totalDeadLettered > 0 ? "text-amber-500" : "text-foreground"
-            }`}>
-              {currentStatus.totalDeadLettered.toLocaleString()}
-            </p>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Queue Depths */}
-      {currentStatus && Object.keys(currentStatus.queueDepths).length > 0 && (
-        <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-queues">
-          <h2 className="mb-3 text-lg font-semibold text-foreground">
+      {/* ─── Active Queues ─── */}
+      <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-queues">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-foreground">
             {t("coordinator.activeQueues", "Active Queues")}
           </h2>
+          {activeQueueCount > 0 && (
+            <span className="rounded-full bg-accent/10 px-2.5 py-0.5 text-xs font-semibold text-accent tabular-nums">
+              {totalPending} {t("coordinator.totalPending", "pending")}
+            </span>
+          )}
+        </div>
+        {currentStatus && Object.keys(currentStatus.queueDepths).length > 0 ? (
           <div className="space-y-2">
             {Object.entries(currentStatus.queueDepths).map(([convId, depth]) => (
               <div key={convId} className="flex items-center gap-3 rounded-lg bg-muted/50 px-3 py-2">
-                <code className="flex-1 truncate text-sm text-foreground">{convId}</code>
+                <Link
+                  to={`/manage/conversations`}
+                  className="flex-1 truncate font-mono text-sm text-foreground hover:text-primary transition-colors"
+                  title={convId}
+                >
+                  {convId}
+                  <ExternalLink className="ms-1.5 inline h-3 w-3 text-muted-foreground" />
+                </Link>
                 <span className="rounded-full bg-accent/10 px-2.5 py-0.5 text-sm font-semibold text-accent tabular-nums">
                   {depth} {t("coordinator.queued", "queued")}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+            <CheckCircle2 className="h-5 w-5 text-emerald-500/50" />
+            {t("coordinator.noActiveQueues", "No active conversations being processed")}
+          </div>
+        )}
+      </div>
+
+      {/* ─── SSE Event History ─── */}
+      {eventHistory.length > 0 && (
+        <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-event-history">
+          <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-foreground">
+            <Clock className="h-4 w-4 text-muted-foreground" />
+            {t("coordinator.eventHistory", "Event History")}
+            <span className="text-xs font-normal text-muted-foreground">
+              ({t("coordinator.lastNSnapshots", `Last ${eventHistory.length} snapshots`)})
+            </span>
+          </h2>
+          <div className="max-h-48 overflow-y-auto space-y-0.5 rounded-lg bg-muted/30 p-2 font-mono text-[11px]">
+            {[...eventHistory].reverse().map((snap, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 rounded px-2 py-1 text-muted-foreground hover:bg-muted/50 transition-colors"
+              >
+                <span className="text-foreground/40 tabular-nums">
+                  [{formatTime(snap.receivedAt)}]
+                </span>
+                <span className="text-emerald-500 tabular-nums">
+                  ✓{snap.totalProcessed.toLocaleString()}
+                </span>
+                <span className={`tabular-nums ${snap.totalDeadLettered > 0 ? "text-red-400" : "text-muted-foreground/40"}`}>
+                  ✗{snap.totalDeadLettered.toLocaleString()}
+                </span>
+                <span className="text-blue-400 tabular-nums">
+                  ⧗{Object.keys(snap.queueDepths).length}q
                 </span>
               </div>
             ))}
@@ -265,7 +379,7 @@ export function CoordinatorPage() {
         </div>
       )}
 
-      {/* Dead-Letter Admin */}
+      {/* ─── Dead-Letter Admin ─── */}
       <div className="rounded-xl border border-border bg-card" data-testid="coordinator-dead-letters">
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <h2 className="text-lg font-semibold text-foreground">

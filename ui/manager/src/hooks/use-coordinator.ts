@@ -72,13 +72,23 @@ export function usePurgeDeadLetters() {
 
 // ==================== SSE Hook ====================
 
+/** A timestamped snapshot from the SSE stream */
+export interface CoordinatorSnapshot extends CoordinatorStatus {
+  /** When this snapshot was received */
+  receivedAt: string;
+}
+
+const EVENT_HISTORY_LIMIT = 20;
+
 /**
  * Hook that subscribes to the coordinator SSE stream for live status updates.
  * Falls back to polling via useCoordinatorStatus if SSE is not available.
+ * Buffers the last 20 status snapshots as a compact event history.
  */
 export function useCoordinatorSSE() {
   const [liveStatus, setLiveStatus] = useState<CoordinatorStatus | null>(null);
   const [sseConnected, setSseConnected] = useState(false);
+  const [eventHistory, setEventHistory] = useState<CoordinatorSnapshot[]>([]);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   const connect = useCallback(() => {
@@ -91,6 +101,18 @@ export function useCoordinatorSSE() {
           const data = JSON.parse(event.data) as CoordinatorStatus;
           setLiveStatus(data);
           setSseConnected(true);
+
+          // Buffer the snapshot into event history
+          const snapshot: CoordinatorSnapshot = {
+            ...data,
+            receivedAt: new Date().toISOString(),
+          };
+          setEventHistory((prev) => {
+            const next = [...prev, snapshot];
+            return next.length > EVENT_HISTORY_LIMIT
+              ? next.slice(-EVENT_HISTORY_LIMIT)
+              : next;
+          });
         } catch {
           // ignore parse errors
         }
@@ -118,5 +140,5 @@ export function useCoordinatorSSE() {
     };
   }, [connect]);
 
-  return { liveStatus, sseConnected };
+  return { liveStatus, sseConnected, eventHistory };
 }

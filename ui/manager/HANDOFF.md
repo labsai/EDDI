@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-03-31  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: `890fa53` feat(v6): Phase 14 Hardening - Logs/Audit dropdowns, unified Create+Wizard, sidebar reorg, orphan polish
+> **Last commit**: `1647f87` feat(v6): Phase 14 Final - SecretKeyPicker, Coordinator enrichment, Dashboard enrichment
 
 ---
 
@@ -21,7 +21,7 @@
 **Group Discussion UI**: Groups page (card/list views), Group Detail (3-panel), Group Wizard (4-step), 7 components, API layer, hooks, 5 templates.
 **A2A Protocol UI**: Agent-detail A2A section (enable/disable, description, skills, endpoints, Agent Card preview). LangChain editor A2A Agents section (remote agents as tools).
 **LLM Editor UX**: System Prompt Qute syntax highlighting (Monarch tokenizer), Pre/Post Instructions as Section+ContentEditor, model params cleanup, Add Task dialog label fix, wizard model autocomplete + base URL hints + step labels.
-**Phase 14 (UX Hardening)**: Logs session seeding + dropdown filters, Audit auto-load + dropdowns, Create+Wizard unified button, Orphan detection rich UX + selective deletion, Sidebar 4-section reorg + version display.
+**Phase 14 (UX Hardening)**: Logs session seeding + dropdown filters, Audit auto-load + dropdowns, Create+Wizard unified button, Orphan detection rich UX + selective deletion, Sidebar 4-section reorg + version display, **SecretKeyPicker** vault-aware apiKey component, **Coordinator enrichment** (hero card, success rate bar, SSE event history, error categories, throughput badge), **Dashboard enrichment** (platform health strip, recent conversations, expanded quick actions, gradient stat cards).
 
 ### What's Done
 
@@ -71,7 +71,7 @@
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 437 pass (`npm run test`) — 42 files, 0 failures
+- **Unit/Component**: 441 pass (`npm run test`) — 42 files
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds
