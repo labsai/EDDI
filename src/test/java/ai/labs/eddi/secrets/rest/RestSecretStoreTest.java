@@ -142,10 +142,9 @@ class RestSecretStoreTest {
     }
 
     @Test
-    void listSecrets_returnsEmptyForInvalidTenantId() {
+    void listSecrets_returns400ForInvalidTenantId() {
         Response resp = rest.listSecrets("../bad");
-        assertEquals(200, resp.getStatus());
-        // Should return empty list, not error
+        assertEquals(400, resp.getStatus());
     }
 
     // ─── healthCheck ───
@@ -164,6 +163,60 @@ class RestSecretStoreTest {
         when(secretProvider.isAvailable()).thenReturn(false);
         Response resp = rest.healthCheck();
         assertEquals(503, resp.getStatus());
+    }
+
+    // ─── rotateDek ───
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void rotateDek_returns200WithCount() throws Exception {
+        when(secretProvider.rotateDek("default")).thenReturn(3);
+
+        Response resp = rest.rotateDek("default");
+        assertEquals(200, resp.getStatus());
+        Map<String, Object> body = (Map<String, Object>) resp.getEntity();
+        assertEquals(3, body.get("secretsReEncrypted"));
+        verify(secretResolver).invalidateAll();
+    }
+
+    @Test
+    void rotateDek_returns400ForInvalidTenantId() {
+        Response resp = rest.rotateDek("../bad");
+        assertEquals(400, resp.getStatus());
+    }
+
+    @Test
+    void rotateDek_returns500OnFailure() throws Exception {
+        when(secretProvider.rotateDek("default")).thenThrow(new ISecretProvider.SecretProviderException("No DEK found"));
+        Response resp = rest.rotateDek("default");
+        assertEquals(500, resp.getStatus());
+    }
+
+    @Test
+    void rotateDek_returns503WhenVaultUnavailable() {
+        when(secretProvider.isAvailable()).thenReturn(false);
+        Response resp = rest.rotateDek("default");
+        assertEquals(503, resp.getStatus());
+    }
+
+    // ─── rotateKek ───
+
+    @Test
+    void rotateKek_returns400WhenBodyNull() {
+        Response resp = rest.rotateKek(null);
+        assertEquals(400, resp.getStatus());
+    }
+
+    @Test
+    void rotateKek_returns400WhenKeysEmpty() {
+        Response resp = rest.rotateKek(new IRestSecretStore.KekRotationRequest("", "newkey"));
+        assertEquals(400, resp.getStatus());
+    }
+
+    @Test
+    void rotateKek_returns400WhenNewKeyTooShort() {
+        Response resp = rest.rotateKek(new IRestSecretStore.KekRotationRequest("oldkey", "short"));
+        assertEquals(400, resp.getStatus());
     }
 
     // ─── reference format ───

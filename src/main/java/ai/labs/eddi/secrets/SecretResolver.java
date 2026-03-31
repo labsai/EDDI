@@ -3,6 +3,9 @@ package ai.labs.eddi.secrets;
 import ai.labs.eddi.secrets.model.SecretReference;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -31,7 +34,9 @@ import java.util.regex.Pattern;
  * <p>
  * Includes a Caffeine cache with configurable TTL to avoid repeated
  * decryption/vault calls. Cache is invalidated on secret rotation via
- * {@link #invalidateCache(SecretReference)}.
+ * {@link #invalidateCache(SecretReference)}. Failed resolutions (not-found,
+ * provider errors) are <b>never cached</b> so that newly created secrets
+ * resolve immediately.
  *
  * @author ginccc
  * @since 6.0.0
@@ -43,16 +48,24 @@ public class SecretResolver {
     private static final Pattern VAULT_PATTERN = SecretReference.compiledPattern();
 
     private final ISecretProvider secretProvider;
+    private final MeterRegistry meterRegistry;
     private final int cacheTtlMinutes;
     private final int cacheMaxSize;
 
     private Cache<String, String> cache;
 
+    // ─── Metrics ───
+    private Counter cacheHitCounter;
+    private Counter cacheMissCounter;
+    private Counter resolveErrorCounter;
+    private Timer resolveTimer;
+
     @Inject
-    public SecretResolver(ISecretProvider secretProvider,
+    public SecretResolver(ISecretProvider secretProvider, MeterRegistry meterRegistry,
             @ConfigProperty(name = "eddi.vault.cache-ttl-minutes", defaultValue = "5") int cacheTtlMinutes,
             @ConfigProperty(name = "eddi.vault.cache-max-size", defaultValue = "1000") int cacheMaxSize) {
         this.secretProvider = secretProvider;
+        this.meterRegistry = meterRegistry;
         this.cacheTtlMinutes = cacheTtlMinutes;
         this.cacheMaxSize = cacheMaxSize;
     }
@@ -60,6 +73,11 @@ public class SecretResolver {
     @PostConstruct
     void init() {
         this.cache = Caffeine.newBuilder().expireAfterWrite(Duration.ofMinutes(cacheTtlMinutes)).maximumSize(cacheMaxSize).build();
+
+        this.cacheHitCounter = meterRegistry.counter("eddi.vault.cache.hits");
+        this.cacheMissCounter = meterRegistry.counter("eddi.vault.cache.misses");
+        this.resolveErrorCounter = meterRegistry.counter("eddi.vault.resolve.errors");
+        this.resolveTimer = meterRegistry.timer("eddi.vault.resolve.time");
 
         if (secretProvider.isAvailable()) {
             LOGGER.infof("SecretResolver initialized (cache TTL=%dmin, maxSize=%d)", cacheTtlMinutes, cacheMaxSize);
@@ -100,6 +118,11 @@ public class SecretResolver {
      * same string.
      * <p>
      * If the vault is not available, the value passes through unchanged.
+     * <p>
+     * <b>Caching strategy:</b> Only successful resolutions are cached. Failed
+     * resolutions (secret not found or provider error) are <b>never cached</b>,
+     * ensuring that newly created secrets resolve immediately without waiting for
+     * cache expiry.
      *
      * @param value
      *            the value that may contain ${eddivault:...} references
@@ -123,17 +146,18 @@ public class SecretResolver {
             SecretReference ref = SecretReference.parse(fullMatch);
             String cacheKey = ref.tenantId() + "/" + ref.keyName();
 
-            String resolved = cache.get(cacheKey, k -> {
-                try {
-                    return secretProvider.resolve(ref);
-                } catch (ISecretProvider.SecretNotFoundException e) {
-                    LOGGER.warnf("Vault reference not found: %s — passing through unchanged", fullMatch);
-                    return null;
-                } catch (ISecretProvider.SecretProviderException e) {
-                    LOGGER.errorf("Failed to resolve vault reference: %s — %s", fullMatch, e.getMessage());
-                    return null;
+            // Check cache first — only successful resolutions are cached
+            String resolved = cache.getIfPresent(cacheKey);
+            if (resolved != null) {
+                cacheHitCounter.increment();
+            } else {
+                cacheMissCounter.increment();
+                resolved = resolveFromProvider(ref, fullMatch);
+                if (resolved != null) {
+                    // Only cache successful resolutions — never cache failures
+                    cache.put(cacheKey, resolved);
                 }
-            });
+            }
 
             if (resolved != null) {
                 matcher.appendReplacement(result, Matcher.quoteReplacement(resolved));
@@ -144,6 +168,28 @@ public class SecretResolver {
         }
         matcher.appendTail(result);
         return result.toString();
+    }
+
+    /**
+     * Resolve a single secret reference from the provider, with timing and error
+     * handling.
+     *
+     * @return the plaintext value, or null if resolution failed
+     */
+    private String resolveFromProvider(SecretReference ref, String fullMatch) {
+        return resolveTimer.record(() -> {
+            try {
+                return secretProvider.resolve(ref);
+            } catch (ISecretProvider.SecretNotFoundException e) {
+                LOGGER.warnf("Vault reference not found: %s — passing through unchanged", fullMatch);
+                resolveErrorCounter.increment();
+                return null;
+            } catch (ISecretProvider.SecretProviderException e) {
+                LOGGER.errorf("Failed to resolve vault reference: %s — %s", fullMatch, e.getMessage());
+                resolveErrorCounter.increment();
+                return null;
+            }
+        });
     }
 
     /**

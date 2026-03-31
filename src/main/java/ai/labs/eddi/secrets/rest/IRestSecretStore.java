@@ -97,6 +97,36 @@ public interface IRestSecretStore {
     Response healthCheck();
 
     /**
+     * Rotate the Data Encryption Key (DEK) for a specific tenant. Re-encrypts all
+     * secrets for the tenant with a newly generated DEK.
+     *
+     * @param tenantId
+     *            the tenant whose DEK to rotate
+     * @return 200 with the number of secrets re-encrypted
+     */
+    @POST
+    @Path("/{tenantId}/rotate-dek")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Rotate DEK for a tenant")
+    Response rotateDek(@PathParam("tenantId") String tenantId);
+
+    /**
+     * Rotate the Key Encryption Key (KEK / Master Key). Re-encrypts all tenant DEKs
+     * with the new master key. After this call, restart the application with the
+     * new master key in the environment.
+     *
+     * @param body
+     *            contains the old and new master keys
+     * @return 200 with the number of DEKs re-encrypted
+     */
+    @POST
+    @Path("/admin/rotate-kek")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Rotate Master Key (KEK)")
+    Response rotateKek(KekRotationRequest body);
+
+    /**
      * Request body for storing a secret. Includes the plaintext value, an optional
      * description, and an optional allowed-agents list.
      *
@@ -108,5 +138,16 @@ public interface IRestSecretStore {
      *            list of agent IDs, or ["*"] for all (nullable → defaults to ["*"])
      */
     record SecretRequest(String value, String description, List<String> allowedAgents) {
+    }
+
+    /**
+     * Request body for KEK rotation.
+     *
+     * @param oldMasterKey
+     *            the current master key
+     * @param newMasterKey
+     *            the new master key to rotate to
+     */
+    record KekRotationRequest(String oldMasterKey, String newMasterKey) {
     }
 }

@@ -6,6 +6,7 @@ import ai.labs.eddi.secrets.model.EncryptedSecret;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -26,16 +27,17 @@ import static org.mockito.Mockito.*;
 class VaultSecretProviderTest {
 
     private ISecretPersistence persistence;
+    private SimpleMeterRegistry meterRegistry;
     private VaultSecretProvider provider;
 
     @BeforeEach
     void setUp() {
         persistence = mock(ISecretPersistence.class);
-        // Reflective setup — cannot call onStartup directly because it needs a
-        // StartupEvent; instead inject via constructor + manual init
-        provider = new VaultSecretProvider(Optional.of("test-master-key-32chars!!"), persistence);
+        meterRegistry = new SimpleMeterRegistry();
+        provider = new VaultSecretProvider(Optional.of("test-master-key-32chars!!"), persistence, meterRegistry);
+        provider.initMetrics();
         // Simulate startup
-        provider.onStartup(null);
+        provider.onStartup(new io.quarkus.runtime.StartupEvent());
     }
 
     @Test
@@ -45,8 +47,9 @@ class VaultSecretProviderTest {
 
     @Test
     void isAvailable_whenMasterKeyNotSet() {
-        var disabledProvider = new VaultSecretProvider(Optional.empty(), persistence);
-        disabledProvider.onStartup(null);
+        var disabledProvider = new VaultSecretProvider(Optional.empty(), persistence, meterRegistry);
+        disabledProvider.initMetrics();
+        disabledProvider.onStartup(new io.quarkus.runtime.StartupEvent());
         assertFalse(disabledProvider.isAvailable());
     }
 
@@ -176,15 +179,17 @@ class VaultSecretProviderTest {
 
     @Test
     void unavailable_throwsOnResolve() {
-        var disabledProvider = new VaultSecretProvider(Optional.empty(), persistence);
-        disabledProvider.onStartup(null);
+        var disabledProvider = new VaultSecretProvider(Optional.empty(), persistence, meterRegistry);
+        disabledProvider.initMetrics();
+        disabledProvider.onStartup(new io.quarkus.runtime.StartupEvent());
         assertThrows(ISecretProvider.SecretProviderException.class, () -> disabledProvider.resolve(new SecretReference("default", "key")));
     }
 
     @Test
     void unavailable_throwsOnStore() {
-        var disabledProvider = new VaultSecretProvider(Optional.empty(), persistence);
-        disabledProvider.onStartup(null);
+        var disabledProvider = new VaultSecretProvider(Optional.empty(), persistence, meterRegistry);
+        disabledProvider.initMetrics();
+        disabledProvider.onStartup(new io.quarkus.runtime.StartupEvent());
         assertThrows(ISecretProvider.SecretProviderException.class,
                 () -> disabledProvider.store(new SecretReference("default", "key"), "val", null, null));
     }

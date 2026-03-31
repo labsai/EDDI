@@ -95,6 +95,18 @@ public interface ISecretProvider {
     List<SecretMetadata> listKeys(String tenantId) throws SecretProviderException;
 
     /**
+     * Rotate the Data Encryption Key (DEK) for a specific tenant. Generates a new
+     * DEK, re-encrypts all secrets for the tenant, and replaces the old DEK.
+     *
+     * @param tenantId
+     *            the tenant whose DEK to rotate
+     * @return the number of secrets re-encrypted
+     * @throws SecretProviderException
+     *             if rotation fails
+     */
+    int rotateDek(String tenantId) throws SecretProviderException;
+
+    /**
      * Check if the secret provider is properly configured and operational.
      *
      * @return true if the provider can resolve secrets

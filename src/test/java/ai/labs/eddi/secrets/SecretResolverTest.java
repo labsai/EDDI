@@ -1,6 +1,7 @@
 package ai.labs.eddi.secrets;
 
 import ai.labs.eddi.secrets.model.SecretReference;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -11,12 +12,14 @@ class SecretResolverTest {
 
     private ISecretProvider secretProvider;
     private SecretResolver resolver;
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
         secretProvider = mock(ISecretProvider.class);
+        meterRegistry = new SimpleMeterRegistry();
         when(secretProvider.isAvailable()).thenReturn(true);
-        resolver = new SecretResolver(secretProvider, 5, 100);
+        resolver = new SecretResolver(secretProvider, meterRegistry, 5, 100);
         resolver.init(); // Initialize the Caffeine cache (@PostConstruct)
     }
 
@@ -95,7 +98,7 @@ class SecretResolverTest {
     void resolveValue_vaultNotAvailable_passthrough() {
         ISecretProvider unavailable = mock(ISecretProvider.class);
         when(unavailable.isAvailable()).thenReturn(false);
-        SecretResolver passthroughResolver = new SecretResolver(unavailable, 5, 100);
+        SecretResolver passthroughResolver = new SecretResolver(unavailable, meterRegistry, 5, 100);
         passthroughResolver.init();
 
         String input = "Bearer ${eddivault:key}";

@@ -136,6 +136,20 @@ public class MongoSecretPersistence implements ISecretPersistence {
         return doc != null ? Optional.of(documentToDek(doc)) : Optional.empty();
     }
 
+    @Override
+    public void deleteDek(String tenantId) {
+        deksCollection.deleteOne(eq(FIELD_TENANT_ID, tenantId));
+    }
+
+    @Override
+    public List<EncryptedDek> listAllDeks() {
+        var deks = new ArrayList<EncryptedDek>();
+        for (var doc : deksCollection.find()) {
+            deks.add(documentToDek(doc));
+        }
+        return deks;
+    }
+
     // ─── Document conversion ───
 
     private EncryptedSecret documentToSecret(Document doc) {

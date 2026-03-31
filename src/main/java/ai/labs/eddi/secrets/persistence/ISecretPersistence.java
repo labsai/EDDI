@@ -31,11 +31,17 @@ public interface ISecretPersistence {
     /**
      * Insert or update an encrypted secret. The composite key is
      * {@code (tenantId, keyName)}.
+     *
+     * @throws PersistenceException
+     *             if the write fails
      */
     void upsertSecret(EncryptedSecret secret);
 
     /**
      * Find an encrypted secret by tenant and key name.
+     *
+     * @throws PersistenceException
+     *             if the read fails
      */
     Optional<EncryptedSecret> findSecret(String tenantId, String keyName);
 
@@ -43,11 +49,16 @@ public interface ISecretPersistence {
      * Delete an encrypted secret.
      *
      * @return true if a secret was actually deleted
+     * @throws PersistenceException
+     *             if the delete fails
      */
     boolean deleteSecret(String tenantId, String keyName);
 
     /**
      * List all encrypted secrets for a given tenant.
+     *
+     * @throws PersistenceException
+     *             if the read fails
      */
     List<EncryptedSecret> listSecretsByTenant(String tenantId);
 
@@ -55,11 +66,34 @@ public interface ISecretPersistence {
 
     /**
      * Insert or update an encrypted DEK. The key is {@code tenantId}.
+     *
+     * @throws PersistenceException
+     *             if the write fails
      */
     void upsertDek(EncryptedDek dek);
 
     /**
      * Find an encrypted DEK by tenant ID.
+     *
+     * @throws PersistenceException
+     *             if the read fails
      */
     Optional<EncryptedDek> findDek(String tenantId);
+
+    /**
+     * Delete an encrypted DEK for a specific tenant. Used during DEK rotation.
+     *
+     * @throws PersistenceException
+     *             if the delete fails
+     */
+    void deleteDek(String tenantId);
+
+    /**
+     * List all encrypted DEKs across all tenants. Used during KEK rotation to
+     * re-encrypt every tenant's DEK with the new master key.
+     *
+     * @throws PersistenceException
+     *             if the read fails
+     */
+    List<EncryptedDek> listAllDeks();
 }

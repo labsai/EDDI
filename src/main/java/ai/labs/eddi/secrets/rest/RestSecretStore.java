@@ -2,6 +2,7 @@ package ai.labs.eddi.secrets.rest;
 
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.impl.VaultSecretProvider;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -172,7 +173,7 @@ public class RestSecretStore implements IRestSecretStore {
         try {
             validateId(tenantId, "tenantId");
         } catch (IllegalArgumentException e) {
-            return Response.ok(List.of()).build();
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
         try {
             return Response.ok(secretProvider.listKeys(tenantId)).build();
@@ -191,6 +192,59 @@ public class RestSecretStore implements IRestSecretStore {
             return Response.ok(status).build();
         } else {
             return Response.status(Response.Status.SERVICE_UNAVAILABLE).entity(status).build();
+        }
+    }
+
+    @Override
+    public Response rotateDek(String tenantId) {
+        var unavailable = vaultUnavailableResponse();
+        if (unavailable.isPresent())
+            return unavailable.get();
+
+        try {
+            validateId(tenantId, "tenantId");
+        } catch (IllegalArgumentException e) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+        }
+        try {
+            int count = secretProvider.rotateDek(tenantId);
+            secretResolver.invalidateAll(); // All cached secrets for this tenant may have changed
+            return Response.ok(Map.of("tenantId", tenantId, "secretsReEncrypted", count, "message",
+                    "DEK rotated successfully. " + count + " secrets re-encrypted.")).build();
+        } catch (ISecretProvider.SecretProviderException e) {
+            LOGGER.errorf("Failed to rotate DEK for tenant %s: %s", tenantId, e.getMessage());
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "DEK rotation failed: " + e.getMessage())).build();
+        }
+    }
+
+    @Override
+    public Response rotateKek(KekRotationRequest body) {
+        var unavailable = vaultUnavailableResponse();
+        if (unavailable.isPresent())
+            return unavailable.get();
+
+        if (body == null || body.oldMasterKey() == null || body.oldMasterKey().isBlank() || body.newMasterKey() == null
+                || body.newMasterKey().isBlank()) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "Both oldMasterKey and newMasterKey are required and must not be empty")).build();
+        }
+        if (body.newMasterKey().length() < 8) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "New master key must be at least 8 characters")).build();
+        }
+
+        if (!(secretProvider instanceof VaultSecretProvider vaultProvider)) {
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(Map.of("error", "KEK rotation is only supported by VaultSecretProvider")).build();
+        }
+
+        try {
+            int count = vaultProvider.rotateKek(body.oldMasterKey(), body.newMasterKey());
+            secretResolver.invalidateAll(); // All cached secrets use the old KEK chain
+            return Response.ok(Map.of("deksReEncrypted", count, "message", "KEK rotated successfully. " + count + " DEKs re-encrypted. "
+                    + "IMPORTANT: Update the EDDI_VAULT_MASTER_KEY environment variable to the new key and restart.")).build();
+        } catch (ISecretProvider.SecretProviderException e) {
+            LOGGER.errorf("Failed to rotate KEK: %s", e.getMessage());
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "KEK rotation failed: " + e.getMessage())).build();
         }
     }
 }

@@ -88,7 +88,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             schemaInitialized = true;
             LOGGER.info("Secrets vault PostgreSQL tables ensured");
         } catch (SQLException e) {
-            LOGGER.error("Failed to initialize secrets vault tables", e);
+            throw new PersistenceException("Failed to initialize secrets vault tables", e);
         }
     }
 
@@ -121,7 +121,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             ps.setTimestamp(11, instantToTimestamp(secret.getLastRotatedAt()));
             ps.executeUpdate();
         } catch (Exception e) {
-            LOGGER.errorf(e, "Failed to upsert secret %s/%s", secret.getTenantId(), secret.getKeyName());
+            throw new PersistenceException("Failed to upsert secret " + secret.getTenantId() + "/" + secret.getKeyName(), e);
         }
     }
 
@@ -137,7 +137,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
                     return Optional.of(resultSetToSecret(rs));
             }
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to find secret %s/%s", tenantId, keyName);
+            throw new PersistenceException("Failed to find secret " + tenantId + "/" + keyName, e);
         }
         return Optional.empty();
     }
@@ -151,8 +151,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             ps.setString(2, keyName);
             return ps.executeUpdate() > 0;
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to delete secret %s/%s", tenantId, keyName);
-            return false;
+            throw new PersistenceException("Failed to delete secret " + tenantId + "/" + keyName, e);
         }
     }
 
@@ -168,7 +167,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
                     secrets.add(resultSetToSecret(rs));
             }
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to list secrets for tenant %s", tenantId);
+            throw new PersistenceException("Failed to list secrets for tenant " + tenantId, e);
         }
         return secrets;
     }
@@ -191,7 +190,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             ps.setTimestamp(4, instantToTimestamp(dek.getCreatedAt()));
             ps.executeUpdate();
         } catch (Exception e) {
-            LOGGER.errorf(e, "Failed to upsert DEK for tenant %s", dek.getTenantId());
+            throw new PersistenceException("Failed to upsert DEK for tenant " + dek.getTenantId(), e);
         }
     }
 
@@ -209,9 +208,40 @@ public class PostgresSecretPersistence implements ISecretPersistence {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to find DEK for tenant %s", tenantId);
+            throw new PersistenceException("Failed to find DEK for tenant " + tenantId, e);
         }
         return Optional.empty();
+    }
+
+    @Override
+    public void deleteDek(String tenantId) {
+        ensureSchema();
+        String sql = "DELETE FROM secret_vault_deks WHERE tenant_id = ?";
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, tenantId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to delete DEK for tenant " + tenantId, e);
+        }
+    }
+
+    @Override
+    public List<EncryptedDek> listAllDeks() {
+        ensureSchema();
+        String sql = "SELECT * FROM secret_vault_deks ORDER BY tenant_id";
+        List<EncryptedDek> deks = new ArrayList<>();
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    Timestamp createdTs = rs.getTimestamp("created_at");
+                    deks.add(new EncryptedDek(rs.getString("id"), rs.getString("tenant_id"), rs.getString("encrypted_dek"), rs.getString("iv"),
+                            createdTs != null ? createdTs.toInstant() : null));
+                }
+            }
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to list all DEKs", e);
+        }
+        return deks;
     }
 
     // ─── Conversion helpers ───
