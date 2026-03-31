@@ -14,6 +14,28 @@ Each entry follows this format:
 - **Files** — Links to modified files
 
 
+## Documentation Audit — Second Pass (2026-03-31)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Second-pass cleanup after full recheck of all 46 doc files + 5 subdirectories.
+
+| File | Fix |
+|---|---|
+| **`docs/README.md`** | Rewritten as a proper GitBook landing page (not a thin pointer). Self-contained with navigation tables, key capabilities, and quick start |
+| **`docs/getting-started.md`** | Fixed GitHub branch `master` → `main`. Updated Maven 3.8.4 → 3.9+, MongoDB >4.0 → ≥6.0. Replaced `{% hint %}` GitBook syntax with standard blockquote. Added PostgreSQL as DB option |
+| **`docs/httpcalls.md`** | Removed all 10 blocks of stale 2018 response headers. Fixed broken Postman collection reference (`agent` → `bot` in filename). Replaced `{% file %}` GitBook syntax |
+| **`docs/conversations.md`** | Fixed broken `weather_agent_v2.zip` reference → `weather_bot_v2.zip`. Replaced `{% file %}` GitBook syntax |
+| **`docs/passing-context-information.md`** | Removed stale `.gitbook/assets/chat-gui.png` reference and dead Notion link. Replaced with Manager reference |
+| **`docs/creating-your-first-agent/*.md`** | Fixed 2 broken Postman collection refs (`agent` → `bot`). Fixed 4 stale Swagger UI URLs (`/view#!/` → `/q/swagger-ui`). Replaced `{% file %}` GitBook syntax |
+| **`docs/your-first-agent/README.md`** | Replaced 2 `{% embed %}` GitBook directives with standard markdown. Added note about v6 multi-provider support |
+
+**Total cleanup:** 0 remaining `{% %}` GitBook-specific directives. 0 remaining `/view#!/` Swagger references. 0 remaining `blob/master` branch links. All `.gitbook/assets/` references now point to existing files.
+
+---
+
 ## Documentation Audit — Release-Ready v6.0.0 (2026-03-31)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
