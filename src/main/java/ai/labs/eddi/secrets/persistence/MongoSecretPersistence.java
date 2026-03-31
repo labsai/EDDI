@@ -83,38 +83,54 @@ public class MongoSecretPersistence implements ISecretPersistence {
     @Override
     public void upsertSecret(EncryptedSecret secret) {
         RuntimeUtilities.checkNotNull(secret, "secret");
-        var filter = and(eq(FIELD_TENANT_ID, secret.getTenantId()), eq(FIELD_KEY_NAME, secret.getKeyName()));
+        try {
+            var filter = and(eq(FIELD_TENANT_ID, secret.getTenantId()), eq(FIELD_KEY_NAME, secret.getKeyName()));
 
-        var update = Updates.combine(Updates.set(FIELD_ENCRYPTED_VALUE, secret.getEncryptedValue()), Updates.set(FIELD_IV, secret.getIv()),
-                Updates.set(FIELD_DEK_ID, secret.getDekId()), Updates.set(FIELD_CHECKSUM, secret.getChecksum()),
-                Updates.set(FIELD_DESCRIPTION, secret.getDescription()), Updates.set(FIELD_ALLOWED_AGENTS, secret.getAllowedAgents()),
-                Updates.set(FIELD_LAST_ACCESSED_AT, instantToString(secret.getLastAccessedAt())),
-                Updates.set(FIELD_LAST_ROTATED_AT, instantToString(secret.getLastRotatedAt())),
-                Updates.setOnInsert(FIELD_TENANT_ID, secret.getTenantId()), Updates.setOnInsert(FIELD_KEY_NAME, secret.getKeyName()),
-                Updates.setOnInsert(FIELD_CREATED_AT, instantToString(secret.getCreatedAt())));
+            var update = Updates.combine(Updates.set(FIELD_ENCRYPTED_VALUE, secret.getEncryptedValue()), Updates.set(FIELD_IV, secret.getIv()),
+                    Updates.set(FIELD_DEK_ID, secret.getDekId()), Updates.set(FIELD_CHECKSUM, secret.getChecksum()),
+                    Updates.set(FIELD_DESCRIPTION, secret.getDescription()), Updates.set(FIELD_ALLOWED_AGENTS, secret.getAllowedAgents()),
+                    Updates.set(FIELD_LAST_ACCESSED_AT, instantToString(secret.getLastAccessedAt())),
+                    Updates.set(FIELD_LAST_ROTATED_AT, instantToString(secret.getLastRotatedAt())),
+                    Updates.setOnInsert(FIELD_TENANT_ID, secret.getTenantId()), Updates.setOnInsert(FIELD_KEY_NAME, secret.getKeyName()),
+                    Updates.setOnInsert(FIELD_CREATED_AT, instantToString(secret.getCreatedAt())));
 
-        secretsCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
+            secretsCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
+        } catch (com.mongodb.MongoException e) {
+            throw new PersistenceException("Failed to upsert secret " + secret.getTenantId() + "/" + secret.getKeyName(), e);
+        }
     }
 
     @Override
     public Optional<EncryptedSecret> findSecret(String tenantId, String keyName) {
-        var doc = secretsCollection.find(and(eq(FIELD_TENANT_ID, tenantId), eq(FIELD_KEY_NAME, keyName))).first();
-        return doc != null ? Optional.of(documentToSecret(doc)) : Optional.empty();
+        try {
+            var doc = secretsCollection.find(and(eq(FIELD_TENANT_ID, tenantId), eq(FIELD_KEY_NAME, keyName))).first();
+            return doc != null ? Optional.of(documentToSecret(doc)) : Optional.empty();
+        } catch (com.mongodb.MongoException e) {
+            throw new PersistenceException("Failed to find secret " + tenantId + "/" + keyName, e);
+        }
     }
 
     @Override
     public boolean deleteSecret(String tenantId, String keyName) {
-        var result = secretsCollection.deleteOne(and(eq(FIELD_TENANT_ID, tenantId), eq(FIELD_KEY_NAME, keyName)));
-        return result.getDeletedCount() > 0;
+        try {
+            var result = secretsCollection.deleteOne(and(eq(FIELD_TENANT_ID, tenantId), eq(FIELD_KEY_NAME, keyName)));
+            return result.getDeletedCount() > 0;
+        } catch (com.mongodb.MongoException e) {
+            throw new PersistenceException("Failed to delete secret " + tenantId + "/" + keyName, e);
+        }
     }
 
     @Override
     public List<EncryptedSecret> listSecretsByTenant(String tenantId) {
-        var secrets = new ArrayList<EncryptedSecret>();
-        for (var doc : secretsCollection.find(eq(FIELD_TENANT_ID, tenantId))) {
-            secrets.add(documentToSecret(doc));
+        try {
+            var secrets = new ArrayList<EncryptedSecret>();
+            for (var doc : secretsCollection.find(eq(FIELD_TENANT_ID, tenantId))) {
+                secrets.add(documentToSecret(doc));
+            }
+            return secrets;
+        } catch (com.mongodb.MongoException e) {
+            throw new PersistenceException("Failed to list secrets for tenant " + tenantId, e);
         }
-        return secrets;
     }
 
     // ─── DEKs ───
@@ -122,32 +138,49 @@ public class MongoSecretPersistence implements ISecretPersistence {
     @Override
     public void upsertDek(EncryptedDek dek) {
         RuntimeUtilities.checkNotNull(dek, "dek");
-        var filter = eq(FIELD_TENANT_ID, dek.getTenantId());
+        try {
+            var filter = eq(FIELD_TENANT_ID, dek.getTenantId());
 
-        var update = Updates.combine(Updates.set(FIELD_ENCRYPTED_DEK, dek.getEncryptedDek()), Updates.set(FIELD_IV, dek.getIv()),
-                Updates.setOnInsert(FIELD_TENANT_ID, dek.getTenantId()), Updates.setOnInsert(FIELD_CREATED_AT, instantToString(dek.getCreatedAt())));
+            var update = Updates.combine(Updates.set(FIELD_ENCRYPTED_DEK, dek.getEncryptedDek()), Updates.set(FIELD_IV, dek.getIv()),
+                    Updates.setOnInsert(FIELD_TENANT_ID, dek.getTenantId()),
+                    Updates.setOnInsert(FIELD_CREATED_AT, instantToString(dek.getCreatedAt())));
 
-        deksCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
+            deksCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
+        } catch (com.mongodb.MongoException e) {
+            throw new PersistenceException("Failed to upsert DEK for tenant " + dek.getTenantId(), e);
+        }
     }
 
     @Override
     public Optional<EncryptedDek> findDek(String tenantId) {
-        var doc = deksCollection.find(eq(FIELD_TENANT_ID, tenantId)).first();
-        return doc != null ? Optional.of(documentToDek(doc)) : Optional.empty();
+        try {
+            var doc = deksCollection.find(eq(FIELD_TENANT_ID, tenantId)).first();
+            return doc != null ? Optional.of(documentToDek(doc)) : Optional.empty();
+        } catch (com.mongodb.MongoException e) {
+            throw new PersistenceException("Failed to find DEK for tenant " + tenantId, e);
+        }
     }
 
     @Override
     public void deleteDek(String tenantId) {
-        deksCollection.deleteOne(eq(FIELD_TENANT_ID, tenantId));
+        try {
+            deksCollection.deleteOne(eq(FIELD_TENANT_ID, tenantId));
+        } catch (com.mongodb.MongoException e) {
+            throw new PersistenceException("Failed to delete DEK for tenant " + tenantId, e);
+        }
     }
 
     @Override
     public List<EncryptedDek> listAllDeks() {
-        var deks = new ArrayList<EncryptedDek>();
-        for (var doc : deksCollection.find()) {
-            deks.add(documentToDek(doc));
+        try {
+            var deks = new ArrayList<EncryptedDek>();
+            for (var doc : deksCollection.find()) {
+                deks.add(documentToDek(doc));
+            }
+            return deks;
+        } catch (com.mongodb.MongoException e) {
+            throw new PersistenceException("Failed to list all DEKs", e);
         }
-        return deks;
     }
 
     // ─── Document conversion ───

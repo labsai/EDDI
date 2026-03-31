@@ -107,7 +107,9 @@ public interface IRestSecretStore {
     @POST
     @Path("/{tenantId}/rotate-dek")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(summary = "Rotate DEK for a tenant")
+    @RolesAllowed("eddi-admin")
+    @Operation(summary = "Rotate DEK for a tenant", description = "Generates a new Data Encryption Key and re-encrypts all secrets for the tenant. "
+            + "This does NOT require a restart — the new DEK is used immediately.")
     Response rotateDek(@PathParam("tenantId") String tenantId);
 
     /**
@@ -123,7 +125,10 @@ public interface IRestSecretStore {
     @Path("/admin/rotate-kek")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(summary = "Rotate Master Key (KEK)")
+    @RolesAllowed("eddi-admin")
+    @Operation(summary = "Rotate Master Key (KEK)", description = "Re-encrypts all tenant DEKs with a new master key. "
+            + "WARNING: This endpoint transmits master keys in the request body. " + "Ensure TLS is enabled. After a successful rotation, update the "
+            + "EDDI_VAULT_MASTER_KEY environment variable and restart the application.")
     Response rotateKek(KekRotationRequest body);
 
     /**

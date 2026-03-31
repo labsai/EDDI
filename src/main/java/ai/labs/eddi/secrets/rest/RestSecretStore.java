@@ -10,7 +10,6 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -179,7 +178,7 @@ public class RestSecretStore implements IRestSecretStore {
             return Response.ok(secretProvider.listKeys(tenantId)).build();
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.errorf("Failed to list secrets: %s — %s", tenantId, e.getMessage());
-            return Response.ok(List.of()).build();
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to list secrets")).build();
         }
     }
 

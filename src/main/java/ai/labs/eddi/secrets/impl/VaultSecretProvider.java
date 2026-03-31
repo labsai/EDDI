@@ -19,6 +19,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.AbstractMap.SimpleEntry;
 
 /**
  * Production-grade {@link ISecretProvider} using envelope encryption with
@@ -252,7 +253,8 @@ public class VaultSecretProvider implements ISecretProvider {
         rotateCounter.increment();
 
         try {
-            // 1. Decrypt all secrets with old DEK
+            // 1. Verify: decrypt all secrets with old DEK (validates key before mutating
+            // anything)
             var dekOpt = persistence.findDek(tenantId);
             if (dekOpt.isEmpty()) {
                 throw new SecretProviderException("No DEK found for tenant " + tenantId + " — nothing to rotate");
@@ -264,18 +266,25 @@ public class VaultSecretProvider implements ISecretProvider {
             // 2. Generate new DEK
             byte[] newDek = EnvelopeCrypto.generateDek();
 
-            // 3. Re-encrypt each secret with the new DEK
+            // 3. Prepare: decrypt all and re-encrypt in memory (no writes yet)
             Instant now = Instant.now();
+            List<SimpleEntry<EncryptedSecret, EnvelopeCrypto.EncryptionResult>> reEncrypted = new ArrayList<>();
             for (EncryptedSecret secret : secrets) {
                 String plaintext = EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), oldDek);
-                EnvelopeCrypto.EncryptionResult reEncrypted = EnvelopeCrypto.encrypt(plaintext, newDek);
-                secret.setEncryptedValue(reEncrypted.ciphertext());
-                secret.setIv(reEncrypted.iv());
+                EnvelopeCrypto.EncryptionResult enc = EnvelopeCrypto.encrypt(plaintext, newDek);
+                reEncrypted.add(new SimpleEntry<>(secret, enc));
+            }
+
+            // 4. Commit: write all re-encrypted secrets, then replace the DEK
+            for (var entry : reEncrypted) {
+                EncryptedSecret secret = entry.getKey();
+                EnvelopeCrypto.EncryptionResult enc = entry.getValue();
+                secret.setEncryptedValue(enc.ciphertext());
+                secret.setIv(enc.iv());
                 secret.setLastRotatedAt(now);
                 persistence.upsertSecret(secret);
             }
 
-            // 4. Encrypt and store new DEK (replaces old)
             EnvelopeCrypto.EncryptionResult newDekEnc = EnvelopeCrypto.encryptDek(newDek, kek);
             EncryptedDek newDekEntity = new EncryptedDek(dekOpt.get().getId(), tenantId, newDekEnc.ciphertext(), newDekEnc.iv(), Instant.now());
             persistence.upsertDek(newDekEntity);
@@ -317,16 +326,21 @@ public class VaultSecretProvider implements ISecretProvider {
             byte[] oldKek = EnvelopeCrypto.deriveKeyFromString(oldMasterKey);
             byte[] newKek = EnvelopeCrypto.deriveKeyFromString(newMasterKey);
 
+            // Phase 1: Verify — decrypt ALL DEKs with old KEK to validate before mutating
             List<EncryptedDek> allDeks = persistence.listAllDeks();
+            List<SimpleEntry<EncryptedDek, EnvelopeCrypto.EncryptionResult>> prepared = new ArrayList<>();
             for (EncryptedDek encDek : allDeks) {
-                // Decrypt DEK with old KEK
                 byte[] rawDek = EnvelopeCrypto.decryptDek(encDek.getEncryptedDek(), encDek.getIv(), oldKek);
-
-                // Re-encrypt with new KEK
                 EnvelopeCrypto.EncryptionResult reEnc = EnvelopeCrypto.encryptDek(rawDek, newKek);
+                prepared.add(new SimpleEntry<>(encDek, reEnc));
+            }
+
+            // Phase 2: Commit — write all re-encrypted DEKs
+            for (var entry : prepared) {
+                EncryptedDek encDek = entry.getKey();
+                EnvelopeCrypto.EncryptionResult reEnc = entry.getValue();
                 encDek.setEncryptedDek(reEnc.ciphertext());
                 encDek.setIv(reEnc.iv());
-
                 persistence.upsertDek(encDek);
             }
 

@@ -6,9 +6,9 @@ EDDI includes a built-in secrets vault for managing sensitive values like API ke
 
 ```
 ┌─────────────────┐     ┌──────────────┐     ┌───────────────────┐
-│  Configuration   │────>│ SecretResolver│────>│  ISecretProvider  │
-│  (JSON configs)  │     │  (resolves    │     │  (reads encrypted │
-│  ${eddivault:..} │     │   at runtime) │     │   storage)        │
+│  Configuration   │────>│ SecretResolver│────>│  VaultSecretProv.  │
+│  (JSON configs)  │     │  (resolves    │     │  (envelope crypto  │
+│  ${eddivault:..} │     │   at runtime) │     │   + persistence)   │
 └─────────────────┘     └──────────────┘     └───────────────────┘
                                                        │
                                               ┌────────▼────────┐
@@ -20,28 +20,34 @@ EDDI includes a built-in secrets vault for managing sensitive values like API ke
 
 ### Core Components
 
-| Component                              | Workflow           | Purpose                                                         |
+| Component                              | Package            | Purpose                                                         |
 | -------------------------------------- | ------------------ | --------------------------------------------------------------- |
-| `SecretReference`                      | `secrets.model`    | Value object: `namespace/scope/key` URI parsing                 |
+| `SecretReference`                      | `secrets.model`    | Value object: `tenantId/keyName` URI parsing                    |
 | `EnvelopeCrypto`                       | `secrets.crypto`   | AES-256-GCM encryption with envelope key wrapping               |
-| `ISecretProvider`                      | `secrets`          | Interface for reading/writing encrypted secrets                 |
-| `DatabaseSecretProvider`               | `secrets`          | MongoDB/PostgreSQL implementation of `ISecretProvider`          |
-| `SecretResolver`                       | `secrets`          | Resolves `${eddivault:path}` references to plaintext at runtime |
-| `IRestSecretStore` / `RestSecretStore` | `secrets.rest`     | JAX-RS endpoints for secret CRUD                                |
+| `ISecretProvider`                      | `secrets`          | SPI for reading/writing encrypted secrets                       |
+| `VaultSecretProvider`                  | `secrets.impl`     | Production implementation with envelope crypto + persistence    |
+| `SecretResolver`                       | `secrets`          | Resolves `${eddivault:...}` references to plaintext at runtime  |
+| `IRestSecretStore` / `RestSecretStore` | `secrets.rest`     | JAX-RS endpoints for secret CRUD and key rotation               |
 | `SecretScrubber`                       | `secrets.sanitize` | Removes `${eddivault:...}` references from export payloads      |
 | `SecretRedactionFilter`                | `secrets.sanitize` | Regex-based log redaction for API keys, tokens, vault refs      |
+| `ISecretPersistence`                   | `secrets.persist.` | DB abstraction (MongoDB default, PostgreSQL via profile)        |
 
 ## Secret References
 
 Secrets are referenced in configuration JSON using the vault URI syntax:
 
+**Short form** (uses `default` tenant):
 ```
-${eddivault:namespace/scope/key}
+${eddivault:keyName}
 ```
 
-- **namespace** — tenant or organizational delimiter (e.g., `default`)
-- **scope** — agent or feature scope (e.g., `agent-123`)
-- **key** — the secret name (e.g., `openai-api-key`)
+**Full form** (explicit tenant):
+```
+${eddivault:tenantId/keyName}
+```
+
+- **tenantId** — tenant namespace (e.g., `default`, `acme-corp`)
+- **keyName** — the secret name (e.g., `openai-api-key`)
 
 ### Where Vault References Work
 
@@ -57,24 +63,26 @@ Vault references are resolved **at runtime** when the task executes, never store
 
 1. Task reads configuration containing `${eddivault:...}` reference
 2. `SecretResolver.resolveValue()` finds and replaces vault URIs
-3. `ISecretProvider.getSecret()` decrypts and returns the plaintext
+3. `VaultSecretProvider.resolve()` decrypts and returns the plaintext
 4. Plaintext is used for the operation (e.g., HTTP call header)
 5. **Plaintext is NOT stored in memory** — only the vault reference persists
+
+**Caching:** Successfully resolved secrets are cached in a Caffeine cache (configurable TTL). Failed resolutions are **never cached**, ensuring newly created secrets resolve immediately without waiting for cache expiry.
 
 ## Encryption
 
 ### Envelope Encryption
 
-EDDI uses **envelope encryption** — each secret gets its own random Data Encryption Key (DEK), which is itself encrypted by a Key Encryption Key (KEK) derived from the master password.
+EDDI uses **envelope encryption** — each tenant gets its own random Data Encryption Key (DEK), which is itself encrypted by a Key Encryption Key (KEK) derived from the master password.
 
 ```
 Master Password → PBKDF2 (600,000 iterations) → KEK
                                                   │
-Secret → random DEK → AES-256-GCM encrypt → ciphertext
+Secret → tenant DEK → AES-256-GCM encrypt → ciphertext
                 │
                 └→ KEK wraps DEK → encrypted DEK
                         │
-                        └→ stored: { encryptedDek, iv, salt, ciphertext }
+                        └→ stored: { encryptedDek, iv, ciphertext }
 ```
 
 ### Configuration
@@ -139,7 +147,7 @@ Agents can request secret input from users (e.g., API keys during setup). The fl
 When a property has `scope: secret`:
 
 1. **PropertySetterTask** detects `scope == secret` on the property instruction
-2. The raw value is immediately stored in the vault via `ISecretProvider.storeSecret()`
+2. The raw value is immediately stored in the vault via `ISecretProvider.store()`
 3. A vault reference (`${eddivault:...}`) replaces the plaintext in memory
 4. The raw `input:initial` entry is scrubbed from the conversation step
 
@@ -164,7 +172,7 @@ To signal the chat UI to show a password field, use the `inputField` output type
 
 ### Chat UI: Password Fields + Secret Mode
 
-both **eddi-chat-ui** and the **EDDI-Manager chat panel** support secret input:
+Both **eddi-chat-ui** and the **EDDI-Manager chat panel** support secret input:
 
 **Backend-driven password fields:**
 
@@ -210,38 +218,38 @@ The `scope: secret` instruction causes `PropertySetterTask` to store the API key
 
 ### Endpoints
 
-All endpoints are under the base path `/secretstore/secrets`.
+All endpoints are under the base path `/secretstore/secrets`. All endpoints require the `eddi-admin` role.
 
-| Method   | Path                              | Description                                            |
-| -------- | --------------------------------- | ------------------------------------------------------ |
-| `PUT`    | `/{tenantId}/{agentId}/{keyName}` | Store a secret (body = plaintext value)                |
-| `DELETE` | `/{tenantId}/{agentId}/{keyName}` | Delete a secret                                        |
-| `GET`    | `/{tenantId}/{agentId}/{keyName}` | Get secret **metadata only** (never returns plaintext) |
-| `GET`    | `/{tenantId}/{agentId}`           | List all secrets for a tenant+agent (metadata only)    |
-| `GET`    | `/health`                         | Vault health check (provider status)                   |
+| Method   | Path                         | Description                                            |
+| -------- | ---------------------------- | ------------------------------------------------------ |
+| `PUT`    | `/{tenantId}/{keyName}`      | Store a secret (body = plaintext value)                |
+| `DELETE` | `/{tenantId}/{keyName}`      | Delete a secret                                        |
+| `GET`    | `/{tenantId}/{keyName}`      | Get secret **metadata only** (never returns plaintext) |
+| `GET`    | `/{tenantId}`                | List all secrets for a tenant (metadata only)          |
+| `GET`    | `/health`                    | Vault health check (provider status)                   |
+| `POST`   | `/{tenantId}/rotate-dek`     | Rotate the tenant's Data Encryption Key                |
+| `POST`   | `/admin/rotate-kek`          | Rotate the Master Key (KEK) — **TLS required**         |
 
 > **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`, `checksum`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API.
 
 ### Response Examples
 
-**`PUT /{tenantId}/{agentId}/{keyName}`** — returns the vault reference:
+**`PUT /{tenantId}/{keyName}`** — returns the vault reference:
 
 ```json
 {
-  "reference": "${eddivault:default.agent1.apiKey}",
+  "reference": "${eddivault:apiKey}",
   "tenantId": "default",
-  "agentId": "agent1",
   "keyName": "apiKey"
 }
 ```
 
-**`GET /{tenantId}/{agentId}`** — returns metadata list:
+**`GET /{tenantId}`** — returns metadata list:
 
 ```json
 [
   {
     "tenantId": "default",
-    "agentId": "agent1",
     "keyName": "apiKey",
     "createdAt": "2026-03-15T10:30:00Z",
     "lastAccessedAt": "2026-03-16T14:00:00Z",
@@ -255,14 +263,87 @@ All endpoints are under the base path `/secretstore/secrets`.
 ```json
 {
   "status": "UP",
-  "provider": "DatabaseSecretProvider",
+  "provider": "VaultSecretProvider",
   "available": true
 }
 ```
 
+**`POST /{tenantId}/rotate-dek`** — rotates the tenant's DEK:
+
+```json
+{
+  "tenantId": "default",
+  "secretsReEncrypted": 5,
+  "message": "DEK rotated successfully. 5 secrets re-encrypted."
+}
+```
+
+**`POST /admin/rotate-kek`** — rotates the master key:
+
+Request body:
+```json
+{
+  "oldMasterKey": "current-master-key",
+  "newMasterKey": "new-master-key-at-least-8-chars"
+}
+```
+
+Response:
+```json
+{
+  "deksReEncrypted": 3,
+  "message": "KEK rotated successfully. 3 DEKs re-encrypted. IMPORTANT: Update the EDDI_VAULT_MASTER_KEY environment variable to the new key and restart."
+}
+```
+
+> **⚠️ Warning:** The `rotate-kek` endpoint transmits master keys in the request body. Ensure TLS is enabled. After rotation, update `EDDI_VAULT_MASTER_KEY` and restart.
+
+### Key Rotation
+
+EDDI supports two levels of key rotation:
+
+**DEK Rotation** (`POST /{tenantId}/rotate-dek`):
+- Generates a new Data Encryption Key for the tenant
+- Re-encrypts all secrets with the new DEK
+- Does NOT require a restart
+- Recommended: rotate periodically or after personnel changes
+
+**KEK Rotation** (`POST /admin/rotate-kek`):
+- Re-encrypts all tenant DEKs with a new master key
+- Secret ciphertexts are NOT modified — only DEK wrappers change
+- Requires an application restart with the new `EDDI_VAULT_MASTER_KEY` after rotation
+- Both operations use a verify-then-commit pattern: all decryption is validated before any writes occur
+
 ### Input Validation
 
-All path parameters (`tenantId`, `agentId`, `keyName`) are validated against `[a-zA-Z0-9._-]{1,128}` to prevent path traversal attacks.
+All path parameters (`tenantId`, `keyName`) are validated against `[a-zA-Z0-9._-]{1,128}` to prevent path traversal attacks.
+
+## Observability
+
+### Micrometer Metrics
+
+The vault emits metrics under the `eddi.vault.*` namespace for Grafana/Prometheus monitoring:
+
+#### SecretResolver Metrics
+
+| Metric                      | Type    | Description                              |
+| --------------------------- | ------- | ---------------------------------------- |
+| `eddi.vault.cache.hits`     | Counter | Number of cache hits                     |
+| `eddi.vault.cache.misses`   | Counter | Number of cache misses                   |
+| `eddi.vault.resolve.errors` | Counter | Resolution failures (not-found, errors)  |
+| `eddi.vault.resolve.time`   | Timer   | Duration of provider resolution calls    |
+
+#### VaultSecretProvider Metrics
+
+| Metric                       | Type    | Description                                |
+| ---------------------------- | ------- | ------------------------------------------ |
+| `eddi.vault.resolve.count`   | Counter | Total resolve operations                   |
+| `eddi.vault.store.count`     | Counter | Total store operations                     |
+| `eddi.vault.delete.count`    | Counter | Total delete operations                    |
+| `eddi.vault.rotate.count`    | Counter | Total rotation operations (DEK + KEK)      |
+| `eddi.vault.errors.count`    | Counter | Total error count (persistence + crypto)   |
+| `eddi.vault.resolve.duration`| Timer   | Duration of resolve operations             |
+| `eddi.vault.store.duration`  | Timer   | Duration of store operations               |
 
 ## Manager — Secrets Admin Page
 
@@ -270,7 +351,7 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 
 ### Features
 
-- **Namespace filtering** — select tenant ID and agent ID to scope the view
+- **Namespace filtering** — select tenant ID to scope the view
 - **Secrets table** — displays `keyName`, `createdAt`, `lastAccessedAt`, and `checksum` (truncated)
 - **Add Secret** — dialog with masked password input (eye toggle, `autoComplete="new-password"`)
 - **Delete Secret** — confirmation dialog before permanent deletion
@@ -295,7 +376,7 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 | Anthropic keys (`sk-ant-...`) | `sk-ant-<REDACTED>`       | `sk-ant-api03-...` → `sk-ant-<REDACTED>`                |
 | Bearer tokens                 | `Bearer <REDACTED>`       | `Bearer eyJhb...` → `Bearer <REDACTED>`                 |
 | API key params                | `apikey=<REDACTED>`       | `apikey=secret123` → `apikey=<REDACTED>`                |
-| Vault references              | `${eddivault:<REDACTED>}` | `${eddivault:ns/scope/key}` → `${eddivault:<REDACTED>}` |
+| Vault references              | `${eddivault:<REDACTED>}` | `${eddivault:t/key}` → `${eddivault:<REDACTED>}`        |
 
 ### Export Sanitization
 
@@ -307,24 +388,34 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 - **Property values**: Secret-scoped properties store only vault references, never plaintext
 - **User input**: When `scope == secret`, the raw `input:initial` is removed from the conversation step
 
+### Persistence Error Handling
+
+Both MongoDB and PostgreSQL persistence implementations wrap all database exceptions in `PersistenceException` (unchecked). This ensures:
+- Consistent error handling across database backends
+- No silent failures — all persistence errors surface to the caller
+- Clear error messages with context (tenant ID, key name, operation)
+
 ## Testing
 
-54 tests across 8 test classes:
+~100 tests across backend and frontend:
 
-### Backend (37 tests)
+### Backend (~80 tests)
 
 | Test Class                    | Tests | Coverage                                                                                           |
 | ----------------------------- | ----- | -------------------------------------------------------------------------------------------------- |
+| `SecretVaultIntegrationTest`  | 22    | Full round-trip, negative caching, DEK/KEK rotation, metrics, exceptions                          |
+| `VaultSecretProviderTest`     | 11    | Store, resolve, delete, metadata, list, unavailable states                                         |
+| `SecretResolverTest`          | 10    | Single/multiple/nested resolution, caching, passthrough, auto-vault keys                           |
+| `RestSecretStoreTest`         | 22    | All endpoints, validation, error codes, vault unavailable, rotation                                |
 | `EnvelopeCryptoTest`          | 9     | Encrypt/decrypt, key rotation, wrong key, tampering, large payloads                                |
-| `SecretResolverTest`          | 7     | Single/multiple/nested resolution, no-ops, missing secrets                                         |
 | `SecretRedactionFilterTest`   | 6     | All 5 regex patterns, null/empty, safe messages                                                    |
 | `SecretScrubberTest`          | 4     | Nested object scrubbing, preservation of non-secret fields                                         |
-| `SecretReferenceTest`         | 6     | Parsing, equality, hash, invalid references                                                        |
+| `SecretReferenceTest`         | 6+    | Parsing, equality, hash, invalid references                                                        |
 | `ConversationSecretInputTest` | 5     | Secret context scrubbing, normal passthrough, false flag, empty context, output vs. lifecycle data |
 
 ### Frontend (17 tests)
 
 | Test File                       | Tests | Coverage                                                                                                                |
 | ------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------- |
-| `secrets.test.tsx` (Manager)    | 12    | Page render, tenant/agent inputs, vault health, create dialog (password, autocomplete, eye toggle), delete confirmation |
+| `secrets.test.tsx` (Manager)    | 12    | Page render, tenant inputs, vault health, create dialog (password, autocomplete, eye toggle), delete confirmation       |
 | `chat-store.test.tsx` (Chat UI) | 5     | `SET_INPUT_FIELD`, `CLEAR_INPUT_FIELD`, `TOGGLE_SECRET_MODE`, `CLEAR_MESSAGES` reset, initial defaults                  |
