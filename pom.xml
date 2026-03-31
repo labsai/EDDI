@@ -272,7 +272,7 @@
         <dependency>
             <groupId>com.github.victools</groupId>
             <artifactId>jsonschema-module-jackson</artifactId>
-            <version>4.38.0</version>
+            <version>5.0.0</version>
         </dependency>
         <dependency>
             <groupId>jakarta.annotation</groupId>
