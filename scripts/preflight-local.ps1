@@ -24,6 +24,7 @@
     .\scripts\preflight-local.ps1 -LabelsOnly
     # Just verify Red Hat labels are present
 #>
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '')]
 param(
     [switch]$SkipBuild,
     [switch]$LabelsOnly

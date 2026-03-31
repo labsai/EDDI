@@ -9,6 +9,7 @@
 #    .\install.ps1 -Db postgres -WithAuth    # specific choices
 # ─────────────────────────────────────────────────────────────
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '')]
 param(
     [switch]$Defaults,
     [ValidateSet("mongodb", "postgres")]
@@ -36,9 +37,9 @@ if (-not [Environment]::UserInteractive -or $Host.Name -eq 'Default Host') {
 $ProgressPreference = 'SilentlyContinue'
 
 # ── Configuration ──────────────────────────────────────────
-if (-not $EddiPort)      { $EddiPort = "7070" }
+if (-not $EddiPort) { $EddiPort = "7070" }
 if (-not $EddiHttpsPort) { $EddiHttpsPort = "7443" }
-if (-not $EddiDir)       { $EddiDir = Join-Path $HOME ".eddi" }
+if (-not $EddiDir) { $EddiDir = Join-Path $HOME ".eddi" }
 $EddiBranch = if ($env:EDDI_BRANCH) { $env:EDDI_BRANCH } else { "main" }
 $ComposeBaseUrl = "https://raw.githubusercontent.com/labsai/EDDI/$EddiBranch"
 
@@ -64,18 +65,18 @@ $EddiVaultMasterKey = ""
 
 function Write-Banner {
     Write-Host ""
-    Write-Host "     ______   ____    ____    ____  " -ForegroundColor White
+    Write-Host "     ______   ____    ____    ____ " -ForegroundColor White
     Write-Host "    / ____/  / __ \  / __ \  /  _/ " -ForegroundColor White
-    Write-Host "   / __/    / / / / / / / /  / /   " -ForegroundColor Cyan
-    Write-Host "  / /___   / /_/ / / /_/ / _/ /    " -ForegroundColor Cyan
-    Write-Host " /_____/  /_____/ /_____/ /___/    " -ForegroundColor Cyan
+    Write-Host "   / __/    / / / / / / / /  / /   " -ForegroundColor White
+    Write-Host "  / /___   / /_/ / / /_/ / _/ /    " -ForegroundColor White
+    Write-Host " /_____/  /_____/ /_____/ /___/    " -ForegroundColor White
     Write-Host ""
     Write-Host "   Multi-Agent Orchestration Middleware" -ForegroundColor White
     Write-Host "   https://eddi.labs.ai" -ForegroundColor DarkGray
     Write-Host ""
 }
 
-function Write-Ok($msg)   { Write-Host "  ✅ $msg" -ForegroundColor Green }
+function Write-Ok($msg) { Write-Host "  ✅ $msg" -ForegroundColor Green }
 function Write-Warn($msg) { Write-Host "  ⚠️  $msg" -ForegroundColor Yellow }
 function Write-Fail($msg) { Write-Host "  ❌ $msg" -ForegroundColor Red; exit 1 }
 function Write-Step($num, $total, $title) {
@@ -106,7 +107,8 @@ function Test-PortInUse([int]$Port) {
         $connected = $task.Wait(500)
         $tcp.Dispose()
         return $connected
-    } catch {
+    }
+    catch {
         return $false
     }
 }
@@ -127,7 +129,8 @@ function Read-Port([string]$PortName, [int]$DefaultPort) {
         if ($nextFree -gt 0) {
             Write-Host "  Suggested alternative: $nextFree" -ForegroundColor Cyan
         }
-    } else {
+    }
+    else {
         Write-Host "  Port $DefaultPort is available." -ForegroundColor DarkGray
     }
 
@@ -148,11 +151,13 @@ function Read-Port([string]$PortName, [int]$DefaultPort) {
         if ($reply -match '^\d+$' -and [int]$reply -ge 1024 -and [int]$reply -le 65535) {
             if (Test-PortInUse ([int]$reply)) {
                 Write-Warn "Port $reply is in use. Try another."
-            } else {
+            }
+            else {
                 Write-Ok "$PortName port: $reply"
                 return [int]$reply
             }
-        } else {
+        }
+        else {
             Write-Host "  Please enter a valid port (1024-65535)" -ForegroundColor Yellow
         }
     }
@@ -166,13 +171,14 @@ function Test-Prerequisites {
         $dockerVersion = (docker --version 2>$null) -replace '.*?(\d+\.\d+\.\d+).*', '$1'
         if (-not $dockerVersion) { throw "not found" }
         Write-Ok "Docker found ($dockerVersion)"
-    } catch {
+    }
+    catch {
         Write-Host "  ❌ Docker is not installed." -ForegroundColor Red
         Write-Host ""
 
         # Try winget auto-install
         $canWinget = $false
-        try { winget --version 2>$null | Out-Null; $canWinget = ($LASTEXITCODE -eq 0) } catch {}
+        try { winget --version 2>$null | Out-Null; $canWinget = ($LASTEXITCODE -eq 0) } catch { Write-Verbose $_.Exception.Message }
 
         if ($canWinget -and -not $Defaults) {
             $choice = Read-Host "  Install Docker Desktop now via winget? [Y/n]"
@@ -203,7 +209,8 @@ function Test-Prerequisites {
     try {
         docker info 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "not running" }
-    } catch {
+    }
+    catch {
         Write-Fail "Docker is installed but not running.`n     Start Docker Desktop."
     }
 
@@ -212,7 +219,8 @@ function Test-Prerequisites {
         $composeVersion = docker compose version --short 2>$null
         if (-not $composeVersion) { throw "not found" }
         Write-Ok "Docker Compose found ($composeVersion)"
-    } catch {
+    }
+    catch {
         Write-Fail "Docker Compose not found.`n     Install: https://docs.docker.com/compose/install/"
     }
 
@@ -221,7 +229,8 @@ function Test-Prerequisites {
         Invoke-RestMethod -Uri "http://localhost:${EddiPort}/q/health/ready" -TimeoutSec 3 -ErrorAction Stop | Out-Null
         $script:EddiAlreadyRunning = $true
         Write-Ok "EDDI already running on port $EddiPort"
-    } catch {
+    }
+    catch {
         $script:EddiAlreadyRunning = $false
     }
 }
@@ -233,7 +242,8 @@ function Get-DeployedAgentCount {
         $response = Invoke-RestMethod -Uri "http://localhost:${EddiPort}/administration/production/deploymentstatus" -TimeoutSec 5 -ErrorAction Stop
         if ($response -is [array]) { return $response.Count }
         return 0
-    } catch {
+    }
+    catch {
         return 0
     }
 }
@@ -245,7 +255,7 @@ $TotalSteps = 5
 function Step-Database {
     if ($Db) { return }
 
-    Write-Step 1 $TotalSteps "Database"
+    Write-Step -num 1 -total $TotalSteps -title "Database"
     Write-Host "  EDDI needs a database to store agent configs & conversations."
     Write-Host ""
     Write-Host "  1) MongoDB        " -NoNewline; Write-Host "document store, simple setup (default)" -ForegroundColor DarkGray
@@ -282,7 +292,7 @@ function Step-Security {
         }
     }
 
-    Write-Step 2 $TotalSteps "Security"
+    Write-Step -num 2 -total $TotalSteps -title "Security"
     Write-Host "  EDDI encrypts API keys and secrets using a vault master key."
     Write-Host "  This key is unique to your installation — keep it safe!"
     Write-Host ""
@@ -302,7 +312,8 @@ function Step-Security {
     if ($choice -eq "1") {
         $script:EddiVaultMasterKey = New-VaultKey
         Write-Ok "Vault master key generated"
-    } else {
+    }
+    else {
         while ($true) {
             $passphrase = Read-Host "  Enter passphrase" -AsSecureString
             $plaintext = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
@@ -310,7 +321,8 @@ function Step-Security {
             )
             if ($plaintext.Length -lt 16) {
                 Write-Host "  Passphrase must be at least 16 characters" -ForegroundColor Yellow
-            } else {
+            }
+            else {
                 $script:EddiVaultMasterKey = $plaintext
                 Write-Ok "Custom passphrase set"
                 break
@@ -322,7 +334,7 @@ function Step-Security {
 function Step-Auth {
     if ($Defaults -or $WithAuth) { return }
 
-    Write-Step 3 $TotalSteps "Authentication"
+    Write-Step -num 3 -total $TotalSteps -title "Authentication"
     Write-Host "  How should EDDI handle user access?"
     Write-Host ""
     Write-Host "  1) Open access    " -NoNewline; Write-Host "no login needed (dev / personal)" -ForegroundColor DarkGray
@@ -335,7 +347,7 @@ function Step-Auth {
 function Step-Monitoring {
     if ($Defaults -or $WithMonitoring) { return }
 
-    Write-Step 4 $TotalSteps "Monitoring"
+    Write-Step -num 4 -total $TotalSteps -title "Monitoring"
     Write-Host "  1) Skip for now   " -NoNewline; Write-Host "add later with: eddi update" -ForegroundColor DarkGray
     Write-Host "  2) Grafana        " -NoNewline; Write-Host "dashboards + Prometheus metrics" -ForegroundColor DarkGray
     Write-Host ""
@@ -344,7 +356,7 @@ function Step-Monitoring {
 }
 
 function Step-Ports {
-    Write-Step 5 $TotalSteps "Ports"
+    Write-Step -num 5 -total $TotalSteps -title "Ports"
     Write-Host "  EDDI uses two ports: HTTP for the dashboard/API, HTTPS for secure access."
     Write-Host ""
 
@@ -364,7 +376,8 @@ function Get-ComposeFiles {
 
     if ($Db -eq "postgres") {
         $neededFiles += "docker-compose.postgres-only.yml"
-    } else {
+    }
+    else {
         $neededFiles += "docker-compose.yml"
     }
 
@@ -399,14 +412,16 @@ function Get-ComposeFiles {
             # File exists next to the script — copy to install dir
             Copy-Item $localFile $target -Force
             Write-Host "  Using local $f " -NoNewline; Write-Host "✅" -ForegroundColor Green
-        } else {
+        }
+        else {
             # Not available locally — download from GitHub
             $downloadUrl = "$ComposeBaseUrl/$f"
             Write-Host "  Downloading $f... " -NoNewline
             try {
                 Invoke-WebRequest -Uri $downloadUrl -OutFile $target -UseBasicParsing -ErrorAction Stop
                 Write-Host "✅" -ForegroundColor Green
-            } catch {
+            }
+            catch {
                 Write-Fail "Failed to download $f.`n     URL: $downloadUrl`n     Error: $($_.Exception.Message)`n     Check your internet connection and that the branch '$EddiBranch' exists.";
             }
         }
@@ -432,13 +447,15 @@ function Get-ComposeFiles {
 
             if ($mfLocalFile -and (Test-Path $mfLocalFile)) {
                 Copy-Item $mfLocalFile $mfTarget -Force
-            } else {
+            }
+            else {
                 $mfUrl = "$ComposeBaseUrl/$mf"
                 Write-Host "  Downloading $mf... " -NoNewline
                 try {
                     Invoke-WebRequest -Uri $mfUrl -OutFile $mfTarget -UseBasicParsing -ErrorAction Stop
                     Write-Host "✅" -ForegroundColor Green
-                } catch {
+                }
+                catch {
                     Write-Warn "Failed to download $mf (monitoring may not work)"
                 }
             }
@@ -477,7 +494,8 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
         $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($currentUser, "FullControl", "Allow")
         $acl.AddAccessRule($rule)
         Set-Acl $envPath $acl
-    } catch {
+    }
+    catch {
         # Non-fatal — write a warning but continue
         Write-Warn "Could not restrict .env file permissions"
     }
@@ -486,6 +504,9 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
 # ── Start containers ─────────────────────────────────────
 
 function Start-Eddi {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+    if (-not $PSCmdlet.ShouldProcess("EDDI", "Start Containers")) { return }
     Write-Section "Starting EDDI"
 
     # Export env vars so docker-compose variable substitution picks them up
@@ -502,10 +523,12 @@ function Start-Eddi {
         if ($LASTEXITCODE -eq 0) {
             Write-Host ""
             Write-Ok "Local image built"
-        } else {
+        }
+        else {
             Write-Fail "Failed to build local image.`n     Make sure you ran: .\mvnw.cmd package -DskipTests"
         }
-    } else {
+    }
+    else {
         Write-Host "  Pulling images (this may take a minute)..."
         Write-Host ""
         $envFile = Join-Path $EddiDir ".env"
@@ -514,7 +537,8 @@ function Start-Eddi {
         if ($LASTEXITCODE -eq 0) {
             Write-Host ""
             Write-Ok "Images pulled"
-        } else {
+        }
+        else {
             Write-Fail "Failed to pull images. Check internet and disk space."
         }
     }
@@ -526,7 +550,8 @@ function Start-Eddi {
     if ($LASTEXITCODE -eq 0) {
         Write-Host "✅" -ForegroundColor Green
         $script:ContainersStarted = $true
-    } else {
+    }
+    else {
         Write-Fail "Failed to start containers."
     }
 }
@@ -544,7 +569,8 @@ function Wait-ForReady {
             Write-Host "✅ ready in ${elapsed}s" -ForegroundColor Green
             $script:Healthy = $true
             return
-        } catch {
+        }
+        catch {
             Start-Sleep -Seconds 2
             $elapsed += 2
             Write-Host "." -NoNewline
@@ -568,10 +594,12 @@ function Import-InitialAgents {
         try {
             Invoke-RestMethod -Uri "http://localhost:${EddiPort}/backup/import/initialAgents" -Method Post -TimeoutSec 60 -ErrorAction Stop | Out-Null
             Write-Host "✅" -ForegroundColor Green
-        } catch {
+        }
+        catch {
             Write-Host "⚠️  (non-fatal — EDDI is still usable)" -ForegroundColor Yellow
         }
-    } else {
+    }
+    else {
         Write-Ok "Found $agentCount deployed agent(s), skipping initial import."
     }
 }
@@ -666,7 +694,8 @@ try {
     $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds)
     Write-Host "  Total setup time: ${elapsed}s" -ForegroundColor DarkGray
     Write-Host ""
-} catch {
+}
+catch {
     if ($ContainersStarted -and -not $Healthy) {
         Write-Host ""
         Write-Host "⚠️  Setup interrupted. Cleaning up containers..." -ForegroundColor Yellow
@@ -770,6 +799,7 @@ try {
         [Environment]::SetEnvironmentVariable('PATH', "$userPath;$EddiDir", 'User')
         Write-Host "  " -NoNewline; Write-Ok "CLI wrapper installed (eddi.cmd). Restart terminal to use 'eddi' command."
     }
-} catch {
+}
+catch {
     Write-Host "  Tip: Add $EddiDir to your PATH to use 'eddi' command" -ForegroundColor DarkGray
 }

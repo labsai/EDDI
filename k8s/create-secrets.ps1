@@ -10,6 +10,7 @@
 #    .\k8s\create-secrets.ps1 -Key "my-key"   # use a specific key
 # ─────────────────────────────────────────────────────────────
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '')]
 param(
     [switch]$Auto,
     [string]$Key = "",
@@ -40,6 +41,9 @@ if (-not (Get-Command kubectl -ErrorAction SilentlyContinue)) {
 }
 
 function New-RandomKey {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+    if (-not $PSCmdlet.ShouldProcess("Secrets", "Generate Random Key")) { return }
     $bytes = New-Object byte[] 24
     [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
     return [Convert]::ToBase64String($bytes)
