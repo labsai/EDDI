@@ -13,6 +13,45 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Secrets Vault Hardening — Negative Caching Fix, Metrics, Key Rotation (2026-03-31)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Production-grade hardening of the Secrets Vault. Critical negative caching bug fixed, exception swallowing eliminated, full Micrometer observability, and formal DEK/KEK rotation mechanisms.
+
+| Change | Details |
+|---|---|
+| **Negative Caching Fix** | `SecretResolver` used `cache.get(key, loader)` which cached `null` from `SecretNotFoundException` — once a lookup failed, it stayed failed even after the secret was created. Replaced with `getIfPresent()` + `put()` pattern so only successful resolutions are cached |
+| **Exception Propagation** | `PostgresSecretPersistence` silently swallowed all SQL exceptions. Now rethrows as `PersistenceException` (unchecked). `VaultSecretProvider` wraps `PersistenceException` in `SecretProviderException` for callers |
+| **Micrometer Metrics** | `SecretResolver`: `eddi.vault.cache.hits/misses`, `eddi.vault.resolve.errors/time`. `VaultSecretProvider`: `eddi.vault.resolve/store/delete/rotate.count`, `eddi.vault.resolve/store.duration`, `eddi.vault.errors.count` |
+| **DEK Rotation** | `ISecretProvider.rotateDek(tenantId)` — generates new DEK, re-encrypts all tenant secrets, updates timestamps. `ISecretPersistence.deleteDek()` + `listAllDeks()` added |
+| **KEK Rotation** | `VaultSecretProvider.rotateKek(oldKey, newKey)` — re-encrypts all DEKs with new master key, updates internal KEK reference |
+| **REST Endpoints** | `POST /{tenantId}/rotate-dek` (admin), `POST /admin/rotate-kek` (admin). Input validation, cache invalidation, JSON response with operation counts |
+| **lastAccessedAt** | Changed to best-effort, fire-and-forget — DB write failures for access timestamps no longer block secret resolution |
+| **listSecrets** | Invalid tenant ID now returns 400 (was silently returning empty list) |
+
+**Tests (98 total, all passing):**
+
+| Test | Count | Coverage |
+|---|---|---|
+| `SecretVaultIntegrationTest` (NEW) | 22 | Full round-trip, negative caching fix, DEK/KEK rotation, metrics emission, exception propagation, cache invalidation |
+| `VaultSecretProviderTest` (updated) | 11 | Constructor updated for MeterRegistry |
+| `SecretResolverTest` (updated) | 8 | Constructor updated for MeterRegistry |
+| `RestSecretStoreTest` (updated) | 22 | Rotation endpoints, invalid tenant 400, vault unavailable |
+| Other secrets tests | 35 | Crypto, sanitize, model, redaction |
+
+**Design decisions:**
+- `PersistenceException` is unchecked — bubbles through without polluting every call site with `throws`
+- Rotation is designed atomic-ish: if re-encryption fails mid-batch, old DEK/KEK remains valid for retry
+- KEK rotation is `VaultSecretProvider`-specific (not in `ISecretProvider` interface) since it requires the old master key
+- Metrics use the `eddi.vault.*` namespace, consistent with other `eddi.*` metrics
+
+**Files:** 7 modified (provider, resolver, persistence interface, postgres persistence, mongo persistence, REST interface, REST implementation), 4 tests updated/created.
+
+---
+
 ## Phase 12: CI/CD — GitHub Actions Unified Pipeline, CircleCI Removed (2026-03-31)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
