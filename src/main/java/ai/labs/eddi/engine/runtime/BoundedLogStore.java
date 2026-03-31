@@ -332,7 +332,7 @@ public class BoundedLogStore {
             return false;
         if (conversationId != null && !conversationId.equals(entry.conversationId()))
             return false;
-        if (level != null && !level.equalsIgnoreCase(entry.level()))
+        if (level != null && !meetsMinimumLevel(entry.level(), level))
             return false;
         return true;
     }

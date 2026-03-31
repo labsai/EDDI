@@ -59,10 +59,10 @@ public class LogAdminIT {
 
     @Test
     @Order(4)
-    @DisplayName("GET /administration/logs with level filter should filter by level")
-    void getRecentLogs_filtersByLevel() {
-        given().queryParam("level", "INFO").get(BASE).then().assertThat().statusCode(200).contentType(ContentType.JSON);
-        // All returned entries should have level=INFO (if any)
+    @DisplayName("GET /administration/logs with level filter should return entries at or above level")
+    void getRecentLogs_filtersByMinimumLevel() {
+        // Minimum-level semantics: level=WARN returns WARN+ERROR+FATAL
+        given().queryParam("level", "WARN").get(BASE).then().assertThat().statusCode(200).contentType(ContentType.JSON);
     }
 
     @Test

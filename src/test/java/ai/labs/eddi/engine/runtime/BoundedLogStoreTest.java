@@ -128,27 +128,77 @@ class BoundedLogStoreTest {
         }
 
         @Test
-        void shouldFilterByLevel() {
+        void shouldFilterByMinimumLevel() {
+            store.publish(createEntry("DEBUG", null, null, "debug"));
             store.publish(createEntry("INFO", null, null, "info"));
             store.publish(createEntry("WARN", null, null, "warn"));
             store.publish(createEntry("ERROR", null, null, "error"));
 
+            // Minimum-level semantics: WARN returns WARN + ERROR
             List<LogEntry> entries = store.getEntries(null, null, "WARN", 10);
 
+            assertEquals(2, entries.size());
+            assertTrue(entries.stream().allMatch(e -> "WARN".equals(e.level()) || "ERROR".equals(e.level())));
+        }
+
+        @Test
+        void shouldFilterByErrorLevelOnly() {
+            store.publish(createEntry("INFO", null, null, "info"));
+            store.publish(createEntry("WARN", null, null, "warn"));
+            store.publish(createEntry("ERROR", null, null, "error"));
+
+            List<LogEntry> entries = store.getEntries(null, null, "ERROR", 10);
+
             assertEquals(1, entries.size());
-            assertEquals("warn", entries.get(0).message());
+            assertEquals("ERROR", entries.get(0).level());
         }
 
         @Test
         void shouldCombineFilters() {
-            store.publish(createEntry("INFO", "agent-a", "conv-1", "match"));
-            store.publish(createEntry("WARN", "agent-a", "conv-1", "no-level-match"));
-            store.publish(createEntry("INFO", "agent-b", "conv-1", "no-agent-match"));
+            store.publish(createEntry("DEBUG", "agent-a", "conv-1", "below-threshold"));
+            store.publish(createEntry("WARN", "agent-a", "conv-1", "match-warn"));
+            store.publish(createEntry("ERROR", "agent-a", "conv-1", "match-error"));
+            store.publish(createEntry("WARN", "agent-b", "conv-1", "wrong-agent"));
 
-            List<LogEntry> entries = store.getEntries("agent-a", "conv-1", "INFO", 10);
+            // level=WARN + agentId=agent-a + conversationId=conv-1 → match-warn +
+            // match-error
+            List<LogEntry> entries = store.getEntries("agent-a", "conv-1", "WARN", 10);
 
-            assertEquals(1, entries.size());
-            assertEquals("match", entries.get(0).message());
+            assertEquals(2, entries.size());
+            assertTrue(entries.stream().allMatch(e -> "agent-a".equals(e.agentId())));
+        }
+    }
+
+    // ==================== Minimum Level Check ====================
+
+    @Nested
+    class MinimumLevelCheck {
+
+        @Test
+        void shouldReturnTrueWhenEntryLevelAboveThreshold() {
+            assertTrue(store.meetsMinimumLevel("ERROR", "WARN"));
+            assertTrue(store.meetsMinimumLevel("ERROR", "INFO"));
+            assertTrue(store.meetsMinimumLevel("WARN", "DEBUG"));
+        }
+
+        @Test
+        void shouldReturnTrueWhenEntryLevelEqualsThreshold() {
+            assertTrue(store.meetsMinimumLevel("WARN", "WARN"));
+            assertTrue(store.meetsMinimumLevel("ERROR", "ERROR"));
+            assertTrue(store.meetsMinimumLevel("INFO", "INFO"));
+        }
+
+        @Test
+        void shouldReturnFalseWhenEntryLevelBelowThreshold() {
+            assertFalse(store.meetsMinimumLevel("DEBUG", "INFO"));
+            assertFalse(store.meetsMinimumLevel("INFO", "WARN"));
+            assertFalse(store.meetsMinimumLevel("WARN", "ERROR"));
+        }
+
+        @Test
+        void shouldTreatUnknownLevelAsLowest() {
+            assertTrue(store.meetsMinimumLevel("ERROR", "UNKNOWN"));
+            assertFalse(store.meetsMinimumLevel("UNKNOWN", "ERROR"));
         }
     }
 
