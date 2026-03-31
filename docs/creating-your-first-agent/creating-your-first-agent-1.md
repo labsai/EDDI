@@ -522,7 +522,7 @@ Example
 
 `eddi://ai.labs.package/packagestore/packages/5a2ae60f17312624f8b8a445?version=1`
 
-> See also the API documentation at [http://localhost:7070/view#!/configurations/createWorkflow](http://localhost:7070/view#!/configurations/createWorkflow)
+> See also the API documentation at [http://localhost:7070/q/swagger-ui](http://localhost:7070/q/swagger-ui)
 
 ### 5. Creating an Agent
 
@@ -554,7 +554,7 @@ Example:
 
 `eddi://ai.labs.agent/agentstore/agents/5a2ae68a17312624f8b8a446?version=1`
 
-> See also the API documentation at [http://localhost:7070/view#!/configurations/createAgent](http://localhost:7070/view#!/configurations/createAgent)
+> See also the API documentation at [http://localhost:7070/q/swagger-ui](http://localhost:7070/q/swagger-ui)
 
 ### 6. Launching the Agent
 
@@ -610,9 +610,7 @@ By the way you can use the attached **postman collection** below to do all of th
 7. Create conversation
 8. Say Hello to the agent
 
-{% file src="../.gitbook/assets/Creating and chatting with an agent.postman_collection.json" %}
-Example to download
-{% endfile %}
+Download the [Postman collection](../.gitbook/assets/Creating%20and%20chatting%20with%20a%20bot.postman_collection.json) to run through all the steps above.
 
 ### External Links
 

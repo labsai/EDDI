@@ -641,6 +641,4 @@ Developer tests:
 
 ## Sample Agent
 
-{% file src=".gitbook/assets/weather_agent_v2.zip" %}
-Weather-agent-v2.zip
-{% endfile %}
+Download the [Weather Agent v2 (Postman collection)](.gitbook/assets/weather_bot_v2.zip) to try the full example.

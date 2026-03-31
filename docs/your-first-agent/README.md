@@ -6,9 +6,7 @@ description: How to use the godfather agent
 
 After EDDI has started point your browser to this URL:
 
-{% embed url="http://localhost:7070/" %}
-Default EDDI URL when starting EDDI via docker
-{% endembed %}
+> Default URL: [http://localhost:7070/](http://localhost:7070/)
 
 You should be seeing this on the page
 
@@ -20,9 +18,9 @@ Click on "Deploy Example Agent". This will deploy the Agent Father agent, to hel
 
 This agent walks you through the process of creating a new agent that talks to ChatGPT. In order to create that agent, you will need to get an API key from ChatGPT. This key can be obtained here:
 
-{% embed url="https://platform.openai.com/account/api-keys" %}
-Link to get a ChatGPT API key
-{% endembed %}
+> Get an OpenAI API key at [platform.openai.com/account/api-keys](https://platform.openai.com/account/api-keys)
+>
+> **Note:** In v6, Agent Father supports any of the 12 LLM providers (OpenAI, Anthropic, Gemini, Mistral, etc.). API keys are stored securely in the Secrets Vault.
 
 As soon as you have your key, click on Open and the first conversation with the Agent Father will start.
 

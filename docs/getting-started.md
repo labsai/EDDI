@@ -48,7 +48,7 @@ _**Prerequisite**: You need an up and running `Docker` environment. (For referen
 
 ### Use docker-compose (recommended)
 
-1. `Checkout` the `docker-compose` file from `Github`:[`https://github.com/labsai/EDDI/blob/master/docker-compose.yml`](https://github.com/labsai/EDDI/blob/master/docker-compose.yml)
+1. `Checkout` the `docker-compose` file from `Github`:[`https://github.com/labsai/EDDI/blob/main/docker-compose.yml`](https://github.com/labsai/EDDI/blob/main/docker-compose.yml)
 2. Run Docker Command:
 
    ```
@@ -106,16 +106,14 @@ See the [Kubernetes Deployment Guide](kubernetes.md) for full details including 
 #### _Prerequisites:_
 
 - Java 25
-- Maven 3.8.4
-- MongoDB > 4.0
+- Maven 3.9+
+- MongoDB ≥ 6.0 (or PostgreSQL)
 
 ### How to run the project
 
-Setup a local mongodb (> v4.0)
+Setup a local MongoDB (≥ 6.0) or PostgreSQL instance.
 
-{% hint style="info" %}
-If no mongodb instance is available on the give host, quarkus will try to run a mongodb container on startup, given the host has a docker running server
-{% endhint %}
+> **Note:** If no database instance is available, Quarkus Dev Services will try to start a container automatically (requires Docker running on the host).
 
 On a terminal, under project root folder, run the following command:
 

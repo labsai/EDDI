@@ -279,20 +279,7 @@ _Response Code_
 
 `201`
 
-_Response Headers_
-
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 16:40:58 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/5af86a9aba31c023bcb9ef2b?version=1",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/<id>?version=1`
 
 ### 2 - Create the behaviorSet
 
@@ -353,20 +340,7 @@ _Request Body_
 }
 ```
 
-_Response Headers_
-
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 16:45:52 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.behavior/behaviorstore/behaviorsets/5af86bc0ba31c023bcb9ef2c?version=1",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.behavior/behaviorstore/behaviorsets/<id>?version=1`
 
 ### 3 - Create the **httpCall**
 
@@ -414,20 +388,7 @@ _Response Code_
 
 `201`
 
-_Response Headers_
-
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 19:13:52 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/5af88e70ba31c023bcb9ef2e?version=1",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/<id>?version=1`
 
 ### 4 - Create the outputSet
 
@@ -484,20 +445,7 @@ _Response Code_
 
 `201`
 
-_Response Headers_
-
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 16:48:37 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.output/outputstore/outputsets/5af86c65ba31c023bcb9ef2d?version=1",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.output/outputstore/outputsets/<id>?version=1`
 
 ### 5 - Creating the package
 
@@ -602,20 +550,7 @@ Response Code
 
 `201`
 
-Response Headers
-
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 19:26:36 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.package/packagestore/packages/5af8916cba31c023bcb9ef2f?version=1",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.package/packagestore/packages/<id>?version=1`
 
 ### 6 - Creating the agent
 
@@ -642,20 +577,7 @@ _Response Code_
 
 `201`
 
-_Response Headers_
-
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 21:18:16 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.agent/agentstore/agents/5af8ab98ba31c023bcb9ef32?version=1",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.agent/agentstore/agents/<id>?version=1`
 
 ### 7 - Deploy the agent
 
@@ -671,19 +593,7 @@ _Response Code_
 
 `202`
 
-_Response Headers_
 
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 21:21:54 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
 
 ### 8 - Create the conversation
 
@@ -699,20 +609,7 @@ _Response Code_
 
 `201`
 
-_Response Headers_
-
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 21:30:45 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.conversation/conversationstore/conversations/5af8ae85ba31c023bcb9ef35",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
+> The `Location` header contains the conversation URI.
 
 ### 9 - Say weather
 
@@ -765,19 +662,7 @@ _Response Code_
 
 `200`
 
-_Response Headers_
 
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 21:35:15 GMT",
-  "content-type": "application/json;resteasy-server-has-produces=true",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "325",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location"
-}
-```
 
 ### 10 - Say "Vienna"
 
@@ -822,24 +707,6 @@ _Response Code_
 
 `200`
 
-_Response Headers_
+## Full Example
 
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 21:35:15 GMT",
-  "content-type": "application/json;resteasy-server-has-produces=true",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "325",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location"
-}
-```
-
-## Full example
-
-If you would like to run the full example through postman, you can download and import the collection below.
-
-{% file src=".gitbook/assets/EDDI - Weather agent.postman_collection.json" %}
-EDDI - Weather agent.postman_collection.json
-{% endfile %}
+Download the [Weather Agent Postman Collection](.gitbook/assets/EDDI%20-%20Weather%20bot.postman_collection.json) to run the full example.

@@ -119,10 +119,4 @@ Here is an example of a `JSON` object of the input data:
 }
 ```
 
-> Additional information:
-
-We can also use [`http://localhost:7070/chat`](http://localhost:7070/chat) to test the context parameters by providing `Context Type`,`Context Name`, `Context Value`. see image below :
-
-![](.gitbook/assets/chat-gui.png)
-
-[Callbacks](https://www.notion.so/Callbacks-c7cfea02c5544021a07ef6c480b5a89e)
+> You can also test context parameters in the **EDDI Manager** chat panel at `http://localhost:7070`.
