@@ -369,7 +369,7 @@ When adding a new feature, use this guide to decide where configuration belongs:
 
 | Question | Config Level | Example |
 |---|---|---|
-| Does it affect the entire agent across all conversations? | **Agent level** (`AgentConfiguration`) | `enableUserMemory`, `enableStreaming` |
+| Does it affect the entire agent across all conversations? | **Agent level** (`AgentConfiguration`) | `enableMemoryTools`, `enableStreaming` |
 | Does it control how a pipeline step behaves? | **Extension level** (e.g., `langchain.json`, `property.json`) | LLM parameters, property instructions |
 | Does it define which extensions run and in what order? | **Workflow level** (`package.json`) | Extension types and URIs |
 | Is it a user-facing runtime setting? | **Agent level** | User memory config, audit settings |

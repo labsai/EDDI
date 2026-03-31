@@ -496,11 +496,12 @@ Use context passed from your app:
 
 ```bash
 curl -X POST http://localhost:7070/agents/agent-abc-123/start \
+  -H "Content-Type: application/json" \
   -d '{
     "input": "What is my name?",
     "context": {
-      "userName": "John",
-      "userId": "user-123"
+      "userName": {"type": "string", "value": "John"},
+      "userId": {"type": "string", "value": "user-123"}
     }
   }'
 ```
@@ -592,7 +593,7 @@ Register it in CDI and it becomes available as an extension!
 
 ## Getting Help
 
-- **Documentation**: https://docs.labs.ai
+- **Documentation**: https://github.com/labsai/EDDI/tree/main/docs
 - **GitHub**: https://github.com/labsai/EDDI
 - **Issues**: https://github.com/labsai/EDDI/issues
 

@@ -140,5 +140,5 @@ IAuditEntryCollector ---------> AuditLedgerService
                           +--------+--------+
                           |                 |
                      AuditStore     PostgresAuditStore
-                     (MongoDB)        (future)
+                     (MongoDB)        (PostgreSQL)
 ```

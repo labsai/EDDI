@@ -449,17 +449,8 @@ _Response Code_
 
 `201`
 
-_Response Headers_
+The `Location` response header contains the URI of the newly created resource:
 
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Thu, 21 Jun 2018 01:00:02 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.behavior/behaviorstore/behaviorsets/5b2af892ee5ee72440ee1b4b?version=1",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
+```
+Location: eddi://ai.labs.behavior/behaviorstore/behaviorsets/{id}?version=1
 ```

@@ -13,6 +13,37 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+
+## Documentation Audit — Release-Ready v6.0.0 (2026-03-31)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Comprehensive documentation audit to ensure all public docs accurately reflect the v6.0.0 codebase. Verified against actual Java source code (interfaces, enums, config fields).
+
+| File | Fix |
+|---|---|
+| **`docs/README.md`** | Complete rewrite — updated version from 5.6.0 to 6.0.0-RC1, removed dead CircleCI badge, expanded to 12 LLM providers, added all v6 features (RAG, MCP, A2A, Secrets Vault, etc.) |
+| **`docs/agent-manager-gui.md`** | Complete rewrite — replaced legacy jQuery dashboard description with React 19 Manager SPA (pipeline builder, 8 form editors, secrets admin, chat panel, 11 locales, RTL) |
+| **`docs/properties.md`** | Fixed lifecycle: `loadLongTermProperties` → `loadUserProperties` via `IUserMemoryStore.getVisibleEntries()`. Fixed `enableUserMemory` → `enableMemoryTools`. Fixed link from planning doc to published `user-memory.md` |
+| **`docs/managed-agents.md`** | Fixed REST path `/managedagents` → `/agents/managed`. Fixed environment enum (only `production` and `test`; `unrestricted`/`restricted` are legacy aliases). Removed 2019 Apache response headers. Added undo/redo/MCP cross-reference |
+| **`docs/audit-ledger.md`** | Fixed PostgresAuditStore from `(future)` to `(PostgreSQL)` — implementation exists since Phase 7 |
+| **`docs/deployment-management-of-agents.md`** | Fixed duplicate "production" in environment table. Fixed environment descriptions to match `Deployment.java`. Removed all 2018 response headers. Re-added List All Deployed Agents section with proper JSON |
+| **`docs/architecture.md`** | Fixed `enableUserMemory` → `enableMemoryTools` |
+| **`docs/developer-quickstart.md`** | Fixed context format (flat string → `{type, value}` matching `Context.java`). Fixed dead `docs.labs.ai` URL |
+| **`docs/how-to....md`** | Reordered FAQs by v6 relevance: LLM setup, secrets, context, monitoring, K8s first; legacy pattern-matching FAQs last. Added 5 new v6-relevant entries |
+| **`docs/SUMMARY.md`** | Restructured into proper sections (Getting Started, Architecture, Agent Config, Conversations, Protocols, Security, Advanced, Deployment, Reference) |
+| **`docs/extensions.md`** | Removed stale 2018 response headers |
+| **`docs/behavior-rules.md`** | Replaced stale 2018 response headers with useful Location header note |
+| **`docs/conversations.md`** | Removed 3 blocks of stale 2018 response headers |
+
+**Code verification method:** `grep_search` against actual Java source for every changed reference — `Deployment.java` (enum values), `AgentConfiguration.java` (`enableMemoryTools`), `Context.java` (type/value format), `IRestAgentManagement.java` (REST paths), `Conversation.java` (property lifecycle), `IUserMemoryStore.java` (storage layer), `PostgresAuditStore.java` (existence).
+
+**Files:** 13 documentation files modified.
+
+---
+
 ## Logging API Audit — Security, Dead Code, Level Filter, Type Safety (2026-03-31)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

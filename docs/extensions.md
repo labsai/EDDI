@@ -327,16 +327,3 @@ _Response Code_
 
 `200`
 
-_Response Headers_
-
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sat, 19 May 2018 22:00:11 GMT",
-  "content-type": "application/json",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "6208",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location"
-}
-```

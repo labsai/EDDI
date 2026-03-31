@@ -119,9 +119,9 @@ First, you need to set up a `AgentTrigger`.
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | intent           | (`String`) keyword or phrase (camel case or with '-') that will be used in managed agents to trigger the agents defined in this model                                                                                                                                                                          |
 | agentDeployments | (`Array:`<`AgentDeployment`>) array of `AgentDeployment`. If multiple `agentDeployments` are defined, one will be picked randomly.                                                                                                                                                                             |
-| environment      | (`String`) the environment that you would like (production, production, test)                                                                                                                                                                                                                                  |
-| agentId          | (`String`) the id of the agent that you want to create the agentTrigger for it.                                                                                                                                                                                                                                |
-| initialContext   | (Array <`Object`> ) As context can be handed over on each request to the agent, `initialContext` allows the definition of context the agent should get at the very first conversation step when a conversation with the agent is started (only way to get context to the agent in the first conversation step) |
+| environment      | (`String`) the environment: `production` (default) or `test`. Legacy values `unrestricted` and `restricted` are accepted and mapped to `production`.                                                                                                                                              |
+| agentId          | (`String`) the id of the agent that you want to create the agentTrigger for it.                                                                                                                                                                                                                |
+| initialContext   | (Object) Context handed to the agent at conversation start. Keys map to `Context` objects with `type` and `value` fields. Only applied when the conversation is first created.                                                                                                |
 
 ### AgentTrigger API endpoints
 
@@ -140,9 +140,13 @@ To trigger a managed agent you will have to call the following API endpoints.
 
 | HTTP Method | API Endpoint                                          | Request Body | Response           |
 | ----------- | ----------------------------------------------------- | ------------ | ------------------ |
-| GET         | `/managedagents​/{intent}​/{userId}`                  | N/A          | Conversation model |
-| POST        | `/managedagents​/{intent}​/{userId}`                  | Input model  | N/A                |
-| POST        | `/managedagents​/{intent}​/{userId}​/endConversation` | Input model  | N/A                |
+| GET         | `/agents/managed/{intent}/{userId}`                   | N/A          | Conversation model |
+| POST        | `/agents/managed/{intent}/{userId}`                   | Input model  | N/A                |
+| POST        | `/agents/managed/{intent}/{userId}/endConversation`   | N/A          | N/A                |
+| GET         | `/agents/managed/{intent}/{userId}/undo`              | N/A          | Boolean            |
+| POST        | `/agents/managed/{intent}/{userId}/undo`              | N/A          | N/A                |
+| GET         | `/agents/managed/{intent}/{userId}/redo`              | N/A          | Boolean            |
+| POST        | `/agents/managed/{intent}/{userId}/redo`              | N/A          | N/A                |
 
 ### Description API endpoint required path parameters
 
@@ -157,7 +161,7 @@ To trigger a managed agent you will have to call the following API endpoints.
 
 _Request URL:_
 
-`POST` `http://localhost:7070//agenttriggerstore/agenttriggers`
+`POST` `http://localhost:7070/agenttriggerstore/agenttriggers`
 
 _Request Body_
 
@@ -181,20 +185,6 @@ _Response Body_
 _Response Code_
 
 `200`
-
-_Response Headers_
-
-```javascript
-access-control-allow-headers: authorization, Content-Type
-access-control-allow-methods: GET, PUT, POST, DELETE, PATCH, OPTIONS
-access-control-allow-origin: *
-access-control-expose-headers: location
-connection: Keep-Alive
-content-length: 0
-date: Mon, 18 Mar 2019 00:31:07 GMT
-keep-alive: timeout=5, max=100
-server: Apache/2.4.29 (Ubuntu)
-```
 
 #### 2/Trigger the ManagedAgent
 
@@ -251,16 +241,12 @@ _Response Code_
 
 `200`
 
-_Response Headers_
+### MCP Integration
 
-```javascript
-access-control-allow-headers: authorization, Content-Type
-access-control-allow-methods: GET, PUT, POST, DELETE, PATCH, OPTIONS
-access-control-allow-origin: *
-access-control-expose-headers: location
-connection: Keep-Alive
-content-length: 0
-date: Mon, 18 Mar 2019 00:31:07 GMT
-keep-alive: timeout=5, max=100
-server: Apache/2.4.29 (Ubuntu)
+The same managed conversation functionality is available via the MCP `chat_managed` tool:
+
 ```
+chat_managed(intent: "weather_trigger", userId: "myUserId", message: "Hello managed agent!")
+```
+
+See [MCP Server](mcp-server.md) for full tool documentation.

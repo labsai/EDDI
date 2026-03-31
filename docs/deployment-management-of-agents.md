@@ -10,17 +10,16 @@ Deployment management provides:
 
 - **Environment Isolation**: Test agents without affecting production
 - **Version Control**: Deploy specific agent versions, roll back if needed
-- **Gradual Rollout**: Test in `test` environment, then `production`, finally `production`
+- **Gradual Rollout**: Test agents in `test` environment before deploying to `production`
 - **Zero-Downtime Updates**: Deploy new versions while old ones are still running
 - **Audit Trail**: Track what's deployed, when, and by whom
 
 ### EDDI Environments
 
-| Environment      | Purpose                        | Access Control             |
-| ---------------- | ------------------------------ | -------------------------- |
-| **`test`**       | Development and testing        | Typically production       |
-| **`production`** | Public/demo deployments        | No authentication required |
-| **`production`** | Production with authentication | Requires valid OAuth token |
+| Environment      | Purpose                            | Access Control             |
+| ---------------- | ---------------------------------- | -------------------------- |
+| **`test`**       | Development and testing            | Same as production         |
+| **`production`** | Live deployments (default)         | Optional OAuth (Keycloak)  |
 
 ### Deployment Lifecycle
 
@@ -80,7 +79,7 @@ The deployment of a specific agent is done through a **`POST`** to **`/administr
 | ------------- | ---------------------------------------------------------------------------------------- |
 | HTTP Method   | `POST`                                                                                   |
 | API endpoint  | `/administration/{environment}/deploy/{agentId}`                                         |
-| {environment} | (`Path parameter`):`String` deployment environment (e.g: **production,production,test**) |
+| {environment} | (`Path parameter`):`String` deployment environment: `production` (default) or `test`             |
 | {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **deploy**.                 |
 
 ### Example _:_
@@ -97,18 +96,6 @@ _Response Code:_
 
 `202`
 
-_Response Headers:_
-
-```javascript
-{
-"access-control-allow-origin": "*",
-"date": "Mon, 19 Mar 2018 16:32:58 GMT",
-"access-control-allow-headers": "authorization, Content-Type",
-"content-length": "0",
-"access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-"content-type": null
-}
-```
 
 ## **Undeployment of an Agent**
 
@@ -120,7 +107,7 @@ The undeployment of a specific agent is done through a **`POST`** to **`/adminis
 | ------------- | ---------------------------------------------------------------------------------------- |
 | HTTP Method   | `POST`                                                                                   |
 | API endpoint  | `/administration/{environment}/undeploy/{agentId}`                                       |
-| {environment} | (`Path parameter`):`String` deployment environment (e.g: **production,production,test**) |
+| {environment} | (`Path parameter`):`String` deployment environment: `production` (default) or `test`             |
 | {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **undeploy**.               |
 
 ### Example :
@@ -139,19 +126,6 @@ _Response Code_
 
 `202`
 
-_Response Headers_
-
-```javascript
-{
-"access-control-allow-origin": "*",
-"date": "Mon, 19 Mar 2018 16:38:36 GMT",
-"access-control-allow-headers": "authorization, Content-Type",
-"content-length": "0",
-"access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-"content-type": null
-
-}
-```
 
 ## **Check the deployment status of an agent:**
 
@@ -163,7 +137,7 @@ Deployment status of an Agent REST API Endpoint
 | ------------- | ------------------------------------------------------------------------------------------------- |
 | HTTP Method   | `GET`                                                                                             |
 | Api endpoint  | `/administration/{environment}/deploymentstatus/{agentId}`                                        |
-| {environment} | (`Path parameter`):`String` deployment environment (e.g: **production,production,test**)          |
+| {environment} | (`Path parameter`):`String` deployment environment: `production` (default) or `test`             |
 | {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **check** its **deployment status**. |
 | Response      | `NOT_FOUND`, `IN_PROGRESS`, `ERROR` and `READY`.                                                  |
 
@@ -181,22 +155,10 @@ _Response Code_
 
 `200`
 
-_Response Headers_
 
 ## **List all deployed Agents:**
 
-```javascript
-{
-"access-control-allow-origin": "*",
-"date": "Mon, 19 Mar 2018 16:33:08 GMT",
-"access-control-allow-headers": "authorization, Content-Type",
-"content-length": "5",
-"access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-"content-type": "text/plain;charset=utf-8"
-}
-```
-
-To list all the deployed Agents a `GET` to **`/administration/{environment}/deploymentstore/{agentId}`**:
+To list all deployed Agents, send a `GET` to `/deploymentstore/deployments`:
 
 ### List of Deployed Agents REST API Endpoint
 
@@ -205,7 +167,7 @@ To list all the deployed Agents a `GET` to **`/administration/{environment}/depl
 | HTTP Method  | `GET`                          |
 | API endpoint | `/deploymentstore/deployments` |
 
-### Example :
+### Example:
 
 _Request URL_
 
@@ -217,40 +179,21 @@ _Response Code_
 
 _Response Body_
 
-```javascript
+```json
 [
   {
-    agentId: "5aaf90e29f7dd421ac3c7dd4",
-    agentVersion: 1,
-    environment: "production",
-    deploymentStatus: "deployed",
+    "agentId": "5aaf90e29f7dd421ac3c7dd4",
+    "agentVersion": 1,
+    "environment": "production",
+    "deploymentStatus": "deployed"
   },
   {
-    agentId: "5aaf90e29f7dd421ac3c7dd4",
-    agentVersion: 1,
-    environment: "production",
-    deploymentStatus: "deployed",
-  },
-  {
-    agentId: "5aaf98e19f7dd421ac3c7de9",
-    agentVersion: 1,
-    environment: "production",
-    deploymentStatus: "deployed",
-  },
-];
-```
-
-_Response Headers_
-
-```javascript
-{
-"access-control-allow-origin": "*",
-"date": "Mon, 19 Mar 2018 16:33:29 GMT",
-"access-control-allow-headers": "authorization, Content-Type",
-"content-length": "414",
-"access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-"content-type": "application/json"
-}
+    "agentId": "5aaf98e19f7dd421ac3c7de9",
+    "agentVersion": 1,
+    "environment": "production",
+    "deploymentStatus": "deployed"
+  }
+]
 ```
 
 ---

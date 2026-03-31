@@ -132,14 +132,14 @@ Properties can be set before or after any lifecycle task (HTTP calls, LLM calls)
 
 ### Via LLM Tools (Agent-Driven)
 
-When `enableUserMemory` is enabled in the agent configuration, the LLM can set properties using built-in memory tools:
+When `enableMemoryTools` is enabled in the agent configuration, the LLM can set properties using built-in memory tools:
 
 ```
 Agent: "I'll remember that you prefer dark mode."
 → Tool call: rememberFact(key="ui_preference", value="dark_mode", category="preference", visibility="self")
 ```
 
-See [Persistent Memory Architecture](planning/persistent-memory-architecture.md) for full details on the memory tool system.
+See [Persistent User Memory](user-memory.md) for full details on the LLM memory tools, visibility scoping, and Dream consolidation.
 
 ---
 
@@ -190,11 +190,15 @@ Properties are managed by `Conversation.java` at session boundaries — NOT by p
 
 ```
 Conversation.init()
-  └─→ loadLongTermProperties()
-      └─→ IPropertiesHandler.loadProperties(userId)
-      └─→ Properties loaded into conversationProperties with scope=longTerm
+  └─→ loadUserProperties()
+      └─→ IPropertiesHandler.getUserMemoryStore()
+      └─→ IUserMemoryStore.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries)
+      └─→ Entries converted to Property objects with scope=longTerm
+      └─→ Loaded into conversationProperties
       └─→ Available as {properties.key} in all templates
 ```
+
+Recall order (`most_recent` or `most_accessed`) and max entries come from the agent's `UserMemoryConfig` if configured, otherwise sensible defaults (1000 entries, most recent).
 
 ### 2. Pipeline Execution
 
@@ -212,11 +216,15 @@ LifecycleManager runs pipeline
 ```
 Conversation.postConversationLifecycleTasks()
   └─→ storePropertiesPermanently()
-      └─→ All longTerm properties saved via IPropertiesHandler
-      └─→ Secret properties scrubbed from memory and vaulted
+      └─→ All longTerm properties saved via IUserMemoryStore.upsert()
+      └─→ Visibility applied at persistence boundary:
+          - Explicit visibility on property → used as-is
+          - No visibility set → defaults to agent's defaultVisibility (or `global`)
 ```
 
 > **Key insight**: Persistent state is a **session concern** handled at init/teardown — NOT in the pipeline. This means properties "just work" without any task ordering dependencies.
+
+> **Storage**: In v6, all persistent properties are stored in the unified `usermemories` collection (MongoDB) or `usermemories` table (PostgreSQL). The legacy `properties` collection has been removed. See [Persistent User Memory](user-memory.md) for the full unified memory model.
 
 ---
 

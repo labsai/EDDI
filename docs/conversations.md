@@ -276,21 +276,6 @@ _Response Code_
 
 `201`
 
-_Response Headers_
-
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 15 Apr 2018 01:45:09 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.conversation/conversationstore/conversations/5ad2aea52de29719b44a792c",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
-
 ## Send/receive messages
 
 ### Send a message
@@ -348,17 +333,7 @@ Response Body
 }
 ```
 
-Response Headers
 
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 22 Apr 2018 23:54:12 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "321",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "content-type": "application/json;resteasy-server-has-produces=true"
-}
 ```
 
 ### Receive a message
@@ -436,19 +411,6 @@ Response Code
 
 `200`
 
-Response Headers
-
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Mon, 23 Apr 2018 00:07:25 GMT",
-  "cache-control": "no-cache",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "891",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "content-type": "application/json"
-}
-```
 
 ## Time Travel: Undo and Redo
 

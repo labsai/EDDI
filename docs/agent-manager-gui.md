@@ -1,58 +1,92 @@
-# Agent Manager GUI
+# Agent Manager Dashboard
 
-## Agent Manager (GUI)
+**Version: 6.0.0**
 
-> Documentation in progress
+## Overview
 
-The agent manager is a friendly Graphical user interface that help **EDDI**'s agent developers to deploy, chat, edit agents packages and also update an agent if an updated package is available!
+The EDDI Manager is a modern **React 19 single-page application** for building, testing, deploying, and monitoring EDDI agents. It is served directly from the EDDI backend — no separate deployment needed.
 
-## Access to the agent manager:
+## Access
 
-You can access to agent manager via:
+Open your browser to the EDDI root URL:
 
-> [http://localhost:7070/manage?apiUrl=http%3A%2F%2Flocalhost%3A7070](http://localhost:7070/manage?apiUrl=http%3A%2F%2Flocalhost%3A7070)
+```
+http://localhost:7070
+```
 
-## Main page
+The Manager is the default landing page. No `apiUrl` query parameter is needed — the Manager automatically connects to the backend that serves it.
 
-![](<.gitbook/assets/2-main-list (1).jpg>)
+## Features
 
-1. Allows you to log out from the agent manager and redirects you to login page.
-2. This is the **agents view** where you can see the list of all agents both deployed and non deployed agents.
-3. You can use the text box next t o this label to enter your search criteria such as an agent name .
-4. This is the list of all agents in this image example for brevity we showed only one agent, but most likely you will find a lot of agents (deployed and non deployed).
-5. Name of the agent.
-6. Version of that agent that it is deployed.
-7. Last modification date of the entire agent resources.
-8. Opens the chat with the agent by using the chat screen, more details later
-9. Undeploy this agent from this **EDDI** instance.
-10. Workflows used in this agent
-11. **Workflows view**: coming soon.
+### Agent Management
+- **Agent List** — Browse all agents with search, version, deployment status, and last-modified date
+- **Agent Editor** — Edit agent name, description, and package references with a form-based UI
+- **Version Picker** — Switch between agent versions; compare configurations across versions
+- **Deploy / Undeploy** — One-click deployment with status badges
+- **Duplicate** — Clone an agent and all its packages/extensions in one operation
 
-## Agent overview
+### Pipeline Builder
+- **Drag-and-Drop** — Visually compose packages by dragging workflow extensions (behavior rules, HTTP calls, LangChain, output, etc.) into a pipeline
+- **Extension Editors** — Form-based editors for all 8 resource types:
 
-![](<.gitbook/assets/3-agent-page (1) (1).jpg>)
+  | Resource Type | Editor |
+  |---|---|
+  | Behavior Rules | Rule groups, conditions (input/action/context match), actions |
+  | HTTP Calls | URL, method, headers, body, pre/post property instructions |
+  | LangChain (LLM) | Provider, model, system prompt, tools, RAG, cascade |
+  | Output | Action-based output sets with text, quick replies, and delays |
+  | Property Setter | Property instructions with scope and visibility |
+  | Dictionary | Words, phrases, and expression mappings |
+  | RAG | Embedding provider, vector store, chunk settings, document ingestion |
+  | MCP Calls | External MCP server connections |
 
-1. The login allow connection with social Media such as **GitHub** or **Google**
-2. Use login and password as credentials for registered users, basically you will have to go through the registration form which is pretty straightforward.
+- **JSON Editor** — Monaco-based JSON editor with syntax highlighting for any resource
+- **Version History** — Every save creates a new version; switch and compare at will
 
-## Agent Overview
+### Chat Panel
+- **Embedded Chat** — Test conversations with any deployed agent directly in the Manager
+- **SSE Streaming** — Real-time response streaming
+- **Secret Input** — Password field mode for entering API keys securely
+- **Undo / Redo** — Time-travel through conversation steps
 
-## Edit agent description modal
+### Secrets Administration
+- **Secrets Page** (`/manage/secrets`) — Manage vault entries through the UI
+- **Write-Only** — Secret values can be stored but never retrieved (API returns metadata only)
+- **Vault Health** — Live status badge showing vault online/offline state
 
-![](.gitbook/assets/4-edit-agent.jpg)
+### Observability
+- **Logs Panel** — Live server-side log streaming via SSE with level filtering and search
+- **Audit Trail** — Per-conversation timeline of pipeline execution (tasks, LLM details, tool calls, costs)
 
-## Edit JSON
+### Additional Features
+- **Dark / Light Theme** — System-aware with manual toggle
+- **11 Locales** — English, German, French, Spanish, Arabic, Chinese, Thai, Japanese, Korean, Portuguese, Hindi
+- **RTL Support** — Full right-to-left layout for Arabic
+- **Responsive Layout** — Collapsible sidebar, mobile-friendly
 
-![](.gitbook/assets/5-edit-existing-data.jpg)
+## Technology Stack
 
-## Agent's packages edit view
+| Layer | Technology |
+|---|---|
+| **Framework** | React 19 + TypeScript 5 |
+| **Build** | Vite 6 |
+| **Styling** | Tailwind CSS v4 with CSS variables |
+| **State (server)** | TanStack Query v5 |
+| **State (UI)** | Zustand (chat/debug), `useState` elsewhere |
+| **Routing** | React Router v7 |
+| **i18n** | react-i18next |
+| **Editor** | Monaco (@monaco-editor/react) |
+| **DnD** | @dnd-kit |
+| **Testing** | Vitest + React Testing Library + MSW |
 
-![](<.gitbook/assets/6-edit-packages (1).jpg>)
+## Authentication
 
-## Agent packages updates
+When Keycloak is enabled (`QUARKUS_OIDC_TENANT_ENABLED=true`), the Manager uses `keycloak-js` for login:
 
-![](<.gitbook/assets/7-update-packages (1).jpg>)
+- Automatic token refresh (every 30s before expiry)
+- Role-based UI (admin sees deploy/delete, viewer sees read-only)
+- Graceful degradation when auth is disabled (open access)
 
-## Dictionary selection from package editing view
+## Source Code
 
-![](.gitbook/assets/8-select-dictionary.jpg)
+The Manager is developed in the [EDDI-Manager](https://github.com/labsai/EDDI-Manager) repository and bundled into the EDDI Docker image at build time.
