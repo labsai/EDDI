@@ -42,7 +42,7 @@ docker run --name mongodb -d mongo:6.0
 Start EDDI (without auth):
 
 ```bash
-docker run --name eddi --link mongodb:mongodb -p 7070:7070 -d labsai/eddi:6
+docker run --name eddi --link mongodb:mongodb -p 7070:7070 -d labsai/eddi:latest
 ```
 
 Start EDDI (with auth):
@@ -54,7 +54,7 @@ docker run --name eddi \
   -e QUARKUS_OIDC_TENANT_ENABLED=true \
   -e QUARKUS_OIDC_AUTH_SERVER_URL=http://your-keycloak:8080/realms/eddi \
   -e QUARKUS_OIDC_CLIENT_ID=eddi-backend \
-  -d labsai/eddi:6
+  -d labsai/eddi:latest
 ```
 
 ## Environment Variables
@@ -92,5 +92,5 @@ docker run --name eddi \
   -e QUARKUS_OIDC_AUTH_SERVER_URL=http://keycloak:8080/realms/eddi \
   -e EDDI_TOOLS_WEBSEARCH_PROVIDER=google \
   -e EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=YOUR_KEY \
-  -d labsai/eddi:6
+  -d labsai/eddi:latest
 ```

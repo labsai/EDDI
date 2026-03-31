@@ -133,7 +133,7 @@ kubectl apply -k k8s/examples/postgres-ha/
                │
     ┌──────────▼──────────┐    ┌─────────────┐
     │  EDDI Deployment     │───▶│  MongoDB    │
-    │  (labsai/eddi:6)     │    │ StatefulSet │
+    │  (labsai/eddi:latest) │    │ StatefulSet │
     │                      │    └─────────────┘
     │  replicas: 1-10      │    ┌─────────────┐
     │  (HPA auto-scales)   │───▶│ PostgreSQL  │

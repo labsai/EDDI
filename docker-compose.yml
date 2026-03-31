@@ -1,6 +1,6 @@
 services:
   eddi:
-    image: labsai/eddi:6
+    image: labsai/eddi:latest
     environment:
       - "EDDI_VAULT_MASTER_KEY=${EDDI_VAULT_MASTER_KEY:-}"
 #      - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"

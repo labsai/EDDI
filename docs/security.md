@@ -46,7 +46,7 @@ Browser (EDDI Manager)
 docker run -e QUARKUS_OIDC_TENANT_ENABLED=true \
            -e QUARKUS_OIDC_AUTH_SERVER_URL=http://keycloak:8080/realms/eddi \
            -e QUARKUS_OIDC_CLIENT_ID=eddi-backend \
-           labsai/eddi:6
+           labsai/eddi:latest
 ```
 
 ### Auth Permissions

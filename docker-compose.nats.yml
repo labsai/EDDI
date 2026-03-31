@@ -29,7 +29,7 @@ services:
     restart: unless-stopped
 
   eddi:
-    image: labsai/eddi:6.0.0
+    image: labsai/eddi:latest
     ports:
       - "7070:7070"
     environment:

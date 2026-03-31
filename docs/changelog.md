@@ -13,6 +13,29 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Install Script Hardening for RC1 Release (2026-03-31)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Full edge-case audit and remediation of both install scripts (`install.sh`, `install.ps1`) for the v6.0.0-RC1 release.
+
+| Fix | Severity | Details |
+|---|---|---|
+| **Docker image tags** | 🔴 Critical | All compose files used `:6` or `:6.0.0` — tags that don't exist on Docker Hub. Changed to `:latest` which CI pushes on every tag-based release |
+| **`install.ps1` piped mode** | 🔴 Critical | `iwr | iex` would hang on `Read-Host` prompts. Added `[Environment]::UserInteractive` + `$Host.Name` detection to force non-interactive mode |
+| **Monitoring downloads** | 🟡 Significant | `--with-monitoring` failed on remote installs (`curl | bash`) because `prometheus.yml` and `grafana-data/` weren't downloaded. Both scripts now download all 4 monitoring config files from GitHub when not running from repo checkout |
+| **Vault key quoting** | 🟡 Significant | Custom passphrases with `#` silently truncated in `.env` (treated as comment). Vault key now double-quoted in `.env` file |
+| **Windows CLI wrapper** | 🟡 Feature gap | `install.ps1` had no CLI wrapper. Added `eddi.cmd` (batch file) + auto-add to user PATH |
+| **Cleanup trap** | 🔵 Minor | `install.sh` trap used `docker compose ... down` without `--env-file`. Now conditionally passes `--env-file` if `.env` exists. `COMPOSE_FILES` array initialized early to avoid unbound variable under `set -u` |
+| **Deprecated compose key** | 🔵 Minor | Removed `version: '3.8'` from `docker-compose.postgres.yml` (warns in Compose v2+) |
+| **Unused `EDDI_VERSION`** | 🔵 Minor | Removed from `install.sh` — variable was documented but never referenced |
+| **Docs** | 🔵 Minor | Updated `docker.md`, `security.md`, `kubernetes.md` to use `:latest` tag in all examples |
+
+**Files:** 9 modified (`docker-compose.yml`, `docker-compose.postgres-only.yml`, `docker-compose.nats.yml`, `docker-compose.postgres.yml`, `install.sh`, `install.ps1`, `docs/docker.md`, `docs/security.md`, `docs/kubernetes.md`).
+
+---
 
 ## Documentation Audit — Second Pass (2026-03-31)
 
