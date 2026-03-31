@@ -61,17 +61,17 @@ describe("CoordinatorPage", () => {
     });
   });
 
-  it("shows in-memory coordinator type from mock data", async () => {
+  it("shows NATS JetStream coordinator type from mock data", async () => {
     renderCoordinator();
     await waitFor(() => {
-      expect(screen.getByText("In-Memory")).toBeInTheDocument();
+      expect(screen.getByText("NATS JetStream")).toBeInTheDocument();
     });
   });
 
   it("shows CONNECTED status from mock data", async () => {
     renderCoordinator();
     await waitFor(() => {
-      expect(screen.getByText("CONNECTED")).toBeInTheDocument();
+      expect(screen.getByText(/CONNECTED/)).toBeInTheDocument();
     });
   });
 

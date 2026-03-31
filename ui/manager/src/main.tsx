@@ -31,6 +31,8 @@ async function startApp() {
       console.log("[EDDI] Backend not reachable — starting mock API (MSW)");
       const { worker } = await import("@/test/mocks/browser");
       await worker.start({ onUnhandledRequest: "bypass" });
+      // Signal to UI components that mock data is active
+      (window as unknown as Record<string, unknown>).__EDDI_MOCK_ACTIVE__ = true;
     }
   }
 

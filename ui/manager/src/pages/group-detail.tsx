@@ -20,7 +20,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { BackLink } from "@/components/shared/back-link";
 import { ErrorState } from "@/components/shared/error-state";
 import { cn } from "@/lib/utils";
-import { STYLE_INFO } from "@/lib/api/groups";
+import { STYLE_INFO, type DiscussionStyle } from "@/lib/api/groups";
+import { STYLE_THEME } from "@/components/groups/discussion-transcript";
 
 const STATE_COLORS: Record<string, string> = {
   COMPLETED: "text-emerald-500",
@@ -119,6 +120,7 @@ export function GroupDetailPage() {
   }
 
   const styleInfo = STYLE_INFO[groupConfig.style];
+  const styleTheme = STYLE_THEME[groupConfig.style as DiscussionStyle] || STYLE_THEME.ROUND_TABLE;
 
   // Determine whether to show streaming or static transcript
   const isStreamActive = streamState.isStreaming || (streamState.state !== "CREATED" && !selectedConvId);
@@ -137,7 +139,7 @@ export function GroupDetailPage() {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {styleInfo && (
-            <Badge variant="outline" className="hidden sm:inline-flex" title={styleInfo.flow}>
+            <Badge variant="outline" className={cn("hidden sm:inline-flex", styleTheme.flowText)} title={styleInfo.flow}>
               {styleInfo.icon} {styleInfo.label}
             </Badge>
           )}
@@ -252,6 +254,7 @@ export function GroupDetailPage() {
               conversation={isStreamActive ? null : (selectedConversation ?? null)}
               streamState={isStreamActive ? streamState : undefined}
               isLoading={convLoading && !!selectedConvId}
+              discussionStyle={groupConfig.style as DiscussionStyle}
             />
           </div>
         </div>
@@ -259,7 +262,7 @@ export function GroupDetailPage() {
         {/* RIGHT: Config panel */}
         {showConfig && (
           <div className="w-72 shrink-0 rounded-xl border border-border bg-card overflow-hidden max-xl:hidden">
-            <GroupConfigPanel config={groupConfig} />
+            <GroupConfigPanel config={groupConfig} groupId={groupId} groupVersion={version} />
           </div>
         )}
       </div>

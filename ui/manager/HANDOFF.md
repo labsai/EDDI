@@ -1,8 +1,8 @@
 # EDDI Manager — Handoff Document
 
-> **Last updated**: 2026-03-29  
+> **Last updated**: 2026-03-31  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: `pending` feat(v6): Global platform status indicator + unified stream badges
+> **Last commit**: `pending` feat(v6): Group wizard UX overhaul — batch-create, validation, style-aware themes
 
 ---
 
@@ -53,7 +53,7 @@
 | —     | **Dashboard replacement**: old Bootstrap/jQuery `index.html` → redirect to `/manage`. OpenAPI + Docs external links in sidebar. Branded loading indicator. Removed bootstrap, jQuery, moment, KaTeX, Slick, old webpack bundles    | latest    |
 | —     | **Agent Setup Wizard**: Two-mode wizard (Standard Agent + API Agent) with `/administration/agents/setup` and `/setup-api` endpoints. OpenAPI spec input (URL/file/paste), LLM provider picker, feature toggles. 90+ i18n keys | `9a568ac` |
 | —     | **LangChain Editor Tooling**: `enableHttpCallTools` toggle, `mcpServers` editor (URL/name/transport/apiKey), updated agent mode detection | `0b527fe` |
-| —     | **Group Discussion UI**: Groups page, Group Detail, Group Wizard, 7 components, API layer, TanStack Query hooks, 5 preset templates | pending |
+| —     | **Group Discussion UI**: Groups page, Group Detail, Group Wizard (4-step, batch-create, per-slot validation), Group Config Panel (style-aware, bulk delete), Discussion Transcript (5 style themes), 7 components, API layer, TanStack Query hooks, 5 templates. `deleteGroupWithMembers` soft-delete. 10 wizard tests. | pending |
 | —     | **A2A Protocol UI**: Agent-detail A2A section (CTA enable/disable, description, skills tags, endpoint URLs, Agent Card preview), LangChain editor A2A Agents section (URL, name, apiKey vault warning, timeout, skills filter), MSW mocks, 10 new tests | pending |
 | —     | **MCP Tool Auto-Discovery**: Discover button in MCP editor, DiscoveredToolsPanel, whitelist/blacklist add | pending |
 | —     | **OpenAPI Endpoint Discovery**: Backend `discover-endpoints` via `McpApiToolBuilder`, editor-level import (Append/Replace with confirmation), workflow-level import dialog (parallel multi-config creation), URL validation, Enter key, collision-safe keys | `184c550` |
@@ -69,7 +69,7 @@
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 422 pass (`npm run test`) — 41 files (41 passing)
+- **Unit/Component**: 436 pass (`npm run test`) — 42 files, 0 failures
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds

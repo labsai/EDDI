@@ -1,5 +1,5 @@
 import { api } from "../api-client";
-import type { AgentDescriptor } from "./agents";
+import { deleteAgent, type AgentDescriptor } from "./agents";
 
 // ─── Enums & Types ───────────────────────────────────────────────
 
@@ -475,3 +475,42 @@ export const ENTRY_TYPE_INFO: Record<
   ERROR: { label: "Error", color: "destructive" },
   SKIPPED: { label: "Skipped", color: "muted" },
 };
+
+// ─── Bulk Operations ─────────────────────────────────────────────
+
+/**
+ * Soft-delete a group and all its member agents.
+ * Each member agent is deleted with permanent=false (soft-delete).
+ * The group itself is also soft-deleted.
+ */
+export async function deleteGroupWithMembers(
+  groupId: string,
+  version: number,
+  config: AgentGroupConfiguration,
+): Promise<void> {
+  // Soft-delete each member agent (best-effort, continue on error)
+  const memberDeletes = config.members
+    .filter((m) => m.agentId && m.memberType !== "GROUP")
+    .map((m) =>
+      deleteAgent(m.agentId, 1, { permanent: false }).catch(() => {
+        // Ignore — agent may already be deleted
+      }),
+    );
+
+  // Also soft-delete moderator agent if separate from members
+  if (
+    config.moderatorAgentId &&
+    !config.members.some((m) => m.agentId === config.moderatorAgentId)
+  ) {
+    memberDeletes.push(
+      deleteAgent(config.moderatorAgentId, 1, { permanent: false }).catch(
+        () => {},
+      ),
+    );
+  }
+
+  await Promise.allSettled(memberDeletes);
+
+  // Soft-delete the group itself
+  await deleteGroup(groupId, version, false);
+}

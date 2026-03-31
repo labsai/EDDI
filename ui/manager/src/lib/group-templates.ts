@@ -23,7 +23,7 @@ export interface GroupTemplate {
 export const GROUP_TEMPLATES: GroupTemplate[] = [
   {
     key: "advisory-board",
-    name: "Advisory Board (Beraterstab)",
+    name: "Advisory Board",
     description:
       "A panel of expert advisors consulting on strategic decisions. Each agent represents a different business function and provides domain-specific insights.",
     icon: "👔",
@@ -31,20 +31,10 @@ export const GROUP_TEMPLATES: GroupTemplate[] = [
     maxRounds: 2,
     roles: [
       { displayName: "Marketing Expert", role: "Marketing" },
-      { displayName: "Sales Strategist", role: "Sales" },
-      { displayName: "Product Manager", role: "Product" },
       { displayName: "Tech Lead", role: "Engineering" },
-      { displayName: "Legal Counsel", role: "Legal" },
       { displayName: "Finance Director", role: "Finance" },
-      { displayName: "HR Lead", role: "HR" },
-      { displayName: "Operations Manager", role: "Operations" },
-      { displayName: "Data Analyst", role: "Analytics" },
-      { displayName: "UX Researcher", role: "UX" },
-      { displayName: "Customer Success", role: "Customer Success" },
-      { displayName: "Compliance Officer", role: "Compliance" },
+      { displayName: "Legal Counsel", role: "Legal" },
       { displayName: "Strategy Consultant", role: "Strategy" },
-      { displayName: "Innovation Lead", role: "Innovation" },
-      { displayName: "Quality Assurance", role: "QA" },
     ],
     moderatorSuggested: true,
   },

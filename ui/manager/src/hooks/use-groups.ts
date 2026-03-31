@@ -11,6 +11,7 @@ import {
   getGroupConversation,
   listGroupConversations,
   deleteGroupConversation,
+  deleteGroupWithMembers,
   type AgentGroupConfiguration,
 } from "@/lib/api/groups";
 
@@ -154,6 +155,24 @@ export function useDeleteGroupConversation() {
     }) => deleteGroupConversation(groupId, conversationId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: GROUP_CONVERSATIONS_KEY });
+    },
+  });
+}
+
+export function useDeleteGroupWithMembers() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      groupId,
+      version,
+      config,
+    }: {
+      groupId: string;
+      version: number;
+      config: AgentGroupConfiguration;
+    }) => deleteGroupWithMembers(groupId, version, config),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: GROUPS_KEY });
     },
   });
 }

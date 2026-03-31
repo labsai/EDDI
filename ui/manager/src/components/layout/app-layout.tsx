@@ -7,6 +7,7 @@ import { ChatDrawer } from "@/components/chat/chat-drawer";
 import { WelcomeModal } from "@/components/onboarding/welcome-modal";
 import { GuidedTour } from "@/components/onboarding/guided-tour";
 import { TourOfferBar } from "@/components/onboarding/tour-offer-bar";
+import { MockDataBanner } from "./mock-data-banner";
 import { cn } from "@/lib/utils";
 
 export function AppLayout() {
@@ -60,6 +61,7 @@ export function AppLayout() {
 
       {/* Main content area */}
       <div className="flex flex-1 flex-col overflow-hidden">
+        <MockDataBanner />
         <TopBar
           onMenuClick={() => setMobileSidebarOpen(true)}
           sidebarVisible={mobileSidebarOpen}

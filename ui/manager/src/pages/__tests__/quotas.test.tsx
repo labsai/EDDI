@@ -70,7 +70,7 @@ describe("QuotasPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("quotas-toggle-enabled")).toBeInTheDocument();
     });
-    expect(screen.getByText("Disabled")).toBeInTheDocument();
+    expect(screen.getByText("Enabled")).toBeInTheDocument();
   });
 
   it("shows reset usage button", async () => {

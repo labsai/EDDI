@@ -430,6 +430,7 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
       // Finalize the debug turn so pipeline trace can display it
       debug.finalizeTurn();
       // Parse the snapshot from the done event to extract quickReplies
+      // and — if no tokens were streamed — the output text itself.
       // BEFORE calling finishStreaming (which sets isProcessing=false)
       // so that stale quick reply buttons never flash.
       let newQuickReplies: string[] = [];
@@ -441,6 +442,32 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
               snapshot.conversationOutputs.length - 1
             ];
             newQuickReplies = extractQuickReplies(lastOutput);
+
+            // When the backend uses structured JSON output (addToOutput=false
+            // with postResponse), no tokens are streamed — the actual text
+            // only appears in the done snapshot's conversationOutputs.
+            // Back-fill the agent message if it's still empty.
+            const msgs = store.getState().messages;
+            const lastMsg = msgs[msgs.length - 1];
+            if (lastMsg?.role === "agent" && !lastMsg.content.trim()) {
+              const snapshotText = extractOutput(lastOutput);
+              if (snapshotText) {
+                store.setState((s) => {
+                  const updated = [...s.messages];
+                  const prev = updated[updated.length - 1];
+                  if (prev) {
+                    updated[updated.length - 1] = {
+                      id: prev.id,
+                      role: prev.role,
+                      content: snapshotText,
+                      timestamp: prev.timestamp,
+                      isStreaming: prev.isStreaming,
+                    };
+                  }
+                  return { messages: updated };
+                });
+              }
+            }
           }
         } catch {
           // Ignore parse errors — done event data may be empty

@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import DOMPurify from "dompurify";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import type { TranscriptEntry, TranscriptEntryType } from "@/lib/api/groups";
+import type { TranscriptEntry, TranscriptEntryType, DiscussionStyle } from "@/lib/api/groups";
 import { ENTRY_TYPE_INFO } from "@/lib/api/groups";
 
 interface AgentResponseCardProps {
@@ -11,6 +11,8 @@ interface AgentResponseCardProps {
   isSpeaking?: boolean;
   /** When true, render HTML content (sanitized via DOMPurify). Off by default for safety. */
   allowHtml?: boolean;
+  /** Discussion style for style-aware badge colors */
+  discussionStyle?: DiscussionStyle;
   className?: string;
 }
 
@@ -73,7 +75,8 @@ function hasHtml(content: string): boolean {
 }
 
 function badgeVariant(
-  type: TranscriptEntryType
+  type: TranscriptEntryType,
+  _style?: DiscussionStyle
 ): "default" | "secondary" | "success" | "warning" | "destructive" | "outline" {
   switch (type) {
     case "SYNTHESIS":
@@ -94,7 +97,7 @@ function badgeVariant(
   }
 }
 
-export function AgentResponseCard({ entry, isSpeaking, allowHtml, className }: AgentResponseCardProps) {
+export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyle, className }: AgentResponseCardProps) {
   const { t } = useTranslation();
   const info = ENTRY_TYPE_INFO[entry.type];
   const isUser = entry.speakerAgentId === "user";
@@ -135,7 +138,7 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, className }: A
           <span className="text-sm font-semibold text-foreground">
             {entry.speakerDisplayName}
           </span>
-          <Badge variant={badgeVariant(entry.type)} className="text-[10px] px-1.5 py-0">
+          <Badge variant={badgeVariant(entry.type, discussionStyle)} className="text-[10px] px-1.5 py-0">
             {info.label}
           </Badge>
           {entry.targetAgentId && (
@@ -168,8 +171,11 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, className }: A
             </div>
           )
         ) : entry.errorReason ? (
-          <div className="text-sm text-destructive/80 italic">
-            {entry.errorReason}
+          <div className="flex items-center gap-2 text-sm text-muted-foreground italic">
+            <span className="text-[10px] rounded-full bg-muted px-2 py-0.5">
+              {entry.type === "SKIPPED" ? "⏭️ Skipped" : "⚠️ Error"}
+            </span>
+            <span className="text-xs">{entry.errorReason}</span>
           </div>
         ) : (
           <div className="text-sm text-muted-foreground italic">
@@ -180,4 +186,3 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, className }: A
     </div>
   );
 }
-

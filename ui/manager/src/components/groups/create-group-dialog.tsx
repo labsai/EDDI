@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { X, ChevronRight, ChevronLeft, Users, Plus, Trash2, GripVertical } from "lucide-react";
+import { X, ChevronRight, ChevronLeft, Users, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -304,64 +304,94 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                 </Button>
               </div>
 
-              <div className="space-y-2 max-h-[400px] overflow-y-auto">
+              <div className="space-y-2 max-h-[400px] overflow-y-auto pe-1">
                 {members.map((member, idx) => (
                   <div
                     key={idx}
-                    className="flex items-center gap-2 rounded-lg border border-border p-2 bg-secondary/20"
+                    className="rounded-lg border border-border overflow-hidden bg-card"
                   >
-                    <GripVertical className="h-4 w-4 text-muted-foreground shrink-0 cursor-grab" />
-                    <input
-                      value={member.displayName}
-                      onChange={(e) => updateMember(idx, { displayName: e.target.value })}
-                      className="flex-1 min-w-0 rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-                      placeholder="Display Name"
-                    />
-                    <select
-                      value={member.agentId}
-                      onChange={(e) => updateMember(idx, { agentId: e.target.value })}
-                      className="flex-1 min-w-0 rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-                    >
-                      <option value="">{t("groups.selectAgent", "Select agent…")}</option>
-                      {agents.map((agent) => (
-                        <option key={agent.id} value={agent.id}>
-                          {agent.name || agent.id.slice(0, 12)}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      value={member.role ?? ""}
-                      onChange={(e) => updateMember(idx, { role: e.target.value || null })}
-                      className="w-24 rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-                      placeholder="Role"
-                    />
-                    <select
-                      value={member.memberType ?? "AGENT"}
-                      onChange={(e) => updateMember(idx, { memberType: e.target.value as "AGENT" | "GROUP" })}
-                      className="w-20 rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-                    >
-                      <option value="AGENT">Agent</option>
-                      <option value="GROUP">Group</option>
-                    </select>
-                    <button
-                      onClick={() => removeMember(idx)}
-                      className="shrink-0 rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    {/* Card header — type toggle + name + delete */}
+                    <div className="flex items-center gap-2 px-3 py-2 bg-secondary/20">
+                      {/* Agent/Group type toggle — FIRST (prominent) */}
+                      <div className="flex items-center rounded-md border border-border bg-background overflow-hidden shrink-0">
+                        <button
+                          onClick={() => updateMember(idx, { memberType: "AGENT" })}
+                          className={cn(
+                            "px-2 py-0.5 text-[10px] font-medium transition-colors",
+                            member.memberType === "AGENT"
+                              ? "bg-primary text-primary-foreground"
+                              : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          Agent
+                        </button>
+                        <button
+                          onClick={() => updateMember(idx, { memberType: "GROUP" })}
+                          className={cn(
+                            "px-2 py-0.5 text-[10px] font-medium transition-colors",
+                            member.memberType === "GROUP"
+                              ? "bg-primary text-primary-foreground"
+                              : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          <Users className="inline h-2.5 w-2.5 me-0.5" />
+                          Group
+                        </button>
+                      </div>
+
+                      <input
+                        value={member.displayName}
+                        onChange={(e) => updateMember(idx, { displayName: e.target.value })}
+                        className="flex-1 min-w-0 bg-transparent text-xs font-semibold text-foreground focus:outline-none placeholder:text-muted-foreground"
+                        placeholder={t("groupWizard.displayName", "Display Name")}
+                      />
+
+                      <input
+                        value={member.role ?? ""}
+                        onChange={(e) => updateMember(idx, { role: e.target.value || null })}
+                        className="w-24 bg-transparent text-xs text-muted-foreground focus:outline-none placeholder:text-muted-foreground/50"
+                        placeholder={t("groupWizard.rolePlaceholder", "Role")}
+                      />
+
+                      <button
+                        onClick={() => removeMember(idx)}
+                        className="shrink-0 rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Card body — agent selector */}
+                    <div className="px-3 py-2">
+                      <select
+                        value={member.agentId}
+                        onChange={(e) => updateMember(idx, { agentId: e.target.value })}
+                        className={cn(
+                          "w-full rounded-md border bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring",
+                          !member.agentId ? "border-amber-400/50" : "border-input"
+                        )}
+                      >
+                        <option value="">{t("groups.selectAgent", "Select agent…")}</option>
+                        {agents.map((agent) => (
+                          <option key={agent.id} value={agent.id}>
+                            {agent.name || agent.id.slice(0, 12)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 ))}
               </div>
 
               {/* Moderator */}
-              <div>
-                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  {t("groups.moderator", "Moderator (for synthesis)")}
+              <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-3">
+                <label className="text-xs font-semibold text-foreground flex items-center gap-1.5 mb-2">
+                  ⭐ {t("groups.moderator", "Moderator (for synthesis)")}
                 </label>
                 <select
                   value={moderatorAgentId}
                   onChange={(e) => setModeratorAgentId(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 >
                   <option value="">{t("groups.noModerator", "No moderator")}</option>
                   {agents.map((agent) => (

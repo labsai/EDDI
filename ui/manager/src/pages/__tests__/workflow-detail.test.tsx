@@ -35,8 +35,8 @@ describe("WorkflowDetailPage", () => {
     renderPage();
 
     await waitFor(() => {
-      // MSW returns descriptor name "Support Workflow" for pkg1
-      expect(screen.getByText("Support Workflow")).toBeInTheDocument();
+      // MSW returns descriptor name "Support Ticket Pipeline" for pkg1
+      expect(screen.getByText("Support Ticket Pipeline")).toBeInTheDocument();
     });
   });
 

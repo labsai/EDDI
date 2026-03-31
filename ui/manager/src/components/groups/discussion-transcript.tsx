@@ -1,9 +1,9 @@
 import { useTranslation } from "react-i18next";
-import { MessageSquareQuote, Copy, CheckCircle2, Code } from "lucide-react";
+import { MessageSquareQuote, Copy, CheckCircle2, Code, ArrowRight } from "lucide-react";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { PhaseHeader } from "./phase-header";
 import { AgentResponseCard } from "./agent-response-card";
-import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType } from "@/lib/api/groups";
+import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle } from "@/lib/api/groups";
 import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,8 @@ interface DiscussionTranscriptProps {
   /** Live streaming state from SSE hook — takes priority over conversation */
   streamState?: GroupStreamState;
   isLoading?: boolean;
+  /** Discussion style for visual theming */
+  discussionStyle?: DiscussionStyle;
 }
 
 interface PhaseGroup {
@@ -22,6 +24,79 @@ interface PhaseGroup {
   phaseType: PhaseType;
   entries: TranscriptEntry[];
 }
+
+/** Style-aware accent colors for transcript theming */
+const STYLE_THEME: Record<DiscussionStyle, {
+  accent: string;
+  phaseAccent: string;
+  questionBg: string;
+  flowBg: string;
+  flowText: string;
+  progressBg: string;
+  progressText: string;
+  progressBorder: string;
+}> = {
+  ROUND_TABLE: {
+    accent: "text-amber-500",
+    phaseAccent: "border-amber-500/30 bg-amber-500/5",
+    questionBg: "bg-amber-500/5 border-b-amber-500/20",
+    flowBg: "bg-amber-500/10",
+    flowText: "text-amber-600 dark:text-amber-400",
+    progressBg: "bg-amber-500/5",
+    progressText: "text-amber-600 dark:text-amber-400",
+    progressBorder: "border-amber-500/20",
+  },
+  PEER_REVIEW: {
+    accent: "text-teal-500",
+    phaseAccent: "border-teal-500/30 bg-teal-500/5",
+    questionBg: "bg-teal-500/5 border-b-teal-500/20",
+    flowBg: "bg-teal-500/10",
+    flowText: "text-teal-600 dark:text-teal-400",
+    progressBg: "bg-teal-500/5",
+    progressText: "text-teal-600 dark:text-teal-400",
+    progressBorder: "border-teal-500/20",
+  },
+  DEVIL_ADVOCATE: {
+    accent: "text-rose-500",
+    phaseAccent: "border-rose-500/30 bg-rose-500/5",
+    questionBg: "bg-rose-500/5 border-b-rose-500/20",
+    flowBg: "bg-rose-500/10",
+    flowText: "text-rose-600 dark:text-rose-400",
+    progressBg: "bg-rose-500/5",
+    progressText: "text-rose-600 dark:text-rose-400",
+    progressBorder: "border-rose-500/20",
+  },
+  DELPHI: {
+    accent: "text-violet-500",
+    phaseAccent: "border-violet-500/30 bg-violet-500/5",
+    questionBg: "bg-violet-500/5 border-b-violet-500/20",
+    flowBg: "bg-violet-500/10",
+    flowText: "text-violet-600 dark:text-violet-400",
+    progressBg: "bg-violet-500/5",
+    progressText: "text-violet-600 dark:text-violet-400",
+    progressBorder: "border-violet-500/20",
+  },
+  DEBATE: {
+    accent: "text-indigo-500",
+    phaseAccent: "border-indigo-500/30 bg-indigo-500/5",
+    questionBg: "bg-indigo-500/5 border-b-indigo-500/20",
+    flowBg: "bg-indigo-500/10",
+    flowText: "text-indigo-600 dark:text-indigo-400",
+    progressBg: "bg-indigo-500/5",
+    progressText: "text-indigo-600 dark:text-indigo-400",
+    progressBorder: "border-indigo-500/20",
+  },
+  CUSTOM: {
+    accent: "text-primary",
+    phaseAccent: "border-primary/30 bg-primary/5",
+    questionBg: "bg-card/50",
+    flowBg: "bg-primary/10",
+    flowText: "text-primary",
+    progressBg: "bg-primary/5",
+    progressText: "text-primary",
+    progressBorder: "border-primary/20",
+  },
+};
 
 /** Infer PhaseType from TranscriptEntryType */
 function entryTypeToPhaseType(type: TranscriptEntryType): PhaseType {
@@ -76,11 +151,16 @@ export function DiscussionTranscript({
   conversation,
   streamState,
   isLoading,
+  discussionStyle,
 }: DiscussionTranscriptProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [allowHtml, setAllowHtml] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Resolve theme colors
+  const style = discussionStyle || "ROUND_TABLE";
+  const theme = STYLE_THEME[style] || STYLE_THEME.ROUND_TABLE;
 
   // Determine the effective data source: streaming or static
   const isStreaming = !!streamState && (streamState.isStreaming || streamState.state !== "CREATED");
@@ -158,10 +238,10 @@ export function DiscussionTranscript({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Question header */}
-      <div className="border-b border-border p-4 bg-card/50">
+      {/* Question header — style-aware background */}
+      <div className={cn("border-b p-4", theme.questionBg)}>
         <div className="flex items-start gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold shrink-0">
+          <div className={cn("flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white shrink-0 bg-primary")}>
             Q
           </div>
           <div className="flex-1 min-w-0">
@@ -173,7 +253,7 @@ export function DiscussionTranscript({
                 {stateLabel}
               </Badge>
               {isStreaming && (
-                <Badge variant="outline" className="text-[10px] text-primary border-primary/30 animate-pulse">
+                <Badge variant="outline" className={cn("text-[10px] animate-pulse border-current", theme.accent)}>
                   ● LIVE
                 </Badge>
               )}
@@ -202,6 +282,27 @@ export function DiscussionTranscript({
         </div>
       </div>
 
+      {/* Phase flow indicator — shows the style's phases as breadcrumb */}
+      {style !== "CUSTOM" && (
+        <div className={cn("flex items-center gap-1 px-4 py-1.5 border-b border-border", theme.flowBg)}>
+          {(STYLE_INFO_FLOW[style] || []).map((step, idx, arr) => (
+            <span key={idx} className="flex items-center gap-1">
+              <span className={cn(
+                "text-[10px] font-medium rounded px-1.5 py-0.5",
+                effectiveCurrentPhase?.toLowerCase().includes(step.toLowerCase())
+                  ? `${theme.flowText} font-bold`
+                  : "text-muted-foreground"
+              )}>
+                {step}
+              </span>
+              {idx < arr.length - 1 && (
+                <ArrowRight className="h-2.5 w-2.5 text-muted-foreground/50" />
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Transcript body */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
         {phases.map((phase, idx) => (
@@ -222,6 +323,7 @@ export function DiscussionTranscript({
                 entry={entry}
                 isSpeaking={activeSpeakers.has(entry.speakerAgentId) && entry.content === null}
                 allowHtml={allowHtml}
+                discussionStyle={style}
               />
             ))}
           </PhaseHeader>
@@ -264,15 +366,15 @@ export function DiscussionTranscript({
           </div>
         )}
 
-        {/* In-progress indicator */}
+        {/* In-progress indicator — style-aware */}
         {(effectiveState === "IN_PROGRESS" || effectiveState === "SYNTHESIZING") && (
-          <div className="flex items-center gap-3 p-3 rounded-lg bg-primary/5 border border-primary/20">
+          <div className={cn("flex items-center gap-3 p-3 rounded-lg border", theme.progressBg, theme.progressBorder)}>
             <div className="flex gap-1">
-              <span className="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:0ms]" />
-              <span className="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:150ms]" />
-              <span className="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
+              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:0ms]", theme.accent.replace("text-", "bg-"))} />
+              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:150ms]", theme.accent.replace("text-", "bg-"))} />
+              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:300ms]", theme.accent.replace("text-", "bg-"))} />
             </div>
-            <span className="text-sm text-primary font-medium">
+            <span className={cn("text-sm font-medium", theme.progressText)}>
               {effectiveState === "SYNTHESIZING"
                 ? t("groups.synthesizing", "Moderator is synthesizing…")
                 : t("groups.discussing", "Agents are discussing…")}
@@ -301,3 +403,14 @@ export function DiscussionTranscript({
   );
 }
 
+/** Phase flow steps per discussion style for the breadcrumb indicator */
+const STYLE_INFO_FLOW: Record<string, string[]> = {
+  ROUND_TABLE: ["Opinion", "Discussion", "Synthesis"],
+  PEER_REVIEW: ["Opinion", "Critique", "Revision", "Synthesis"],
+  DEVIL_ADVOCATE: ["Opinion", "Challenge", "Defense", "Synthesis"],
+  DELPHI: ["Independent", "Anonymous", "Revised", "Synthesis"],
+  DEBATE: ["Pro Opening", "Con Opening", "Rebuttals", "Judgment"],
+};
+
+// Re-export for use in group-detail
+export { STYLE_THEME };
