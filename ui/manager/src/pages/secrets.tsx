@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -11,11 +11,12 @@ import {
   X,
   Eye,
   EyeOff,
-  ChevronDown,
-  Bot,
   Info,
   AlertTriangle,
   ExternalLink,
+  Copy,
+  RefreshCw,
+  FileText,
 } from "lucide-react";
 import {
   useSecrets,
@@ -23,8 +24,6 @@ import {
   useDeleteSecret,
   useVaultHealth,
 } from "@/hooks/use-secrets";
-import { useAgentDescriptors } from "@/hooks/use-agents";
-import { parseResourceUri } from "@/lib/api/agents";
 import type { SecretMetadata } from "@/lib/api/secrets";
 
 const DEFAULT_TENANT = "default";
@@ -34,42 +33,41 @@ export function SecretsPage() {
 
   /* ─── Namespace state ─── */
   const [tenantId, setTenantId] = useState(DEFAULT_TENANT);
-  const [agentId, setAgentId] = useState("");
-
-  /* ─── Agent descriptors for the selector ─── */
-  const { data: agentDescriptors } = useAgentDescriptors(100);
-  const agents = useMemo(() => {
-    if (!agentDescriptors) return [];
-    return agentDescriptors.map((d) => {
-      const { id } = parseResourceUri(d.resource);
-      return { id, name: d.name || id };
-    });
-  }, [agentDescriptors]);
-
-  // Auto-select first agent when agents load and none is selected
-  useEffect(() => {
-    if (!agentId && agents.length > 0) {
-      setAgentId(agents[0]!.id);
-    }
-  }, [agents, agentId]);
 
   /* ─── Dialog state ─── */
   const [showCreate, setShowCreate] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
   const [newValue, setNewValue] = useState("");
+  const [newDescription, setNewDescription] = useState("");
   const [valueVisible, setValueVisible] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SecretMetadata | null>(null);
 
-  /* ─── Queries (auto-fetches when agentId changes) ─── */
-  const {
-    data: secrets,
-    isLoading,
-  } = useSecrets(tenantId, agentId);
+  /* ─── Queries ─── */
+  const { data: secrets, isLoading } = useSecrets(tenantId);
   const { data: vaultHealth } = useVaultHealth();
   const storeMut = useStoreSecret();
   const deleteMut = useDeleteSecret();
 
   const vaultDown = vaultHealth?.available === false;
+
+  /* ─── Copy vault reference ─── */
+  const copyRef = useCallback(
+    (keyName: string) => {
+      const ref =
+        tenantId === DEFAULT_TENANT
+          ? `\${eddivault:${keyName}}`
+          : `\${eddivault:${tenantId}/${keyName}}`;
+      navigator.clipboard.writeText(ref).then(() => {
+        toast.success(
+          t("secrets.refCopied", {
+            ref,
+            defaultValue: `Copied: ${ref}`,
+          }),
+        );
+      });
+    },
+    [tenantId, t],
+  );
 
   /* ─── Handlers ─── */
   const handleCreate = useCallback(() => {
@@ -77,9 +75,9 @@ export function SecretsPage() {
     storeMut.mutate(
       {
         tenantId,
-        agentId,
         keyName: newKeyName.trim(),
         value: newValue.trim(),
+        description: newDescription.trim() || undefined,
       },
       {
         onSuccess: () => {
@@ -92,20 +90,20 @@ export function SecretsPage() {
           setShowCreate(false);
           setNewKeyName("");
           setNewValue("");
+          setNewDescription("");
           setValueVisible(false);
         },
         onError: (err) =>
           toast.error(err instanceof Error ? err.message : String(err)),
       },
     );
-  }, [tenantId, agentId, newKeyName, newValue, storeMut, t]);
+  }, [tenantId, newKeyName, newValue, newDescription, storeMut, t]);
 
   const handleDelete = useCallback(() => {
     if (!deleteTarget) return;
     deleteMut.mutate(
       {
         tenantId: deleteTarget.tenantId,
-        agentId: deleteTarget.agentId,
         keyName: deleteTarget.keyName,
       },
       {
@@ -136,7 +134,14 @@ export function SecretsPage() {
     }
   };
 
-  const selectedAgentName = agents.find((a) => a.id === agentId)?.name;
+  /** Build the short-form or full-form vault reference string for display */
+  const refString = useMemo(
+    () => (keyName: string) =>
+      tenantId === DEFAULT_TENANT
+        ? `\${eddivault:${keyName}}`
+        : `\${eddivault:${tenantId}/${keyName}}`,
+    [tenantId],
+  );
 
   return (
     <div className="space-y-6 p-6" data-testid="secrets-page">
@@ -149,18 +154,20 @@ export function SecretsPage() {
           <p className="mt-1 text-sm text-muted-foreground">
             {t(
               "secrets.description",
-              "Manage encrypted secrets stored in the vault. Values are never exposed.",
+              "Manage encrypted secrets shared across all agents in a tenant. Values are never exposed.",
             )}
           </p>
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => setShowCreate(true)}
-            disabled={!agentId || vaultDown}
-            title={vaultDown
-              ? t("secrets.vaultNotConfigured", "Secrets vault is not configured")
-              : !agentId
-                ? t("secrets.selectAgentFirst", "Select an agent first — secrets are scoped per agent")
+            disabled={vaultDown}
+            title={
+              vaultDown
+                ? t(
+                    "secrets.vaultNotConfigured",
+                    "Secrets vault is not configured",
+                  )
                 : undefined
             }
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
@@ -174,19 +181,30 @@ export function SecretsPage() {
 
       {/* Vault status banner */}
       {vaultDown ? (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-4 space-y-2" data-testid="vault-not-configured">
+        <div
+          className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-4"
+          data-testid="vault-not-configured"
+        >
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
             <span className="text-sm font-semibold text-destructive">
-              {vaultHealth?.error || t("secrets.vaultNotConfigured", "Secrets Vault is not configured")}
+              {vaultHealth?.error ||
+                t(
+                  "secrets.vaultNotConfigured",
+                  "Secrets Vault is not configured",
+                )}
             </span>
           </div>
           {vaultHealth?.reason && (
-            <p className="text-xs text-muted-foreground">{vaultHealth.reason}</p>
+            <p className="text-xs text-muted-foreground">
+              {vaultHealth.reason}
+            </p>
           )}
           {vaultHealth?.action && (
             <div className="rounded-md bg-muted/50 px-3 py-2">
-              <code className="text-xs text-foreground break-all">{vaultHealth.action}</code>
+              <code className="break-all text-xs text-foreground">
+                {vaultHealth.action}
+              </code>
             </div>
           )}
           {vaultHealth?.docs && (
@@ -204,19 +222,24 @@ export function SecretsPage() {
       ) : (
         <div className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-          <p className="text-xs text-muted-foreground">
-            {t(
-              "secrets.scopeExplanation",
-              "Secrets are scoped per agent — each agent has its own isolated vault namespace. Select an agent below to view and manage its secrets.",
-            )}
-          </p>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "secrets.scopeExplanation",
+                "Secrets are scoped per tenant and shared across all agents. Reference them in configs with ${eddivault:keyName}. Access is controlled by configuration authorship — only admins who write the config decide which secrets to use.",
+              )}
+            </p>
+          </div>
         </div>
       )}
 
-      {/* Namespace selectors */}
+      {/* Tenant selector */}
       <div className="flex flex-wrap items-end gap-4">
         <div className="flex flex-col gap-1.5">
-          <label htmlFor="secrets-tenant-input" className="text-xs font-medium text-muted-foreground">
+          <label
+            htmlFor="secrets-tenant-input"
+            className="text-xs font-medium text-muted-foreground"
+          >
             {t("secrets.tenantId", "Tenant ID")}
           </label>
           <input
@@ -229,29 +252,6 @@ export function SecretsPage() {
             data-testid="tenant-input"
           />
         </div>
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="secrets-agent-select" className="text-xs font-medium text-muted-foreground">
-            {t("secrets.agentId", "Agent ID")}
-          </label>
-          <div className="relative">
-            <select
-              id="secrets-agent-select"
-              value={agentId}
-              onChange={(e) => setAgentId(e.target.value)}
-              className="h-9 w-72 appearance-none rounded-lg border border-input bg-background pe-8 ps-9 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-              data-testid="agent-id-input"
-            >
-              <option value="">{t("secrets.selectAgent", "Select an agent…")}</option>
-              {agents.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name} ({a.id})
-                </option>
-              ))}
-            </select>
-            <Bot className="pointer-events-none absolute inset-s-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <ChevronDown className="pointer-events-none absolute inset-e-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          </div>
-        </div>
         {isLoading && (
           <div className="flex h-9 items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -261,13 +261,14 @@ export function SecretsPage() {
       </div>
 
       {/* Secrets table */}
-      {agentId && secrets && secrets.length > 0 && (
+      {secrets && secrets.length > 0 && (
         <div className="rounded-xl border border-border bg-card shadow-sm">
           <div className="border-b border-border px-4 py-3">
             <h2 className="text-sm font-semibold text-foreground">
               {t("secrets.tableTitle", {
-                agent: selectedAgentName || agentId,
-                defaultValue: `Secrets for ${selectedAgentName || agentId}`,
+                tenant: tenantId,
+                count: secrets.length,
+                defaultValue: `${secrets.length} secret${secrets.length === 1 ? "" : "s"} in tenant "${tenantId}"`,
               })}
             </h2>
           </div>
@@ -280,14 +281,23 @@ export function SecretsPage() {
                   </th>
                   <th className="px-4 py-3 text-start font-semibold text-foreground">
                     <span className="inline-flex items-center gap-1.5">
+                      <FileText className="h-3.5 w-3.5" />
+                      {t("secrets.descriptionCol", "Description")}
+                    </span>
+                  </th>
+                  <th className="px-4 py-3 text-start font-semibold text-foreground">
+                    {t("secrets.reference", "Reference")}
+                  </th>
+                  <th className="px-4 py-3 text-start font-semibold text-foreground">
+                    <span className="inline-flex items-center gap-1.5">
                       <Clock className="h-3.5 w-3.5" />
                       {t("secrets.created", "Created")}
                     </span>
                   </th>
                   <th className="px-4 py-3 text-start font-semibold text-foreground">
                     <span className="inline-flex items-center gap-1.5">
-                      <Clock className="h-3.5 w-3.5" />
-                      {t("secrets.lastAccessed", "Last Accessed")}
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      {t("secrets.lastRotated", "Last Rotated")}
                     </span>
                   </th>
                   <th className="px-4 py-3 text-start font-semibold text-foreground">
@@ -304,7 +314,7 @@ export function SecretsPage() {
               <tbody className="divide-y divide-border">
                 {secrets.map((s) => (
                   <tr
-                    key={`${s.tenantId}-${s.agentId}-${s.keyName}`}
+                    key={`${s.tenantId}-${s.keyName}`}
                     className="transition-colors hover:bg-muted/50"
                   >
                     <td className="px-4 py-3">
@@ -315,15 +325,33 @@ export function SecretsPage() {
                         </span>
                       </span>
                     </td>
+                    <td className="max-w-48 px-4 py-3 text-muted-foreground">
+                      <span className="line-clamp-1">
+                        {s.description || "—"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => copyRef(s.keyName)}
+                        className="inline-flex items-center gap-1.5 rounded-md bg-muted/50 px-2 py-1 font-mono text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        title={t("secrets.copyRef", "Copy vault reference")}
+                        data-testid={`copy-ref-${s.keyName}`}
+                      >
+                        <Copy className="h-3 w-3" />
+                        {refString(s.keyName)}
+                      </button>
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {formatDate(s.createdAt)}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {formatDate(s.lastAccessedAt)}
+                      {formatDate(s.lastRotatedAt)}
                     </td>
                     <td className="px-4 py-3">
                       <span className="font-mono text-xs text-muted-foreground">
-                        {s.checksum ? s.checksum.substring(0, 12) + "…" : "—"}
+                        {s.checksum
+                          ? s.checksum.substring(0, 12) + "…"
+                          : "—"}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-end">
@@ -331,9 +359,15 @@ export function SecretsPage() {
                         onClick={() => setDeleteTarget(s)}
                         className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
                         data-testid={`delete-${s.keyName}`}
-                        aria-label={t("secrets.deleteKey", { key: s.keyName, defaultValue: `Delete ${s.keyName}` })}
+                        aria-label={t("secrets.deleteKey", {
+                          key: s.keyName,
+                          defaultValue: `Delete ${s.keyName}`,
+                        })}
                       >
-                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                        <Trash2
+                          className="h-3.5 w-3.5"
+                          aria-hidden="true"
+                        />
                         {t("common.delete", "Delete")}
                       </button>
                     </td>
@@ -345,37 +379,18 @@ export function SecretsPage() {
         </div>
       )}
 
-      {/* Empty state — agent selected but no secrets */}
-      {agentId && secrets && secrets.length === 0 && (
+      {/* Empty state */}
+      {secrets && secrets.length === 0 && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border p-12 text-center">
           <KeyRound className="h-12 w-12 text-muted-foreground/30" />
           <p className="mt-4 text-lg font-medium text-foreground">
             {t("secrets.empty", "No secrets found")}
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
-            {t(
-              "secrets.emptyHintAgent",
-              {
-                agent: selectedAgentName || agentId,
-                defaultValue: `No secrets stored for ${selectedAgentName || agentId} yet. Click "Add Secret" to create one.`,
-              },
-            )}
-          </p>
-        </div>
-      )}
-
-      {/* Not loaded yet (no agentId) */}
-      {!agentId && (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border p-12 text-center">
-          <KeyRound className="h-12 w-12 text-muted-foreground/30" />
-          <p className="mt-4 text-lg font-medium text-foreground">
-            {t("secrets.enterAgentId", "Enter an Agent ID")}
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t(
-              "secrets.enterAgentIdHint",
-              "Specify an Agent ID above to view and manage its secrets.",
-            )}
+            {t("secrets.emptyHint", {
+              tenant: tenantId,
+              defaultValue: `No secrets stored for tenant "${tenantId}" yet. Click "Add Secret" to create one.`,
+            })}
           </p>
         </div>
       )}
@@ -388,6 +403,7 @@ export function SecretsPage() {
             setShowCreate(false);
             setNewKeyName("");
             setNewValue("");
+            setNewDescription("");
             setValueVisible(false);
           }}
           onKeyDown={(e) => {
@@ -395,6 +411,7 @@ export function SecretsPage() {
               setShowCreate(false);
               setNewKeyName("");
               setNewValue("");
+              setNewDescription("");
               setValueVisible(false);
             }
           }}
@@ -407,7 +424,10 @@ export function SecretsPage() {
             aria-labelledby="create-secret-title"
           >
             <div className="flex items-center justify-between">
-              <h2 id="create-secret-title" className="text-lg font-semibold text-foreground">
+              <h2
+                id="create-secret-title"
+                className="text-lg font-semibold text-foreground"
+              >
                 {t("secrets.createTitle", "Add Secret")}
               </h2>
               <button
@@ -415,6 +435,7 @@ export function SecretsPage() {
                   setShowCreate(false);
                   setNewKeyName("");
                   setNewValue("");
+                  setNewDescription("");
                   setValueVisible(false);
                 }}
                 className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted"
@@ -423,21 +444,23 @@ export function SecretsPage() {
               </button>
             </div>
 
-            {/* Show which agent the secret is for */}
+            {/* Tenant context badge */}
             <div className="mt-3 flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-              <Bot className="h-3.5 w-3.5 shrink-0" />
+              <KeyRound className="h-3.5 w-3.5 shrink-0" />
               <span>
                 {t("secrets.creatingFor", {
                   tenant: tenantId,
-                  agent: selectedAgentName || agentId,
-                  defaultValue: `Creating secret for ${selectedAgentName || agentId} (tenant: ${tenantId})`,
+                  defaultValue: `Storing in tenant "${tenantId}" — available to all agents`,
                 })}
               </span>
             </div>
 
             <div className="mt-4 space-y-4">
               <div>
-                <label htmlFor="new-key-name" className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                <label
+                  htmlFor="new-key-name"
+                  className="mb-1.5 block text-xs font-medium text-muted-foreground"
+                >
                   {t("secrets.keyNameLabel", "Key Name")}
                 </label>
                 <input
@@ -447,16 +470,27 @@ export function SecretsPage() {
                   onChange={(e) => setNewKeyName(e.target.value)}
                   placeholder={t(
                     "secrets.keyNamePlaceholder",
-                    "e.g. apiKey, dbPassword",
+                    "e.g. openaiKey, dbPassword",
                   )}
                   className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                   data-testid="new-key-input"
                   autoComplete="off"
                   autoFocus
                 />
+                {newKeyName.trim() && (
+                  <p className="mt-1 font-mono text-xs text-muted-foreground">
+                    {t("secrets.willUseRef", "Reference:")}{" "}
+                    <code className="rounded bg-muted px-1 py-0.5">
+                      {refString(newKeyName.trim())}
+                    </code>
+                  </p>
+                )}
               </div>
               <div>
-                <label htmlFor="new-secret-value" className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                <label
+                  htmlFor="new-secret-value"
+                  className="mb-1.5 block text-xs font-medium text-muted-foreground"
+                >
                   {t("secrets.valueLabel", "Secret Value")}
                 </label>
                 <div className="relative">
@@ -465,7 +499,10 @@ export function SecretsPage() {
                     type={valueVisible ? "text" : "password"}
                     value={newValue}
                     onChange={(e) => setNewValue(e.target.value)}
-                    placeholder={t("secrets.valuePlaceholder", "Enter secret value…")}
+                    placeholder={t(
+                      "secrets.valuePlaceholder",
+                      "Enter secret value…",
+                    )}
                     className="h-9 w-full rounded-lg border border-input bg-background pe-10 ps-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                     data-testid="new-value-input"
                     autoComplete="new-password"
@@ -474,7 +511,11 @@ export function SecretsPage() {
                     type="button"
                     onClick={() => setValueVisible(!valueVisible)}
                     className="absolute inset-e-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    aria-label={valueVisible ? t("secrets.hideValue", "Hide value") : t("secrets.showValue", "Show value")}
+                    aria-label={
+                      valueVisible
+                        ? t("secrets.hideValue", "Hide value")
+                        : t("secrets.showValue", "Show value")
+                    }
                     data-testid="new-value-eye"
                   >
                     {valueVisible ? (
@@ -485,10 +526,31 @@ export function SecretsPage() {
                   </button>
                 </div>
               </div>
+              <div>
+                <label
+                  htmlFor="new-description"
+                  className="mb-1.5 block text-xs font-medium text-muted-foreground"
+                >
+                  {t("secrets.descriptionLabel", "Description (optional)")}
+                </label>
+                <input
+                  id="new-description"
+                  type="text"
+                  value={newDescription}
+                  onChange={(e) => setNewDescription(e.target.value)}
+                  placeholder={t(
+                    "secrets.descriptionPlaceholder",
+                    "e.g. OpenAI API key for production",
+                  )}
+                  className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  data-testid="new-description-input"
+                  autoComplete="off"
+                />
+              </div>
               <p className="text-xs text-muted-foreground">
                 {t(
                   "secrets.storeWarning",
-                  "The value will be encrypted. It cannot be retrieved once stored.",
+                  "The value will be encrypted with AES-256-GCM. It cannot be retrieved once stored — only replaced.",
                 )}
               </p>
             </div>
@@ -499,6 +561,7 @@ export function SecretsPage() {
                   setShowCreate(false);
                   setNewKeyName("");
                   setNewValue("");
+                  setNewDescription("");
                   setValueVisible(false);
                 }}
                 className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
@@ -508,7 +571,9 @@ export function SecretsPage() {
               <button
                 onClick={handleCreate}
                 disabled={
-                  !newKeyName.trim() || !newValue.trim() || storeMut.isPending
+                  !newKeyName.trim() ||
+                  !newValue.trim() ||
+                  storeMut.isPending
                 }
                 className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 data-testid="confirm-create-button"
@@ -540,13 +605,19 @@ export function SecretsPage() {
             aria-labelledby="delete-secret-title"
             aria-describedby="delete-secret-desc"
           >
-            <h2 id="delete-secret-title" className="text-lg font-semibold text-foreground">
+            <h2
+              id="delete-secret-title"
+              className="text-lg font-semibold text-foreground"
+            >
               {t("secrets.confirmDeleteTitle", "Delete Secret")}
             </h2>
-            <p id="delete-secret-desc" className="mt-2 text-sm text-muted-foreground">
+            <p
+              id="delete-secret-desc"
+              className="mt-2 text-sm text-muted-foreground"
+            >
               {t("secrets.confirmDeleteMessage", {
                 key: deleteTarget.keyName,
-                defaultValue: `Are you sure you want to permanently delete "${deleteTarget.keyName}"? This cannot be undone.`,
+                defaultValue: `Are you sure you want to permanently delete "${deleteTarget.keyName}"? Any agent configs using this secret will fail to resolve. This cannot be undone.`,
               })}
             </p>
             <div className="mt-6 flex justify-end gap-2">

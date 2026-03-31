@@ -10,19 +10,18 @@ import {
 
 const secretKeys = {
   all: ["secrets"] as const,
-  list: (tenantId: string, agentId: string) =>
-    ["secrets", "list", tenantId, agentId] as const,
+  list: (tenantId: string) => ["secrets", "list", tenantId] as const,
   health: ["secrets", "health"] as const,
 };
 
 /* ─── Hooks ─── */
 
-/** List secrets for a tenant+agent namespace. */
-export function useSecrets(tenantId: string, agentId: string) {
+/** List secrets for a tenant. */
+export function useSecrets(tenantId: string) {
   return useQuery({
-    queryKey: secretKeys.list(tenantId, agentId),
-    queryFn: () => listSecrets(tenantId, agentId),
-    enabled: !!tenantId && !!agentId,
+    queryKey: secretKeys.list(tenantId),
+    queryFn: () => listSecrets(tenantId),
+    enabled: !!tenantId,
   });
 }
 
@@ -32,13 +31,21 @@ export function useStoreSecret() {
   return useMutation({
     mutationFn: (args: {
       tenantId: string;
-      agentId: string;
       keyName: string;
       value: string;
-    }) => storeSecret(args.tenantId, args.agentId, args.keyName, args.value),
+      description?: string;
+      allowedAgents?: string[];
+    }) =>
+      storeSecret(
+        args.tenantId,
+        args.keyName,
+        args.value,
+        args.description,
+        args.allowedAgents,
+      ),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({
-        queryKey: secretKeys.list(vars.tenantId, vars.agentId),
+        queryKey: secretKeys.list(vars.tenantId),
       });
     },
   });
@@ -48,14 +55,11 @@ export function useStoreSecret() {
 export function useDeleteSecret() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: {
-      tenantId: string;
-      agentId: string;
-      keyName: string;
-    }) => deleteSecret(args.tenantId, args.agentId, args.keyName),
+    mutationFn: (args: { tenantId: string; keyName: string }) =>
+      deleteSecret(args.tenantId, args.keyName),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({
-        queryKey: secretKeys.list(vars.tenantId, vars.agentId),
+        queryKey: secretKeys.list(vars.tenantId),
       });
     },
   });

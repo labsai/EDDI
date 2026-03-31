@@ -2,21 +2,24 @@
 
 export interface SecretMetadata {
   tenantId: string;
-  agentId: string;
   keyName: string;
-  createdAt: string;   // ISO instant
+  createdAt: string; // ISO instant
   lastAccessedAt: string | null;
+  lastRotatedAt: string | null;
   checksum: string;
+  description: string | null;
+  allowedAgents: string[]; // ["*"] = all agents
 }
 
 export interface SecretStoreRequest {
   value: string;
+  description?: string;
+  allowedAgents?: string[];
 }
 
 export interface SecretStoreResponse {
   reference: string;
   tenantId: string;
-  agentId: string;
   keyName: string;
 }
 
@@ -38,12 +41,13 @@ export interface VaultHealth {
 
 const BASE = "/secretstore/secrets";
 
-/** List all secrets for a given tenant+agent namespace. */
+/** List all secrets for a given tenant. */
 export async function listSecrets(
   tenantId: string,
-  agentId: string,
 ): Promise<SecretMetadata[]> {
-  const res = await fetch(`${window.location.origin}${BASE}/${tenantId}/${agentId}`);
+  const res = await fetch(
+    `${window.location.origin}${BASE}/${tenantId}`,
+  );
   if (!res.ok) return [];
   return res.json();
 }
@@ -51,21 +55,28 @@ export async function listSecrets(
 /** Store (create or update) a secret. */
 export async function storeSecret(
   tenantId: string,
-  agentId: string,
   keyName: string,
   value: string,
+  description?: string,
+  allowedAgents?: string[],
 ): Promise<SecretStoreResponse> {
+  const body: SecretStoreRequest = { value };
+  if (description) body.description = description;
+  if (allowedAgents) body.allowedAgents = allowedAgents;
+
   const res = await fetch(
-    `${window.location.origin}${BASE}/${tenantId}/${agentId}/${keyName}`,
+    `${window.location.origin}${BASE}/${tenantId}/${keyName}`,
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ value }),
+      body: JSON.stringify(body),
     },
   );
   if (!res.ok) {
     if (res.status === 503) {
-      throw new Error("Secrets vault is not configured. Set up a secret provider in the EDDI backend.");
+      throw new Error(
+        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
+      );
     }
     const err = await res.json().catch(() => ({ error: "Unknown error" }));
     throw new Error(err.error || `Failed to store secret (HTTP ${res.status})`);
@@ -76,19 +87,22 @@ export async function storeSecret(
 /** Delete a secret from the vault. */
 export async function deleteSecret(
   tenantId: string,
-  agentId: string,
   keyName: string,
 ): Promise<void> {
   const res = await fetch(
-    `${window.location.origin}${BASE}/${tenantId}/${agentId}/${keyName}`,
+    `${window.location.origin}${BASE}/${tenantId}/${keyName}`,
     { method: "DELETE" },
   );
   if (!res.ok && res.status !== 204) {
     if (res.status === 503) {
-      throw new Error("Secrets vault is not configured. Set up a secret provider in the EDDI backend.");
+      throw new Error(
+        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
+      );
     }
     const err = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(err.error || `Failed to delete secret (HTTP ${res.status})`);
+    throw new Error(
+      err.error || `Failed to delete secret (HTTP ${res.status})`,
+    );
   }
 }
 

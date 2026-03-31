@@ -44,9 +44,10 @@ describe("WorkflowDetailPage", () => {
     renderPage();
 
     await waitFor(() => {
-      // MSW returns a package with 2 extensions (behavior + langchain)
+      // MSW returns a 5-step pipeline (parser → rules → property → llm → output)
       expect(screen.getByText("Rules")).toBeInTheDocument();
       expect(screen.getByText("LLM")).toBeInTheDocument();
+      expect(screen.getByText("Output")).toBeInTheDocument();
     });
   });
 

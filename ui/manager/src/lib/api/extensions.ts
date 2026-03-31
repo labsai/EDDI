@@ -37,7 +37,6 @@ export const EXTENSION_TYPE_INFO: Record<
   { label: string; icon: string; order: number }
 > = {
   "ai.labs.parser": { label: "Input Parser", icon: "FileText", order: 1 },
-  "ai.labs.behavior": { label: "Rules", icon: "GitBranch", order: 2 },
   "ai.labs.rules": { label: "Rules", icon: "GitBranch", order: 2 },
   "ai.labs.property": { label: "Property Setter", icon: "Settings", order: 3 },
   "ai.labs.httpcalls": { label: "HTTP Calls", icon: "Globe", order: 4 },
@@ -60,7 +59,6 @@ export function getExtensionLabel(type: string): string {
  * are not included — they use embedded config or have no separate store.
  */
 export const EXTENSION_TO_RESOURCE_SLUG: Record<string, string> = {
-  "ai.labs.behavior": "rules",
   "ai.labs.rules": "rules",
   "ai.labs.httpcalls": "apicalls",
   "ai.labs.apicalls": "apicalls",

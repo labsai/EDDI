@@ -26,23 +26,13 @@ function renderSecrets() {
   );
 }
 
-/** Select an agent from the dropdown (now a <select> instead of text input) */
-async function selectAgent(user: ReturnType<typeof userEvent.setup>, agentId = "agent1") {
-  // Wait for agent descriptors to load into the <select>
-  const select = screen.getByTestId("agent-id-input");
-  await waitFor(() => {
-    expect(select.querySelectorAll("option").length).toBeGreaterThan(1);
-  });
-  await user.selectOptions(select, agentId);
-}
-
 describe("SecretsPage", () => {
   it("renders the page title and description", () => {
     renderSecrets();
     expect(screen.getByText("Secrets Vault")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Manage encrypted secrets stored in the vault. Values are never exposed."
+        /Manage encrypted secrets shared across all agents/
       )
     ).toBeInTheDocument();
   });
@@ -52,59 +42,57 @@ describe("SecretsPage", () => {
     expect(screen.getByTestId("secrets-page")).toBeInTheDocument();
   });
 
-  it("renders tenant and agent ID inputs", () => {
+  it("renders tenant input", () => {
     renderSecrets();
     expect(screen.getByTestId("tenant-input")).toBeInTheDocument();
-    expect(screen.getByTestId("agent-id-input")).toBeInTheDocument();
   });
 
-  it("shows Enter an Agent ID prompt when no agent ID is set", () => {
+  it("Add Secret button is enabled when vault is UP", async () => {
     renderSecrets();
-    expect(screen.getByText("Enter an Agent ID")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("create-secret-button")).not.toBeDisabled();
+    });
   });
 
-  it("disables Add Secret button when no agent ID", () => {
+  it("loads and displays secrets for default tenant", async () => {
     renderSecrets();
-    // Auto-select may happen — we test the button initially
-    const btn = screen.getByTestId("create-secret-button");
-    // Button may be enabled or disabled depending on auto-select timing
-    expect(btn).toBeInTheDocument();
-  });
-
-  it("enables Add Secret button after selecting agent", async () => {
-    renderSecrets();
-    const user = userEvent.setup();
-    await selectAgent(user);
-    expect(screen.getByTestId("create-secret-button")).not.toBeDisabled();
-  });
-
-  it("loads and displays secrets after selecting agent", async () => {
-    renderSecrets();
-    const user = userEvent.setup();
-    await selectAgent(user);
-
-    // Secrets auto-load when agent is selected (no refresh button needed)
+    // Secrets auto-load for "default" tenant
     await waitFor(() => {
       expect(screen.getByText("openai-api-key")).toBeInTheDocument();
       expect(screen.getByText("sendgrid-api-key")).toBeInTheDocument();
     });
   });
 
+  it("shows description column", async () => {
+    renderSecrets();
+    await waitFor(() => {
+      expect(
+        screen.getByText("OpenAI API key for production agents")
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("shows copy reference buttons", async () => {
+    renderSecrets();
+    await waitFor(() => {
+      expect(screen.getByTestId("copy-ref-openai-api-key")).toBeInTheDocument();
+    });
+  });
+
   it("opens create dialog when Add Secret is clicked", async () => {
     renderSecrets();
     const user = userEvent.setup();
-    await selectAgent(user);
     await user.click(screen.getByTestId("create-secret-button"));
 
     expect(screen.getByTestId("new-key-input")).toBeInTheDocument();
     expect(screen.getByTestId("new-value-input")).toBeInTheDocument();
     expect(screen.getByTestId("new-value-eye")).toBeInTheDocument();
+    expect(screen.getByTestId("new-description-input")).toBeInTheDocument();
   });
 
   it("create dialog has password input with autocomplete off", async () => {
     renderSecrets();
     const user = userEvent.setup();
-    await selectAgent(user);
     await user.click(screen.getByTestId("create-secret-button"));
 
     const keyInput = screen.getByTestId("new-key-input");
@@ -117,7 +105,6 @@ describe("SecretsPage", () => {
   it("eye toggle reveals secret value", async () => {
     renderSecrets();
     const user = userEvent.setup();
-    await selectAgent(user);
     await user.click(screen.getByTestId("create-secret-button"));
 
     const valueInput = screen.getByTestId("new-value-input");
@@ -127,10 +114,18 @@ describe("SecretsPage", () => {
     expect(valueInput).toHaveAttribute("type", "text");
   });
 
+  it("shows reference preview when key name is entered", async () => {
+    renderSecrets();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("create-secret-button"));
+
+    await user.type(screen.getByTestId("new-key-input"), "mySecret");
+    expect(screen.getByText(/\$\{eddivault:mySecret\}/)).toBeInTheDocument();
+  });
+
   it("confirm create button is disabled until key and value are entered", async () => {
     renderSecrets();
     const user = userEvent.setup();
-    await selectAgent(user);
     await user.click(screen.getByTestId("create-secret-button"));
 
     const confirmBtn = screen.getByTestId("confirm-create-button");
@@ -145,9 +140,7 @@ describe("SecretsPage", () => {
     renderSecrets();
     const user = userEvent.setup();
 
-    await selectAgent(user);
-
-    // Secrets auto-load when agent is selected
+    // Secrets auto-load for default tenant
     await waitFor(() => {
       expect(screen.getByText("openai-api-key")).toBeInTheDocument();
     });

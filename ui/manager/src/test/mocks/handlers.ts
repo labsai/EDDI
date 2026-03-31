@@ -604,19 +604,45 @@ export const handlers = [
   }),
 
   // Get agent
-  http.get("*/agentstore/agents/:id", ({ request }) => {
+  http.get("*/agentstore/agents/:id", ({ request, params }) => {
     const url = new URL(request.url);
     const version = parseInt(url.searchParams.get("version") ?? "1", 10);
-    return HttpResponse.json({
-      workflows: [
-        "eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=1",
-      ],
+    const agentId = params.id as string;
+    // Per-agent configs for a realistic detail view
+    const agentConfigs: Record<string, object> = {
+      agent1: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=2"],
+        channels: [{ type: "web", config: { allowedOrigins: ["*"], maxIdleMinutes: 30 } }],
+        a2aEnabled: true,
+        description: "24/7 customer support with order tracking, returns processing, and escalation handling",
+        a2aSkills: ["order-tracking", "return-processing", "escalation"],
+        memory: { memoryType: "longTerm", maxConversationSteps: 100 },
+      },
+      agent3: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf3?version=1"],
+        channels: [{ type: "web", config: { allowedOrigins: ["https://clinic.example.com"] } }],
+        a2aEnabled: false,
+        description: "Patient appointment scheduling with slot extraction and calendar integration",
+        a2aSkills: [],
+        memory: { memoryType: "shortTerm", maxConversationSteps: 20 },
+      },
+      agent4: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf4?version=2"],
+        channels: [],
+        a2aEnabled: true,
+        description: "Automated invoice analysis with field extraction, validation, and CRM updates",
+        a2aSkills: ["invoice-parsing", "data-validation"],
+        memory: { memoryType: "longTerm", maxConversationSteps: 50 },
+      },
+    };
+    const config = agentConfigs[agentId] ?? {
+      workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=2"],
       channels: [],
-      a2aEnabled: true,
-      description: "Customer support AI agent for order tracking and refunds",
-      a2aSkills: ["order-tracking", "refund-processing"],
-      _version: version,
-    });
+      a2aEnabled: false,
+      description: "AI agent configured for EDDI platform",
+      a2aSkills: [],
+    };
+    return HttpResponse.json({ ...config, _version: version });
   }),
 
   // Deployment status
@@ -706,18 +732,29 @@ export const handlers = [
     return HttpResponse.json({
       workflowSteps: [
         {
+          type: "ai.labs.parser",
+          extensions: {},
+          config: { uri: "eddi://ai.labs.parser/parserstore/parsers/parser1?version=1" },
+        },
+        {
           type: "ai.labs.rules",
           extensions: {},
-          config: {
-            uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1",
-          },
+          config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1" },
+        },
+        {
+          type: "ai.labs.property",
+          extensions: {},
+          config: { uri: "eddi://ai.labs.property/propertysetterstore/propertysetters/ps1?version=1" },
         },
         {
           type: "ai.labs.llm",
           extensions: {},
-          config: {
-            uri: "eddi://ai.labs.llm/llmstore/llms/lc1?version=1",
-          },
+          config: { uri: "eddi://ai.labs.llm/llmstore/llms/llm1?version=1" },
+        },
+        {
+          type: "ai.labs.output",
+          extensions: {},
+          config: { uri: "eddi://ai.labs.output/outputstore/outputsets/out1?version=1" },
         },
       ],
     });
@@ -755,9 +792,11 @@ export const handlers = [
 
   // Simple conversation log
   http.get("*/conversationstore/conversations/simple/:id", () => {
+    const now = new Date();
+    const stepTime = (offsetMs: number) => new Date(now.getTime() - offsetMs).toISOString();
     return HttpResponse.json({
       agentId: "agent1",
-      agentVersion: 1,
+      agentVersion: 3,
       conversationId: "conv1",
       conversationState: "READY",
       environment: "production",
@@ -766,27 +805,58 @@ export const handlers = [
       conversationSteps: [
         {
           conversationStep: [
-            { key: "input:initial", value: "Hello", timestamp: new Date().toISOString(), originWorkflowId: null },
-            { key: "actions", value: ["greet"], timestamp: new Date().toISOString(), originWorkflowId: "pkg1" },
-            { key: "output:text:greet", value: "Hi there! How can I help you?", timestamp: new Date().toISOString(), originWorkflowId: "pkg1" },
+            { key: "input:initial", value: "Hi, I need help with my order", timestamp: stepTime(300000), originWorkflowId: null },
+            { key: "actions", value: ["greet", "order_inquiry"], timestamp: stepTime(299500), originWorkflowId: "pkg1" },
+            { key: "output:text:greet", value: "Hello! I'd be happy to help with your order. Could you share your order number?", timestamp: stepTime(299000), originWorkflowId: "pkg1" },
           ],
-          timestamp: new Date().toISOString(),
+          timestamp: stepTime(300000),
         },
         {
           conversationStep: [
-            { key: "input:initial", value: "What's the weather?", timestamp: new Date().toISOString(), originWorkflowId: null },
-            { key: "actions", value: ["get_weather"], timestamp: new Date().toISOString(), originWorkflowId: "pkg1" },
-            { key: "output:text:get_weather", value: "The weather in NYC is sunny at 72°F.", timestamp: new Date().toISOString(), originWorkflowId: "pkg1" },
+            { key: "input:initial", value: "It's ORD-2024-78542", timestamp: stepTime(240000), originWorkflowId: null },
+            { key: "actions", value: ["lookup_order"], timestamp: stepTime(239500), originWorkflowId: "pkg1" },
+            { key: "output:text:lookup_order", value: "I found your order ORD-2024-78542. It was placed on March 28th for a Wireless Keyboard ($89.99). It's currently in transit and expected to arrive by April 2nd. Is there anything specific you'd like to know about it?", timestamp: stepTime(238000), originWorkflowId: "pkg1" },
           ],
-          timestamp: new Date().toISOString(),
+          timestamp: stepTime(240000),
+        },
+        {
+          conversationStep: [
+            { key: "input:initial", value: "Can I change the delivery address?", timestamp: stepTime(180000), originWorkflowId: null },
+            { key: "actions", value: ["address_change"], timestamp: stepTime(179500), originWorkflowId: "pkg1" },
+            { key: "output:text:address_change", value: "Since your order is already in transit, I can try to redirect the package. Please provide the new delivery address and I'll check if a redirect is possible with the carrier.", timestamp: stepTime(178000), originWorkflowId: "pkg1" },
+            { key: "quickReplies", value: ["Keep current address", "Provide new address", "Cancel order instead"], timestamp: stepTime(177500), originWorkflowId: "pkg1" },
+          ],
+          timestamp: stepTime(180000),
+        },
+        {
+          conversationStep: [
+            { key: "input:initial", value: "123 Oak Street, Suite 4B, Portland OR 97201", timestamp: stepTime(120000), originWorkflowId: null },
+            { key: "actions", value: ["update_address", "notify_carrier"], timestamp: stepTime(119000), originWorkflowId: "pkg1" },
+            { key: "output:text:update_address", value: "Great news! I've submitted a redirect request to the carrier for: 123 Oak Street, Suite 4B, Portland OR 97201. You'll receive a confirmation email within the next 2 hours. The estimated delivery date may shift by 1 business day.", timestamp: stepTime(117000), originWorkflowId: "pkg1" },
+          ],
+          timestamp: stepTime(120000),
+        },
+        {
+          conversationStep: [
+            { key: "input:initial", value: "Perfect, thank you!", timestamp: stepTime(60000), originWorkflowId: null },
+            { key: "actions", value: ["farewell"], timestamp: stepTime(59500), originWorkflowId: "pkg1" },
+            { key: "output:text:farewell", value: "You're welcome! Your redirect reference is RDR-98765. Is there anything else I can help you with?", timestamp: stepTime(58000), originWorkflowId: "pkg1" },
+            { key: "quickReplies", value: ["Track my order", "View other orders", "No thanks, goodbye"], timestamp: stepTime(57500), originWorkflowId: "pkg1" },
+          ],
+          timestamp: stepTime(60000),
         },
       ],
       conversationOutputs: [
-        { "output:text:greet": "Hi there! How can I help you?" },
-        { "output:text:get_weather": "The weather in NYC is sunny at 72°F." },
+        { "output:text:greet": "Hello! I'd be happy to help with your order. Could you share your order number?" },
+        { "output:text:lookup_order": "I found your order ORD-2024-78542. It was placed on March 28th for a Wireless Keyboard ($89.99). It's currently in transit and expected to arrive by April 2nd." },
+        { "output:text:address_change": "Since your order is already in transit, I can try to redirect the package." },
+        { "output:text:update_address": "Great news! I've submitted a redirect request to the carrier." },
+        { "output:text:farewell": "You're welcome! Your redirect reference is RDR-98765." },
       ],
       conversationProperties: {
         agentName: "Support Agent",
+        userId: "user-42",
+        channel: "web",
       },
     });
   }),
@@ -824,17 +894,23 @@ export const handlers = [
   http.post("*/agents/:conversationId", () => {
     return HttpResponse.json({
       agentId: "agent1",
-      agentVersion: 1,
+      agentVersion: 3,
       conversationId: "conv-mock",
       conversationState: "READY",
       environment: "production",
       conversationSteps: [
         {
           input: "",
-          output: "Thanks for your message! How can I help?",
+          output: "I'd be happy to help! I can assist you with order tracking, returns, account inquiries, or product recommendations. What would you like help with?",
           actions: ["respond"],
+          quickReplies: ["Track my order", "Start a return", "Browse products"],
         },
       ],
+      conversationProperties: {
+        agentName: "Support Agent",
+        userId: "user-42",
+        channel: "web",
+      },
     });
   }),
 
@@ -842,18 +918,21 @@ export const handlers = [
   http.get("*/agents/:conversationId", () => {
     return HttpResponse.json({
       agentId: "agent1",
-      agentVersion: 1,
+      agentVersion: 3,
       conversationId: "conv-mock",
       conversationState: "READY",
       environment: "production",
       conversationSteps: [
         {
-          output: "Welcome! How can I help you today?",
+          output: "Welcome to EDDI Support! I can help with orders, returns, billing, or product questions. How can I assist you today?",
           actions: ["welcome"],
+          quickReplies: ["Order help", "Returns", "Billing question", "Something else"],
         },
       ],
       conversationProperties: {
         agentName: "Support Agent",
+        userId: "user-42",
+        channel: "web",
       },
     });
   }),
@@ -2023,85 +2102,97 @@ export const logAdminHandlers = [
 const MOCK_SECRETS = [
   {
     tenantId: "default",
-    agentId: "agent1",
     keyName: "openai-api-key",
     createdAt: new Date(Date.now() - 12 * 86400000).toISOString(),
     lastAccessedAt: new Date(Date.now() - 300000).toISOString(),
+    lastRotatedAt: new Date(Date.now() - 5 * 86400000).toISOString(),
     checksum: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+    description: "OpenAI API key for production agents",
+    allowedAgents: ["*"],
   },
   {
     tenantId: "default",
-    agentId: "agent1",
     keyName: "sendgrid-api-key",
     createdAt: new Date(Date.now() - 10 * 86400000).toISOString(),
     lastAccessedAt: new Date(Date.now() - 2 * 3600000).toISOString(),
+    lastRotatedAt: null,
     checksum: "f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5",
+    description: "SendGrid email service key",
+    allowedAgents: ["*"],
   },
   {
     tenantId: "default",
-    agentId: "agent4",
     keyName: "anthropic-api-key",
     createdAt: new Date(Date.now() - 8 * 86400000).toISOString(),
     lastAccessedAt: new Date(Date.now() - 86400000).toISOString(),
+    lastRotatedAt: null,
     checksum: "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+    description: "Anthropic Claude API key",
+    allowedAgents: ["*"],
   },
   {
     tenantId: "default",
-    agentId: "agent4",
     keyName: "stripe-secret-key",
     createdAt: new Date(Date.now() - 6 * 86400000).toISOString(),
     lastAccessedAt: null,
+    lastRotatedAt: null,
     checksum: "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5",
+    description: "Stripe payment processing secret",
+    allowedAgents: ["agent4"],
   },
   {
     tenantId: "default",
-    agentId: "agent7",
-    keyName: "azure-document-intelligence-key",
-    createdAt: new Date(Date.now() - 3 * 86400000).toISOString(),
-    lastAccessedAt: new Date(Date.now() - 5 * 3600000).toISOString(),
-    checksum: "e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6",
-  },
-  {
-    tenantId: "default",
-    agentId: "agent7",
     keyName: "pg-connection-string",
     createdAt: new Date(Date.now() - 3 * 86400000).toISOString(),
     lastAccessedAt: new Date(Date.now() - 7200000).toISOString(),
+    lastRotatedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
     checksum: "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3",
+    description: "PostgreSQL vector store connection string",
+    allowedAgents: ["*"],
   },
 ];
 
 export const secretsHandlers = [
-  // List secrets
-  http.get("*/secretstore/secrets/:tenantId/:agentId", ({ params }) => {
+  // List secrets (tenant-scoped, no agentId)
+  http.get("*/secretstore/secrets/:tenantId", ({ params, request }) => {
+    // Skip the health endpoint
+    if (params.tenantId === "health") return;
+    const url = new URL(request.url);
+    // Skip paths like /tenantId/keyName (those are getMetadata)
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length > 3) return;
     const filtered = MOCK_SECRETS.filter(
-      (s) => s.tenantId === params.tenantId && s.agentId === params.agentId,
+      (s) => s.tenantId === params.tenantId,
     );
     return HttpResponse.json(filtered);
   }),
 
-  // Store secret
-  http.put("*/secretstore/secrets/:tenantId/:agentId/:keyName", ({ params }) => {
+  // Store secret (tenant-scoped)
+  http.put("*/secretstore/secrets/:tenantId/:keyName", ({ params }) => {
+    const tenantId = params.tenantId as string;
+    const keyName = params.keyName as string;
+    const ref = tenantId === "default"
+      ? `\${eddivault:${keyName}}`
+      : `\${eddivault:${tenantId}/${keyName}}`;
     return HttpResponse.json(
       {
-        reference: `\${eddivault:${params.tenantId}.${params.agentId}.${params.keyName}}`,
-        tenantId: params.tenantId,
-        agentId: params.agentId,
-        keyName: params.keyName,
+        reference: ref,
+        tenantId,
+        keyName,
       },
       { status: 201 },
     );
   }),
 
-  // Delete secret
+  // Delete secret (tenant-scoped)
   http.delete(
-    "*/secretstore/secrets/:tenantId/:agentId/:keyName",
+    "*/secretstore/secrets/:tenantId/:keyName",
     () => new HttpResponse(null, { status: 204 }),
   ),
 
   // Health check
   http.get("*/secretstore/secrets/health", () =>
-    HttpResponse.json({ status: "UP", provider: "DatabaseSecretProvider", available: true }),
+    HttpResponse.json({ status: "UP", provider: "VaultSecretProvider", available: true }),
   ),
 ];
 
@@ -2470,7 +2561,7 @@ export const scheduleHandlers = [
   http.get("*/secretstore/secrets/health", () => {
     return HttpResponse.json({
       status: "UP",
-      provider: "mock-vault",
+      provider: "VaultSecretProvider",
       available: true,
     });
   }),

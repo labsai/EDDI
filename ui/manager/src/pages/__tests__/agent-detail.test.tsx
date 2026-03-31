@@ -127,7 +127,7 @@ describe("AgentDetailPage", () => {
     renderAgentDetail();
     await waitFor(() => {
       expect(screen.getByText("order-tracking")).toBeInTheDocument();
-      expect(screen.getByText("refund-processing")).toBeInTheDocument();
+      expect(screen.getByText("return-processing")).toBeInTheDocument();
     });
   });
 });
