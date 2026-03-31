@@ -118,10 +118,10 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
                 continue;
 
             Bson filter = and(eq(FIELD_USER_ID, userId), eq(FIELD_KEY, key), eq(FIELD_VISIBILITY, Visibility.global.name()));
-            Bson update = Updates.combine(Updates.set(FIELD_VALUE, entry.getValue()), Updates.set(FIELD_VISIBILITY, Visibility.global.name()),
-                    Updates.set(FIELD_UPDATED_AT, now.toString()), Updates.setOnInsert(FIELD_USER_ID, userId), Updates.setOnInsert(FIELD_KEY, key),
-                    Updates.setOnInsert(FIELD_CATEGORY, "property"), Updates.setOnInsert(FIELD_CREATED_AT, now.toString()),
-                    Updates.setOnInsert(FIELD_ACCESS_COUNT, 0));
+            Bson update = Updates.combine(Updates.set(FIELD_VALUE, entry.getValue()), Updates.set(FIELD_UPDATED_AT, now.toString()),
+                    Updates.setOnInsert(FIELD_USER_ID, userId), Updates.setOnInsert(FIELD_KEY, key),
+                    Updates.setOnInsert(FIELD_VISIBILITY, Visibility.global.name()), Updates.setOnInsert(FIELD_CATEGORY, "property"),
+                    Updates.setOnInsert(FIELD_CREATED_AT, now.toString()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0));
 
             memoriesCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
         }

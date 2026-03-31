@@ -13,6 +13,37 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Consolidate `IPropertiesStore` into `IUserMemoryStore` (2026-03-30)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Eliminated the legacy flat `properties` collection and unified all user-scoped persistent storage into the `usermemories` collection. This removes a redundant storage layer and ensures all user data follows the structured, agent-aware model introduced in Phase 11a.
+
+| Change | Details |
+|---|---|
+| **Deleted** | `IPropertiesStore.java`, `PropertiesStore.java` (Mongo), `PostgresPropertiesStore.java` — all redundant with `IUserMemoryStore` |
+| **Renamed** | `enableUserMemory` → `enableMemoryTools` in `AgentConfiguration` — clarifies that the flag gates only advanced features (LLM tools, Dream, guardrails), not basic longTerm property persistence |
+| **Conversation.java** | Consolidated dual load/store into single unified flow via `IUserMemoryStore.getVisibleEntries()` for loading and `upsert()` for storing. Visibility defaulted to `global` at the persistence boundary |
+| **ConversationService** | Removed `IPropertiesStore` injection entirely |
+| **IPropertiesHandler** | Simplified to 3 methods: `getUserMemoryStore()`, `getUserId()`, `getUserMemoryConfig()`. Removed `loadProperties()`/`mergeProperties()` |
+| **REST** | `RestPropertiesStore` now backed by `IUserMemoryStore` flat property methods |
+| **MongoUserMemoryStore** | `readProperties()`/`mergeProperties()`/`deleteProperties()` now operate on global entries in `usermemories` (no more `propertiesCollection`) |
+| **PostgresUserMemoryStore** | Same: legacy methods now query/upsert from `usermemories` table with `visibility='global'` |
+| **Migration** | `PropertiesMigrationService` — bulk `@Observes StartupEvent` migration: reads all legacy `properties` docs, upserts as global entries with `category=legacy`, renames old collection to `properties_migrated_v6` |
+
+**Design decisions:**
+- Visibility is applied strictly at the persistence boundary in `Conversation.storePropertiesPermanently()` — the `Property` model itself is unchanged
+- Properties without explicit visibility default to `global` (matching legacy unscoped behavior)
+- Step/conversation-scoped properties are never persisted (enforced cleanly)
+- Bulk migration is idempotent: skips if no `properties` collection exists, renames as backup after migration
+- No `@JsonAlias` for `enableMemoryTools` — clean break for v6
+
+**Files:** 3 deleted, 1 new (`PropertiesMigrationService`), 8 modified. All tests pass.
+
+---
+
 ## Strategy 2: Rolling Summary + Conversation Recall Tool (2026-03-30)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

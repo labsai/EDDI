@@ -389,10 +389,6 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                 int count = ps.executeUpdate();
                 LOGGER.infof("[MEMORY] GDPR delete-all for user '%s': %d entries removed", userId, count);
             }
-            try (PreparedStatement ps = conn.prepareStatement("DELETE FROM properties WHERE user_id = ?")) {
-                ps.setString(1, userId);
-                ps.executeUpdate();
-            }
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to delete all data for userId=" + userId, e);
         }

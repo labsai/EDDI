@@ -381,6 +381,10 @@ public class Conversation implements IConversation {
             @SuppressWarnings("unchecked")
             Map<String, Object> map = (Map<String, Object>) value;
             prop = new Property(entry.key(), map, Scope.longTerm);
+        } else if (value instanceof List<?> list) {
+            @SuppressWarnings("unchecked")
+            List<Object> objectList = (List<Object>) list;
+            prop = new Property(entry.key(), objectList, Scope.longTerm);
         } else if (value instanceof Integer i) {
             prop = new Property(entry.key(), i, Scope.longTerm);
         } else if (value instanceof Float f) {

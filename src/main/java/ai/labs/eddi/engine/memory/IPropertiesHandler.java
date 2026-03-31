@@ -10,7 +10,9 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
  */
 public interface IPropertiesHandler {
 
-    /** User memory store instance — always non-null. */
+    /**
+     * User memory store instance. Non-null when provided by ConversationService.
+     */
     IUserMemoryStore getUserMemoryStore();
 
     /**

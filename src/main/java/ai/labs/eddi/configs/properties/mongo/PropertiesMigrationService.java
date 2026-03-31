@@ -6,7 +6,7 @@ import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import com.mongodb.MongoNamespace;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
-import io.quarkus.arc.DefaultBean;
+import io.quarkus.arc.profile.IfBuildProfile;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -23,11 +23,15 @@ import java.util.List;
  * Idempotent: if the {@code properties} collection doesn't exist or is empty,
  * this is a no-op. After successful migration, the old collection is renamed to
  * {@code properties_migrated_v6} as a safety backup.
+ * <p>
+ * Only active in MongoDB mode (not Postgres — Postgres was added in v6
+ * alongside the usermemories table, so there is no legacy properties table to
+ * migrate).
  *
  * @since 6.0.0
  */
 @ApplicationScoped
-@DefaultBean
+@IfBuildProfile("!postgres")
 public class PropertiesMigrationService {
 
     private static final Logger LOGGER = Logger.getLogger(PropertiesMigrationService.class);
