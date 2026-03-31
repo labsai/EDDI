@@ -8,13 +8,14 @@
 
 Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker image**. Deploy on Docker, Kubernetes, or OpenShift.
 
-**Latest version: 6.0.0** · [Website](https://eddi.labs.ai/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
+**Latest version: 6.0.0-RC1** · [Website](https://eddi.labs.ai/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
 
 ---
 
 ## ✨ Features at a Glance
 
 ### 🤖 Multi-Agent Orchestration
+
 - 🔀 **Intelligent Routing** — Direct conversations to different agents based on context, rules, and intent
 - 🗣️ **Group Conversations** — Multi-agent debates with 5 built-in styles (Round Table, Peer Review, Devil's Advocate, Delphi, Debate)
 - 🪆 **Nested Groups** — Compose groups of groups for tournament brackets, red-team vs blue-team, and panel reviews
@@ -22,18 +23,21 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - 🧙 **Agent Father** — Meta-agent that creates other agents through conversation (ships out of the box)
 
 ### 🧠 LLM Provider Support (12 Providers)
+
 - 🟢 **OpenAI** · **Anthropic Claude** · **Google Gemini** · **Mistral AI**
 - ☁️ **Azure OpenAI** · **Amazon Bedrock** · **Oracle GenAI** · **Google Vertex AI**
 - 🏠 **Ollama** · **Jlama** · **Hugging Face** — Run models locally or in your own cloud
 - 🔗 **OpenAI-compatible endpoints** — DeepSeek, Cohere, and any compatible API via `baseUrl`
 
 ### 🔗 Protocol & Interoperability
+
 - 🧩 **MCP Server** (48+ tools) — Full EDDI control from Claude Desktop, IDE plugins, or any MCP client
 - 🧩 **MCP Client** — Connect agents to external MCP tool servers
 - 🤝 **A2A Protocol** — Agent-to-Agent peer communication with skill discovery and Agent Cards
 - 📋 **OpenAPI-to-Agent** — Paste an OpenAPI spec, get a fully deployed API-calling agent
 
 ### 🛠️ Built-In AI Agent Tools
+
 - 🔍 **Web Search** — DuckDuckGo or Google Custom Search
 - 🧮 **Calculator** — Sandboxed math parser (no code injection)
 - 🌐 **Web Scraper** · 📄 **PDF Reader** — SSRF-protected content extraction
@@ -41,23 +45,27 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - 🔌 **HTTP Calls as Tools** — Expose your own APIs as LLM-callable tools with full security sandboxing
 
 ### 📚 RAG (Retrieval-Augmented Generation)
+
 - 📦 **7 Embedding Providers** — OpenAI, Ollama, Azure OpenAI, Mistral, Bedrock, Cohere, Vertex AI
 - 🗄️ **5 Vector Stores** — pgvector, In-Memory, MongoDB Atlas, Elasticsearch, Qdrant
 - 🌐 **httpCall RAG** — Zero-infrastructure RAG via any search API
 - 📥 **REST Ingestion API** — Async document ingestion with status tracking
 
 ### 💭 Memory & Context
+
 - 💾 **Persistent User Memory** — Agents remember facts, preferences, and context across conversations
 - 🪟 **Token-Aware Windowing** — Intelligent context packing with anchored opening steps
 - 📝 **Property Extraction** — Config-driven slot-filling for structured data capture
 - 🔄 **Conversation State** — Full history with undo/redo support
 
 ### 📈 Smart Model Cascading
+
 - 📉 **Cost Optimization** — Try cheap/fast models first, escalate to powerful models only when needed
 - 📊 **4 Confidence Strategies** — Structured output, heuristic, judge model, or none
 - 💰 **Per-Conversation Budgets** — Automatic cost tracking with budget caps
 
 ### 🔐 Enterprise Security
+
 - 🏦 **Secrets Vault** — Envelope encryption (PBKDF2 + AES) for API keys, never plaintext in DB
 - 🛡️ **SSRF Protection** — URL validation blocks private/internal addresses on all tools
 - 🔒 **Sandboxed Evaluation** — No `eval()`, no script engines — safe recursive-descent math parser
@@ -66,6 +74,7 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - 🚫 **No Dynamic Code Execution** — Custom logic runs in external MCP servers, outside the EDDI perimeter
 
 ### ⚙️ Configuration-Driven Architecture
+
 - 📄 **JSON Configs, Not Code** — Agent behavior defined in versioned JSON documents
 - 🔧 **Lifecycle Pipeline** — Pluggable task pipeline: Input → Parse → Rules → API/LLM → Output
 - 📦 **Composable Agents** — Agents assembled from reusable, version-controlled workflows and extensions
@@ -73,6 +82,7 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - 📤 **Import / Export** — Agents are portable as ZIP files with secret scrubbing on export
 
 ### 🚀 Cloud-Native & Observable
+
 - 🐳 **One-Command Install** — Interactive wizard sets up EDDI + database + starter agent via Docker
 - ☸️ **Kubernetes / OpenShift** — Kustomize overlays, Helm charts, HPA, PDB, NetworkPolicy
 - 📊 **Prometheus & Grafana** — Built-in Micrometer instrumentation at `/q/metrics`
@@ -82,6 +92,7 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - 🗃️ **DB-Agnostic** — Choose MongoDB or PostgreSQL, switch with one env var
 
 ### 🖥️ Manager Dashboard & Chat UI
+
 - 🎨 **React 19 Manager UI** — Modern admin dashboard for agent building, testing, deployment, and monitoring
 - 💬 **Chat Widget** — Embeddable React chat UI with SSE streaming and Keycloak auth
 - 🔍 **Audit Trail Viewer** — Timeline-based compliance and debugging UI
@@ -183,27 +194,27 @@ Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming
 
 ## 📖 Documentation
 
-| Guide | Description |
-|-------|-------------|
-| **[Getting Started](docs/getting-started.md)** | Setup and first steps |
-| **[Developer Quickstart](docs/developer-quickstart.md)** | Build your first agent in 5 minutes |
-| **[Architecture](docs/architecture.md)** | Deep dive into EDDI's design and pipeline |
-| **[LangChain Integration](docs/langchain.md)** | Connecting to 12 LLM providers |
-| **[Behavior Rules](docs/behavior-rules.md)** | Configuring agent routing logic |
-| **[HTTP Calls](docs/httpcalls.md)** | External API integration |
-| **[RAG](docs/rag.md)** | Knowledge base retrieval setup |
-| **[MCP Server](docs/mcp-server.md)** | 48+ tools for AI-assisted agent management |
-| **[A2A Protocol](docs/a2a-protocol.md)** | Agent-to-Agent peer communication |
-| **[Group Conversations](docs/group-conversations.md)** | Multi-agent debate orchestration |
-| **[User Memory](docs/user-memory.md)** | Cross-conversation fact retention |
-| **[Model Cascading](docs/model-cascade.md)** | Cost-optimized multi-model routing |
-| **[Security](docs/security.md)** | SSRF protection, sandboxing, and hardening |
-| **[Secrets Vault](docs/secrets-vault.md)** | Envelope encryption for sensitive data |
-| **[Audit Ledger](docs/audit-ledger.md)** | EU AI Act-compliant audit trail |
-| **[Kubernetes](docs/kubernetes.md)** | Deploy with Kustomize or Helm |
-| **[Red Hat OpenShift](docs/redhat-openshift.md)** | Certified container, automated release |
-| **[Agent Father Deep Dive](docs/agent-father-deep-dive.md)** | How the meta-agent works |
-| **[Full Documentation](https://docs.labs.ai/)** | Complete documentation site |
+| Guide                                                        | Description                                |
+| ------------------------------------------------------------ | ------------------------------------------ |
+| **[Getting Started](docs/getting-started.md)**               | Setup and first steps                      |
+| **[Developer Quickstart](docs/developer-quickstart.md)**     | Build your first agent in 5 minutes        |
+| **[Architecture](docs/architecture.md)**                     | Deep dive into EDDI's design and pipeline  |
+| **[LangChain Integration](docs/langchain.md)**               | Connecting to 12 LLM providers             |
+| **[Behavior Rules](docs/behavior-rules.md)**                 | Configuring agent routing logic            |
+| **[HTTP Calls](docs/httpcalls.md)**                          | External API integration                   |
+| **[RAG](docs/rag.md)**                                       | Knowledge base retrieval setup             |
+| **[MCP Server](docs/mcp-server.md)**                         | 48+ tools for AI-assisted agent management |
+| **[A2A Protocol](docs/a2a-protocol.md)**                     | Agent-to-Agent peer communication          |
+| **[Group Conversations](docs/group-conversations.md)**       | Multi-agent debate orchestration           |
+| **[User Memory](docs/user-memory.md)**                       | Cross-conversation fact retention          |
+| **[Model Cascading](docs/model-cascade.md)**                 | Cost-optimized multi-model routing         |
+| **[Security](docs/security.md)**                             | SSRF protection, sandboxing, and hardening |
+| **[Secrets Vault](docs/secrets-vault.md)**                   | Envelope encryption for sensitive data     |
+| **[Audit Ledger](docs/audit-ledger.md)**                     | EU AI Act-compliant audit trail            |
+| **[Kubernetes](docs/kubernetes.md)**                         | Deploy with Kustomize or Helm              |
+| **[Red Hat OpenShift](docs/redhat-openshift.md)**            | Certified container, automated release     |
+| **[Agent Father Deep Dive](docs/agent-father-deep-dive.md)** | How the meta-agent works                   |
+| **[Full Documentation](https://docs.labs.ai/)**              | Complete documentation site                |
 
 ---
 
@@ -211,7 +222,7 @@ Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming
 
 ### Prerequisites
 
-- Java 25 ([Eclipse Temurin](https://adoptium.net/) recommended)
+- Java 25
 - Maven 3.9+ (bundled via `mvnw` wrapper)
 - MongoDB ≥ 6.0 or PostgreSQL
 

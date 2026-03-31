@@ -291,23 +291,6 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         return and(eq(FIELD_USER_ID, entry.userId()), eq(FIELD_KEY, entry.key()), eq(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()));
     }
 
-    private Document entryToDocument(UserMemoryEntry entry) {
-        Document doc = new Document();
-        doc.put(FIELD_USER_ID, entry.userId());
-        doc.put(FIELD_KEY, entry.key());
-        doc.put(FIELD_VALUE, entry.value());
-        doc.put(FIELD_CATEGORY, entry.category());
-        doc.put(FIELD_VISIBILITY, entry.visibility() != null ? entry.visibility().name() : Visibility.self.name());
-        doc.put(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId());
-        doc.put(FIELD_GROUP_IDS, entry.groupIds());
-        doc.put(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId());
-        doc.put(FIELD_CONFLICTED, entry.conflicted());
-        doc.put(FIELD_ACCESS_COUNT, entry.accessCount());
-        doc.put(FIELD_CREATED_AT, entry.createdAt() != null ? entry.createdAt().toString() : Instant.now().toString());
-        doc.put(FIELD_UPDATED_AT, entry.updatedAt() != null ? entry.updatedAt().toString() : Instant.now().toString());
-        return doc;
-    }
-
     private UserMemoryEntry documentToEntry(Document doc) {
         String visStr = doc.getString(FIELD_VISIBILITY);
         Visibility vis;

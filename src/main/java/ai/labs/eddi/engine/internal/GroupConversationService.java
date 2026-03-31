@@ -798,7 +798,6 @@ public class GroupConversationService implements IGroupConversationService {
      * concatenates all text entries (same logic as the Manager's
      * {@code extractOutput()}).
      */
-    @SuppressWarnings("unchecked")
     private String extractResponse(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
         if (snapshot == null || snapshot.getConversationOutputs() == null) {
             return "";
