@@ -4,7 +4,7 @@ import org.jboss.logging.Logger;
 
 /**
  * Prints a highly visible startup banner showing the vault status. Called once
- * from {@link ai.labs.eddi.secrets.impl.DatabaseSecretProvider} via a
+ * from {@link ai.labs.eddi.secrets.impl.VaultSecretProvider} via a
  * {@link io.quarkus.runtime.StartupEvent} observer during startup.
  * <p>
  * The banner makes it unmistakably clear whether secret encryption is active or

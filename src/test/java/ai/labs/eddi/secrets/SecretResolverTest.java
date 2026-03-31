@@ -37,22 +37,44 @@ class SecretResolverTest {
     }
 
     @Test
-    void resolveValue_vaultRef_resolvesToPlaintext() throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
-        var ref = new SecretReference("default", "agent1", "openaiKey");
+    void resolveValue_shortForm_resolvesToPlaintext() throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
+        var ref = new SecretReference("default", "openaiKey");
         when(secretProvider.resolve(ref)).thenReturn("sk-actual-secret-key");
 
-        String input = "Bearer ${eddivault:default/agent1/openaiKey}";
+        String input = "Bearer ${eddivault:openaiKey}";
         String result = resolver.resolveValue(input);
 
         assertEquals("Bearer sk-actual-secret-key", result);
     }
 
     @Test
-    void resolveValue_multipleRefs_allResolved() throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
-        when(secretProvider.resolve(new SecretReference("t", "b", "key1"))).thenReturn("val1");
-        when(secretProvider.resolve(new SecretReference("t", "b", "key2"))).thenReturn("val2");
+    void resolveValue_fullForm_resolvesToPlaintext() throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
+        var ref = new SecretReference("myTenant", "openaiKey");
+        when(secretProvider.resolve(ref)).thenReturn("sk-tenant-key");
 
-        String input = "${eddivault:t/b/key1}:${eddivault:t/b/key2}";
+        String input = "Bearer ${eddivault:myTenant/openaiKey}";
+        String result = resolver.resolveValue(input);
+
+        assertEquals("Bearer sk-tenant-key", result);
+    }
+
+    @Test
+    void resolveValue_multipleRefs_allResolved() throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
+        when(secretProvider.resolve(new SecretReference("default", "key1"))).thenReturn("val1");
+        when(secretProvider.resolve(new SecretReference("default", "key2"))).thenReturn("val2");
+
+        String input = "${eddivault:key1}:${eddivault:key2}";
+        String result = resolver.resolveValue(input);
+
+        assertEquals("val1:val2", result);
+    }
+
+    @Test
+    void resolveValue_mixedFormats_allResolved() throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
+        when(secretProvider.resolve(new SecretReference("default", "key1"))).thenReturn("val1");
+        when(secretProvider.resolve(new SecretReference("acme", "key2"))).thenReturn("val2");
+
+        String input = "${eddivault:key1}:${eddivault:acme/key2}";
         String result = resolver.resolveValue(input);
 
         assertEquals("val1:val2", result);
@@ -62,7 +84,7 @@ class SecretResolverTest {
     void resolveValue_secretNotFound_keepsRef() throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
         when(secretProvider.resolve(any(SecretReference.class))).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
 
-        String input = "Bearer ${eddivault:default/agent1/missing}";
+        String input = "Bearer ${eddivault:missingKey}";
         String result = resolver.resolveValue(input);
 
         // When secret is not found, the reference should remain as-is
@@ -76,7 +98,17 @@ class SecretResolverTest {
         SecretResolver passthroughResolver = new SecretResolver(unavailable, 5, 100);
         passthroughResolver.init();
 
-        String input = "Bearer ${eddivault:default/agent1/key}";
+        String input = "Bearer ${eddivault:key}";
         assertEquals(input, passthroughResolver.resolveValue(input));
+    }
+
+    @Test
+    void resolveValue_autoVaultKey_withAgentPrefix() throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
+        var ref = new SecretReference("default", "69c687.userApiKey");
+        when(secretProvider.resolve(ref)).thenReturn("user-secret");
+
+        String result = resolver.resolveValue("${eddivault:69c687.userApiKey}");
+
+        assertEquals("user-secret", result);
     }
 }

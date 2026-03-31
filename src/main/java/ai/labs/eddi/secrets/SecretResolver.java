@@ -16,22 +16,31 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Resolves {@code ${eddivault:tenantId/agentId/keyName}} references in
- * parameter maps.
+ * Resolves vault references in parameter maps and strings. Supports both the
+ * <b>short form</b> ({@code ${eddivault:keyName}}) and <b>full form</b>
+ * ({@code ${eddivault:tenantId/keyName}}).
  * <p>
  * This is the central integration point between the vault and the execution
  * workflow. It is called <b>after</b> Qute template processing and
  * <b>before</b> the final API call (late-binding resolution).
  * <p>
+ * <b>Access model:</b> Access control is via configuration authorship — the
+ * admin who writes the agent config decides which vault references to include.
+ * The resolver does NOT check agent permissions; it resolves any valid
+ * reference that exists in the vault.
+ * <p>
  * Includes a Caffeine cache with configurable TTL to avoid repeated
  * decryption/vault calls. Cache is invalidated on secret rotation via
  * {@link #invalidateCache(SecretReference)}.
+ *
+ * @author ginccc
+ * @since 6.0.0
  */
 @ApplicationScoped
 public class SecretResolver {
 
     private static final Logger LOGGER = Logger.getLogger(SecretResolver.class);
-    private static final Pattern VAULT_PATTERN = Pattern.compile(SecretReference.VAULT_PATTERN);
+    private static final Pattern VAULT_PATTERN = SecretReference.compiledPattern();
 
     private final ISecretProvider secretProvider;
     private final int cacheTtlMinutes;
@@ -53,7 +62,7 @@ public class SecretResolver {
         this.cache = Caffeine.newBuilder().expireAfterWrite(Duration.ofMinutes(cacheTtlMinutes)).maximumSize(cacheMaxSize).build();
 
         if (secretProvider.isAvailable()) {
-            LOGGER.infov("SecretResolver initialized (cache TTL={0}min, maxSize={1})", cacheTtlMinutes, cacheMaxSize);
+            LOGGER.infof("SecretResolver initialized (cache TTL=%dmin, maxSize=%d)", cacheTtlMinutes, cacheMaxSize);
         } else {
             LOGGER.info("SecretResolver initialized in passthrough mode (vault not configured)");
         }
@@ -85,8 +94,10 @@ public class SecretResolver {
     }
 
     /**
-     * Resolve vault references in a single string value. Supports multiple vault
-     * references within the same string.
+     * Resolve vault references in a single string value. Supports both the short
+     * form ({@code ${eddivault:keyName}}) and full form
+     * ({@code ${eddivault:tenantId/keyName}}), and multiple references within the
+     * same string.
      * <p>
      * If the vault is not available, the value passes through unchanged.
      *
@@ -107,19 +118,19 @@ public class SecretResolver {
         StringBuilder result = new StringBuilder();
         while (matcher.find()) {
             String fullMatch = matcher.group(0);
-            String tenantId = matcher.group(1);
-            String agentId = matcher.group(2);
-            String keyName = matcher.group(3);
 
-            String cacheKey = tenantId + "/" + agentId + "/" + keyName;
+            // Parse using SecretReference — handles both short and full form
+            SecretReference ref = SecretReference.parse(fullMatch);
+            String cacheKey = ref.tenantId() + "/" + ref.keyName();
+
             String resolved = cache.get(cacheKey, k -> {
                 try {
-                    return secretProvider.resolve(new SecretReference(tenantId, agentId, keyName));
+                    return secretProvider.resolve(ref);
                 } catch (ISecretProvider.SecretNotFoundException e) {
-                    LOGGER.warnv("Vault reference not found: {0} — passing through unchanged", fullMatch);
+                    LOGGER.warnf("Vault reference not found: %s — passing through unchanged", fullMatch);
                     return null;
                 } catch (ISecretProvider.SecretProviderException e) {
-                    LOGGER.errorv("Failed to resolve vault reference: {0} — {1}", fullMatch, e.getMessage());
+                    LOGGER.errorf("Failed to resolve vault reference: %s — %s", fullMatch, e.getMessage());
                     return null;
                 }
             });
@@ -139,9 +150,9 @@ public class SecretResolver {
      * Invalidate a specific cache entry (called on secret rotation).
      */
     public void invalidateCache(SecretReference reference) {
-        String cacheKey = reference.tenantId() + "/" + reference.agentId() + "/" + reference.keyName();
+        String cacheKey = reference.tenantId() + "/" + reference.keyName();
         cache.invalidate(cacheKey);
-        LOGGER.infov("Cache invalidated for: {0}", cacheKey);
+        LOGGER.infof("Cache invalidated for: %s", cacheKey);
     }
 
     /**

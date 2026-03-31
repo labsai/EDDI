@@ -378,6 +378,16 @@ public class PropertySetterTask implements ILifecycleTask {
     /**
      * Store a plaintext secret in the vault and return the vault reference string.
      * Also scrubs the raw user input from conversation memory to prevent leakage.
+     * <p>
+     * <b>Agent designers never see vault references for auto-vaulted secrets.</b>
+     * They simply write {@code { "name": "userApiKey", "scope": "secret" }} in the
+     * PropertySetter config. This method transparently vaults the user input and
+     * stores a vault reference in conversation properties. Templates use
+     * {@code {properties.userApiKey}} — the SecretResolver resolves transparently.
+     * <p>
+     * The keyName is namespaced with the agentId to prevent cross-agent collisions:
+     * {@code agentId.keyName}. Since the tenant is typically "default", the
+     * short-form syntax is used: {@code ${eddivault:agentId.keyName}}.
      *
      * @param memory
      *            the conversation memory (used for agentId and input scrubbing)
@@ -386,7 +396,7 @@ public class PropertySetterTask implements ILifecycleTask {
      * @param plaintext
      *            the secret value to store
      * @return the vault reference string, e.g.
-     *         {@code ${eddivault:default/agentId/keyName}}
+     *         {@code ${eddivault:69c687.userApiKey}}
      */
     private String autoVaultSecret(IConversationMemory memory, String keyName, String plaintext) {
         // Determine tenantId — use conversation property if set, else "default"
@@ -400,11 +410,13 @@ public class PropertySetterTask implements ILifecycleTask {
         }
 
         String agentId = memory.getAgentId();
-        var ref = new SecretReference(tenantId, agentId, keyName);
+        // Namespace with agentId to prevent cross-agent collision
+        String qualifiedKeyName = agentId + "." + keyName;
+        var ref = new SecretReference(tenantId, qualifiedKeyName);
 
         // Store the plaintext in the vault (encrypted at rest)
         try {
-            secretProvider.store(ref, plaintext);
+            secretProvider.store(ref, plaintext, "Auto-vaulted from conversation", List.of(agentId));
         } catch (ISecretProvider.SecretProviderException e) {
             // If vault storage fails, log and return the plaintext as-is (degraded mode).
             // This prevents the PropertySetter from breaking the workflow.

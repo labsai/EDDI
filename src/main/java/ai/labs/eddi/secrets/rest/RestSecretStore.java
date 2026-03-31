@@ -1,6 +1,7 @@
 package ai.labs.eddi.secrets.rest;
 
 import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -17,6 +18,13 @@ import java.util.regex.Pattern;
  * REST implementation for the Secrets Vault API. All endpoints require
  * authentication (handled by Keycloak). Plaintext secret values are NEVER
  * returned — only accepted via PUT.
+ * <p>
+ * Secrets are scoped at the <b>tenant level</b>. The {@code agentId} has been
+ * removed from paths — it was impractical to duplicate shared secrets (like API
+ * keys) across every agent.
+ *
+ * @author ginccc
+ * @since 6.0.0
  */
 @ApplicationScoped
 public class RestSecretStore implements IRestSecretStore {
@@ -25,15 +33,16 @@ public class RestSecretStore implements IRestSecretStore {
     private static final Pattern VALID_ID = Pattern.compile("[a-zA-Z0-9._\\-]{1,128}");
 
     private final ISecretProvider secretProvider;
+    private final SecretResolver secretResolver;
 
     @Inject
-    public RestSecretStore(ISecretProvider secretProvider) {
+    public RestSecretStore(ISecretProvider secretProvider, SecretResolver secretResolver) {
         this.secretProvider = secretProvider;
+        this.secretResolver = secretResolver;
     }
 
     /**
      * Check if the vault is unavailable and return an actionable 503 response.
-     * Returns empty if the vault is available (caller should proceed normally).
      */
     private Optional<Response> vaultUnavailableResponse() {
         if (!secretProvider.isAvailable()) {
@@ -59,14 +68,13 @@ public class RestSecretStore implements IRestSecretStore {
     }
 
     @Override
-    public Response storeSecret(String tenantId, String agentId, String keyName, SecretRequest body) {
+    public Response storeSecret(String tenantId, String keyName, SecretRequest body) {
         var unavailable = vaultUnavailableResponse();
         if (unavailable.isPresent())
             return unavailable.get();
 
         try {
             validateId(tenantId, "tenantId");
-            validateId(agentId, "agentId");
             validateId(keyName, "keyName");
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
@@ -76,7 +84,7 @@ public class RestSecretStore implements IRestSecretStore {
         }
 
         try {
-            var ref = new SecretReference(tenantId, agentId, keyName);
+            var ref = new SecretReference(tenantId, keyName);
 
             // Check if exists (for correct HTTP status)
             boolean exists;
@@ -87,9 +95,14 @@ public class RestSecretStore implements IRestSecretStore {
                 exists = false;
             }
 
-            secretProvider.store(ref, body.value());
+            secretProvider.store(ref, body.value(), body.description(), body.allowedAgents());
 
-            var responseRef = Map.of("reference", ref.toReferenceString(), "tenantId", tenantId, "agentId", agentId, "keyName", keyName);
+            // Invalidate resolver cache on update
+            if (exists) {
+                secretResolver.invalidateCache(ref);
+            }
+
+            var responseRef = Map.of("reference", ref.toReferenceString(), "tenantId", tenantId, "keyName", keyName);
 
             if (exists) {
                 return Response.ok(responseRef).build();
@@ -97,75 +110,74 @@ public class RestSecretStore implements IRestSecretStore {
                 return Response.status(Response.Status.CREATED).entity(responseRef).build();
             }
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorv("Failed to store secret: {0}/{1}/{2} — {3}", tenantId, agentId, keyName, e.getMessage());
+            LOGGER.errorf("Failed to store secret: %s/%s — %s", tenantId, keyName, e.getMessage());
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to store secret")).build();
         }
     }
 
     @Override
-    public Response deleteSecret(String tenantId, String agentId, String keyName) {
+    public Response deleteSecret(String tenantId, String keyName) {
         var unavailable = vaultUnavailableResponse();
         if (unavailable.isPresent())
             return unavailable.get();
 
         try {
             validateId(tenantId, "tenantId");
-            validateId(agentId, "agentId");
             validateId(keyName, "keyName");
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
         try {
-            secretProvider.delete(new SecretReference(tenantId, agentId, keyName));
+            var ref = new SecretReference(tenantId, keyName);
+            secretProvider.delete(ref);
+            secretResolver.invalidateCache(ref);
             return Response.noContent().build();
         } catch (ISecretProvider.SecretNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "Secret not found")).build();
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorv("Failed to delete secret: {0}/{1}/{2} — {3}", tenantId, agentId, keyName, e.getMessage());
+            LOGGER.errorf("Failed to delete secret: %s/%s — %s", tenantId, keyName, e.getMessage());
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to delete secret")).build();
         }
     }
 
     @Override
-    public Response getSecretMetadata(String tenantId, String agentId, String keyName) {
+    public Response getSecretMetadata(String tenantId, String keyName) {
         var unavailable = vaultUnavailableResponse();
         if (unavailable.isPresent())
             return unavailable.get();
 
         try {
             validateId(tenantId, "tenantId");
-            validateId(agentId, "agentId");
             validateId(keyName, "keyName");
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
         try {
-            SecretMetadata metadata = secretProvider.getMetadata(new SecretReference(tenantId, agentId, keyName));
+            SecretMetadata metadata = secretProvider.getMetadata(new SecretReference(tenantId, keyName));
             return Response.ok(metadata).build();
         } catch (ISecretProvider.SecretNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "Secret not found")).build();
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorv("Failed to get secret metadata: {0}/{1}/{2} — {3}", tenantId, agentId, keyName, e.getMessage());
+            LOGGER.errorf("Failed to get secret metadata: %s/%s — %s", tenantId, keyName, e.getMessage());
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to get metadata")).build();
         }
     }
 
     @Override
-    public Response listSecrets(String tenantId, String agentId) {
+    public Response listSecrets(String tenantId) {
         var unavailable = vaultUnavailableResponse();
         if (unavailable.isPresent())
             return unavailable.get();
 
         try {
             validateId(tenantId, "tenantId");
-            validateId(agentId, "agentId");
         } catch (IllegalArgumentException e) {
             return Response.ok(List.of()).build();
         }
         try {
-            return Response.ok(secretProvider.listKeys(tenantId, agentId)).build();
+            return Response.ok(secretProvider.listKeys(tenantId)).build();
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorv("Failed to list secrets: {0}/{1} — {2}", tenantId, agentId, e.getMessage());
+            LOGGER.errorf("Failed to list secrets: %s — %s", tenantId, e.getMessage());
             return Response.ok(List.of()).build();
         }
     }

@@ -9,12 +9,20 @@ import java.util.List;
  * Service Provider Interface for secrets management. Implementations handle the
  * actual storage and retrieval of encrypted secrets.
  * <p>
+ * Secrets are scoped at the <b>tenant level</b>, identified by
+ * {@code (tenantId, keyName)}. There is no agent-level scoping — access control
+ * is via <b>configuration authorship</b>: the admin who writes the agent config
+ * decides which vault references ({@code ${eddivault:keyName}}) to include.
+ * <p>
  * All implementations MUST ensure:
  * <ul>
  * <li>Plaintext values exist only in volatile JVM memory</li>
- * <li>Namespace isolation: tenant/agent scoping is enforced</li>
+ * <li>Namespace isolation: tenant scoping is enforced</li>
  * <li>Thread safety for concurrent access</li>
  * </ul>
+ *
+ * @author ginccc
+ * @since 6.0.0
  */
 public interface ISecretProvider {
 
@@ -33,17 +41,21 @@ public interface ISecretProvider {
     String resolve(SecretReference reference) throws SecretNotFoundException, SecretProviderException;
 
     /**
-     * Store a new secret. If a secret with the same reference already exists, it is
-     * overwritten.
+     * Store a new secret or update an existing one.
      *
      * @param reference
-     *            the secret reference (tenant/agent/keyName)
+     *            the secret reference (tenantId/keyName)
      * @param plaintext
      *            the plaintext value to encrypt and store
+     * @param description
+     *            human-readable description (nullable)
+     * @param allowedAgents
+     *            list of agent IDs allowed to use this secret, or {@code ["*"]} for
+     *            all agents (nullable → defaults to ["*"])
      * @throws SecretProviderException
      *             if storage fails
      */
-    void store(SecretReference reference, String plaintext) throws SecretProviderException;
+    void store(SecretReference reference, String plaintext, String description, List<String> allowedAgents) throws SecretProviderException;
 
     /**
      * Delete a secret from the backend.
@@ -58,8 +70,8 @@ public interface ISecretProvider {
     void delete(SecretReference reference) throws SecretNotFoundException, SecretProviderException;
 
     /**
-     * Get non-sensitive metadata about a secret (timestamps, checksum). Plaintext
-     * is NEVER returned through this method.
+     * Get non-sensitive metadata about a secret (timestamps, checksum, description,
+     * allowedAgents). Plaintext is NEVER returned through this method.
      *
      * @param reference
      *            the secret reference
@@ -72,17 +84,15 @@ public interface ISecretProvider {
     SecretMetadata getMetadata(SecretReference reference) throws SecretNotFoundException, SecretProviderException;
 
     /**
-     * List all secret keys for a given tenant and Agent namespace.
+     * List all secret keys for a given tenant.
      *
      * @param tenantId
      *            the tenant identifier
-     * @param agentId
-     *            the Agent identifier
-     * @return list of metadata for all secrets in the namespace
+     * @return list of metadata for all secrets in the tenant
      * @throws SecretProviderException
      *             if the operation fails
      */
-    List<SecretMetadata> listKeys(String tenantId, String agentId) throws SecretProviderException;
+    List<SecretMetadata> listKeys(String tenantId) throws SecretProviderException;
 
     /**
      * Check if the secret provider is properly configured and operational.
