@@ -13,6 +13,47 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Secrets Vault v2 — Tenant-Scoped, Persistent, Production-Ready (2026-03-31)
+
+**Repos:** EDDI + EDDI-Manager (`feature/version-6.0.0`)
+
+**What changed:**
+
+Complete re-architecture of the EDDI Secrets Vault from agent-scoped ephemeral storage to tenant-scoped persistent storage with dual-format vault reference syntax.
+
+| Change | Details |
+|---|---|
+| **Scope** | `tenant/agent/key` → `tenant/key` — secrets shared across all agents within a tenant |
+| **Persistence** | `DatabaseSecretProvider` (ephemeral) → `VaultSecretProvider` backed by `ISecretPersistence` (MongoDB + PostgreSQL) |
+| **Reference Syntax** | New `${eddivault:keyName}` (short-form, defaults to "default" tenant) and `${eddivault:tenantId/keyName}` (full-form) |
+| **Model** | `SecretReference` dual-format regex, `SecretMetadata` gains `description`, `lastRotatedAt`, `allowedAgents`, `@JsonFormat(STRING)` timestamps |
+| **REST API** | 3-segment → 2-segment paths (removed agentId), `SecretRequest` with description/allowedAgents |
+| **Auto-Vaulting** | `PropertySetterTask.autoVaultSecret()` namespaces keys with `agentId.keyName` to prevent cross-agent collision |
+| **A2A Security** | `A2AToolProviderManager` recognizes both `${vault:}` (legacy) and `${eddivault:}` prefixes |
+
+**Manager UI changes:**
+
+| Component | Change |
+|---|---|
+| `secrets.ts` | Removed agentId from API functions, added metadata fields, 2-segment URLs |
+| `use-secrets.ts` | Removed agentId from query keys and mutations |
+| `secrets.tsx` | Removed agent selector, added copy-reference button, description column, reference preview, last-rotated column |
+| `handlers.ts` | Updated MSW mock data (removed agentId, added description/allowedAgents/lastRotatedAt) |
+| `en.json` | Updated all secrets i18n keys for tenant-scoped UX |
+| `secrets.test.tsx` | Rewritten: 13 tests for tenant-scoped architecture |
+
+**Design decisions:**
+- Access control by configuration authorship — admins control which vault references to embed in agent configs, not runtime enforcement
+- Short-form `${eddivault:keyName}` preferred for UX simplicity; full-form available for multi-tenant deployments
+- Auto-vaulted property keys prefixed with `agentId.` to prevent cross-agent collisions while keeping the short-form UX
+- `VaultStartupBanner` Javadoc updated from deleted `DatabaseSecretProvider` to `VaultSecretProvider`
+
+**Tests:** `SecretReferenceTest` (5), `SecretResolverTest` (5), Manager `secrets.test.tsx` (13). All pass.
+
+**Files:** 10+ modified across both repos. Backend compiles (0 errors), `tsc -b` passes, all secrets tests green.
+
+---
+
 ## Consolidate `IPropertiesStore` into `IUserMemoryStore` (2026-03-30)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
