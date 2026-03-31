@@ -3,7 +3,7 @@ name: CI/CD
 on:
   push:
     branches: [ main ]
-    tags: [ 'v*' ]
+    tags: [ '[0-9]*' ]
   pull_request:
     branches: [ main ]
 
@@ -61,7 +61,7 @@ jobs:
     if: >
       github.event_name == 'push' &&
       github.repository == 'labsai/EDDI' &&
-      (startsWith(github.ref, 'refs/tags/v') ||
+      (startsWith(github.ref, 'refs/tags/') ||
        !contains(github.event.head_commit.message || '', '[skip docker]'))
 
     outputs:
@@ -85,9 +85,9 @@ jobs:
       - name: Compute Docker tags
         id: meta
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            # Tag push: v6.0.0-RC1 → 6.0.0-RC1
-            PRIMARY_TAG="${GITHUB_REF#refs/tags/v}"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            # Tag push: 6.0.0-RC1
+            PRIMARY_TAG="${GITHUB_REF#refs/tags/}"
             IS_RELEASE="true"
           else
             # Branch push: version from pom.xml + build number
