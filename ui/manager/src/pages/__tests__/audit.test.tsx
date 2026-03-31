@@ -55,10 +55,12 @@ describe("AuditPage", () => {
     expect(screen.getByTestId("version-input")).toBeInTheDocument();
   });
 
-  it("shows empty state prompt initially", () => {
+  it("auto-loads recent entries on mount (no initial empty state)", async () => {
     renderAudit();
-    expect(screen.getByTestId("empty-state")).toBeInTheDocument();
-    expect(screen.getByText("Search for audit entries")).toBeInTheDocument();
+    // The page auto-loads "recent" entries, so the audit-timeline should appear
+    await waitFor(() => {
+      expect(screen.getByTestId("audit-timeline")).toBeInTheDocument();
+    });
   });
 
   it("loads entries after entering conversation ID and searching", async () => {
@@ -184,18 +186,19 @@ describe("AuditPage", () => {
     expect(screen.getByTestId("recent-entries-btn")).toBeInTheDocument();
   });
 
-  it("renders export button (disabled when no results)", () => {
+  it("renders export button", async () => {
     renderAudit();
     const btn = screen.getByTestId("export-btn");
     expect(btn).toBeInTheDocument();
-    expect(btn).toBeDisabled();
+    // After auto-load, it should become enabled
+    await waitFor(() => {
+      expect(btn).not.toBeDisabled();
+    });
   });
 
   it("clicking Recent switches to conversation mode and triggers search", async () => {
     renderAudit();
-    const user = userEvent.setup();
-    await user.click(screen.getByTestId("recent-entries-btn"));
-    // After clicking recent, the search should fire (conversation-input should have 'recent')
+    // Auto-load already sets conversation-input to 'recent'
     const input = screen.getByTestId("conversation-input") as HTMLInputElement;
     expect(input.value).toBe("recent");
   });

@@ -31,7 +31,11 @@
     "sectionDevelopment": "개발",
     "sectionOperations": "운영",
     "mainNavigation": "메인 탐색",
-    "openMenu": "탐색 메뉴 열기"
+    "openMenu": "탐색 메뉴 열기",
+    "sectionCore": "Core",
+    "sectionBuild": "Build & Test",
+    "sectionMonitor": "Monitor",
+    "sectionAdmin": "Admin"
   },
   "theme": {
     "light": "라이트",
@@ -108,7 +112,9 @@
     "sortByName": "이름순 정렬",
     "sortByVersion": "버전순 정렬",
     "sortByModified": "수정일순 정렬",
-    "apply": "적용"
+    "apply": "적용",
+    "copied": "Copied",
+    "copy": "Copy"
   },
   "agents": {
     "deploy": "배포",
@@ -667,7 +673,9 @@
     "noHistoryLogs": "기록 로그를 찾을 수 없습니다.",
     "entryCount": "{{count}}개 항목",
     "showStacktrace": "스택트레이스 표시 ({{count}} 프레임)",
-    "hideStacktrace": "스택트레이스 숨기기"
+    "hideStacktrace": "스택트레이스 숨기기",
+    "allAgents": "All Agents",
+    "allConversations": "All Conversations"
   },
   "secrets": {
     "title": "Secrets Vault",
@@ -698,7 +706,21 @@
     "enterAgentId": "Agent ID 입력",
     "enterAgentIdHint": "위에서 Agent ID를 지정하여 Secrets를 보고 관리하세요.",
     "vaultUp": "Vault 온라인",
-    "vaultDown": "Vault 오프라인"
+    "vaultDown": "Vault 오프라인",
+    "descriptionLabel": "Description (optional)",
+    "descriptionPlaceholder": "e.g. OpenAI API key for production",
+    "descriptionCol": "Description",
+    "reference": "Reference",
+    "willUseRef": "Reference:",
+    "copyRef": "Copy vault reference",
+    "refCopied": "Copied: {{ref}}",
+    "lastRotated": "Last Rotated",
+    "scopeExplanation": "Secrets are scoped per tenant and shared across all agents. Reference them in configs with ${eddivault:keyName}. Access is controlled by configuration authorship — only admins who write the config decide which secrets to use.",
+    "creatingFor": "Storing in tenant \"{{tenant}}\" — available to all agents",
+    "vaultNotConfigured": "Secrets Vault is not configured",
+    "viewDocs": "View documentation",
+    "selectAgentFirst": "Select an agent first",
+    "tableTitle": "{{count}} secret(s) in tenant \"{{tenant}}\""
   },
   "audit": {
     "title": "Audit Trail",
@@ -1010,5 +1032,15 @@
   "stream": {
     "live": "라이브",
     "reconnecting": "재연결 중…"
+  },
+  "createOrWizard": {
+    "title": "New {{type}}",
+    "newAgent": "New Agent",
+    "newGroup": "New Group",
+    "quickCreate": "Quick Create",
+    "quickCreateTitle": "Quick Create {{type}}",
+    "quickCreateDesc": "Set a name and description, configure details later.",
+    "guidedSetup": "Guided Setup",
+    "guidedSetupDesc": "Step-by-step wizard with LLM provider, prompts, and deployment."
   }
 }

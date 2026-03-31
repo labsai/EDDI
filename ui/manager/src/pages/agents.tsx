@@ -1,13 +1,14 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Bot, Search, Plus, Upload, Wand2, ExternalLink, Trash2, Copy, Download, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { Bot, Search, Plus, Upload, ExternalLink, Trash2, Copy, Download, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { useInfiniteAgentDescriptors, useDeleteAgent, useDuplicateAgent, groupAgentsByName } from "@/hooks/use-agents";
 import { AgentCard } from "@/components/agents/agent-card";
 import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
 import { ImportAgentDialog } from "@/components/agents/import-agent-dialog";
+import { CreateOrWizardDialog } from "@/components/shared/create-or-wizard-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -31,6 +32,7 @@ export function AgentsPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("agents"));
@@ -137,18 +139,12 @@ export function AgentsPage() {
             <Upload className="h-4 w-4" />
             {t("agents.import", "Import")}
           </Button>
-          <Button variant="outline" asChild data-testid="agent-wizard-btn">
-            <Link to="/manage/agents/wizard">
-              <Wand2 className="h-4 w-4" />
-              {t("wizard.title")}
-            </Link>
-          </Button>
           <Button
             onClick={() => setCreateOpen(true)}
             data-testid="create-agent-btn"
           >
             <Plus className="h-4 w-4" />
-            {t("agents.createAgent")}
+            {t("createOrWizard.newAgent", "New Agent")}
           </Button>
         </div>
       </div>
@@ -362,8 +358,20 @@ export function AgentsPage() {
       )}
       </div>
 
-      {/* Create dialog */}
-      <CreateAgentDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      {/* Create or Wizard dialog */}
+      <CreateOrWizardDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        type="agent"
+        wizardPath="/manage/agents/wizard"
+        onQuickCreate={() => {
+          setCreateOpen(false);
+          setQuickCreateOpen(true);
+        }}
+      />
+
+      {/* Quick Create dialog (standalone) */}
+      <CreateAgentDialog open={quickCreateOpen} onClose={() => setQuickCreateOpen(false)} />
 
       {/* Import dialog */}
       <ImportAgentDialog

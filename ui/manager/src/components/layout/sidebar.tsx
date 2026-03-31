@@ -4,7 +4,7 @@ import {
   LayoutDashboard,
   Bot,
   Workflow,
-  MessageSquare,
+  MessagesSquare,
   MessageCircle,
   FileCode,
   PanelLeftClose,
@@ -14,8 +14,8 @@ import {
   BookOpen,
   FileJson,
   Activity,
-  Clock,
-  Trash2,
+  CalendarClock,
+  Link2Off,
   ScrollText,
   KeyRound,
   ShieldCheck,
@@ -34,7 +34,7 @@ import { TOUR_CHAPTERS } from "@/components/onboarding/tour-chapters";
 
 const navSections = [
   {
-    labelKey: "nav.sectionManagement",
+    labelKey: "nav.sectionCore",
     items: [
       { path: "/manage", icon: LayoutDashboard, labelKey: "nav.dashboard" },
       { path: "/manage/agents", icon: Bot, labelKey: "nav.agents" },
@@ -43,55 +43,28 @@ const navSections = [
     ],
   },
   {
-    labelKey: "nav.sectionDevelopment",
+    labelKey: "nav.sectionBuild",
     items: [
       { path: "/manage/resources", icon: FileCode, labelKey: "nav.resources" },
       { path: "/manage/chat", icon: MessageCircle, labelKey: "nav.chat" },
     ],
   },
   {
-    labelKey: "nav.sectionOperations",
+    labelKey: "nav.sectionMonitor",
     items: [
-      {
-        path: "/manage/conversations",
-        icon: MessageSquare,
-        labelKey: "nav.conversations",
-      },
-      {
-        path: "/manage/coordinator",
-        icon: Activity,
-        labelKey: "nav.coordinator",
-      },
-      {
-        path: "/manage/schedules",
-        icon: Clock,
-        labelKey: "nav.schedules",
-      },
-      {
-        path: "/manage/logs",
-        icon: ScrollText,
-        labelKey: "nav.logs",
-      },
-      {
-        path: "/manage/orphans",
-        icon: Trash2,
-        labelKey: "nav.orphans",
-      },
-      {
-        path: "/manage/secrets",
-        icon: KeyRound,
-        labelKey: "nav.secrets",
-      },
-      {
-        path: "/manage/audit",
-        icon: ShieldCheck,
-        labelKey: "nav.audit",
-      },
-      {
-        path: "/manage/quotas",
-        icon: Gauge,
-        labelKey: "nav.quotas",
-      },
+      { path: "/manage/logs", icon: ScrollText, labelKey: "nav.logs" },
+      { path: "/manage/conversations", icon: MessagesSquare, labelKey: "nav.conversations" },
+      { path: "/manage/coordinator", icon: Activity, labelKey: "nav.coordinator" },
+      { path: "/manage/audit", icon: ShieldCheck, labelKey: "nav.audit" },
+    ],
+  },
+  {
+    labelKey: "nav.sectionAdmin",
+    items: [
+      { path: "/manage/secrets", icon: KeyRound, labelKey: "nav.secrets" },
+      { path: "/manage/quotas", icon: Gauge, labelKey: "nav.quotas" },
+      { path: "/manage/schedules", icon: CalendarClock, labelKey: "nav.schedules" },
+      { path: "/manage/orphans", icon: Link2Off, labelKey: "nav.orphans" },
     ],
   },
 ] as const;
@@ -292,8 +265,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       {/* Help & Tour menu */}
       <HelpMenu collapsed={collapsed} />
 
-      {/* Collapse toggle */}
+      {/* Version + Collapse toggle */}
       <div className="border-t border-sidebar-border p-2">
+        {!collapsed && (
+          <p className="mb-1 px-3 text-center text-[10px] text-sidebar-foreground/30">
+            EDDI Manager v{__APP_VERSION__}
+          </p>
+        )}
         <button
           onClick={onToggle}
           data-testid="sidebar-toggle"

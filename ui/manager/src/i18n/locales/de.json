@@ -31,7 +31,11 @@
     "sectionDevelopment": "Entwicklung",
     "sectionOperations": "Betrieb",
     "mainNavigation": "Hauptnavigation",
-    "openMenu": "Navigationsmenü öffnen"
+    "openMenu": "Navigationsmenü öffnen",
+    "sectionCore": "Core",
+    "sectionBuild": "Build & Test",
+    "sectionMonitor": "Monitor",
+    "sectionAdmin": "Admin"
   },
   "theme": {
     "light": "Hell",
@@ -108,7 +112,9 @@
     "sortByName": "Nach Name sortieren",
     "sortByVersion": "Nach Version sortieren",
     "sortByModified": "Nach Änderungsdatum sortieren",
-    "apply": "Anwenden"
+    "apply": "Anwenden",
+    "copied": "Copied",
+    "copy": "Copy"
   },
   "agents": {
     "deploy": "Bereitstellen",
@@ -667,7 +673,9 @@
     "noHistoryLogs": "Keine historischen Logs gefunden.",
     "entryCount": "{{count}} Einträge",
     "showStacktrace": "Stacktrace anzeigen ({{count}} Frames)",
-    "hideStacktrace": "Stacktrace ausblenden"
+    "hideStacktrace": "Stacktrace ausblenden",
+    "allAgents": "All Agents",
+    "allConversations": "All Conversations"
   },
   "secrets": {
     "title": "Secrets Vault",
@@ -698,7 +706,21 @@
     "enterAgentId": "Agent ID eingeben",
     "enterAgentIdHint": "Geben Sie oben eine Agent ID ein, um Secrets anzuzeigen und zu verwalten.",
     "vaultUp": "Vault online",
-    "vaultDown": "Vault offline"
+    "vaultDown": "Vault offline",
+    "descriptionLabel": "Description (optional)",
+    "descriptionPlaceholder": "e.g. OpenAI API key for production",
+    "descriptionCol": "Description",
+    "reference": "Reference",
+    "willUseRef": "Reference:",
+    "copyRef": "Copy vault reference",
+    "refCopied": "Copied: {{ref}}",
+    "lastRotated": "Last Rotated",
+    "scopeExplanation": "Secrets are scoped per tenant and shared across all agents. Reference them in configs with ${eddivault:keyName}. Access is controlled by configuration authorship — only admins who write the config decide which secrets to use.",
+    "creatingFor": "Storing in tenant \"{{tenant}}\" — available to all agents",
+    "vaultNotConfigured": "Secrets Vault is not configured",
+    "viewDocs": "View documentation",
+    "selectAgentFirst": "Select an agent first",
+    "tableTitle": "{{count}} secret(s) in tenant \"{{tenant}}\""
   },
   "audit": {
     "title": "Audit Trail",
@@ -1010,5 +1032,15 @@
   "stream": {
     "live": "Live",
     "reconnecting": "Verbindung wird wiederhergestellt…"
+  },
+  "createOrWizard": {
+    "title": "New {{type}}",
+    "newAgent": "New Agent",
+    "newGroup": "New Group",
+    "quickCreate": "Quick Create",
+    "quickCreateTitle": "Quick Create {{type}}",
+    "quickCreateDesc": "Set a name and description, configure details later.",
+    "guidedSetup": "Guided Setup",
+    "guidedSetupDesc": "Step-by-step wizard with LLM provider, prompts, and deployment."
   }
 }

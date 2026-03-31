@@ -9,9 +9,13 @@ describe("AgentsPage — Import/Export", () => {
     expect(screen.getByTestId("import-agent-btn")).toBeInTheDocument();
   });
 
-  it("renders agent wizard button", () => {
+  it("renders create-agent-btn that opens the choice dialog", async () => {
     renderWithProviders(<AgentsPage />);
-    expect(screen.getByTestId("agent-wizard-btn")).toBeInTheDocument();
+    const user = userEvent.setup();
+    const btn = screen.getByTestId("create-agent-btn");
+    expect(btn).toHaveTextContent("New Agent");
+    await user.click(btn);
+    expect(screen.getByTestId("create-or-wizard-dialog")).toBeInTheDocument();
   });
 
   it("import button opens import dialog on click", async () => {

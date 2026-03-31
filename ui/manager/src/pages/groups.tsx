@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Users, Search, Plus, Wand2, ExternalLink, Copy, Trash2 } from "lucide-react";
+import { Users, Search, Plus, ExternalLink, Copy, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useGroupDescriptors, useDeleteGroup, useDuplicateGroup } from "@/hooks/use-groups";
 import { GroupCard } from "@/components/groups/group-card";
 import { CreateGroupDialog } from "@/components/groups/create-group-dialog";
+import { CreateOrWizardDialog } from "@/components/shared/create-or-wizard-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -24,6 +25,7 @@ export function GroupsPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("groups"));
 
@@ -78,15 +80,9 @@ export function GroupsPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" asChild data-testid="group-wizard-btn">
-            <Link to="/manage/groups/wizard">
-              <Wand2 className="h-4 w-4" />
-              {t("groupWizard.title", "Group Wizard")}
-            </Link>
-          </Button>
           <Button onClick={() => setCreateOpen(true)} data-testid="create-group-btn">
             <Plus className="h-4 w-4" />
-            {t("groups.createGroup", "Create Group")}
+            {t("createOrWizard.newGroup", "New Group")}
           </Button>
         </div>
       </div>
@@ -250,10 +246,22 @@ export function GroupsPage() {
         </>
       )}
 
-      {/* Create dialog */}
-      <CreateGroupDialog
+      {/* Create or Wizard dialog */}
+      <CreateOrWizardDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
+        type="group"
+        wizardPath="/manage/groups/wizard"
+        onQuickCreate={() => {
+          setCreateOpen(false);
+          setQuickCreateOpen(true);
+        }}
+      />
+
+      {/* Quick Create dialog (standalone) */}
+      <CreateGroupDialog
+        open={quickCreateOpen}
+        onClose={() => setQuickCreateOpen(false)}
       />
 
       {/* Delete confirmation */}

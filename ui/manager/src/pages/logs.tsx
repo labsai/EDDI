@@ -18,6 +18,9 @@ import { StreamBadge } from "@/components/ui/stream-badge";
 import { useLogStream, useHistoryLogs, useInstanceId } from "@/hooks/use-logs";
 import type { LogEntry } from "@/lib/api/logs";
 import type { HistoryFilters } from "@/lib/api/logs";
+import { useDeployedAgents } from "@/hooks/use-chat";
+import { getConversationDescriptors, parseConversationUri, type ConversationDescriptor } from "@/lib/api/conversations";
+import { useQuery } from "@tanstack/react-query";
 
 // ==================== Level badge config ====================
 
@@ -249,13 +252,10 @@ function LiveTab() {
         <div className="flex-1" />
 
         {/* Agent filter */}
-        <input
-          type="text"
-          placeholder={t("logs.filterAgent", "Agent ID...")}
+        <AgentFilterSelect
           value={agentFilter}
-          onChange={(e) => setAgentFilter(e.target.value)}
-          className="w-36 rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-          data-testid="filter-agent"
+          onChange={setAgentFilter}
+          testId="filter-agent"
         />
 
         {/* Level filter */}
@@ -408,21 +408,15 @@ function HistoryTab() {
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Filters */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <input
-          type="text"
-          placeholder={t("logs.filterAgent", "Agent ID...")}
+        <AgentFilterSelect
           value={filters.agentId ?? ""}
-          onChange={(e) => updateFilter("agentId", e.target.value)}
-          className="w-36 rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-          data-testid="history-filter-agent"
+          onChange={(v) => updateFilter("agentId", v)}
+          testId="history-filter-agent"
         />
-        <input
-          type="text"
-          placeholder={t("logs.filterConversation", "Conversation ID...")}
+        <ConversationFilterSelect
           value={filters.conversationId ?? ""}
-          onChange={(e) => updateFilter("conversationId", e.target.value)}
-          className="w-44 rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-          data-testid="history-filter-conversation"
+          onChange={(v) => updateFilter("conversationId", v)}
+          testId="history-filter-conversation"
         />
         <input
           type="text"
@@ -601,6 +595,81 @@ function LogRow({ entry }: { entry: LogEntry }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ==================== Filter Select Components ====================
+
+/** Dropdown for selecting an agent — populated from deployed agents. */
+function AgentFilterSelect({
+  value,
+  onChange,
+  testId,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  testId: string;
+}) {
+  const { t } = useTranslation();
+  const { data: agents } = useDeployedAgents();
+
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="appearance-none rounded-lg border border-input bg-background pe-7 ps-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        data-testid={testId}
+      >
+        <option value="">{t("logs.allAgents", "All Agents")}</option>
+        {agents?.map((agent) => (
+          <option key={agent.id} value={agent.id}>
+            {agent.name || agent.id}
+          </option>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute inset-e-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+    </div>
+  );
+}
+
+/** Dropdown for selecting a conversation — populated from recent conversations. */
+function ConversationFilterSelect({
+  value,
+  onChange,
+  testId,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  testId: string;
+}) {
+  const { t } = useTranslation();
+  const { data: conversations } = useQuery({
+    queryKey: ["logs", "conversations-filter"],
+    queryFn: () => getConversationDescriptors(50),
+    staleTime: 60_000,
+  });
+
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="appearance-none rounded-lg border border-input bg-background pe-7 ps-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        data-testid={testId}
+      >
+        <option value="">{t("logs.allConversations", "All Conversations")}</option>
+        {conversations?.map((conv: ConversationDescriptor) => {
+          const convId = parseConversationUri(conv.resource);
+          return (
+            <option key={convId} value={convId}>
+              {convId.substring(0, 10)}… — {conv.agentId} ({conv.conversationState})
+            </option>
+          );
+        })}
+      </select>
+      <ChevronDown className="pointer-events-none absolute inset-e-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
     </div>
   );
 }

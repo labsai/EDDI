@@ -31,7 +31,11 @@
     "sectionDevelopment": "开发",
     "sectionOperations": "运维",
     "mainNavigation": "主导航",
-    "openMenu": "打开导航菜单"
+    "openMenu": "打开导航菜单",
+    "sectionCore": "Core",
+    "sectionBuild": "Build & Test",
+    "sectionMonitor": "Monitor",
+    "sectionAdmin": "Admin"
   },
   "theme": {
     "light": "浅色",
@@ -108,7 +112,9 @@
     "sortByName": "按名称排序",
     "sortByVersion": "按版本排序",
     "sortByModified": "按修改日期排序",
-    "apply": "应用"
+    "apply": "应用",
+    "copied": "Copied",
+    "copy": "Copy"
   },
   "agents": {
     "deploy": "部署",
@@ -667,7 +673,9 @@
     "noHistoryLogs": "未找到历史日志。",
     "entryCount": "{{count}} 条记录",
     "showStacktrace": "显示堆栈跟踪（{{count}} 帧）",
-    "hideStacktrace": "隐藏堆栈跟踪"
+    "hideStacktrace": "隐藏堆栈跟踪",
+    "allAgents": "All Agents",
+    "allConversations": "All Conversations"
   },
   "secrets": {
     "title": "Secrets Vault",
@@ -698,7 +706,21 @@
     "enterAgentId": "输入 Agent ID",
     "enterAgentIdHint": "在上方指定 Agent ID 以查看和管理其 Secrets。",
     "vaultUp": "Vault 在线",
-    "vaultDown": "Vault 离线"
+    "vaultDown": "Vault 离线",
+    "descriptionLabel": "Description (optional)",
+    "descriptionPlaceholder": "e.g. OpenAI API key for production",
+    "descriptionCol": "Description",
+    "reference": "Reference",
+    "willUseRef": "Reference:",
+    "copyRef": "Copy vault reference",
+    "refCopied": "Copied: {{ref}}",
+    "lastRotated": "Last Rotated",
+    "scopeExplanation": "Secrets are scoped per tenant and shared across all agents. Reference them in configs with ${eddivault:keyName}. Access is controlled by configuration authorship — only admins who write the config decide which secrets to use.",
+    "creatingFor": "Storing in tenant \"{{tenant}}\" — available to all agents",
+    "vaultNotConfigured": "Secrets Vault is not configured",
+    "viewDocs": "View documentation",
+    "selectAgentFirst": "Select an agent first",
+    "tableTitle": "{{count}} secret(s) in tenant \"{{tenant}}\""
   },
   "audit": {
     "title": "Audit Trail",
@@ -1010,5 +1032,15 @@
   "stream": {
     "live": "实时",
     "reconnecting": "重新连接中…"
+  },
+  "createOrWizard": {
+    "title": "New {{type}}",
+    "newAgent": "New Agent",
+    "newGroup": "New Group",
+    "quickCreate": "Quick Create",
+    "quickCreateTitle": "Quick Create {{type}}",
+    "quickCreateDesc": "Set a name and description, configure details later.",
+    "guidedSetup": "Guided Setup",
+    "guidedSetupDesc": "Step-by-step wizard with LLM provider, prompts, and deployment."
   }
 }

@@ -776,18 +776,17 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
-  // Conversation descriptors
+  // Conversation descriptors — supports agentId, conversationId, conversationState filters
   http.get("*/conversationstore/conversations", ({ request }) => {
     const url = new URL(request.url);
+    const agentId = url.searchParams.get("agentId");
     const conversationId = url.searchParams.get("conversationId");
-    if (conversationId) {
-      return HttpResponse.json(
-        CONVERSATIONS_MOCK.filter((c) =>
-          c.resource.includes(conversationId)
-        )
-      );
-    }
-    return HttpResponse.json(CONVERSATIONS_MOCK);
+    const conversationState = url.searchParams.get("conversationState");
+    let result = [...CONVERSATIONS_MOCK];
+    if (agentId) result = result.filter((c) => c.agentId === agentId);
+    if (conversationId) result = result.filter((c) => c.resource.includes(conversationId));
+    if (conversationState) result = result.filter((c) => c.conversationState === conversationState);
+    return HttpResponse.json(result);
   }),
 
   // Simple conversation log

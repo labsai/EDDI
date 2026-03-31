@@ -22,6 +22,9 @@ import {
 } from "lucide-react";
 import { useAuditTrail, useAuditTrailByAgent } from "@/hooks/use-audit";
 import type { AuditEntry } from "@/lib/api/audit";
+import { useDeployedAgents } from "@/hooks/use-chat";
+import { getConversationDescriptors, parseConversationUri } from "@/lib/api/conversations";
+import { useQuery } from "@tanstack/react-query";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -295,6 +298,23 @@ export function AuditPage() {
     URL.revokeObjectURL(url);
   }, [entries, searchValue, searchAgentId]);
 
+  // Auto-load recent entries on mount
+  const hasAutoLoaded = useRef(false);
+  useEffect(() => {
+    if (!hasAutoLoaded.current) {
+      hasAutoLoaded.current = true;
+      handleLoadRecent();
+    }
+  }, [handleLoadRecent]);
+
+  // Data for dropdowns
+  const { data: deployedAgents } = useDeployedAgents();
+  const { data: recentConversations } = useQuery({
+    queryKey: ["audit", "conversations-filter"],
+    queryFn: () => getConversationDescriptors(50),
+    staleTime: 60_000,
+  });
+
   return (
     <div className="space-y-6" data-testid="audit-page">
       {/* Header */}
@@ -366,26 +386,47 @@ export function AuditPage() {
         {/* Input fields */}
         <div className="flex items-center gap-3">
           {mode === "conversation" ? (
-            <input
-              type="text"
-              value={conversationId}
-              onChange={(e) => setConversationId(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={t("audit.conversationIdPlaceholder", "Enter conversation ID...")}
-              className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-              data-testid="conversation-input"
-            />
-          ) : (
             <>
               <input
                 type="text"
-                value={agentId}
-                onChange={(e) => setAgentId(e.target.value)}
+                list="conversation-suggestions"
+                value={conversationId}
+                onChange={(e) => setConversationId(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={t("audit.agentIdPlaceholder", "Enter agent ID...")}
+                placeholder={t("audit.conversationIdPlaceholder", "Enter conversation ID...")}
                 className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                data-testid="agent-input"
+                data-testid="conversation-input"
               />
+              <datalist id="conversation-suggestions">
+                <option value="recent">{t("audit.recent", "Recent")}</option>
+                {recentConversations?.map((conv) => {
+                  const convId = parseConversationUri(conv.resource);
+                  return (
+                    <option key={convId} value={convId}>
+                      {conv.agentId} ({conv.conversationState})
+                    </option>
+                  );
+                })}
+              </datalist>
+            </>
+          ) : (
+            <>
+              <div className="relative flex-1">
+                <select
+                  value={agentId}
+                  onChange={(e) => setAgentId(e.target.value)}
+                  className="w-full appearance-none rounded-lg border border-border bg-background pe-8 ps-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  data-testid="agent-input"
+                >
+                  <option value="">{t("audit.selectAgent", "Select an agent…")}</option>
+                  {deployedAgents?.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name || agent.id}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute inset-e-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              </div>
               <input
                 type="text"
                 value={agentVersion}

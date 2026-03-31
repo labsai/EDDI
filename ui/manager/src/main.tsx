@@ -8,6 +8,8 @@ import { AuthProvider } from "@/components/auth/auth-provider";
 import { App } from "@/app";
 import "@/i18n/config";
 import "@/index.css";
+// Start collecting logs from session start (before user navigates to /manage/logs)
+import "@/hooks/session-log-store";
 
 const queryClient = new QueryClient({
   defaultOptions: {

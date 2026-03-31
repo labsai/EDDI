@@ -27,6 +27,10 @@
     "groups": "Groups",
     "chat": "Chat",
     "resources": "Resources",
+    "sectionCore": "Core",
+    "sectionBuild": "Build & Test",
+    "sectionMonitor": "Monitor",
+    "sectionAdmin": "Admin",
     "sectionManagement": "Management",
     "sectionDevelopment": "Development",
     "sectionOperations": "Operations",
@@ -108,7 +112,19 @@
     "sortByName": "Sort by name",
     "sortByVersion": "Sort by version",
     "sortByModified": "Sort by last modified",
-    "apply": "Apply"
+    "apply": "Apply",
+    "copied": "Copied",
+    "copy": "Copy"
+  },
+  "createOrWizard": {
+    "title": "New {{type}}",
+    "newAgent": "New Agent",
+    "newGroup": "New Group",
+    "quickCreate": "Quick Create",
+    "quickCreateTitle": "Quick Create {{type}}",
+    "quickCreateDesc": "Set a name and description, configure details later.",
+    "guidedSetup": "Guided Setup",
+    "guidedSetupDesc": "Step-by-step wizard with LLM provider, prompts, and deployment."
   },
   "platform": {
     "status": "Platform Status",
@@ -682,7 +698,9 @@
     "noHistoryLogs": "No historical logs found.",
     "entryCount": "{{count}} entries",
     "showStacktrace": "Show stacktrace ({{count}} frames)",
-    "hideStacktrace": "Hide stacktrace"
+    "hideStacktrace": "Hide stacktrace",
+    "allAgents": "All Agents",
+    "allConversations": "All Conversations"
   },
   "secrets": {
     "title": "Secrets Vault",

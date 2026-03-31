@@ -9,6 +9,7 @@ import {
   type LogFilters,
   type HistoryFilters,
 } from "@/lib/api/logs";
+import { useSessionLogStore } from "@/hooks/session-log-store";
 
 // ==================== Query Keys ====================
 
@@ -46,12 +47,22 @@ export function useInstanceId() {
 
 const MAX_LOG_ENTRIES = 500; // Max entries in the live view
 
+/** Are any filter fields set? */
+function hasFilters(f: LogFilters): boolean {
+  return !!(f.agentId || f.conversationId || f.level);
+}
+
 /**
  * Hook that subscribes to the log SSE stream for live log tailing.
- * Returns accumulated log entries and connection status.
+ * When no filters are active, seeds initial entries from the session log store
+ * (which collects since app boot) so the user sees data immediately.
  */
 export function useLogStream(filters: LogFilters = {}) {
-  const [entries, setEntries] = useState<LogEntry[]>([]);
+  // Seed from session store when unfiltered
+  const sessionEntries = useSessionLogStore((s) => s.entries);
+  const [entries, setEntries] = useState<LogEntry[]>(() =>
+    hasFilters(filters) ? [] : sessionEntries.slice(0, MAX_LOG_ENTRIES)
+  );
   const [sseConnected, setSseConnected] = useState(false);
   const [paused, setPaused] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);

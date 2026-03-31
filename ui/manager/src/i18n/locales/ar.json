@@ -31,7 +31,11 @@
     "sectionDevelopment": "التطوير",
     "sectionOperations": "العمليات",
     "mainNavigation": "التنقل الرئيسي",
-    "openMenu": "فتح قائمة التنقل"
+    "openMenu": "فتح قائمة التنقل",
+    "sectionCore": "Core",
+    "sectionBuild": "Build & Test",
+    "sectionMonitor": "Monitor",
+    "sectionAdmin": "Admin"
   },
   "theme": {
     "light": "فاتح",
@@ -108,7 +112,9 @@
     "sortByName": "ترتيب حسب الاسم",
     "sortByVersion": "ترتيب حسب الإصدار",
     "sortByModified": "ترتيب حسب تاريخ التعديل",
-    "apply": "تطبيق"
+    "apply": "تطبيق",
+    "copied": "Copied",
+    "copy": "Copy"
   },
   "agents": {
     "deploy": "نشر",
@@ -667,7 +673,9 @@
     "noHistoryLogs": "لم يتم العثور على سجلات تاريخية.",
     "entryCount": "{{count}} إدخال",
     "showStacktrace": "عرض Stacktrace ({{count}} إطار)",
-    "hideStacktrace": "إخفاء Stacktrace"
+    "hideStacktrace": "إخفاء Stacktrace",
+    "allAgents": "All Agents",
+    "allConversations": "All Conversations"
   },
   "secrets": {
     "title": "Secrets Vault",
@@ -698,7 +706,21 @@
     "enterAgentId": "أدخل Agent ID",
     "enterAgentIdHint": "حدد Agent ID أعلاه لعرض وإدارة Secrets.",
     "vaultUp": "Vault متصل",
-    "vaultDown": "Vault غير متصل"
+    "vaultDown": "Vault غير متصل",
+    "descriptionLabel": "Description (optional)",
+    "descriptionPlaceholder": "e.g. OpenAI API key for production",
+    "descriptionCol": "Description",
+    "reference": "Reference",
+    "willUseRef": "Reference:",
+    "copyRef": "Copy vault reference",
+    "refCopied": "Copied: {{ref}}",
+    "lastRotated": "Last Rotated",
+    "scopeExplanation": "Secrets are scoped per tenant and shared across all agents. Reference them in configs with ${eddivault:keyName}. Access is controlled by configuration authorship — only admins who write the config decide which secrets to use.",
+    "creatingFor": "Storing in tenant \"{{tenant}}\" — available to all agents",
+    "vaultNotConfigured": "Secrets Vault is not configured",
+    "viewDocs": "View documentation",
+    "selectAgentFirst": "Select an agent first",
+    "tableTitle": "{{count}} secret(s) in tenant \"{{tenant}}\""
   },
   "audit": {
     "title": "Audit Trail",
@@ -1010,5 +1032,15 @@
   "stream": {
     "live": "مباشر",
     "reconnecting": "إعادة الاتصال…"
+  },
+  "createOrWizard": {
+    "title": "New {{type}}",
+    "newAgent": "New Agent",
+    "newGroup": "New Group",
+    "quickCreate": "Quick Create",
+    "quickCreateTitle": "Quick Create {{type}}",
+    "quickCreateDesc": "Set a name and description, configure details later.",
+    "guidedSetup": "Guided Setup",
+    "guidedSetupDesc": "Step-by-step wizard with LLM provider, prompts, and deployment."
   }
 }
