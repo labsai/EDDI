@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-03-31  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: `pending` feat(v6): Group wizard UX overhaul — batch-create, validation, style-aware themes
+> **Last commit**: `890fa53` feat(v6): Phase 14 Hardening - Logs/Audit dropdowns, unified Create+Wizard, sidebar reorg, orphan polish
 
 ---
 
@@ -21,6 +21,7 @@
 **Group Discussion UI**: Groups page (card/list views), Group Detail (3-panel), Group Wizard (4-step), 7 components, API layer, hooks, 5 templates.
 **A2A Protocol UI**: Agent-detail A2A section (enable/disable, description, skills, endpoints, Agent Card preview). LangChain editor A2A Agents section (remote agents as tools).
 **LLM Editor UX**: System Prompt Qute syntax highlighting (Monarch tokenizer), Pre/Post Instructions as Section+ContentEditor, model params cleanup, Add Task dialog label fix, wizard model autocomplete + base URL hints + step labels.
+**Phase 14 (UX Hardening)**: Logs session seeding + dropdown filters, Audit auto-load + dropdowns, Create+Wizard unified button, Orphan detection rich UX + selective deletion, Sidebar 4-section reorg + version display.
 
 ### What's Done
 
@@ -65,11 +66,12 @@
 | 13d | **Onboarding Flow**: Multi-chapter interactive tour (Dashboard, Agents, Workflows, Chat, Resources). Welcome Modal (3-panel carousel, glassmorphism). Spotlight overlay (box-shadow cutout). Tour tooltip (smart placement, progress bar, keyboard nav). Per-chapter localStorage persistence. Sidebar Help menu (chapter list, completion badges, restart). Focus trap, body scroll lock, WCAG keyboard support. Zustand store, 18 tests, 60+ i18n keys across 11 locales. | pending |
 | Hard | **Platform Hardening**: Secrets vault agent selector dropdown. Audit page: auto-refresh, recent entries, JSON export. Logs page: level stats bar, inline text search, export, copy-to-clipboard. Coordinator: auto-refresh interval, throughput rate, error category breakdown, expandable dead-letter payloads. Debug drawer in side-panel chat. Context-aware back-navigation (resource→workflow→agent). MSW handler dedup. Vite proxy additions. 10 new tests (logs.test.tsx, audit/coordinator/secrets test extensions). | pending |
 | PlatS | **Global Platform Status**: Always-visible top-bar health indicator polling `/administration/logs/instance` every 15s. Click/tap popover with instance ID, latency (color-coded), last-checked time. Reusable `StreamBadge` component for SSE connections. Logs page: replaced big SSE badge with StreamBadge. Coordinator: replaced ● Live span with StreamBadge. Secrets: removed vault health badge (covered by global indicator). `usePlatformStatus` hook (TanStack Query). 16 i18n keys across 11 locales. | pending |
+| **P14** | **Phase 14 — UX Hardening (partial)**: Logs session SSE collector (`session-log-store.ts`), agent/conversation dropdown filters on Logs + Audit. Audit auto-loads `recent` on mount. Agents + Groups: unified "New" button with CreateOrWizardDialog. Orphans: pre-scan empty state, type-specific icons, version extraction, copy URI, selective deletion checkboxes. Sidebar: regrouped into Core/Build/Monitor/Admin, icons updated (MessagesSquare, CalendarClock, Link2Off), `__APP_VERSION__` display. 31 i18n keys propagated to all 10 locales. | `890fa53` |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 436 pass (`npm run test`) — 42 files, 0 failures
+- **Unit/Component**: 437 pass (`npm run test`) — 42 files, 0 failures
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds
@@ -156,6 +158,24 @@ Manager tests updated: `integration-helpers.ts` and `deployment.integration.spec
 - Chat-UI Rewrite (`eddi-chat-ui` repo) — ✅ Vite rewrite complete, deployed to EDDI backend
 - See EDDI `AGENTS.md` for full roadmap
 
+---
+
+### 🔵 What's Next — Phase 14 Continuation (3 remaining items)
+
+Phase 14 UX Hardening is partially complete. **G.1** (chat history fix), **A** (logs), **D** (audit), **E** (create+wizard), **C** (orphan polish), and **G.3** (sidebar) are DONE.
+
+Three items remain:
+
+| ID | Item | What To Do | Key Files |
+|----|------|------------|----------|
+| **G.2** | **Secret Vault Key Picker** | Create `SecretKeyPicker` component (password input OR vault dropdown). Integrate into every `apiKey` field across the app. When user selects a vault key, value becomes `vault:<keyName>`. Auto-detect vault refs on load. Graceful 503 degradation. | New: `src/components/shared/secret-key-picker.tsx`. Modify: `langchain-editor.tsx` (3 apiKey fields: LLM task, MCP server, A2A agent), `mcpcalls-editor.tsx` (1 field), `rag-editor.tsx` (2 fields: embedding + store), `agent-wizard.tsx` (1 field), `group-wizard.tsx` (1 field). Use `useSecrets('default')` hook. |
+| **B** | **Coordinator Enrichment** | Reorganise stat cards (hero + 3 metrics), add success rate ratio bar, promote Active Queues with conversation links, add SSE event history buffer (last 20 snapshots as compact log). Update `use-coordinator.ts` to buffer `eventHistory[]`. | Modify: `coordinator.tsx`, `use-coordinator.ts`. Backend SSE only sends aggregate `CoordinatorStatus` — work within that constraint. |
+| **F** | **Dashboard Enrichment** | Add Recent Conversations section (last 5, clickable), Platform Health strip, expand Quick Actions (Logs, Orphan Scan, Audit Trail), visual polish on stat cards (gradient, hover lift). Add `useRecentConversations()` hook. | Modify: `dashboard.tsx`, `use-dashboard.ts`. Keep lightweight — each new data source adds load time. |
+
+After all three, run full verification: `npx tsc -b`, `npm run test`, `npm run build`.
+
+**Implementation plan artifact**: See `implementation_plan.md` in conversation `8bdeea74` for full technical details on each phase.
+
 **📄 Reference docs:**
 
 - [Editing layer plan](docs/editing-layer-plan.md) — Phases 3.14–3.19 (all ✅)
@@ -191,3 +211,24 @@ Manager tests updated: `integration-helpers.ts` and `deployment.integration.spec
 - Pre-commit hook references old `pre-commit` npm package — use `--no-verify` for now
 - Workflow duplicate not implemented (no backend endpoint for it yet)
 - `index.html` now redirects to `/manage` — Quarkus must serve `manage.html` at `/manage` route (check `application.properties`)
+
+---
+
+## Phase 14 — Files Modified (this session)
+
+| File | Change |
+|------|--------|
+| `src/hooks/session-log-store.ts` | **NEW** — Zustand store, SSE auto-connect at boot, 1000-entry circular buffer |
+| `src/hooks/use-logs.ts` | Seed live log entries from session store on mount |
+| `src/pages/logs.tsx` | Agent/Conversation filter dropdowns (both Live + History tabs) |
+| `src/pages/audit.tsx` | Auto-load recent on mount, agent dropdown, conversation datalist |
+| `src/pages/agents.tsx` | Unified "New Agent" button with CreateOrWizardDialog |
+| `src/pages/groups.tsx` | Unified "New Group" button with CreateOrWizardDialog |
+| `src/components/shared/create-or-wizard-dialog.tsx` | **NEW** — Choice dialog: Quick Create vs Guided Setup |
+| `src/pages/orphans.tsx` | Complete rewrite: pre-scan state, type icons, selective deletion |
+| `src/components/layout/sidebar.tsx` | 4 sections (Core/Build/Monitor/Admin), new icons, version display |
+| `vite.config.ts` | `define: { __APP_VERSION__: ... }` from package.json |
+| `src/vite-env.d.ts` | `declare const __APP_VERSION__: string` |
+| `src/i18n/locales/*.json` | 31 new keys propagated to all 11 locales, fixed `studio.type.output` collision |
+| `src/pages/__tests__/audit.test.tsx` | Updated for auto-load + text input (not select) |
+| `src/pages/__tests__/backup.test.tsx` | Updated for unified button (no separate wizard button) |
