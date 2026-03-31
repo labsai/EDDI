@@ -20,9 +20,9 @@ public class HttpClientModule {
     @Produces
     @ApplicationScoped
     public VertxHttpClient provideHttpClient(@ConfigProperty(name = "httpClient.maxConnectionPerRoute") Integer maxConnectionPerRoute,
-                                             @ConfigProperty(name = "httpClient.maxRedirects") Integer maxRedirects,
-                                             @ConfigProperty(name = "httpClient.idleTimeoutInMillis") Integer idleTimeout,
-                                             @ConfigProperty(name = "httpClient.connectTimeoutInMillis") Integer connectTimeout) {
+            @ConfigProperty(name = "httpClient.maxRedirects") Integer maxRedirects,
+            @ConfigProperty(name = "httpClient.idleTimeoutInMillis") Integer idleTimeout,
+            @ConfigProperty(name = "httpClient.connectTimeoutInMillis") Integer connectTimeout) {
 
         WebClientOptions options = new WebClientOptions();
 

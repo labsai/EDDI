@@ -9,7 +9,7 @@ public final class FileUtilities {
     private static final String lineSeparator = System.getProperty("line.separator");
 
     private FileUtilities() {
-        //utility class
+        // utility class
     }
 
     public static String readTextFromFile(File file) throws IOException {
@@ -28,8 +28,8 @@ public final class FileUtilities {
             if (rd != null) {
                 try {
                     rd.close();
-                } catch (IOException e) {
-                    //do nothing
+                } catch (IOException _) {
+                    // do nothing
                 }
             }
         }

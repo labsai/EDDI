@@ -33,9 +33,7 @@ public class JacksonCodec<T> implements Codec<T> {
     private final Codec<RawBsonDocument> rawBsonDocumentCodec;
     private final Class<T> type;
 
-    public JacksonCodec(ObjectMapper bsonObjectMapper,
-                        CodecRegistry codecRegistry,
-                        Class<T> type) {
+    public JacksonCodec(ObjectMapper bsonObjectMapper, CodecRegistry codecRegistry, Class<T> type) {
         this.bsonObjectMapper = bsonObjectMapper;
         this.rawBsonDocumentCodec = codecRegistry.get(RawBsonDocument.class);
         this.type = type;

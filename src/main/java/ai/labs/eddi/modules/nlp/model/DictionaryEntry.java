@@ -63,15 +63,21 @@ public class DictionaryEntry implements IDictionary.IDictionaryEntry {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
 
         DictionaryEntry that = (DictionaryEntry) o;
 
-        if (frequency != that.frequency) return false;
-        if (rating != that.rating) return false;
-        if (!Objects.equals(expressions, that.expressions)) return false;
-        if (!Objects.equals(languageCode, that.languageCode)) return false;
+        if (frequency != that.frequency)
+            return false;
+        if (rating != that.rating)
+            return false;
+        if (!Objects.equals(expressions, that.expressions))
+            return false;
+        if (!Objects.equals(languageCode, that.languageCode))
+            return false;
         return Objects.equals(value, that.value);
 
     }

@@ -4,12 +4,7 @@ import java.net.URI;
 
 public interface IHttpClient {
     enum Method {
-        HEAD,
-        GET,
-        POST,
-        PUT,
-        DELETE,
-        PATCH
+        HEAD, GET, POST, PUT, DELETE, PATCH
     }
 
     IRequest newRequest(URI uri);

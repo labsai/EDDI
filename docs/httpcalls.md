@@ -2,11 +2,11 @@
 
 ## Overview
 
-**HttpCalls** enable EDDI bots to integrate with external REST APIs, making EDDI a powerful orchestration layer that can combine conversational AI with traditional backend services. This is how bots can fetch real-time data, authenticate users, store information in external systems, or trigger business workflows.
+**HttpCalls** enable EDDI agents to integrate with external REST APIs, making EDDI a powerful orchestration layer that can combine conversational AI with traditional backend services. This is how agents can fetch real-time data, authenticate users, store information in external systems, or trigger business workflows.
 
 ### Role in the Lifecycle
 
-HttpCalls are lifecycle tasks that execute during the bot's processing pipeline:
+HttpCalls are lifecycle tasks that execute during the agent's processing pipeline:
 
 ```
 User Input → Parser → Behavior Rules → HttpCalls → Output Generation
@@ -22,7 +22,7 @@ Typically, Behavior Rules decide **when** to make an API call by triggering an a
 - **Business workflows**: Processing payments, sending notifications, triggering events
 - **Multi-step APIs**: First call gets auth token, second call uses it to access protected resources
 - **Analytics**: Sending conversation data to external analytics platforms
-- **Self-modification**: The "Bot Father" bot uses HttpCalls to create other bots via EDDI's own API
+- **Self-modification**: The "Agent Father" agent uses HttpCalls to create other agents via EDDI's own API
 
 ### Key Features
 
@@ -38,7 +38,7 @@ Typically, Behavior Rules decide **when** to make an API call by triggering an a
 
 In this article we will talk about EDDI's **`httpCalls`** **feature** (calling other `JSON` APIs).
 
-The **`httpCalls`** feature allows a **Chatbot** to consume **3rd** party APIs and use the `JSON` response in another **`httpCall`** (for **authentication** or requesting a token for instance) or directly print the results in Chatbot's `Output,` this means, for example, you can call a weather API and use the `JSON` response in your Chatbot's output if the user asks about today's weather or the week's forecast!
+The **`httpCalls`** feature allows a **Agent** to consume **3rd** party APIs and use the `JSON` response in another **`httpCall`** (for **authentication** or requesting a token for instance) or directly print the results in Agent's `Output,` this means, for example, you can call a weather API and use the `JSON` response in your Agent's output if the user asks about today's weather or the week's forecast!
 
 We will emphasize the `httpCall` model and go through an example step by step, you can also download the example in **Postman** collection format and run the steps.
 
@@ -125,10 +125,10 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
 | httpCall.request.method                                                     | (`String`) `HTTP` Method of the `httpCall` (e.g `GET`,`POST`,etc...)                                                                                                                                                             |
 | httpCall.request.contentType                                                | (`String`) value of the `contentType HTTP header` of the `httpCall`                                                                                                                                                              |
 | httpCall.request.body                                                       | (`String`) an escaped `JSON` object that goes in the `HTTP Request` body if needed.                                                                                                                                              |
-| httpCall.postResponse.qrBuildInstructions[].pathToTargetArray              | (`String`) path to the array in your `JSON` **response data.**                                                                                                                                                                   |
-| httpCall.postResponse.qrBuildInstructions[].iterationObjectName            | (`String`) a variable name that will point to the `TargetArray.`                                                                                                                                                                 |
-| httpCall.postResponse.qrBuildInstructions[].quickReplyValue                | (`String`) `thymeleaf expression` to use as a `quickReply` value.                                                                                                                                                                |
-| httpCall.postResponse.qrBuildInstructions[].quickReplyExpressions          | (`String`) `expression` to retrieve a property from `iterationObjectName`.                                                                                                                                                       |
+| httpCall.postResponse.qrBuildInstructions[].pathToTargetArray               | (`String`) path to the array in your `JSON` **response data.**                                                                                                                                                                   |
+| httpCall.postResponse.qrBuildInstructions[].iterationObjectName             | (`String`) a variable name that will point to the `TargetArray.`                                                                                                                                                                 |
+| httpCall.postResponse.qrBuildInstructions[].quickReplyValue                 | (`String`) `Qute expression` to use as a `quickReply` value.                                                                                                                                                                |
+| httpCall.postResponse.qrBuildInstructions[].quickReplyExpressions           | (`String`) `expression` to retrieve a property from `iterationObjectName`.                                                                                                                                                       |
 | httpCall.postResponse.propertyInstructions.name                             | (`String`) name of property to be used in templating                                                                                                                                                                             |
 | httpCall.postResponse.propertyInstructions.value                            | (`String`) a static value can be set here if `fromObjectPath` is not defined.                                                                                                                                                    |
 | httpCall.postResponse.propertyInstructions.scope                            | <p>(<code>String</code>) Can be either : </p><p><code>step</code> used for only for one user interaction </p><p><code>conversation</code> for entire conversation and </p><p><code>longTerm</code> for between conversations</p> |
@@ -153,7 +153,7 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
 
 ```javascript
 {
-  "targetServerUrl": "https://api.bot-metrics.com/v1/messages",
+  "targetServerUrl": "https://api.agent-metrics.com/v1/messages",
   "httpCalls": [
     {
       "name": "sendUserMessageToAnalytics",
@@ -168,11 +168,11 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
           "token": "<token>"
         },
         "contentType": "application/json",
-        "body": "{\"text\": \"[[${memory.current.input}]]\",\"message_type\": \"incoming\",\"user_id\": \"[[${memory.current.userInfo.userId}]]\",\"platform\": \"eddi\"}"
+        "body": "{\"text\": \"{memory.current.input}\",\"message_type\": \"incoming\",\"user_id\": \"{memory.current.userInfo.userId}\",\"platform\": \"eddi\"}"
       }
     },
     {
-      "name": "sendBotMessageToAnalytics",
+      "name": "sendAgentMessageToAnalytics",
       "actions": [
         "send_output_to_analytics"
       ],
@@ -190,7 +190,7 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
           "token": "<token>"
         },
         "contentType": "application/json",
-        "body": "{\"text\": \"[[${output}]]\",\"message_type\": \"outgoing\",\"user_id\": \"[[${memory.current.userInfo.userId}]]\",\"platform\": \"eddi\"}"
+        "body": "{\"text\": \"{output}\",\"message_type\": \"outgoing\",\"user_id\": \"{memory.current.userInfo.userId}\",\"platform\": \"eddi\"}"
       },
       "postResponse": {
         "propertyInstructions": [
@@ -222,8 +222,8 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
               "pathToTargetArray": "savedObjName.data.topics",
               "iterationObjectName": "topic",
               "templateFilterExpression": "${topic.subType} != 'specialSubType'",
-              "quickReplyValue": "[(${topic.name})]",
-              "quickReplyExpressions": "property(topic_id([(${topic.id})]))"
+              "quickReplyValue": "{topic.name}",
+              "quickReplyExpressions": "property(topic_id({topic.id}))"
             }
           }
         ]
@@ -235,13 +235,13 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
 
 ## Step by step example
 
-We will do a step by step example from scratch (**Chatbot** creation to a simple conversation that uses `httpCall`)
+We will do a step by step example from scratch (**Agent** creation to a simple conversation that uses `httpCall`)
 
 For the sake of simplicity we will use a free weather API to fetch weather of cities by their names ([api.openweathermap.org](http://api.openweathermap.org/)).
 
 ### 1 - Create regularDictionnary
 
-> More about regular dictionaries can be found [here](creating-your-first-chatbot/#1-creating-a-regular-dictionary).
+> More about regular dictionaries can be found [here](creating-your-first-agent/#1-creating-a-regular-dictionary).
 
 _Request URL_
 
@@ -279,20 +279,7 @@ _Response Code_
 
 `201`
 
-_Response Headers_
-
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 16:40:58 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/5af86a9aba31c023bcb9ef2b?version=1",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/<id>?version=1`
 
 ### 2 - Create the behaviorSet
 
@@ -353,24 +340,11 @@ _Request Body_
 }
 ```
 
-_Response Headers_
-
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 16:45:52 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.behavior/behaviorstore/behaviorsets/5af86bc0ba31c023bcb9ef2c?version=1",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.behavior/behaviorstore/behaviorsets/<id>?version=1`
 
 ### 3 - Create the **httpCall**
 
-Note that we can pass user input to the http call using _**`[[${memory.current.input}]]`**_
+Note that we can pass user input to the http call using _**`{memory.current.input}`**_
 
 _Request URL_
 
@@ -395,7 +369,7 @@ _Request Body_
         "queryParams": {
           "APPID": "c3366d78c7c0f76d63eb4cdf1384ddbf",
           "units": "metric",
-          "q": "[[${memory.current.input}]]"
+          "q": "{memory.current.input}"
         },
         "method": "get",
         "contentType": "",
@@ -414,26 +388,13 @@ _Response Code_
 
 `201`
 
-_Response Headers_
-
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 19:13:52 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/5af88e70ba31c023bcb9ef2e?version=1",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/<id>?version=1`
 
 ### 4 - Create the outputSet
 
 > More about outputSet can be found [Output Configuration](output-configuration.md).
 >
-> Note When you set `"saveResponse" : true` in `httpCall` then you can use `[[${memory.current.httpCalls.<responseObjectName>}]]` to access the response data and use `thymeleaf`( `th:each` ) to iterate over `JSON` `arrays` if you have them in your `JSON` response.
+> Note When you set `"saveResponse" : true` in `httpCall` then you can use `{memory.current.httpCalls.<responseObjectName>}` to access the response data and use Qute ( `{#for}` ) to iterate over `JSON` `arrays` if you have them in your `JSON` response.
 
 _Request URL_
 
@@ -466,7 +427,7 @@ _Request Body_
           "valueAlternatives": [
             {
               "type": "text",
-              "text": "The current weather situation of [[${memory.current.input}]] is [[${memory.current.httpCalls.currentWeather.weather[0].description}]] at [[${memory.current.httpCalls.currentWeather.main.temp}]] °C"
+              "text": "The current weather situation of {memory.current.input} is {memory.current.httpCalls.currentWeather.weather[0].description} at {memory.current.httpCalls.currentWeather.main.temp} °C"
             }
           ]
         }
@@ -484,29 +445,16 @@ _Response Code_
 
 `201`
 
-_Response Headers_
-
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 16:48:37 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.output/outputstore/outputsets/5af86c65ba31c023bcb9ef2d?version=1",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.output/outputstore/outputsets/<id>?version=1`
 
 ### 5 - Creating the package
 
-> More about packages can be found [here](creating-your-first-chatbot/#4-creating-the-package).
+> More about packages can be found [here](creating-your-first-agent/#4-creating-the-package).
 >
-> Important Package note
+> Important Workflow note
 >
-> * `ai.labs.httpcalls` & `ai.labs.output` must come after `ai.labs.behavior` in order of the package definition
-> * `ai.labs.templating` has to be after `ai.labs.output`
+> - `ai.labs.httpcalls` & `ai.labs.output` must come after `ai.labs.behavior` in order of the package definition
+> - `ai.labs.templating` has to be after `ai.labs.output`
 
 _Request URL_
 
@@ -602,26 +550,13 @@ Response Code
 
 `201`
 
-Response Headers
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.package/packagestore/packages/<id>?version=1`
 
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 19:26:36 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.package/packagestore/packages/5af8916cba31c023bcb9ef2f?version=1",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
-
-### 6 - Creating the bot
+### 6 - Creating the agent
 
 _Request URL_
 
-`POST` `http://localhost:7070/botstore/bots`
+`POST` `http://localhost:7070/agentstore/agents`
 
 _Request Body_
 
@@ -642,26 +577,13 @@ _Response Code_
 
 `201`
 
-_Response Headers_
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.agent/agentstore/agents/<id>?version=1`
 
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 21:18:16 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.bot/botstore/bots/5af8ab98ba31c023bcb9ef32?version=1",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
-
-### 7 - Deploy the bot
+### 7 - Deploy the agent
 
 _Request URL_
 
-`POST` `http://localhost:7070/administration/restricted/deploy/**<bot_id>**?version=1&autoDeploy=true`
+`POST` `http://localhost:7070/administration/production/deploy/**<agent_id>**?version=1&autoDeploy=true`
 
 _Response Body_
 
@@ -671,25 +593,13 @@ _Response Code_
 
 `202`
 
-_Response Headers_
 
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 21:21:54 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
 
 ### 8 - Create the conversation
 
 _Request URL_
 
-`POST` `http://localhost:7070/bots/**<env>**/**<bot_id>**`
+`POST` `http://localhost:7070/agents/**<env>**/**<agent_id>**`
 
 _Response Body_
 
@@ -699,26 +609,13 @@ _Response Code_
 
 `201`
 
-_Response Headers_
-
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 21:30:45 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.conversation/conversationstore/conversations/5af8ae85ba31c023bcb9ef35",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
-```
+> The `Location` header contains the conversation URI.
 
 ### 9 - Say weather
 
 _Request URL_
 
-`POST` `http://localhost:7070/bots/<env>/<bot_id>/<conversation_id>?returnDetailed=false&returnCurrentStepOnly=true`
+`POST` `http://localhost:7070/agents/<env>/<agent_id>/<conversation_id>?returnDetailed=false&returnCurrentStepOnly=true`
 
 _Request Body_
 
@@ -732,9 +629,9 @@ _Response Body_
 
 ```javascript
 {
-  "botId": "5af8b075ba31c023bcb9ef3b",
-  "botVersion": 1,
-  "environment": "unrestricted",
+  "agentId": "5af8b075ba31c023bcb9ef3b",
+  "agentVersion": 1,
+  "environment": "production",
   "conversationState": "READY",
   "redoCacheSize": 0,
   "conversationSteps": [
@@ -765,33 +662,21 @@ _Response Code_
 
 `200`
 
-_Response Headers_
 
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 21:35:15 GMT",
-  "content-type": "application/json;resteasy-server-has-produces=true",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "325",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location"
-}
-```
 
 ### 10 - Say "Vienna"
 
 _Request URL_
 
-`POST` `http://localhost:7070/bots/<env>/<bot_id>/<conversation_id>?returnDetailed=false&returnCurrentStepOnly=true`
+`POST` `http://localhost:7070/agents/<env>/<agent_id>/<conversation_id>?returnDetailed=false&returnCurrentStepOnly=true`
 
 _Request Body_
 
 ```javascript
 {
-  "botId": "5af8b075ba31c023bcb9ef3b",
-  "botVersion": 1,
-  "environment": "unrestricted",
+  "agentId": "5af8b075ba31c023bcb9ef3b",
+  "agentVersion": 1,
+  "environment": "production",
   "conversationState": "READY",
   "redoCacheSize": 0,
   "conversationSteps": [
@@ -822,25 +707,6 @@ _Response Code_
 
 `200`
 
-_Response Headers_
+## Full Example
 
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Sun, 13 May 2018 21:35:15 GMT",
-  "content-type": "application/json;resteasy-server-has-produces=true",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "325",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location"
-}
-```
-
-## Full example
-
-If you would like to run the full example through postman, you can download and import the collection below.
-
-{% file src=".gitbook/assets/EDDI - Weather bot.postman_collection.json" %}
-EDDI - Weather bot.postman\_collection.json
-{% endfile %}
-
+Download the [Weather Agent Postman Collection](.gitbook/assets/EDDI%20-%20Weather%20bot.postman_collection.json) to run the full example.

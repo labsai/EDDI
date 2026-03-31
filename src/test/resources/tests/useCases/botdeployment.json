@@ -1,0 +1,10 @@
+{
+  "intent": "weather-agent",
+  "agentDeployments": [
+    {
+      "environment": "production",
+      "agentId": "%s",
+      "initialContext": {}
+    }
+  ]
+}

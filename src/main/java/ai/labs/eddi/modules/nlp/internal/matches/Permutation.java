@@ -28,7 +28,7 @@ public class Permutation implements Iterable<Integer[]> {
         private Integer[] next = null;
 
         PermutationIterator(Integer[] values) {
-            this.values = values;
+            this.values = Arrays.copyOf(values, values.length);
 
             Arrays.sort(this.values);
 
@@ -66,7 +66,8 @@ public class Permutation implements Iterable<Integer[]> {
         private Integer[] calculateNext() {
             factorialCounter++;
             if (factorialCounter < factorial) {
-                int firstNonDecreasingIndex = -1, swapPoint = -1;
+                int firstNonDecreasingIndex = -1;
+                int swapPoint = -1;
 
                 for (int i = values.length - 1; i > 0; i--) {
                     if (values[i - 1].compareTo(values[i]) < 0) {
@@ -75,19 +76,20 @@ public class Permutation implements Iterable<Integer[]> {
                     } else if (i == 1) {
                         return null;
                     }
-                }//from the end, find first index that arrayToPermute[index]<arrayToPermute[index+1]
+                } // from the end, find first index that
+                  // arrayToPermute[index]<arrayToPermute[index+1]
 
                 for (int i = values.length - 1; i > firstNonDecreasingIndex; i--) {
                     if (values[firstNonDecreasingIndex].compareTo(values[i]) < 0) {
                         swapPoint = i;
                         break;
-                    }//finding the first numthat arrayToPermute[swapPoint]>arrayToPermute[index]
+                    } // finding the first numthat arrayToPermute[swapPoint]>arrayToPermute[index]
                 }
                 Integer tmp = values[firstNonDecreasingIndex];
                 values[firstNonDecreasingIndex] = values[swapPoint];
-                values[swapPoint] = tmp;//swap arrayToPermute[index], arrayToPermute[swapPoint]
+                values[swapPoint] = tmp;// swap arrayToPermute[index], arrayToPermute[swapPoint]
 
-                //swap the index+1...end sequences
+                // swap the index+1...end sequences
                 for (int i = 0; i < (values.length - 1 - firstNonDecreasingIndex) / 2; i++) {
                     tmp = values[firstNonDecreasingIndex + 1 + i];
                     values[firstNonDecreasingIndex + 1 + i] = values[values.length - 1 - i];

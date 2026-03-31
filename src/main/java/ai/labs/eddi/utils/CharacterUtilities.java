@@ -49,7 +49,6 @@ public class CharacterUtilities {
         return true;
     }
 
-
     public static String deleteUndefinedChars(String sentence, String pattern) {
         StringBuilder inputBuilder = new StringBuilder(sentence);
         deleteUndefinedChars(inputBuilder, pattern);
@@ -57,17 +56,19 @@ public class CharacterUtilities {
     }
 
     /**
-     * Methode deletes all characters which are not defined in pattern
-     * to make sure that there are no unexpected chars when processing input.
+     * Methode deletes all characters which are not defined in pattern to make sure
+     * that there are no unexpected chars when processing input.
      *
-     * @param sentence unprocessed String with any characters
-     * @param pattern  String containing all allowed chars
+     * @param sentence
+     *            unprocessed String with any characters
+     * @param pattern
+     *            String containing all allowed chars
      */
     public static void deleteUndefinedChars(StringBuilder sentence, String pattern) {
         boolean isProhibited;
         char[] patternChars = pattern.toCharArray();
 
-        for (int i = 0; i < sentence.length(); ) {
+        for (int i = 0; i < sentence.length();) {
             isProhibited = true;
             for (char allowedChar : patternChars) {
                 if (sentence.charAt(i) == allowedChar) {
@@ -97,23 +98,26 @@ public class CharacterUtilities {
                 input.replace(i, i + 1, specialCharacters.get(lookup).toString());
             } else {
                 switch (Character.toLowerCase(lookup)) {
-                    case 'ä':
+                    case 'ä' :
                         input.replace(i, i + 1, "ae");
                         break;
-                    case 'ö':
+                    case 'ö' :
                         input.replace(i, i + 1, "oe");
                         break;
-                    case 'ü':
+                    case 'ü' :
                         input.replace(i, i + 1, "ue");
                         break;
-                    case 'ß':
+                    case 'ß' :
                         input.replace(i, i + 1, "ss");
                         break;
-                    case 'é':
+                    case 'é' :
                         input.replace(i, i + 1, "e");
                         break;
-                    case 'á':
+                    case 'á' :
                         input.replace(i, i + 1, "a");
+                        break;
+                    default :
+                        break;
                 }
             }
         }

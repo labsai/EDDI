@@ -1,7 +1,6 @@
 package ai.labs.eddi.modules.nlp.expressions;
 
 import ai.labs.eddi.utils.CharacterUtilities;
-import lombok.extern.slf4j.Slf4j;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -9,7 +8,6 @@ import java.util.Collections;
 /**
  * @author ginccc
  */
-@Slf4j
 public class Expression implements Cloneable {
     protected String domain;
     protected String expressionName;
@@ -131,7 +129,6 @@ public class Expression implements Cloneable {
         return getDomain() == null || getDomain().equals(exp.getDomain());
     }
 
-
     public Boolean containsExpressionWithName(String expressionName) {
         return getAllExpressionsWithNames(expressionName).size() > 0;
     }
@@ -185,14 +182,20 @@ public class Expression implements Cloneable {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof Expression)) return false;
+        if (this == o)
+            return true;
+        if (!(o instanceof Expression))
+            return false;
 
         Expression that = (Expression) o;
 
-        return expressionName.equals("*") || that.getExpressionName().equals("*") ||
-                (expressionName.equals(that.getExpressionName()) && getSubExpressions().length == that.getSubExpressions().length &&
-                        Arrays.equals(getSubExpressions(), that.getSubExpressions()));
+        return expressionName.equals("*") || that.getExpressionName().equals("*") || (expressionName.equals(that.getExpressionName())
+                && getSubExpressions().length == that.getSubExpressions().length && Arrays.equals(getSubExpressions(), that.getSubExpressions()));
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(expressionName, Arrays.hashCode(getSubExpressions()));
     }
 
     @Override
@@ -228,4 +231,6 @@ public class Expression implements Cloneable {
         }
         return ret.toString();
     }
+
+    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(Expression.class);
 }

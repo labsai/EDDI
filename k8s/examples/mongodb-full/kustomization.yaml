@@ -1,0 +1,37 @@
+# EDDI + MongoDB + auth + monitoring — combined example
+#
+# This shows how to compose multiple overlays into a single deployment.
+# Kustomize takes ONE directory, so you create a kustomization.yaml
+# that references both a base overlay and component overlays.
+#
+# Usage: kubectl apply -k k8s/examples/mongodb-full/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: eddi
+
+resources:
+  # Start with the MongoDB overlay (includes base + MongoDB)
+  - ../../overlays/mongodb
+
+  # Add component overlays — these provide additional resources + patches
+  - ../../overlays/auth/keycloak-deployment.yaml
+  - ../../overlays/monitoring/monitoring-stack.yaml
+  - ../../overlays/manager/manager-deployment.yaml
+
+# Compose patches from multiple overlays
+patches:
+  # Enable OIDC authentication
+  - target:
+      kind: ConfigMap
+      name: eddi-config
+    patch: |
+      - op: replace
+        path: /data/QUARKUS_OIDC_TENANT_ENABLED
+        value: "true"
+      - op: add
+        path: /data/QUARKUS_OIDC_AUTH_SERVER_URL
+        value: "http://keycloak:8080/realms/eddi"
+      - op: add
+        path: /data/QUARKUS_OIDC_CLIENT_ID
+        value: "eddi-backend"

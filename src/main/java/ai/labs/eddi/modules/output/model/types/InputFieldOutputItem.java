@@ -1,15 +1,9 @@
 package ai.labs.eddi.modules.output.model.types;
 
 import ai.labs.eddi.modules.output.model.OutputItem;
-import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaTitle;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.Objects;
 
-@Getter
-@Setter
-@JsonSchemaTitle("inputField")
 public class InputFieldOutputItem extends OutputItem {
     private String subType;
     private String placeholder;
@@ -37,12 +31,13 @@ public class InputFieldOutputItem extends OutputItem {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         InputFieldOutputItem that = (InputFieldOutputItem) o;
-        return Objects.equals(subType, that.subType) && Objects.equals(placeholder, that.placeholder) &&
-                Objects.equals(label, that.label) && Objects.equals(defaultValue, that.defaultValue) &&
-                Objects.equals(validation, that.validation);
+        return Objects.equals(subType, that.subType) && Objects.equals(placeholder, that.placeholder) && Objects.equals(label, that.label)
+                && Objects.equals(defaultValue, that.defaultValue) && Objects.equals(validation, that.validation);
     }
 
     @Override
@@ -50,11 +45,46 @@ public class InputFieldOutputItem extends OutputItem {
         return Objects.hash(subType, placeholder, label, defaultValue, validation);
     }
 
-    @Getter
-    @Setter
-    private static class Validation {
-        private Integer minLength;
-        private Integer maxLength;
-        private String validationErrorMessage;
+    private record Validation(Integer minLength, Integer maxLength, String validationErrorMessage) {
+    }
+
+    public String getSubType() {
+        return subType;
+    }
+
+    public void setSubType(String subType) {
+        this.subType = subType;
+    }
+
+    public String getPlaceholder() {
+        return placeholder;
+    }
+
+    public void setPlaceholder(String placeholder) {
+        this.placeholder = placeholder;
+    }
+
+    public String getLabel() {
+        return label;
+    }
+
+    public void setLabel(String label) {
+        this.label = label;
+    }
+
+    public String getDefaultValue() {
+        return defaultValue;
+    }
+
+    public void setDefaultValue(String defaultValue) {
+        this.defaultValue = defaultValue;
+    }
+
+    public Validation getValidation() {
+        return validation;
+    }
+
+    public void setValidation(Validation validation) {
+        this.validation = validation;
     }
 }

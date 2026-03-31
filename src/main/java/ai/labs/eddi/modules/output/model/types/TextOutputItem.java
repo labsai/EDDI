@@ -1,15 +1,9 @@
 package ai.labs.eddi.modules.output.model.types;
 
 import ai.labs.eddi.modules.output.model.OutputItem;
-import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaTitle;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.Objects;
 
-@Getter
-@Setter
-@JsonSchemaTitle("text")
 public class TextOutputItem extends OutputItem {
     private String text;
     private int delay;
@@ -36,8 +30,10 @@ public class TextOutputItem extends OutputItem {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         TextOutputItem that = (TextOutputItem) o;
         return Objects.equals(text, that.text) && delay == that.delay;
     }
@@ -50,5 +46,21 @@ public class TextOutputItem extends OutputItem {
     @Override
     public String toString() {
         return text;
+    }
+
+    public String getText() {
+        return text;
+    }
+
+    public void setText(String text) {
+        this.text = text;
+    }
+
+    public int getDelay() {
+        return delay;
+    }
+
+    public void setDelay(int delay) {
+        this.delay = delay;
     }
 }

@@ -23,8 +23,8 @@ public class MemoryItemConverter implements IMemoryItemConverter {
     private static final String KEY_USER_ID = "userId";
     private static final String KEY_CONVERSATION_INFO = "conversationInfo";
     private static final String KEY_CONVERSATION_ID = "conversationId";
-    private static final String KEY_BOT_ID = "botId";
-    private static final String KEY_BOT_VERSION = "botVersion";
+    private static final String KEY_AGENT_ID = "agentId";
+    private static final String KEY_AGENT_VERSION = "agentVersion";
     private static final String KEY_CONVERSATION_LOG = "conversationLog";
 
     @Override
@@ -50,8 +50,8 @@ public class MemoryItemConverter implements IMemoryItemConverter {
 
         addInfoObject(conversationDataObjects, memory.getUserId(), KEY_USER_INFO, KEY_USER_ID);
         addInfoObject(conversationDataObjects, memory.getConversationId(), KEY_CONVERSATION_INFO, KEY_CONVERSATION_ID);
-        addInfoObject(conversationDataObjects, memory.getBotId(), KEY_CONVERSATION_INFO, KEY_BOT_ID);
-        addInfoObject(conversationDataObjects, memory.getBotVersion().toString(), KEY_CONVERSATION_INFO, KEY_BOT_VERSION);
+        addInfoObject(conversationDataObjects, memory.getAgentId(), KEY_CONVERSATION_INFO, KEY_AGENT_ID);
+        addInfoObject(conversationDataObjects, memory.getAgentVersion().toString(), KEY_CONVERSATION_INFO, KEY_AGENT_VERSION);
 
         conversationDataObjects.put(KEY_CONVERSATION_LOG, new ConversationLogGenerator(memory));
 
@@ -62,11 +62,13 @@ public class MemoryItemConverter implements IMemoryItemConverter {
         if (!isNullOrEmpty(id)) {
             if (ret.containsKey(keyInfo)) {
                 Object o = ret.get(keyInfo);
-                if (o instanceof Map map) {
+                if (o instanceof Map<?, ?>) {
+                    @SuppressWarnings("unchecked")
+                    var map = (Map<String, Object>) o;
                     map.put(keyId, id);
                 }
             } else {
-                var objectMap = new HashMap<>();
+                var objectMap = new HashMap<String, Object>();
                 objectMap.put(keyId, id);
                 ret.put(keyInfo, objectMap);
             }

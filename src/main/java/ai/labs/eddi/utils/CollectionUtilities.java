@@ -7,7 +7,7 @@ import java.util.List;
  */
 public final class CollectionUtilities {
     private CollectionUtilities() {
-        //utility class constructor
+        // utility class constructor
     }
 
     public static void addAllWithoutDuplicates(List<String> collection, List<String> addTo) {

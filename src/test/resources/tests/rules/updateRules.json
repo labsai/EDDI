@@ -1,0 +1,91 @@
+{
+  "behaviorGroups": [
+    {
+      "name": "Smalltalk",
+      "behaviorRules": [
+        {
+          "name": "Welcome_changed",
+          "actions": [
+            "welcome"
+          ],
+          "conditions": [
+            {
+              "type": "negation",
+              "configs": {},
+              "conditions": [
+                {
+                  "type": "occurrence",
+                  "configs": {
+                    "maxOccurrence": "ever",
+                    "behaviorRuleName": "Welcome"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Greeting",
+          "actions": [
+            "greet"
+          ],
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "greeting(*)",
+                "occurrence": "currentStep"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Goodbye",
+          "actions": [
+            "say_goodbye",
+            "CONVERSATION_END"
+          ],
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "goodbye(*)",
+                "occurrence": "currentStep"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Thank",
+          "actions": [
+            "thank"
+          ],
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "thank(*)",
+                "occurrence": "currentStep"
+              }
+            }
+          ]
+        },
+        {
+          "name": "how are you",
+          "actions": [
+            "how_are_you"
+          ],
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "how_are_you_changed",
+                "occurrence": "currentStep"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

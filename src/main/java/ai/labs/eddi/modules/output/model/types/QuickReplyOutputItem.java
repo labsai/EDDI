@@ -1,15 +1,9 @@
 package ai.labs.eddi.modules.output.model.types;
 
 import ai.labs.eddi.modules.output.model.OutputItem;
-import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaTitle;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.Objects;
 
-@Getter
-@Setter
-@JsonSchemaTitle("quickReply")
 public class QuickReplyOutputItem extends OutputItem {
     private String value;
     private String expressions;
@@ -33,16 +27,40 @@ public class QuickReplyOutputItem extends OutputItem {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         QuickReplyOutputItem that = (QuickReplyOutputItem) o;
-        return Objects.equals(value, that.value) &&
-                Objects.equals(expressions, that.expressions) &&
-                Objects.equals(isDefault, that.isDefault);
+        return Objects.equals(value, that.value) && Objects.equals(expressions, that.expressions) && Objects.equals(isDefault, that.isDefault);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(value, expressions, isDefault);
+    }
+
+    public String getValue() {
+        return value;
+    }
+
+    public void setValue(String value) {
+        this.value = value;
+    }
+
+    public String getExpressions() {
+        return expressions;
+    }
+
+    public void setExpressions(String expressions) {
+        this.expressions = expressions;
+    }
+
+    public Boolean getIsDefault() {
+        return isDefault;
+    }
+
+    public void setIsDefault(Boolean isDefault) {
+        this.isDefault = isDefault;
     }
 }

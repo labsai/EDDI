@@ -1,0 +1,98 @@
+{
+  "outputSet": [
+    {
+      "action": "welcome",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            {
+              "type": "text",
+              "text": "Welcome! I am E.D.D.I."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "action": "greet",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            {
+              "type": "text",
+              "text": "Hi there! Nice to meet up! :-)"
+            },
+            {
+              "type": "text",
+              "text": "Hey you!"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "action": "greet",
+      "timesOccurred": 1,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            {
+              "type": "text",
+              "text": "Did we already say hi ?! Well, twice is better than not at all! ;-)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "action": "say_goodbye",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            {
+              "type": "text",
+              "text": "See you soon!"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "action": "thank",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            {
+              "type": "text",
+              "text": "Your Welcome!"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "action": "how_are_you",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "type": "text",
+          "valueAlternatives": [
+            {
+              "type": "text",
+              "text": "Pretty good.. having lovely conversations all day long.. :-D"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

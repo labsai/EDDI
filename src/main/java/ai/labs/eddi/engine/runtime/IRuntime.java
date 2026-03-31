@@ -13,17 +13,13 @@ public interface IRuntime {
 
     ExecutorService getExecutorService();
 
-    void logVersion();
+    ScheduledExecutorService getScheduledExecutorService();
 
-    <T> Future<T> submitScheduledCallable(Callable<T> callable,
-                                                   long delay, TimeUnit timeUnit,
-                                                   Map<Object, Object> threadBindings);
+    void logVersion();
 
     <T> Future<T> submitCallable(Callable<T> callable, Map<Object, Object> threadBindings);
 
-    <T> Future<T> submitCallable(Callable<T> callable,
-                                 IFinishedExecution<T> callableCompleted,
-                                 Map<Object, Object> threadBindings);
+    <T> Future<T> submitCallable(Callable<T> callable, IFinishedExecution<T> callableCompleted, Map<Object, Object> threadBindings);
 
     interface IFinishedExecution<T> {
         void onComplete(T result);
@@ -31,4 +27,3 @@ public interface IRuntime {
         void onFailure(Throwable t);
     }
 }
-

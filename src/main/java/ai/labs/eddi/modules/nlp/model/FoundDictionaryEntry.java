@@ -2,16 +2,10 @@ package ai.labs.eddi.modules.nlp.model;
 
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.Setter;
 
 /**
  * @author ginccc
  */
-@Setter
-@Getter
-@EqualsAndHashCode(callSuper = true)
 public class FoundDictionaryEntry extends DictionaryEntry {
     protected boolean isCorrected;
     // 0.0 > and <= 1.0
@@ -25,5 +19,38 @@ public class FoundDictionaryEntry extends DictionaryEntry {
         super(dictionaryEntry.getValue(), dictionaryEntry.getExpressions());
         isCorrected = corrected;
         this.matchingAccuracy = matchingAccuracy;
+    }
+
+    public boolean isIsCorrected() {
+        return isCorrected;
+    }
+
+    public void setIsCorrected(boolean isCorrected) {
+        this.isCorrected = isCorrected;
+    }
+
+    public double getMatchingAccuracy() {
+        return matchingAccuracy;
+    }
+
+    public void setMatchingAccuracy(double matchingAccuracy) {
+        this.matchingAccuracy = matchingAccuracy;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
+        if (!super.equals(o))
+            return false;
+        FoundDictionaryEntry that = (FoundDictionaryEntry) o;
+        return isCorrected == that.isCorrected && Double.compare(that.matchingAccuracy, matchingAccuracy) == 0;
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(super.hashCode(), isCorrected, matchingAccuracy);
     }
 }

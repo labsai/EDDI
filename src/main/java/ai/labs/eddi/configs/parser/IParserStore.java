@@ -7,5 +7,5 @@ import ai.labs.eddi.datastore.IResourceStore;
  * @author ginccc
  */
 public interface IParserStore extends IResourceStore<ParserConfiguration> {
-    //class for reflection purposes
+    // class for reflection purposes
 }

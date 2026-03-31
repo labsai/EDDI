@@ -1,11 +1,8 @@
 package ai.labs.eddi.modules.nlp.expressions;
 
-import lombok.extern.slf4j.Slf4j;
-
 /**
  * @author ginccc
  */
-@Slf4j
 public class Negation extends Expression {
 
     public Negation() {
@@ -43,4 +40,6 @@ public class Negation extends Expression {
         if (getSubExpressions().length > 0)
             getSubExpressions()[0].setDomain(category);
     }
+
+    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(Negation.class);
 }

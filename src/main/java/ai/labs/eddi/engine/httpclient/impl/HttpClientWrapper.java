@@ -11,9 +11,6 @@ import io.vertx.ext.web.client.HttpResponse;
 import io.vertx.ext.web.client.WebClientSession;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.Setter;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -42,9 +39,8 @@ public class HttpClientWrapper implements IHttpClient {
     private static final Logger log = Logger.getLogger(HttpClientWrapper.class);
 
     @Inject
-    public HttpClientWrapper(VertxHttpClient httpClient,
-                             @ConfigProperty(name = "systemRuntime.projectDomain") String projectDomain,
-                             @ConfigProperty(name = "systemRuntime.projectVersion") String projectVersion) {
+    public HttpClientWrapper(VertxHttpClient httpClient, @ConfigProperty(name = "systemRuntime.projectDomain") String projectDomain,
+            @ConfigProperty(name = "systemRuntime.projectVersion") String projectVersion) {
         this.webClient = httpClient.getWebClient();
         this.userAgent = projectDomain.toUpperCase() + "/" + projectVersion;
     }
@@ -69,11 +65,9 @@ public class HttpClientWrapper implements IHttpClient {
      * <p>
      * <b>Note:</b> This class is stateful and wraps a mutable {@link HttpRequest}.
      * It is designed to be used for a single request configuration and execution.
-     * Reusing an instance of this class for multiple {@code send()} calls may result in
-     * accumulated headers or query parameters.
+     * Reusing an instance of this class for multiple {@code send()} calls may
+     * result in accumulated headers or query parameters.
      */
-    @Getter
-    @EqualsAndHashCode
     private class RequestWrapper implements IRequest {
         private final URI uri;
         private final HttpRequest<Buffer> request;
@@ -98,8 +92,10 @@ public class HttpClientWrapper implements IHttpClient {
                     String key = idx > 0 ? pair.substring(0, idx) : pair;
                     String value = idx > 0 && pair.length() > idx + 1 ? pair.substring(idx + 1) : null;
 
-                    if (key != null) key = URLDecoder.decode(key, StandardCharsets.UTF_8);
-                    if (value != null) value = URLDecoder.decode(value, StandardCharsets.UTF_8);
+                    if (key != null)
+                        key = URLDecoder.decode(key, StandardCharsets.UTF_8);
+                    if (value != null)
+                        value = URLDecoder.decode(value, StandardCharsets.UTF_8);
 
                     queryParamsMap.computeIfAbsent(key, k -> new ArrayList<>()).add(value);
                 }
@@ -175,7 +171,8 @@ public class HttpClientWrapper implements IHttpClient {
             });
 
             try {
-                // Use a timeout slightly larger than the request timeout to ensure we don't block indefinitely
+                // Use a timeout slightly larger than the request timeout to ensure we don't
+                // block indefinitely
                 // if the callback never fires (though Vert.x should handle the timeout).
                 return future.get(currentTimeout + 1000, TimeUnit.MILLISECONDS);
             } catch (java.util.concurrent.TimeoutException e) {
@@ -190,7 +187,8 @@ public class HttpClientWrapper implements IHttpClient {
         }
 
         private void doSend(io.vertx.core.Handler<io.vertx.core.AsyncResult<IResponse>> handler) {
-            // Buffer entire response in memory; check size limits in handleResponse to mitigate large responses.
+            // Buffer entire response in memory; check size limits in handleResponse to
+            // mitigate large responses.
             if (requestBody != null) {
                 Buffer buffer;
                 try {
@@ -205,7 +203,8 @@ public class HttpClientWrapper implements IHttpClient {
             }
         }
 
-        private void handleResponse(io.vertx.core.AsyncResult<HttpResponse<Buffer>> ar, io.vertx.core.Handler<io.vertx.core.AsyncResult<IResponse>> handler) {
+        private void handleResponse(io.vertx.core.AsyncResult<HttpResponse<Buffer>> ar,
+                io.vertx.core.Handler<io.vertx.core.AsyncResult<IResponse>> handler) {
             if (ar.succeeded()) {
                 HttpResponse<Buffer> response = ar.result();
                 // Check Content-Length header if available
@@ -281,7 +280,6 @@ public class HttpClientWrapper implements IHttpClient {
             return map;
         }
 
-
         @Override
         public void send(final ICompleteListener completeListener) {
             doSend(ar -> {
@@ -312,14 +310,29 @@ public class HttpClientWrapper implements IHttpClient {
         public String toString() {
             String requestBodyTruncated = truncateAndClean(this.requestBody);
 
-            return String.format("RequestWrapper{uri=%s, method=%s, requestBody=\"%s\", maxLength=%d, queryParams=%s}",
-                    uri, method, requestBodyTruncated, maxLength, queryParamsMap);
+            return String.format("RequestWrapper{uri=%s, method=%s, requestBody=\"%s\", maxLength=%d, queryParams=%s}", uri, method,
+                    requestBodyTruncated, maxLength, queryParamsMap);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
+            RequestWrapper that = (RequestWrapper) o;
+            return maxLength == that.maxLength && currentTimeout == that.currentTimeout && java.util.Objects.equals(uri, that.uri)
+                    && java.util.Objects.equals(request, that.request) && java.util.Objects.equals(method, that.method)
+                    && java.util.Objects.equals(requestBody, that.requestBody) && java.util.Objects.equals(requestEncoding, that.requestEncoding)
+                    && java.util.Objects.equals(queryParamsMap, that.queryParamsMap);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(uri, request, method, maxLength, requestBody, requestEncoding, currentTimeout, queryParamsMap);
         }
     }
 
-    @Setter
-    @Getter
-    @EqualsAndHashCode
     private static class ResponseWrapper implements IResponse {
         private String contentAsString;
         private int httpCode;
@@ -332,8 +345,56 @@ public class HttpClientWrapper implements IHttpClient {
 
             String httpHeaderString = httpHeader != null ? httpHeader.toString() : null;
 
-            return String.format("ResponseWrapper{httpCode=%d, httpCodeMessage=\"%s\", responseBody=\"%s\", httpHeader=%s}",
-                    httpCode, httpCodeMessage, contentAsStringTruncated, httpHeaderString);
+            return String.format("ResponseWrapper{httpCode=%d, httpCodeMessage=\"%s\", responseBody=\"%s\", httpHeader=%s}", httpCode,
+                    httpCodeMessage, contentAsStringTruncated, httpHeaderString);
+        }
+
+        public String getContentAsString() {
+            return contentAsString;
+        }
+
+        public void setContentAsString(String contentAsString) {
+            this.contentAsString = contentAsString;
+        }
+
+        public int getHttpCode() {
+            return httpCode;
+        }
+
+        public void setHttpCode(int httpCode) {
+            this.httpCode = httpCode;
+        }
+
+        public String getHttpCodeMessage() {
+            return httpCodeMessage;
+        }
+
+        public void setHttpCodeMessage(String httpCodeMessage) {
+            this.httpCodeMessage = httpCodeMessage;
+        }
+
+        public Map<String, String> getHttpHeader() {
+            return httpHeader;
+        }
+
+        public void setHttpHeader(Map<String, String> httpHeader) {
+            this.httpHeader = httpHeader;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
+            ResponseWrapper that = (ResponseWrapper) o;
+            return httpCode == that.httpCode && java.util.Objects.equals(contentAsString, that.contentAsString)
+                    && java.util.Objects.equals(httpCodeMessage, that.httpCodeMessage) && java.util.Objects.equals(httpHeader, that.httpHeader);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(contentAsString, httpCode, httpCodeMessage, httpHeader);
         }
     }
 

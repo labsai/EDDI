@@ -1,5 +1,6 @@
 package ai.labs.eddi.backup;
 
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.*;
@@ -9,15 +10,15 @@ import jakarta.ws.rs.core.Response;
  * @author ginccc
  */
 @Path("/backup/export")
-@Tag(name = "10. Backup Bots", description = "Import & Export Bots as Zip Files")
+@Tag(name = "Backup")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestExportService {
     @GET
     @Produces("application/zip")
-    @Path("{botFilename}")
-    Response getBotZipArchive(@PathParam("botFilename") String botFilename);
+    @Path("{agentFilename}")
+    Response getAgentZipArchive(@PathParam("agentFilename") String agentFilename);
 
     @POST
-    @Path("{botId}")
-    Response exportBot(@PathParam("botId") String botId,
-                       @QueryParam("botVersion") @DefaultValue("1") Integer botVersion);
+    @Path("{agentId}")
+    Response exportAgent(@PathParam("agentId") String agentId, @QueryParam("agentVersion") @DefaultValue("1") Integer agentVersion);
 }

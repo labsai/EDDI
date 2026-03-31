@@ -26,7 +26,7 @@ public final class StringUtilities {
         return filter;
     }
 
-    public static String joinStrings(String delimiter, Collection values) {
+    public static String joinStrings(String delimiter, Collection<?> values) {
         return joinStrings(delimiter, values.toArray());
     }
 

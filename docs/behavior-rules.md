@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Behavior Rules** are the decision-making engine in EDDI's Lifecycle Pipeline. They are IF-THEN rules that evaluate conversation state and trigger actions based on conditions. This is where you define **when** to call an LLM, **when** to invoke an API, and **how** your bot responds to user inputs.
+**Behavior Rules** are the decision-making engine in EDDI's Lifecycle Pipeline. They are IF-THEN rules that evaluate conversation state and trigger actions based on conditions. This is where you define **when** to call an LLM, **when** to invoke an API, and **how** your agent responds to user inputs.
 
 ### Role in the Lifecycle
 
@@ -13,6 +13,7 @@ User Input → Parser → Behavior Rules → API/LLM Calls → Output Generation
 ```
 
 Behavior Rules examine the conversation memory (including parsed input, context data, and conversation history) and decide:
+
 - Which actions to trigger
 - Whether to call an LLM or skip it
 - Whether to make external API calls
@@ -71,22 +72,20 @@ Each `Behavior Rule` has a list of `conditions`, that, depending on the `conditi
 
 ### List of available conditions:
 
-* [Input Matcher](behavior-rules.md#input-matcher)
-* [Context Matcher](behavior-rules.md#context-matcher)
-* [Connector](behavior-rules.md#connector)
-* [Negation](behavior-rules.md#negation)
-* [Occurrence](behavior-rules.md#occurrence)
-* [Dependency](behavior-rules.md#dependency)
-* [Action Matcher](behavior-rules.md#action-matcher)
-* [Dynamic Value Matcher](behavior-rules.md#dynamic-value-matcher)
+- [Input Matcher](behavior-rules.md#input-matcher)
+- [Context Matcher](behavior-rules.md#context-matcher)
+- [Connector](behavior-rules.md#connector)
+- [Negation](behavior-rules.md#negation)
+- [Occurrence](behavior-rules.md#occurrence)
+- [Dependency](behavior-rules.md#dependency)
+- [Action Matcher](behavior-rules.md#action-matcher)
+- [Dynamic Value Matcher](behavior-rules.md#dynamic-value-matcher)
 
 ### General Structure
 
 `conditions` are always children of either a `Behavior Rule` or another `condition`. It will always follows that same structure.
 
 ### Description of condition structure
-
-
 
 ### Input Matcher
 
@@ -317,12 +316,12 @@ This condition type checks the size of arrays or collections in the conversation
 (...)
 ```
 
-| Config | Type | Description |
-|--------|------|-------------|
-| `valuePath` | string | Path to the array/collection to check |
-| `min` | int | Minimum size required (-1 to skip check) |
-| `max` | int | Maximum size allowed (-1 to skip check) |
-| `equal` | int | Exact size required (-1 to skip check) |
+| Config      | Type   | Description                              |
+| ----------- | ------ | ---------------------------------------- |
+| `valuePath` | string | Path to the array/collection to check    |
+| `min`       | int    | Minimum size required (-1 to skip check) |
+| `max`       | int    | Maximum size allowed (-1 to skip check)  |
+| `equal`     | int    | Exact size required (-1 to skip check)   |
 
 ## The Behavior Rule API Endpoints
 
@@ -450,18 +449,8 @@ _Response Code_
 
 `201`
 
-_Response Headers_
+The `Location` response header contains the URI of the newly created resource:
 
-```javascript
-{
-  "access-control-allow-origin": "*",
-  "date": "Thu, 21 Jun 2018 01:00:02 GMT",
-  "access-control-allow-headers": "authorization, Content-Type",
-  "content-length": "0",
-  "location": "eddi://ai.labs.behavior/behaviorstore/behaviorsets/5b2af892ee5ee72440ee1b4b?version=1",
-  "access-control-allow-methods": "GET, PUT, POST, DELETE, PATCH, OPTIONS",
-  "access-control-expose-headers": "location",
-  "content-type": null
-}
 ```
-
+Location: eddi://ai.labs.behavior/behaviorstore/behaviorsets/{id}?version=1
+```

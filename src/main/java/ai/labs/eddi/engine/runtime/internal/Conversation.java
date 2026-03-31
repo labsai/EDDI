@@ -1,6 +1,8 @@
 package ai.labs.eddi.engine.runtime.internal;
 
-import ai.labs.eddi.configs.properties.model.Properties;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
@@ -9,37 +11,48 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.model.Data;
-import ai.labs.eddi.engine.runtime.IExecutablePackage;
+import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
+import ai.labs.eddi.configs.properties.model.Property.Visibility;
+import org.jboss.logging.Logger;
 
 import java.util.*;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.engine.memory.ContextUtilities.storeContextLanguageInLongTermMemory;
 import static ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
+import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT;
+import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT_INITIAL;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * @author ginccc
  */
 public class Conversation implements IConversation {
+    private static final Logger LOGGER = Logger.getLogger(Conversation.class);
     private static final String KEY_USER_INFO = "userInfo";
-    private static final String KEY_INPUT = "input";
     private static final String KEY_CONTEXT = "context";
-    private static final String KEY_ACTIONS = "actions";
-    private final List<IExecutablePackage> executablePackages;
+    private static final String KEY_SECRET_INPUT = "secretInput";
+    private static final String SECRET_INPUT_PLACEHOLDER = "<secret input>";
+    private static final String CONVERSATION_START = "CONVERSATION_START";
+    private static final String CONVERSATION_END = "CONVERSATION_END";
+
+    // Default recall settings for agents without UserMemoryConfig
+    private static final String DEFAULT_RECALL_ORDER = "most_recent";
+    private static final int DEFAULT_MAX_RECALL_ENTRIES = 1000;
+
+    private final List<IExecutableWorkflow> executableWorkflows;
     private final IConversationMemory conversationMemory;
     private final IPropertiesHandler propertiesHandler;
     private final IConversation.IConversationOutputRenderer outputProvider;
 
-    Conversation(List<IExecutablePackage> executablePackages,
-                 IConversationMemory conversationMemory,
-                 IPropertiesHandler propertiesHandler,
-                 IConversationOutputRenderer outputProvider) {
-        this.executablePackages = executablePackages;
+    Conversation(List<IExecutableWorkflow> executableWorkflows, IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
+            IConversationOutputRenderer outputProvider) {
+        this.executableWorkflows = executableWorkflows;
         this.conversationMemory = conversationMemory;
         this.propertiesHandler = propertiesHandler;
         this.outputProvider = outputProvider;
@@ -65,7 +78,16 @@ public class Conversation implements IConversation {
         setConversationState(ConversationState.READY);
 
         addConversationStartAction(conversationMemory.getCurrentStep());
-        loadLongTermProperties(conversationMemory);
+
+        // Set UserMemoryConfig on the memory (if advanced tools are enabled)
+        AgentConfiguration.UserMemoryConfig memoryConfig = propertiesHandler.getUserMemoryConfig();
+        if (memoryConfig != null) {
+            conversationMemory.setUserMemoryConfig(memoryConfig);
+        }
+
+        // Load all user properties from usermemories (always, regardless of
+        // enableMemoryTools)
+        loadUserProperties(conversationMemory, context);
 
         try {
             var lifecycleData = prepareLifecycleData("", context, null);
@@ -81,28 +103,56 @@ public class Conversation implements IConversation {
 
     private static void addConversationStartAction(IWritableConversationStep currentStep) {
         List<String> conversationEndArray = Collections.singletonList(CONVERSATION_START);
-        currentStep.storeData(new Data<>(KEY_ACTIONS, conversationEndArray));
-        currentStep.addConversationOutputList(KEY_ACTIONS, conversationEndArray);
+        currentStep.set(ACTIONS, conversationEndArray);
+        currentStep.addConversationOutputList(ACTIONS.key(), conversationEndArray);
     }
 
-    private void loadLongTermProperties(IConversationMemory conversationMemory) throws LifecycleException {
-        try {
-            Properties properties = propertiesHandler.loadProperties();
+    /**
+     * Loads user properties from the {@code usermemories} collection. This replaces
+     * both the old {@code loadLongTermProperties()} (which read from the legacy
+     * {@code properties} collection) and the old {@code loadUserMemories()}.
+     * <p>
+     * Uses {@link IUserMemoryStore#getVisibleEntries} which handles visibility
+     * scoping (self + group + global). Recall order and max entries come from
+     * {@link AgentConfiguration.UserMemoryConfig} if available, or sensible
+     * defaults.
+     */
+    private void loadUserProperties(IConversationMemory memory, Map<String, Context> context) throws LifecycleException {
+        IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
+        if (store == null)
+            return;
 
-            if (properties.containsKey(KEY_USER_INFO)) {
-                Object userInfo = properties.get(KEY_USER_INFO);
-                if (userInfo instanceof Map userInfoMap) {
-                    conversationMemory.getConversationProperties().
-                            put(KEY_USER_INFO, new Property(KEY_USER_INFO, userInfoMap, Scope.conversation));
+        try {
+            String userId = memory.getUserId();
+            String agentId = memory.getAgentId();
+            List<String> groupIds = extractGroupIds(context);
+
+            // Use config-specific recall settings if available, else defaults
+            AgentConfiguration.UserMemoryConfig config = memory.getUserMemoryConfig();
+            String recallOrder = config != null ? config.getRecallOrder() : DEFAULT_RECALL_ORDER;
+            int maxEntries = config != null ? config.getMaxRecallEntries() : DEFAULT_MAX_RECALL_ENTRIES;
+
+            List<UserMemoryEntry> entries = store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries);
+
+            for (UserMemoryEntry entry : entries) {
+                Property prop = entryToProperty(entry);
+
+                // Special handling for userInfo (needs to be stored as conversation-scoped map)
+                if (KEY_USER_INFO.equals(entry.key()) && entry.value() instanceof Map<?, ?>) {
+                    @SuppressWarnings("unchecked")
+                    var userInfoMap = (Map<String, Object>) entry.value();
+                    memory.getConversationProperties().put(KEY_USER_INFO, new Property(KEY_USER_INFO, userInfoMap, Scope.conversation));
+                } else {
+                    memory.getConversationProperties().put(entry.key(), prop);
                 }
             }
 
-            conversationMemory.getConversationProperties().putAll(convertProperties(properties));
-
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-            throw new LifecycleException(e.getLocalizedMessage(), e);
+            if (!entries.isEmpty()) {
+                LOGGER.debugf("[MEMORY] Loaded %d user properties for user='%s', agent='%s'", entries.size(), userId, agentId);
+            }
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new LifecycleException("Failed to load user properties: " + e.getLocalizedMessage(), e);
         }
-
     }
 
     private ConversationState getConversationState() {
@@ -115,8 +165,7 @@ public class Conversation implements IConversation {
     }
 
     @Override
-    public void say(final String message, final Map<String, Context> contexts)
-            throws LifecycleException, ConversationNotReadyException {
+    public void say(final String message, final Map<String, Context> contexts) throws LifecycleException, ConversationNotReadyException {
         runStep(message, contexts, true, new LinkedList<>());
     }
 
@@ -156,9 +205,7 @@ public class Conversation implements IConversation {
 
     private void checkIfConversationInProgress() throws ConversationNotReadyException {
         if (getConversationState() == ConversationState.IN_PROGRESS) {
-            String errorMessage = "Conversation is currently IN_PROGRESS! Please try again later!";
-            errorMessage = String.format(errorMessage, getConversationState());
-            throw new ConversationNotReadyException(errorMessage);
+            throw new ConversationNotReadyException("Conversation is currently IN_PROGRESS! Please try again later!");
         }
     }
 
@@ -171,11 +218,10 @@ public class Conversation implements IConversation {
         ((ConversationMemory) conversationMemory).startNextStep();
     }
 
-    private List<IData> prepareLifecycleData(String message, Map<String, Context> contexts,
-                                             List<String> taskTypeResultsToBeRemoved) {
+    private List<IData<?>> prepareLifecycleData(String message, Map<String, Context> contexts, List<String> taskTypeResultsToBeRemoved) {
 
         List<IData<Context>> contextData = createContextData(contexts);
-        List<IData> lifecycleData = new LinkedList<>(contextData);
+        List<IData<?>> lifecycleData = new LinkedList<>(contextData);
 
         storeContextLanguageInLongTermMemory(contexts, conversationMemory);
 
@@ -183,12 +229,12 @@ public class Conversation implements IConversation {
         addContextToConversationOutput(currentStep, contextData);
         removedTaskTypeResultsFromPreviousRuns(currentStep, taskTypeResultsToBeRemoved);
 
-        storeUserInputInMemory(message, lifecycleData);
+        boolean isSecretInput = isSecretInputFlagged(contexts);
+        storeUserInputInMemory(message, lifecycleData, isSecretInput);
         return lifecycleData;
     }
 
-    private void removedTaskTypeResultsFromPreviousRuns(IWritableConversationStep currentStep,
-                                                        List<String> taskTypeResultsToBeRemoved) {
+    private void removedTaskTypeResultsFromPreviousRuns(IWritableConversationStep currentStep, List<String> taskTypeResultsToBeRemoved) {
 
         if (!isNullOrEmpty(taskTypeResultsToBeRemoved)) {
             taskTypeResultsToBeRemoved.forEach(type -> {
@@ -198,8 +244,7 @@ public class Conversation implements IConversation {
         }
     }
 
-    private void addContextToConversationOutput(IWritableConversationStep currentStep,
-                                                List<IData<Context>> contextData) {
+    private void addContextToConversationOutput(IWritableConversationStep currentStep, List<IData<Context>> contextData) {
 
         if (!contextData.isEmpty()) {
             var context = ConversationMemoryUtilities.prepareContext(contextData);
@@ -207,20 +252,38 @@ public class Conversation implements IConversation {
         }
     }
 
-    private void storeUserInputInMemory(String message, List<IData> lifecycleData) {
-        IData initialData;
+    /**
+     * Check if the client flagged this input as a secret via the context map. The
+     * client sends: {@code { "secretInput": { "type": "string", "value": "true" }
+     * }}
+     */
+    private static boolean isSecretInputFlagged(Map<String, Context> contexts) {
+        if (contexts == null || !contexts.containsKey(KEY_SECRET_INPUT)) {
+            return false;
+        }
+        Context secretCtx = contexts.get(KEY_SECRET_INPUT);
+        return secretCtx != null && "true".equals(String.valueOf(secretCtx.getValue()));
+    }
+
+    private void storeUserInputInMemory(String message, List<IData<?>> lifecycleData, boolean isSecretInput) {
+        IData<?> initialData;
         IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
         if (!"".equals(message.trim())) {
-            initialData = new Data<>(KEY_INPUT + ":initial", message);
+            // The actual plaintext flows through lifecycle data so PropertySetterTask
+            // can vault it. But the conversation output (persisted + returned to client)
+            // is scrubbed when the client marks the input as secret.
+            initialData = new Data<>(INPUT_INITIAL.key(), message);
             initialData.setPublic(true);
             lifecycleData.add(initialData);
-            currentStep.addConversationOutputString(KEY_INPUT, message);
+
+            String displayValue = isSecretInput ? SECRET_INPUT_PLACEHOLDER : message;
+            currentStep.addConversationOutputString(INPUT.key(), displayValue);
         }
     }
 
-    private void executeConversationStep(List<IData> lifecycleData, List<String> lifecycleTaskTypes) throws LifecycleException {
+    private void executeConversationStep(List<IData<?>> lifecycleData, List<String> lifecycleTaskTypes) throws LifecycleException {
         try {
-            executePackages(lifecycleData, lifecycleTaskTypes);
+            executeWorkflows(lifecycleData, lifecycleTaskTypes);
         } catch (ConversationStopException unused) {
             endConversation();
         }
@@ -233,7 +296,7 @@ public class Conversation implements IConversation {
     }
 
     private void checkActionsForConversationEnd() {
-        IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(KEY_ACTIONS);
+        IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(ACTIONS);
         if (actionData != null) {
             List<String> result = actionData.getResult();
             if (result != null && result.contains(CONVERSATION_END)) {
@@ -242,61 +305,95 @@ public class Conversation implements IConversation {
         }
     }
 
-    private Map<String, Property> convertProperties(Properties properties) {
-        return properties.keySet().stream().collect(
-                Collectors.toMap(name -> name,
-                        name -> {
-                            Object value = properties.get(name);
-                            if (value instanceof String) {
-                                return new Property(name, value.toString(), Scope.longTerm);
-                            } else if (value instanceof Map valueMap) {
-                                return new Property(name, valueMap, Scope.longTerm);
-                            } else if (value instanceof Integer valueInt) {
-                                return new Property(name, valueInt, Scope.longTerm);
-                            } else if (value instanceof Float valueFloat) {
-                                return new Property(name, valueFloat, Scope.longTerm);
-                            } else {
-                                return new Property(name, (String) null, Scope.longTerm);
-                            }
-                        },
-                        (a, b) -> b, LinkedHashMap::new));
-
-    }
-
     private void removeOldInvalidProperties() {
         IConversationProperties conversationProperties = conversationMemory.getConversationProperties();
-        Map<String, Property> filteredConversationProperties =
-                conversationProperties.entrySet().stream()
-                        .filter(property -> property.getValue().getScope() != Scope.step)
-                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        Map<String, Property> filteredConversationProperties = conversationProperties.entrySet().stream()
+                .filter(property -> property.getValue().getScope() != Scope.step).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
         conversationProperties.clear();
         conversationProperties.putAll(filteredConversationProperties);
     }
 
-    private void storePropertiesPermanently()
-            throws IResourceStore.ResourceStoreException {
+    /**
+     * Persists all longTerm properties to the {@code usermemories} collection.
+     * <p>
+     * Visibility is applied at the persistence boundary:
+     * <ul>
+     * <li>If the property has explicit visibility → use it</li>
+     * <li>If the property has no visibility (null) → default to {@code global}
+     * (matches legacy flat properties behavior)</li>
+     * </ul>
+     */
+    private void storePropertiesPermanently() throws IResourceStore.ResourceStoreException {
+        IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
+        if (store == null)
+            return;
 
-        Properties longTermConversationProperties = new Properties();
-        for (Property property : conversationMemory.getConversationProperties().values()) {
-            if (property.getScope() == Scope.longTerm) {
-                var valueString = property.getValueString();
-                var valueObject = property.getValueObject();
-                var valueInt = property.getValueInt();
-                var valueFloat = property.getValueFloat();
-                if (valueString != null) {
-                    longTermConversationProperties.put(property.getName(), valueString);
-                } else if (valueObject != null) {
-                    longTermConversationProperties.put(property.getName(), valueObject);
-                } else if (valueInt != null) {
-                    longTermConversationProperties.put(property.getName(), valueInt);
-                } else if (valueFloat != null) {
-                    longTermConversationProperties.put(property.getName(), valueFloat);
-                }
+        String userId = conversationMemory.getUserId();
+        String agentId = conversationMemory.getAgentId();
+        String conversationId = conversationMemory.getConversationId();
+
+        // Determine the agent's configured default visibility (from UserMemoryConfig).
+        // Falls back to global if no config (matches legacy unscoped behavior).
+        AgentConfiguration.UserMemoryConfig config = conversationMemory.getUserMemoryConfig();
+        Visibility configDefault = Visibility.global;
+        if (config != null) {
+            try {
+                configDefault = Visibility.valueOf(config.getDefaultVisibility());
+            } catch (IllegalArgumentException e) {
+                configDefault = Visibility.global;
             }
         }
 
-        propertiesHandler.mergeProperties(longTermConversationProperties);
+        for (Property property : conversationMemory.getConversationProperties().values()) {
+            if (property.getScope() == Scope.longTerm) {
+                // Apply visibility at persistence boundary only
+                Visibility vis = property.getVisibility() != null ? property.getVisibility() : configDefault;
+                UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis);
+                store.upsert(entry);
+            }
+        }
+    }
+
+    /**
+     * Extracts groupId(s) from the conversation context map.
+     * GroupConversationService puts "groupId" in the context when creating member
+     * conversations.
+     */
+    private static List<String> extractGroupIds(Map<String, Context> context) {
+        if (context == null)
+            return List.of();
+        Context groupCtx = context.get("groupId");
+        if (groupCtx != null && groupCtx.getValue() != null) {
+            return List.of(String.valueOf(groupCtx.getValue()));
+        }
+        return List.of();
+    }
+
+    private static Property entryToProperty(UserMemoryEntry entry) {
+        Object value = entry.value();
+        Property prop;
+        if (value instanceof String s) {
+            prop = new Property(entry.key(), s, Scope.longTerm);
+        } else if (value instanceof Map<?, ?>) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) value;
+            prop = new Property(entry.key(), map, Scope.longTerm);
+        } else if (value instanceof List<?> list) {
+            @SuppressWarnings("unchecked")
+            List<Object> objectList = (List<Object>) list;
+            prop = new Property(entry.key(), objectList, Scope.longTerm);
+        } else if (value instanceof Integer i) {
+            prop = new Property(entry.key(), i, Scope.longTerm);
+        } else if (value instanceof Float f) {
+            prop = new Property(entry.key(), f, Scope.longTerm);
+        } else if (value instanceof Boolean b) {
+            prop = new Property(entry.key(), b, Scope.longTerm);
+        } else {
+            prop = new Property(entry.key(), value != null ? value.toString() : null, Scope.longTerm);
+        }
+        prop.setVisibility(entry.visibility());
+        return prop;
     }
 
     private List<IData<Context>> createContextData(Map<String, Context> context) {
@@ -310,12 +407,11 @@ public class Conversation implements IConversation {
         return contextData;
     }
 
-    private void executePackages(List<IData> data, List<String> lifecycleTaskTypes) throws LifecycleException, ConversationStopException {
-        for (IExecutablePackage executablePackage : executablePackages) {
-            conversationMemory.getCurrentStep().setCurrentPackageId(executablePackage.getPackageId());
-            data.stream().filter(Objects::nonNull).
-                    forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
-            ILifecycleManager lifecycleManager = executablePackage.getLifecycleManager();
+    private void executeWorkflows(List<IData<?>> data, List<String> lifecycleTaskTypes) throws LifecycleException, ConversationStopException {
+        for (IExecutableWorkflow executableWorkflow : executableWorkflows) {
+            conversationMemory.getCurrentStep().setCurrentWorkflowId(executableWorkflow.getWorkflowId());
+            data.stream().filter(Objects::nonNull).forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
+            ILifecycleManager lifecycleManager = executableWorkflow.getLifecycleManager();
             lifecycleManager.executeLifecycle(conversationMemory, lifecycleTaskTypes);
         }
     }

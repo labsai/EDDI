@@ -1,22 +1,24 @@
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
-import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Stack;
-import java.util.stream.Collectors;
 
 /**
  * @author ginccc
  */
 public class ConversationMemory implements IConversationMemory {
     private String conversationId;
-    private final String botId;
-    private final Integer botVersion;
+    private final String agentId;
+    private final Integer agentVersion;
     private String userId;
     private IWritableConversationStep currentStep;
     private final Stack<IConversationStep> previousSteps;
@@ -25,19 +27,30 @@ public class ConversationMemory implements IConversationMemory {
     private final IConversationProperties conversationProperties = new ConversationProperties(this);
     private ConversationState conversationState;
 
-    public ConversationMemory(String conversationId, String botId, Integer botVersion, String userId) {
-        this(botId, botVersion, userId);
+    /** Transient — never serialized to MongoDB. Set per-turn for SSE streaming. */
+    private transient ConversationEventSink eventSink;
+
+    /** Transient — never serialized to MongoDB. Set per-turn for audit capture. */
+    private transient IAuditEntryCollector auditCollector;
+
+    /**
+     * Transient — never serialized to MongoDB. Set once during Conversation.init().
+     */
+    private transient AgentConfiguration.UserMemoryConfig userMemoryConfig;
+
+    public ConversationMemory(String conversationId, String agentId, Integer agentVersion, String userId) {
+        this(agentId, agentVersion, userId);
         this.conversationId = conversationId;
     }
 
-    public ConversationMemory(String botId, Integer botVersion, String userId) {
-        this(botId, botVersion);
+    public ConversationMemory(String agentId, Integer agentVersion, String userId) {
+        this(agentId, agentVersion);
         this.userId = userId;
     }
 
-    public ConversationMemory(String botId, Integer botVersion) {
-        this.botId = botId;
-        this.botVersion = botVersion;
+    public ConversationMemory(String agentId, Integer agentVersion) {
+        this.agentId = agentId;
+        this.agentVersion = agentVersion;
         var conversationOutput = new ConversationOutput();
         this.conversationOutputs.add(conversationOutput);
         this.currentStep = new ConversationStep(conversationOutput);
@@ -129,8 +142,8 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
-    public String getBotId() {
-        return botId;
+    public String getAgentId() {
+        return agentId;
     }
 
     @Override
@@ -139,8 +152,8 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
-    public Integer getBotVersion() {
-        return botVersion;
+    public Integer getAgentVersion() {
+        return agentVersion;
     }
 
     public List<ConversationOutput> getConversationOutputs() {
@@ -157,7 +170,37 @@ public class ConversationMemory implements IConversationMemory {
         return redoCache;
     }
 
-    public final static class ConversationStepStack implements IConversationStepStack {
+    @Override
+    public ConversationEventSink getEventSink() {
+        return eventSink;
+    }
+
+    @Override
+    public void setEventSink(ConversationEventSink eventSink) {
+        this.eventSink = eventSink;
+    }
+
+    @Override
+    public IAuditEntryCollector getAuditCollector() {
+        return auditCollector;
+    }
+
+    @Override
+    public void setAuditCollector(IAuditEntryCollector auditCollector) {
+        this.auditCollector = auditCollector;
+    }
+
+    @Override
+    public AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
+        return userMemoryConfig;
+    }
+
+    @Override
+    public void setUserMemoryConfig(AgentConfiguration.UserMemoryConfig config) {
+        this.userMemoryConfig = config;
+    }
+
+    public static final class ConversationStepStack implements IConversationStepStack {
         private final List<IConversationStep> conversationSteps = new ArrayList<>();
 
         public ConversationStepStack(List<IConversationStep> steps) {
@@ -173,6 +216,11 @@ public class ConversationMemory implements IConversationMemory {
                 }
             }
             return null;
+        }
+
+        @Override
+        public <T> IData<T> getLatestData(MemoryKey<T> key) {
+            return getLatestData(key.key());
         }
 
         @Override
@@ -192,8 +240,7 @@ public class ConversationMemory implements IConversationMemory {
 
         @Override
         public <T> List<IData<T>> getAllLatestData(String prefix) {
-            return conversationSteps.stream().map((IConversationStep conversationStep) ->
-                    conversationStep.<T>getLatestData(prefix)).collect(Collectors.toList());
+            return conversationSteps.stream().map((IConversationStep conversationStep) -> conversationStep.<T>getLatestData(prefix)).toList();
         }
 
         @Override

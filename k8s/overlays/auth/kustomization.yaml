@@ -1,0 +1,31 @@
+# Keycloak authentication overlay
+#
+# ⚠️  This is a COMPONENT overlay — it does NOT include the base EDDI manifests.
+# You MUST apply it together with a database overlay.
+#
+# Pre-configured test users:
+#   eddi  / eddi   (admin)
+#   viewer / viewer (read-only)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: eddi
+
+resources:
+  - keycloak-deployment.yaml
+
+# Patch EDDI to enable OIDC authentication
+patches:
+  - target:
+      kind: ConfigMap
+      name: eddi-config
+    patch: |
+      - op: replace
+        path: /data/QUARKUS_OIDC_TENANT_ENABLED
+        value: "true"
+      - op: add
+        path: /data/QUARKUS_OIDC_AUTH_SERVER_URL
+        value: "http://keycloak:8080/realms/eddi"
+      - op: add
+        path: /data/QUARKUS_OIDC_CLIENT_ID
+        value: "eddi-backend"

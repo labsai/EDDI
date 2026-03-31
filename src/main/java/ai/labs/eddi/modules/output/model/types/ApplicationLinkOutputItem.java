@@ -1,15 +1,9 @@
 package ai.labs.eddi.modules.output.model.types;
 
 import ai.labs.eddi.modules.output.model.OutputItem;
-import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaTitle;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.Objects;
 
-@Getter
-@Setter
-@JsonSchemaTitle("applicationLink")
 public class ApplicationLinkOutputItem extends OutputItem {
     private String path;
     private String label;
@@ -31,8 +25,10 @@ public class ApplicationLinkOutputItem extends OutputItem {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         ApplicationLinkOutputItem that = (ApplicationLinkOutputItem) o;
         return Objects.equals(path, that.path) && Objects.equals(label, that.label) && delay == that.delay;
     }
@@ -45,5 +41,29 @@ public class ApplicationLinkOutputItem extends OutputItem {
     @Override
     public String toString() {
         return path + ";" + label + ";" + delay;
+    }
+
+    public String getPath() {
+        return path;
+    }
+
+    public void setPath(String path) {
+        this.path = path;
+    }
+
+    public String getLabel() {
+        return label;
+    }
+
+    public void setLabel(String label) {
+        this.label = label;
+    }
+
+    public int getDelay() {
+        return delay;
+    }
+
+    public void setDelay(int delay) {
+        this.delay = delay;
     }
 }

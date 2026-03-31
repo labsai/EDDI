@@ -11,9 +11,7 @@ public interface ITemplatingEngine {
     String processTemplate(String template, Map<String, Object> dynamicAttributesMap, TemplateMode templateMode) throws TemplateEngineException;
 
     enum TemplateMode {
-        TEXT,
-        HTML,
-        JAVASCRIPT
+        TEXT, HTML, JAVASCRIPT
     }
 
     class TemplateEngineException extends Exception {

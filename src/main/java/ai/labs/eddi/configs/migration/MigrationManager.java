@@ -2,14 +2,14 @@ package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
-import com.mongodb.reactivestreams.client.MongoCollection;
-import com.mongodb.reactivestreams.client.MongoDatabase;
-import io.reactivex.rxjava3.core.Observable;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.Arrays;
@@ -25,6 +25,7 @@ import static java.lang.Boolean.parseBoolean;
 import static java.lang.String.format;
 
 @ApplicationScoped
+@DefaultBean
 public class MigrationManager implements IMigrationManager {
     private static final Logger LOGGER = Logger.getLogger(MigrationManager.class);
 
@@ -63,7 +64,7 @@ public class MigrationManager implements IMigrationManager {
     public static final String FIELD_NAME_TARGET_SERVER_URL = "targetServerUrl";
     public static final String OLD_FIELD_NAME_TARGET_SERVER = "targetServer";
     public static final String COLLECTION_OUTPUTS = "outputs";
-    public static final String COLLECTION_HTTPCALLS = "httpcalls";
+    public static final String COLLECTION_HTTPCALLS = "apicalls";
     public static final String COLLECTION_PROPERTYSETTER = "propertysetter";
     public static final String COLLECTION_CONVERSATION_MEMORY = "conversationmemories";
     public static final String FIELD_NAME_VALIDATION = "validation";
@@ -83,7 +84,7 @@ public class MigrationManager implements IMigrationManager {
 
     @Inject
     public MigrationManager(MongoDatabase database, MigrationLogStore migrationLogStore,
-                            @ConfigProperty(name = "eddi.migration.skipConversationMemories") Boolean skipConversationMemories) {
+            @ConfigProperty(name = "eddi.migration.skipConversationMemories") Boolean skipConversationMemories) {
         this.propertySetterCollection = database.getCollection(COLLECTION_PROPERTYSETTER);
         this.propertySetterCollectionHistory = database.getCollection(COLLECTION_PROPERTYSETTER + ".history");
 
@@ -105,7 +106,7 @@ public class MigrationManager implements IMigrationManager {
             this.isCurrentlyRunning = true;
             if (isMigrationNeeded()) {
                 startPropertyMigration();
-                startHttpCallsMigration();
+                startApiCallsMigration();
                 startOutputMigration();
                 if (!skipConversationMemories) {
                     startConversationMemoryMigration();
@@ -126,9 +127,8 @@ public class MigrationManager implements IMigrationManager {
     private void startPropertyMigration() {
         try {
             IDocumentMigration migration = migratePropertySetter();
-            boolean migrationHasExecuted =
-                    iterateMigration(COLLECTION_PROPERTYSETTER, migration,
-                            propertySetterCollection, propertySetterCollectionHistory);
+            boolean migrationHasExecuted = iterateMigration(COLLECTION_PROPERTYSETTER, migration, propertySetterCollection,
+                    propertySetterCollectionHistory);
 
             if (migrationHasExecuted) {
                 LOGGER.info("Migration of propertysetter documents has finished!");
@@ -140,13 +140,10 @@ public class MigrationManager implements IMigrationManager {
         }
     }
 
-
-    private void startHttpCallsMigration() {
+    private void startApiCallsMigration() {
         try {
-            IDocumentMigration migration = migrateHttpCalls();
-            boolean migrationHasExecuted =
-                    iterateMigration(COLLECTION_HTTPCALLS, migration,
-                            httpCallsCollection, httpCallsCollectionHistory);
+            IDocumentMigration migration = migrateApiCalls();
+            boolean migrationHasExecuted = iterateMigration(COLLECTION_HTTPCALLS, migration, httpCallsCollection, httpCallsCollectionHistory);
 
             if (migrationHasExecuted) {
                 LOGGER.info("Migration of httpcalls documents has finished!");
@@ -161,9 +158,7 @@ public class MigrationManager implements IMigrationManager {
     private void startOutputMigration() {
         try {
             IDocumentMigration migration = migrateOutput();
-            boolean migrationHasExecuted =
-                    iterateMigration(COLLECTION_OUTPUTS, migration,
-                            outputCollection, outputCollectionHistory);
+            boolean migrationHasExecuted = iterateMigration(COLLECTION_OUTPUTS, migration, outputCollection, outputCollectionHistory);
 
             if (migrationHasExecuted) {
                 LOGGER.info("Migration of output documents has finished!");
@@ -178,9 +173,7 @@ public class MigrationManager implements IMigrationManager {
     private void startConversationMemoryMigration() {
         try {
             IDocumentMigration migration = migrateConversationMemory();
-            boolean migrationHasExecuted =
-                    iterateMigration(COLLECTION_CONVERSATION_MEMORY, migration,
-                            conversationMemoryCollection, null);
+            boolean migrationHasExecuted = iterateMigration(COLLECTION_CONVERSATION_MEMORY, migration, conversationMemoryCollection, null);
 
             if (migrationHasExecuted) {
                 LOGGER.info("Migration of conversation memory documents has finished!");
@@ -192,27 +185,20 @@ public class MigrationManager implements IMigrationManager {
         }
     }
 
-    private boolean iterateMigration(String documentType, IDocumentMigration migration,
-                                     MongoCollection<Document> collection,
-                                     MongoCollection<Document> collectionHistory) {
+    private boolean iterateMigration(String documentType, IDocumentMigration migration, MongoCollection<Document> collection,
+            MongoCollection<Document> collectionHistory) {
 
-        Observable<Document> observable = Observable.fromPublisher(collection.find());
-        Iterable<Document> documents = observable.blockingIterable();
-        var migrationHasExecuted = migrateDocuments(documentType, documents, migration, collection, false);
+        var migrationHasExecuted = migrateDocuments(documentType, collection.find(), migration, collection, false);
 
         if (collectionHistory != null) {
-            observable = Observable.fromPublisher(collectionHistory.find());
-            Iterable<Document> historyDocuments = observable.blockingIterable();
-            migrationHasExecuted =
-                    migrateDocuments(documentType, historyDocuments, migration, collectionHistory, true)
-                            || migrationHasExecuted;
+            migrationHasExecuted = migrateDocuments(documentType, collectionHistory.find(), migration, collectionHistory, true)
+                    || migrationHasExecuted;
         }
         return migrationHasExecuted;
     }
 
     private boolean migrateDocuments(String documentType, Iterable<Document> documents, IDocumentMigration migration,
-                                     MongoCollection<Document> collection,
-                                     boolean isHistory) {
+            MongoCollection<Document> collection, boolean isHistory) {
 
         boolean migrationHasExecuted = false;
         for (var document : documents) {
@@ -227,6 +213,7 @@ public class MigrationManager implements IMigrationManager {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public IDocumentMigration migratePropertySetter() {
         return document -> {
             try {
@@ -235,12 +222,10 @@ public class MigrationManager implements IMigrationManager {
                     var setOnActions = (List<Map<String, Object>>) document.get(FIELD_NAME_SET_ON_ACTIONS);
                     for (var setOnActionContainer : setOnActions) {
                         if (setOnActionContainer.containsKey(FIELD_NAME_SET_PROPERTIES)) {
-                            var setProperties =
-                                    (List<Map<String, Object>>) setOnActionContainer.get(FIELD_NAME_SET_PROPERTIES);
+                            var setProperties = (List<Map<String, Object>>) setOnActionContainer.get(FIELD_NAME_SET_PROPERTIES);
 
                             for (var setProperty : setProperties) {
-                                convertedPropertySetter =
-                                        convertPropertyInstructions(setProperty) || convertedPropertySetter;
+                                convertedPropertySetter = convertPropertyInstructions(setProperty) || convertedPropertySetter;
                             }
                         }
                     }
@@ -255,39 +240,38 @@ public class MigrationManager implements IMigrationManager {
     }
 
     @Override
-    public IDocumentMigration migrateHttpCalls() {
+    @SuppressWarnings("unchecked")
+    public IDocumentMigration migrateApiCalls() {
         return document -> {
             try {
-                boolean convertedHttpCalls = false;
+                boolean convertedApiCalls = false;
                 if (document.containsKey(OLD_FIELD_NAME_TARGET_SERVER)) {
                     document.put(FIELD_NAME_TARGET_SERVER_URL, document.get(OLD_FIELD_NAME_TARGET_SERVER));
                     document.remove(OLD_FIELD_NAME_TARGET_SERVER);
-                    convertedHttpCalls = true;
+                    convertedApiCalls = true;
                 }
                 String differentOldFieldName = OLD_FIELD_NAME_TARGET_SERVER + "Uri";
                 if (document.containsKey(differentOldFieldName)) {
                     document.put(FIELD_NAME_TARGET_SERVER_URL, document.get(differentOldFieldName));
                     document.remove(differentOldFieldName);
-                    convertedHttpCalls = true;
+                    convertedApiCalls = true;
                 }
                 if (document.containsKey(FIELD_NAME_HTTP_CALLS)) {
                     var httpCalls = (List<Map<String, Object>>) document.get(FIELD_NAME_HTTP_CALLS);
                     for (var httpCall : httpCalls) {
                         if (httpCall.containsKey(FIELD_NAME_PRE_REQUEST)) {
-                            var preRequest =
-                                    (Map<String, List<Map<String, Object>>>) httpCall.get(FIELD_NAME_PRE_REQUEST);
-                            convertedHttpCalls = convertPreAndPostProcessing(preRequest) || convertedHttpCalls;
+                            var preRequest = (Map<String, List<Map<String, Object>>>) httpCall.get(FIELD_NAME_PRE_REQUEST);
+                            convertedApiCalls = convertPreAndPostProcessing(preRequest) || convertedApiCalls;
                         }
 
                         if (httpCall.containsKey(FIELD_NAME_POST_RESPONSE)) {
-                            var postResponse =
-                                    (Map<String, List<Map<String, Object>>>) httpCall.get(FIELD_NAME_POST_RESPONSE);
-                            convertedHttpCalls = convertPreAndPostProcessing(postResponse) || convertedHttpCalls;
+                            var postResponse = (Map<String, List<Map<String, Object>>>) httpCall.get(FIELD_NAME_POST_RESPONSE);
+                            convertedApiCalls = convertPreAndPostProcessing(postResponse) || convertedApiCalls;
                         }
                     }
                 }
 
-                return convertedHttpCalls ? document : null;
+                return convertedApiCalls ? document : null;
             } catch (Exception e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
                 return null;
@@ -311,10 +295,10 @@ public class MigrationManager implements IMigrationManager {
         if (value != null) {
             if (value instanceof String) {
                 if (value.equals("[[${@java.util.UUID@randomUUID()}]]")) {
-                    value = "[# th:with=\"uuid=${@java.util.UUID@randomUUID()}\"][[${uuid}]][/]";
+                    value = "{uuidUtils:generateUUID()}";
                 }
                 propertyInstruction.put(FIELD_NAME_VALUE_STRING, value);
-            } else if (value instanceof Map) {
+            } else if (value instanceof Map<?, ?>) {
                 propertyInstruction.put(FIELD_NAME_VALUE_OBJECT, value);
             } else if (value instanceof Integer) {
                 propertyInstruction.put(FIELD_NAME_VALUE_INT, value);
@@ -334,6 +318,7 @@ public class MigrationManager implements IMigrationManager {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public IDocumentMigration migrateOutput() {
         return document -> {
             try {
@@ -353,25 +338,25 @@ public class MigrationManager implements IMigrationManager {
                                             var textOutput = new TextOutputItem(valueAlternative.toString());
                                             valueAlternatives.set(i, textOutput);
                                             convertedOutput = true;
-                                        } else if (valueAlternative instanceof Map outputValue) {
+                                        } else if (valueAlternative instanceof Map<?, ?>) {
+                                            var outputValue = (Map<String, Object>) valueAlternative;
                                             var type = outputValue.get(FIELD_NAME_TYPE);
                                             if (isNullOrEmpty(type) || type.equals(FIELD_NAME_OTHER)) {
                                                 if (!isNullOrEmpty(outputValue.get(FIELD_NAME_TEXT))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_TEXT);
-                                                } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_URI))) {
+                                                } else if (!isNullOrEmpty(outputValue.get(FIELD_NAME_URI))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_IMAGE);
-                                                } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_EXPRESSIONS))) {
+                                                } else if (!isNullOrEmpty(outputValue.get(FIELD_NAME_EXPRESSIONS))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_QUICK_REPLY);
-                                                } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_PLACEHOLDER))) {
+                                                } else if (!isNullOrEmpty(outputValue.get(FIELD_NAME_PLACEHOLDER))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_INPUT_FIELD);
                                                     if (outputValue.containsKey(OLD_FIELD_NAME_IS_PASSWORD)) {
-                                                        var isPassword =
-                                                                parseBoolean(outputValue.get(OLD_FIELD_NAME_IS_PASSWORD).toString());
+                                                        var isPassword = parseBoolean(outputValue.get(OLD_FIELD_NAME_IS_PASSWORD).toString());
                                                         if (isPassword) {
                                                             outputValue.put(FIELD_NAME_SUB_TYPE, "password");
                                                         }
                                                     }
-                                                } else if (!isNullOrEmpty(((Map) valueAlternative).get(FIELD_NAME_ON_PRESS))) {
+                                                } else if (!isNullOrEmpty(outputValue.get(FIELD_NAME_ON_PRESS))) {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_BUTTON);
                                                 } else {
                                                     outputValue.put(FIELD_NAME_TYPE, FIELD_NAME_OTHER);
@@ -382,7 +367,6 @@ public class MigrationManager implements IMigrationManager {
 
                                             type = outputValue.get(FIELD_NAME_TYPE);
 
-
                                             if (type.equals(FIELD_NAME_TEXT)) {
                                                 removeNonSupportedProperties(outputValue, FIELD_NAME_TEXT, FIELD_NAME_DELAY);
                                             }
@@ -392,14 +376,13 @@ public class MigrationManager implements IMigrationManager {
                                             }
 
                                             if (type.equals(FIELD_NAME_INPUT_FIELD)) {
-                                                removeNonSupportedProperties(outputValue, FIELD_NAME_SUB_TYPE,
-                                                        FIELD_NAME_LABEL, FIELD_NAME_DEFAULT_VALUE, FIELD_NAME_PLACEHOLDER,
-                                                        FIELD_NAME_VALIDATION);
+                                                removeNonSupportedProperties(outputValue, FIELD_NAME_SUB_TYPE, FIELD_NAME_LABEL,
+                                                        FIELD_NAME_DEFAULT_VALUE, FIELD_NAME_PLACEHOLDER, FIELD_NAME_VALIDATION);
                                             }
 
                                             if (type.equals(FIELD_NAME_BUTTON)) {
-                                                removeNonSupportedProperties(outputValue,
-                                                        FIELD_NAME_BUTTON_TYPE, FIELD_NAME_LABEL, FIELD_NAME_ON_PRESS);
+                                                removeNonSupportedProperties(outputValue, FIELD_NAME_BUTTON_TYPE, FIELD_NAME_LABEL,
+                                                        FIELD_NAME_ON_PRESS);
                                             }
 
                                             if (type.equals(FIELD_NAME_OTHER)) {
@@ -446,19 +429,18 @@ public class MigrationManager implements IMigrationManager {
         toBeRemoved.forEach(outputValue::remove);
     }
 
+    @SuppressWarnings("unchecked")
     private IDocumentMigration migrateConversationMemory() {
         return document -> {
             try {
                 boolean convertedConversationMemory = false;
 
                 if (document.containsKey(FIELD_NAME_CONVERSATION_PROPERTIES)) {
-                    var conversationProperties =
-                            (Map<String, Map<String, Object>>) document.get(FIELD_NAME_CONVERSATION_PROPERTIES);
+                    var conversationProperties = (Map<String, Map<String, Object>>) document.get(FIELD_NAME_CONVERSATION_PROPERTIES);
 
                     for (var propertyKey : conversationProperties.keySet()) {
                         var conversationProperty = conversationProperties.get(propertyKey);
-                        convertedConversationMemory =
-                                convertPropertyInstructions(conversationProperty) || convertedConversationMemory;
+                        convertedConversationMemory = convertPropertyInstructions(conversationProperty) || convertedConversationMemory;
                     }
                 }
 
@@ -470,8 +452,7 @@ public class MigrationManager implements IMigrationManager {
         };
     }
 
-    private void saveToPersistence(String documentType, Document document, boolean isHistory,
-                                   MongoCollection<Document> collection) {
+    private void saveToPersistence(String documentType, Document document, boolean isHistory, MongoCollection<Document> collection) {
 
         String id;
         int version = -1;
@@ -481,6 +462,7 @@ public class MigrationManager implements IMigrationManager {
         }
 
         if (isHistory) {
+            @SuppressWarnings("unchecked")
             var idObj = (Map<String, Object>) document.get(ID_FIELD);
             id = idObj.get(ID_FIELD).toString();
 
@@ -489,16 +471,14 @@ public class MigrationManager implements IMigrationManager {
             idObject.put(VERSION_FIELD, version);
 
             var query = eq(ID_FIELD, idObject);
-            Observable.fromPublisher(collection.replaceOne(query, document)).blockingFirst();
+            collection.replaceOne(query, document);
         } else {
             id = document.get(ID_FIELD).toString();
             var query = eq(ID_FIELD, new ObjectId(id));
-            Observable.fromPublisher(collection.replaceOne(query, document)).blockingFirst();
+            collection.replaceOne(query, document);
         }
 
-        var message =
-                format("Successfully migrated %s document with id: %s, version: %d to new format.",
-                        documentType, id, version);
+        var message = format("Successfully migrated %s document with id: %s, version: %d to new format.", documentType, id, version);
         LOGGER.info(message);
     }
 }

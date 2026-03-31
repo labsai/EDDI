@@ -1,0 +1,11 @@
+# EDDI + MongoDB overlay
+# Usage: kubectl apply -k k8s/overlays/mongodb/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: eddi
+
+resources:
+  - ../../base
+  - mongodb-statefulset.yaml
+  - mongodb-service.yaml

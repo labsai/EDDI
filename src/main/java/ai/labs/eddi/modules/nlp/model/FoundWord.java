@@ -30,9 +30,12 @@ public class FoundWord extends FoundDictionaryEntry implements IDictionary.IFoun
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        if (!super.equals(o)) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
+        if (!super.equals(o))
+            return false;
 
         FoundWord foundWord = (FoundWord) o;
 

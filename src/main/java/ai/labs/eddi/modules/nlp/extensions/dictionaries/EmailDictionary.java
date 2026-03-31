@@ -16,9 +16,8 @@ import java.util.regex.Pattern;
 public class EmailDictionary implements IDictionary {
     private static final String ID = "EmailDictionary";
     private final IExpressionProvider expressionProvider;
-    private static final Pattern emailPattern =
-            Pattern.compile("\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,4}\\b",
-                    Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern emailPattern = Pattern.compile("\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,4}\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
     public EmailDictionary(IExpressionProvider expressionProvider) {
         this.expressionProvider = expressionProvider;

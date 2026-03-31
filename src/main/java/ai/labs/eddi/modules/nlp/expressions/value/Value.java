@@ -1,7 +1,6 @@
 package ai.labs.eddi.modules.nlp.expressions.value;
 
 import ai.labs.eddi.modules.nlp.expressions.Expression;
-import lombok.extern.slf4j.Slf4j;
 
 import java.util.regex.Pattern;
 
@@ -10,7 +9,6 @@ import static ai.labs.eddi.utils.CharacterUtilities.isNumber;
 /**
  * @author ginccc
  */
-@Slf4j
 public class Value extends Expression {
     private static final Pattern BOOLEAN_MATCHER_PATTERN = Pattern.compile("true|false", Pattern.CASE_INSENSITIVE);
 
@@ -24,13 +22,13 @@ public class Value extends Expression {
     @Override
     public void setSubExpressions(Expression... subExpressions) {
         log.warn("Tried to set a new SubExpression for a Value Expression!");
-        //not implemented
+        // not implemented
     }
 
     @Override
     public void addSubExpressions(Expression... subExpressions) {
         log.warn("Tried to add a new SubExpression for a Value Expression!");
-        //not implemented
+        // not implemented
     }
 
     public Boolean isNumeric() {
@@ -58,7 +56,8 @@ public class Value extends Expression {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
+        if (this == o)
+            return true;
 
         if (o instanceof Value && isNumeric()) {
             Value value = (Value) o;
@@ -67,4 +66,14 @@ public class Value extends Expression {
 
         return super.equals(o);
     }
+
+    @Override
+    public int hashCode() {
+        if (isNumeric()) {
+            return Float.hashCode(toFloat());
+        }
+        return super.hashCode();
+    }
+
+    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(Value.class);
 }

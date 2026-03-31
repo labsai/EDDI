@@ -1,21 +1,22 @@
 package ai.labs.eddi.datastore.mongo;
 
+import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStorage;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.UpdateOptions;
-import com.mongodb.reactivestreams.client.MongoCollection;
-import com.mongodb.reactivestreams.client.MongoDatabase;
-import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.NoSuchElementException;
+import java.util.List;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 
@@ -34,15 +35,12 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     protected MongoCollection<Document> historyCollection;
     protected IDocumentBuilder documentBuilder;
 
-    public MongoResourceStorage(MongoDatabase database, String collectionName,
-                                IDocumentBuilder documentBuilder,
-                                Class<T> documentType) {
+    public MongoResourceStorage(MongoDatabase database, String collectionName, IDocumentBuilder documentBuilder, Class<T> documentType) {
         this(database, collectionName, documentBuilder, documentType, new String[0]);
     }
 
-    public MongoResourceStorage(MongoDatabase database, String collectionName,
-                                IDocumentBuilder documentBuilder,
-                                Class<T> documentType, String... indexes) {
+    public MongoResourceStorage(MongoDatabase database, String collectionName, IDocumentBuilder documentBuilder, Class<T> documentType,
+            String... indexes) {
         checkNotNull(database, "database");
 
         this.documentType = documentType;
@@ -59,9 +57,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     private void ensureIndex(MongoCollection<Document> mongoCollection, Bson indexKey, boolean unique) {
-        Observable.fromPublisher(
-                mongoCollection.createIndex(indexKey, new IndexOptions().unique(unique))
-        ).blockingFirst();
+        mongoCollection.createIndex(indexKey, new IndexOptions().unique(unique));
     }
 
     @Override
@@ -83,42 +79,37 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
-    public void store(IResource currentResource) {
+    public void store(IResource<T> currentResource) {
         Resource resource = checkInternalResource(currentResource);
         if (resource.getId() == null) {
-            Observable.fromPublisher(currentCollection.insertOne(resource.getMongoDocument())).blockingFirst();
+            currentCollection.insertOne(resource.getMongoDocument());
         } else {
-            Observable.fromPublisher(currentCollection.updateOne(
-                    Filters.eq("_id", new ObjectId(resource.getId())),
-                    new Document("$set", resource.getMongoDocument()),
-                    new UpdateOptions().upsert(true))).blockingFirst();
+            currentCollection.updateOne(Filters.eq("_id", new ObjectId(resource.getId())), new Document("$set", resource.getMongoDocument()),
+                    new UpdateOptions().upsert(true));
         }
     }
 
     @Override
-    public void createNew(IResource currentResource) {
+    public void createNew(IResource<T> currentResource) {
         Resource resource = checkInternalResource(currentResource);
-        Observable.fromPublisher(currentCollection.insertOne(resource.getMongoDocument())).blockingFirst();
+        currentCollection.insertOne(resource.getMongoDocument());
     }
-
 
     @Override
     public IResource<T> read(String id, Integer version) {
         Document query = new Document(ID_FIELD, new ObjectId(id));
         query.put(VERSION_FIELD, version);
 
-        try {
-            Observable<Document> observable = Observable.fromPublisher(currentCollection.find(query).first());
-            Document document = observable.blockingFirst();
-            return new Resource(document);
-        } catch (NoSuchElementException ne) {
+        Document document = currentCollection.find(query).first();
+        if (document == null) {
             return null;
         }
+        return new Resource(document);
     }
 
     @Override
     public void remove(String id) {
-        Observable.fromPublisher(currentCollection.deleteOne(new Document(ID_FIELD, new ObjectId(id)))).blockingFirst();
+        currentCollection.deleteOne(new Document(ID_FIELD, new ObjectId(id)));
     }
 
     @Override
@@ -138,7 +129,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         query.put("$lt", endId);
         Document idQuery = new Document();
         idQuery.put(ID_FIELD, query);
-        Observable.fromPublisher(historyCollection.deleteMany(idQuery)).blockingFirst();
+        historyCollection.deleteMany(idQuery);
     }
 
     @Override
@@ -146,13 +137,11 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         Document objectId = new Document(ID_FIELD, new ObjectId(id));
         objectId.put(VERSION_FIELD, version);
 
-        try {
-            Observable<Document> observable = Observable.fromPublisher(historyCollection.find(Filters.eq(ID_FIELD, objectId)).first());
-            Document doc = observable.blockingFirst();
-            return new HistoryResource(doc);
-        } catch (NoSuchElementException ne) {
+        Document doc = historyCollection.find(Filters.eq(ID_FIELD, objectId)).first();
+        if (doc == null) {
             return null;
         }
+        return new HistoryResource(doc);
     }
 
     @Override
@@ -171,17 +160,19 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         Document object = new Document();
         object.put(ID_FIELD, query);
 
-        if (Observable.fromPublisher(historyCollection.countDocuments(object)).blockingFirst() == 0) {
+        if (historyCollection.countDocuments(object) == 0) {
             return null;
         }
 
-
-        Document doc = Observable.fromPublisher(historyCollection.find(object).sort(new Document(ID_FIELD, -1)).limit(1)).blockingFirst();
+        Document doc = historyCollection.find(object).sort(new Document(ID_FIELD, -1)).limit(1).first();
+        if (doc == null) {
+            return null;
+        }
         return new HistoryResource(doc);
     }
 
     @Override
-    public IHistoryResource<T> newHistoryResourceFor(IResource resource, boolean deleted) {
+    public IHistoryResource<T> newHistoryResourceFor(IResource<T> resource, boolean deleted) {
         Resource mongoResource = checkInternalResource(resource);
         Document historyObject = new Document(mongoResource.getMongoDocument());
 
@@ -199,29 +190,108 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public Integer getCurrentVersion(String id) {
         Document query = new Document(ID_FIELD, new ObjectId(id));
-        try {
-            Document one = Observable.fromPublisher(currentCollection.find(query).first()).blockingFirst();
-            return (Integer) one.get(VERSION_FIELD);
-        } catch (NoSuchElementException ne) {
+        Document one = currentCollection.find(query).first();
+        if (one == null) {
             return -1;
         }
+        return (Integer) one.get(VERSION_FIELD);
     }
 
     @Override
-    public void store(IHistoryResource resource) {
+    public void store(IHistoryResource<T> resource) {
         HistoryResource historyResource = checkInternalHistoryResource(resource);
-        Observable.fromPublisher(historyCollection.insertOne(historyResource.getMongoDocument())).blockingFirst();
+        historyCollection.insertOne(historyResource.getMongoDocument());
     }
 
-    private Resource checkInternalResource(IResource currentResource) {
-        if (!(currentResource instanceof MongoResourceStorage.Resource)) {
+    @Override
+    public List<IResourceStore.IResourceId> findResourceIdsContaining(String jsonPath, String value) {
+        Document filter = new Document(jsonPath, new Document("$in", java.util.Collections.singletonList(value)));
+
+        List<IResourceStore.IResourceId> results = new java.util.LinkedList<>();
+        currentCollection.find(filter).forEach(doc -> {
+            String docId = doc.getObjectId(ID_FIELD).toString();
+            Integer version = doc.getInteger(VERSION_FIELD);
+            results.add(createResourceId(docId, version));
+        });
+        return results;
+    }
+
+    @Override
+    public List<IResourceStore.IResourceId> findHistoryResourceIdsContaining(String jsonPath, String value) {
+        Document filter = new Document(jsonPath, new Document("$in", java.util.Collections.singletonList(value)));
+
+        List<IResourceStore.IResourceId> results = new java.util.LinkedList<>();
+        historyCollection.find(filter).forEach(doc -> {
+            Object idObject = doc.get(ID_FIELD);
+            if (idObject instanceof Document idDoc) {
+                String docId = idDoc.getObjectId(ID_FIELD).toString();
+                Integer version = idDoc.getInteger(VERSION_FIELD);
+                results.add(createResourceId(docId, version));
+            }
+        });
+        return results;
+    }
+
+    @Override
+    public List<IResourceStore.IResourceId> findResources(IResourceFilter.QueryFilters[] allQueryFilters, String sortField, int skip, int limit) {
+
+        List<Bson> connectedFilters = new java.util.ArrayList<>();
+        for (IResourceFilter.QueryFilters queryFilters : allQueryFilters) {
+            List<Bson> filters = new java.util.ArrayList<>();
+            for (IResourceFilter.QueryFilter queryFilter : queryFilters.getQueryFilters()) {
+                if (queryFilter.getFilter() instanceof String) {
+                    filters.add(Filters.regex(queryFilter.getField(), queryFilter.getFilter().toString()));
+                } else {
+                    filters.add(Filters.eq(queryFilter.getField(), queryFilter.getFilter()));
+                }
+            }
+            if (queryFilters.getConnectingType() == IResourceFilter.QueryFilters.ConnectingType.AND) {
+                connectedFilters.add(Filters.and(filters));
+            } else {
+                connectedFilters.add(Filters.or(filters));
+            }
+        }
+
+        Bson query = Filters.and(connectedFilters);
+        Document sort = sortField != null ? new Document(sortField, -1) : new Document();
+        int effectiveLimit = limit < 1 ? 20 : limit;
+
+        var iterable = currentCollection.find(query.toBsonDocument()).sort(sort).limit(effectiveLimit).skip(skip > 0 ? skip : 0);
+
+        List<IResourceStore.IResourceId> results = new java.util.LinkedList<>();
+        iterable.forEach(doc -> {
+            String docId = doc.get(ID_FIELD).toString();
+            Object versionField = doc.get(VERSION_FIELD);
+            Integer version = Integer.parseInt(versionField.toString());
+            results.add(createResourceId(docId, version));
+        });
+
+        return results;
+    }
+
+    private static IResourceStore.IResourceId createResourceId(String id, Integer version) {
+        return new IResourceStore.IResourceId() {
+            @Override
+            public String getId() {
+                return id;
+            }
+
+            @Override
+            public Integer getVersion() {
+                return version;
+            }
+        };
+    }
+
+    private Resource checkInternalResource(IResource<T> currentResource) {
+        if (!(currentResource instanceof MongoResourceStorage<?>.Resource)) {
             throw new IllegalArgumentException("Resource must not be implemented externally.");
         }
         return (Resource) currentResource;
     }
 
-    private HistoryResource checkInternalHistoryResource(IHistoryResource resource) {
-        if (!(resource instanceof MongoResourceStorage.HistoryResource)) {
+    private HistoryResource checkInternalHistoryResource(IHistoryResource<T> resource) {
+        if (!(resource instanceof MongoResourceStorage<?>.HistoryResource)) {
             throw new IllegalArgumentException("HistoryResource must not be implemented externally.");
         }
         return (HistoryResource) resource;

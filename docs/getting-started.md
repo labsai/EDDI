@@ -1,6 +1,6 @@
 # Getting started
 
-**Version: ≥5.0.x**
+**Version: 6.0.0**
 
 Welcome to **EDDI**!
 
@@ -10,22 +10,37 @@ This article will help you to get started with **EDDI**.
 
 EDDI is a **middleware orchestration service** for conversational AI. When you run EDDI, you're starting:
 
-1. **The EDDI Service**: A Java/Quarkus application that exposes REST APIs for bot management and conversations
-2. **MongoDB**: A database that stores bot configurations, packages, and conversation history
-3. **Optional UI**: A web-based dashboard for managing bots (accessible at http://localhost:7070)
+1. **The EDDI Service**: A Java/Quarkus application that exposes REST APIs for agent management and conversations
+2. **MongoDB**: A database that stores agent configurations, packages, and conversation history
+3. **Optional UI**: A web-based dashboard for managing agents (accessible at http://localhost:7070)
 
 Once running, you can:
-- Create and configure bots through the API or dashboard
-- Integrate bots into your applications via REST API
+
+- Create and configure agents through the API or dashboard
+- Integrate agents into your applications via REST API
 - Connect to LLM services (OpenAI, Claude, Gemini, etc.)
 - Build complex conversation flows with behavior rules
-- Call external APIs from your bot logic
+- Call external APIs from your agent logic
 
 ## Installation Options
 
-You have two options to run **EDDI**: The most convenient way is to run **EDDI** with Docker. Alternatively, you can run **EDDI** from source by checking out the git repository and building the project with Maven.
+### Option 0 - One-Command Install (Recommended)
 
-## Option 1 - EDDI with Docker
+**Linux / macOS / WSL2:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/labsai/EDDI/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1 | iex
+```
+
+The wizard guides you through choosing a database (MongoDB or PostgreSQL), optional authentication (Keycloak), and monitoring (Grafana). After setup, Agent Father is deployed automatically to help you create your first AI agent.
+
+### Option 1 - EDDI with Docker (Manual)
 
 There are two ways to use `Docker` with **EDDI**, either with **`docker-compose`** or launch the container manually.
 
@@ -33,12 +48,12 @@ _**Prerequisite**: You need an up and running `Docker` environment. (For referen
 
 ### Use docker-compose (recommended)
 
-1. `Checkout` the `docker-compose` file from `Github`:[`https://github.com/labsai/EDDI/blob/master/docker-compose.yml`](https://github.com/labsai/EDDI/blob/master/docker-compose.yml)
-2.  Run Docker Command:
+1. `Checkout` the `docker-compose` file from `Github`:[`https://github.com/labsai/EDDI/blob/main/docker-compose.yml`](https://github.com/labsai/EDDI/blob/main/docker-compose.yml)
+2. Run Docker Command:
 
-    ```
-     docker-compose up
-    ```
+   ```
+    docker-compose up
+   ```
 
 ### Use launch docker containers manually
 
@@ -47,32 +62,58 @@ _**Prerequisite**: You need an up and running `Docker` environment. (For referen
     ```
     docker network create eddi-network
     ```
+
 2.  Start a `MongoDB` instance using the `MongoDB` `Docker` image:
 
     ```
     docker run --name mongodb --network=eddi-network -d mongo
     ```
+
 3.  Start **EDDI** :
 
     ```
     docker run --name eddi --network=eddi-network -p 7070:7070 -d labsai/eddi
     ```
 
-## Option 2 - Run from Source
+## Option 2 - Deploy on Kubernetes
+
+EDDI runs natively on any Kubernetes cluster (minikube, kind, GKE, EKS, AKS).
+
+**Quickstart (all-in-one):**
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
+bash k8s/create-secrets.sh  # generate vault key
+```
+
+**Using Kustomize overlays:**
+
+```bash
+kubectl apply -k k8s/overlays/mongodb/    # MongoDB backend
+kubectl apply -k k8s/overlays/postgres/   # PostgreSQL backend
+```
+
+**Using Helm:**
+
+```bash
+helm install eddi ./helm/eddi --namespace eddi --create-namespace
+```
+
+See the [Kubernetes Deployment Guide](kubernetes.md) for full details including auth, monitoring, NATS, Ingress, and production hardening.
+
+## Option 3 - Run from Source
 
 #### _Prerequisites:_
 
-* Java 21
-* Maven 3.8.4
-* MongoDB > 4.0
+- Java 25
+- Maven 3.9+
+- MongoDB ≥ 6.0 (or PostgreSQL)
 
 ### How to run the project
 
-Setup a local mongodb (> v4.0)
+Setup a local MongoDB (≥ 6.0) or PostgreSQL instance.
 
-{% hint style="info" %}
-If no mongodb instance is available on the give host, quarkus will try to run a mongodb container on startup, given the host has a docker running server
-{% endhint %}
+> **Note:** If no database instance is available, Quarkus Dev Services will try to start a container automatically (requires Docker running on the host).
 
 On a terminal, under project root folder, run the following command:
 
@@ -81,8 +122,6 @@ On a terminal, under project root folder, run the following command:
 ```
 
 1. Go to Browser --> [http://localhost:7070](http://localhost:7070)
-
-Note: If running locally inside an IDE you need _lombok_ to be enabled (otherwise you will get compile errors complaining about missing constructors). Either download as plugin (e.g. inside IntelliJ) or follow instructions here [https://projectlombok.org/](https://projectlombok.org/)
 
 ### Build App & Docker image
 
@@ -123,6 +162,3 @@ or
 ```bash
 docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.testing.yml -p ci up -d
 ```
-
-> **Important for eclipse users:** If you are planning to browse and build EDDI's code from eclipse, you must take in consideration that EDDI uses project Lombok, so you must add it to eclipse classpath, this can be done easily by executing this jar:`.m2\repository\org\projectlombok\lombok\1.16.26\lombok-1.16.26.jar`
-

@@ -7,12 +7,11 @@ import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.ReadPreference;
 import com.mongodb.WriteConcern;
-import com.mongodb.reactivestreams.client.MongoClients;
-import com.mongodb.reactivestreams.client.MongoDatabase;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoDatabase;
 import de.undercouch.bson4jackson.BsonFactory;
 import de.undercouch.bson4jackson.BsonParser;
-import io.quarkus.mongodb.impl.ReactiveMongoClientImpl;
-import io.quarkus.mongodb.reactive.ReactiveMongoClient;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.ws.rs.Produces;
 import org.bson.BsonInvalidOperationException;
@@ -24,52 +23,48 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import io.quarkus.arc.DefaultBean;
 
 import static org.bson.codecs.configuration.CodecRegistries.*;
 
 /**
+ * MongoDB persistence module. Produces the {@link MongoDatabase} CDI bean.
+ * <p>
+ * Annotated {@code @DefaultBean} so it is NOT activated when PostgreSQL mode
+ * overrides the datastore layer.
+ *
  * @author ginccc
  */
 @ApplicationScoped
+@DefaultBean
 public class PersistenceModule {
     @Produces
     @ApplicationScoped
+    @DefaultBean
     public MongoDatabase provideMongoDB(@ConfigProperty(name = "mongodb.connectionString") String connectionString,
-                                        @ConfigProperty(name = "mongodb.database") String database) {
-            BsonFactory bsonFactory = new BsonFactory();
-            bsonFactory.enable(BsonParser.Feature.HONOR_DOCUMENT_LENGTH);
+            @ConfigProperty(name = "mongodb.database") String database) {
+        BsonFactory bsonFactory = new BsonFactory();
+        bsonFactory.enable(BsonParser.Feature.HONOR_DOCUMENT_LENGTH);
 
+        MongoClient client = MongoClients.create(buildMongoClientOptions(ReadPreference.nearest(), connectionString, bsonFactory));
+        registerMongoClientShutdownHook(client);
 
-            ReactiveMongoClient client = new ReactiveMongoClientImpl(MongoClients.create(buildMongoClientOptions(ReadPreference.nearest(), connectionString, bsonFactory)));
-            registerMongoClientShutdownHook(client);
-
-            return client.getDatabase(database).unwrap();
+        return client.getDatabase(database);
     }
 
-    private MongoClientSettings buildMongoClientOptions(ReadPreference readPreference,
-                                                       String connectionString,
-                                                       BsonFactory bsonFactory) {
+    private MongoClientSettings buildMongoClientOptions(ReadPreference readPreference, String connectionString, BsonFactory bsonFactory) {
 
         var objectMapper = new ObjectMapper(bsonFactory);
         new SerializationCustomizer(false).customize(objectMapper);
-        CodecRegistry codecRegistry = fromRegistries(
-                MongoClientSettings.getDefaultCodecRegistry(),
-                fromCodecs(new URIStringCodec(), new RawBsonDocumentCodec()),
-                fromProviders(
-                        new ValueCodecProvider(), new BsonValueCodecProvider(),
-                        new DocumentCodecProvider(), new IterableCodecProvider(), new MapCodecProvider(),
-                        new JacksonProvider(objectMapper)
-                )
-        );
+        CodecRegistry codecRegistry = fromRegistries(MongoClientSettings.getDefaultCodecRegistry(),
+                fromCodecs(new URIStringCodec(), new RawBsonDocumentCodec()), fromProviders(new ValueCodecProvider(), new BsonValueCodecProvider(),
+                        new DocumentCodecProvider(), new IterableCodecProvider(), new MapCodecProvider(), new JacksonProvider(objectMapper)));
 
-        return MongoClientSettings.builder()
-                .applyConnectionString(new ConnectionString(connectionString))
-                .codecRegistry(codecRegistry)
-                .writeConcern(WriteConcern.MAJORITY)
-                .readPreference(readPreference).build();
+        return MongoClientSettings.builder().applyConnectionString(new ConnectionString(connectionString)).codecRegistry(codecRegistry)
+                .writeConcern(WriteConcern.MAJORITY).readPreference(readPreference).build();
     }
 
-    private void registerMongoClientShutdownHook(final ReactiveMongoClient mongoClient) {
+    private void registerMongoClientShutdownHook(final MongoClient mongoClient) {
         Runtime.getRuntime().addShutdownHook(new Thread("ShutdownHook_MongoClient") {
             @Override
             public void run() {
@@ -101,8 +96,7 @@ public class PersistenceModule {
             try {
                 return new URI(uriString);
             } catch (URISyntaxException e) {
-                throw new BsonInvalidOperationException(
-                        String.format("Cannot create URI from string '%s'", uriString));
+                throw new BsonInvalidOperationException(String.format("Cannot create URI from string '%s'", uriString));
 
             }
         }

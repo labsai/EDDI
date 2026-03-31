@@ -1,19 +1,20 @@
 package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.Data;
 
 import java.util.*;
-import java.util.function.Function;
+
 import java.util.stream.IntStream;
 
 /**
  * @author ginccc
  */
 public class ConversationStep implements IConversationMemory.IWritableConversationStep {
-    private Map<String, IData> store;
+    private Map<String, IData<?>> store;
     private final ConversationOutput conversationOutput;
     int conversationStepNumber;
-    private String currentPackageId;
+    private String currentWorkflowId;
 
     ConversationStep(ConversationOutput conversationOutput) {
         store = new LinkedHashMap<>();
@@ -21,8 +22,9 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public <T> IData<T> getData(String key) {
-        return store.get(key);
+        return (IData<T>) store.get(key);
     }
 
     @Override
@@ -41,9 +43,16 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     }
 
     @Override
-    public void storeData(IData data) {
-        data.setOriginPackageId(this.currentPackageId);
+    public void storeData(IData<?> data) {
+        data.setOriginWorkflowId(this.currentWorkflowId);
         store.put(data.getKey(), data);
+    }
+
+    @Override
+    public <T> void set(MemoryKey<T> key, T value) {
+        Data<T> data = new Data<>(key.key(), value);
+        data.setPublic(key.isPublic());
+        storeData(data);
     }
 
     @Override
@@ -52,8 +61,8 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     }
 
     @Override
-    public void setCurrentPackageId(String packageId) {
-        this.currentPackageId = packageId;
+    public void setCurrentWorkflowId(String workflowId) {
+        this.currentWorkflowId = workflowId;
     }
 
     public void resetConversationOutput(String rootKey) {
@@ -67,8 +76,8 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
 
     @Override
     public void replaceConversationOutputObject(String key, Object valueToBeReplaced, Object replace) {
-        var outputs = (List<Object>) conversationOutput.
-                computeIfAbsent(key, (Function<String, List>) k -> new ArrayList());
+        @SuppressWarnings("unchecked")
+        var outputs = (List<Object>) conversationOutput.computeIfAbsent(key, k -> new ArrayList<>());
 
         IntStream.range(0, outputs.size()).forEach(i -> {
             var currentValue = outputs.get(i);
@@ -84,17 +93,17 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     }
 
     @Override
-    public void addConversationOutputList(String key, List list) {
-        var currentList = (List<Object>) conversationOutput.
-                computeIfAbsent(key, (Function<String, List>) k -> new ArrayList());
+    @SuppressWarnings("unchecked")
+    public void addConversationOutputList(String key, List<?> list) {
+        var currentList = (List<Object>) conversationOutput.computeIfAbsent(key, k -> new ArrayList<>());
 
         currentList.addAll(list);
     }
 
     @Override
     public void addConversationOutputMap(String key, Map<String, Object> map) {
-        var currentMap = (Map<String, Object>) conversationOutput.
-                computeIfAbsent(key, (Function<String, Map>) k -> new LinkedHashMap<String, Object>());
+        @SuppressWarnings("unchecked")
+        var currentMap = (Map<String, Object>) conversationOutput.computeIfAbsent(key, k -> new LinkedHashMap<String, Object>());
 
         currentMap.putAll(map);
     }
@@ -110,22 +119,39 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     }
 
     @Override
-    public List<IData> getAllElements() {
+    public List<IData<?>> getAllElements() {
         return new ArrayList<>(store.values());
     }
 
-
     @Override
     public <T> IData<T> getLatestData(String prefix) {
-        List<IData> elements = getAllElements();
+        List<IData<?>> elements = getAllElements();
         Collections.reverse(elements);
-        for (IData element : elements) {
+        for (IData<?> element : elements) {
             if (element.getKey().startsWith(prefix)) {
-                return element;
+                @SuppressWarnings("unchecked")
+                IData<T> result = (IData<T>) element;
+                return result;
             }
         }
 
         return null;
+    }
+
+    @Override
+    public <T> IData<T> getLatestData(MemoryKey<T> key) {
+        return getLatestData(key.key());
+    }
+
+    @Override
+    public <T> IData<T> getData(MemoryKey<T> key) {
+        return getData(key.key());
+    }
+
+    @Override
+    public <T> T get(MemoryKey<T> key) {
+        IData<T> data = getData(key.key());
+        return data != null ? data.getResult() : null;
     }
 
     @Override
@@ -140,8 +166,10 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof ConversationStep)) return false;
+        if (this == o)
+            return true;
+        if (!(o instanceof ConversationStep))
+            return false;
 
         ConversationStep that = (ConversationStep) o;
 
@@ -155,9 +183,6 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
 
     @Override
     public String toString() {
-        return "ConversationStep" +
-                "{input=" + getLatestData("input") +
-                ", output=" + getLatestData("output") +
-                '}';
+        return "ConversationStep" + "{input=" + getLatestData("input") + ", output=" + getLatestData("output") + '}';
     }
 }

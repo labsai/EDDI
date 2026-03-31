@@ -1,7 +1,10 @@
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
-import ai.labs.eddi.engine.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
 
 import java.io.Serializable;
@@ -16,9 +19,9 @@ import java.util.Stack;
 public interface IConversationMemory extends Serializable {
     String getConversationId();
 
-    String getBotId();
+    String getAgentId();
 
-    Integer getBotVersion();
+    Integer getAgentVersion();
 
     String getUserId();
 
@@ -48,9 +51,59 @@ public interface IConversationMemory extends Serializable {
 
     Stack<IConversationStep> getRedoCache();
 
+    /**
+     * Get the event sink for streaming SSE events. Returns {@code null} when no
+     * streaming is requested (standard say endpoint).
+     */
+    default ConversationEventSink getEventSink() {
+        return null;
+    }
+
+    /**
+     * Set the event sink for this conversation turn. Called from
+     * {@code ConversationService.sayStreaming()} before lifecycle execution.
+     */
+    default void setEventSink(ConversationEventSink eventSink) {
+        // no-op by default
+    }
+
+    /**
+     * Get the audit entry collector for this conversation turn. Returns
+     * {@code null} when auditing is disabled.
+     */
+    default IAuditEntryCollector getAuditCollector() {
+        return null;
+    }
+
+    /**
+     * Set the audit entry collector for this conversation turn. Called from
+     * {@code ConversationService} before lifecycle execution.
+     */
+    default void setAuditCollector(IAuditEntryCollector auditCollector) {
+        // no-op by default
+    }
+
+    /**
+     * Get the user memory configuration for this conversation. Returns {@code null}
+     * when persistent user memory is disabled.
+     */
+    default AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
+        return null;
+    }
+
+    /**
+     * Set the user memory configuration. Called from {@code Conversation.init()}
+     * when the agent has user memory enabled.
+     */
+    default void setUserMemoryConfig(AgentConfiguration.UserMemoryConfig config) {
+        // no-op by default
+    }
 
     interface IConversationStepStack {
         <T> IData<T> getLatestData(String key);
+
+        /** Type-safe variant of {@link #getLatestData(String)}. */
+        <T> IData<T> getLatestData(MemoryKey<T> key);
 
         <T> List<List<IData<T>>> getAllData(String prefix);
 
@@ -66,11 +119,21 @@ public interface IConversationMemory extends Serializable {
     interface IConversationStep extends Serializable {
         <T> IData<T> getData(String key);
 
+        /** Type-safe variant of {@link #getData(String)}. */
+        <T> IData<T> getData(MemoryKey<T> key);
+
+        /**
+         * Convenience method: returns the value directly, or {@code null} if not
+         * present. Equivalent to
+         * {@code getData(key) != null ? getData(key).getResult() : null}.
+         */
+        <T> T get(MemoryKey<T> key);
+
         <T> List<IData<T>> getAllData(String prefix);
 
         Set<String> getAllKeys();
 
-        List<IData> getAllElements();
+        List<IData<?>> getAllElements();
 
         int size();
 
@@ -78,15 +141,24 @@ public interface IConversationMemory extends Serializable {
 
         <T> IData<T> getLatestData(String prefix);
 
+        /** Type-safe variant of {@link #getLatestData(String)}. */
+        <T> IData<T> getLatestData(MemoryKey<T> key);
+
         ConversationOutput getConversationOutput();
     }
 
     interface IWritableConversationStep extends IConversationStep {
-        void storeData(IData element);
+        void storeData(IData<?> element);
+
+        /**
+         * Type-safe store: creates a {@link IData} wrapper, sets the public flag from
+         * the key, and stores it in this step.
+         */
+        <T> void set(MemoryKey<T> key, T value);
 
         void removeData(String key);
 
-        void setCurrentPackageId(String packageId);
+        void setCurrentWorkflowId(String workflowId);
 
         void resetConversationOutput(String rootKey);
 
@@ -96,7 +168,7 @@ public interface IConversationMemory extends Serializable {
 
         void addConversationOutputString(String key, String value);
 
-        void addConversationOutputList(String key, List list);
+        void addConversationOutputList(String key, List<?> list);
 
         void addConversationOutputMap(String key, Map<String, Object> map);
     }

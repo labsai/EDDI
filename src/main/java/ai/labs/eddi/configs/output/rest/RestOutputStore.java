@@ -1,6 +1,6 @@
 package ai.labs.eddi.configs.output.rest;
 
-import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
@@ -8,15 +8,15 @@ import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
-import org.jboss.logging.Logger;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.NotFoundException;
+
 import jakarta.ws.rs.core.Response;
 import java.util.List;
+
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 /**
  * @author ginccc
@@ -28,12 +28,8 @@ public class RestOutputStore implements IRestOutputStore {
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<OutputConfigurationSet> restVersionInfo;
 
-    private static final Logger log = Logger.getLogger(RestOutputStore.class);
-
     @Inject
-    public RestOutputStore(IOutputStore outputStore,
-                           IDocumentDescriptorStore documentDescriptorStore,
-                           IJsonSchemaCreator jsonSchemaCreator) {
+    public RestOutputStore(IOutputStore outputStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, outputStore, documentDescriptorStore);
         this.outputStore = outputStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
@@ -44,8 +40,7 @@ public class RestOutputStore implements IRestOutputStore {
         try {
             return Response.ok(jsonSchemaCreator.generateSchema(OutputConfigurationSet.class)).build();
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -55,15 +50,11 @@ public class RestOutputStore implements IRestOutputStore {
     }
 
     @Override
-    public OutputConfigurationSet readOutputSet(String id, Integer version,
-                                                String filter, String order, Integer index, Integer limit) {
+    public OutputConfigurationSet readOutputSet(String id, Integer version, String filter, String order, Integer index, Integer limit) {
         try {
             return outputStore.read(id, version, filter, order, index, limit);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
         }
     }
 
@@ -71,11 +62,8 @@ public class RestOutputStore implements IRestOutputStore {
     public List<String> readOutputKeys(String id, Integer version, String filter, Integer limit) {
         try {
             return outputStore.readActions(id, version, filter, limit);
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            throw sneakyThrow(e);
         }
     }
 
@@ -90,31 +78,25 @@ public class RestOutputStore implements IRestOutputStore {
     }
 
     @Override
-    public Response deleteOutputSet(String id, Integer version) {
-        return restVersionInfo.delete(id, version);
+    public Response deleteOutputSet(String id, Integer version, Boolean permanent) {
+        return restVersionInfo.delete(id, version, permanent);
     }
 
     @Override
-    public Response patchOutputSet(String id, Integer version,
-                                   List<PatchInstruction<OutputConfigurationSet>> patchInstructions) {
+    public Response patchOutputSet(String id, Integer version, List<PatchInstruction<OutputConfigurationSet>> patchInstructions) {
         try {
             OutputConfigurationSet currentOutputConfigurationSet = outputStore.read(id, version);
-            OutputConfigurationSet patchedOutputConfigurationSet =
-                    patchDocument(currentOutputConfigurationSet, patchInstructions);
+            OutputConfigurationSet patchedOutputConfigurationSet = patchDocument(currentOutputConfigurationSet, patchInstructions);
 
             return updateOutputSet(id, version, patchedOutputConfigurationSet);
 
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            throw sneakyThrow(e);
         }
     }
 
     private OutputConfigurationSet patchDocument(OutputConfigurationSet currentOutputConfigurationSet,
-                                                 List<PatchInstruction<OutputConfigurationSet>> patchInstructions)
-            throws IResourceStore.ResourceStoreException {
+            List<PatchInstruction<OutputConfigurationSet>> patchInstructions) throws IResourceStore.ResourceStoreException {
 
         for (var patchInstruction : patchInstructions) {
             var outputConfigurationSetPatch = patchInstruction.getDocument();
@@ -123,10 +105,8 @@ public class RestOutputStore implements IRestOutputStore {
                     currentOutputConfigurationSet.getOutputSet().removeAll(outputConfigurationSetPatch.getOutputSet());
                     currentOutputConfigurationSet.getOutputSet().addAll(outputConfigurationSetPatch.getOutputSet());
                 }
-                case DELETE ->
-                        currentOutputConfigurationSet.getOutputSet().removeAll(outputConfigurationSetPatch.getOutputSet());
-                default ->
-                        throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");
+                case DELETE -> currentOutputConfigurationSet.getOutputSet().removeAll(outputConfigurationSetPatch.getOutputSet());
+                default -> throw new IResourceStore.ResourceStoreException("Patch operation must be either SET or DELETE!");
             }
         }
 
@@ -139,11 +119,8 @@ public class RestOutputStore implements IRestOutputStore {
         try {
             var outputConfigurationSet = outputStore.read(id, version);
             return restVersionInfo.create(outputConfigurationSet);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException();
-        } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
         }
     }
 

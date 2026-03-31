@@ -1,21 +1,20 @@
 package ai.labs.eddi.configs.output.rest.keys;
 
-import ai.labs.eddi.configs.behavior.IBehaviorStore;
-import ai.labs.eddi.configs.behavior.model.BehaviorConfiguration;
-import ai.labs.eddi.configs.behavior.model.BehaviorGroupConfiguration;
-import ai.labs.eddi.configs.behavior.model.BehaviorRuleConfiguration;
+import ai.labs.eddi.configs.rules.IRuleSetStore;
+import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
+import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
+import ai.labs.eddi.configs.rules.model.RuleConfiguration;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.keys.IRestOutputActions;
-import ai.labs.eddi.configs.packages.IPackageStore;
-import ai.labs.eddi.configs.packages.model.PackageConfiguration;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.CollectionUtilities;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.NotFoundException;
-import org.jboss.logging.Logger;
+
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.net.URI;
 import java.util.Collections;
@@ -29,32 +28,28 @@ import java.util.Map;
 
 @ApplicationScoped
 public class RestOutputActions implements IRestOutputActions {
-    private final IPackageStore packageStore;
-    private final IBehaviorStore behaviorStore;
+    private final IWorkflowStore workflowStore;
+    private final IRuleSetStore behaviorStore;
     private final IOutputStore outputStore;
 
-    private static final Logger log = Logger.getLogger(RestOutputActions.class);
-
     @Inject
-    public RestOutputActions(IPackageStore packageStore,
-                             IBehaviorStore behaviorStore,
-                             IOutputStore outputStore) {
-        this.packageStore = packageStore;
+    public RestOutputActions(IWorkflowStore workflowStore, IRuleSetStore behaviorStore, IOutputStore outputStore) {
+        this.workflowStore = workflowStore;
         this.behaviorStore = behaviorStore;
         this.outputStore = outputStore;
     }
 
     @Override
-    public List<String> readOutputActions(String packageId, Integer packageVersion, String filter, Integer limit) {
+    public List<String> readOutputActions(String workflowId, Integer workflowVersion, String filter, Integer limit) {
         List<String> retOutputKeys = new LinkedList<>();
         try {
-            PackageConfiguration packageConfiguration = packageStore.read(packageId, packageVersion);
+            WorkflowConfiguration workflowConfig = workflowStore.read(workflowId, workflowVersion);
             List<IResourceStore.IResourceId> resourceIds;
-            resourceIds = readBehaviorRuleSetResourceIds(packageConfiguration);
+            resourceIds = readRuleSetResourceIds(workflowConfig);
             for (IResourceStore.IResourceId resourceId : resourceIds) {
-                BehaviorConfiguration behaviorConfiguration = behaviorStore.read(resourceId.getId(), resourceId.getVersion());
-                for (BehaviorGroupConfiguration groupConfiguration : behaviorConfiguration.getBehaviorGroups()) {
-                    for (BehaviorRuleConfiguration behaviorRuleConfiguration : groupConfiguration.getBehaviorRules()) {
+                RuleSetConfiguration behaviorConfiguration = behaviorStore.read(resourceId.getId(), resourceId.getVersion());
+                for (RuleGroupConfiguration groupConfiguration : behaviorConfiguration.getBehaviorGroups()) {
+                    for (RuleConfiguration behaviorRuleConfiguration : groupConfiguration.getRules()) {
                         for (String action : behaviorRuleConfiguration.getActions()) {
                             if (action.contains(filter)) {
                                 CollectionUtilities.addAllWithoutDuplicates(retOutputKeys, List.of(action));
@@ -67,7 +62,7 @@ public class RestOutputActions implements IRestOutputActions {
                 }
             }
 
-            resourceIds = readOutputSetResourceIds(packageConfiguration);
+            resourceIds = readOutputSetResourceIds(workflowConfig);
             for (IResourceStore.IResourceId resourceId : resourceIds) {
                 List<String> outputKeys = outputStore.readActions(resourceId.getId(), resourceId.getVersion(), filter, limit);
                 CollectionUtilities.addAllWithoutDuplicates(retOutputKeys, outputKeys);
@@ -78,10 +73,9 @@ public class RestOutputActions implements IRestOutputActions {
 
             return sortedOutputKeys(retOutputKeys);
         } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException();
+            throw sneakyThrow(e);
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e);
+            throw sneakyThrow(e);
         }
     }
 
@@ -90,15 +84,15 @@ public class RestOutputActions implements IRestOutputActions {
         return retOutputKeys;
     }
 
-    private List<IResourceStore.IResourceId> readBehaviorRuleSetResourceIds(PackageConfiguration packageConfiguration) {
+    private List<IResourceStore.IResourceId> readRuleSetResourceIds(WorkflowConfiguration workflowConfiguration) {
         List<IResourceStore.IResourceId> resourceIds = new LinkedList<>();
 
-        for (PackageConfiguration.PackageExtension packageExtension : packageConfiguration.getPackageExtensions()) {
-            if (!packageExtension.getType().toString().startsWith("eddi://ai.labs.behavior")) {
+        for (WorkflowConfiguration.WorkflowStep workflowStep : workflowConfiguration.getWorkflowSteps()) {
+            if (!workflowStep.getType().toString().startsWith("eddi://ai.labs.rules")) {
                 continue;
             }
 
-            Map<String, Object> config = packageExtension.getConfig();
+            Map<String, Object> config = workflowStep.getConfig();
             String uri = (String) config.get("uri");
             resourceIds.add(RestUtilities.extractResourceId(URI.create(uri)));
         }
@@ -107,15 +101,15 @@ public class RestOutputActions implements IRestOutputActions {
 
     }
 
-    private List<IResourceStore.IResourceId> readOutputSetResourceIds(PackageConfiguration packageConfiguration) {
+    private List<IResourceStore.IResourceId> readOutputSetResourceIds(WorkflowConfiguration workflowConfiguration) {
         List<IResourceStore.IResourceId> resourceIds = new LinkedList<>();
 
-        for (PackageConfiguration.PackageExtension packageExtension : packageConfiguration.getPackageExtensions()) {
-            if (!packageExtension.getType().toString().startsWith("eddi://ai.labs.output")) {
+        for (WorkflowConfiguration.WorkflowStep workflowStep : workflowConfiguration.getWorkflowSteps()) {
+            if (!workflowStep.getType().toString().startsWith("eddi://ai.labs.output")) {
                 continue;
             }
 
-            Map<String, Object> config = packageExtension.getConfig();
+            Map<String, Object> config = workflowStep.getConfig();
             String uri = (String) config.get("uri");
             resourceIds.add(RestUtilities.extractResourceId(URI.create(uri)));
         }
@@ -123,4 +117,3 @@ public class RestOutputActions implements IRestOutputActions {
         return resourceIds;
     }
 }
-

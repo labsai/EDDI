@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.nlp.extensions.dictionaries.providers;
 
-
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.OrdinalNumbersDictionary;

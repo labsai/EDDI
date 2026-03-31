@@ -1,0 +1,47 @@
+# EDDI Ingress — vendor-neutral, works with nginx, Traefik, HAProxy, etc.
+#
+# Customize:
+#   - Set your hostname in spec.rules[].host
+#   - Uncomment TLS section for HTTPS
+#   - Change ingressClassName to match your cluster's Ingress controller
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: eddi
+  labels:
+    app.kubernetes.io/name: eddi
+    app.kubernetes.io/part-of: eddi
+  annotations:
+    # nginx-ingress controller defaults (ignored by other controllers)
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    # SSE support — required for streaming responses
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  # Uncomment and set to your Ingress controller's class name:
+  # ingressClassName: nginx
+  rules:
+    - host: eddi.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: eddi
+                port:
+                  name: http
+          # Uncomment to expose Manager UI on the same host
+          # - path: /manage
+          #   pathType: Prefix
+          #   backend:
+          #     service:
+          #       name: eddi-manager
+          #       port:
+          #         name: http
+  # Uncomment for TLS:
+  # tls:
+  #   - hosts:
+  #       - eddi.example.com
+  #     secretName: eddi-tls

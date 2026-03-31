@@ -36,8 +36,10 @@ public class Phrase extends DictionaryEntry implements IDictionary.IPhrase {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof IDictionary.IPhrase)) return false;
+        if (this == o)
+            return true;
+        if (!(o instanceof IDictionary.IPhrase))
+            return false;
 
         IDictionary.IPhrase that = (IDictionary.IPhrase) o;
 

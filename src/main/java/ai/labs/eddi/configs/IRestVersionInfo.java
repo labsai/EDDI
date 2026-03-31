@@ -8,6 +8,8 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.net.URI;
 
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
+
 /**
  * @author ginccc
  */
@@ -23,7 +25,7 @@ public interface IRestVersionInfo {
             String path = URI.create(getResourceURI()).getPath();
             return Response.seeOther(URI.create(path + id + versionQueryParam + currentResourceId.getVersion())).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage());
+            throw sneakyThrow(e);
         }
     }
 
@@ -36,14 +38,13 @@ public interface IRestVersionInfo {
             IResourceStore.IResourceId currentResourceId = getCurrentResourceId(id);
             return currentResourceId.getVersion();
         } catch (IResourceStore.ResourceNotFoundException e) {
-            throw new NotFoundException(e.getLocalizedMessage(), e);
+            throw sneakyThrow(e);
         }
     }
 
     String getResourceURI();
 
-    default IResourceStore.IResourceId getCurrentResourceId(String id)
-            throws IResourceStore.ResourceNotFoundException {
+    default IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         throw new IllegalStateException("Method getCurrentVersion of interface IRestVersionInfo needs to be implemented");
     }
 }

@@ -20,7 +20,7 @@ public class ConversationMemoryTest {
 
     @Test
     public void testInitialization() {
-        //assert
+        // assert
         Assertions.assertNotNull(memory.getCurrentStep());
         Assertions.assertEquals(0, memory.getPreviousSteps().size());
     }
@@ -43,16 +43,16 @@ public class ConversationMemoryTest {
 
     @Test
     public void testStartNextStep() {
-        //setup
+        // setup
         IConversationMemory.IWritableConversationStep entry = memory.getCurrentStep();
 
         final Data<LinkedList<Object>> data = new Data<>("testkey", new LinkedList<>());
         entry.storeData(data);
 
-        //test
+        // test
         memory.startNextStep();
 
-        //assert
+        // assert
         Assertions.assertEquals(2, memory.size());
         Assertions.assertEquals(1, memory.getPreviousSteps().size());
         Assertions.assertSame(entry, memory.getPreviousSteps().get(0));
@@ -60,7 +60,7 @@ public class ConversationMemoryTest {
 
     @Test
     public void testUndo() {
-        //setup
+        // setup
         IConversationMemory.IWritableConversationStep entry = memory.getCurrentStep();
         final Data<LinkedList<Object>> data = new Data<>("testkey", new LinkedList<>());
         entry.storeData(data);
@@ -76,7 +76,7 @@ public class ConversationMemoryTest {
 
     @Test
     public void testRedo() {
-        //setup
+        // setup
         memory.startNextStep();
 
         IConversationMemory.IWritableConversationStep entry = memory.getCurrentStep();

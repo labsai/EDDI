@@ -1,8 +1,5 @@
 package ai.labs.eddi.modules.nlp.internal.matches;
 
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-
 import java.util.*;
 
 /**
@@ -146,14 +143,31 @@ public class IterationCounter implements Iterator<IterationCounter.IterationPlan
         return false;
     }
 
-    @Getter
-    @EqualsAndHashCode
     public class IterationPlan {
         private Integer[] indexes;
 
         private IterationPlan(Integer[] indexes) {
             this.indexes = new Integer[indexes.length];
             System.arraycopy(indexes, 0, this.indexes, 0, indexes.length);
+        }
+
+        public Integer[] getIndexes() {
+            return indexes;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
+            IterationPlan that = (IterationPlan) o;
+            return java.util.Objects.equals(indexes, that.indexes);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash((Object[]) indexes);
         }
     }
 }

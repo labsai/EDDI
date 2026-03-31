@@ -1,8 +1,93 @@
 # Security
 
-**Version: ≥5.6.x**
+**Version: 6.0.0**
 
-This document describes the security measures applied to EDDI's AI Agent Tooling system, particularly for tools that execute in response to LLM-generated arguments.
+This document describes the security measures applied to EDDI's AI Agent Tooling system, particularly for tools that execute in response to LLM-generated arguments, as well as the Keycloak-based authentication layer.
+
+---
+
+## Authentication — Keycloak OIDC
+
+**Version: ≥6.0.0**
+
+EDDI supports optional authentication via [Keycloak](https://www.keycloak.org/) using the Quarkus OIDC extension. Authentication is **disabled by default** — the system runs open (no login required) unless explicitly enabled.
+
+### Architecture
+
+```
+Browser (EDDI Manager)
+    │
+    ├── keycloak-js → Keycloak login → JWT access token
+    │
+    ├── Authorization: Bearer <token> → EDDI backend
+    │                                      │
+    │                                      ├── Quarkus OIDC validates token via JWKS
+    │                                      ├── SecurityIdentity populated
+    │                                      └── RestAgentManagement checks identity
+    │
+    └── Token refresh (automatic, every 30s before expiry)
+```
+
+### Configuration Properties
+
+| Property                       | Type           | Default                             | Description                                     |
+| ------------------------------ | -------------- | ----------------------------------- | ----------------------------------------------- |
+| `quarkus.oidc.enabled`         | **Build-time** | `true`                              | Extension active — must be `true` at build time |
+| `quarkus.oidc.tenant-enabled`  | **Runtime**    | `false`                             | Enables/disables auth enforcement               |
+| `quarkus.oidc.auth-server-url` | Runtime        | `http://localhost:8180/realms/eddi` | Keycloak realm URL                              |
+| `quarkus.oidc.client-id`       | Runtime        | `eddi-backend`                      | OIDC client ID (bearer-only)                    |
+| `authorization.enabled`        | Runtime        | `false`                             | Fine-grained authorization checks               |
+
+> **Important:** `quarkus.oidc.enabled` is a **build-time** property — it cannot be changed at container start. The OIDC extension must always be active in the binary. Use `quarkus.oidc.tenant-enabled` (runtime) to toggle auth on/off via environment variables.
+
+### Enabling Auth at Container Start
+
+```bash
+docker run -e QUARKUS_OIDC_TENANT_ENABLED=true \
+           -e QUARKUS_OIDC_AUTH_SERVER_URL=http://keycloak:8080/realms/eddi \
+           -e QUARKUS_OIDC_CLIENT_ID=eddi-backend \
+           labsai/eddi:latest
+```
+
+### Auth Permissions
+
+When OIDC is enabled, the following permission rules apply (see `application.properties`):
+
+| Path Pattern                                                                                    | Policy                                   |
+| ----------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `/q/metrics/*`, `/q/health/*`, `/chat/production/*`, `/agents/production/*`, `/agents/managed/*` | **Permit** (no auth)                     |
+| `/`, `/*`                                                                                       | **Authenticated** (valid token required) |
+
+### RestAgentManagement Gate
+
+`RestAgentManagement.checkUserAuthIfApplicable()` enforces per-request auth:
+
+```java
+if (checkForUserAuthentication &&
+        !production.equals(userConversation.getEnvironment()) &&
+        identity.isAnonymous()) {
+    throw new UnauthorizedException();
+}
+```
+
+- When `quarkus.oidc.tenant-enabled=false` → `checkForUserAuthentication=false` → all requests pass
+- When `quarkus.oidc.tenant-enabled=true` → only authenticated users can access production endpoints
+- Requests to `/production/` environments always pass regardless of auth status
+
+### Local Development Keycloak
+
+The EDDI-Manager repo provides a docker-compose for local Keycloak:
+
+```bash
+docker compose -f docker-compose.keycloak.yml up
+```
+
+This starts Keycloak 26 on port 8180 with:
+
+- **Realm**: `eddi`
+- **Clients**: `eddi-manager` (SPA, public), `eddi-backend` (bearer-only)
+- **Roles**: `admin`, `editor`, `viewer`
+- **Test users**: `eddi`/`eddi` (admin), `viewer`/`viewer` (read-only)
 
 ---
 
@@ -22,27 +107,27 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 
 Only `http` and `https` URLs are accepted. All other schemes are rejected:
 
-| Blocked | Example |
-|---------|---------|
-| `file://` | `file:///etc/passwd` |
-| `ftp://` | `ftp://internal-server/data` |
-| `jar://` | `jar:file:///app.jar!/secret` |
-| `gopher://` | `gopher://127.0.0.1:25/...` |
+| Blocked     | Example                       |
+| ----------- | ----------------------------- |
+| `file://`   | `file:///etc/passwd`          |
+| `ftp://`    | `ftp://internal-server/data`  |
+| `jar://`    | `jar:file:///app.jar!/secret` |
+| `gopher://` | `gopher://127.0.0.1:25/...`   |
 
 ### Private / Internal IP Blocking
 
 DNS resolution is performed and the resolved address is checked before any connection is made:
 
-| Range | Description |
-|-------|-------------|
-| `127.0.0.0/8` | Loopback addresses |
-| `10.0.0.0/8` | Private network (Class A) |
-| `172.16.0.0/12` | Private network (Class B) |
-| `192.168.0.0/16` | Private network (Class C) |
+| Range            | Description                   |
+| ---------------- | ----------------------------- |
+| `127.0.0.0/8`    | Loopback addresses            |
+| `10.0.0.0/8`     | Private network (Class A)     |
+| `172.16.0.0/12`  | Private network (Class B)     |
+| `192.168.0.0/16` | Private network (Class C)     |
 | `169.254.0.0/16` | Link-local (AWS/GCP metadata) |
-| `fd00::/8` | IPv6 unique-local |
-| `fe80::/10` | IPv6 link-local |
-| `::1` | IPv6 loopback |
+| `fd00::/8`       | IPv6 unique-local             |
+| `fe80::/10`      | IPv6 link-local               |
+| `::1`            | IPv6 loopback                 |
 
 ### Cloud Metadata Endpoint Blocking
 
@@ -139,22 +224,24 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool �
 
 ```json
 {
-  "tasks": [{
-    "actions": ["help"],
-    "type": "openai",
-    "enableBuiltInTools": true,
-    "enableRateLimiting": true,
-    "defaultRateLimit": 100,
-    "toolRateLimits": { "websearch": 30, "weather": 50 },
-    "enableToolCaching": true,
-    "enableCostTracking": true,
-    "maxBudgetPerConversation": 5.0,
-    "parameters": {
-      "apiKey": "...",
-      "modelName": "gpt-4o",
-      "systemMessage": "You are a helpful assistant."
+  "tasks": [
+    {
+      "actions": ["help"],
+      "type": "openai",
+      "enableBuiltInTools": true,
+      "enableRateLimiting": true,
+      "defaultRateLimit": 100,
+      "toolRateLimits": { "websearch": 30, "weather": 50 },
+      "enableToolCaching": true,
+      "enableCostTracking": true,
+      "maxBudgetPerConversation": 5.0,
+      "parameters": {
+        "apiKey": "...",
+        "modelName": "gpt-4o",
+        "systemMessage": "You are a helpful assistant."
+      }
     }
-  }]
+  ]
 }
 ```
 
@@ -189,6 +276,6 @@ When adding a new tool to EDDI:
 ## See Also
 
 - [LangChain Integration](langchain.md) — Full agent configuration reference
-- [Bot Father LangChain Tools Guide](bot-father-langchain-tools-guide.md) — Guided tool setup
+- [Agent Father LangChain Tools Guide](agent-father-langchain-tools-guide.md) — Guided tool setup
 - [Architecture](architecture.md) — EDDI's lifecycle pipeline and concurrency model
 - [Metrics](metrics.md) — Monitoring tool execution performance

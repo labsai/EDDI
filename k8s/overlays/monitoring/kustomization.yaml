@@ -1,0 +1,11 @@
+# Monitoring overlay — Prometheus + Grafana
+#
+# ⚠️  This is a COMPONENT overlay — it does NOT include the base EDDI manifests.
+# You MUST apply it together with a database overlay.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: eddi
+
+resources:
+  - monitoring-stack.yaml

@@ -1,6 +1,6 @@
 # Conversation Memory and State Management
 
-**Version: ≥5.5.x**
+**Version: 6.0.0**
 
 ## Overview
 
@@ -10,8 +10,8 @@
 
 Think of Conversation Memory as a **living document** that captures everything about a conversation:
 
-- **Who**: User ID and bot ID
-- **What**: All messages exchanged (both user inputs and bot outputs)
+- **Who**: User ID and agent ID
+- **What**: All messages exchanged (both user inputs and agent outputs)
 - **When**: Timestamp of each interaction
 - **Context**: Data passed from external systems (user profile, session info, etc.)
 - **State**: Current processing stage (READY, IN_PROGRESS, ENDED, etc.)
@@ -25,16 +25,17 @@ Think of Conversation Memory as a **living document** that captures everything a
 A conversation is divided into **steps**, where each step represents one complete interaction cycle:
 
 ```
-Step 1: User says "Hello" → Bot responds "Hi, how can I help?"
-Step 2: User says "What's the weather?" → Bot responds "The weather is sunny, 75°F"
+Step 1: User says "Hello" → Agent responds "Hi, how can I help?"
+Step 2: User says "What's the weather?" → Agent responds "The weather is sunny, 75°F"
 Step 3: ...
 ```
 
 Each step contains:
+
 - **Input**: What the user said
 - **Actions**: Actions triggered by behavior rules
 - **Data**: Results from lifecycle tasks (parsed expressions, API responses, LLM outputs)
-- **Output**: Bot's response
+- **Output**: Agent's response
 
 ### 2. Current Step vs Previous Steps
 
@@ -50,11 +51,11 @@ IConversationStepStack getPreviousSteps();    // All completed steps (history)
 
 EDDI supports different scopes for storing data:
 
-| Scope | Lifetime | Use Case |
-|-------|----------|----------|
-| `step` | Single interaction | Temporary data needed only for this response |
-| `conversation` | Entire conversation | User preferences, extracted entities (persists across steps) |
-| `longTerm` | Across conversations | User profile data that should persist between sessions |
+| Scope          | Lifetime             | Use Case                                                     |
+| -------------- | -------------------- | ------------------------------------------------------------ |
+| `step`         | Single interaction   | Temporary data needed only for this response                 |
+| `conversation` | Entire conversation  | User preferences, extracted entities (persists across steps) |
+| `longTerm`     | Across conversations | User profile data that should persist between sessions       |
 
 ### 4. Undo/Redo Support
 
@@ -68,9 +69,10 @@ boolean isRedoAvailable(); // Check if redo is possible
 ```
 
 This enables scenarios like:
+
 - User makes a mistake and wants to go back
 - Testing different conversation paths
-- Debugging bot behavior
+- Debugging agent behavior
 
 ## Conversation Memory Structure
 
@@ -80,26 +82,26 @@ This enables scenarios like:
 public interface IConversationMemory {
     // Identity
     String getConversationId();
-    String getBotId();
-    Integer getBotVersion();
+    String getAgentId();
+    Integer getAgentVersion();
     String getUserId();
-    
+
     // State
     ConversationState getConversationState();
     void setConversationState(ConversationState state);
-    
+
     // Steps
     IWritableConversationStep getCurrentStep();
     IConversationStepStack getPreviousSteps();
     IConversationStepStack getAllSteps();
     int size();  // Total number of steps
-    
+
     // Properties
     IConversationProperties getConversationProperties();
-    
+
     // Output
     List<ConversationOutput> getConversationOutputs();
-    
+
     // History management
     void undoLastStep();
     void redoLastStep();
@@ -111,7 +113,7 @@ public interface IConversationMemory {
 
 ```java
 public enum ConversationState {
-    READY,           // Bot is ready to process next input
+    READY,           // Agent is ready to process next input
     IN_PROGRESS,     // Currently processing a message
     EXECUTION_INTERRUPTED,  // Processing was interrupted
     ERROR,           // An error occurred
@@ -128,10 +130,10 @@ Each lifecycle task follows this pattern:
 public void execute(IConversationMemory memory, Object component) {
     // 1. Read from memory
     String userInput = memory.getCurrentStep().getLatestData("input").getResult();
-    
+
     // 2. Perform task logic
     String processed = process(userInput);
-    
+
     // 3. Write results back to memory
     IData<String> data = dataFactory.createData("output", processed);
     memory.getCurrentStep().storeData(data);
@@ -142,7 +144,7 @@ public void execute(IConversationMemory memory, Object component) {
 
 ```java
 // Reads conversation memory to check conditions
-IData<List<String>> expressionsData = 
+IData<List<String>> expressionsData =
     memory.getCurrentStep().getLatestData("expressions");
 
 // If conditions match, stores actions in memory
@@ -184,32 +186,32 @@ memory.getCurrentStep().storeData(
 
 ## Accessing Memory in Configurations
 
-### In Output Templates (Thymeleaf)
+### In Output Templates (Qute)
 
 ```html
 <!-- Access current input -->
-You said: [[${memory.current.input}]]
+You said: {memory.current.input}
 
 <!-- Access previous step data -->
-Previously, you mentioned: [[${memory.previous.userPreference}]]
+Previously, you mentioned: {memory.previous.userPreference}
 
 <!-- Access context data -->
-Welcome, [[${memory.current.context.userName}]]!
+Welcome, {memory.current.context.userName}!
 
 <!-- Access HTTP call response -->
-The weather is: [[${memory.current.httpCalls.weatherResponse.temperature}]]
+The weather is: {memory.current.httpCalls.weatherResponse.temperature}
 
 <!-- Access LLM response -->
-AI says: [[${memory.current.llmResponse}]]
+AI says: {memory.current.llmResponse}
 ```
 
 ### In HTTP Call Body Templates
 
 ```json
 {
-  "userId": "[[${memory.current.context.userId}]]",
-  "message": "[[${memory.current.input}]]",
-  "conversationId": "[[${memory.conversationId}]]"
+  "userId": "{memory.current.context.userId}",
+  "message": "{memory.current.input}",
+  "conversationId": "{memory.conversationId}"
 }
 ```
 
@@ -239,18 +241,19 @@ AI says: [[${memory.current.llmResponse}]]
 Request → Check Cache → If Miss: Load from MongoDB → Execute Lifecycle → Save to MongoDB + Update Cache
 ```
 
-EDDI uses **Infinispan** for distributed caching:
+EDDI uses **Caffeine** for in-process caching:
+
 - Fast retrieval of frequently accessed conversations
 - Reduced MongoDB load
-- Supports horizontal scaling across multiple EDDI instances
+- Size-based eviction with configurable maximum entries
 
 ### MongoDB Structure
 
 ```javascript
 {
   "_id": "conversationId",
-  "botId": "bot-123",
-  "botVersion": 1,
+  "agentId": "agent-123",
+  "agentVersion": 1,
   "userId": "user-456",
   "conversationState": "READY",
   "conversationSteps": [
@@ -313,8 +316,8 @@ When calling LLMs, you can control how much history is sent:
 {
   "parameters": {
     "sendConversation": "true",
-    "includeFirstBotMessage": "true",
-    "logSizeLimit": "10"  // Only last 10 messages
+    "includeFirstAgentMessage": "true",
+    "logSizeLimit": "10" // Only last 10 messages
   }
 }
 ```
@@ -325,7 +328,7 @@ Pass data from your application via context instead of hardcoding:
 
 ```javascript
 // API Request
-POST /bots/prod/mybot/conversation123
+POST /agents/prod/myagent/conversation123
 {
   "input": "What's my order status?",
   "context": {
@@ -335,9 +338,10 @@ POST /bots/prod/mybot/conversation123
 }
 ```
 
-Then access in bot logic:
+Then access in agent logic:
+
 ```
-${memory.current.context.userId}
+{context.userId}
 ```
 
 ## Memory Flow Example
@@ -345,8 +349,9 @@ ${memory.current.context.userId}
 Let's trace how memory flows through a complete conversation step:
 
 ### 1. User Request
+
 ```json
-POST /bots/prod/weatherbot/conv-123
+POST /agents/prod/weatheragent/conv-123
 {
   "input": "What's the weather in Paris?",
   "context": {
@@ -356,6 +361,7 @@ POST /bots/prod/weatherbot/conv-123
 ```
 
 ### 2. Memory Initialization
+
 ```java
 IConversationMemory memory = loadOrCreateMemory("conv-123");
 memory.getCurrentStep().storeData(
@@ -367,6 +373,7 @@ memory.getConversationProperties().put(
 ```
 
 ### 3. Parser Task Execution
+
 ```java
 // Reads input
 String input = memory.getCurrentStep().getLatestData("input").getResult();
@@ -382,6 +389,7 @@ memory.getCurrentStep().storeData(
 ```
 
 ### 4. Behavior Rules Execution
+
 ```java
 // Reads expressions
 List<String> expressions = memory.getCurrentStep()
@@ -396,6 +404,7 @@ if (matchesRule(expressions, "entity(weather)")) {
 ```
 
 ### 5. HTTP Call Execution
+
 ```java
 // Reads action
 List<String> actions = memory.getCurrentStep()
@@ -404,10 +413,10 @@ List<String> actions = memory.getCurrentStep()
 if (actions.contains("fetch_weather")) {
     // Extract location from expressions
     String location = extractLocation(expressions);  // "paris"
-    
+
     // Make API call
     JsonObject weather = weatherApi.get(location);
-    
+
     // Store response
     memory.getCurrentStep().storeData(
         dataFactory.createData("weatherData", weather)
@@ -416,6 +425,7 @@ if (actions.contains("fetch_weather")) {
 ```
 
 ### 6. Output Generation
+
 ```java
 // Reads weather data
 JsonObject weather = memory.getCurrentStep()
@@ -423,7 +433,7 @@ JsonObject weather = memory.getCurrentStep()
 
 // Applies template
 String output = applyTemplate(
-    "The weather in [[${weatherData.location}]] is [[${weatherData.description}]]",
+    "The weather in {weatherData.location} is {weatherData.description}",
     memory
 );
 // Result: "The weather in Paris is sunny with 22°C"
@@ -435,6 +445,7 @@ memory.getCurrentStep().storeData(
 ```
 
 ### 7. Memory Persistence
+
 ```java
 // Save to MongoDB
 conversationMemoryStore.save(memory);
@@ -444,6 +455,7 @@ cache.put("conv-123", memory.getConversationState());
 ```
 
 ### 8. Response to User
+
 ```json
 {
   "conversationState": "READY",
@@ -466,8 +478,8 @@ IData<JsonObject> httpData = memory.getCurrentStep()
     .getLatestData("httpCalls.userProfile");
 String userName = httpData.getResult().getString("name");
 
-// In Thymeleaf
-[[${memory.current.httpCalls.userProfile.name}]]
+// In Qute
+{memory.current.httpCalls.userProfile.name}
 ```
 
 ### Iterating Over History
@@ -485,16 +497,98 @@ for (IConversationStep step : previousSteps) {
 
 ### Conditional Memory Access
 
-```javascript
-// In Thymeleaf, check if data exists
-[(${memory.current.weatherData != null ? memory.current.weatherData.temperature : 'N/A'})]
 ```
+{#if memory.current.weatherData}
+  Temperature: {memory.current.weatherData.temperature}
+{#else}
+  N/A
+{/if}
+```
+
+---
+
+## Template Variable Reference
+
+When tasks process templates (system prompts, HTTP call bodies, property instructions, output templates), `MemoryItemConverter.convert(memory)` produces a map with these top-level keys:
+
+| Key | Type | Source | Example Access |
+|---|---|---|---|
+| `context` | `Map<String, Object>` | Input context variables set per turn | `{context.language}` |
+| `properties` | `Map<String, Property>` | **All conversation properties** — includes both session-scoped and `longTerm` properties loaded from persistent storage | `{properties.preferred_language.valueString}` |
+| `memory` | `Map` with `current`, `last`, `past` | Conversation step data from the pipeline | `{memory.current.output}`, `{memory.last.input}` |
+| `userInfo` | `Map` with `userId` | Authenticated user identity | `{userInfo.userId}` |
+| `conversationInfo` | `Map` with `conversationId`, `agentId`, etc. | Conversation metadata | `{conversationInfo.agentId}` |
+| `conversationLog` | `String` | Formatted conversation history | `{conversationLog}` |
+
+> **Key insight**: `longTerm` properties are loaded into `conversationProperties` at conversation init and are immediately available via `{properties.key}` in any template. You do NOT need a separate template namespace for persistent data — properties IS the namespace.
+
+### When to Use Which
+
+| Need | Use | Why |
+|---|---|---|
+| Data from your application | `{context.X}` | Per-request, set by caller |
+| Persistent user preferences | `{properties.X.valueString}` | Survives across conversations (scope=longTerm) |
+| Current turn's input/output | `{memory.current.X}` | Step-level data from the pipeline |
+| Previous turn's data | `{memory.last.X}` | One step back |
+| Who the user is | `{userInfo.userId}` | Authenticated identity |
+| Which agent/conversation | `{conversationInfo.agentId}` | Conversation metadata |
+| Full conversation history | `{conversationLog}` | Formatted string of all turns |
+
+---
+
+## Conversation Lifecycle: Init and Teardown
+
+Understanding what happens at conversation boundaries is critical for features that manage persistent state.
+
+### Initialization (`Conversation.init()`)
+
+When a conversation starts or continues:
+
+```
+Conversation.init()
+  ├─→ Load conversation memory from store
+  ├─→ loadLongTermProperties()
+  │     └─→ IPropertiesHandler.loadProperties(userId)
+  │     └─→ Properties loaded into conversationProperties with scope=longTerm
+  │     └─→ Available as {properties.key} in all templates
+  └─→ Set conversation state to IN_PROGRESS
+```
+
+### Pipeline Execution
+
+The `LifecycleManager` runs all configured tasks in sequence:
+
+```
+LifecycleManager.executeLifecycle(memory)
+  ├─→ Input Parser
+  ├─→ Behavior Rules → emit actions
+  ├─→ PropertySetterTask → set properties based on actions
+  ├─→ HttpCallsTask → execute API calls based on actions
+  ├─→ LlmTask → call LLM based on actions
+  └─→ OutputGenerationTask → format response
+```
+
+### Teardown (`postConversationLifecycleTasks()`)
+
+After the pipeline completes:
+
+```
+Conversation.postConversationLifecycleTasks()
+  ├─→ storePropertiesPermanently()
+  │     ├─→ All longTerm properties saved via IPropertiesHandler
+  │     └─→ Secret properties scrubbed and vaulted via SecretsVault
+  ├─→ Save conversation memory to store
+  └─→ Set conversation state to READY
+```
+
+> **Key insight**: Persistent state is a **session concern** handled in `Conversation.java` init/teardown — NOT a pipeline task. If a feature needs to load/save cross-conversation state, it extends the Conversation init/teardown logic. The pipeline processes data for a single turn; session boundaries manage what persists between turns.
 
 ## Related Documentation
 
 - [Architecture Overview](architecture.md) - Understanding the big picture
+- [Properties](properties.md) - Property system, scopes, and persistence
 - [Behavior Rules](behavior-rules.md) - Using memory in conditions
 - [Output Templating](output-templating.md) - Accessing memory in outputs
 - [HTTP Calls](httpcalls.md) - Storing API responses in memory
-- [LangChain Integration](langchain.md) - Using conversation history with LLMs
-
+- [LLM Integration](langchain.md) - Using conversation history with LLMs
+- [Passing Context Information](passing-context-information.md) - Injecting external data

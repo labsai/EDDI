@@ -1,8 +1,0 @@
-{
-  "resource" : "eddi://ai.labs.behavior/behaviorstore/behaviorsets/6740832b2b0f614abcaee7b7?version=1",
-  "createdOn" : 1732281131146,
-  "lastModifiedOn" : 1764675697996,
-  "deleted" : false,
-  "name" : "Create Gemini Vertex Connector Bot",
-  "description" : ""
-}

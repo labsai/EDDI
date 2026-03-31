@@ -1,47 +1,96 @@
 # Docker
 
-## Setup
+## Quick Start
 
-1. **Option**: Use docker-compose (recommended)&#x20;
-   1. 1\. Checkout the docker-compose file from github: [https://github.com/labsai/EDDI/blob/master/docker-compose.yml](https://github.com/labsai/EDDI/blob/master/docker-compose.yml)
-      1. 2\. Run Docker Command:`docker-compose up`
-2. **Option**: Launch docker containers manually
-
-Start a MongoDB instance using the MongoDB docker image:
+### Without Authentication (default)
 
 ```bash
-docker run --name mongodb -e MONGODB_DBNAME=eddi -d mongo
+docker-compose up
 ```
 
-Start EDDI:
+This starts EDDI on port `7070` and MongoDB. No login required.
+
+### With Keycloak Authentication
+
+The EDDI-Manager repo provides a full-stack docker-compose with Keycloak:
 
 ```bash
-docker run --name eddi --link mongodb:mongodb -p 7070:7070 -d labsai/eddi
+# From the EDDI-Manager repo
+docker compose -f docker-compose.keycloak.yml up
 ```
 
-### Environment Variables
+This starts:
 
-You can configure EDDI using environment variables. This is especially useful for configuring AI tools that require API keys.
+- **Keycloak 26** on port `8180` (admin console: `http://localhost:8180`, login `admin`/`admin`)
+- **EDDI** on port `7070` with OIDC auth enabled
+- **MongoDB** for data storage
 
-**Web Search Tool (Google):**
+Pre-configured test users:
+| Username | Password | Role |
+|----------|----------|------|
+| `eddi` | `eddi` | admin |
+| `viewer` | `viewer` | viewer (read-only) |
+
+### Manual Docker Setup
+
+Start MongoDB:
+
+```bash
+docker run --name mongodb -d mongo:6.0
+```
+
+Start EDDI (without auth):
+
+```bash
+docker run --name eddi --link mongodb:mongodb -p 7070:7070 -d labsai/eddi:latest
+```
+
+Start EDDI (with auth):
+
+```bash
+docker run --name eddi \
+  --link mongodb:mongodb \
+  -p 7070:7070 \
+  -e QUARKUS_OIDC_TENANT_ENABLED=true \
+  -e QUARKUS_OIDC_AUTH_SERVER_URL=http://your-keycloak:8080/realms/eddi \
+  -e QUARKUS_OIDC_CLIENT_ID=eddi-backend \
+  -d labsai/eddi:latest
+```
+
+## Environment Variables
+
+### Authentication
+
+| Variable                       | Default                             | Description                  |
+| ------------------------------ | ----------------------------------- | ---------------------------- |
+| `QUARKUS_OIDC_TENANT_ENABLED`  | `false`                             | Enable/disable Keycloak auth |
+| `QUARKUS_OIDC_AUTH_SERVER_URL` | `http://localhost:8180/realms/eddi` | Keycloak realm URL           |
+| `QUARKUS_OIDC_CLIENT_ID`       | `eddi-backend`                      | OIDC client ID               |
+| `QUARKUS_HTTP_CORS_ORIGINS`    | `http://localhost:3000,...`         | Allowed CORS origins         |
+
+> **Note:** `QUARKUS_OIDC_TENANT_ENABLED` is a **runtime** toggle. No rebuild needed to enable/disable auth.
+
+### AI Tools
+
 ```bash
 -e EDDI_TOOLS_WEBSEARCH_PROVIDER=google \
 -e EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=your_key \
 -e EDDI_TOOLS_WEBSEARCH_GOOGLE_CX=your_cx
 ```
 
-**Weather Tool (OpenWeatherMap):**
 ```bash
 -e EDDI_TOOLS_WEATHER_OPENWEATHERMAP_API_KEY=your_key
 ```
 
-Example with tools enabled:
+### Full Example
+
 ```bash
 docker run --name eddi \
   --link mongodb:mongodb \
   -p 7070:7070 \
+  -e QUARKUS_OIDC_TENANT_ENABLED=true \
+  -e QUARKUS_OIDC_AUTH_SERVER_URL=http://keycloak:8080/realms/eddi \
   -e EDDI_TOOLS_WEBSEARCH_PROVIDER=google \
-  -e EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=YOUR_GOOGLE_API_KEY \
-  -e EDDI_TOOLS_WEBSEARCH_GOOGLE_CX=YOUR_GOOGLE_CX \
-  -d labsai/eddi
+  -e EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=YOUR_KEY \
+  -d labsai/eddi:latest
 ```

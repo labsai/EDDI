@@ -1,20 +1,30 @@
 package ai.labs.eddi.configs.patch;
 
-import lombok.Getter;
-import lombok.Setter;
-
 /**
  * @author ginccc
  */
 
-@Getter
-@Setter
 public class PatchInstruction<T> {
     public enum PatchOperation {
-        SET,
-        DELETE
+        SET, DELETE
     }
 
     private PatchOperation operation;
     private T document;
+
+    public PatchOperation getOperation() {
+        return operation;
+    }
+
+    public void setOperation(PatchOperation operation) {
+        this.operation = operation;
+    }
+
+    public T getDocument() {
+        return document;
+    }
+
+    public void setDocument(T document) {
+        this.document = document;
+    }
 }

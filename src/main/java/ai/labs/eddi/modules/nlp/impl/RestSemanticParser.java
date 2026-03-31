@@ -12,9 +12,6 @@ import ai.labs.eddi.modules.nlp.IRestSemanticParser;
 import ai.labs.eddi.modules.nlp.Solution;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -29,7 +26,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 import static ai.labs.eddi.modules.nlp.DictionaryUtilities.extractExpressions;
 
@@ -47,9 +43,8 @@ public class RestSemanticParser implements IRestSemanticParser {
     private final Logger log = Logger.getLogger(RestSemanticParser.class);
 
     @Inject
-    public RestSemanticParser(IRuntime runtime,
-                              IResourceClientLibrary resourceClientLibrary,
-                              @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTasks) {
+    public RestSemanticParser(IRuntime runtime, IResourceClientLibrary resourceClientLibrary,
+            @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTasks) {
         this.runtime = runtime;
         this.resourceClientLibrary = resourceClientLibrary;
         this.parserProvider = lifecycleTasks.get("ai.labs.parser");
@@ -63,14 +58,11 @@ public class RestSemanticParser implements IRestSemanticParser {
 
         runtime.submitCallable((Callable<Void>) () -> {
             try {
-                URI resourceUri = URI.create(IRestParserStore.resourceURI + configId +
-                        IRestParserStore.versionQueryParam + version);
+                URI resourceUri = URI.create(IRestParserStore.resourceURI + configId + IRestParserStore.versionQueryParam + version);
                 IInputParser inputParser = getParser(resourceUri);
                 List<RawSolution> rawSolutions = inputParser.parse(sentence);
                 List<Solution> solutionExpressions = extractExpressions(rawSolutions, true, true);
-                asyncResponse.resume(solutionExpressions.stream().
-                        map(solution -> new ResponseSolution(solution.getExpressions())).
-                        collect(Collectors.toList()));
+                asyncResponse.resume(solutionExpressions.stream().map(solution -> new ResponseSolution(solution.getExpressions())).toList());
             } catch (IllegalArgumentException e) {
                 asyncResponse.resume(new BadRequestException(e.getLocalizedMessage()));
             } catch (Exception e) {
@@ -92,10 +84,8 @@ public class RestSemanticParser implements IRestSemanticParser {
             var parserConfiguration = fetchParserConfiguration(resourceUri);
             var config = parserConfiguration.getConfig();
             var extensions = parserConfiguration.getExtensions();
-            var inputParser =
-                    (IInputParser) parserTask.configure(
-                            config != null ? config : new HashMap<>(),
-                            extensions != null ? extensions : new HashMap<>());
+            var inputParser = (IInputParser) parserTask.configure(config != null ? config : new HashMap<>(),
+                    extensions != null ? extensions : new HashMap<>());
 
             cache.put(resourceUri, inputParser);
             return inputParser;
@@ -108,14 +98,22 @@ public class RestSemanticParser implements IRestSemanticParser {
         return resourceClientLibrary.getResource(resourceUri, ParserConfiguration.class);
     }
 
-    @Getter
-    @Setter
-    @NoArgsConstructor
     public static class ResponseSolution {
         private String expressions;
 
         public ResponseSolution(Expressions exps) {
             expressions = exps.toString();
+        }
+
+        public ResponseSolution() {
+        }
+
+        public String getExpressions() {
+            return expressions;
+        }
+
+        public void setExpressions(String expressions) {
+            this.expressions = expressions;
         }
     }
 }

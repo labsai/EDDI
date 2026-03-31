@@ -1,8 +1,0 @@
-{
-  "resource" : "eddi://ai.labs.output/outputstore/outputsets/6740832b2b0f614abcaee7b5?version=1",
-  "createdOn" : 1732281131089,
-  "lastModifiedOn" : 1764675697996,
-  "deleted" : false,
-  "name" : "Create Gemini Connector Bot",
-  "description" : ""
-}

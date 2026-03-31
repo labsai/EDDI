@@ -1,0 +1,143 @@
+name: Red Hat Certification Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'EDDI version (e.g. 6.0.0)'
+        required: true
+        default: '6.0.0'
+      release:
+        description: 'Release number (e.g. 1, 2, 3)'
+        required: true
+        default: '1'
+      submit:
+        description: 'Submit results to Red Hat (true/false)'
+        required: true
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+      registry:
+        description: 'Target registry'
+        required: true
+        default: 'docker.io'
+        type: choice
+        options: ['docker.io', 'quay.io']
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-certify:
+    name: Build, Push & Certify
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Set execute permission for mvnw
+        run: chmod +x mvnw
+
+      - name: Build application (generates licenses automatically)
+        run: ./mvnw clean package -DskipTests -Plicense-gen -B
+
+      - name: Verify licenses generated
+        run: |
+          echo "=== THIRD-PARTY.txt (first 50 lines) ==="
+          head -50 licenses/THIRD-PARTY.txt || echo "THIRD-PARTY.txt not found!"
+          echo ""
+          echo "=== Downloaded license files ==="
+          ls -la licenses/third-party/ 2>/dev/null | head -20 || echo "No third-party dir found!"
+          echo "Total license files: $(ls licenses/third-party/ 2>/dev/null | wc -l)"
+
+      - name: Set image coordinates
+        id: image
+        run: |
+          REGISTRY="${{ inputs.registry }}"
+          IMAGE="${REGISTRY}/labsai/eddi"
+          TAG="${{ inputs.version }}-${{ inputs.release }}"
+          echo "full=${IMAGE}:${TAG}" >> $GITHUB_OUTPUT
+          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+
+      - name: Login to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ inputs.registry == 'quay.io' && secrets.QUAY_USERNAME || secrets.DOCKER_USERNAME }}
+          password: ${{ inputs.registry == 'quay.io' && secrets.QUAY_PASSWORD || secrets.DOCKER_PASSWORD }}
+
+      - name: Build Docker image with Red Hat labels
+        run: |
+          docker build \
+            --build-arg EDDI_VERSION=${{ inputs.version }} \
+            --build-arg EDDI_RELEASE=${{ inputs.release }} \
+            -f src/main/docker/Dockerfile.jvm \
+            -t ${{ steps.image.outputs.full }} \
+            -t ${{ steps.image.outputs.image }}:${{ inputs.version }} \
+            -t ${{ steps.image.outputs.image }}:latest \
+            .
+
+      - name: Verify Red Hat labels
+        run: |
+          echo "=== Container Labels ==="
+          docker inspect ${{ steps.image.outputs.full }} \
+            --format '{{json .Config.Labels}}' | python3 -m json.tool
+
+      - name: Verify /licenses in container
+        run: |
+          echo "=== /licenses directory ==="
+          docker run --rm --entrypoint="" ${{ steps.image.outputs.full }} \
+            ls -la /licenses/
+          echo ""
+          echo "=== THIRD-PARTY.txt in container ==="
+          docker run --rm --entrypoint="" ${{ steps.image.outputs.full }} \
+            head -30 /licenses/THIRD-PARTY.txt || true
+
+      - name: Push to registry
+        run: |
+          docker push ${{ steps.image.outputs.full }}
+          docker push ${{ steps.image.outputs.image }}:${{ inputs.version }}
+          docker push ${{ steps.image.outputs.image }}:latest
+
+      - name: Install preflight
+        run: |
+          PREFLIGHT_VERSION=$(curl -s https://api.github.com/repos/redhat-openshift-ecosystem/openshift-preflight/releases/latest | jq -r .tag_name)
+          echo "Installing preflight ${PREFLIGHT_VERSION}..."
+          curl -sL "https://github.com/redhat-openshift-ecosystem/openshift-preflight/releases/download/${PREFLIGHT_VERSION}/preflight-linux-amd64" \
+            -o /usr/local/bin/preflight
+          chmod +x /usr/local/bin/preflight
+          preflight --version
+
+      - name: Run preflight check
+        run: |
+          SUBMIT_FLAG=""
+          if [ "${{ inputs.submit }}" = "true" ]; then
+            SUBMIT_FLAG="--submit"
+          fi
+
+          preflight check container \
+            ${{ steps.image.outputs.full }} \
+            --certification-project-id=${{ secrets.REDHAT_CERT_PROJECT_ID }} \
+            --pyxis-api-token=${{ secrets.REDHAT_API_TOKEN }} \
+            --docker-config=${HOME}/.docker/config.json \
+            ${SUBMIT_FLAG} \
+            2>&1 | tee preflight-results.txt
+
+      - name: Upload preflight results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preflight-results
+          path: |
+            preflight-results.txt
+            artifacts/
+          retention-days: 30

@@ -8,21 +8,37 @@ import java.util.List;
  * @author ginccc
  */
 public interface IDescriptorStore<T> {
-    List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+    List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     T readDescriptor(String resourceId, Integer version) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
-    T readDescriptorWithHistory(String resourceId, Integer version) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+    T readDescriptorWithHistory(String resourceId, Integer version)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
-    Integer updateDescriptor(String resourceId, Integer version, T descriptor) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException;
+    Integer updateDescriptor(String resourceId, Integer version, T descriptor)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException;
 
-    void setDescriptor(String resourceId, Integer version, T descriptor) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+    void setDescriptor(String resourceId, Integer version, T descriptor)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     void createDescriptor(String resourceId, Integer version, T descriptor) throws IResourceStore.ResourceStoreException;
 
     IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException;
 
-    void deleteDescriptor(String resourceId, Integer version) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException;
+    void deleteDescriptor(String resourceId, Integer version)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException;
 
     void deleteAllDescriptor(String resourceId);
+
+    /**
+     * Find descriptors by their origin ID (the resource ID from the exporting
+     * instance). Used during merge import to find existing resources that were
+     * previously imported.
+     *
+     * @param originId
+     *            the resource ID from the source instance
+     * @return list of matching descriptors, empty if none found
+     */
+    List<T> findByOriginId(String originId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 }

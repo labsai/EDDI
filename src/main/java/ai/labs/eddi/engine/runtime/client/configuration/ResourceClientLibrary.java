@@ -1,15 +1,17 @@
 package ai.labs.eddi.engine.runtime.client.configuration;
 
-import ai.labs.eddi.configs.behavior.IRestBehaviorStore;
-import ai.labs.eddi.configs.http.IRestHttpCallsStore;
-import ai.labs.eddi.configs.langchain.IRestLangChainStore;
+import ai.labs.eddi.configs.rules.IRestRuleSetStore;
+import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
+import ai.labs.eddi.configs.llm.IRestLlmStore;
+import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
-import ai.labs.eddi.configs.regulardictionary.IRestRegularDictionaryStore;
+import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
+import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -26,29 +28,29 @@ import static ai.labs.eddi.datastore.IResourceStore.IResourceId;
 @ApplicationScoped
 public class ResourceClientLibrary implements IResourceClientLibrary {
     private final IRestParserStore restParserStore;
-    private final IRestRegularDictionaryStore restRegularDictionaryStore;
-    private final IRestBehaviorStore restBehaviorStore;
-    private final IRestHttpCallsStore restHttpCallsStore;
-    private final IRestLangChainStore restLangChainStore;
+    private final IRestDictionaryStore restDictionaryStore;
+    private final IRestRuleSetStore restRuleSetStore;
+    private final IRestApiCallsStore restApiCallsStore;
+    private final IRestLlmStore restLlmStore;
     private final IRestOutputStore restOutputStore;
     private final IRestPropertySetterStore restPropertySetterStore;
+    private final IRestMcpCallsStore restMcpCallsStore;
     private Map<String, IResourceService> restInterfaces;
 
+    private static final Logger log = Logger.getLogger(ResourceClientLibrary.class);
+
     @Inject
-    public ResourceClientLibrary(IRestParserStore restParserStore,
-                                 IRestRegularDictionaryStore restRegularDictionaryStore,
-                                 IRestBehaviorStore restBehaviorStore,
-                                 IRestHttpCallsStore restHttpCallsStore,
-                                 IRestLangChainStore restLangChainStore,
-                                 IRestOutputStore restOutputStore,
-                                 IRestPropertySetterStore restPropertySetterStore) {
+    public ResourceClientLibrary(IRestParserStore restParserStore, IRestDictionaryStore restDictionaryStore, IRestRuleSetStore restRuleSetStore,
+            IRestApiCallsStore restApiCallsStore, IRestLlmStore restLlmStore, IRestOutputStore restOutputStore,
+            IRestPropertySetterStore restPropertySetterStore, IRestMcpCallsStore restMcpCallsStore) {
         this.restParserStore = restParserStore;
-        this.restRegularDictionaryStore = restRegularDictionaryStore;
-        this.restBehaviorStore = restBehaviorStore;
-        this.restHttpCallsStore = restHttpCallsStore;
-        this.restLangChainStore = restLangChainStore;
+        this.restDictionaryStore = restDictionaryStore;
+        this.restRuleSetStore = restRuleSetStore;
+        this.restApiCallsStore = restApiCallsStore;
+        this.restLlmStore = restLlmStore;
         this.restOutputStore = restOutputStore;
         this.restPropertySetterStore = restPropertySetterStore;
+        this.restMcpCallsStore = restMcpCallsStore;
 
         init();
     }
@@ -66,53 +68,84 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             public Response duplicate(String id, Integer version) {
                 return restParserStore.duplicateParser(id, version);
             }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restParserStore.deleteParser(id, version, permanent);
+            }
         });
 
         restInterfaces.put("ai.labs.regulardictionary", new IResourceService() {
             @Override
             public Object read(String id, Integer version) {
-                return restRegularDictionaryStore.readRegularDictionary(id, version, "", "", 0, 0);
+                return restDictionaryStore.readRegularDictionary(id, version, "", "", 0, 0);
             }
 
             @Override
             public Response duplicate(String id, Integer version) {
-                return restRegularDictionaryStore.duplicateRegularDictionary(id, version);
+                return restDictionaryStore.duplicateRegularDictionary(id, version);
+            }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restDictionaryStore.deleteRegularDictionary(id, version, permanent);
             }
         });
 
         restInterfaces.put("ai.labs.behavior", new IResourceService() {
             @Override
             public Object read(String id, Integer version) {
-                return restBehaviorStore.readBehaviorRuleSet(id, version);
+                return restRuleSetStore.readRuleSet(id, version);
             }
 
             @Override
             public Response duplicate(String id, Integer version) {
-                return restBehaviorStore.duplicateBehaviorRuleSet(id, version);
+                return restRuleSetStore.duplicateRuleSet(id, version);
+            }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restRuleSetStore.deleteRuleSet(id, version, permanent);
             }
         });
+
+        // Alias: IRestRuleSetStore uses resourceBaseType "ai.labs.rules"
+        restInterfaces.put("ai.labs.rules", restInterfaces.get("ai.labs.behavior"));
 
         restInterfaces.put("ai.labs.httpcalls", new IResourceService() {
             @Override
             public Object read(String id, Integer version) {
-                return restHttpCallsStore.readHttpCalls(id, version);
+                return restApiCallsStore.readApiCalls(id, version);
             }
 
             @Override
             public Response duplicate(String id, Integer version) {
-                return restHttpCallsStore.duplicateHttpCalls(id, version);
+                return restApiCallsStore.duplicateApiCalls(id, version);
+            }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restApiCallsStore.deleteApiCalls(id, version, permanent);
             }
         });
 
-        restInterfaces.put("ai.labs.langchain", new IResourceService() {
+        // Alias: IRestApiCallsStore uses resourceBaseType "ai.labs.apicalls"
+        restInterfaces.put("ai.labs.apicalls", restInterfaces.get("ai.labs.httpcalls"));
+
+        restInterfaces.put("ai.labs.llm", new IResourceService() {
             @Override
             public Object read(String id, Integer version) {
-                return restLangChainStore.readLangChain(id, version);
+                return restLlmStore.readLlm(id, version);
             }
 
             @Override
             public Response duplicate(String id, Integer version) {
-                return restLangChainStore.duplicateLangChain(id, version);
+                return restLlmStore.duplicateLlm(id, version);
+            }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restLlmStore.deleteLlm(id, version, permanent);
             }
         });
 
@@ -126,6 +159,11 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             public Response duplicate(String id, Integer version) {
                 return restOutputStore.duplicateOutputSet(id, version);
             }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restOutputStore.deleteOutputSet(id, version, permanent);
+            }
         });
 
         restInterfaces.put("ai.labs.property", new IResourceService() {
@@ -138,9 +176,32 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             public Response duplicate(String id, Integer version) {
                 return restPropertySetterStore.duplicatePropertySetter(id, version);
             }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restPropertySetterStore.deletePropertySetter(id, version, permanent);
+            }
+        });
+
+        restInterfaces.put("ai.labs.mcpcalls", new IResourceService() {
+            @Override
+            public Object read(String id, Integer version) {
+                return restMcpCallsStore.readMcpCalls(id, version);
+            }
+
+            @Override
+            public Response duplicate(String id, Integer version) {
+                return restMcpCallsStore.duplicateMcpCalls(id, version);
+            }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restMcpCallsStore.deleteMcpCalls(id, version, permanent);
+            }
         });
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public <T> T getResource(URI uri, Class<T> clazz) throws ServiceException {
         String type = uri.getHost();
@@ -167,9 +228,24 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         return proxy.duplicate(resourceId.getId(), resourceId.getVersion());
     }
 
+    @Override
+    public Response deleteResource(URI uri, boolean permanent) throws ServiceException {
+        String type = uri.getHost();
+        IResourceService proxy = restInterfaces.get(type);
+        if (RuntimeUtilities.isNullOrEmpty(proxy)) {
+            log.warnf("Could not find proxy for type '%s' in uri '%s' — skipping delete", type, uri);
+            return Response.ok().build();
+        }
+
+        IResourceId resourceId = RestUtilities.extractResourceId(uri);
+        return proxy.delete(resourceId.getId(), resourceId.getVersion(), permanent);
+    }
+
     private interface IResourceService {
         Object read(String id, Integer version) throws ServiceException;
 
         Response duplicate(String id, Integer version) throws ServiceException;
+
+        Response delete(String id, Integer version, boolean permanent) throws ServiceException;
     }
 }

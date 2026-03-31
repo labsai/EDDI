@@ -2,8 +2,6 @@ package ai.labs.eddi.modules.nlp.extensions.dictionaries;
 
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.model.*;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -11,11 +9,8 @@ import java.util.stream.Collectors;
 /**
  * @author ginccc
  */
-@Getter
-@Setter
 public class RegularDictionary implements IDictionary {
     private static final String ID = "regular";
-    private String languageCode;
     private List<IPhrase> phrases = new LinkedList<>();
     private Map<String, IWord> words = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     private List<IRegEx> regExs = new LinkedList<>();
@@ -37,15 +32,13 @@ public class RegularDictionary implements IDictionary {
 
     @Override
     public List<IFoundWord> lookupTerm(String lookup) {
-        List<IFoundWord> ret = phrases.stream().flatMap(phrase -> phrase.getWords().stream()).
-                filter(partOfPhrase -> partOfPhrase.getValue().equals(lookup)).
-                map(partOfPhrase -> new FoundWord(partOfPhrase, false, 1.0)).
-                collect(Collectors.toList());
+        List<IFoundWord> ret = phrases.stream().flatMap(phrase -> phrase.getWords().stream())
+                .filter(partOfPhrase -> partOfPhrase.getValue().equals(lookup)).map(partOfPhrase -> new FoundWord(partOfPhrase, false, 1.0))
+                .collect(Collectors.toList());
 
-        phrases.stream().flatMap(phrase -> phrase.getWords().stream()).
-                filter(partOfPhrase -> partOfPhrase.getValue().equalsIgnoreCase(lookup)).
-                map(partOfPhrase -> new FoundWord(partOfPhrase, false, 0.9)).
-                collect(Collectors.toList()).stream().filter(foundWord -> !ret.contains(foundWord)).forEach(ret::add);
+        phrases.stream().flatMap(phrase -> phrase.getWords().stream()).filter(partOfPhrase -> partOfPhrase.getValue().equalsIgnoreCase(lookup))
+                .map(partOfPhrase -> new FoundWord(partOfPhrase, false, 0.9)).collect(Collectors.toList()).stream()
+                .filter(foundWord -> !ret.contains(foundWord)).forEach(ret::add);
 
         IWord word;
         if ((word = words.get(lookup)) != null) {
@@ -54,11 +47,8 @@ public class RegularDictionary implements IDictionary {
         }
 
         if (ret.isEmpty() || lookupIfKnown) {
-            regExs.stream().
-                    filter(regEx -> regEx.match(lookup)).
-                    forEach(regEx ->
-                            ret.add(new FoundRegEx(new Word(lookup, regEx.getExpressions(), regEx.getLanguageCode()), regEx))
-                    );
+            regExs.stream().filter(regEx -> regEx.match(lookup))
+                    .forEach(regEx -> ret.add(new FoundRegEx(new Word(lookup, regEx.getExpressions(), regEx.getLanguageCode()), regEx)));
         }
 
         return ret;
@@ -79,5 +69,29 @@ public class RegularDictionary implements IDictionary {
 
     public void addPhrase(String value, Expressions expressions) {
         phrases.add(new Phrase(value, expressions, ID));
+    }
+
+    public void setPhrases(List<IPhrase> phrases) {
+        this.phrases = phrases;
+    }
+
+    public void setWords(Map<String, IWord> words) {
+        this.words = words;
+    }
+
+    public List<IRegEx> getRegExs() {
+        return regExs;
+    }
+
+    public void setRegExs(List<IRegEx> regExs) {
+        this.regExs = regExs;
+    }
+
+    public boolean isLookupIfKnown() {
+        return lookupIfKnown;
+    }
+
+    public void setLookupIfKnown(boolean lookupIfKnown) {
+        this.lookupIfKnown = lookupIfKnown;
     }
 }

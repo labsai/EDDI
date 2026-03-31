@@ -1,7 +1,6 @@
 package ai.labs.eddi.modules.nlp.internal.matches;
 
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
-import lombok.Getter;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -9,7 +8,6 @@ import java.util.List;
 /**
  * @author ginccc
  */
-@Getter
 public class MatchingResult {
     private List<IDictionary.IFoundWord> result;
     private boolean corrected;
@@ -25,5 +23,13 @@ public class MatchingResult {
 
     public void addResult(IDictionary.IFoundWord dictionaryEntries) {
         result.add(dictionaryEntries);
+    }
+
+    public List<IDictionary.IFoundWord> getResult() {
+        return result;
+    }
+
+    public boolean isCorrected() {
+        return corrected;
     }
 }

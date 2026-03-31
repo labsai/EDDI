@@ -1,0 +1,9 @@
+# EDDI Kubernetes Namespace
+# Optional — apply if you want EDDI in its own namespace.
+# If you prefer a different namespace, change the name below.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: eddi
+  labels:
+    app.kubernetes.io/part-of: eddi

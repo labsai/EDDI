@@ -27,8 +27,10 @@ public class Word extends DictionaryEntry implements IDictionary.IWord {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof IDictionary.IWord)) return false;
+        if (this == o)
+            return true;
+        if (!(o instanceof IDictionary.IWord))
+            return false;
 
         IDictionary.IWord word = (IDictionary.IWord) o;
 

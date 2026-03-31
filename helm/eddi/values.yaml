@@ -1,0 +1,198 @@
+# ─────────────────────────────────────────────────────────────
+# EDDI Helm Chart — Default Values
+# ─────────────────────────────────────────────────────────────
+# Override any value with --set or a custom values.yaml file:
+#   helm install eddi ./helm/eddi --set eddi.replicas=3
+#   helm install eddi ./helm/eddi -f my-values.yaml
+
+# ── EDDI Server ────────────────────────────────────────────
+
+eddi:
+  image:
+    repository: labsai/eddi
+    tag: "6"
+    pullPolicy: IfNotPresent
+
+  replicas: 1
+
+  # Vault master key — encrypts API keys and secrets
+  # ⚠️  If you lose this key, encrypted secrets are UNRECOVERABLE
+  # Generate: openssl rand -base64 24
+  vaultMasterKey: ""
+
+  # Database backend: "mongodb" or "postgres"
+  datastoreType: mongodb
+
+  # Messaging: "in-memory" (single replica) or "nats" (multi-replica)
+  messagingType: in-memory
+
+  # CORS origins
+  corsOrigins: "http://localhost:3000,http://localhost:7070"
+
+  # OIDC / Keycloak authentication
+  oidc:
+    enabled: false
+    authServerUrl: "http://keycloak:8080/realms/eddi"
+    clientId: "eddi-backend"
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 384Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+
+  service:
+    type: ClusterIP
+    port: 7070
+
+  # Pod annotations (e.g., Prometheus scrape)
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "7070"
+    prometheus.io/path: "/q/metrics"
+
+# ── MongoDB ────────────────────────────────────────────────
+
+mongodb:
+  enabled: true
+  image:
+    repository: mongo
+    tag: "7.0"
+  storage:
+    size: 10Gi
+    # storageClassName: standard
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# ── PostgreSQL ─────────────────────────────────────────────
+
+postgres:
+  enabled: false
+  image:
+    repository: postgres
+    tag: "16-alpine"
+  database: eddi
+  username: eddi
+  password: eddi
+  storage:
+    size: 10Gi
+    # storageClassName: standard
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# ── NATS JetStream ─────────────────────────────────────────
+
+nats:
+  enabled: false
+  image:
+    repository: nats
+    tag: "2.10-alpine"
+  storage:
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# ── Keycloak ───────────────────────────────────────────────
+
+keycloak:
+  enabled: false
+  image:
+    repository: quay.io/keycloak/keycloak
+    tag: "26.0"
+  adminUsername: admin
+  adminPassword: admin
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# ── Manager UI ─────────────────────────────────────────────
+
+manager:
+  enabled: false
+  image:
+    repository: labsai/eddi-config-ui
+    tag: "latest"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+# ── Ingress ────────────────────────────────────────────────
+
+ingress:
+  enabled: false
+  # className: nginx
+  annotations: {}
+    # nginx.ingress.kubernetes.io/proxy-buffering: "off"
+  hosts:
+    - host: eddi.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: eddi-tls
+  #    hosts:
+  #      - eddi.example.com
+
+# ── Autoscaling ────────────────────────────────────────────
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# ── Pod Disruption Budget ──────────────────────────────────
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# ── Network Policy ─────────────────────────────────────────
+
+networkPolicy:
+  enabled: false
+
+# ── Monitoring ─────────────────────────────────────────────
+
+monitoring:
+  prometheus:
+    enabled: false
+  grafana:
+    enabled: false
+
+# ── Service Account ────────────────────────────────────────
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ── Namespace ──────────────────────────────────────────────
+
+namespace: eddi

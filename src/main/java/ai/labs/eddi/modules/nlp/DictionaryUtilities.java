@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.nlp;
 
-
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
@@ -11,14 +10,12 @@ import ai.labs.eddi.modules.output.model.QuickReply;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * @author ginccc
  */
 public class DictionaryUtilities {
-    private static Expressions convertDictionaryEntriesToExpressions(List<IDictionary.IFoundWord>
-                                                                             dictionaryEntries) {
+    private static Expressions convertDictionaryEntriesToExpressions(List<IDictionary.IFoundWord> dictionaryEntries) {
         Expressions expressions = new Expressions();
 
         for (IDictionary.IDictionaryEntry dictionaryEntry : dictionaryEntries) {
@@ -28,19 +25,16 @@ public class DictionaryUtilities {
         return expressions;
     }
 
-    public static List<Solution> extractExpressions(List<RawSolution> rawSolutions,
-                                                    boolean includeUnused,
-                                                    boolean includeUnknown) {
+    public static List<Solution> extractExpressions(List<RawSolution> rawSolutions, boolean includeUnused, boolean includeUnknown) {
         List<Solution> solutionExpressions = new ArrayList<>();
 
-        Expressions expressions, filteredExpressions;
+        Expressions expressions;
+        Expressions filteredExpressions;
         for (RawSolution rawSolution : rawSolutions) {
             expressions = convertDictionaryEntriesToExpressions(rawSolution.getDictionaryEntries());
             filteredExpressions = new Expressions();
-            filteredExpressions.addAll(expressions.stream().
-                    filter(expression -> includeUnused || !expression.getExpressionName().equals("unused")).
-                    filter(expression -> includeUnknown || !expression.getExpressionName().equals("unknown")).
-                    collect(Collectors.toList()));
+            filteredExpressions.addAll(expressions.stream().filter(expression -> includeUnused || !expression.getExpressionName().equals("unused"))
+                    .filter(expression -> includeUnknown || !expression.getExpressionName().equals("unknown")).toList());
             solutionExpressions.add(new Solution(filteredExpressions));
         }
 

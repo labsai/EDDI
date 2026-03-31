@@ -1,11 +1,14 @@
 services:
   eddi:
-    image: labsai/eddi:5
-#    environment:
+    image: labsai/eddi:latest
+    environment:
+      - "EDDI_VAULT_MASTER_KEY=${EDDI_VAULT_MASTER_KEY:-}"
 #      - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
-      - "7070:7070"
-      - "7443:7443"
+      - "${EDDI_PORT:-7070}:7070"
+      - "${EDDI_HTTPS_PORT:-7443}:7443"
 #      - "5005:5005"
     depends_on:
       - mongodb

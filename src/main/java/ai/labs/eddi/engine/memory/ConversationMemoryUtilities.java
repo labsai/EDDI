@@ -4,7 +4,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
-import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.PackageRunSnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.Data;
@@ -14,6 +14,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.*;
 
+import static ai.labs.eddi.engine.memory.MemoryKeys.*;
 import static ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.ConversationStepData;
 import static ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.SimpleConversationStep;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -24,10 +25,6 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
 public class ConversationMemoryUtilities {
-    private static final String KEY_INPUT_INITIAL = "input:initial";
-    private static final String KEY_ACTIONS = "actions";
-    private static final String KEY_OUTPUT = "output";
-    private static final String KEY_QUICK_REPLIES = "quickReplies";
     private static final String KEY_CONVERSATION_STEPS = "conversationSteps";
     private static final String KEY_CONVERSATION_OUTPUTS = "conversationOutputs";
     private static final String KEY_CONVERSATION_PROPERTIES = "conversationProperties";
@@ -62,8 +59,8 @@ public class ConversationMemoryUtilities {
             snapshot.setConversationId(conversationMemory.getConversationId());
         }
 
-        snapshot.setBotId(conversationMemory.getBotId());
-        snapshot.setBotVersion(conversationMemory.getBotVersion());
+        snapshot.setAgentId(conversationMemory.getAgentId());
+        snapshot.setAgentVersion(conversationMemory.getAgentVersion());
         snapshot.setConversationState(conversationMemory.getConversationState());
         return snapshot;
     }
@@ -72,16 +69,11 @@ public class ConversationMemoryUtilities {
         var conversationStepSnapshot = new ConversationStepSnapshot();
 
         if (!conversationStep.isEmpty()) {
-            var packageRunSnapshot = new PackageRunSnapshot();
-            conversationStepSnapshot.getPackages().add(packageRunSnapshot);
+            var packageRunSnapshot = new WorkflowRunSnapshot();
+            conversationStepSnapshot.getWorkflows().add(packageRunSnapshot);
             for (var data : conversationStep.getAllElements()) {
-                var resultSnapshot = new ResultSnapshot(
-                        data.getKey(),
-                        data.getResult(),
-                        data.getPossibleResults(),
-                        data.getTimestamp(),
-                        data.getOriginPackageId(),
-                        data.isPublic());
+                var resultSnapshot = new ResultSnapshot(data.getKey(), data.getResult(), data.getPossibleResults(), data.getTimestamp(),
+                        data.getOriginWorkflowId(), data.isPublic());
                 packageRunSnapshot.getLifecycleTasks().add(resultSnapshot);
             }
         }
@@ -94,11 +86,11 @@ public class ConversationMemoryUtilities {
         for (var redoStep : redoSteps) {
             IWritableConversationStep conversationStep = new ConversationStep(new ConversationOutput());
             conversationSteps.add(conversationStep);
-            for (var packageRunSnapshot : redoStep.getPackages()) {
+            for (var packageRunSnapshot : redoStep.getWorkflows()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
-                    var data = new Data(resultSnapshot.getKey(), resultSnapshot.getResult(),
-                            resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(),
-                            resultSnapshot.isPublic());
+                    @SuppressWarnings("unchecked")
+                    var data = new Data<Object>(resultSnapshot.getKey(), resultSnapshot.getResult(),
+                            (List<Object>) resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(), resultSnapshot.isPublic());
                     conversationStep.storeData(data);
                 }
             }
@@ -108,8 +100,8 @@ public class ConversationMemoryUtilities {
     }
 
     public static IConversationMemory convertConversationMemorySnapshot(ConversationMemorySnapshot snapshot) {
-        var conversationMemory = new ConversationMemory(snapshot.getConversationId(),
-                snapshot.getBotId(), snapshot.getBotVersion(), snapshot.getUserId());
+        var conversationMemory = new ConversationMemory(snapshot.getConversationId(), snapshot.getAgentId(), snapshot.getAgentVersion(),
+                snapshot.getUserId());
 
         conversationMemory.setConversationState(snapshot.getConversationState());
         conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
@@ -130,11 +122,11 @@ public class ConversationMemoryUtilities {
             }
 
             var conversationStepSnapshot = conversationSteps.get(i);
-            for (var packageRunSnapshot : conversationStepSnapshot.getPackages()) {
+            for (var packageRunSnapshot : conversationStepSnapshot.getWorkflows()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
-                    var data = new Data(resultSnapshot.getKey(), resultSnapshot.getResult(),
-                            resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(),
-                            resultSnapshot.isPublic());
+                    @SuppressWarnings("unchecked")
+                    var data = new Data<Object>(resultSnapshot.getKey(), resultSnapshot.getResult(),
+                            (List<Object>) resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(), resultSnapshot.isPublic());
                     conversationMemory.getCurrentStep().storeData(data);
                 }
             }
@@ -143,8 +135,7 @@ public class ConversationMemoryUtilities {
         return conversationMemory;
     }
 
-    public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(
-            ConversationMemorySnapshot conversationMemorySnapshot,
+    public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot,
             boolean returnDetailed, boolean returnCurrentStepOnly) {
 
         var newSnapshot = getSimpleMemorySnapshot(conversationMemorySnapshot);
@@ -162,8 +153,8 @@ public class ConversationMemoryUtilities {
                 var newConversationOutput = newConversationOutputs.get(index);
 
                 for (var key : conversationOutput.keySet()) {
-                    if (key.startsWith(KEY_INPUT_INITIAL) || key.startsWith(KEY_ACTIONS) ||
-                            key.startsWith(KEY_OUTPUT) || key.startsWith(KEY_QUICK_REPLIES)) {
+                    if (key.startsWith(INPUT_INITIAL.key()) || key.startsWith(ACTIONS.key()) || key.startsWith(OUTPUT_PREFIX)
+                            || key.startsWith(QUICK_REPLIES_PREFIX)) {
                         newConversationOutput.put(key, conversationOutput.get(key));
                     }
                 }
@@ -175,20 +166,15 @@ public class ConversationMemoryUtilities {
         for (var conversationStepSnapshot : conversationSteps) {
             var simpleConversationStep = new SimpleConversationStep();
             newSnapshot.getConversationSteps().add(simpleConversationStep);
-            for (var packageRunSnapshot : conversationStepSnapshot.getPackages()) {
+            for (var packageRunSnapshot : conversationStepSnapshot.getWorkflows()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     var key = resultSnapshot.getKey();
-                    if (returnDetailed ||
-                            key.equals(KEY_INPUT_INITIAL) || key.startsWith(KEY_ACTIONS) ||
-                            key.startsWith(KEY_OUTPUT) || key.startsWith(KEY_QUICK_REPLIES)) {
+                    if (returnDetailed || key.equals(INPUT_INITIAL.key()) || key.startsWith(ACTIONS.key()) || key.startsWith(OUTPUT_PREFIX)
+                            || key.startsWith(QUICK_REPLIES_PREFIX)) {
 
                         var result = resultSnapshot.getResult();
-                        simpleConversationStep.getConversationStep().add(
-                                new ConversationStepData(
-                                        key,
-                                        result,
-                                        resultSnapshot.getTimestamp(),
-                                        resultSnapshot.getOriginPackageId()));
+                        simpleConversationStep.getConversationStep()
+                                .add(new ConversationStepData(key, result, resultSnapshot.getTimestamp(), resultSnapshot.getOriginWorkflowId()));
 
                     } else {
                         continue;
@@ -202,8 +188,7 @@ public class ConversationMemoryUtilities {
         return newSnapshot;
     }
 
-    private static SimpleConversationMemorySnapshot getSimpleMemorySnapshot(
-            ConversationMemorySnapshot conversationMemorySnapshot) {
+    private static SimpleConversationMemorySnapshot getSimpleMemorySnapshot(ConversationMemorySnapshot conversationMemorySnapshot) {
 
         var simpleSnapshot = new SimpleConversationMemorySnapshot();
 
@@ -212,8 +197,8 @@ public class ConversationMemoryUtilities {
         }
 
         simpleSnapshot.setConversationId(conversationMemorySnapshot.getConversationId());
-        simpleSnapshot.setBotId(conversationMemorySnapshot.getBotId());
-        simpleSnapshot.setBotVersion(conversationMemorySnapshot.getBotVersion());
+        simpleSnapshot.setAgentId(conversationMemorySnapshot.getAgentId());
+        simpleSnapshot.setAgentVersion(conversationMemorySnapshot.getAgentVersion());
         simpleSnapshot.setConversationState(conversationMemorySnapshot.getConversationState());
         simpleSnapshot.setEnvironment(conversationMemorySnapshot.getEnvironment());
         simpleSnapshot.setUndoAvailable(conversationMemorySnapshot.getConversationSteps().size() > 1);
@@ -221,26 +206,17 @@ public class ConversationMemoryUtilities {
         return simpleSnapshot;
     }
 
-    public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(
-            IConversationMemory returnConversationMemory,
-            Boolean returnDetailed,
-            Boolean returnCurrentStepOnly,
-            List<String> returningFields) {
+    public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(IConversationMemory returnConversationMemory,
+            Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields) {
 
-        return convertSimpleConversationMemorySnapshot(
-                convertConversationMemory(returnConversationMemory),
-                returnDetailed,
-                returnCurrentStepOnly, returningFields);
+        return convertSimpleConversationMemorySnapshot(convertConversationMemory(returnConversationMemory), returnDetailed, returnCurrentStepOnly,
+                returningFields);
     }
 
-    public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(
-            ConversationMemorySnapshot conversationMemorySnapshot,
-            Boolean returnDetailed,
-            Boolean returnCurrentStepOnly,
-            List<String> returningFields) {
+    public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(ConversationMemorySnapshot conversationMemorySnapshot,
+            Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields) {
 
-        var memorySnapshot =
-                convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed, returnCurrentStepOnly);
+        var memorySnapshot = convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed, returnCurrentStepOnly);
 
         if (returnCurrentStepOnly) {
             if (isNullOrEmpty(returningFields) || returningFields.contains(KEY_CONVERSATION_STEPS)) {
@@ -281,7 +257,9 @@ public class ConversationMemoryUtilities {
             if (context != null) {
                 var contextType = context.getType();
                 switch (contextType) {
-                    case object, array, string -> dynamicAttributesMap.put(key, context.getValue());
+                    case object, array, string, expressions -> dynamicAttributesMap.put(key, context.getValue());
+                    default -> {
+                    }
                 }
             } else {
                 dynamicAttributesMap.put(key, null);

@@ -40,8 +40,7 @@ public class ZipArchive implements IZipArchive {
     }
 
     private static void writeZipFile(String targetZipFile, File directoryToZip, List<File> fileList) throws IOException {
-        try (FileOutputStream fos = new FileOutputStream(targetZipFile);
-             ZipOutputStream zos = new ZipOutputStream(new BufferedOutputStream(fos))) {
+        try (FileOutputStream fos = new FileOutputStream(targetZipFile); ZipOutputStream zos = new ZipOutputStream(new BufferedOutputStream(fos))) {
 
             for (File file : fileList) {
                 if (!file.isDirectory()) {
@@ -54,7 +53,8 @@ public class ZipArchive implements IZipArchive {
     private static void addToZip(File directoryToZip, File file, ZipOutputStream zos) throws IOException {
         // Use try-with-resources for automatic stream closing
         try (FileInputStream fis = new FileInputStream(file)) {
-            // Ensure consistent path separators and protect against traversal in entry name creation itself
+            // Ensure consistent path separators and protect against traversal in entry name
+            // creation itself
             var zipEntry = getZipEntry(directoryToZip, file);
             zos.putNextEntry(zipEntry);
 
@@ -68,11 +68,10 @@ public class ZipArchive implements IZipArchive {
     }
 
     private static ZipEntry getZipEntry(File directoryToZip, File file) throws IOException {
-        String entryName = file.getCanonicalPath()
-                .substring(directoryToZip.getCanonicalPath().length() + 1)
-                .replace(File.separatorChar, '/'); // Use '/' for zip standard
-
-        // Basic check for traversal sequences in the source file path relative to the source directory
+        // Use '/' for zip standard
+        String entryName = file.getCanonicalPath().substring(directoryToZip.getCanonicalPath().length() + 1).replace(File.separatorChar, '/');
+        // Basic check for traversal sequences in the source file path relative to the
+        // source directory
         if (entryName.contains("../")) {
             throw new IOException("Malicious entry: " + entryName);
         }

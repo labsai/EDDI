@@ -5,7 +5,7 @@ import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationExc
 import java.util.Collections;
 import java.util.Map;
 
-import static ai.labs.eddi.configs.packages.model.ExtensionDescriptor.ConfigValue;
+import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
 
 public interface IParserExtensionProvider<T> {
     String KEY_LOOKUP_IF_KNOWN = "lookupIfKnown";
@@ -22,7 +22,7 @@ public interface IParserExtensionProvider<T> {
     }
 
     default T provide(Map<String, Object> config) throws IllegalExtensionConfigurationException {
-        //to be overridden if needed
+        // to be overridden if needed
 
         return null;
     }

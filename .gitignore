@@ -3,6 +3,7 @@
 Thumbs.db
 desktop.ini
 *~
+bot-father/
 
 # === Java ===
 *.class
@@ -51,5 +52,34 @@ fabric.properties
 .history/
 
 # === Project-specific ===
+.env
 docker/data/
 /tmp/
+
+# Kubernetes — user-specific values and Helm packaging output
+helm/eddi/charts/
+*.tgz
+my-values.yaml
+*-values-override.yaml
+
+# Build & test outputs
+build-clean-compile.txt
+build-full.txt
+build-package-clean.txt
+build-package-output.txt
+build-test-output.txt
+build-xlint-output.txt
+build-xlint.txt
+build-warnings.txt
+orphan-test.txt
+test-output.txt
+
+# AI session files (keep locally, don't push)
+.gemini/
+
+eddi-audit-deadletter.jsonl
+
+# Auto-generated license files (rebuilt during Maven build)
+licenses/third-party/
+licenses/licenses.xml
+licenses/THIRD-PARTY.txt

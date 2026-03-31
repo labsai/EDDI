@@ -6,25 +6,24 @@ import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import ai.labs.eddi.utils.StringUtilities;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
-import com.mongodb.reactivestreams.client.MongoCollection;
-import com.mongodb.reactivestreams.client.MongoDatabase;
-import io.reactivex.rxjava3.core.Observable;
 import org.bson.Document;
 
 import java.util.LinkedList;
 import java.util.List;
 
-
 /**
  * @author ginccc
  */
+@SuppressWarnings("deprecation")
 public class DescriptorStore<T> implements IDescriptorStore<T> {
     public static final String COLLECTION_DESCRIPTORS = "descriptors";
     private static final String FIELD_RESOURCE = "resource";
     private static final String FIELD_NAME = "name";
-    private static final String FIELD_BOT_NAME = "botName";
+    private static final String FIELD_AGENT_NAME = "agentName";
     private static final String FIELD_DESCRIPTION = "description";
     public static final String FIELD_LAST_MODIFIED = "lastModifiedOn";
     private static final String FIELD_DELETED = "deleted";
@@ -39,18 +38,17 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         RuntimeUtilities.checkNotNull(database, "database");
 
         MongoCollection<Document> descriptorCollection = database.getCollection(COLLECTION_DESCRIPTORS);
-        MongoResourceStorage<T> resourceStorage =
-                new MongoResourceStorage<>(database, collectionName, documentBuilder, documentType);
+        MongoResourceStorage<T> resourceStorage = new MongoResourceStorage<>(database, collectionName, documentBuilder, documentType);
         this.descriptorResourceStore = new ModifiableHistorizedResourceStore<>(resourceStorage);
         this.resourceFilter = new ResourceFilter<>(descriptorCollection, descriptorResourceStore);
 
-        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_RESOURCE), new IndexOptions().unique(true))).blockingFirst();
-        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_USER_ID), new IndexOptions().unique(false))).blockingFirst();
-        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_NAME), new IndexOptions().unique(false))).blockingFirst();
-        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_BOT_NAME), new IndexOptions().unique(false))).blockingFirst();
-        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_DESCRIPTION), new IndexOptions().unique(false))).blockingFirst();
-        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_LAST_MODIFIED), new IndexOptions().unique(false))).blockingFirst();
-        Observable.fromPublisher(descriptorCollection.createIndex(Indexes.ascending(FIELD_DELETED), new IndexOptions().unique(false))).blockingFirst();
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_RESOURCE), new IndexOptions().unique(true));
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_USER_ID), new IndexOptions().unique(false));
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_NAME), new IndexOptions().unique(false));
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_AGENT_NAME), new IndexOptions().unique(false));
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_DESCRIPTION), new IndexOptions().unique(false));
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_LAST_MODIFIED), new IndexOptions().unique(false));
+        descriptorCollection.createIndex(Indexes.ascending(FIELD_DELETED), new IndexOptions().unique(false));
     }
 
     @Override
@@ -67,12 +65,13 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
             filter = StringUtilities.convertToSearchString(filter);
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_USER_ID, filter));
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_NAME, filter));
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_BOT_NAME, filter));
+            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_AGENT_NAME, filter));
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_DESCRIPTION, filter));
             queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_RESOURCE, filter));
         }
         if (!queryFiltersOptional.isEmpty()) {
-            IResourceFilter.QueryFilters optional = new IResourceFilter.QueryFilters(IResourceFilter.QueryFilters.ConnectingType.OR, queryFiltersOptional);
+            IResourceFilter.QueryFilters optional = new IResourceFilter.QueryFilters(IResourceFilter.QueryFilters.ConnectingType.OR,
+                    queryFiltersOptional);
             return resourceFilter.readResources(new IResourceFilter.QueryFilters[]{required, optional}, index, limit, FIELD_LAST_MODIFIED);
         } else {
             return resourceFilter.readResources(new IResourceFilter.QueryFilters[]{required}, index, limit, FIELD_LAST_MODIFIED);
@@ -88,18 +87,20 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     }
 
     @Override
-    public T readDescriptorWithHistory(String resourceId, Integer version) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public T readDescriptorWithHistory(String resourceId, Integer version)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         return descriptorResourceStore.readIncludingDeleted(resourceId, version);
     }
 
-
     @Override
-    public Integer updateDescriptor(String resourceId, Integer version, T documentDescriptor) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+    public Integer updateDescriptor(String resourceId, Integer version, T documentDescriptor)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         return descriptorResourceStore.update(resourceId, version, documentDescriptor);
     }
 
     @Override
-    public void setDescriptor(String resourceId, Integer version, T documentDescriptor) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    public void setDescriptor(String resourceId, Integer version, T documentDescriptor)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         descriptorResourceStore.set(resourceId, version, documentDescriptor);
     }
 
@@ -109,7 +110,8 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     }
 
     @Override
-    public void deleteDescriptor(String resourceId, Integer version) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
+    public void deleteDescriptor(String resourceId, Integer version)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
         descriptorResourceStore.delete(resourceId, version);
     }
 
@@ -118,8 +120,14 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         descriptorResourceStore.deleteAllPermanently(resourceId);
     }
 
-
     public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return descriptorResourceStore.getCurrentResourceId(id);
+    }
+
+    @Override
+    public List<T> findByOriginId(String originId) {
+        // Legacy MongoDB store — not reached in production since all stores use the new
+        // DescriptorStore
+        return List.of();
     }
 }

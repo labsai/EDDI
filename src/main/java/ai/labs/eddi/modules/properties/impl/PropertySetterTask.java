@@ -1,13 +1,13 @@
 package ai.labs.eddi.modules.properties.impl;
 
-import ai.labs.eddi.configs.packages.model.ExtensionDescriptor;
+import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.PropertyInstruction;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import ai.labs.eddi.engine.lifecycle.exceptions.PackageConfigurationException;
+import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import ai.labs.eddi.engine.memory.IData;
@@ -21,16 +21,19 @@ import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.properties.IPropertySetter;
 import ai.labs.eddi.modules.properties.model.SetOnActions;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.model.SecretReference;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import ognl.Ognl;
+import ai.labs.eddi.utils.PathNavigator;
+
+import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.net.URI;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static ai.labs.eddi.configs.properties.model.Property.Scope.conversation;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
@@ -43,6 +46,7 @@ import static java.lang.Boolean.parseBoolean;
 @ApplicationScoped
 public class PropertySetterTask implements ILifecycleTask {
     public static final String ID = "ai.labs.property";
+    private static final Logger LOGGER = Logger.getLogger(PropertySetterTask.class);
     private static final String EXPRESSIONS_PARSED_IDENTIFIER = "expressions:parsed";
     private static final String ACTIONS_IDENTIFIER = "actions";
     private static final String CATCH_ANY_INPUT_AS_PROPERTY_ACTION = "CATCH_ANY_INPUT_AS_PROPERTY";
@@ -63,26 +67,25 @@ public class PropertySetterTask implements ILifecycleTask {
     private static final String SCOPE = "scope";
     private static final String OVERRIDE = "override";
     private static final String KEY_URI = "uri";
+    private static final String SECRET_INPUT_PLACEHOLDER = "<secret input>";
     private final IExpressionProvider expressionProvider;
     private final IMemoryItemConverter memoryItemConverter;
     private final ITemplatingEngine templatingEngine;
     private final IDataFactory dataFactory;
     private final IResourceClientLibrary resourceClientLibrary;
     private final ObjectMapper objectMapper;
+    private final ISecretProvider secretProvider;
 
     @Inject
-    public PropertySetterTask(IExpressionProvider expressionProvider,
-                              IMemoryItemConverter memoryItemConverter,
-                              ITemplatingEngine templatingEngine,
-                              IDataFactory dataFactory,
-                              IResourceClientLibrary resourceClientLibrary,
-                              ObjectMapper objectMapper) {
+    public PropertySetterTask(IExpressionProvider expressionProvider, IMemoryItemConverter memoryItemConverter, ITemplatingEngine templatingEngine,
+            IDataFactory dataFactory, IResourceClientLibrary resourceClientLibrary, ObjectMapper objectMapper, ISecretProvider secretProvider) {
         this.expressionProvider = expressionProvider;
         this.memoryItemConverter = memoryItemConverter;
         this.templatingEngine = templatingEngine;
         this.dataFactory = dataFactory;
         this.resourceClientLibrary = resourceClientLibrary;
         this.objectMapper = objectMapper;
+        this.secretProvider = secretProvider;
     }
 
     @Override
@@ -129,10 +132,8 @@ public class PropertySetterTask implements ILifecycleTask {
                 setOnActionsList.forEach(setOnAction -> {
                     List<String> actions = setOnAction.getActions();
                     if (actions.contains(action) || actions.contains("*")) {
-                        setOnAction.getSetProperties().stream().
-                                filter(propertyInstruction ->
-                                        !propertyInstructions.contains(propertyInstruction)).
-                                forEach(propertyInstructions::add);
+                        setOnAction.getSetProperties().stream().filter(propertyInstruction -> !propertyInstructions.contains(propertyInstruction))
+                                .forEach(propertyInstructions::add);
                     }
                 });
 
@@ -150,49 +151,54 @@ public class PropertySetterTask implements ILifecycleTask {
                             Object templatedObj;
                             if (!conversationProperties.containsKey(name) || property.getOverride()) {
                                 if (!isNullOrEmpty(fromObjectPath)) {
-                                    templatedObj = Ognl.getValue(fromObjectPath, templateDataObjects);
+                                    templatedObj = PathNavigator.getValue(fromObjectPath, templateDataObjects);
                                     if (!isNullOrEmpty(toObjectPath)) {
-                                        Ognl.setValue(toObjectPath, templateDataObjects, templatedObj);
+                                        PathNavigator.setValue(toObjectPath, templateDataObjects, templatedObj);
                                     } else if (templatedObj instanceof String) {
-                                        templateString = templatingEngine.processTemplate(
-                                                templatedObj.toString(),
-                                                templateDataObjects);
-                                        conversationProperties.put(name,
-                                                new Property(name, templateString, scope));
-                                    } else if (templatedObj instanceof Map valueMap) {
-                                        conversationProperties.put(name,
-                                                new Property(name, new LinkedHashMap<>(valueMap), scope));
-                                    } else if (templatedObj instanceof List valueList) {
-                                        conversationProperties.put(name,
-                                                new Property(name, new ArrayList<>(valueList), scope));
+                                        templateString = templatingEngine.processTemplate(templatedObj.toString(), templateDataObjects);
+                                        conversationProperties.put(name, new Property(name, templateString, scope));
+                                    } else if (templatedObj instanceof Map<?, ?>) {
+                                        @SuppressWarnings("unchecked")
+                                        var valueMap = (Map<String, Object>) templatedObj;
+                                        conversationProperties.put(name, new Property(name, new LinkedHashMap<>(valueMap), scope));
+                                    } else if (templatedObj instanceof List<?>) {
+                                        @SuppressWarnings("unchecked")
+                                        var valueList = (List<Object>) templatedObj;
+                                        conversationProperties.put(name, new Property(name, new ArrayList<>(valueList), scope));
                                     } else if (templatedObj instanceof Integer valueInt) {
-                                        conversationProperties.put(name,
-                                                new Property(name, valueInt, scope));
+                                        conversationProperties.put(name, new Property(name, valueInt, scope));
                                     } else if (templatedObj instanceof Float valueFloat) {
-                                        conversationProperties.put(name,
-                                                new Property(name, valueFloat, scope));
+                                        conversationProperties.put(name, new Property(name, valueFloat, scope));
                                     } else if (templatedObj instanceof Boolean valueBoolean) {
-                                        conversationProperties.put(name,
-                                                new Property(name, valueBoolean, scope));
+                                        conversationProperties.put(name, new Property(name, valueBoolean, scope));
                                     }
                                 } else {
                                     var valueString = property.getValueString();
                                     if (!isNullOrEmpty(valueString)) {
-                                        templateString =
-                                                templatingEngine.processTemplate(valueString, templateDataObjects);
-                                        conversationProperties.put(name, new Property(name, templateString, scope));
+                                        templateString = templatingEngine.processTemplate(valueString, templateDataObjects);
+                                        if (scope == Scope.secret) {
+                                            // Auto-vault: store the plaintext in the vault and
+                                            // replace it with a vault reference in conversation properties.
+                                            templateString = autoVaultSecret(memory, name, templateString);
+                                            // Store as conversation-scoped (the vault ref, not the plaintext)
+                                            conversationProperties.put(name, new Property(name, templateString, conversation));
+                                        } else {
+                                            // NOTE: Do NOT resolve vault references here — they must stay as-is
+                                            // in conversation properties (which are persisted to DB).
+                                            // Vault refs are resolved at point-of-use by downstream consumers
+                                            // (ChatModelRegistry, ApiCallExecutor) to prevent secret leakage.
+                                            conversationProperties.put(name, new Property(name, templateString, scope));
+                                        }
                                     }
 
                                     var valueMap = property.getValueObject();
                                     if (valueMap != null) {
-                                        conversationProperties.put(name,
-                                                new Property(name, new LinkedHashMap<>(valueMap), scope));
+                                        conversationProperties.put(name, new Property(name, new LinkedHashMap<>(valueMap), scope));
                                     }
 
                                     var valueList = property.getValueList();
                                     if (valueList != null) {
-                                        conversationProperties.put(name,
-                                                new Property(name, new ArrayList<>(valueList), scope));
+                                        conversationProperties.put(name, new Property(name, new ArrayList<>(valueList), scope));
                                     }
 
                                     var valueInt = property.getValueInt();
@@ -221,7 +227,8 @@ public class PropertySetterTask implements ILifecycleTask {
             }
         }
 
-        // see if action "CATCH_ANY_INPUT_AS_PROPERTY" was in the last step, so we take last user input into account
+        // see if action "CATCH_ANY_INPUT_AS_PROPERTY" was in the last step, so we take
+        // last user input into account
         IConversationStepStack previousSteps = memory.getPreviousSteps();
         if (previousSteps.size() > 0) {
             actionsData = previousSteps.get(0).getLatestData(ACTIONS_IDENTIFIER);
@@ -265,8 +272,7 @@ public class PropertySetterTask implements ILifecycleTask {
     }
 
     @Override
-    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
-            throws PackageConfigurationException {
+    public Object configure(Map<String, Object> configuration, Map<String, Object> extensions) throws WorkflowConfigurationException {
 
         List<SetOnActions> setOnActionsList = new LinkedList<>();
 
@@ -279,19 +285,17 @@ public class PropertySetterTask implements ILifecycleTask {
                 Object uriObj = configuration.get(KEY_URI);
                 if (!isNullOrEmpty(uriObj) && uriObj.toString().startsWith("eddi")) {
                     URI uri = URI.create(uriObj.toString());
-                    var propertySetterConfig =
-                            resourceClientLibrary.getResource(uri, PropertySetterConfiguration.class);
+                    var propertySetterConfig = resourceClientLibrary.getResource(uri, PropertySetterConfiguration.class);
                     setOnActionsList.addAll(propertySetterConfig.getSetOnActions());
                 }
             }
         } catch (ServiceException e) {
             String message = "Error while fetching PropertySetterConfiguration!\n" + e.getLocalizedMessage();
-            throw new PackageConfigurationException(message, e);
+            throw new WorkflowConfigurationException(message, e);
         }
 
         return new PropertySetter(new LinkedList<>(setOnActionsList));
     }
-
 
     private List<SetOnActions> parseRawConfig(Map<String, Object> configuration) {
         var setOnActionsRaw = convertObjectToListOfMapsWithObjects(configuration.get(KEY_SET_ON_ACTIONS));
@@ -312,8 +316,7 @@ public class PropertySetterTask implements ILifecycleTask {
 
                     Object setPropertiesObj = setOnAction.get("setProperties");
                     if (setPropertiesObj instanceof List) {
-                        setOnActions.setSetProperties(
-                                convertToProperties(convertObjectToListOfMapsWithObjects(setPropertiesObj)));
+                        setOnActions.setSetProperties(convertToProperties(convertObjectToListOfMapsWithObjects(setPropertiesObj)));
                     }
                 }
 
@@ -343,9 +346,13 @@ public class PropertySetterTask implements ILifecycleTask {
             if (property.containsKey(VALUE_STRING)) {
                 var o = property.get(VALUE_STRING);
                 propertyInstruction.setValueString(o.toString());
-            } else if (property.containsKey(VALUE_OBJECT) && property.get(VALUE_OBJECT) instanceof Map m) {
+            } else if (property.containsKey(VALUE_OBJECT) && property.get(VALUE_OBJECT) instanceof Map<?, ?>) {
+                @SuppressWarnings("unchecked")
+                var m = (Map<String, Object>) property.get(VALUE_OBJECT);
                 propertyInstruction.setValueObject(m);
-            } else if (property.containsKey(VALUE_LIST) && property.get(VALUE_LIST) instanceof List l) {
+            } else if (property.containsKey(VALUE_LIST) && property.get(VALUE_LIST) instanceof List<?>) {
+                @SuppressWarnings("unchecked")
+                var l = (List<Object>) property.get(VALUE_LIST);
                 propertyInstruction.setValueList(l);
             } else if (property.containsKey(VALUE_INT) && property.get(VALUE_INT) instanceof Integer i) {
                 propertyInstruction.setValueInt(i);
@@ -365,6 +372,69 @@ public class PropertySetterTask implements ILifecycleTask {
             propertyInstruction.setOverride(parseBoolean(property.getOrDefault(OVERRIDE, true).toString()));
 
             return propertyInstruction;
-        }).collect(Collectors.toList());
+        }).toList();
+    }
+
+    /**
+     * Store a plaintext secret in the vault and return the vault reference string.
+     * Also scrubs the raw user input from conversation memory to prevent leakage.
+     * <p>
+     * <b>Agent designers never see vault references for auto-vaulted secrets.</b>
+     * They simply write {@code { "name": "userApiKey", "scope": "secret" }} in the
+     * PropertySetter config. This method transparently vaults the user input and
+     * stores a vault reference in conversation properties. Templates use
+     * {@code {properties.userApiKey}} — the SecretResolver resolves transparently.
+     * <p>
+     * The keyName is namespaced with the agentId to prevent cross-agent collisions:
+     * {@code agentId.keyName}. Since the tenant is typically "default", the
+     * short-form syntax is used: {@code ${eddivault:agentId.keyName}}.
+     *
+     * @param memory
+     *            the conversation memory (used for agentId and input scrubbing)
+     * @param keyName
+     *            the property name used as the vault key
+     * @param plaintext
+     *            the secret value to store
+     * @return the vault reference string, e.g.
+     *         {@code ${eddivault:69c687.userApiKey}}
+     */
+    private String autoVaultSecret(IConversationMemory memory, String keyName, String plaintext) {
+        // Determine tenantId — use conversation property if set, else "default"
+        var conversationProperties = memory.getConversationProperties();
+        String tenantId = "default";
+        if (conversationProperties.containsKey("tenantId")) {
+            Property tenantProp = conversationProperties.get("tenantId");
+            if (tenantProp.getValueString() != null) {
+                tenantId = tenantProp.getValueString();
+            }
+        }
+
+        String agentId = memory.getAgentId();
+        // Namespace with agentId to prevent cross-agent collision
+        String qualifiedKeyName = agentId + "." + keyName;
+        var ref = new SecretReference(tenantId, qualifiedKeyName);
+
+        // Store the plaintext in the vault (encrypted at rest)
+        try {
+            secretProvider.store(ref, plaintext, "Auto-vaulted from conversation", List.of(agentId));
+        } catch (ISecretProvider.SecretProviderException e) {
+            // If vault storage fails, log and return the plaintext as-is (degraded mode).
+            // This prevents the PropertySetter from breaking the workflow.
+            LOGGER.error("Failed to store secret in vault for key '" + keyName + "': " + e.getMessage());
+            return plaintext;
+        }
+
+        // Scrub the raw user input from conversation memory so the plaintext
+        // doesn't persist in the DB as part of the conversation history.
+        var currentStep = memory.getCurrentStep();
+        IData<String> inputData = currentStep.getLatestData(INPUT_INITIAL_IDENTIFIER);
+        if (inputData != null && plaintext.equals(inputData.getResult())) {
+            currentStep.storeData(dataFactory.createData(INPUT_INITIAL_IDENTIFIER, SECRET_INPUT_PLACEHOLDER));
+            currentStep.resetConversationOutput("input");
+            currentStep.addConversationOutputString("input", SECRET_INPUT_PLACEHOLDER);
+        }
+
+        // Return the vault reference to be stored in properties instead of plaintext
+        return ref.toReferenceString();
     }
 }

@@ -1,0 +1,11 @@
+package ai.labs.eddi.configs.descriptors;
+
+import ai.labs.eddi.datastore.serialization.IDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+
+/**
+ * @author ginccc
+ */
+public interface IDocumentDescriptorStore extends IDescriptorStore<DocumentDescriptor> {
+
+}

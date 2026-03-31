@@ -15,20 +15,20 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 /**
- * Tests for ConversationCoordinator, focusing on:
- * - L3 fix: Race condition in submitInOrder (synchronized isEmpty+offer+submit)
- * - Sequential ordering guarantee per conversation
- * - Concurrent conversations handled independently
+ * Tests for InMemoryConversationCoordinator, focusing on: - L3 fix: Race
+ * condition in submitInOrder (synchronized isEmpty+offer+submit) - Sequential
+ * ordering guarantee per conversation - Concurrent conversations handled
+ * independently
  */
 class ConversationCoordinatorTest {
 
     private IRuntime runtime;
-    private ConversationCoordinator coordinator;
+    private InMemoryConversationCoordinator coordinator;
 
     @BeforeEach
     void setUp() {
         runtime = mock(IRuntime.class);
-        coordinator = new ConversationCoordinator(runtime);
+        coordinator = new InMemoryConversationCoordinator(runtime);
     }
 
     @Test
@@ -62,7 +62,7 @@ class ConversationCoordinatorTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void submitInOrder_differentConversations_bothSubmittedImmediately() {
+    void submitInOrder_differentConversations_agenthSubmittedImmediately() {
         // Given: two different conversations
         Callable<Void> callable1 = mock(Callable.class);
         Callable<Void> callable2 = mock(Callable.class);
@@ -125,7 +125,8 @@ class ConversationCoordinatorTest {
     @Test
     @SuppressWarnings("unchecked")
     void submitInOrder_concurrentSubmissions_onlyOneSubmittedToRuntime() throws Exception {
-        // L3 fix test: Concurrent submissions should not both be submitted to runtime.
+        // L3 fix test: Concurrent submissions should not both be submitted to
+        // runtime.
         // We simulate concurrent access by using threads with a latch.
 
         int concurrentCount = 10;
@@ -134,11 +135,10 @@ class ConversationCoordinatorTest {
         AtomicInteger submitCount = new AtomicInteger(0);
 
         // Mock runtime to count submissions
-        when(runtime.submitCallable(any(Callable.class), any(IRuntime.IFinishedExecution.class), any()))
-                .thenAnswer(inv -> {
-                    submitCount.incrementAndGet();
-                    return mock(Future.class);
-                });
+        when(runtime.submitCallable(any(Callable.class), any(IRuntime.IFinishedExecution.class), any())).thenAnswer(inv -> {
+            submitCount.incrementAndGet();
+            return mock(Future.class);
+        });
 
         // Launch concurrent submissions for the same conversation
         for (int i = 0; i < concurrentCount; i++) {
@@ -162,7 +162,6 @@ class ConversationCoordinatorTest {
 
         // Then: only ONE message should be submitted to runtime (the first one)
         // The rest should be queued and submitted sequentially via callbacks.
-        assertEquals(1, submitCount.get(),
-                "With L3 fix, only one concurrent submission should reach runtime.submitCallable");
+        assertEquals(1, submitCount.get(), "With L3 fix, only one concurrent submission should reach runtime.submitCallable");
     }
 }

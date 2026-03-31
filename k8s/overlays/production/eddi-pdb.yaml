@@ -1,0 +1,14 @@
+# PodDisruptionBudget — ensure at least 1 EDDI pod is always available
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: eddi
+  labels:
+    app.kubernetes.io/name: eddi
+    app.kubernetes.io/part-of: eddi
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: eddi
+      app.kubernetes.io/component: server

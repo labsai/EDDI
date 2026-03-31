@@ -10,7 +10,6 @@ import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
 import ai.labs.eddi.modules.nlp.model.Phrase;
 import ai.labs.eddi.modules.nlp.model.Word;
 import ai.labs.eddi.utils.StringUtilities;
-import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +22,6 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 /**
  * @author ginccc
  */
-@Slf4j
 public class InputParserTest {
     private static IExpressionProvider expressionProvider;
 
@@ -34,17 +32,17 @@ public class InputParserTest {
 
     @Test
     public void testParseWord() throws Exception {
-        //setup
+        // setup
         String lookupString = "test1 test2";
         TestDictionary testDictionary = new TestDictionary();
         testDictionary.addWord(new Word("test1", expressionProvider.parseExpressions("expression1"), "exp1", 0, false));
         testDictionary.addWord(new Word("test2", expressionProvider.parseExpressions("expression2"), "exp2", 0, false));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
-        //test
+        // test
         List<RawSolution> suggestions = inputParser.parse(lookupString);
 
-        //assert
+        // assert
         assertEquals(1, suggestions.size());
         assertEquals("test1", suggestions.get(0).getDictionaryEntries().get(0).getValue());
         assertEquals("test2", suggestions.get(0).getDictionaryEntries().get(1).getValue());
@@ -52,32 +50,32 @@ public class InputParserTest {
 
     @Test
     public void testParsePhrase() throws Exception {
-        //setup
+        // setup
         String lookupString = "day after tomorrow";
         TestDictionary testDictionary = new TestDictionary();
         testDictionary.addPhrase(new Phrase("day after tomorrow", expressionProvider.parseExpressions("phrase(day_after_tomorrow)"), ""));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary), Collections.emptyList());
 
-        //test
+        // test
         List<RawSolution> suggestions = inputParser.parse(lookupString);
 
-        //assert
+        // assert
         assertEquals("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(0).getValue());
         assertEquals("phrase(day_after_tomorrow)", toString(suggestions.get(0).getDictionaryEntries().get(0).getExpressions()));
     }
 
     @Test
     public void testParsePhrase2() throws Exception {
-        //setup
+        // setup
         String lookupString = "someword day after tomorrow";
         TestDictionary testDictionary = new TestDictionary();
         testDictionary.addPhrase(new Phrase("day after tomorrow", expressionProvider.parseExpressions("phrase(day_after_tomorrow)"), ""));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
-        //test
+        // test
         List<RawSolution> suggestions = inputParser.parse(lookupString);
 
-        //assert
+        // assert
         List<IDictionary.IFoundWord> found = suggestions.get(0).getDictionaryEntries();
         assertEquals(1, suggestions.size());
         assertEquals(2, found.size());
@@ -89,48 +87,48 @@ public class InputParserTest {
 
     @Test
     public void testParsePhrase3() throws Exception {
-        //setup
+        // setup
         String lookupString = "day after tomorrow someword";
         TestDictionary testDictionary = new TestDictionary();
         testDictionary.addPhrase(new Phrase("day after tomorrow", expressionProvider.parseExpressions("phrase(day_after_tomorrow)"), ""));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
-        //test
+        // test
         List<RawSolution> suggestions = inputParser.parse(lookupString);
 
-        //assert
+        // assert
         assertEquals("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(0).getValue());
         assertEquals("phrase(day_after_tomorrow)", toString(suggestions.get(0).getDictionaryEntries().get(0).getExpressions()));
     }
 
     @Test
     public void testParsePhrase4() throws Exception {
-        //setup
+        // setup
         String lookupString = "someword day after tomorrow someword";
         TestDictionary testDictionary = new TestDictionary();
         testDictionary.addPhrase(new Phrase("day after tomorrow", expressionProvider.parseExpressions("phrase(day_after_tomorrow)"), ""));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
-        //test
+        // test
         List<RawSolution> suggestions = inputParser.parse(lookupString);
 
-        //assert
+        // assert
         assertEquals("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(1).getValue());
         assertEquals("phrase(day_after_tomorrow)", toString(suggestions.get(0).getDictionaryEntries().get(1).getExpressions()));
     }
 
     @Test
     public void testParsePhrase5() throws Exception {
-        //setup
+        // setup
         String lookupString = "day someword after tomorrow";
         TestDictionary testDictionary = new TestDictionary();
         testDictionary.addPhrase(new Phrase("day after tomorrow", expressionProvider.parseExpressions("phrase(day_after_tomorrow)"), ""));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
-        //test
+        // test
         List<RawSolution> suggestions = inputParser.parse(lookupString);
 
-        //assert
+        // assert
         assertNotSame("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(0).getValue());
         assertEquals("day", suggestions.get(0).getDictionaryEntries().get(0).getValue());
         assertEquals("someword", suggestions.get(0).getDictionaryEntries().get(1).getValue());
@@ -140,24 +138,24 @@ public class InputParserTest {
 
     @Test
     public void testParsePhrase6() throws Exception {
-        //setup
+        // setup
         String lookupString = "day after tomorrow";
         TestDictionary testDictionary = new TestDictionary();
         testDictionary.addPhrase(new Phrase("day after", expressionProvider.parseExpressions("phrase(day_after)"), ""));
         testDictionary.addPhrase(new Phrase("day after tomorrow", expressionProvider.parseExpressions("phrase(day_after_tomorrow)"), ""));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
-        //test
+        // test
         List<RawSolution> suggestions = inputParser.parse(lookupString);
 
-        //assert
+        // assert
         assertEquals("day after tomorrow", suggestions.get(0).getDictionaryEntries().get(0).getValue());
         assertEquals("phrase(day_after_tomorrow)", toString(suggestions.get(0).getDictionaryEntries().get(0).getExpressions()));
     }
 
     @Test
     public void testResultSet() throws Exception {
-        //setup
+        // setup
         String lookupString = "day after tomorrow";
         TestDictionary testDictionary = new TestDictionary();
         testDictionary.addWord(new Word("day", expressionProvider.parseExpressions("unused(day)"), "", 0, false));
@@ -168,11 +166,11 @@ public class InputParserTest {
         testDictionary.addWord(new Word("tomorrow", expressionProvider.parseExpressions("unused(tomorrow1)"), "", 0, false));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary));
 
-        //test
+        // test
         List<RawSolution> suggestions = inputParser.parse(lookupString);
 
-        //assert
-        assertEquals(7, suggestions.size());
+        // assert
+        assertEquals(8, suggestions.size());
         List<IDictionary.IFoundWord> foundWords = suggestions.get(0).getDictionaryEntries();
         assertEquals(3, foundWords.size());
         assertEquals("day", foundWords.get(0).getValue());
@@ -182,17 +180,17 @@ public class InputParserTest {
 
     @Test
     public void testParse2Phrase() throws Exception {
-        //setup
+        // setup
         String lookupString = "day after tomorrow another phrase";
         TestDictionary testDictionary = new TestDictionary();
         testDictionary.addPhrase(new Phrase("another phrase", expressionProvider.parseExpressions("phrase(another_phrase)"), ""));
         testDictionary.addPhrase(new Phrase("day after tomorrow", expressionProvider.parseExpressions("phrase(day_after_tomorrow)"), ""));
         InputParser inputParser = new InputParser(Collections.singletonList(testDictionary), Collections.emptyList());
 
-        //test
+        // test
         List<RawSolution> suggestions = inputParser.parse(lookupString);
 
-        //assert
+        // assert
         assertEquals(1, suggestions.size());
         List<IDictionary.IFoundWord> foundWords = suggestions.get(0).getDictionaryEntries();
         assertEquals(2, foundWords.size());

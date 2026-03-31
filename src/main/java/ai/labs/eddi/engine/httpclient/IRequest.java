@@ -20,7 +20,7 @@ public interface IRequest {
 
     IResponse send() throws HttpRequestException;
 
-    Map<String,Object> toMap();
+    Map<String, Object> toMap();
 
     void send(ICompleteListener completeListener) throws HttpRequestException;
 

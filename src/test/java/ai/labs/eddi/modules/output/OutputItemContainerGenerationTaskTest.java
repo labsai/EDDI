@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import java.net.URI;
 import java.util.*;
 
+import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static java.util.Arrays.asList;
 import static org.mockito.Mockito.*;
 
@@ -33,7 +34,6 @@ import static org.mockito.Mockito.*;
 public class OutputItemContainerGenerationTaskTest {
     private static final String ACTION_1 = "action1";
     private static final String ACTION_2 = "action2";
-    private static final String ACTION = "actions";
     private static final String SOME_ACTION_1 = "someAction1";
     private static final String SOME_ACTION_2 = "someAction2";
     private static final String SOME_OTHER_ACTION_1 = "someOtherAction1";
@@ -49,8 +49,8 @@ public class OutputItemContainerGenerationTaskTest {
     public static final String OUTPUT_TYPE_TEXT = "text";
     private static OutputGenerationTask outputGenerationTask;
     private static IResourceClientLibrary resourceClientLibrary;
-    private static IOutputGeneration outputGeneration;
     private static IDataFactory dataFactory;
+    private static IOutputGeneration outputGeneration;
 
     @BeforeEach
     public void setUp() {
@@ -63,7 +63,7 @@ public class OutputItemContainerGenerationTaskTest {
 
     @Test
     public void executeTask() {
-        //setup
+        // setup
         when(outputGeneration.getOutputs(anyList())).thenAnswer(invocation -> {
             Map<String, List<OutputEntry>> ret = new LinkedHashMap<>();
             OutputEntry outputEntry = createOutputEntry();
@@ -73,14 +73,12 @@ public class OutputItemContainerGenerationTaskTest {
         var conversationMemory = mock(IConversationMemory.class);
         var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
         when(conversationMemory.getCurrentStep()).thenAnswer(invocation -> currentStep);
-        when(currentStep.getLatestData(eq(ACTION))).thenAnswer(invocation ->
-                new Data<>(ACTION_1, asList(SOME_ACTION_1, SOME_OTHER_ACTION_1)));
+        when(currentStep.getLatestData(eq(ACTIONS))).thenAnswer(invocation -> new Data<>(ACTION_1, asList(SOME_ACTION_1, SOME_OTHER_ACTION_1)));
         var conversationStepStack = mock(IConversationMemory.IConversationStepStack.class);
         when(conversationMemory.getPreviousSteps()).then(invocation -> conversationStepStack);
         var conversationStep = mock(IConversationMemory.IConversationStep.class);
         when(conversationStepStack.get(anyInt())).then(invocation -> conversationStep);
-        when(conversationStep.getLatestData(eq(ACTION))).then(invocation ->
-                new Data<>(ACTION_2, asList(SOME_ACTION_2, SOME_OTHER_ACTION_2)));
+        when(conversationStep.getLatestData(eq(ACTIONS))).then(invocation -> new Data<>(ACTION_2, asList(SOME_ACTION_2, SOME_OTHER_ACTION_2)));
 
         var expectedOutputData = new Data<>(OUTPUT_TEXT + ACTION_1, new TextOutputItem(ANSWER_ALTERNATIVE_1),
                 asList(new TextOutputItem(ANSWER_ALTERNATIVE_1), new TextOutputItem(ANSWER_ALTERNATIVE_2)));
@@ -92,15 +90,13 @@ public class OutputItemContainerGenerationTaskTest {
         List<QuickReply> quickReplies = asList(new QuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION, false),
                 new QuickReply(SOME_OTHER_QUICK_REPLY, SOME_OTHER_EXPRESSION, false));
         IData<List<QuickReply>> expectedQuickReplyData = new Data<>(QUICK_REPLIES + ACTION_1, quickReplies);
-        when(dataFactory.createData(eq(QUICK_REPLIES + ACTION_1), anyList())).
-                thenAnswer(invocation -> expectedQuickReplyData);
-        when(conversationMemory.getConversationProperties()).
-                thenAnswer(invocation -> new ConversationProperties(conversationMemory));
+        when(dataFactory.createData(eq(QUICK_REPLIES + ACTION_1), anyList())).thenAnswer(invocation -> expectedQuickReplyData);
+        when(conversationMemory.getConversationProperties()).thenAnswer(invocation -> new ConversationProperties(conversationMemory));
 
-        //test
+        // test
         outputGenerationTask.execute(conversationMemory, outputGeneration);
 
-        //assert
+        // assert
         verify(conversationMemory, times(1)).getCurrentStep();
         verify(conversationMemory, times(1)).getConversationProperties();
         verify(currentStep, times(2)).storeData(any());
@@ -109,17 +105,17 @@ public class OutputItemContainerGenerationTaskTest {
 
     @Test
     public void configure() throws Exception {
-        //setup
+        // setup
         final HashMap<String, Object> configuration = new HashMap<>();
         final String uri = "eddi://ai.labs.output/outputstore/outputsets/00000000000000000?version=1";
         configuration.put("uri", uri);
-        when(resourceClientLibrary.getResource(URI.create(uri), OutputConfigurationSet.class)).
-                thenAnswer(invocation -> createOutputConfigurationSet());
+        when(resourceClientLibrary.getResource(URI.create(uri), OutputConfigurationSet.class))
+                .thenAnswer(invocation -> createOutputConfigurationSet());
 
-        //test
+        // test
         var outputGeneration = (OutputGeneration) outputGenerationTask.configure(configuration, null);
 
-        //assert
+        // assert
         var outputEntry = outputGeneration.getOutputMapper().get(ACTION_1).get(0);
         Assertions.assertEquals(1, outputGeneration.getOutputMapper().keySet().size());
         Assertions.assertEquals(2, outputEntry.getOutputs().get(0).getValueAlternatives().size());
@@ -128,11 +124,7 @@ public class OutputItemContainerGenerationTaskTest {
 
     private OutputEntry createOutputEntry() {
         List<OutputValue> outputs = new LinkedList<>();
-        outputs.add(
-                new OutputValue(
-                        asList(
-                                new TextOutputItem(ANSWER_ALTERNATIVE_1),
-                                new TextOutputItem(ANSWER_ALTERNATIVE_2))));
+        outputs.add(new OutputValue(asList(new TextOutputItem(ANSWER_ALTERNATIVE_1), new TextOutputItem(ANSWER_ALTERNATIVE_2))));
         List<QuickReply> quickReplies = new LinkedList<>();
         quickReplies.add(new QuickReply(SOME_QUICK_REPLY, SOME_EXPRESSION, false));
         quickReplies.add(new QuickReply(SOME_OTHER_QUICK_REPLY, SOME_OTHER_EXPRESSION, false));

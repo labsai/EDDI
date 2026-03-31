@@ -19,7 +19,7 @@ import java.util.Iterator;
 public class MatchMatrixTest {
     @Test
     public void testCreatePossibleSolutions() {
-        //setup
+        // setup
         MatchMatrix matchMatrix = new MatchMatrix();
         MatchingResult matchingResult = new MatchingResult();
         Expressions expressions = new Expressions(new Expression("unused", new Expression("hello")));
@@ -27,10 +27,10 @@ public class MatchMatrixTest {
         matchingResult.addResult(new FoundWord(word, false, 1.0));
         matchMatrix.addMatchingResult(0, "helo", matchingResult);
 
-        //test
+        // test
         Iterator<Suggestion> possibleSolutions = matchMatrix.iterator();
 
-        //assert
+        // assert
         Assertions.assertTrue(possibleSolutions.hasNext());
         Assertions.assertArrayEquals(new IDictionary.IFoundWord[]{new FoundWord(word, false, 1.0)}, possibleSolutions.next().build().toArray());
         Assertions.assertFalse(possibleSolutions.hasNext());

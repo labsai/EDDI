@@ -1,25 +1,51 @@
 package ai.labs.eddi.modules.nlp.internal.matches;
 
-import lombok.AllArgsConstructor;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.Setter;
-
 import java.util.*;
 
 /**
  * @author ginccc
  */
 public class MatchMatrix implements Iterable<Suggestion> {
-    @AllArgsConstructor
-    @Getter
-    @Setter
-    @EqualsAndHashCode
     class Match {
         int index;
         String inputTerm;
-    }
 
+        public Match(int index, String inputTerm) {
+            this.index = index;
+            this.inputTerm = inputTerm;
+        }
+
+        public int getIndex() {
+            return index;
+        }
+
+        public void setIndex(int index) {
+            this.index = index;
+        }
+
+        public String getInputTerm() {
+            return inputTerm;
+        }
+
+        public void setInputTerm(String inputTerm) {
+            this.inputTerm = inputTerm;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
+            Match that = (Match) o;
+            return index == that.index && java.util.Objects.equals(inputTerm, that.inputTerm);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(index, inputTerm);
+        }
+    }
 
     private Map<Match, List<MatchingResult>> mappedMatchMatrix = new LinkedHashMap<>();
 
@@ -99,7 +125,7 @@ public class MatchMatrix implements Iterable<Suggestion> {
                     List<MatchingResult> listOfMatchingResults = getMatchingResults(index);
                     Integer iterationIndex = iterationPlan.getIndexes()[index];
                     if (iterationIndex >= listOfMatchingResults.size()) {
-                        //iteration plan is out of bounds, so we skip it
+                        // iteration plan is out of bounds, so we skip it
                         nextSuggestion = null;
                         break;
                     }

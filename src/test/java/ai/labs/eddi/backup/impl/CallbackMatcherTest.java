@@ -11,25 +11,25 @@ import java.util.regex.Pattern;
 public class CallbackMatcherTest {
     @Test
     public void testReplaceMatchesOneOccurrence() throws Exception {
-        //setup
+        // setup
         CallbackMatcher callbackMatcher = new CallbackMatcher(Pattern.compile("testRegex"));
 
-        //test
+        // test
         String result = callbackMatcher.replaceMatches("This is the test: testRegex!", matchResult -> "works");
 
-        //assert
+        // assert
         Assertions.assertEquals("This is the test: works!", result);
     }
 
     @Test
     public void testReplaceMatchesTwoOccurrence() throws Exception {
-        //setup
+        // setup
         CallbackMatcher callbackMatcher = new CallbackMatcher(Pattern.compile("testRegex"));
 
-        //test
+        // test
         String result = callbackMatcher.replaceMatches("This is the test: testRegex + testRegex!", matchResult -> "works");
 
-        //assert
+        // assert
         Assertions.assertEquals("This is the test: works + works!", result);
     }
 }

@@ -1,83 +1,112 @@
 ---
 description: >-
-  Multi-Agent Orchestration Middleware for Conversational AI. Coordinates multiple AI agents, business systems, and conversation flows. Developed in Java, powered by Quarkus, provided with Docker, and orchestrated with Kubernetes or Openshift.
+  Multi-Agent Orchestration Middleware for Conversational AI — coordinate
+  multiple AI agents, business systems, and conversation flows through
+  configuration, not code.
 ---
 
 # E.D.D.I Documentation
 
-E.D.D.I (Enhanced Dialog Driven Interface) is a **multi-agent orchestration middleware** that coordinates between users, AI agents (LLMs), and business systems. It provides intelligent routing, conversation management, and API orchestration for building sophisticated AI-powered applications.
+Welcome to the official documentation for **E.D.D.I** (Enhanced Dialog Driven Interface) — a production-grade multi-agent orchestration middleware for conversational AI.
 
-**What EDDI Does:**
-- **Orchestrates Multiple AI Agents**: Route conversations to different LLMs (OpenAI, Claude, Gemini, Ollama) based on context and rules
-- **Coordinates Business Logic**: Integrate AI agents with your APIs, databases, and services
-- **Manages Conversations**: Maintain stateful, context-aware conversations across multiple agents
-- **Controls Agent Behavior**: Define when and how agents are invoked through configurable rules
+**Latest version: 6.0.0-RC1** · License: Apache 2.0 · [GitHub](https://github.com/labsai/EDDI) · [Website](https://eddi.labs.ai/)
 
-Developed in Java using Quarkus, it is lean, RESTful, scalable, and cloud-native.
-It comes as Docker container and can be orchestrated with Kubernetes or Openshift.
-The Docker image has been certified by IBM/Red Hat.
+---
 
-Latest stable version: 5.6.0
+## What Is EDDI?
 
-License: Apache License 2.0
+EDDI coordinates between users, AI agents (LLMs), and business systems. It provides intelligent routing, conversation management, and API orchestration — all through **versioned JSON configurations**, not code.
 
-Project website: [here](https://eddi.labs.ai/)
+Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker image**. Supports **MongoDB or PostgreSQL**. Deploy on Docker, Kubernetes, or OpenShift.
 
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=labsai/EDDI&amp;utm_campaign=Badge_Grade) [![CircleCI](https://circleci.com/gh/labsai/EDDI/tree/main.svg?style=svg)](https://circleci.com/gh/labsai/EDDI/tree/main)
+---
 
-![alt text](https://eddi.labs.ai/EDDI-landing-page-image.png)
+## Start Here
 
-## Intro
+| Guide | Time | Description |
+|---|---|---|
+| 🚀 **[Getting Started](getting-started.md)** | 5 min | Install EDDI and run your first agent |
+| ⚡ **[Developer Quickstart](developer-quickstart.md)** | 10 min | Build a complete agent step-by-step via REST API |
+| 🏗️ **[Architecture Overview](architecture.md)** | 15 min | Understand the lifecycle pipeline and config model |
+| 🧩 **[Putting It All Together](putting-it-all-together.md)** | 20 min | Real-world hotel booking agent walkthrough |
 
-E.D.D.I is a **multi-agent orchestration middleware** for conversational AI systems. It sits between your application and multiple AI agents (LLMs, APIs, services), intelligently routing requests, coordinating responses, and maintaining conversation state.
+---
 
-**EDDI as Orchestration Middleware:**
-- **Agent Coordination**: Manage multiple AI agents (OpenAI, Claude, Gemini, etc.) from a single interface
-- **Intelligent Routing**: Direct conversations to appropriate agents based on context, rules, and intent
-- **Business Integration**: Connect AI agents with your existing systems (CRMs, databases, APIs)
-- **Conversation Management**: Maintain stateful, context-aware conversations across agent interactions
-- **Behavior Control**: Define complex orchestration logic without coding
+## Key Capabilities
 
-**Architecture:**
-- **Lifecycle Pipeline**: Configurable processing pipeline (Input → Parse → Route → Agents → Aggregate → Output)
-- **Composable Agents**: Agents are assembled from reusable, version-controlled configurations
-- **Stateful Orchestration**: Complete conversation history maintained across agent interactions
-- **Asynchronous Processing**: Non-blocking architecture handles thousands of concurrent conversations
+### 🤖 Multi-Agent Orchestration
+- **12 LLM Providers** — OpenAI, Anthropic, Google Gemini, Mistral AI, Azure OpenAI, Amazon Bedrock, Oracle GenAI, Vertex AI, Ollama, Jlama, Hugging Face, plus OpenAI-compatible endpoints
+- **[Group Conversations](group-conversations.md)** — Multi-agent debates (Round Table, Peer Review, Devil's Advocate, Delphi, Debate)
+- **[Managed Agents](managed-agents.md)** — Intent-based auto-routing with one conversation per user per intent
+- **[Model Cascading](model-cascade.md)** — Cost-optimized multi-model routing with confidence-based escalation
 
-**Key Capabilities:**
-* **Multi-Agent Orchestration**: Coordinate multiple AI agents in a single conversation flow
-* **Conditional Agent Invocation**: Decide which agents to call based on business rules
-* **Agent Response Aggregation**: Combine outputs from multiple agents intelligently
-* **Seamless API Integration**: Connect agents with traditional REST APIs
-* **Pattern-Based Input Processing**: Route requests based on vocabulary and patterns
-* **Dynamic Output Generation**: Template-based responses using agent outputs and business data
-* **Composable Bot Model**: Bots assembled from version-controlled packages and extensions (Bot → Package → Extension)
-* Support for multiple chatbots, including multiple versions of the same bot, running concurrently
-* Support for Major AI API integrations via langchain4j: OpenAI, Hugging Face (text only), Claude, Gemini, Ollama (and more to come)
+### 🔗 Protocols & Interoperability
+- **[MCP Server](mcp-server.md)** (48+ tools) — Full EDDI control from Claude Desktop, IDE plugins, or any MCP client
+- **[A2A Protocol](a2a-protocol.md)** — Agent-to-Agent peer communication with skill discovery
 
-## Documentation
+### 🧠 Intelligence & Memory
+- **[LLM Integration](langchain.md)** — Connect any of 12 providers with agent mode and tool calling
+- **[RAG](rag.md)** — 7 embedding providers, 5 vector stores, plus zero-infrastructure httpCall RAG
+- **[Persistent User Memory](user-memory.md)** — Agents remember facts across conversations
+- **[Properties](properties.md)** — Config-driven slot-filling and importance extraction
 
-Start with these guides to understand EDDI:
+### 🔐 Enterprise Security
+- **[Secrets Vault](secrets-vault.md)** — Envelope encryption (AES-256-GCM + PBKDF2) for API keys
+- **[Security](security.md)** — SSRF protection, sandboxed evaluation, Keycloak auth
+- **[Audit Ledger](audit-ledger.md)** — Write-once trail with HMAC integrity for EU AI Act compliance
 
-* **[Getting Started](getting-started.md)** - Setup and installation
-* **[Developer Quickstart Guide](developer-quickstart.md)** - Build your first bot in 5 minutes
-* **[Architecture Overview](architecture.md)** - Deep dive into how EDDI works internally
-* **[Creating Your First Chatbot](creating-your-first-chatbot/)** - Step-by-step tutorial
-* **[Behavior Rules](behavior-rules.md)** - Configure bot logic and decision-making
-* **[LangChain Integration](langchain.md)** - Connect to LLM APIs (OpenAI, Claude, etc.)
-* **[Security](security.md)** - SSRF protection, sandboxed evaluation, and tool hardening
-* **[HTTP Calls](httpcalls.md)** - Integrate with external REST APIs
-* **[Bot Father Deep Dive](bot-father-deep-dive.md)** - Real-world orchestration example
+---
 
-Technical specifications:
+## Agent Configuration
 
-* Resource-/REST-oriented architecture
-* Java Quarkus framework
-* JAX-RS
-* Dependency Injection
-* Prometheus integration (Metrics endpoint)
-* Kubernetes integration (Liveness/Readiness endpoint)
-* MongoDB for storing bot configurations and conversation logs
-* OAuth 2.0 (Keycloak) for authentication and user management
-* HTML, CSS, Javascript (Dashboard)
-* React (Basic Chat UI)
+Build agent behavior by composing these extensions:
+
+| Extension | Purpose | Guide |
+|---|---|---|
+| **Behavior Rules** | Decision-making logic — IF conditions THEN actions | [→ Guide](behavior-rules.md) |
+| **HTTP Calls** | Call external REST APIs with templated requests | [→ Guide](httpcalls.md) |
+| **LLM Integration** | Chat, agent mode, tool calling with any provider | [→ Guide](langchain.md) |
+| **Output** | Define what the agent says, with alternatives | [→ Guide](output-configuration.md) |
+| **Output Templating** | Dynamic responses using Qute templates | [→ Guide](output-templating.md) |
+| **Properties** | Extract and store structured data from conversations | [→ Guide](properties.md) |
+| **Semantic Parser** | Map user input to expressions via dictionaries | [→ Guide](semantic-parser.md) |
+| **Context** | Inject external data from your application | [→ Guide](passing-context-information.md) |
+
+---
+
+## Deployment & Operations
+
+| Topic | Guide |
+|---|---|
+| 🐳 Docker | [→ Guide](docker.md) |
+| ☸️ Kubernetes & Helm | [→ Guide](kubernetes.md) |
+| 🔴 Red Hat OpenShift | [→ Guide](redhat-openshift.md) |
+| ☁️ AWS + MongoDB Atlas | [→ Guide](setup-eddi-on-aws-with-mongodb-atlas.md) |
+| 📊 Metrics & Monitoring | [→ Guide](metrics.md) |
+| 📋 Log Administration | [→ Guide](log-administration.md) |
+| 🔖 Release & Versioning | [→ Guide](release-versioning.md) |
+
+---
+
+## Quick Start
+
+```bash
+# One-command install (interactive wizard)
+curl -fsSL https://raw.githubusercontent.com/labsai/EDDI/main/install.sh | bash
+
+# Or pull and run directly
+docker pull labsai/eddi:latest
+docker compose up
+```
+
+Then open [http://localhost:7070](http://localhost:7070) to access the Manager Dashboard.
+
+See **[Getting Started](getting-started.md)** for all setup options.
+
+---
+
+## Browse All Documentation
+
+See the full **[Table of Contents](SUMMARY.md)** for the complete documentation index.
+
+**Have a question?** Check the **[FAQs](how-to....md)** for common setup and configuration answers.

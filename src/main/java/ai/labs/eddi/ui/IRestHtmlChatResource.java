@@ -16,15 +16,15 @@ import org.jboss.resteasy.reactive.Cache;
 
 @Path("/chat")
 @Produces(MediaType.TEXT_HTML)
-@Tag(name = "13. Bot Chat UI", description = "Responsive Chat Window")
+@Tag(name = "Chat UI")
 public interface IRestHtmlChatResource {
 
     @GET
-    @Cache(noCache = true)
+    @Cache(noCache = true, mustRevalidate = true)
     Response viewDefault();
 
     @GET
-    @Cache(noCache = true)
+    @Cache(noCache = true, mustRevalidate = true)
     @Path("{path:.*}")
     Response viewHtml(@PathParam("path") String path);
 }

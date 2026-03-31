@@ -1,13 +1,12 @@
 package ai.labs.eddi.configs.schema;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.kjetland.jackson.jsonSchema.JsonSchemaConfig;
-import com.kjetland.jackson.jsonSchema.JsonSchemaDraft;
-import com.kjetland.jackson.jsonSchema.JsonSchemaGenerator;
+import com.github.victools.jsonschema.generator.*;
+import com.github.victools.jsonschema.module.jackson.JacksonModule;
+import com.github.victools.jsonschema.module.jackson.JacksonOption;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import java.util.LinkedList;
 
 @ApplicationScoped
 public class JsonSchemaCreator implements IJsonSchemaCreator {
@@ -20,29 +19,16 @@ public class JsonSchemaCreator implements IJsonSchemaCreator {
 
     @Override
     public String generateSchema(Class<?> clazz) throws Exception {
-        JsonSchemaConfig config = JsonSchemaConfig.vanillaJsonSchemaDraft4();
-        JsonSchemaConfig eddiJsonSchemaConfig = new JsonSchemaConfig(
-                config.autoGenerateTitleForProperties(),
-                config.defaultArrayFormat(),
-                config.useOneOfForOption(),
-                config.useOneOfForNullables(),
-                config.usePropertyOrdering(),
-                config.hidePolymorphismTypeProperty(),
-                true,
-                config.useMinLengthForNotNull(),
-                config.useTypeIdForDefinitionName(),
-                config.customType2FormatMapping(),
-                config.useMultipleEditorSelectViaProperty(),
-                config.uniqueItemClasses(),
-                config.classTypeReMapping(),
-                config.jsonSuppliers(),
-                config.subclassesResolver(),
-                config.failOnUnknownProperties(),
-                new LinkedList<Class<?>>().toArray(new Class[0]),
-                JsonSchemaDraft.DRAFT_04);
-        JsonSchemaGenerator jsonSchemaGenerator = new JsonSchemaGenerator(objectMapper, eddiJsonSchemaConfig);
+        JacksonModule jacksonModule = new JacksonModule(JacksonOption.RESPECT_JSONPROPERTY_ORDER, JacksonOption.RESPECT_JSONPROPERTY_REQUIRED,
+                JacksonOption.FLATTENED_ENUMS_FROM_JSONVALUE);
 
-        var jsonSchema = jsonSchemaGenerator.generateJsonSchema(clazz);
+        SchemaGeneratorConfigBuilder configBuilder = new SchemaGeneratorConfigBuilder(objectMapper, SchemaVersion.DRAFT_2020_12,
+                OptionPreset.PLAIN_JSON).with(jacksonModule).with(Option.DEFINITIONS_FOR_ALL_OBJECTS).with(Option.NULLABLE_FIELDS_BY_DEFAULT);
+
+        SchemaGeneratorConfig config = configBuilder.build();
+        SchemaGenerator generator = new SchemaGenerator(config);
+
+        var jsonSchema = generator.generateSchema(clazz);
         return objectMapper.writeValueAsString(jsonSchema);
     }
 }

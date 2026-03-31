@@ -6,7 +6,6 @@ import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.value.Value;
 import ai.labs.eddi.modules.properties.IPropertySetter;
-import lombok.Getter;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -21,7 +20,6 @@ import static ai.labs.eddi.configs.properties.model.Property.Scope.*;
 public class PropertySetter implements IPropertySetter {
     private static final String PROPERTY_EXPRESSION = "property";
 
-    @Getter
     private final List<SetOnActions> setOnActionsList;
 
     public PropertySetter(List<SetOnActions> setOnActionsList) {
@@ -30,11 +28,9 @@ public class PropertySetter implements IPropertySetter {
 
     @Override
     public List<Property> extractProperties(Expressions expressions) {
-        return expressions.stream().
-                filter(expression ->
-                        PROPERTY_EXPRESSION.equals(expression.getExpressionName()) &&
-                                expression.getSubExpressions().length > 0).
-                map(expression -> {
+        return expressions.stream()
+                .filter(expression -> PROPERTY_EXPRESSION.equals(expression.getExpressionName()) && expression.getSubExpressions().length > 0)
+                .map(expression -> {
                     var meanings = new LinkedList<String>();
                     var propertyValue = new Value();
                     extractMeanings(meanings, propertyValue, expression.getSubExpressions()[0]);
@@ -49,9 +45,9 @@ public class PropertySetter implements IPropertySetter {
                             return new Property(propertyName, propertyValue.toInteger(), propertyScope);
                         }
                     } else {
-                        return propertyValue.isBoolean() ?
-                                new Property(propertyName, propertyValue.toBoolean(), propertyScope) :
-                                new Property(propertyName, propertyValue.getExpressionName(), propertyScope);
+                        return propertyValue.isBoolean()
+                                ? new Property(propertyName, propertyValue.toBoolean(), propertyScope)
+                                : new Property(propertyName, propertyValue.getExpressionName(), propertyScope);
                     }
 
                 }).collect(Collectors.toCollection(LinkedList::new));
@@ -73,8 +69,14 @@ public class PropertySetter implements IPropertySetter {
                 case "step" -> propertyScope = step;
                 // case "conversation" -> propertyScope = conversation;
                 case "longTerm" -> propertyScope = longTerm;
+                default -> {
+                }
             }
         }
         return propertyScope;
+    }
+
+    public List<SetOnActions> getSetOnActionsList() {
+        return setOnActionsList;
     }
 }

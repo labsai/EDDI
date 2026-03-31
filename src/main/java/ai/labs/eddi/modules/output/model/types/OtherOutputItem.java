@@ -1,13 +1,9 @@
 package ai.labs.eddi.modules.output.model.types;
 
 import ai.labs.eddi.modules.output.model.OutputItem;
-import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaInject;
-import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaTitle;
 
 import java.util.*;
 
-@JsonSchemaInject(json = "{\"additionalProperties\" : true}")
-@JsonSchemaTitle("other")
 public class OtherOutputItem extends OutputItem implements Map<String, String> {
     private final LinkedHashMap<String, String> internalMap = new LinkedHashMap<>();
 
@@ -52,7 +48,7 @@ public class OtherOutputItem extends OutputItem implements Map<String, String> {
     }
 
     @Override
-    public void putAll(Map m) {
+    public void putAll(Map<? extends String, ? extends String> m) {
         internalMap.putAll(m);
     }
 
@@ -78,8 +74,10 @@ public class OtherOutputItem extends OutputItem implements Map<String, String> {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         OtherOutputItem that = (OtherOutputItem) o;
         return Objects.equals(internalMap, that.internalMap);
     }

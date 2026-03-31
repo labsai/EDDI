@@ -1,17 +1,11 @@
 package ai.labs.eddi.modules.nlp.extensions.normalizers;
 
 import ai.labs.eddi.utils.LanguageUtilities;
-import lombok.AllArgsConstructor;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.util.List;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 
-@NoArgsConstructor
-@AllArgsConstructor
-@Setter
 public class PunctuationNormalizer implements INormalizer {
     public static final String PUNCTUATION = "!?:.,;";
     private static final String REPLACE_REGEX = " $0 ";
@@ -53,5 +47,21 @@ public class PunctuationNormalizer implements INormalizer {
             }
         }
         return false;
+    }
+
+    public PunctuationNormalizer() {
+    }
+
+    public PunctuationNormalizer(Pattern punctuationPattern, boolean removePunctuation) {
+        this.punctuationPattern = punctuationPattern;
+        this.removePunctuation = removePunctuation;
+    }
+
+    public void setPunctuationPattern(Pattern punctuationPattern) {
+        this.punctuationPattern = punctuationPattern;
+    }
+
+    public void setRemovePunctuation(boolean removePunctuation) {
+        this.removePunctuation = removePunctuation;
     }
 }

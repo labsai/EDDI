@@ -1,37 +1,33 @@
 package ai.labs.eddi.configs.propertysetter.rest;
 
-import ai.labs.eddi.configs.documentdescriptor.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.configs.documentdescriptor.model.DocumentDescriptor;
-import org.jboss.logging.Logger;
-
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
+
 import java.util.List;
+
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 /**
  * @author ginccc
  */
-
 @ApplicationScoped
 public class RestPropertySetterStore implements IRestPropertySetterStore {
     private final IPropertySetterStore propertySetterStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<PropertySetterConfiguration> restVersionInfo;
 
-    private static final Logger log = Logger.getLogger(RestPropertySetterStore.class);
-
     @Inject
-    public RestPropertySetterStore(IPropertySetterStore propertySetterStore,
-                                   IDocumentDescriptorStore documentDescriptorStore,
-                                   IJsonSchemaCreator jsonSchemaCreator) {
+    public RestPropertySetterStore(IPropertySetterStore propertySetterStore, IDocumentDescriptorStore documentDescriptorStore,
+            IJsonSchemaCreator jsonSchemaCreator) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, propertySetterStore, documentDescriptorStore);
         this.propertySetterStore = propertySetterStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
@@ -42,8 +38,7 @@ public class RestPropertySetterStore implements IRestPropertySetterStore {
         try {
             return Response.ok(jsonSchemaCreator.generateSchema(PropertySetterConfiguration.class)).build();
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException();
+            throw sneakyThrow(e);
         }
     }
 
@@ -68,8 +63,8 @@ public class RestPropertySetterStore implements IRestPropertySetterStore {
     }
 
     @Override
-    public Response deletePropertySetter(String id, Integer version) {
-        return restVersionInfo.delete(id, version);
+    public Response deletePropertySetter(String id, Integer version, Boolean permanent) {
+        return restVersionInfo.delete(id, version, permanent);
     }
 
     @Override

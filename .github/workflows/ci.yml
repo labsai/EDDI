@@ -1,0 +1,302 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+env:
+  DOCKER_IMAGE: labsai/eddi
+  JAVA_VERSION: '25'
+
+jobs:
+  # ─── Job 1: Build & Test ────────────────────────────────────────
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Set execute permission for mvnw
+        run: chmod +x mvnw
+
+      - name: Build and test
+        run: ./mvnw clean verify -DskipITs -B
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: target/surefire-reports/
+          retention-days: 14
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
+          retention-days: 14
+
+  # ─── Job 2: Docker Build & Push ─────────────────────────────────
+  docker:
+    name: Docker Build & Push
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: >
+      github.event_name == 'push' &&
+      github.repository == 'labsai/EDDI' &&
+      (startsWith(github.ref, 'refs/tags/v') ||
+       !contains(github.event.head_commit.message || '', '[skip docker]'))
+
+    outputs:
+      primary-tag: ${{ steps.meta.outputs.primary-tag }}
+      is-release: ${{ steps.meta.outputs.is-release }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Set execute permission for mvnw
+        run: chmod +x mvnw
+
+      - name: Compute Docker tags
+        id: meta
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            # Tag push: v6.0.0-RC1 → 6.0.0-RC1
+            PRIMARY_TAG="${GITHUB_REF#refs/tags/v}"
+            IS_RELEASE="true"
+          else
+            # Branch push: version from pom.xml + build number
+            POM_VERSION=$(grep -m1 '<version>' pom.xml | sed 's/.*<version>\(.*\)<\/version>.*/\1/')
+            PRIMARY_TAG="${POM_VERSION}-b${{ github.run_number }}"
+            IS_RELEASE="false"
+          fi
+
+          echo "primary-tag=${PRIMARY_TAG}" >> $GITHUB_OUTPUT
+          echo "is-release=${IS_RELEASE}" >> $GITHUB_OUTPUT
+
+          echo "### 🐳 Docker Tags" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${DOCKER_IMAGE}:${PRIMARY_TAG}\`" >> $GITHUB_STEP_SUMMARY
+          if [[ "$IS_RELEASE" == "true" ]]; then
+            echo "- \`${DOCKER_IMAGE}:latest\`" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Build application
+        run: ./mvnw clean package -DskipTests -Plicense-gen -B
+
+      - name: Build Docker image
+        run: |
+          PRIMARY_TAG="${{ steps.meta.outputs.primary-tag }}"
+          IS_RELEASE="${{ steps.meta.outputs.is-release }}"
+
+          TAGS="-t ${DOCKER_IMAGE}:${PRIMARY_TAG}"
+          if [[ "$IS_RELEASE" == "true" ]]; then
+            TAGS="${TAGS} -t ${DOCKER_IMAGE}:latest"
+          fi
+
+          docker build \
+            --build-arg EDDI_VERSION="${PRIMARY_TAG}" \
+            --build-arg EDDI_RELEASE="${{ github.run_number }}" \
+            -f src/main/docker/Dockerfile.jvm \
+            ${TAGS} \
+            .
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Push to Docker Hub
+        run: |
+          PRIMARY_TAG="${{ steps.meta.outputs.primary-tag }}"
+          IS_RELEASE="${{ steps.meta.outputs.is-release }}"
+
+          docker push ${DOCKER_IMAGE}:${PRIMARY_TAG}
+          if [[ "$IS_RELEASE" == "true" ]]; then
+            docker push ${DOCKER_IMAGE}:latest
+          fi
+
+          echo "### ✅ Pushed to Docker Hub" >> $GITHUB_STEP_SUMMARY
+
+  # ─── Job 3: Smoke Test ──────────────────────────────────────────
+  smoke-test:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    needs: docker
+
+    steps:
+      - name: Start MongoDB
+        run: |
+          docker run -d --name mongodb \
+            --network host \
+            mongo:6.0
+          echo "Waiting for MongoDB..."
+          for i in $(seq 1 15); do
+            if docker exec mongodb mongosh --eval "db.runCommand({ping:1})" > /dev/null 2>&1; then
+              echo "✅ MongoDB ready"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Start EDDI
+        run: |
+          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
+          echo "Starting ${DOCKER_IMAGE}:${PRIMARY_TAG}..."
+
+          docker run -d --name eddi \
+            --network host \
+            -e "MONGODB_CONNECTIONSTRING=mongodb://localhost:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000" \
+            ${DOCKER_IMAGE}:${PRIMARY_TAG}
+
+      - name: Wait for healthy
+        run: |
+          echo "Waiting for EDDI to start..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:7070/q/health/ready > /dev/null 2>&1; then
+              echo "✅ EDDI is healthy after $((i * 2))s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "❌ EDDI failed to start within 60s"
+          echo "=== EDDI logs ==="
+          docker logs eddi
+          echo "=== MongoDB logs ==="
+          docker logs mongodb
+          exit 1
+
+      - name: Verify API responds
+        run: |
+          echo "=== Health endpoint ==="
+          curl -sf http://localhost:7070/q/health/ready | python3 -m json.tool
+
+          echo ""
+          echo "=== OpenAPI spec available ==="
+          HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:7070/openapi)
+          echo "HTTP ${HTTP_CODE}"
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ OpenAPI endpoint returned ${HTTP_CODE}"
+            exit 1
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f eddi 2>/dev/null || true
+          docker rm -f mongodb 2>/dev/null || true
+
+  # ─── Job 4: Red Hat Preflight (PRs only) ────────────────────────
+  preflight-check:
+    name: Preflight Dry-Run (Red Hat Certification)
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Set execute permission for mvnw
+        run: chmod +x mvnw
+
+      - name: Build application
+        run: ./mvnw clean package -DskipTests -Plicense-gen -B
+
+      - name: Build Docker image with Red Hat labels
+        run: |
+          docker build \
+            -f src/main/docker/Dockerfile.jvm \
+            -t eddi-preflight-check:test \
+            .
+
+      - name: Verify Red Hat labels present
+        run: |
+          echo "=== Checking required Red Hat labels ==="
+          LABELS=$(docker inspect eddi-preflight-check:test --format '{{json .Config.Labels}}')
+          echo "$LABELS" | python3 -m json.tool
+          MISSING=0
+          for label in name vendor version release summary description; do
+            if echo "$LABELS" | python3 -c "import sys,json; d=json.load(sys.stdin); assert '$label' in d" 2>/dev/null; then
+              echo "✅ Label '$label' present"
+            else
+              echo "❌ Label '$label' MISSING"
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" -eq 1 ]; then
+            echo "::error::Required Red Hat labels are missing"
+            exit 1
+          fi
+
+      - name: Verify /licenses in container
+        run: |
+          echo "=== /licenses directory ==="
+          docker run --rm --entrypoint="" eddi-preflight-check:test ls -la /licenses/
+          echo ""
+          echo "=== THIRD-PARTY.txt exists ==="
+          docker run --rm --entrypoint="" eddi-preflight-check:test \
+            test -f /licenses/THIRD-PARTY.txt && echo "✅ THIRD-PARTY.txt found" || { echo "❌ THIRD-PARTY.txt missing"; exit 1; }
+
+      - name: Install preflight
+        run: |
+          PREFLIGHT_VERSION=$(curl -s https://api.github.com/repos/redhat-openshift-ecosystem/openshift-preflight/releases/latest | jq -r .tag_name)
+          echo "Installing preflight ${PREFLIGHT_VERSION}..."
+          curl -sL "https://github.com/redhat-openshift-ecosystem/openshift-preflight/releases/download/${PREFLIGHT_VERSION}/preflight-linux-amd64" \
+            -o /usr/local/bin/preflight
+          chmod +x /usr/local/bin/preflight
+          preflight --version
+
+      - name: Preflight check (local, no submit)
+        run: |
+          preflight check container \
+            eddi-preflight-check:test \
+            2>&1 | tee preflight-dryrun.txt || true
+          echo ""
+          echo "=== Preflight Summary ==="
+          if grep -q "FAILED" preflight-dryrun.txt; then
+            echo "::warning::Preflight check has failures — review output above."
+            echo "Note: Some checks (e.g. HasUniqueTag) require a pushed image and are expected to fail in dry-run."
+          else
+            echo "✅ All preflight checks passed"
+          fi
+
+      - name: Upload preflight dry-run results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preflight-dryrun
+          path: preflight-dryrun.txt
+          retention-days: 14

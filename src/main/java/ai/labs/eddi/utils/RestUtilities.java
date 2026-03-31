@@ -62,7 +62,6 @@ public class RestUtilities {
             relativeUriString = relativeUriString.substring(0, relativeUriString.length() - 1);
         }
 
-
         String[] split = relativeUriString.split("/");
         String lastPartOfUri = split.length > 2 ? split[split.length - 1].split("\\?")[0] : null;
         final String id = isValidId(lastPartOfUri) ? lastPartOfUri : null;
@@ -110,6 +109,11 @@ public class RestUtilities {
             }
 
             if (c >= 'A' && c <= 'F') {
+                continue;
+            }
+
+            // Allow dashes for UUID format (e.g. "5262b802-dc6c-4008-b54c-7c0b58100f97")
+            if (c == '-') {
                 continue;
             }
 

@@ -2,9 +2,8 @@ package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStore;
+import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Filters;
-import com.mongodb.reactivestreams.client.MongoCollection;
-import io.reactivex.rxjava3.core.Observable;
 import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -36,18 +35,15 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
 
         BsonDocument query = createQuery(queryFilters);
         Document sort = createSortQuery(sortTypes);
-        var publisher = collection.find(query).sort(sort);
+        var iterable = collection.find(query).sort(sort);
         if (limit == null || limit < 1) {
             limit = 20;
         }
-        publisher.limit(limit);
+        iterable.limit(limit);
 
         if (index != null) {
-            publisher.skip(index > 0 ? (index * limit) : 0);
+            iterable.skip(index > 0 ? (index * limit) : 0);
         }
-
-        Observable<Document> observable = Observable.fromPublisher(publisher);
-        Iterable<Document> iterable = observable.blockingIterable();
 
         for (Document result : iterable) {
             String id = result.get(FIELD_ID).toString();
@@ -60,8 +56,6 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
     }
 
     private BsonDocument createQuery(QueryFilters[] allQueryFilters) {
-        BsonDocument filter = new BsonDocument();
-
         List<Bson> connectedFilters = new ArrayList<>();
         for (QueryFilters queryFilters : allQueryFilters) {
             List<Bson> filters = new ArrayList<>();

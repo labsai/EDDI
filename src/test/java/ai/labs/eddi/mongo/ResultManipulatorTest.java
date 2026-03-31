@@ -61,67 +61,62 @@ public class ResultManipulatorTest {
 
     @Test
     public void testFilter1() throws ResultManipulator.FilterEntriesException {
-        //setup
+        // setup
         String filter = "what";
 
-        //setup expected
+        // setup expected
         TestEntity[] testEntities = new TestEntity[]{new TestEntity("whatever2"), new TestEntity("whatever1")};
 
-        //test
+        // test
         resultManipulator.filterEntities(filter);
 
-        //assert
+        // assert
         Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
     public void testFilter2() throws ResultManipulator.FilterEntriesException {
-        //setup
+        // setup
         String filter = "\"something2\"";
 
-        //setup expected
+        // setup expected
         TestEntity[] testEntities = new TestEntity[]{new TestEntity("something2")};
 
-        //test
+        // test
         resultManipulator.filterEntities(filter);
 
-        //assert
+        // assert
         Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
     public void testFilter3() throws ResultManipulator.FilterEntriesException {
-        //setup
+        // setup
         String filter = "";
 
-        //setup expected
-        TestEntity[] testEntities = new TestEntity[]{
-                new TestEntity("something4"),
-                new TestEntity("something2"),
-                new TestEntity("something1"),
-                new TestEntity("something3"),
-                new TestEntity("whatever2"),
-                new TestEntity("whatever1")};
+        // setup expected
+        TestEntity[] testEntities = new TestEntity[]{new TestEntity("something4"), new TestEntity("something2"), new TestEntity("something1"),
+                new TestEntity("something3"), new TestEntity("whatever2"), new TestEntity("whatever1")};
 
-        //test
+        // test
         resultManipulator.filterEntities(filter);
 
-        //assert
+        // assert
         Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
     public void testFilter4() throws ResultManipulator.FilterEntriesException {
-        //setup
+        // setup
         String filter = "somethingwichisnotinthelist";
 
-        //setup expected
+        // setup expected
         TestEntity[] testEntities = new TestEntity[]{};
 
-        //test
+        // test
         resultManipulator.filterEntities(filter);
 
-        //assert
+        // assert
         Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
@@ -139,7 +134,7 @@ public class ResultManipulatorTest {
     public void testSort2() {
         try {
             resultManipulator.sortEntities((o1, o2) -> {
-                return 0;  //not implemented,
+                return 0; // not implemented,
             }, null);
             Assertions.fail();
         } catch (Exception e) {
@@ -149,127 +144,104 @@ public class ResultManipulatorTest {
 
     @Test
     public void testSort3() {
-        //setup expected
-        TestEntity[] testEntities = new TestEntity[]{
-                new TestEntity("something1"),
-                new TestEntity("something2"),
-                new TestEntity("something3"),
-                new TestEntity("something4"),
-                new TestEntity("whatever1"),
-                new TestEntity("whatever2")};
+        // setup expected
+        TestEntity[] testEntities = new TestEntity[]{new TestEntity("something1"), new TestEntity("something2"), new TestEntity("something3"),
+                new TestEntity("something4"), new TestEntity("whatever1"), new TestEntity("whatever2")};
 
-        //test
+        // test
         resultManipulator.sortEntities(Comparator.comparing(TestEntity::getTest), ResultManipulator.ASCENDING);
 
-        //assert
+        // assert
         Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
     public void testSort4() {
-        //setup expected
-        TestEntity[] testEntities = new TestEntity[]{
-                new TestEntity("whatever2"),
-                new TestEntity("whatever1"),
-                new TestEntity("something4"),
-                new TestEntity("something3"),
-                new TestEntity("something2"),
-                new TestEntity("something1")
-        };
+        // setup expected
+        TestEntity[] testEntities = new TestEntity[]{new TestEntity("whatever2"), new TestEntity("whatever1"), new TestEntity("something4"),
+                new TestEntity("something3"), new TestEntity("something2"), new TestEntity("something1")};
 
-        //test
+        // test
         resultManipulator.sortEntities(Comparator.comparing(TestEntity::getTest), ResultManipulator.DESCENDING);
 
-        //assert
+        // assert
         Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
     public void testLimit1() {
-        //setup
+        // setup
         int index = 0;
         int limit = 5;
 
-        //setup expected
-        TestEntity[] testEntities = new TestEntity[]{
-                new TestEntity("something4"),
-                new TestEntity("something2"),
-                new TestEntity("something1"),
-                new TestEntity("something3"),
-                new TestEntity("whatever2")
-        };
+        // setup expected
+        TestEntity[] testEntities = new TestEntity[]{new TestEntity("something4"), new TestEntity("something2"), new TestEntity("something1"),
+                new TestEntity("something3"), new TestEntity("whatever2")};
 
-        //test
+        // test
         resultManipulator.limitEntities(index, limit);
 
-        //assert
+        // assert
         Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
     public void testLimit2() {
-        //setup
+        // setup
         int index = 2;
         int limit = 2;
 
-        //setup expected
-        TestEntity[] testEntities = new TestEntity[]{
-                new TestEntity("whatever2"),
-                new TestEntity("whatever1")};
+        // setup expected
+        TestEntity[] testEntities = new TestEntity[]{new TestEntity("whatever2"), new TestEntity("whatever1")};
 
-        //test
+        // test
         resultManipulator.limitEntities(index, limit);
 
-        //assert
+        // assert
         Assertions.assertEquals(testEntities.length, resultManipulator.getManipulatedList().size());
         Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
     public void testLimit3() {
-        //setup
+        // setup
         int index = 10;
         int limit = 3;
 
-        //setup expected
+        // setup expected
         TestEntity[] testEntities = new TestEntity[]{};
 
-        //test
+        // test
         resultManipulator.limitEntities(index, limit);
 
-        //assert
+        // assert
         Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
     public void testLimit4() {
-        //setup
+        // setup
         int index = 0;
         int limit = 0;
 
-        //setup expected
-        TestEntity[] testEntities = new TestEntity[]{
-                new TestEntity("something4"),
-                new TestEntity("something2"),
-                new TestEntity("something1"),
-                new TestEntity("something3"),
-                new TestEntity("whatever2"),
-                new TestEntity("whatever1")};
+        // setup expected
+        TestEntity[] testEntities = new TestEntity[]{new TestEntity("something4"), new TestEntity("something2"), new TestEntity("something1"),
+                new TestEntity("something3"), new TestEntity("whatever2"), new TestEntity("whatever1")};
 
-        //test
+        // test
         resultManipulator.limitEntities(index, limit);
 
-        //assert
+        // assert
         Assertions.assertArrayEquals(testEntities, resultManipulator.getManipulatedList().toArray());
     }
 
     @Test
     public void testLimit5() {
-        //setup
+        // setup
         int index = -1;
         int limit = 0;
 
-        //test
+        // test
         try {
             resultManipulator.limitEntities(index, limit);
             Assertions.fail();
@@ -280,11 +252,11 @@ public class ResultManipulatorTest {
 
     @Test
     public void testLimit6() {
-        //setup
+        // setup
         int index = 0;
         int limit = -1;
 
-        //test
+        // test
         try {
             resultManipulator.limitEntities(index, limit);
             Assertions.fail();
@@ -306,8 +278,10 @@ public class ResultManipulatorTest {
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
 
             TestEntity that = (TestEntity) o;
 
@@ -322,9 +296,7 @@ public class ResultManipulatorTest {
 
         @Override
         public String toString() {
-            return "TestEntity{" +
-                    "test='" + test + '\'' +
-                    '}';
+            return "TestEntity{" + "test='" + test + '\'' + '}';
         }
     }
 }

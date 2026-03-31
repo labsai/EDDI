@@ -1,0 +1,32 @@
+# NATS JetStream overlay — enables durable messaging for multi-replica EDDI
+#
+# ⚠️  This is a COMPONENT overlay — it does NOT include the base EDDI manifests.
+# You MUST apply it together with a database overlay, for example:
+#
+# Using a combined kustomization.yaml that references both:
+#   resources:
+#     - ../mongodb
+#     - ../nats
+#
+# Requires: EDDI replicas > 1 to benefit from NATS ordering guarantees.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: eddi
+
+resources:
+  - nats-statefulset.yaml
+  - nats-service.yaml
+
+# Patch EDDI to use NATS instead of in-memory messaging
+patches:
+  - target:
+      kind: ConfigMap
+      name: eddi-config
+    patch: |
+      - op: replace
+        path: /data/EDDI_MESSAGING_TYPE
+        value: "nats"
+      - op: add
+        path: /data/EDDI_NATS_URL
+        value: "nats://nats:4222"

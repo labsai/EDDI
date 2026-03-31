@@ -1,8 +1,6 @@
 package ai.labs.eddi.engine.memory.model;
 
 import ai.labs.eddi.engine.memory.IData;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.Collections;
 import java.util.Date;
@@ -12,14 +10,12 @@ import java.util.Random;
 /**
  * @author ginccc
  */
-@Getter
-@Setter
 public class Data<T> implements IData<T> {
     private final String key;
     private List<T> possibleResults;
     private T result;
     private final Date timestamp;
-    private String originPackageId;
+    private String originWorkflowId;
     private boolean isPublic;
 
     public Data(String key, T result) {
@@ -54,7 +50,7 @@ public class Data<T> implements IData<T> {
 
     @Override
     public boolean equals(Object o) {
-        return this == o || o instanceof IData && key.equals(((Data) o).key);
+        return this == o || o instanceof Data<?> data && key.equals(data.key);
     }
 
     @Override
@@ -64,9 +60,46 @@ public class Data<T> implements IData<T> {
 
     @Override
     public String toString() {
-        return "result" +
-                "{key='" + key + '\'' +
-                ", result=" + result +
-                '}';
+        return "result" + "{key='" + key + '\'' + ", result=" + result + '}';
+    }
+
+    public final String getKey() {
+        return key;
+    }
+
+    public List<T> getPossibleResults() {
+        return possibleResults;
+    }
+
+    public void setPossibleResults(List<T> possibleResults) {
+        this.possibleResults = possibleResults;
+    }
+
+    public T getResult() {
+        return result;
+    }
+
+    public void setResult(T result) {
+        this.result = result;
+    }
+
+    public final Date getTimestamp() {
+        return timestamp;
+    }
+
+    public String getOriginWorkflowId() {
+        return originWorkflowId;
+    }
+
+    public void setOriginWorkflowId(String originWorkflowId) {
+        this.originWorkflowId = originWorkflowId;
+    }
+
+    public boolean isPublic() {
+        return isPublic;
+    }
+
+    public void setPublic(boolean isPublic) {
+        this.isPublic = isPublic;
     }
 }

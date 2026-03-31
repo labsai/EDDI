@@ -17,7 +17,6 @@
 
 package ai.labs.eddi.datastore.serialization;
 
-
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.SerializerProvider;
@@ -36,8 +35,7 @@ public class IdSerializer extends JsonSerializer<String> {
         serialize(t, (BsonGenerator) jsonGenerator, serializerProvider);
     }
 
-    public void serialize(String s, BsonGenerator bsonGenerator, SerializerProvider serializerProvider) throws
-            IOException {
+    public void serialize(String s, BsonGenerator bsonGenerator, SerializerProvider serializerProvider) throws IOException {
         if (s == null) {
             serializerProvider.defaultSerializeNull(bsonGenerator);
             return;
@@ -50,6 +48,7 @@ public class IdSerializer extends JsonSerializer<String> {
         bsonGenerator.writeObjectId(createObjectIdFromString(s));
     }
 
+    @SuppressWarnings("deprecation")
     private static ObjectId createObjectIdFromString(String s) {
         int[] parsed = parse(s);
 

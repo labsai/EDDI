@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.nlp.extensions.normalizers.providers;
 
-
 import ai.labs.eddi.modules.nlp.extensions.normalizers.ContractedWordNormalizer;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.INormalizer;
 

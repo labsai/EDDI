@@ -1,0 +1,84 @@
+# EDDI Server Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eddi
+  labels:
+    app.kubernetes.io/name: eddi
+    app.kubernetes.io/version: "6.0.0"
+    app.kubernetes.io/component: server
+    app.kubernetes.io/part-of: eddi
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: eddi
+      app.kubernetes.io/component: server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: eddi
+        app.kubernetes.io/version: "6.0.0"
+        app.kubernetes.io/component: server
+        app.kubernetes.io/part-of: eddi
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "7070"
+        prometheus.io/path: "/q/metrics"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 185
+        runAsGroup: 185
+        fsGroup: 185
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: eddi
+          image: labsai/eddi:6
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 7070
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: eddi-config
+            - secretRef:
+                name: eddi-secrets
+          # Startup probe: allow up to 60s for first boot (slow image pull, DB init)
+          startupProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+            failureThreshold: 30
+            periodSeconds: 2
+          # Liveness: restart if the process is stuck
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Readiness: gate traffic until fully ready
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 384Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi

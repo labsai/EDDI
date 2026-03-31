@@ -31,20 +31,20 @@ public class LifecycleManagerTest {
 
     @Test
     public void testExecuteLifecycle() throws Exception {
-        //setup
+        // setup
         ILifecycleTask lifecycleTask = mock(ILifecycleTask.class);
         lifecycleManager.addLifecycleTask(lifecycleTask);
 
-        //test
+        // test
         lifecycleManager.executeLifecycle(memory, null);
 
-        //assert
+        // assert
         Mockito.verify(lifecycleTask, Mockito.atMost(1)).execute(memory, null);
     }
 
     @Test
     public void testValidationWhenMemoryIsNull() {
-        //test
+        // test
         try {
             lifecycleManager.executeLifecycle(null, null);
             Assertions.fail();
@@ -57,7 +57,7 @@ public class LifecycleManagerTest {
 
     @Test
     public void testValidationWhenLifecycleIsNull() {
-        //test
+        // test
         try {
             lifecycleManager.addLifecycleTask(null);
             Assertions.fail();

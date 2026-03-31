@@ -110,8 +110,8 @@ public class ExpressionProvider implements IExpressionProvider {
                 Expressions expressions = parseExpressions(subExpressions);
                 exp.setSubExpressions(expressions);
             } catch (Exception e) {
-                log.error(format("Error while parsing Expression: %s, indexOfOpening: %s, indexOfClosing: %s, message: %s",
-                        expression, indexOfOpening, indexOfClosing, e.getLocalizedMessage()));
+                log.error(format("Error while parsing Expression: %s, indexOfOpening: %s, indexOfClosing: %s, message: %s", expression,
+                        indexOfOpening, indexOfClosing, e.getLocalizedMessage()));
             }
         } else {
             exp = new Expression(expression);

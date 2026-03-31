@@ -9,10 +9,6 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.output.model.QuickReply;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.AllArgsConstructor;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.Setter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -36,7 +32,7 @@ public class OutputTemplateTaskTest {
     private static IDataFactory dataFactory;
     private static IConversationMemory conversationMemory;
     private static IConversationMemory.IWritableConversationStep currentStep;
-    private static final String templateString = "This is some output with context such as [[${context}]]";
+    private static final String templateString = "This is some output with context such as {context}";
     private static OutputTemplateTask outputTemplateTask;
     private static final String expectedOutputString = "This is some output with context such as someContextValue";
     private static ITemplatingEngine templatingEngine;
@@ -49,46 +45,43 @@ public class OutputTemplateTaskTest {
         currentStep = mock(IConversationMemory.IWritableConversationStep.class);
         when(conversationMemory.getCurrentStep()).then(invocation -> currentStep);
         IMemoryItemConverter memoryTemplateConverter = mock(IMemoryItemConverter.class);
-        when(memoryTemplateConverter.convert(any(IConversationMemory.class))).
-                then(invocation -> new HashMap<>());
+        when(memoryTemplateConverter.convert(any(IConversationMemory.class))).then(invocation -> new HashMap<>());
         ObjectMapper objectMapper = new ObjectMapper();
         outputTemplateTask = new OutputTemplateTask(templatingEngine, memoryTemplateConverter, dataFactory, objectMapper);
     }
 
     @Test
     public void executeTaskWithContextString() throws Exception {
-        //setup
+        // setup
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
-            ret.add(new MockData<>("context:someContext",
-                    new Context(Context.ContextType.string, "someContextValue")));
+            ret.add(new MockData<>("context:someContext", new Context(Context.ContextType.string, "someContextValue")));
             return ret;
         });
         List<QuickReply> expectedPostQuickReplies = setupTask();
 
-        //test
+        // test
         outputTemplateTask.execute(conversationMemory, null);
 
-        //assert
+        // assert
         verifyTask(expectedPostQuickReplies);
     }
 
     @Test
     public void executeTaskWithContextObject() throws Exception {
-        //setup
+        // setup
         final TestContextObject testContextObject = new TestContextObject("someContext", "someContextValue");
         when(currentStep.getAllData(eq("context"))).then(invocation -> {
             LinkedList<IData<Context>> ret = new LinkedList<>();
-            ret.add(new MockData<>("context:someContext",
-                    new Context(Context.ContextType.object, testContextObject)));
+            ret.add(new MockData<>("context:someContext", new Context(Context.ContextType.object, testContextObject)));
             return ret;
         });
         List<QuickReply> expectedPostQuickReplies = setupTask();
 
-        //test
+        // test
         outputTemplateTask.execute(conversationMemory, null);
 
-        //assert
+        // assert
         verifyTask(expectedPostQuickReplies);
     }
 
@@ -99,14 +92,10 @@ public class OutputTemplateTaskTest {
             return ret;
         });
         List<QuickReply> expectedPreQuickReplies = new LinkedList<>();
-        expectedPreQuickReplies.add(new QuickReply(
-                "Quick Reply Value [[${context}]]",
-                "quickReply(expression)", false));
+        expectedPreQuickReplies.add(new QuickReply("Quick Reply Value {context}", "quickReply(expression)", false));
 
         List<QuickReply> expectedPostQuickReplies = new LinkedList<>();
-        expectedPostQuickReplies.add(new QuickReply(
-                "Quick Reply Value someContextValue",
-                "quickReply(expression)", false));
+        expectedPostQuickReplies.add(new QuickReply("Quick Reply Value someContextValue", "quickReply(expression)", false));
 
         when(currentStep.getAllData(eq("quickReplies"))).then(invocation -> {
             LinkedList<IData<List<QuickReply>>> ret = new LinkedList<>();
@@ -126,8 +115,7 @@ public class OutputTemplateTaskTest {
         when(dataFactory.createData(eq(KEY_QUICK_REPLY_SOME_ACTION_POST_TEMPLATED), anyList()))
                 .then(invocation -> new Data<>(KEY_QUICK_REPLY_SOME_ACTION_POST_TEMPLATED, expectedPostQuickReplies));
 
-        when(templatingEngine.processTemplate(eq(templateString), anyMap(), eq(TEXT))).
-                then(invocation -> expectedOutputString);
+        when(templatingEngine.processTemplate(eq(templateString), anyMap(), eq(TEXT))).then(invocation -> expectedOutputString);
 
         var expectedPreQuickReply = expectedPreQuickReplies.getFirst();
         var expectedPostQuickReply = expectedPostQuickReplies.getFirst();
@@ -136,15 +124,12 @@ public class OutputTemplateTaskTest {
         String expectedPostQuickReplyValue = expectedPostQuickReply.getValue();
         String expectedPostQuickReplyExpressions = expectedPostQuickReply.getExpressions();
 
-        when(templatingEngine.processTemplate(eq(expectedPreQuickReplyValue), anyMap())).
-                then(invocation -> expectedPostQuickReplyValue);
-        when(templatingEngine.processTemplate(eq(expectedPreQuickReply.getExpressions()), anyMap())).
-                then(invocation -> expectedPostQuickReplyExpressions);
+        when(templatingEngine.processTemplate(eq(expectedPreQuickReplyValue), anyMap())).then(invocation -> expectedPostQuickReplyValue);
+        when(templatingEngine.processTemplate(eq(expectedPreQuickReply.getExpressions()), anyMap()))
+                .then(invocation -> expectedPostQuickReplyExpressions);
 
-        when(templatingEngine.processTemplate(eq(expectedPostQuickReplyValue), anyMap())).
-                then(invocation -> expectedPostQuickReplyValue);
-        when(templatingEngine.processTemplate(eq(expectedPostQuickReplyExpressions), anyMap())).
-                then(invocation -> expectedPostQuickReplyExpressions);
+        when(templatingEngine.processTemplate(eq(expectedPostQuickReplyValue), anyMap())).then(invocation -> expectedPostQuickReplyValue);
+        when(templatingEngine.processTemplate(eq(expectedPostQuickReplyExpressions), anyMap())).then(invocation -> expectedPostQuickReplyExpressions);
 
         return expectedPostQuickReplies;
     }
@@ -159,8 +144,6 @@ public class OutputTemplateTaskTest {
         verify(currentStep, times(9)).storeData(any(IData.class));
     }
 
-
-    @EqualsAndHashCode
     private static class MockData<T> implements IData<T> {
         private final String key;
         private T result;
@@ -191,12 +174,12 @@ public class OutputTemplateTaskTest {
         }
 
         @Override
-        public String getOriginPackageId() {
+        public String getOriginWorkflowId() {
             return null;
         }
 
         @Override
-        public void setOriginPackageId(String packageId) {
+        public void setOriginWorkflowId(String workflowId) {
 
         }
 
@@ -219,14 +202,23 @@ public class OutputTemplateTaskTest {
         public void setPublic(boolean isPublic) {
 
         }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
+            MockData<?> that = (MockData<?>) o;
+            return java.util.Objects.equals(key, that.key) && java.util.Objects.equals(result, that.result);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(key, result);
+        }
     }
 
-    @Getter
-    @Setter
-    @AllArgsConstructor
-    private static class TestContextObject {
-        private String key;
-        private String value;
+    private record TestContextObject(String key, String value) {
     }
 }
-
