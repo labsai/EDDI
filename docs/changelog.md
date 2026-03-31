@@ -42,6 +42,15 @@ Eliminated the legacy flat `properties` collection and unified all user-scoped p
 
 **Files:** 3 deleted, 1 new (`PropertiesMigrationService`), 8 modified. All tests pass.
 
+**Code review fixes (2026-03-31):**
+- Bug: Removed dead `DELETE FROM properties` in `PostgresUserMemoryStore.deleteAllForUser()` — would crash on fresh v6 deployments
+- Bug: `PropertiesMigrationService` changed from `@DefaultBean` to `@IfBuildProfile("!postgres")` — prevented CDI startup failure in Postgres-only mode
+- Fix: Added `List<?>` type handling to `Conversation.entryToProperty()` — list values were silently `toString()`d
+- Fix: `IPropertiesHandler.getUserMemoryStore()` javadoc no longer claims "always non-null"
+- Cleanup: `MongoUserMemoryStore.mergeProperties()` moved redundant `set(FIELD_VISIBILITY)` to `setOnInsert`
+- Docs: `docs/user-memory.md` migration section updated to reflect deletion (not deprecation) of `IPropertiesStore`
+- Test: Added `RestPropertiesStoreTest` (7 tests) to verify REST delegation to `IUserMemoryStore`
+
 ---
 
 ## Strategy 2: Rolling Summary + Conversation Recall Tool (2026-03-30)

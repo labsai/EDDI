@@ -34,11 +34,12 @@ Persistent User Memory enables EDDI agents to remember facts, preferences, and c
 
 ## Agent Configuration
 
-Enable persistent memory in your agent's configuration:
+Enable advanced memory features (LLM tools, Dream consolidation, guardrails, recall settings) in your agent's configuration:
 
 ```json
 {
   "name": "My Agent",
+  "enableMemoryTools": true,
   "userMemoryConfig": {
     "maxEntriesPerUser": 500,
     "maxRecallEntries": 50,
@@ -61,6 +62,8 @@ Enable persistent memory in your agent's configuration:
   "builtInToolsWhitelist": ["usermemory"]
 }
 ```
+
+> **Note:** Basic `longTerm` property persistence (via `PropertySetterTask`) works for **all** agents regardless of `enableMemoryTools`. The flag only gates advanced features: LLM UserMemoryTool, Dream consolidation, write guardrails, and custom recall settings.
 
 ### Configuration Reference
 
@@ -234,17 +237,26 @@ The Dream service exposes Micrometer metrics:
 
 ## Migration from Legacy Properties
 
-Persistent User Memory replaces the legacy `IPropertiesStore` interface (now `@Deprecated`). Key differences:
+In v6, the legacy `IPropertiesStore` interface and the `properties` collection have been **removed**. All user-scoped persistent data now lives in the unified `usermemories` collection.
 
-| Aspect | Legacy Properties | User Memory |
+| Aspect | Legacy Properties (v5) | User Memory (v6) |
 |---|---|---|
 | **Storage** | `properties` collection (flat map) | `usermemories` collection (structured entries) |
+| **Interface** | `IPropertiesStore` (deleted in v6) | `IUserMemoryStore` |
 | **Scoping** | Per-user only | Per-user, per-agent, per-group |
 | **LLM access** | Via template variables only | Direct LLM tool access |
 | **Querying** | Key lookup only | Key, category, search, visibility filtering |
 | **Administration** | No REST API | Full CRUD REST API + MCP tools |
 
-Legacy property operations (`readProperties`, `mergeProperties`, `deleteProperties`) continue to work through `IUserMemoryStore` — the unified store delegates legacy methods to the existing `properties` collection.
+### Backward Compatibility
+
+Legacy flat property operations (`readProperties`, `mergeProperties`, `deleteProperties`) continue to work through `IUserMemoryStore` — they operate on `global` visibility entries in the `usermemories` collection. The REST endpoint at `/propertiesstore/properties/{userId}` is preserved.
+
+### Startup Migration (MongoDB only)
+
+On first startup, `PropertiesMigrationService` automatically migrates existing `properties` documents into `usermemories` as `global` entries with `category=legacy`. The old collection is renamed to `properties_migrated_v6` as a safety backup. This migration is idempotent and skipped if no legacy collection exists.
+
+> **Note:** PostgreSQL deployments do not need migration — the `properties` table only existed in MongoDB (v5).
 
 ## Data Model
 

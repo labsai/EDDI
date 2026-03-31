@@ -966,6 +966,27 @@ Cross-conversation, agent-scoped fact retention with LLM tools, REST API, MCP ma
 
 **Total tests:** 1406 (all pass). **Last commit:** Phase 11a code review fixes.
 
+### Properties Consolidation: `IPropertiesStore` → `IUserMemoryStore` ✅
+
+Eliminated the legacy `properties` collection and unified all user-scoped persistent storage into `usermemories`. Removes a redundant storage layer.
+
+| Change | Details |
+|---|---|
+| **Deleted** | `IPropertiesStore.java`, `PropertiesStore.java` (Mongo), `PostgresPropertiesStore.java` |
+| **Renamed** | `enableUserMemory` → `enableMemoryTools` (gates advanced tools only, not basic persistence) |
+| **Conversation.java** | Consolidated dual load/store into single unified flow via `IUserMemoryStore` |
+| **REST preserved** | `RestPropertiesStore` delegates to `IUserMemoryStore` flat property methods |
+| **Migration** | `PropertiesMigrationService` (MongoDB startup migration, `@IfBuildProfile("!postgres")`) |
+
+**Code review fixes (commit `7997da96`):**
+- Bug: Removed dead `DELETE FROM properties` in Postgres GDPR delete
+- Bug: Guarded `PropertiesMigrationService` with `@IfBuildProfile("!postgres")` (was `@DefaultBean`)
+- Fix: Added `List` type handling to `Conversation.entryToProperty()` 
+- Fix: `IPropertiesHandler` javadoc consistency
+- Cleanup: Moved redundant `set(FIELD_VISIBILITY)` to `setOnInsert` in MongoDB merge
+
+**Docs updated:** `docs/user-memory.md`, `docs/changelog.md`
+
 ### Phase 11b: Token-Aware Conversation Window (Strategy 1) ✅
 
 Config-driven token-budget windowing with anchored opening steps, replacing fixed step-count limits for LLM context management.
