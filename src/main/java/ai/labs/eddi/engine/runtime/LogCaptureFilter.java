@@ -53,8 +53,15 @@ public final class LogCaptureFilter implements Filter {
     public boolean isLoggable(LogRecord record) {
         // Fast path: store already resolved
         if (store != null) {
-            store.capture(record);
-            return true;
+            try {
+                store.capture(record);
+                return true;
+            } catch (Exception _) {
+                // Stale CDI proxy after dev-mode hot-reload — the old Arc
+                // container was shut down, so the cached proxy is invalid.
+                // Reset and fall through to re-resolve from the new container.
+                store = null;
+            }
         }
 
         // Slow path: try to resolve the CDI bean lazily.
