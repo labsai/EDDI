@@ -47,6 +47,7 @@
 
 ## Deployment & Infrastructure
 
+- [Release & Versioning Strategy](release-versioning.md)
 - [Docker](docker.md)
 - [Kubernetes](kubernetes.md)
 - [Setting Up EDDI on AWS with MongoDB Atlas](setup-eddi-on-aws-with-mongodb-atlas.md)
