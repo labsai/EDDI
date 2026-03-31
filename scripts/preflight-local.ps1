@@ -24,7 +24,7 @@
     .\scripts\preflight-local.ps1 -LabelsOnly
     # Just verify Red Hat labels are present
 #>
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '')]
+[CmdletBinding(SupportsShouldProcess)]
 param(
     [switch]$SkipBuild,
     [switch]$LabelsOnly
@@ -33,69 +33,73 @@ param(
 $ErrorActionPreference = "Stop"
 $IMAGE = "eddi-preflight:local"
 
-Write-Host ""
-Write-Host "=== EDDI Preflight Check (Local) ===" -ForegroundColor Cyan
-Write-Host ""
+Write-Information -MessageData "" -InformationAction Continue
+Write-Information -MessageData "=== EDDI Preflight Check (Local) ===" -InformationAction Continue
+Write-Information -MessageData "" -InformationAction Continue
 
 # ─── Prerequisites ───────────────────────────────────────────────
 # Docker Desktop must be running
-$dockerCheck = docker info 2>&1
+docker info 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ Docker is not running." -ForegroundColor Red
-    Write-Host "   Start Docker Desktop and try again." -ForegroundColor DarkGray
+    Write-Error -Message "❌ Docker is not running."
+    Write-Information -MessageData "   Start Docker Desktop and try again." -InformationAction Continue
     exit 1
 }
 
 # JDK required for build (skip check if -SkipBuild)
 if (-not $SkipBuild) {
-    $javaCheck = java -version 2>&1
+    java -version 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "❌ Java (JDK 25) is not installed or not on PATH." -ForegroundColor Red
-        Write-Host "   Install: https://adoptium.net/temurin/releases/?version=25" -ForegroundColor DarkGray
+        Write-Error -Message "❌ Java (JDK 25) is not installed or not on PATH."
+        Write-Information -MessageData "   Install: https://adoptium.net/temurin/releases/?version=25" -InformationAction Continue
         exit 1
     }
 }
 
 # ─── Step 1: Build ──────────────────────────────────────────────
 if (-not $SkipBuild) {
-    Write-Host "[1/4] Building application..." -ForegroundColor Yellow
-    & .\mvnw.cmd clean package -DskipTests -Plicense-gen -B
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "❌ Maven build failed" -ForegroundColor Red
-        exit 1
+    Write-Information -MessageData "[1/4] Building application..." -InformationAction Continue
+    if ($PSCmdlet.ShouldProcess("Maven", "Build application via mvnw")) {
+        & .\mvnw.cmd clean package -DskipTests -Plicense-gen -B
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error -Message "❌ Maven build failed"
+            exit 1
+        }
     }
 
-    Write-Host ""
-    Write-Host "[2/4] Building Docker image..." -ForegroundColor Yellow
-    docker build `
-        --build-arg EDDI_VERSION="local" `
-        --build-arg EDDI_RELEASE="1" `
-        -f src/main/docker/Dockerfile.jvm `
-        -t $IMAGE `
-        .
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "❌ Docker build failed" -ForegroundColor Red
-        exit 1
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "[2/4] Building Docker image..." -InformationAction Continue
+    if ($PSCmdlet.ShouldProcess("Docker", "Build image $IMAGE")) {
+        docker build `
+            --build-arg EDDI_VERSION="local" `
+            --build-arg EDDI_RELEASE="1" `
+            -f src/main/docker/Dockerfile.jvm `
+            -t $IMAGE `
+            .
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error -Message "❌ Docker build failed"
+            exit 1
+        }
     }
 } else {
-    Write-Host "[1/4] Skipping build (using existing image)" -ForegroundColor DarkGray
-    Write-Host "[2/4] Skipping build" -ForegroundColor DarkGray
+    Write-Information -MessageData "[1/4] Skipping build (using existing image)" -InformationAction Continue
+    Write-Information -MessageData "[2/4] Skipping build" -InformationAction Continue
 
     # Verify image exists
     $null = docker image inspect $IMAGE 2>$null
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "❌ Image '$IMAGE' not found. Run without -SkipBuild first." -ForegroundColor Red
+        Write-Error -Message "❌ Image '$IMAGE' not found. Run without -SkipBuild first."
         exit 1
     }
 }
 
 # ─── Step 2: Check Red Hat labels ────────────────────────────────
-Write-Host ""
-Write-Host "[3/4] Checking Red Hat labels..." -ForegroundColor Yellow
+Write-Information -MessageData "" -InformationAction Continue
+Write-Information -MessageData "[3/4] Checking Red Hat labels..." -InformationAction Continue
 
 $labelsJson = docker inspect $IMAGE --format '{{json .Config.Labels}}' 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ Failed to inspect image" -ForegroundColor Red
+    Write-Error -Message "❌ Failed to inspect image"
     exit 1
 }
 
@@ -106,63 +110,68 @@ $missing = @()
 foreach ($label in $requiredLabels) {
     if ($labels.PSObject.Properties.Name -contains $label) {
         $value = $labels.$label
-        Write-Host "  ✅ $label = $value" -ForegroundColor Green
+        Write-Information -MessageData "  ✅ $label = $value" -InformationAction Continue
     } else {
-        Write-Host "  ❌ $label — MISSING" -ForegroundColor Red
+        Write-Warning -Message "  ❌ $label — MISSING"
         $missing += $label
     }
 }
 
 if ($missing.Count -gt 0) {
-    Write-Host ""
-    Write-Host "❌ Missing labels: $($missing -join ', ')" -ForegroundColor Red
-    Write-Host "   Fix in: src/main/docker/Dockerfile.jvm (LABEL directive)" -ForegroundColor DarkGray
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Error -Message "❌ Missing labels: $($missing -join ', ')"
+    Write-Information -MessageData "   Fix in: src/main/docker/Dockerfile.jvm (LABEL directive)" -InformationAction Continue
     exit 1
 }
 
 # Check /licenses
-Write-Host ""
-Write-Host "  Checking /licenses directory..." -ForegroundColor DarkGray
-docker run --rm --entrypoint "" $IMAGE test -f /licenses/THIRD-PARTY.txt
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "  ✅ /licenses/THIRD-PARTY.txt present" -ForegroundColor Green
-} else {
-    Write-Host "  ❌ /licenses/THIRD-PARTY.txt missing — run with -Plicense-gen" -ForegroundColor Red
-    exit 1
+Write-Information -MessageData "" -InformationAction Continue
+Write-Information -MessageData "  Checking /licenses directory..." -InformationAction Continue
+if ($PSCmdlet.ShouldProcess("Docker", "Run container to inspect /licenses directory")) {
+    docker run --rm --entrypoint "" $IMAGE test -f /licenses/THIRD-PARTY.txt
+    if ($LASTEXITCODE -eq 0) {
+        Write-Information -MessageData "  ✅ /licenses/THIRD-PARTY.txt present" -InformationAction Continue
+    } else {
+        Write-Error -Message "  ❌ /licenses/THIRD-PARTY.txt missing — run with -Plicense-gen"
+        exit 1
+    }
 }
 
 if ($LabelsOnly) {
-    Write-Host ""
-    Write-Host "✅ Label check passed. Use without -LabelsOnly for full preflight." -ForegroundColor Green
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "✅ Label check passed. Use without -LabelsOnly for full preflight." -InformationAction Continue
     exit 0
 }
 
 # ─── Step 3: Run preflight via Docker ────────────────────────────
-Write-Host ""
-Write-Host "[4/4] Running preflight check (via Docker)..." -ForegroundColor Yellow
-Write-Host "  This runs the Red Hat preflight tool inside a container." -ForegroundColor DarkGray
-Write-Host "  Some checks (e.g. HasUniqueTag) will fail — this is expected locally." -ForegroundColor DarkGray
-Write-Host ""
+Write-Information -MessageData "" -InformationAction Continue
+Write-Information -MessageData "[4/4] Running preflight check (via Docker)..." -InformationAction Continue
+Write-Information -MessageData "  This runs the Red Hat preflight tool inside a container." -InformationAction Continue
+Write-Information -MessageData "  Some checks (e.g. HasUniqueTag) will fail — this is expected locally." -InformationAction Continue
+Write-Information -MessageData "" -InformationAction Continue
 
 # Run preflight inside a container that has access to the Docker socket
-docker run --rm `
-    -v //var/run/docker.sock:/var/run/docker.sock `
-    --env PFLT_LOGLEVEL=info `
-    quay.io/opdev/preflight:stable `
-    check container $IMAGE 2>&1 | Tee-Object -Variable preflightOutput
+if ($PSCmdlet.ShouldProcess("Docker", "Run preflight check via quay.io/opdev/preflight:stable")) {
+    $preflightOutput = @()
+    docker run --rm `
+        -v //var/run/docker.sock:/var/run/docker.sock `
+        --env PFLT_LOGLEVEL=info `
+        quay.io/opdev/preflight:stable `
+        check container $IMAGE 2>&1 | Tee-Object -Variable preflightOutput
 
-Write-Host ""
-Write-Host "=== Results ===" -ForegroundColor Cyan
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "=== Results ===" -InformationAction Continue
 
-$outputStr = $preflightOutput -join "`n"
-if ($outputStr -match "FAILED") {
-    Write-Host "⚠️  Some preflight checks failed (review output above)" -ForegroundColor Yellow
-    Write-Host "  Note: HasUniqueTag and other registry-dependent checks" -ForegroundColor DarkGray
-    Write-Host "  are expected to fail when checking a local image." -ForegroundColor DarkGray
-} else {
-    Write-Host "✅ All preflight checks passed" -ForegroundColor Green
+    $outputStr = $preflightOutput -join "`n"
+    if ($outputStr -match "FAILED") {
+        Write-Warning -Message "⚠️  Some preflight checks failed (review output above)"
+        Write-Information -MessageData "  Note: HasUniqueTag and other registry-dependent checks" -InformationAction Continue
+        Write-Information -MessageData "  are expected to fail when checking a local image." -InformationAction Continue
+    } else {
+        Write-Information -MessageData "✅ All preflight checks passed" -InformationAction Continue
+    }
 }
 
-Write-Host ""
-Write-Host "Done. For full certification, use the GitHub Actions workflow:" -ForegroundColor DarkGray
-Write-Host "  Actions → 'Red Hat Certification Release' → Run workflow" -ForegroundColor DarkGray
+Write-Information -MessageData "" -InformationAction Continue
+Write-Information -MessageData "Done. For full certification, use the GitHub Actions workflow:" -InformationAction Continue
+Write-Information -MessageData "  Actions → 'Red Hat Certification Release' → Run workflow" -InformationAction Continue

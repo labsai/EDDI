@@ -6,14 +6,14 @@
 #
 #  Options:
 #    .\install.ps1 -Defaults                 # all defaults, no prompts
-#    .\install.ps1 -Db postgres -WithAuth    # specific choices
+#    .\install.ps1 -Database postgres -WithAuth    # specific choices
 # ─────────────────────────────────────────────────────────────
 
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '')]
+[CmdletBinding(SupportsShouldProcess)]
 param(
     [switch]$Defaults,
     [ValidateSet("mongodb", "postgres")]
-    [string]$Db = "",
+    [string]$Database = "",
     [string]$VaultKey = "",
     [switch]$WithAuth,
     [switch]$WithMonitoring,
@@ -39,18 +39,18 @@ $ProgressPreference = 'SilentlyContinue'
 # ── Configuration ──────────────────────────────────────────
 if (-not $EddiPort) { $EddiPort = "7070" }
 if (-not $EddiHttpsPort) { $EddiHttpsPort = "7443" }
-if (-not $EddiDir) { $EddiDir = Join-Path $HOME ".eddi" }
+if (-not $EddiDir) { $EddiDir = Join-Path -Path $HOME -ChildPath ".eddi" }
 $EddiBranch = if ($env:EDDI_BRANCH) { $env:EDDI_BRANCH } else { "main" }
 $ComposeBaseUrl = "https://raw.githubusercontent.com/labsai/EDDI/$EddiBranch"
 
 if ($Full) {
-    $Db = "postgres"
+    $Database = "postgres"
     $WithAuth = $true
     $WithMonitoring = $true
 }
 
-if ($Defaults -and -not $Db) {
-    $Db = "mongodb"
+if ($Defaults -and -not $Database) {
+    $Database = "mongodb"
 }
 
 # ── State ──────────────────────────────────────────────────
@@ -64,30 +64,30 @@ $EddiVaultMasterKey = ""
 # ── Helpers ────────────────────────────────────────────────
 
 function Write-Banner {
-    Write-Host ""
-    Write-Host "     ______   ____    ____    ____ " -ForegroundColor White
-    Write-Host "    / ____/  / __ \  / __ \  /  _/ " -ForegroundColor White
-    Write-Host "   / __/    / / / / / / / /  / /   " -ForegroundColor White
-    Write-Host "  / /___   / /_/ / / /_/ / _/ /    " -ForegroundColor White
-    Write-Host " /_____/  /_____/ /_____/ /___/    " -ForegroundColor White
-    Write-Host ""
-    Write-Host "   Multi-Agent Orchestration Middleware" -ForegroundColor White
-    Write-Host "   https://eddi.labs.ai" -ForegroundColor DarkGray
-    Write-Host ""
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "     ______   ____    ____    ____ " -InformationAction Continue
+    Write-Information -MessageData "    / ____/  / __ \  / __ \  /  _/ " -InformationAction Continue
+    Write-Information -MessageData "   / __/    / / / / / / / /  / /   " -InformationAction Continue
+    Write-Information -MessageData "  / /___   / /_/ / / /_/ / _/ /    " -InformationAction Continue
+    Write-Information -MessageData " /_____/  /_____/ /_____/ /___/    " -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "   Multi-Agent Orchestration Middleware" -InformationAction Continue
+    Write-Information -MessageData "   https://eddi.labs.ai" -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
 }
 
-function Write-Ok($msg) { Write-Host "  ✅ $msg" -ForegroundColor Green }
-function Write-Warn($msg) { Write-Host "  ⚠️  $msg" -ForegroundColor Yellow }
-function Write-Fail($msg) { Write-Host "  ❌ $msg" -ForegroundColor Red; exit 1 }
+function Write-Ok($msg) { Write-Information -MessageData "  ✅ $msg" -InformationAction Continue }
+function Write-Warn($msg) { Write-Warning -Message "  ⚠️  $msg" }
+function Write-Fail($msg) { Write-Error -Message "  ❌ $msg"; exit 1 }
 function Write-Step($num, $total, $title) {
-    Write-Host ""
-    Write-Host "─── Step $num of $total`: $title ───────────────────────" -ForegroundColor White
-    Write-Host ""
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "─── Step $num of $total`: $title ───────────────────────" -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
 }
 function Write-Section($title) {
-    Write-Host ""
-    Write-Host "─── $title ───────────────────────────────" -ForegroundColor White
-    Write-Host ""
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "─── $title ───────────────────────────────" -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
 }
 
 function Read-Choice($default, [string[]]$valid = @()) {
@@ -96,7 +96,7 @@ function Read-Choice($default, [string[]]$valid = @()) {
         $reply = Read-Host "  Choose [$default]"
         if ([string]::IsNullOrWhiteSpace($reply)) { return $default }
         if ($valid.Count -eq 0 -or $valid -contains $reply) { return $reply }
-        Write-Host "  Please enter one of: $($valid -join ', ')" -ForegroundColor Yellow
+        Write-Information -MessageData "  Please enter one of: $($valid -join ', ')" -InformationAction Continue
     }
 }
 
@@ -127,14 +127,14 @@ function Read-Port([string]$PortName, [int]$DefaultPort) {
         Write-Warn "Port $DefaultPort is already in use!"
         $nextFree = Find-NextFreePort ($DefaultPort + 1)
         if ($nextFree -gt 0) {
-            Write-Host "  Suggested alternative: $nextFree" -ForegroundColor Cyan
+            Write-Information -MessageData "  Suggested alternative: $nextFree" -InformationAction Continue
         }
     }
     else {
-        Write-Host "  Port $DefaultPort is available." -ForegroundColor DarkGray
+        Write-Information -MessageData "  Port $DefaultPort is available." -InformationAction Continue
     }
 
-    Write-Host ""
+    Write-Information -MessageData "" -InformationAction Continue
     $suggested = if ($inUse -and $nextFree -gt 0) { $nextFree } else { $DefaultPort }
 
     if ($Defaults) {
@@ -158,7 +158,7 @@ function Read-Port([string]$PortName, [int]$DefaultPort) {
             }
         }
         else {
-            Write-Host "  Please enter a valid port (1024-65535)" -ForegroundColor Yellow
+            Write-Information -MessageData "  Please enter a valid port (1024-65535)" -InformationAction Continue
         }
     }
 }
@@ -173,8 +173,8 @@ function Test-Prerequisites {
         Write-Ok "Docker found ($dockerVersion)"
     }
     catch {
-        Write-Host "  ❌ Docker is not installed." -ForegroundColor Red
-        Write-Host ""
+        Write-Information -MessageData "  ❌ Docker is not installed." -InformationAction Continue
+        Write-Information -MessageData "" -InformationAction Continue
 
         # Try winget auto-install
         $canWinget = $false
@@ -183,25 +183,25 @@ function Test-Prerequisites {
         if ($canWinget -and -not $Defaults) {
             $choice = Read-Host "  Install Docker Desktop now via winget? [Y/n]"
             if (-not $choice -or $choice -match '^[Yy]$') {
-                Write-Host "  Installing Docker Desktop..." -ForegroundColor Cyan
+                Write-Information -MessageData "  Installing Docker Desktop..." -InformationAction Continue
                 winget install -e --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements
-                Write-Host ""
-                Write-Host "  Docker Desktop installed!" -ForegroundColor Green
-                Write-Host "  ⚠️  Please start Docker Desktop, wait for it to be ready," -ForegroundColor Yellow
-                Write-Host "     then re-run this script." -ForegroundColor Yellow
+                Write-Information -MessageData "" -InformationAction Continue
+                Write-Information -MessageData "  Docker Desktop installed!" -InformationAction Continue
+                Write-Information -MessageData "  ⚠️  Please start Docker Desktop, wait for it to be ready," -InformationAction Continue
+                Write-Information -MessageData "     then re-run this script." -InformationAction Continue
                 exit 0
             }
         }
 
-        Write-Host "     Install Docker Desktop:"
-        Write-Host "       winget install Docker.DockerDesktop" -ForegroundColor Cyan
-        Write-Host "       — or —"
-        Write-Host "       https://docs.docker.com/desktop/install/windows-install/"
-        Write-Host ""
-        Write-Host "     Prerequisites:"
-        Write-Host "       • Windows 10 (build 19041+) or Windows 11"
-        Write-Host "       • WSL2 enabled (wsl --install)"
-        Write-Host ""
+        Write-Information -MessageData "     Install Docker Desktop:" -InformationAction Continue
+        Write-Information -MessageData "       winget install Docker.DockerDesktop" -InformationAction Continue
+        Write-Information -MessageData "       — or —" -InformationAction Continue
+        Write-Information -MessageData "       https://docs.docker.com/desktop/install/windows-install/" -InformationAction Continue
+        Write-Information -MessageData "" -InformationAction Continue
+        Write-Information -MessageData "     Prerequisites:" -InformationAction Continue
+        Write-Information -MessageData "       • Windows 10 (build 19041+) or Windows 11" -InformationAction Continue
+        Write-Information -MessageData "       • WSL2 enabled (wsl --install)" -InformationAction Continue
+        Write-Information -MessageData "" -InformationAction Continue
         exit 1
     }
 
@@ -253,16 +253,16 @@ function Get-DeployedAgentCount {
 $TotalSteps = 5
 
 function Step-Database {
-    if ($Db) { return }
+    if ($Database) { return }
 
     Write-Step -num 1 -total $TotalSteps -title "Database"
-    Write-Host "  EDDI needs a database to store agent configs & conversations."
-    Write-Host ""
-    Write-Host "  1) MongoDB        " -NoNewline; Write-Host "document store, simple setup (default)" -ForegroundColor DarkGray
-    Write-Host "  2) PostgreSQL     " -NoNewline; Write-Host "relational, SQL-queryable, familiar" -ForegroundColor DarkGray
-    Write-Host ""
+    Write-Information -MessageData "  EDDI needs a database to store agent configs & conversations." -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "  1) MongoDB        document store, simple setup (default)" -InformationAction Continue
+    Write-Information -MessageData "  2) PostgreSQL     relational, SQL-queryable, familiar" -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
     $choice = Read-Choice "1" @("1", "2")
-    if ($choice -eq "2") { $script:Db = "postgres" } else { $script:Db = "mongodb" }
+    if ($choice -eq "2") { $script:Database = "postgres" } else { $script:Database = "mongodb" }
 }
 
 function New-VaultKey {
@@ -282,7 +282,7 @@ function Step-Security {
     }
 
     # If a key already exists from a previous install, preserve it
-    $envFile = Join-Path $EddiDir ".env"
+    $envFile = Join-Path -Path $EddiDir -ChildPath ".env"
     if (Test-Path $envFile) {
         $existingKey = (Get-Content $envFile | Where-Object { $_ -match '^EDDI_VAULT_MASTER_KEY=(.+)$' } | ForEach-Object { $Matches[1] }) | Select-Object -First 1
         if ($existingKey) {
@@ -293,9 +293,9 @@ function Step-Security {
     }
 
     Write-Step -num 2 -total $TotalSteps -title "Security"
-    Write-Host "  EDDI encrypts API keys and secrets using a vault master key."
-    Write-Host "  This key is unique to your installation — keep it safe!"
-    Write-Host ""
+    Write-Information -MessageData "  EDDI encrypts API keys and secrets using a vault master key." -InformationAction Continue
+    Write-Information -MessageData "  This key is unique to your installation — keep it safe!" -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
 
     if ($Defaults) {
         # Auto-generate for non-interactive installs
@@ -304,9 +304,9 @@ function Step-Security {
         return
     }
 
-    Write-Host "  1) Auto-generate  " -NoNewline; Write-Host "strong random key (recommended)" -ForegroundColor DarkGray
-    Write-Host "  2) Custom         " -NoNewline; Write-Host "enter your own passphrase (min 16 chars)" -ForegroundColor DarkGray
-    Write-Host ""
+    Write-Information -MessageData "  1) Auto-generate  strong random key (recommended)" -InformationAction Continue
+    Write-Information -MessageData "  2) Custom         enter your own passphrase (min 16 chars)" -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
     $choice = Read-Choice "1" @("1", "2")
 
     if ($choice -eq "1") {
@@ -315,12 +315,12 @@ function Step-Security {
     }
     else {
         while ($true) {
-            $passphrase = Read-Host "  Enter passphrase" -AsSecureString
+            $passphrase = Read-Host -Prompt "  Enter passphrase" -AsSecureString
             $plaintext = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
                 [Runtime.InteropServices.Marshal]::SecureStringToBSTR($passphrase)
             )
             if ($plaintext.Length -lt 16) {
-                Write-Host "  Passphrase must be at least 16 characters" -ForegroundColor Yellow
+                Write-Information -MessageData "  Passphrase must be at least 16 characters" -InformationAction Continue
             }
             else {
                 $script:EddiVaultMasterKey = $plaintext
@@ -335,11 +335,11 @@ function Step-Auth {
     if ($Defaults -or $WithAuth) { return }
 
     Write-Step -num 3 -total $TotalSteps -title "Authentication"
-    Write-Host "  How should EDDI handle user access?"
-    Write-Host ""
-    Write-Host "  1) Open access    " -NoNewline; Write-Host "no login needed (dev / personal)" -ForegroundColor DarkGray
-    Write-Host "  2) Keycloak       " -NoNewline; Write-Host "multi-user OIDC (production)" -ForegroundColor DarkGray
-    Write-Host ""
+    Write-Information -MessageData "  How should EDDI handle user access?" -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "  1) Open access    no login needed (dev / personal)" -InformationAction Continue
+    Write-Information -MessageData "  2) Keycloak       multi-user OIDC (production)" -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
     $choice = Read-Choice "1" @("1", "2")
     if ($choice -eq "2") { $script:WithAuth = $true }
 }
@@ -348,17 +348,17 @@ function Step-Monitoring {
     if ($Defaults -or $WithMonitoring) { return }
 
     Write-Step -num 4 -total $TotalSteps -title "Monitoring"
-    Write-Host "  1) Skip for now   " -NoNewline; Write-Host "add later with: eddi update" -ForegroundColor DarkGray
-    Write-Host "  2) Grafana        " -NoNewline; Write-Host "dashboards + Prometheus metrics" -ForegroundColor DarkGray
-    Write-Host ""
+    Write-Information -MessageData "  1) Skip for now   add later with: eddi update" -InformationAction Continue
+    Write-Information -MessageData "  2) Grafana        dashboards + Prometheus metrics" -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
     $choice = Read-Choice "1" @("1", "2")
     if ($choice -eq "2") { $script:WithMonitoring = $true }
 }
 
 function Step-Ports {
     Write-Step -num 5 -total $TotalSteps -title "Ports"
-    Write-Host "  EDDI uses two ports: HTTP for the dashboard/API, HTTPS for secure access."
-    Write-Host ""
+    Write-Information -MessageData "  EDDI uses two ports: HTTP for the dashboard/API, HTTPS for secure access." -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
 
     $script:EddiPort = Read-Port "HTTP" ([int]$EddiPort)
     $script:EddiHttpsPort = Read-Port "HTTPS" ([int]$EddiHttpsPort)
@@ -374,7 +374,7 @@ function Get-ComposeFiles {
 
     $neededFiles = @()
 
-    if ($Db -eq "postgres") {
+    if ($Database -eq "postgres") {
         $neededFiles += "docker-compose.postgres-only.yml"
     }
     else {
@@ -384,8 +384,8 @@ function Get-ComposeFiles {
     # Local build overlay (overrides image with local build context)
     if ($Local) {
         $repoRoot = if ($ScriptDir) { $ScriptDir } else { Get-Location }
-        $localCompose = Join-Path $repoRoot "docker-compose.local.yml"
-        $dockerfile = Join-Path $repoRoot "src\main\docker\Dockerfile.jvm"
+        $localCompose = Join-Path -Path $repoRoot -ChildPath "docker-compose.local.yml"
+        $dockerfile = Join-Path -Path $repoRoot -ChildPath "src\main\docker\Dockerfile.jvm"
         if (-not (Test-Path $localCompose)) {
             Write-Fail "-Local requires running from the EDDI repo root.`n     Run: cd C:\path\to\EDDI; .\install.ps1 -Local"
         }
@@ -405,21 +405,21 @@ function Get-ComposeFiles {
 
     # Resolve each file: prefer local copy, fall back to download
     foreach ($f in $neededFiles) {
-        $target = Join-Path $EddiDir $f
-        $localFile = if ($ScriptDir) { Join-Path $ScriptDir $f } else { "" }
+        $target = Join-Path -Path $EddiDir -ChildPath $f
+        $localFile = if ($ScriptDir) { Join-Path -Path $ScriptDir -ChildPath $f } else { "" }
 
         if ($localFile -and (Test-Path $localFile)) {
             # File exists next to the script — copy to install dir
-            Copy-Item $localFile $target -Force
-            Write-Host "  Using local $f " -NoNewline; Write-Host "✅" -ForegroundColor Green
+            Copy-Item -Path $localFile -Destination $target -Force
+            Write-Information -MessageData "  Using local $f ✅" -InformationAction Continue
         }
         else {
             # Not available locally — download from GitHub
             $downloadUrl = "$ComposeBaseUrl/$f"
-            Write-Host "  Downloading $f... " -NoNewline
+            Write-Information -MessageData "  Downloading $f... " -InformationAction Continue
             try {
                 Invoke-WebRequest -Uri $downloadUrl -OutFile $target -UseBasicParsing -ErrorAction Stop
-                Write-Host "✅" -ForegroundColor Green
+                Write-Information -MessageData "✅" -InformationAction Continue
             }
             catch {
                 Write-Fail "Failed to download $f.`n     URL: $downloadUrl`n     Error: $($_.Exception.Message)`n     Check your internet connection and that the branch '$EddiBranch' exists.";
@@ -431,8 +431,8 @@ function Get-ComposeFiles {
 
     # Download monitoring support files if needed
     if ($WithMonitoring) {
-        Write-Host ""
-        Write-Host "  Downloading monitoring configuration..." -ForegroundColor DarkGray
+        Write-Information -MessageData "" -InformationAction Continue
+        Write-Information -MessageData "  Downloading monitoring configuration..." -InformationAction Continue
         $monitoringFiles = @(
             "prometheus.yml",
             "grafana-data/provisioning/dashboards/dashboard.yml",
@@ -440,20 +440,20 @@ function Get-ComposeFiles {
             "grafana-data/dashboards/eddi-operations.json"
         )
         foreach ($mf in $monitoringFiles) {
-            $mfTarget = Join-Path $EddiDir $mf
-            $mfLocalFile = if ($ScriptDir) { Join-Path $ScriptDir $mf } else { "" }
-            $mfDir = Split-Path $mfTarget -Parent
+            $mfTarget = Join-Path -Path $EddiDir -ChildPath $mf
+            $mfLocalFile = if ($ScriptDir) { Join-Path -Path $ScriptDir -ChildPath $mf } else { "" }
+            $mfDir = Split-Path -Path $mfTarget -Parent
             if (-not (Test-Path $mfDir)) { New-Item -ItemType Directory -Force -Path $mfDir | Out-Null }
 
             if ($mfLocalFile -and (Test-Path $mfLocalFile)) {
-                Copy-Item $mfLocalFile $mfTarget -Force
+                Copy-Item -Path $mfLocalFile -Destination $mfTarget -Force
             }
             else {
                 $mfUrl = "$ComposeBaseUrl/$mf"
-                Write-Host "  Downloading $mf... " -NoNewline
+                Write-Information -MessageData "  Downloading $mf... " -InformationAction Continue
                 try {
                     Invoke-WebRequest -Uri $mfUrl -OutFile $mfTarget -UseBasicParsing -ErrorAction Stop
-                    Write-Host "✅" -ForegroundColor Green
+                    Write-Information -MessageData "✅" -InformationAction Continue
                 }
                 catch {
                     Write-Warn "Failed to download $mf (monitoring may not work)"
@@ -471,7 +471,7 @@ COMPOSE_FILES=$($ComposeFiles -join " ")
 EDDI_PORT=$EddiPort
 EDDI_HTTPS_PORT=$EddiHttpsPort
 EDDI_VAULT_MASTER_KEY=$EddiVaultMasterKey
-"@ | Set-Content (Join-Path $EddiDir ".eddi-config")
+"@ | Set-Content -Path (Join-Path -Path $EddiDir -ChildPath ".eddi-config")
 
     # Write .env file for docker compose variable substitution
     # Quote vault key to protect against special characters (#, ", etc.)
@@ -483,8 +483,8 @@ EDDI_VAULT_MASTER_KEY="$EddiVaultMasterKey"
 EDDI_PORT=$EddiPort
 EDDI_HTTPS_PORT=$EddiHttpsPort
 "@
-    $envPath = Join-Path $EddiDir ".env"
-    $envContent | Set-Content $envPath
+    $envPath = Join-Path -Path $EddiDir -ChildPath ".env"
+    $envContent | Set-Content -Path $envPath -Value $envContent
 
     # Restrict .env file permissions (owner-only read/write)
     try {
@@ -505,7 +505,8 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
 
 function Start-Eddi {
     [CmdletBinding(SupportsShouldProcess)]
-    param()
+    [CmdletBinding(SupportsShouldProcess)]
+param()
     if (-not $PSCmdlet.ShouldProcess("EDDI", "Start Containers")) { return }
     Write-Section "Starting EDDI"
 
@@ -515,13 +516,13 @@ function Start-Eddi {
     $env:EDDI_VAULT_MASTER_KEY = $EddiVaultMasterKey
 
     if ($Local) {
-        Write-Host "  Building local Docker image..."
-        Write-Host ""
-        $envFile = Join-Path $EddiDir ".env"
+        Write-Information -MessageData "  Building local Docker image..." -InformationAction Continue
+        Write-Information -MessageData "" -InformationAction Continue
+        $envFile = Join-Path -Path $EddiDir -ChildPath ".env"
         $buildArgs = @("compose", "--env-file", $envFile) + ($ComposeFiles | ForEach-Object { @("-f", $_) }) + @("build")
         & docker @buildArgs
         if ($LASTEXITCODE -eq 0) {
-            Write-Host ""
+            Write-Information -MessageData "" -InformationAction Continue
             Write-Ok "Local image built"
         }
         else {
@@ -529,13 +530,13 @@ function Start-Eddi {
         }
     }
     else {
-        Write-Host "  Pulling images (this may take a minute)..."
-        Write-Host ""
-        $envFile = Join-Path $EddiDir ".env"
+        Write-Information -MessageData "  Pulling images (this may take a minute)..." -InformationAction Continue
+        Write-Information -MessageData "" -InformationAction Continue
+        $envFile = Join-Path -Path $EddiDir -ChildPath ".env"
         $pullArgs = @("compose", "--env-file", $envFile) + ($ComposeFiles | ForEach-Object { @("-f", $_) }) + @("pull")
         & docker @pullArgs
         if ($LASTEXITCODE -eq 0) {
-            Write-Host ""
+            Write-Information -MessageData "" -InformationAction Continue
             Write-Ok "Images pulled"
         }
         else {
@@ -543,12 +544,12 @@ function Start-Eddi {
         }
     }
 
-    Write-Host "  Starting containers...   " -NoNewline
-    $envFile = Join-Path $EddiDir ".env"
+    Write-Information -MessageData "  Starting containers...   " -InformationAction Continue
+    $envFile = Join-Path -Path $EddiDir -ChildPath ".env"
     $upArgs = @("compose", "--env-file", $envFile) + ($ComposeFiles | ForEach-Object { @("-f", $_) }) + @("up", "-d")
     & docker @upArgs 2>$null
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "✅" -ForegroundColor Green
+        Write-Information -MessageData "✅" -InformationAction Continue
         $script:ContainersStarted = $true
     }
     else {
@@ -561,26 +562,26 @@ function Start-Eddi {
 function Wait-ForReady {
     $maxWait = 120
     $elapsed = 0
-    Write-Host "  Health check             " -NoNewline
+    Write-Information -MessageData "  Health check             " -InformationAction Continue
 
     while ($elapsed -lt $maxWait) {
         try {
             Invoke-RestMethod -Uri "http://localhost:${EddiPort}/q/health/ready" -TimeoutSec 2 -ErrorAction Stop | Out-Null
-            Write-Host "✅ ready in ${elapsed}s" -ForegroundColor Green
+            Write-Information -MessageData "✅ ready in ${elapsed}s" -InformationAction Continue
             $script:Healthy = $true
             return
         }
         catch {
             Start-Sleep -Seconds 2
             $elapsed += 2
-            Write-Host "." -NoNewline
+            Write-Information -MessageData "." -InformationAction Continue
         }
     }
 
-    Write-Host "timeout" -ForegroundColor Red
-    Write-Host ""
-    Write-Host "  EDDI didn't become ready in ${maxWait}s." -ForegroundColor Yellow
-    Write-Host "  Check logs: docker compose $ComposeCmdFiles logs eddi"
+    Write-Information -MessageData "timeout" -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "  EDDI didn't become ready in ${maxWait}s." -InformationAction Continue
+    Write-Information -MessageData "  Check logs: docker compose $ComposeCmdFiles logs eddi" -InformationAction Continue
     exit 1
 }
 
@@ -590,13 +591,13 @@ function Import-InitialAgents {
     $agentCount = Get-DeployedAgentCount
 
     if ($agentCount -eq 0) {
-        Write-Host "  Deploying Agent Father...  " -NoNewline
+        Write-Information -MessageData "  Deploying Agent Father...  " -InformationAction Continue
         try {
             Invoke-RestMethod -Uri "http://localhost:${EddiPort}/backup/import/initialAgents" -Method Post -TimeoutSec 60 -ErrorAction Stop | Out-Null
-            Write-Host "✅" -ForegroundColor Green
+            Write-Information -MessageData "✅" -InformationAction Continue
         }
         catch {
-            Write-Host "⚠️  (non-fatal — EDDI is still usable)" -ForegroundColor Yellow
+            Write-Information -MessageData "⚠️  (non-fatal — EDDI is still usable)" -InformationAction Continue
         }
     }
     else {
@@ -607,60 +608,60 @@ function Import-InitialAgents {
 # ── Success banner ───────────────────────────────────────
 
 function Write-Success {
-    Write-Host ""
-    Write-Host "─── 🎉 Setup Complete! ────────────────────────────" -ForegroundColor Green
-    Write-Host ""
-    Write-Host "  Dashboard  →  " -NoNewline; Write-Host "http://localhost:${EddiPort}" -ForegroundColor Cyan
-    Write-Host "  HTTPS      →  " -NoNewline; Write-Host "https://localhost:${EddiHttpsPort}" -ForegroundColor Cyan
-    Write-Host "  MCP        →  " -NoNewline; Write-Host "http://localhost:${EddiPort}/mcp" -ForegroundColor Cyan
-    Write-Host "  API docs   →  " -NoNewline; Write-Host "http://localhost:${EddiPort}/q/swagger-ui" -ForegroundColor Cyan
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "─── 🎉 Setup Complete! ────────────────────────────" -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "  Dashboard  →  http://localhost:${EddiPort}" -InformationAction Continue
+    Write-Information -MessageData "  HTTPS      →  https://localhost:${EddiHttpsPort}" -InformationAction Continue
+    Write-Information -MessageData "  MCP        →  http://localhost:${EddiPort}/mcp" -InformationAction Continue
+    Write-Information -MessageData "  API docs   →  http://localhost:${EddiPort}/q/swagger-ui" -InformationAction Continue
 
     if ($WithAuth) {
-        Write-Host "  Keycloak   →  " -NoNewline; Write-Host "http://localhost:8180" -ForegroundColor Cyan -NoNewline
-        Write-Host "  (admin/admin)" -ForegroundColor DarkGray
+        Write-Information -MessageData "  Keycloak   →  http://localhost:8180" -InformationAction Continue -NoNewline
+        Write-Information -MessageData "  (admin/admin)" -InformationAction Continue
     }
 
-    Write-Host ""
-    Write-Host "  ┌─ 🔑 Vault Master Key ──────────────────────────────┐" -ForegroundColor Yellow
-    Write-Host "  │                                                    │" -ForegroundColor Yellow
-    Write-Host "  │  Stored in: " -ForegroundColor Yellow -NoNewline
-    Write-Host "$EddiDir\.env" -NoNewline
-    Write-Host "                      │" -ForegroundColor Yellow
-    Write-Host "  │  " -ForegroundColor Yellow -NoNewline; Write-Host "Back up this file! If lost, encrypted" -ForegroundColor DarkGray -NoNewline; Write-Host "             │" -ForegroundColor Yellow
-    Write-Host "  │  " -ForegroundColor Yellow -NoNewline; Write-Host "secrets (API keys) are unrecoverable." -ForegroundColor DarkGray -NoNewline; Write-Host "             │" -ForegroundColor Yellow
-    Write-Host "  └────────────────────────────────────────────────────┘" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "  🤖 Ready to create your first agent?" -ForegroundColor White
-    Write-Host "     Open the dashboard and chat with Agent Father!"
-    Write-Host "     It will guide you through choosing an AI provider,"
-    Write-Host "     setting up API keys, and building your first agent."
-    Write-Host ""
-    Write-Host "  ┌─ Claude Desktop / Cursor ──────────────────────────┐" -ForegroundColor DarkGray
-    Write-Host "  │ Add to your MCP config:                            │" -ForegroundColor DarkGray
-    Write-Host "  │   `"eddi`": { `"url`": `"http://localhost:${EddiPort}/mcp`" }   │" -ForegroundColor DarkGray
-    Write-Host "  └────────────────────────────────────────────────────┘" -ForegroundColor DarkGray
-    Write-Host ""
-    Write-Host "  Install dir: $EddiDir" -ForegroundColor DarkGray
-    Write-Host ""
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "  ┌─ 🔑 Vault Master Key ──────────────────────────────┐" -InformationAction Continue
+    Write-Information -MessageData "  │                                                    │" -InformationAction Continue
+    Write-Information -MessageData "  │  Stored in: " -InformationAction Continue -NoNewline
+    Write-Information -MessageData "$EddiDir\.env" -InformationAction Continue -NoNewline
+    Write-Information -MessageData "                      │" -InformationAction Continue
+    Write-Information -MessageData "  │  Back up this file! If lost, encrypted             │" -InformationAction Continue
+    Write-Information -MessageData "  │  secrets (API keys) are unrecoverable.             │" -InformationAction Continue
+    Write-Information -MessageData "  └────────────────────────────────────────────────────┘" -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "  🤖 Ready to create your first agent?" -InformationAction Continue
+    Write-Information -MessageData "     Open the dashboard and chat with Agent Father!" -InformationAction Continue
+    Write-Information -MessageData "     It will guide you through choosing an AI provider," -InformationAction Continue
+    Write-Information -MessageData "     setting up API keys, and building your first agent." -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "  ┌─ Claude Desktop / Cursor ──────────────────────────┐" -InformationAction Continue
+    Write-Information -MessageData "  │ Add to your MCP config:                            │" -InformationAction Continue
+    Write-Information -MessageData "  │   `" -InformationAction Continueeddi`": { `"url`": `"http://localhost:${EddiPort}/mcp`" }   │" -ForegroundColor DarkGray
+    Write-Information -MessageData "  └────────────────────────────────────────────────────┘" -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "  Install dir: $EddiDir" -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
 
     # Open browser
-    try { Start-Process "http://localhost:${EddiPort}" } catch {}
+    try { Start-Process "http://localhost:${EddiPort}" } catch { Write-Verbose "Browser failed to launch: $($_.Exception.Message)" }
 }
 
 # ── Config summary ───────────────────────────────────────
 
 function Write-ConfigSummary {
     Write-Section "Configuration"
-    $dbLabel = if ($Db -eq "postgres") { "PostgreSQL" } else { "MongoDB" }
-    Write-Host "  Database:       $dbLabel" -ForegroundColor White
-    Write-Host "  Vault:          " -NoNewline; Write-Host "🔒 enabled" -ForegroundColor White -NoNewline; Write-Host " (unique key)" -ForegroundColor DarkGray
+    $dbLabel = if ($Database -eq "postgres") { "PostgreSQL" } else { "MongoDB" }
+    Write-Information -MessageData "  Database:       $dbLabel" -InformationAction Continue
+    Write-Information -MessageData "  Vault:          🔒 enabled" -InformationAction Continue -NoNewline; Write-Information -MessageData " (unique key)" -InformationAction Continue
     $authLabel = if ($WithAuth) { "Keycloak" } else { "open access" }
-    Write-Host "  Authentication: $authLabel" -ForegroundColor $(if ($WithAuth) { "White" } else { "DarkGray" })
+    Write-Information -MessageData "  Authentication: $authLabel" -InformationAction Continue -ForegroundColor $(if ($WithAuth) { "White" } else { "DarkGray" })
     $monLabel = if ($WithMonitoring) { "Grafana + Prometheus" } else { "none" }
-    Write-Host "  Monitoring:     $monLabel" -ForegroundColor $(if ($WithMonitoring) { "White" } else { "DarkGray" })
-    Write-Host "  HTTP port:      $EddiPort" -ForegroundColor White
-    Write-Host "  HTTPS port:     $EddiHttpsPort" -ForegroundColor White
-    Write-Host "  Install dir:    $EddiDir" -ForegroundColor White
+    Write-Information -MessageData "  Monitoring:     $monLabel" -InformationAction Continue -ForegroundColor $(if ($WithMonitoring) { "White" } else { "DarkGray" })
+    Write-Information -MessageData "  HTTP port:      $EddiPort" -InformationAction Continue
+    Write-Information -MessageData "  HTTPS port:     $EddiHttpsPort" -InformationAction Continue
+    Write-Information -MessageData "  Install dir:    $EddiDir" -InformationAction Continue
 }
 
 # ── Main ─────────────────────────────────────────────────
@@ -692,14 +693,14 @@ try {
     Import-InitialAgents
     Write-Success
     $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds)
-    Write-Host "  Total setup time: ${elapsed}s" -ForegroundColor DarkGray
-    Write-Host ""
+    Write-Information -MessageData "  Total setup time: ${elapsed}s" -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
 }
 catch {
     if ($ContainersStarted -and -not $Healthy) {
-        Write-Host ""
-        Write-Host "⚠️  Setup interrupted. Cleaning up containers..." -ForegroundColor Yellow
-        $envFile = Join-Path $EddiDir ".env"
+        Write-Information -MessageData "" -InformationAction Continue
+        Write-Information -MessageData "⚠️  Setup interrupted. Cleaning up containers..." -InformationAction Continue
+        $envFile = Join-Path -Path $EddiDir -ChildPath ".env"
         $cleanupArgs = @("compose")
         if (Test-Path $envFile) { $cleanupArgs += @("--env-file", $envFile) }
         $cleanupArgs += ($ComposeFiles | ForEach-Object { @("-f", $_) }) + @("down")
@@ -710,7 +711,7 @@ catch {
 
 # ── Install CLI wrapper ─────────────────────────────────
 
-$cliPath = Join-Path $EddiDir "eddi.cmd"
+$cliPath = Join-Path -Path $EddiDir -ChildPath "eddi.cmd"
 $cliContent = @"
 @echo off
 setlocal
@@ -790,16 +791,16 @@ echo   logs [-f]   View container logs
 echo   update      Pull latest images and restart
 goto :eof
 "@
-$cliContent | Set-Content $cliPath -Encoding ASCII
+$cliContent | Set-Content -Path $cliPath -Encoding ASCII
 
 # Add to user PATH if not already there
 try {
     $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
     if ($userPath -notlike "*$EddiDir*") {
         [Environment]::SetEnvironmentVariable('PATH', "$userPath;$EddiDir", 'User')
-        Write-Host "  " -NoNewline; Write-Ok "CLI wrapper installed (eddi.cmd). Restart terminal to use 'eddi' command."
+        Write-Ok "CLI wrapper installed (eddi.cmd). Restart terminal to use 'eddi' command."
     }
 }
 catch {
-    Write-Host "  Tip: Add $EddiDir to your PATH to use 'eddi' command" -ForegroundColor DarkGray
+    Write-Information -MessageData "  Tip: Add $EddiDir to your PATH to use 'eddi' command" -InformationAction Continue
 }

@@ -12,6 +12,26 @@ Each entry follows this format:
 - **Repo** — Which repository was modified
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
+## PowerShell Script Hardening & Best Practices (2026-03-31)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Comprehensive refactoring of all PowerShell scripts to adhere to standard PowerShell best practices and address `PSAvoidUsingWriteHost` warnings flagged by PSScriptAnalyzer.
+
+| Fix | Severity | Details |
+|---|---|---|
+| **Eliminate Write-Host** | 🔴 Critical | Replaced all `Write-Host` usages across `install.ps1`, `k8s/create-secrets.ps1`, and `scripts/preflight-local.ps1` with native information streams (`Write-Information`, `Write-Warning`, `Write-Error`) |
+| **Piped Execution Safety** | 🔴 Critical | `Write-Host` output natively breaks piped installer execution (`iwr | iex`) on standard PS 5.1/7 environments. Handled natively with `Write-Information -InformationAction Continue` |
+| **Safety Thresholds (-WhatIf)** | 🟡 Significant | Added `[CmdletBinding(SupportsShouldProcess)]` natively wrapping potentially destructive calls like `docker build`, `docker run`, and `kubectl create` in `$PSCmdlet.ShouldProcess` blocks |
+| **Alias Conflict Resolved** | 🟡 Significant | Renamed existing parameter `-Db` to `-Database` inside `install.ps1` to resolve collision with the injected native `-Debug` alias |
+| **Error Handling** | 🔵 Minor | Fixed empty `catch {}` blocks within `install.ps1`'s browser launch to emit `Write-Verbose` traces for debugging observability |
+| **Variable Cleanup** | 🔵 Minor | Dropped unassigned placeholder variables natively from `scripts/preflight-local.ps1` |
+
+**Files:** 3 modified (`install.ps1`, `k8s/create-secrets.ps1`, `scripts/preflight-local.ps1`).
+
+---
 
 ## Install Script Hardening for RC1 Release (2026-03-31)
 
