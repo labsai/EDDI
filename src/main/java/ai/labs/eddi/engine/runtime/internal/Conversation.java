@@ -205,9 +205,7 @@ public class Conversation implements IConversation {
 
     private void checkIfConversationInProgress() throws ConversationNotReadyException {
         if (getConversationState() == ConversationState.IN_PROGRESS) {
-            String errorMessage = "Conversation is currently IN_PROGRESS! Please try again later!";
-            errorMessage = String.format(errorMessage, getConversationState());
-            throw new ConversationNotReadyException(errorMessage);
+            throw new ConversationNotReadyException("Conversation is currently IN_PROGRESS! Please try again later!");
         }
     }
 

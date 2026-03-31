@@ -113,7 +113,7 @@ public class ConversationService implements IConversationService {
         this.auditLedgerService = auditLedgerService;
         this.tenantQuotaService = tenantQuotaService;
         this.agentTimeout = agentTimeout;
-        this.processingConversationReferences = new ArrayList<>();
+        this.processingConversationReferences = new CopyOnWriteArrayList<>();
 
         this.timerConversationStart = meterRegistry.timer("eddi_conversation_start_duration");
         this.timerConversationEnd = meterRegistry.timer("eddi_conversation_end_duration");
