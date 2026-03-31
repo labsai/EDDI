@@ -1,6 +1,5 @@
 package ai.labs.eddi.datastore.postgres;
 
-import ai.labs.eddi.engine.model.DatabaseLog;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
@@ -61,44 +60,11 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
     }
 
     @Override
-    public List<DatabaseLog> getLogs(Integer skip, Integer limit) {
-        ensureSchema();
-        return getLogsInternal(null, null, null, null, null, null, skip, limit);
-    }
-
-    @Override
-    public List<DatabaseLog> getLogs(Environment environment, String agentId, Integer agentVersion, String conversationId, String userId,
+    public List<LogEntry> getLogs(Environment environment, String agentId, Integer agentVersion, String conversationId, String userId,
             String instanceId, Integer skip, Integer limit) {
         ensureSchema();
         return getLogsInternal(environment != null ? environment.toString() : null, agentId, agentVersion, conversationId, userId, instanceId, skip,
                 limit);
-    }
-
-    @Override
-    public void addLogs(String environment, String agentId, Integer agentVersion, String conversationId, String userId, String instanceId,
-            String message) {
-        ensureSchema();
-        String sql = """
-                INSERT INTO database_logs (message, timestamp, environment, AGENT_ID, AGENT_VERSION, conversation_id, user_id, instance_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """;
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, message);
-            ps.setTimestamp(2, new Timestamp(System.currentTimeMillis()));
-            ps.setString(3, environment);
-            ps.setString(4, agentId);
-            if (agentVersion != null) {
-                ps.setInt(5, agentVersion);
-            } else {
-                ps.setNull(5, Types.INTEGER);
-            }
-            ps.setString(6, conversationId);
-            ps.setString(7, userId);
-            ps.setString(8, instanceId);
-            ps.executeUpdate();
-        } catch (SQLException e) {
-            LOGGER.error("Failed to add database log", e);
-        }
     }
 
     @Override
@@ -136,9 +102,9 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
         }
     }
 
-    private List<DatabaseLog> getLogsInternal(String environment, String agentId, Integer agentVersion, String conversationId, String userId,
+    private List<LogEntry> getLogsInternal(String environment, String agentId, Integer agentVersion, String conversationId, String userId,
             String instanceId, Integer skip, Integer limit) {
-        List<DatabaseLog> logs = new ArrayList<>();
+        List<LogEntry> logs = new ArrayList<>();
         StringBuilder sql = new StringBuilder("SELECT * FROM database_logs WHERE 1=1");
         List<Object> params = new ArrayList<>();
 
@@ -180,18 +146,10 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
             }
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    DatabaseLog logRecord = new DatabaseLog();
-                    logRecord.put("message", rs.getString("message"));
-                    logRecord.put("level", rs.getString("level"));
-                    logRecord.put("loggerName", rs.getString("logger_name"));
-                    logRecord.put("timestamp", rs.getTimestamp("timestamp"));
-                    logRecord.put("environment", rs.getString("environment"));
-                    logRecord.put("agentId", rs.getString("AGENT_ID"));
-                    logRecord.put("agentVersion", rs.getObject("AGENT_VERSION"));
-                    logRecord.put("conversationId", rs.getString("conversation_id"));
-                    logRecord.put("userId", rs.getString("user_id"));
-                    logRecord.put("instanceId", rs.getString("instance_id"));
-                    logs.add(logRecord);
+                    Timestamp ts = rs.getTimestamp("timestamp");
+                    logs.add(new LogEntry(ts != null ? ts.getTime() : 0L, rs.getString("level"), rs.getString("logger_name"), rs.getString("message"),
+                            rs.getString("environment"), rs.getString("AGENT_ID"), (Integer) rs.getObject("AGENT_VERSION"),
+                            rs.getString("conversation_id"), rs.getString("user_id"), rs.getString("instance_id")));
                 }
             }
         } catch (SQLException e) {

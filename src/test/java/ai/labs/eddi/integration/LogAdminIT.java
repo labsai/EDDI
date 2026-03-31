@@ -35,7 +35,7 @@ public class LogAdminIT {
     @Order(1)
     @DisplayName("GET /administration/logs/instance should return instanceId")
     void getInstanceId_returnsValidInstance() {
-        given().get(BASE + "/instance").then().assertThat().statusCode(200).contentType(ContentType.JSON).body("instanceId", notNullValue())
+        given().get(BASE + "/instance-id").then().assertThat().statusCode(200).contentType(ContentType.JSON).body("instanceId", notNullValue())
                 .body("instanceId", not(emptyString()));
     }
 

@@ -1,7 +1,6 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.api.IRestLogAdmin;
-import ai.labs.eddi.engine.model.DatabaseLog;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
@@ -46,7 +45,7 @@ public class RestLogAdmin implements IRestLogAdmin {
     }
 
     @Override
-    public List<DatabaseLog> getHistoryLogs(Deployment.Environment environment, String agentId, Integer agentVersion, String conversationId,
+    public List<LogEntry> getHistoryLogs(Deployment.Environment environment, String agentId, Integer agentVersion, String conversationId,
             String userId, String instanceId, Integer skip, Integer limit) {
         return databaseLogs.getLogs(environment, agentId, agentVersion, conversationId, userId, instanceId, skip, limit);
     }
@@ -70,7 +69,7 @@ public class RestLogAdmin implements IRestLogAdmin {
                 return;
             if (conversationId != null && !conversationId.equals(entry.conversationId()))
                 return;
-            if (level != null && !level.equalsIgnoreCase(entry.level()))
+            if (level != null && !boundedLogStore.meetsMinimumLevel(entry.level(), level))
                 return;
 
             sendEvent(eventSink, sse, entry);

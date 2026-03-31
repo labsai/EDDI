@@ -233,6 +233,20 @@ public class BoundedLogStore {
     }
 
     /**
+     * Check if a log entry's level meets the given minimum level threshold. Used by
+     * both the ring buffer query and SSE stream filter.
+     *
+     * @param entryLevel
+     *            the log entry's level (e.g. "INFO")
+     * @param minLevel
+     *            the minimum level threshold (e.g. "WARN")
+     * @return true if entryLevel >= minLevel
+     */
+    public boolean meetsMinimumLevel(String entryLevel, String minLevel) {
+        return levelOrdinal(entryLevel) >= levelOrdinal(minLevel);
+    }
+
+    /**
      * Register an SSE listener. Returns a listener ID for removal.
      */
     public String addListener(Consumer<LogEntry> listener) {

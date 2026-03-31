@@ -1,8 +1,8 @@
 package ai.labs.eddi.engine.api;
 
-import ai.labs.eddi.engine.model.DatabaseLog;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.LogEntry;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
@@ -24,6 +24,7 @@ import java.util.List;
  */
 @Path("/administration/logs")
 @Tag(name = "Log Admin")
+@RolesAllowed("eddi-admin")
 public interface IRestLogAdmin {
 
     @GET
@@ -42,7 +43,7 @@ public interface IRestLogAdmin {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Get historical logs from database", description = "Returns historical logs from the database. Survives restarts and works cross-instance.")
     @APIResponse(responseCode = "200", description = "List of historical log entries.")
-    List<DatabaseLog> getHistoryLogs(@QueryParam("environment") Deployment.Environment environment,
+    List<LogEntry> getHistoryLogs(@QueryParam("environment") Deployment.Environment environment,
             @Parameter(description = "Filter by agent ID.") @QueryParam("agentId") String agentId, @QueryParam("agentVersion") Integer agentVersion,
             @Parameter(description = "Filter by conversation ID.") @QueryParam("conversationId") String conversationId,
             @QueryParam("userId") String userId, @QueryParam("instanceId") String instanceId, @QueryParam("skip") @DefaultValue("0") Integer skip,

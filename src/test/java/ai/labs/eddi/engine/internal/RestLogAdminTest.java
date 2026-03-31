@@ -1,7 +1,6 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.api.IRestLogAdmin;
-import ai.labs.eddi.engine.model.DatabaseLog;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
@@ -63,15 +62,14 @@ class RestLogAdminTest {
 
     @Test
     void shouldDelegateHistoryToDatabase() {
-        DatabaseLog dbLog = new DatabaseLog();
-        dbLog.put("message", "historic error");
-        dbLog.put("level", "ERROR");
-        when(databaseLogs.getLogs(Deployment.Environment.production, "agent-1", null, null, null, null, 0, 50)).thenReturn(List.of(dbLog));
+        LogEntry logEntry = new LogEntry(System.currentTimeMillis(), "ERROR", "test.Logger", "historic error", "production", "agent-1", null, null,
+                null, null);
+        when(databaseLogs.getLogs(Deployment.Environment.production, "agent-1", null, null, null, null, 0, 50)).thenReturn(List.of(logEntry));
 
-        List<DatabaseLog> result = admin.getHistoryLogs(Deployment.Environment.production, "agent-1", null, null, null, null, 0, 50);
+        List<LogEntry> result = admin.getHistoryLogs(Deployment.Environment.production, "agent-1", null, null, null, null, 0, 50);
 
         assertEquals(1, result.size());
-        assertEquals("historic error", result.get(0).get("message"));
+        assertEquals("historic error", result.get(0).message());
         verify(databaseLogs).getLogs(Deployment.Environment.production, "agent-1", null, null, null, null, 0, 50);
     }
 

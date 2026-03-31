@@ -1,6 +1,5 @@
 package ai.labs.eddi.engine.runtime;
 
-import ai.labs.eddi.engine.model.DatabaseLog;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.utils.RuntimeUtilities;
@@ -47,35 +46,9 @@ public class DatabaseLogs implements IDatabaseLogs {
     }
 
     @Override
-    public List<DatabaseLog> getLogs(Integer skip, Integer limit) {
-        return getLogs(new Document(), skip, limit);
-    }
-
-    @Override
-    public List<DatabaseLog> getLogs(Environment environment, String agentId, Integer agentVersion, String conversationId, String userId,
+    public List<LogEntry> getLogs(Environment environment, String agentId, Integer agentVersion, String conversationId, String userId,
             String instanceId, Integer skip, Integer limit) {
         return getLogs(createFilter(environment, agentId, agentVersion, conversationId, userId, instanceId), skip, limit);
-    }
-
-    @Override
-    public void addLogs(String environment, String agentId, Integer agentVersion, String conversationId, String userId, String instanceId,
-            String message) {
-        Document document = new Document();
-        document.put(KEY_MESSAGE, message);
-        document.put(TIMESTAMP, new Date(System.currentTimeMillis()));
-        document.put(KEY_ENVIRONMENT, environment);
-        document.put(KEY_AGENT_ID, agentId);
-        document.put(KEY_AGENT_VERSION, agentVersion);
-        if (conversationId != null) {
-            document.put(KEY_CONVERSATION_ID, conversationId);
-        }
-        if (userId != null) {
-            document.put(KEY_USER_ID, userId);
-        }
-        if (instanceId != null) {
-            document.put(KEY_INSTANCE_ID, instanceId);
-        }
-        logsCollection.insertOne(document);
     }
 
     @Override
@@ -137,8 +110,8 @@ public class DatabaseLogs implements IDatabaseLogs {
         return filter;
     }
 
-    private List<DatabaseLog> getLogs(Document filter, Integer skip, Integer limit) {
-        List<DatabaseLog> ret = new ArrayList<>();
+    private List<LogEntry> getLogs(Document filter, Integer skip, Integer limit) {
+        List<LogEntry> ret = new ArrayList<>();
         var iterable = logsCollection.find(filter).sort(new Document(TIMESTAMP, -1));
         if (limit > 0) {
             iterable.limit(limit);
@@ -147,11 +120,11 @@ public class DatabaseLogs implements IDatabaseLogs {
             iterable.skip(skip);
         }
 
-        for (Document document : iterable) {
-            var databaseLog = new DatabaseLog();
-            document.keySet().forEach(key -> databaseLog.put(key, document.get(key)));
-            databaseLog.remove("_id");
-            ret.add(databaseLog);
+        for (Document doc : iterable) {
+            Date ts = doc.getDate(TIMESTAMP);
+            ret.add(new LogEntry(ts != null ? ts.getTime() : 0L, doc.getString(KEY_LEVEL), doc.getString(KEY_LOGGER), doc.getString(KEY_MESSAGE),
+                    doc.getString(KEY_ENVIRONMENT), doc.getString(KEY_AGENT_ID), doc.getInteger(KEY_AGENT_VERSION),
+                    doc.getString(KEY_CONVERSATION_ID), doc.getString(KEY_USER_ID), doc.getString(KEY_INSTANCE_ID)));
         }
 
         return ret;
