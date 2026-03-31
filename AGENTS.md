@@ -25,7 +25,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 - **Stateless tasks, stateful memory**: `ILifecycleTask` implementations are singletons; all state lives in `IConversationMemory`
 - **Action-based orchestration**: Tasks emit/listen for string-based actions, never call each other directly
 - **Self-contained platform**: EDDI is a closed platform, not a library consumed by third-party code. Internal interfaces (`IPropertiesStore`, `IResourceStore`, etc.) have no external consumers. Deprecation and replacement of internal APIs is safe — the only backward-compat concern is old JSON configs stored in MongoDB or imported via ZIP.
-- **CI**: CircleCI (compile → test → Docker build → integration tests → push to Docker Hub), migrating to GitHub Actions
+- **CI/CD**: GitHub Actions (compile → test → Docker build → smoke test → push to Docker Hub). `[skip docker]` in commit message skips image builds. Tag-based releases (`v6.0.0-RC1` → `labsai/eddi:6.0.0-RC1`)
 
 ---
 
@@ -87,6 +87,7 @@ Follow this order unless the user explicitly requests something different.
 | —     | Multi-Model Cascading     | Sequential model escalation with confidence routing                                                  |
 | —     | LLM Provider Expansion    | 7 → 12 providers (Mistral, Azure OpenAI, Bedrock, Oracle GenAI)                                      |
 | —     | Quarkus 3.34.1            | LTS upgrade, Java 25 module fix                                                                      |
+| 12    | CI/CD                     | GitHub Actions unified pipeline, Docker Hub push, CircleCI removed                                    |
 
 ### In Progress / Upcoming
 
@@ -96,7 +97,6 @@ Follow this order unless the user explicitly requests something different.
 | 9b    | HITL Framework            | Human-in-the-loop pause/resume/approve                  |
 | 11a   | Persistent Memory         | Cross-conversation user memory                          |
 | 11b   | Multi-Channel             | WhatsApp, Telegram, Slack adapters                      |
-| 12    | CI/CD                     | GitHub Actions migration (from CircleCI)                |
 | 13    | Debugging & Visualization | Time-traveling debugger, visual pipeline builder        |
 | 14    | Website                   | Astro + Starlight documentation site                    |
 
@@ -522,7 +522,7 @@ When designing any new feature, always consider these before finalizing the desi
 | ------------------------------------------- | --------------------------------------------------------- |
 | `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, MongoDB)           |
 | `src/main/resources/initial-agents/`        | Agent Father and sample agent configs                     |
-| `.circleci/config.yml`                      | Current CI (migrating to GitHub Actions)                  |
+| `.github/workflows/ci.yml`                  | CI/CD pipeline (build, test, Docker push, smoke test)     |
 | `docs/`                                     | 40 markdown files, published at docs.labs.ai              |
 | `docs/v6-planning/`                         | Architecture analysis, changelog, business logic analysis |
 | `docker-compose.yml`                        | EDDI + MongoDB local setup                                |

@@ -13,6 +13,54 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Phase 12: CI/CD — GitHub Actions Unified Pipeline, CircleCI Removed (2026-03-31)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Consolidated the split CI/CD setup (legacy CircleCI + partial GitHub Actions) into a single unified GitHub Actions pipeline. CircleCI is deleted entirely.
+
+| Before | After |
+|---|---|
+| **CircleCI** `.circleci/config.yml` — JDK 21, docker-compose integration tests, push to Docker Hub on `main` | **Deleted** |
+| **GitHub Actions** `ci.yml` — build+test only | **Unified** `ci.yml` — 4 jobs: build-and-test, docker, smoke-test, preflight-check |
+| **GitHub Actions** `docker-publish.yml` — separate Docker push workflow | **Deleted** — merged into `ci.yml` |
+
+**Pipeline architecture:**
+
+```
+build-and-test ──→ docker ──→ smoke-test
+       ↓
+  preflight-check (PRs only)
+```
+
+| Job | Trigger | Purpose |
+|---|---|---|
+| `build-and-test` | Always (push main, PR, tag push) | `mvnw clean verify -DskipITs -B`, upload test results + JaCoCo |
+| `docker` | Push to main or tag `v*`, skip on `[skip docker]` in commit msg | Plain `docker build` + `docker push` |
+| `smoke-test` | After `docker` | Start built image + MongoDB, verify `/q/health/ready` responds |
+| `preflight-check` | PRs to main only | Red Hat certification dry-run |
+
+**Tag strategy:**
+
+| Trigger | Docker Tags |
+|---|---|
+| Push to `main` | `labsai/eddi:<pom-version>-b<run>`, `labsai/eddi:latest` |
+| Git tag `v6.0.0-RC1` | `labsai/eddi:6.0.0-RC1`, `labsai/eddi:latest` |
+| Git tag `v6.0.0` (future) | `labsai/eddi:6.0.0`, `labsai/eddi:latest` |
+
+**Design decisions:**
+- **Plain `docker build`** — no Buildx, no multi-platform, no Quarkus container-image plugin. Just `docker build -f Dockerfile.jvm` + `docker push`.
+- **`[skip docker]`** in commit message skips the Docker/smoke-test jobs but still runs tests.
+- **Version from git tag or POM** — tag push strips `v` prefix (`v6.0.0-RC1` → `6.0.0-RC1`), branch push reads version from `pom.xml`.
+- **Smoke test** uses GHA service container (MongoDB) + `curl /q/health/ready`.
+- **CircleCI removal** — stale config (JDK 21, docker24). Integration tests migrated into EDDI's test suite (Testcontainers).
+
+**Files:** 1 rewritten (`ci.yml`), 2 deleted (`docker-publish.yml`, `.circleci/config.yml`), 1 modified (`AGENTS.md`).
+
+---
+
 ## Secrets Vault v2 — Tenant-Scoped, Persistent, Production-Ready (2026-03-31)
 
 **Repos:** EDDI + EDDI-Manager (`feature/version-6.0.0`)
