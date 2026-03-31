@@ -36,6 +36,25 @@ Write-Host ""
 Write-Host "=== EDDI Preflight Check (Local) ===" -ForegroundColor Cyan
 Write-Host ""
 
+# ─── Prerequisites ───────────────────────────────────────────────
+# Docker Desktop must be running
+$dockerCheck = docker info 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ Docker is not running." -ForegroundColor Red
+    Write-Host "   Start Docker Desktop and try again." -ForegroundColor DarkGray
+    exit 1
+}
+
+# JDK required for build (skip check if -SkipBuild)
+if (-not $SkipBuild) {
+    $javaCheck = java -version 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Java (JDK 25) is not installed or not on PATH." -ForegroundColor Red
+        Write-Host "   Install: https://adoptium.net/temurin/releases/?version=25" -ForegroundColor DarkGray
+        exit 1
+    }
+}
+
 # ─── Step 1: Build ──────────────────────────────────────────────
 if (-not $SkipBuild) {
     Write-Host "[1/4] Building application..." -ForegroundColor Yellow
@@ -62,7 +81,7 @@ if (-not $SkipBuild) {
     Write-Host "[2/4] Skipping build" -ForegroundColor DarkGray
 
     # Verify image exists
-    $exists = docker image inspect $IMAGE 2>$null
+    $null = docker image inspect $IMAGE 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "❌ Image '$IMAGE' not found. Run without -SkipBuild first." -ForegroundColor Red
         exit 1
