@@ -484,7 +484,7 @@ EDDI_PORT=$EddiPort
 EDDI_HTTPS_PORT=$EddiHttpsPort
 "@
     $envPath = Join-Path -Path $EddiDir -ChildPath ".env"
-    $envContent | Set-Content -Path $envPath -Value $envContent
+    $envContent | Set-Content -Path $envPath
 
     # Restrict .env file permissions (owner-only read/write)
     try {
@@ -505,8 +505,7 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
 
 function Start-Eddi {
     [CmdletBinding(SupportsShouldProcess)]
-    [CmdletBinding(SupportsShouldProcess)]
-param()
+    param()
     if (-not $PSCmdlet.ShouldProcess("EDDI", "Start Containers")) { return }
     Write-Section "Starting EDDI"
 
@@ -617,16 +616,13 @@ function Write-Success {
     Write-Information -MessageData "  API docs   →  http://localhost:${EddiPort}/q/swagger-ui" -InformationAction Continue
 
     if ($WithAuth) {
-        Write-Information -MessageData "  Keycloak   →  http://localhost:8180" -InformationAction Continue -NoNewline
-        Write-Information -MessageData "  (admin/admin)" -InformationAction Continue
+        Write-Information -MessageData "  Keycloak   →  http://localhost:8180  (admin/admin)" -InformationAction Continue
     }
 
     Write-Information -MessageData "" -InformationAction Continue
     Write-Information -MessageData "  ┌─ 🔑 Vault Master Key ──────────────────────────────┐" -InformationAction Continue
     Write-Information -MessageData "  │                                                    │" -InformationAction Continue
-    Write-Information -MessageData "  │  Stored in: " -InformationAction Continue -NoNewline
-    Write-Information -MessageData "$EddiDir\.env" -InformationAction Continue -NoNewline
-    Write-Information -MessageData "                      │" -InformationAction Continue
+    Write-Information -MessageData "  │  Stored in: $EddiDir\.env" -InformationAction Continue
     Write-Information -MessageData "  │  Back up this file! If lost, encrypted             │" -InformationAction Continue
     Write-Information -MessageData "  │  secrets (API keys) are unrecoverable.             │" -InformationAction Continue
     Write-Information -MessageData "  └────────────────────────────────────────────────────┘" -InformationAction Continue
@@ -638,7 +634,7 @@ function Write-Success {
     Write-Information -MessageData "" -InformationAction Continue
     Write-Information -MessageData "  ┌─ Claude Desktop / Cursor ──────────────────────────┐" -InformationAction Continue
     Write-Information -MessageData "  │ Add to your MCP config:                            │" -InformationAction Continue
-    Write-Information -MessageData "  │   `" -InformationAction Continueeddi`": { `"url`": `"http://localhost:${EddiPort}/mcp`" }   │" -ForegroundColor DarkGray
+    Write-Information -MessageData "  │   `"eddi`": { `"url`": `"http://localhost:${EddiPort}/mcp`" }   │" -InformationAction Continue
     Write-Information -MessageData "  └────────────────────────────────────────────────────┘" -InformationAction Continue
     Write-Information -MessageData "" -InformationAction Continue
     Write-Information -MessageData "  Install dir: $EddiDir" -InformationAction Continue
@@ -654,11 +650,11 @@ function Write-ConfigSummary {
     Write-Section "Configuration"
     $dbLabel = if ($Database -eq "postgres") { "PostgreSQL" } else { "MongoDB" }
     Write-Information -MessageData "  Database:       $dbLabel" -InformationAction Continue
-    Write-Information -MessageData "  Vault:          🔒 enabled" -InformationAction Continue -NoNewline; Write-Information -MessageData " (unique key)" -InformationAction Continue
+    Write-Information -MessageData "  Vault:          🔒 enabled (unique key)" -InformationAction Continue
     $authLabel = if ($WithAuth) { "Keycloak" } else { "open access" }
-    Write-Information -MessageData "  Authentication: $authLabel" -InformationAction Continue -ForegroundColor $(if ($WithAuth) { "White" } else { "DarkGray" })
+    Write-Information -MessageData "  Authentication: $authLabel" -InformationAction Continue
     $monLabel = if ($WithMonitoring) { "Grafana + Prometheus" } else { "none" }
-    Write-Information -MessageData "  Monitoring:     $monLabel" -InformationAction Continue -ForegroundColor $(if ($WithMonitoring) { "White" } else { "DarkGray" })
+    Write-Information -MessageData "  Monitoring:     $monLabel" -InformationAction Continue
     Write-Information -MessageData "  HTTP port:      $EddiPort" -InformationAction Continue
     Write-Information -MessageData "  HTTPS port:     $EddiHttpsPort" -InformationAction Continue
     Write-Information -MessageData "  Install dir:    $EddiDir" -InformationAction Continue
