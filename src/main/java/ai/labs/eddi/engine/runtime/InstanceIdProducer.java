@@ -34,7 +34,6 @@ public class InstanceIdProducer {
 
         String shortUuid = UUID.randomUUID().toString().substring(0, 4);
         this.instanceId = hostname + "-" + shortUuid;
-        log.infov("EDDI instance ID: {0}", instanceId);
     }
 
     public String getInstanceId() {

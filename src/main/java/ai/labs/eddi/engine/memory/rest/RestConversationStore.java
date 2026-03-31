@@ -224,11 +224,16 @@ public class RestConversationStore implements IRestConversationStore {
             var endedConversationIds = conversationMemoryStore.getEndedConversationIds();
 
             for (var endedConversationId : endedConversationIds) {
-                var descriptor = documentDescriptorStore.readDescriptor(endedConversationId, 0);
-                if (descriptor.getLastModifiedOn().before(deleteOlderThanThisDate)) {
-                    documentDescriptorStore.deleteAllDescriptor(endedConversationId);
+                try {
+                    var descriptor = documentDescriptorStore.readDescriptor(endedConversationId, 0);
+                    if (descriptor.getLastModifiedOn().before(deleteOlderThanThisDate)) {
+                        documentDescriptorStore.deleteAllDescriptor(endedConversationId);
+                        conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
+                        amountOfEndedConversations++;
+                    }
+                } catch (IResourceStore.ResourceNotFoundException e) {
                     conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
-                    amountOfEndedConversations++;
+                    log.debug(format("Cleaned up orphaned conversation memory without descriptor (id=%s)", endedConversationId));
                 }
             }
         }
