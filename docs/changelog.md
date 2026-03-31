@@ -13,6 +13,34 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Logging API Audit — Security, Dead Code, Level Filter, Type Safety (2026-03-31)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Complete audit of all logging-related REST APIs. Found 3 distinct surfaces (Log Admin, Conversation Log, Audit Trail) — no duplicates. Fixed 6 issues.
+
+| Issue | Severity | Fix |
+|---|---|---|
+| **No `@RolesAllowed` on `/administration/logs`** | 🔴 Security | Added `@RolesAllowed("eddi-admin")` matching `/auditstore`. OIDC's `tenant-enabled=false` default naturally bypasses in dev mode — no separate toggle needed |
+| **Test path mismatch** | 🔴 Bug | `LogAdminIT` used `/instance` but endpoint is `/instance-id` |
+| **Level filter exact match** | 🟡 Behavior | `matchesFilter()` and SSE stream filter used `equalsIgnoreCase()` (exact match) but OpenAPI docs say "Minimum log level". Changed to `levelOrdinal() >=` semantics. Added `BoundedLogStore.meetsMinimumLevel()` public method for SSE reuse |
+| **Dead `addLogs()` method** | 🟡 Cleanup | Removed single-record insert from `IDatabaseLogs` + both implementations. Only `addLogsBatch()` is used |
+| **Dead `getLogs(skip, limit)`** | 🟡 Cleanup | Removed no-filter overload from `IDatabaseLogs` + both implementations. Only filtered `getLogs()` is used |
+| **`DatabaseLog` weak typing** | 🟢 Quality | Replaced `DatabaseLog extends LinkedHashMap<String, Object>` with typed `LogEntry` record throughout history API. Deleted `DatabaseLog.java` |
+
+**API inventory (no changes to endpoints):**
+- `/administration/logs` — System-wide ops logs (ring buffer + SSE + DB history)
+- `/agents/{conversationId}/log` — Conversation message history
+- `/auditstore` — EU AI Act audit trail
+
+**Tests:** 22 tests pass (BoundedLogStoreTest + RestLogAdminTest). All compile clean.
+
+**Files:** 7 modified, 1 deleted (`DatabaseLog.java`), 2 tests updated.
+
+---
+
 ## Secrets Vault Code Review Remediation (2026-03-31)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
@@ -28,7 +56,7 @@ Critical code review of vault hardening identified 6 issues. All remediated in c
 | **MongoSecretPersistence exceptions** | 🟡 Significant | All 8 methods now wrapped with `try/catch(MongoException)` → `PersistenceException`, matching the Postgres implementation and interface contract |
 | **listSecrets silent degradation** | 🟡 Significant | Returns 500 on persistence error instead of 200+empty list |
 | **Rotation endpoint auth** | 🔵 Minor | Explicit `@RolesAllowed("eddi-admin")` on both rotation methods (defense-in-depth), TLS warning in OpenAPI description for KEK endpoint |
-| **BoundedLogStore level filter** | 🔵 Minor | Fixed `matchesFilter` to use exact case-insensitive level match instead of minimum-threshold. The threshold logic (`meetsMinimumLevel`) is correct for DB persistence but wrong for UI-facing queries |
+| **BoundedLogStore level filter** | 🔵 Minor | Identified incorrect exact-match filter in `matchesFilter()` — fixed in subsequent Logging API Audit (see above) to use minimum-level semantics |
 
 **Tests:** 115 tests run (vault + BoundedLogStore), 0 failures.
 

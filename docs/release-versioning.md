@@ -94,7 +94,10 @@ This produces:
 If RC1 needs fixes:
 
 ```bash
-# Fix on feature branch, merge to main, then:
+# 1. Fix on feature branch, merge to main
+# 2. Tag the new main HEAD
+git checkout main
+git pull origin main
 git tag v6.0.0-RC2
 git push origin v6.0.0-RC2
 ```
@@ -218,4 +221,14 @@ feature/version-6.0.0   v6.0.0-RC1                  v6.0.0
     ├── merge to main       │                           └── start v6.1.0 cycle
     │   → 6.0.0-b3          └── 6.0.0-RC2 + latest
     └── ...
+```
+
+### After a GA Release
+
+After tagging `v6.0.0`, update `pom.xml` on the feature branch to the next version:
+
+```bash
+# On feature/version-6.1.0 (or rename the branch)
+# Update pom.xml: <version>6.1.0</version>
+# CI builds will now produce 6.1.0-b1, 6.1.0-b2, etc.
 ```
