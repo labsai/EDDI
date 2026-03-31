@@ -13,6 +13,27 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Secrets Vault Code Review Remediation (2026-03-31)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Critical code review of vault hardening identified 6 issues. All remediated in commit `386df5bc`.
+
+| Issue | Severity | Fix |
+|---|---|---|
+| **KEK/DEK rotation atomicity** | 🔴 Critical | Verify-then-commit pattern — decrypt all items first, re-encrypt in memory, then batch-write. Prevents partial-failure mixed-key states |
+| **Public docs stale** | 🔴 Critical | Complete rewrite of `docs/secrets-vault.md` — correct 2-segment paths, rotation endpoints, Micrometer metrics, updated test counts, removed stale `agentId`/`DatabaseSecretProvider` references |
+| **MongoSecretPersistence exceptions** | 🟡 Significant | All 8 methods now wrapped with `try/catch(MongoException)` → `PersistenceException`, matching the Postgres implementation and interface contract |
+| **listSecrets silent degradation** | 🟡 Significant | Returns 500 on persistence error instead of 200+empty list |
+| **Rotation endpoint auth** | 🔵 Minor | Explicit `@RolesAllowed("eddi-admin")` on both rotation methods (defense-in-depth), TLS warning in OpenAPI description for KEK endpoint |
+| **BoundedLogStore level filter** | 🔵 Minor | Fixed `matchesFilter` to use exact case-insensitive level match instead of minimum-threshold. The threshold logic (`meetsMinimumLevel`) is correct for DB persistence but wrong for UI-facing queries |
+
+**Tests:** 115 tests run (vault + BoundedLogStore), 0 failures.
+
+---
+
 ## Secrets Vault Hardening — Negative Caching Fix, Metrics, Key Rotation (2026-03-31)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
