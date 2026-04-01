@@ -47,13 +47,13 @@ import {
   type BehaviorConfig,
 } from "@/components/editors/behavior-editor";
 import {
-  HttpCallsEditor,
-  type HttpCallsConfig,
-} from "@/components/editors/httpcalls-editor";
+  LangchainEditor as LlmEditor,
+  type LangchainConfig as LlmConfig,
+} from "@/components/editors/llm-editor";
 import {
-  LangchainEditor,
-  type LangchainConfig,
-} from "@/components/editors/langchain-editor";
+  HttpCallsEditor as ApiCallsEditor,
+  type HttpCallsConfig as ApiCallsConfig,
+} from "@/components/editors/apicalls-editor";
 import {
   OutputEditor,
   type OutputConfig,
@@ -95,10 +95,10 @@ const EDITOR_MAP: Record<
     <BehaviorEditor data={p as BehaviorConfig} onChange={o} readOnly={r} />
   ),
   apicalls: (p, o, r) => (
-    <HttpCallsEditor data={p as HttpCallsConfig} onChange={o} readOnly={r} />
+    <ApiCallsEditor data={p as ApiCallsConfig} onChange={o} readOnly={r} />
   ),
   llm: (p, o, r) => (
-    <LangchainEditor data={p as LangchainConfig} onChange={o} readOnly={r} />
+    <LlmEditor data={p as LlmConfig} onChange={o} readOnly={r} />
   ),
   output: (p, o, r) => (
     <OutputEditor data={p as OutputConfig} onChange={o} readOnly={r} />

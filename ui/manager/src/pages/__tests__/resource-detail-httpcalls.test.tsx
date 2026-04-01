@@ -35,7 +35,7 @@ describe("HTTP Calls Editor", () => {
     renderPage("apicalls");
 
     await waitFor(() => {
-      expect(screen.getByTestId("httpcalls-editor")).toBeInTheDocument();
+      expect(screen.getByTestId("apicalls-editor")).toBeInTheDocument();
     });
   });
 

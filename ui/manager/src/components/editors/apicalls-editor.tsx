@@ -160,7 +160,7 @@ function ActionTags({
         ))}
         {actions.length === 0 && (
           <span className="text-xs text-muted-foreground italic">
-            {t("httpcallsEditor.noActions", "No actions")}
+            {t("apiCallsEditor.noActions", "No actions")}
           </span>
         )}
       </div>
@@ -177,7 +177,7 @@ function ActionTags({
               }
             }}
             placeholder={t(
-              "httpcallsEditor.actionPlaceholder",
+              "apiCallsEditor.actionPlaceholder",
               "e.g. get_weather"
             )}
             className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -338,7 +338,7 @@ function HttpCodeValidatorEditor({
         className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
       >
         <Shield className="h-2.5 w-2.5" />
-        {t("httpcallsEditor.addHttpCodeValidator", "Add HTTP Code Filter")}
+        {t("apiCallsEditor.addHttpCodeValidator", "Add HTTP Code Filter")}
       </button>
     );
   }
@@ -349,7 +349,7 @@ function HttpCodeValidatorEditor({
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
           <Shield className="h-2.5 w-2.5" />
-          {t("httpcallsEditor.httpCodeFilter", "HTTP Code Filter")}
+          {t("apiCallsEditor.httpCodeFilter", "HTTP Code Filter")}
         </span>
         {!readOnly && (
           <button
@@ -364,7 +364,7 @@ function HttpCodeValidatorEditor({
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
-            {t("httpcallsEditor.runOnCodes", "Run on codes")}
+            {t("apiCallsEditor.runOnCodes", "Run on codes")}
           </label>
           <input
             type="text"
@@ -377,7 +377,7 @@ function HttpCodeValidatorEditor({
         </div>
         <div>
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
-            {t("httpcallsEditor.skipOnCodes", "Skip on codes")}
+            {t("apiCallsEditor.skipOnCodes", "Skip on codes")}
           </label>
           <input
             type="text"
@@ -422,7 +422,7 @@ function PropertyInstructionRow({
           value={instruction.name ?? ""}
           onChange={(e) => onChange({ ...instruction, name: e.target.value })}
           readOnly={readOnly}
-          placeholder={t("httpcallsEditor.propName", "Property name")}
+          placeholder={t("apiCallsEditor.propName", "Property name")}
           className="h-7 w-32 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
         <span className="text-xs text-muted-foreground">=</span>
@@ -431,7 +431,7 @@ function PropertyInstructionRow({
           value={instruction.valueString ?? ""}
           onChange={(e) => onChange({ ...instruction, valueString: e.target.value })}
           readOnly={readOnly}
-          placeholder={t("httpcallsEditor.propValue", "Value or template")}
+          placeholder={t("apiCallsEditor.propValue", "Value or template")}
           className="h-7 flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
         <select
@@ -444,7 +444,7 @@ function PropertyInstructionRow({
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
-        <label className="inline-flex items-center gap-1 text-[10px] text-foreground whitespace-nowrap" title={t("httpcallsEditor.overrideTitle", "Override existing value")}>
+        <label className="inline-flex items-center gap-1 text-[10px] text-foreground whitespace-nowrap" title={t("apiCallsEditor.overrideTitle", "Override existing value")}>
           <input
             type="checkbox"
             checked={instruction.override ?? true}
@@ -452,7 +452,7 @@ function PropertyInstructionRow({
             disabled={readOnly}
             className="h-3 w-3 accent-primary"
           />
-          {t("httpcallsEditor.override", "Override")}
+          {t("apiCallsEditor.override", "Override")}
         </label>
         {!readOnly && (
           <button
@@ -473,14 +473,14 @@ function PropertyInstructionRow({
           className="text-[10px] text-muted-foreground hover:text-foreground transition-colors flex items-center gap-0.5"
         >
           {showAdvanced ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
-          {t("httpcallsEditor.advancedMapping", "Object Path Mapping")}
+          {t("apiCallsEditor.advancedMapping", "Object Path Mapping")}
         </button>
         {showAdvanced && (
           <div className="mt-1.5 space-y-1.5 ps-3">
             <div className="grid grid-cols-2 gap-1.5">
               <div>
                 <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                  {t("httpcallsEditor.fromPath", "From Object Path")}
+                  {t("apiCallsEditor.fromPath", "From Object Path")}
                 </label>
                 <input
                   type="text"
@@ -493,7 +493,7 @@ function PropertyInstructionRow({
               </div>
               <div>
                 <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                  {t("httpcallsEditor.toPath", "To Object Path")}
+                  {t("apiCallsEditor.toPath", "To Object Path")}
                 </label>
                 <input
                   type="text"
@@ -514,7 +514,7 @@ function PropertyInstructionRow({
                   disabled={readOnly}
                   className="h-3 w-3 accent-primary"
                 />
-                {t("httpcallsEditor.convertToObject", "Convert to Object")}
+                {t("apiCallsEditor.convertToObject", "Convert to Object")}
               </label>
               <label className="inline-flex items-center gap-1 text-[10px] text-foreground">
                 <input
@@ -524,7 +524,7 @@ function PropertyInstructionRow({
                   disabled={readOnly}
                   className="h-3 w-3 accent-primary"
                 />
-                {t("httpcallsEditor.runOnValidationError", "Run on Validation Error")}
+                {t("apiCallsEditor.runOnValidationError", "Run on Validation Error")}
               </label>
             </div>
             <HttpCodeValidatorEditor
@@ -541,7 +541,7 @@ function PropertyInstructionRow({
 
 // ─── PropertyInstructions list editor ────────────────────────────────────────
 
-function PropertyInstructionsEditor({
+export function PropertyInstructionsEditor({
   instructions,
   onChange,
   readOnly,
@@ -556,7 +556,7 @@ function PropertyInstructionsEditor({
     <div className="space-y-1.5">
       {instructions.length === 0 && (
         <p className="text-[10px] italic text-muted-foreground">
-          {t("httpcallsEditor.noPropertyInstructions", "No property instructions")}
+          {t("apiCallsEditor.noPropertyInstructions", "No property instructions")}
         </p>
       )}
       {instructions.map((inst, i) => (
@@ -579,7 +579,7 @@ function PropertyInstructionsEditor({
           className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           <Plus className="h-3 w-3" />
-          {t("httpcallsEditor.addPropertyInstruction", "Add Property Instruction")}
+          {t("apiCallsEditor.addPropertyInstruction", "Add Property Instruction")}
         </button>
       )}
     </div>
@@ -609,7 +609,7 @@ function OutputBuildInstructionRow({
         <div className="flex-1 grid grid-cols-3 gap-1.5">
           <div>
             <label className="mb-0.5 block text-[10px] text-muted-foreground">
-              {t("httpcallsEditor.pathToTargetArray", "Path to Target Array")}
+              {t("apiCallsEditor.pathToTargetArray", "Path to Target Array")}
             </label>
             <input
               type="text"
@@ -622,7 +622,7 @@ function OutputBuildInstructionRow({
           </div>
           <div>
             <label className="mb-0.5 block text-[10px] text-muted-foreground">
-              {t("httpcallsEditor.iterationObjName", "Iteration Object")}
+              {t("apiCallsEditor.iterationObjName", "Iteration Object")}
             </label>
             <input
               type="text"
@@ -635,14 +635,14 @@ function OutputBuildInstructionRow({
           </div>
           <div>
             <label className="mb-0.5 block text-[10px] text-muted-foreground">
-              {t("httpcallsEditor.templateFilter", "Filter Expression")}
+              {t("apiCallsEditor.templateFilter", "Filter Expression")}
             </label>
             <input
               type="text"
               value={instruction.templateFilterExpression ?? ""}
               onChange={(e) => onChange({ ...instruction, templateFilterExpression: e.target.value })}
               readOnly={readOnly}
-              placeholder={t("httpcallsEditor.filterPlaceholder", "Optional filter...")}
+              placeholder={t("apiCallsEditor.filterPlaceholder", "Optional filter...")}
               className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
@@ -660,7 +660,7 @@ function OutputBuildInstructionRow({
       <div className="grid grid-cols-3 gap-1.5">
         <div>
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
-            {t("httpcallsEditor.outputType", "Output Type")}
+            {t("apiCallsEditor.outputType", "Output Type")}
           </label>
           <select
             value={instruction.outputType ?? "text"}
@@ -675,7 +675,7 @@ function OutputBuildInstructionRow({
         </div>
         <div className="col-span-2">
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
-            {t("httpcallsEditor.outputValue", "Output Value")}
+            {t("apiCallsEditor.outputValue", "Output Value")}
           </label>
           <input
             type="text"
@@ -698,7 +698,7 @@ function OutputBuildInstructionRow({
 
 // ─── OutputBuildInstructions list editor ─────────────────────────────────────
 
-function OutputBuildInstructionsEditor({
+export function OutputBuildInstructionsEditor({
   instructions,
   onChange,
   readOnly,
@@ -713,7 +713,7 @@ function OutputBuildInstructionsEditor({
     <div className="space-y-1.5">
       {instructions.length === 0 && (
         <p className="text-[10px] italic text-muted-foreground">
-          {t("httpcallsEditor.noOutputInstructions", "No output build instructions")}
+          {t("apiCallsEditor.noOutputInstructions", "No output build instructions")}
         </p>
       )}
       {instructions.map((inst, i) => (
@@ -736,7 +736,7 @@ function OutputBuildInstructionsEditor({
           className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           <Plus className="h-3 w-3" />
-          {t("httpcallsEditor.addOutputInstruction", "Add Output Instruction")}
+          {t("apiCallsEditor.addOutputInstruction", "Add Output Instruction")}
         </button>
       )}
     </div>
@@ -764,7 +764,7 @@ function QrBuildInstructionRow({
         <div className="flex-1 grid grid-cols-3 gap-1.5">
           <div>
             <label className="mb-0.5 block text-[10px] text-muted-foreground">
-              {t("httpcallsEditor.pathToTargetArray", "Path to Target Array")}
+              {t("apiCallsEditor.pathToTargetArray", "Path to Target Array")}
             </label>
             <input
               type="text"
@@ -777,7 +777,7 @@ function QrBuildInstructionRow({
           </div>
           <div>
             <label className="mb-0.5 block text-[10px] text-muted-foreground">
-              {t("httpcallsEditor.iterationObjName", "Iteration Object")}
+              {t("apiCallsEditor.iterationObjName", "Iteration Object")}
             </label>
             <input
               type="text"
@@ -790,14 +790,14 @@ function QrBuildInstructionRow({
           </div>
           <div>
             <label className="mb-0.5 block text-[10px] text-muted-foreground">
-              {t("httpcallsEditor.templateFilter", "Filter Expression")}
+              {t("apiCallsEditor.templateFilter", "Filter Expression")}
             </label>
             <input
               type="text"
               value={instruction.templateFilterExpression ?? ""}
               onChange={(e) => onChange({ ...instruction, templateFilterExpression: e.target.value })}
               readOnly={readOnly}
-              placeholder={t("httpcallsEditor.filterPlaceholder", "Optional filter...")}
+              placeholder={t("apiCallsEditor.filterPlaceholder", "Optional filter...")}
               className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
@@ -815,7 +815,7 @@ function QrBuildInstructionRow({
       <div className="grid grid-cols-2 gap-1.5">
         <div>
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
-            {t("httpcallsEditor.qrValue", "Quick Reply Value")}
+            {t("apiCallsEditor.qrValue", "Quick Reply Value")}
           </label>
           <input
             type="text"
@@ -828,7 +828,7 @@ function QrBuildInstructionRow({
         </div>
         <div>
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
-            {t("httpcallsEditor.qrExpressions", "Quick Reply Expressions")}
+            {t("apiCallsEditor.qrExpressions", "Quick Reply Expressions")}
           </label>
           <input
             type="text"
@@ -851,7 +851,7 @@ function QrBuildInstructionRow({
 
 // ─── QuickRepliesBuildInstructions list editor ───────────────────────────────
 
-function QrBuildInstructionsEditor({
+export function QrBuildInstructionsEditor({
   instructions,
   onChange,
   readOnly,
@@ -866,7 +866,7 @@ function QrBuildInstructionsEditor({
     <div className="space-y-1.5">
       {instructions.length === 0 && (
         <p className="text-[10px] italic text-muted-foreground">
-          {t("httpcallsEditor.noQrInstructions", "No quick reply build instructions")}
+          {t("apiCallsEditor.noQrInstructions", "No quick reply build instructions")}
         </p>
       )}
       {instructions.map((inst, i) => (
@@ -889,7 +889,7 @@ function QrBuildInstructionsEditor({
           className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           <Plus className="h-3 w-3" />
-          {t("httpcallsEditor.addQrInstruction", "Add Quick Reply Instruction")}
+          {t("apiCallsEditor.addQrInstruction", "Add Quick Reply Instruction")}
         </button>
       )}
     </div>
@@ -916,7 +916,7 @@ function PreRequestEditor({
       <div className="flex items-center gap-2">
         <Timer className="h-3.5 w-3.5 text-muted-foreground" />
         <label className="text-xs text-muted-foreground whitespace-nowrap">
-          {t("httpcallsEditor.delayMs", "Delay (ms)")}
+          {t("apiCallsEditor.delayMs", "Delay (ms)")}
         </label>
         <input
           type="number"
@@ -932,7 +932,7 @@ function PreRequestEditor({
       <div>
         <h6 className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           <ArrowRightLeft className="h-3 w-3" />
-          {t("httpcallsEditor.propertyInstructions", "Property Instructions")}
+          {t("apiCallsEditor.propertyInstructions", "Property Instructions")}
         </h6>
         <PropertyInstructionsEditor
           instructions={data.propertyInstructions ?? []}
@@ -964,7 +964,7 @@ function PostResponseEditor({
       <div>
         <h6 className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           <ArrowRightLeft className="h-3 w-3" />
-          {t("httpcallsEditor.propertyInstructions", "Property Instructions")}
+          {t("apiCallsEditor.propertyInstructions", "Property Instructions")}
         </h6>
         <PropertyInstructionsEditor
           instructions={data.propertyInstructions ?? []}
@@ -977,7 +977,7 @@ function PostResponseEditor({
       <div>
         <h6 className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           <FileOutput className="h-3 w-3" />
-          {t("httpcallsEditor.outputBuildInstructions", "Output Build Instructions")}
+          {t("apiCallsEditor.outputBuildInstructions", "Output Build Instructions")}
         </h6>
         <OutputBuildInstructionsEditor
           instructions={data.outputBuildInstructions ?? []}
@@ -990,7 +990,7 @@ function PostResponseEditor({
       <div>
         <h6 className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           <MessageCircle className="h-3 w-3" />
-          {t("httpcallsEditor.qrBuildInstructions", "Quick Reply Build Instructions")}
+          {t("apiCallsEditor.qrBuildInstructions", "Quick Reply Build Instructions")}
         </h6>
         <QrBuildInstructionsEditor
           instructions={data.qrBuildInstructions ?? []}
@@ -1067,7 +1067,7 @@ function HttpCallEditor({
           value={call.name ?? ""}
           onChange={(e) => onChange({ ...call, name: e.target.value })}
           readOnly={readOnly}
-          placeholder={t("httpcallsEditor.callName", "Call Name")}
+          placeholder={t("apiCallsEditor.callName", "Call Name")}
           className="h-8 flex-1 rounded-md border border-input bg-background px-3 text-sm font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           data-testid="call-name-input"
         />
@@ -1076,7 +1076,7 @@ function HttpCallEditor({
             type="button"
             onClick={onRemove}
             className="rounded p-1.5 text-muted-foreground hover:text-destructive transition-colors"
-            aria-label={t("httpcallsEditor.removeCall", "Remove Call")}
+            aria-label={t("apiCallsEditor.removeCall", "Remove Call")}
           >
             <Trash2 className="h-4 w-4" />
           </button>
@@ -1088,7 +1088,7 @@ function HttpCallEditor({
           {/* Description */}
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
-              {t("httpcallsEditor.callDescription", "Description")}
+              {t("apiCallsEditor.callDescription", "Description")}
             </label>
             <input
               type="text"
@@ -1098,7 +1098,7 @@ function HttpCallEditor({
               }
               readOnly={readOnly}
               placeholder={t(
-                "httpcallsEditor.descriptionPlaceholder",
+                "apiCallsEditor.descriptionPlaceholder",
                 "Natural language description for LLM agents"
               )}
               className="h-8 w-full rounded-md border border-input bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -1106,7 +1106,7 @@ function HttpCallEditor({
           </div>
 
           {/* Actions */}
-          <Section label={t("httpcallsEditor.actions", "Trigger Actions")}>
+          <Section label={t("apiCallsEditor.actions", "Trigger Actions")}>
             <ActionTags
               actions={call.actions ?? []}
               onChange={(a) => onChange({ ...call, actions: a })}
@@ -1115,7 +1115,7 @@ function HttpCallEditor({
           </Section>
 
           {/* Request */}
-          <Section label={t("httpcallsEditor.request", "Request")}>
+          <Section label={t("apiCallsEditor.request", "Request")}>
             <div className="flex gap-2">
               <select
                 value={call.request.method}
@@ -1136,7 +1136,7 @@ function HttpCallEditor({
                 onChange={(e) => updateRequest({ path: e.target.value })}
                 readOnly={readOnly}
                 placeholder={t(
-                  "httpcallsEditor.pathPlaceholder",
+                  "apiCallsEditor.pathPlaceholder",
                   "/api/endpoint"
                 )}
                 className="h-8 flex-1 rounded-md border border-input bg-background px-3 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -1144,7 +1144,7 @@ function HttpCallEditor({
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                {t("httpcallsEditor.contentType", "Content Type")}
+                {t("apiCallsEditor.contentType", "Content Type")}
               </label>
               <input
                 type="text"
@@ -1159,7 +1159,7 @@ function HttpCallEditor({
 
           {/* Headers */}
           <Section
-            label={t("httpcallsEditor.headers", "Headers")}
+            label={t("apiCallsEditor.headers", "Headers")}
             defaultOpen={
               Object.keys(call.request.headers ?? {}).length > 0
             }
@@ -1169,14 +1169,14 @@ function HttpCallEditor({
               onChange={(h) => updateRequest({ headers: h })}
               keyPlaceholder="Header name"
               valuePlaceholder="Header value"
-              addLabel={t("httpcallsEditor.addHeader", "Add Header")}
+              addLabel={t("apiCallsEditor.addHeader", "Add Header")}
               readOnly={readOnly}
             />
           </Section>
 
           {/* Query params */}
           <Section
-            label={t("httpcallsEditor.queryParams", "Query Parameters")}
+            label={t("apiCallsEditor.queryParams", "Query Parameters")}
             defaultOpen={
               Object.keys(call.request.queryParams ?? {}).length > 0
             }
@@ -1186,14 +1186,14 @@ function HttpCallEditor({
               onChange={(q) => updateRequest({ queryParams: q })}
               keyPlaceholder="Param name"
               valuePlaceholder="Param value"
-              addLabel={t("httpcallsEditor.addQueryParam", "Add Query Param")}
+              addLabel={t("apiCallsEditor.addQueryParam", "Add Query Param")}
               readOnly={readOnly}
             />
           </Section>
 
           {/* Body */}
           <Section
-            label={t("httpcallsEditor.body", "Request Body")}
+            label={t("apiCallsEditor.body", "Request Body")}
             defaultOpen={!!call.request.body}
           >
             <ContentEditor
@@ -1201,9 +1201,9 @@ function HttpCallEditor({
               onChange={(v) => updateRequest({ body: v })}
               readOnly={readOnly}
               language="json"
-              label={t("httpcallsEditor.body", "Request Body")}
+              label={t("apiCallsEditor.body", "Request Body")}
               placeholder={t(
-                "httpcallsEditor.bodyPlaceholder",
+                "apiCallsEditor.bodyPlaceholder",
                 "JSON body template..."
               )}
               testId="request-body-editor"
@@ -1213,7 +1213,7 @@ function HttpCallEditor({
           {/* Parameters (for LLM agents) */}
           <Section
             label={t(
-              "httpcallsEditor.parameters",
+              "apiCallsEditor.parameters",
               "Parameters (for LLM agents)"
             )}
             defaultOpen={
@@ -1223,19 +1223,19 @@ function HttpCallEditor({
             <KvEditor
               entries={call.parameters ?? {}}
               onChange={(p) => onChange({ ...call, parameters: p })}
-              keyPlaceholder={t("httpcallsEditor.paramName", "Param name")}
+              keyPlaceholder={t("apiCallsEditor.paramName", "Param name")}
               valuePlaceholder={t(
-                "httpcallsEditor.paramDescription",
+                "apiCallsEditor.paramDescription",
                 "Description"
               )}
-              addLabel={t("httpcallsEditor.addParam", "Add Parameter")}
+              addLabel={t("apiCallsEditor.addParam", "Add Parameter")}
               readOnly={readOnly}
             />
           </Section>
 
           {/* Options */}
           <Section
-            label={t("httpcallsEditor.options", "Options")}
+            label={t("apiCallsEditor.options", "Options")}
             defaultOpen={false}
           >
             <div className="space-y-2">
@@ -1249,7 +1249,7 @@ function HttpCallEditor({
                   disabled={readOnly}
                   className="h-3.5 w-3.5 rounded border-input accent-primary"
                 />
-                {t("httpcallsEditor.saveResponse", "Save Response")}
+                {t("apiCallsEditor.saveResponse", "Save Response")}
               </label>
               {call.saveResponse && (
                 <input
@@ -1260,7 +1260,7 @@ function HttpCallEditor({
                   }
                   readOnly={readOnly}
                   placeholder={t(
-                    "httpcallsEditor.responseObjectName",
+                    "apiCallsEditor.responseObjectName",
                     "Response Object Name"
                   )}
                   className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -1278,7 +1278,7 @@ function HttpCallEditor({
                   }
                   readOnly={readOnly}
                   placeholder={t(
-                    "httpcallsEditor.responseHeaderObjectName",
+                    "apiCallsEditor.responseHeaderObjectName",
                     "Response Header Object Name"
                   )}
                   className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -1294,7 +1294,7 @@ function HttpCallEditor({
                   disabled={readOnly}
                   className="h-3.5 w-3.5 rounded border-input accent-primary"
                 />
-                {t("httpcallsEditor.fireAndForget", "Fire and Forget")}
+                {t("apiCallsEditor.fireAndForget", "Fire and Forget")}
               </label>
               <label className="inline-flex items-center gap-2 text-xs text-foreground">
                 <input
@@ -1306,7 +1306,7 @@ function HttpCallEditor({
                   disabled={readOnly}
                   className="h-3.5 w-3.5 rounded border-input accent-primary"
                 />
-                {t("httpcallsEditor.batchCalls", "Batch Calls")}
+                {t("apiCallsEditor.batchCalls", "Batch Calls")}
               </label>
               {call.isBatchCalls && (
                 <input
@@ -1317,7 +1317,7 @@ function HttpCallEditor({
                   }
                   readOnly={readOnly}
                   placeholder={t(
-                    "httpcallsEditor.iterationObjectName",
+                    "apiCallsEditor.iterationObjectName",
                     "Iteration Object Name"
                   )}
                   className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -1328,7 +1328,7 @@ function HttpCallEditor({
 
           {/* Pre-Request */}
           <Section
-            label={t("httpcallsEditor.preRequest", "Pre-Request")}
+            label={t("apiCallsEditor.preRequest", "Pre-Request")}
             defaultOpen={
               !!(call.preRequest?.propertyInstructions?.length || call.preRequest?.delayBeforeExecutingInMillis)
             }
@@ -1342,7 +1342,7 @@ function HttpCallEditor({
 
           {/* Post-Response */}
           <Section
-            label={t("httpcallsEditor.postResponse", "Post-Response")}
+            label={t("apiCallsEditor.postResponse", "Post-Response")}
             defaultOpen={
               !!(call.postResponse?.propertyInstructions?.length ||
                 call.postResponse?.outputBuildInstructions?.length ||
@@ -1385,7 +1385,7 @@ function DiscoveredEndpointsPanel({
     >
       <div className="flex items-center justify-between">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {t("httpcallsEditor.discoveredEndpoints", "Discovered Endpoints")} ({result.endpointCount})
+          {t("apiCallsEditor.discoveredEndpoints", "Discovered Endpoints")} ({result.endpointCount})
         </p>
         <span className="text-[10px] text-muted-foreground">
           {result.title} — {result.baseUrl}
@@ -1531,7 +1531,7 @@ export function HttpCallsEditor({
       const msg =
         err && typeof err === "object" && "message" in err
           ? String((err as { message: string }).message)
-          : t("httpcallsEditor.discoveryError", "Could not parse OpenAPI spec");
+          : t("apiCallsEditor.discoveryError", "Could not parse OpenAPI spec");
       setDiscoveryError(msg);
       setHasDiscovered(true);
     } finally {
@@ -1633,12 +1633,12 @@ export function HttpCallsEditor({
   }, [data, onChange]);
 
   return (
-    <div className="space-y-6" data-testid="httpcalls-editor">
+    <div className="space-y-6" data-testid="apicalls-editor">
       {/* Target Server URL */}
       <div>
         <label className="mb-1.5 block text-sm font-medium text-foreground">
           <Globe className="me-1.5 inline h-4 w-4 text-primary" />
-          {t("httpcallsEditor.targetServerUrl", "Target Server URL")}
+          {t("apiCallsEditor.targetServerUrl", "Target Server URL")}
         </label>
         <input
           type="text"
@@ -1648,7 +1648,7 @@ export function HttpCallsEditor({
           }
           readOnly={readOnly}
           placeholder={t(
-            "httpcallsEditor.targetServerUrlPlaceholder",
+            "apiCallsEditor.targetServerUrlPlaceholder",
             "https://api.example.com"
           )}
           className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -1661,7 +1661,7 @@ export function HttpCallsEditor({
         <div className="space-y-3 rounded-xl border border-dashed border-primary/30 bg-primary/5 p-4">
           <label className="mb-1 block text-sm font-medium text-foreground">
             <FileDown className="me-1.5 inline h-4 w-4 text-primary" />
-            {t("httpcallsEditor.openApiSpecUrl", "Import from OpenAPI Spec")}
+            {t("apiCallsEditor.openApiSpecUrl", "Import from OpenAPI Spec")}
           </label>
           <div className="flex gap-2">
             <input
@@ -1669,7 +1669,7 @@ export function HttpCallsEditor({
               value={specUrl}
               onChange={(e) => setSpecUrl(e.target.value)}
               placeholder={t(
-                "httpcallsEditor.specUrlPlaceholder",
+                "apiCallsEditor.specUrlPlaceholder",
                 "https://api.example.com/openapi.json"
               )}
               className="h-8 flex-1 rounded-md border border-input bg-background px-3 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -1685,7 +1685,7 @@ export function HttpCallsEditor({
               type="button"
               onClick={handleDiscover}
               disabled={isDiscovering || !specUrlValid}
-              title={specUrl.trim() && !specUrlValid ? t("httpcallsEditor.invalidUrl", "Enter a valid http:// or https:// URL") : undefined}
+              title={specUrl.trim() && !specUrlValid ? t("apiCallsEditor.invalidUrl", "Enter a valid http:// or https:// URL") : undefined}
               className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
               data-testid="discover-endpoints-btn"
             >
@@ -1695,8 +1695,8 @@ export function HttpCallsEditor({
                 <Search className="h-3.5 w-3.5" />
               )}
               {isDiscovering
-                ? t("httpcallsEditor.discovering", "Parsing…")
-                : t("httpcallsEditor.discoverEndpoints", "Discover Endpoints")}
+                ? t("apiCallsEditor.discovering", "Parsing…")
+                : t("apiCallsEditor.discoverEndpoints", "Discover Endpoints")}
             </button>
           </div>
 
@@ -1707,7 +1707,7 @@ export function HttpCallsEditor({
               data-testid="discovery-loading"
             >
               <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              {t("httpcallsEditor.discovering", "Parsing…")}
+              {t("apiCallsEditor.discovering", "Parsing…")}
             </div>
           )}
 
@@ -1727,7 +1727,7 @@ export function HttpCallsEditor({
                 className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors"
               >
                 <RefreshCw className="h-3 w-3" />
-                {t("httpcallsEditor.retry", "Retry")}
+                {t("apiCallsEditor.retry", "Retry")}
               </button>
             </div>
           )}
@@ -1742,7 +1742,7 @@ export function HttpCallsEditor({
                 data-testid="discovery-empty"
               >
                 {t(
-                  "httpcallsEditor.noEndpointsFound",
+                  "apiCallsEditor.noEndpointsFound",
                   "No endpoints found in the spec"
                 )}
               </div>
@@ -1762,7 +1762,7 @@ export function HttpCallsEditor({
               <div className="flex items-center gap-2">
                 <span className="text-[10px] text-muted-foreground">
                   {selected.size}{" "}
-                  {t("httpcallsEditor.selectedCount", "selected")}
+                  {t("apiCallsEditor.selectedCount", "selected")}
                 </span>
                 <div className="flex-1" />
                 <button
@@ -1773,7 +1773,7 @@ export function HttpCallsEditor({
                   data-testid="import-append-btn"
                 >
                   <Plus className="h-3 w-3" />
-                  {t("httpcallsEditor.importAppend", "Append to Calls")}
+                  {t("apiCallsEditor.importAppend", "Append to Calls")}
                 </button>
                 <button
                   type="button"
@@ -1783,7 +1783,7 @@ export function HttpCallsEditor({
                   data-testid="import-replace-btn"
                 >
                   <FileDown className="h-3 w-3" />
-                  {t("httpcallsEditor.importReplace", "Replace All Calls")}
+                  {t("apiCallsEditor.importReplace", "Replace All Calls")}
                 </button>
               </div>
 
@@ -1796,7 +1796,7 @@ export function HttpCallsEditor({
                   <ShieldAlert className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
                   <p className="flex-1 text-xs text-amber-700 dark:text-amber-300">
                     {t(
-                      "httpcallsEditor.replaceConfirmMessage",
+                      "apiCallsEditor.replaceConfirmMessage",
                       `This will replace ${(data.httpCalls ?? []).length} existing call(s). Are you sure?`
                     )}
                   </p>
@@ -1813,7 +1813,7 @@ export function HttpCallsEditor({
                     className="rounded bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700 transition-colors"
                     data-testid="replace-confirm-yes"
                   >
-                    {t("httpcallsEditor.confirmReplace", "Yes, Replace All")}
+                    {t("apiCallsEditor.confirmReplace", "Yes, Replace All")}
                   </button>
                 </div>
               )}
@@ -1827,7 +1827,7 @@ export function HttpCallsEditor({
         <div className="flex items-center justify-between">
           <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <Globe className="h-4 w-4 text-primary" />
-            {t("httpcallsEditor.calls", "HTTP Calls")}
+            {t("apiCallsEditor.calls", "HTTP Calls")}
           </h3>
           {!readOnly && (
             <button
@@ -1837,14 +1837,14 @@ export function HttpCallsEditor({
               data-testid="add-call-btn"
             >
               <Plus className="h-3.5 w-3.5" />
-              {t("httpcallsEditor.addCall", "Add HTTP Call")}
+              {t("apiCallsEditor.addCall", "Add HTTP Call")}
             </button>
           )}
         </div>
 
         {(data.httpCalls ?? []).length === 0 && (
           <div className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
-            {t("httpcallsEditor.noCalls", "No HTTP calls configured")}
+            {t("apiCallsEditor.noCalls", "No HTTP calls configured")}
           </div>
         )}
 

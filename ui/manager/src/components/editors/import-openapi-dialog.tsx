@@ -18,7 +18,7 @@ import { createResource, getResourceType } from "@/lib/api/resources";
 import { updateDescriptor } from "@/lib/api/descriptors";
 import { parseResourceUri } from "@/lib/api/agents";
 import type { WorkflowExtension } from "@/lib/api/workflows";
-import type { HttpCall } from "./httpcalls-editor";
+import type { HttpCall } from "./apicalls-editor";
 import { isValidUrl } from "@/lib/utils";
 
 export interface ImportOpenApiDialogProps {

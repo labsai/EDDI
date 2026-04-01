@@ -422,7 +422,7 @@
     "noRules": "此组中没有规则",
     "noConditions": "无条件"
   },
-  "httpcallsEditor": {
+  "apiCallsEditor": {
     "targetServerUrl": "目标服务器 URL",
     "targetServerUrlPlaceholder": "https://api.example.com",
     "calls": "HTTP 调用",
@@ -461,7 +461,7 @@
     "noActions": "无操作",
     "actionPlaceholder": "例如 get_weather"
   },
-  "langchainEditor": {
+  "llmEditor": {
     "tasks": "LangChain 任务",
     "addTask": "添加任务",
     "noTasks": "未配置 LangChain 任务",
@@ -559,7 +559,12 @@
     "moveDown": "Move down",
     "moveUp": "Move up",
     "execution": "Execution",
-    "budgetCosts": "Budget & Costs"
+    "budgetCosts": "Budget & Costs",
+    "preRequestDesc": "在 LLM 执行前设置或转换属性。",
+    "postResponseDesc": "处理 LLM 输出：设置属性、构建输出消息和生成快速回复。",
+    "postPropertyInstructions": "属性指令",
+    "postOutputInstructions": "输出构建指令",
+    "postQrInstructions": "快速回复构建指令"
   },
   "outputEditor": {
     "language": "语言",

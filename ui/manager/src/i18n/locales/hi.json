@@ -422,7 +422,7 @@
     "noRules": "इस समूह में कोई नियम नहीं",
     "noConditions": "कोई शर्तें नहीं"
   },
-  "httpcallsEditor": {
+  "apiCallsEditor": {
     "targetServerUrl": "लक्ष्य सर्वर URL",
     "targetServerUrlPlaceholder": "https://api.example.com",
     "calls": "HTTP कॉल",
@@ -461,7 +461,7 @@
     "noActions": "कोई कार्य नहीं",
     "actionPlaceholder": "उदा: get_weather"
   },
-  "langchainEditor": {
+  "llmEditor": {
     "tasks": "LangChain कार्य",
     "addTask": "कार्य जोड़ें",
     "noTasks": "कोई LangChain कार्य कॉन्फ़िगर नहीं",
@@ -559,7 +559,12 @@
     "moveDown": "Move down",
     "moveUp": "Move up",
     "execution": "Execution",
-    "budgetCosts": "Budget & Costs"
+    "budgetCosts": "Budget & Costs",
+    "preRequestDesc": "LLM निष्पादन से पहले प्रॉपर्टीज सेट या ट्रांसफॉर्म करें।",
+    "postResponseDesc": "LLM आउटपुट को प्रोसेस करें: प्रॉपर्टीज सेट करें, आउटपुट मैसेज बनाएं और क्विक रिप्लाई जनरेट करें।",
+    "postPropertyInstructions": "प्रॉपर्टी निर्देश",
+    "postOutputInstructions": "आउटपुट निर्देश",
+    "postQrInstructions": "क्विक रिप्लाई निर्देश"
   },
   "outputEditor": {
     "language": "भाषा",

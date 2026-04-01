@@ -31,17 +31,17 @@ function renderPage(type: string, id = "res1") {
 }
 
 describe("LangChain Editor", () => {
-  it("renders langchain editor with tasks", async () => {
+  it("renders LLM editor with tasks", async () => {
     renderPage("llm");
     await waitFor(() => {
-      expect(screen.getByTestId("langchain-editor")).toBeInTheDocument();
+      expect(screen.getByTestId("llm-editor")).toBeInTheDocument();
     });
   });
 
   it("renders task card with model type select", async () => {
     renderPage("llm");
     await waitFor(() => {
-      expect(screen.getAllByTestId("langchain-task-editor").length).toBeGreaterThan(0);
+      expect(screen.getAllByTestId("llm-task-editor").length).toBeGreaterThan(0);
     });
   });
 

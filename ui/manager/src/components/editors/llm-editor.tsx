@@ -20,9 +20,17 @@ import {
   DollarSign,
   Cpu,
   FileCode,
+  ArrowRightLeft,
+  FileOutput,
+  MessageCircle,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import {
+  PropertyInstructionsEditor,
+  OutputBuildInstructionsEditor,
+  QrBuildInstructionsEditor,
+} from "./apicalls-editor";
 
 // Re-export types so existing imports still work
 export type {
@@ -30,17 +38,22 @@ export type {
   CascadeStep,
   ModelCascadeConfig,
   LangchainTask,
+  LlmTask,
   KnowledgeBaseReference,
   LangchainConfig,
-} from "./langchain/types";
+  LlmConfig,
+  LlmPreRequest,
+  LlmPostResponse,
+} from "./llm/types";
 
 import {
-  type LangchainTask,
-  type LangchainConfig,
+  type LlmTask as LangchainTask,
+  type LlmConfig as LangchainConfig,
+  type LlmPostResponse,
   HIDDEN_PARAM_KEYS,
   MODEL_TYPES,
   BUILT_IN_TOOLS,
-} from "./langchain/types";
+} from "./llm/types";
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -87,7 +100,7 @@ function ActionTags({
         ))}
         {actions.length === 0 && (
           <span className="text-xs text-muted-foreground italic">
-            {t("langchainEditor.noActions", "No actions")}
+            {t("llmEditor.noActions", "No actions")}
           </span>
         )}
       </div>
@@ -104,7 +117,7 @@ function ActionTags({
               }
             }}
             placeholder={t(
-              "langchainEditor.actionPlaceholder",
+              "llmEditor.actionPlaceholder",
               "e.g. help, chat"
             )}
             className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -258,7 +271,7 @@ function TaskEditor({
   return (
     <div
       className="rounded-xl border border-border bg-card shadow-sm"
-      data-testid="langchain-task-editor"
+      data-testid="llm-task-editor"
     >
       {/* Task header */}
       <div className="flex items-center gap-2 p-3">
@@ -311,7 +324,7 @@ function TaskEditor({
           value={task.id ?? ""}
           onChange={(e) => onChange({ ...task, id: e.target.value })}
           readOnly={readOnly}
-          placeholder={t("langchainEditor.taskId", "Task ID")}
+          placeholder={t("llmEditor.taskId", "Task ID")}
           className="h-8 w-32 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
         <span className="flex-1" />
@@ -320,7 +333,7 @@ function TaskEditor({
             type="button"
             onClick={onRemove}
             className="rounded p-1.5 text-muted-foreground hover:text-destructive transition-colors"
-            aria-label={t("langchainEditor.removeTask", "Remove Task")}
+            aria-label={t("llmEditor.removeTask", "Remove Task")}
           >
             <Trash2 className="h-4 w-4" />
           </button>
@@ -332,7 +345,7 @@ function TaskEditor({
           {/* Description */}
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
-              {t("langchainEditor.description", "Description")}
+              {t("llmEditor.description", "Description")}
             </label>
             <input
               type="text"
@@ -342,7 +355,7 @@ function TaskEditor({
               }
               readOnly={readOnly}
               placeholder={t(
-                "langchainEditor.descriptionPlaceholder",
+                "llmEditor.descriptionPlaceholder",
                 "What this task does"
               )}
               className="h-8 w-full rounded-md border border-input bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -350,7 +363,7 @@ function TaskEditor({
           </div>
 
           {/* Actions */}
-          <Section label={t("langchainEditor.triggerActions", "Trigger Actions")}>
+          <Section label={t("llmEditor.triggerActions", "Trigger Actions")}>
             <ActionTags
               actions={task.actions ?? []}
               onChange={(a) => onChange({ ...task, actions: a })}
@@ -360,16 +373,16 @@ function TaskEditor({
 
           {/* System Prompt */}
           <Section
-            label={t("langchainEditor.systemPrompt", "System Prompt")}
+            label={t("llmEditor.systemPrompt", "System Prompt")}
           >
             <ContentEditor
               value={task.parameters?.systemMessage ?? ""}
               onChange={(v) => updateParam("systemMessage", v)}
               readOnly={readOnly}
               language="prompt"
-              label={t("langchainEditor.systemPrompt", "System Prompt")}
+              label={t("llmEditor.systemPrompt", "System Prompt")}
               placeholder={t(
-                "langchainEditor.systemPromptPlaceholder",
+                "llmEditor.systemPromptPlaceholder",
                 "You are a helpful assistant..."
               )}
               testId="system-prompt"
@@ -378,7 +391,7 @@ function TaskEditor({
 
           {/* Model Parameters */}
           <Section
-            label={t("langchainEditor.modelParams", "Model Parameters")}
+            label={t("llmEditor.modelParams", "Model Parameters")}
             defaultOpen={false}
           >
             <div className="grid grid-cols-2 gap-2">
@@ -430,14 +443,14 @@ function TaskEditor({
                 className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
                 <Plus className="h-3 w-3" />
-                {t("langchainEditor.addParam", "Add Parameter")}
+                {t("llmEditor.addParam", "Add Parameter")}
               </button>
             )}
           </Section>
 
           {/* Agent Mode */}
           <Section
-            label={t("langchainEditor.agentMode", "Agent Mode")}
+            label={t("llmEditor.agentMode", "Agent Mode")}
             defaultOpen={!!isAgent}
           >
             <div className="space-y-3">
@@ -456,7 +469,7 @@ function TaskEditor({
                   data-testid="enable-builtin-tools"
                 />
                 {t(
-                  "langchainEditor.enableBuiltInTools",
+                  "llmEditor.enableBuiltInTools",
                   "Enable Built-in Tools"
                 )}
               </label>
@@ -465,7 +478,7 @@ function TaskEditor({
                 <div>
                   <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                     {t(
-                      "langchainEditor.toolWhitelist",
+                      "llmEditor.toolWhitelist",
                       "Tool Whitelist (empty = all)"
                     )}
                   </label>
@@ -515,13 +528,13 @@ function TaskEditor({
                   data-testid="enable-httpcall-tools"
                 />
                 {t(
-                  "langchainEditor.enableHttpCallTools",
+                  "llmEditor.enableHttpCallTools",
                   "Auto-Discover HTTP Call Tools"
                 )}
               </label>
               <p className="text-[10px] text-muted-foreground ps-5 -mt-2">
                 {t(
-                  "langchainEditor.enableHttpCallToolsDesc",
+                  "llmEditor.enableHttpCallToolsDesc",
                   "Automatically expose all httpcall extensions from the workflow as LLM tools"
                 )}
               </p>
@@ -542,13 +555,13 @@ function TaskEditor({
                   data-testid="enable-mcpcall-tools"
                 />
                 {t(
-                  "langchainEditor.enableMcpCallTools",
+                  "llmEditor.enableMcpCallTools",
                   "Auto-Discover MCP Call Tools"
                 )}
               </label>
               <p className="text-[10px] text-muted-foreground ps-5 -mt-2">
                 {t(
-                  "langchainEditor.enableMcpCallToolsDesc",
+                  "llmEditor.enableMcpCallToolsDesc",
                   "Automatically expose all mcpcalls extensions from the workflow as LLM tools"
                 )}
               </p>
@@ -556,11 +569,11 @@ function TaskEditor({
               {/* Explicit HTTP Call Tool URIs */}
               <div>
                 <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {t("langchainEditor.httpCallTools", "HTTP Call Tool URIs")}
+                  {t("llmEditor.httpCallTools", "HTTP Call Tool URIs")}
                 </label>
                 <p className="mb-1.5 text-[10px] text-muted-foreground">
                   {t(
-                    "langchainEditor.httpCallToolsHint",
+                    "llmEditor.httpCallToolsHint",
                     "Explicit httpcall URIs (in addition to auto-discovered ones)"
                   )}
                 </p>
@@ -609,7 +622,7 @@ function TaskEditor({
                       className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
                     >
                       <Plus className="h-3 w-3" />
-                      {t("langchainEditor.addTool", "Add Tool URI")}
+                      {t("llmEditor.addTool", "Add Tool URI")}
                     </button>
                   )}
                 </div>
@@ -619,11 +632,11 @@ function TaskEditor({
               <div>
                 <label className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   <Handshake className="h-3 w-3" />
-                  {t("langchainEditor.a2aAgents", "A2A Agents")}
+                  {t("llmEditor.a2aAgents", "A2A Agents")}
                 </label>
                 <p className="mb-1.5 text-[10px] text-muted-foreground">
                   {t(
-                    "langchainEditor.a2aAgentsDesc",
+                    "llmEditor.a2aAgentsDesc",
                     "Remote A2A-compatible agents whose skills become LLM tools"
                   )}
                 </p>
@@ -645,7 +658,7 @@ function TaskEditor({
                           }}
                           readOnly={readOnly}
                           placeholder={t(
-                            "langchainEditor.a2aUrlPlaceholder",
+                            "llmEditor.a2aUrlPlaceholder",
                             "https://remote.example.com/a2a/agents/..."
                           )}
                           dir="ltr"
@@ -678,7 +691,7 @@ function TaskEditor({
                             onChange({ ...task, a2aAgents: agents });
                           }}
                           readOnly={readOnly}
-                          placeholder={t("langchainEditor.a2aName", "Display Name")}
+                          placeholder={t("llmEditor.a2aName", "Display Name")}
                           className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                         />
                         <SecretKeyPicker
@@ -689,7 +702,7 @@ function TaskEditor({
                             onChange({ ...task, a2aAgents: agents });
                           }}
                           readOnly={readOnly}
-                          placeholder={t("langchainEditor.a2aApiKey", "${vault:my-a2a-key}")}
+                          placeholder={t("llmEditor.a2aApiKey", "${vault:my-a2a-key}")}
                           testId={`a2a-apikey-${ai}`}
                         />
                         <input
@@ -704,14 +717,14 @@ function TaskEditor({
                             onChange({ ...task, a2aAgents: agents });
                           }}
                           readOnly={readOnly}
-                          placeholder={t("langchainEditor.a2aTimeout", "Timeout (ms)")}
+                          placeholder={t("llmEditor.a2aTimeout", "Timeout (ms)")}
                           className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                         />
                       </div>
                       {/* Skills filter */}
                       <div>
                         <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                          {t("langchainEditor.a2aSkillsFilter", "Skills Filter (empty = all)")}
+                          {t("llmEditor.a2aSkillsFilter", "Skills Filter (empty = all)")}
                         </label>
                         <SkillsFilterInput
                           skills={agent.skillsFilter ?? []}
@@ -741,7 +754,7 @@ function TaskEditor({
                       data-testid="add-a2a-agent"
                     >
                       <Plus className="h-3 w-3" />
-                      {t("langchainEditor.addA2aAgent", "Add A2A Agent")}
+                      {t("llmEditor.addA2aAgent", "Add A2A Agent")}
                     </button>
                   )}
                 </div>
@@ -750,7 +763,7 @@ function TaskEditor({
               {/* History limit */}
               <div className="flex items-center gap-2">
                 <label className="text-xs text-foreground whitespace-nowrap">
-                  {t("langchainEditor.historyLimit", "History Limit")}
+                  {t("llmEditor.historyLimit", "History Limit")}
                 </label>
                 <input
                   type="number"
@@ -765,7 +778,7 @@ function TaskEditor({
                   className="h-7 w-20 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 />
                 <span className="text-[10px] text-muted-foreground">
-                  {t("langchainEditor.historyLimitHint", "(-1 = unlimited)")}
+                  {t("llmEditor.historyLimitHint", "(-1 = unlimited)")}
                 </span>
               </div>
             </div>
@@ -773,7 +786,7 @@ function TaskEditor({
 
           {/* ══════ Budget & Costs ══════ */}
           <Section
-            label={t("langchainEditor.budgetCosts", "Budget & Costs")}
+            label={t("llmEditor.budgetCosts", "Budget & Costs")}
             icon={DollarSign}
             accent="text-amber-500"
             defaultOpen={false}
@@ -781,7 +794,7 @@ function TaskEditor({
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <label className="text-xs text-foreground whitespace-nowrap">
-                  {t("langchainEditor.maxBudget", "Max Budget ($)")}
+                  {t("llmEditor.maxBudget", "Max Budget ($)")}
                 </label>
                 <input
                   type="number"
@@ -814,7 +827,7 @@ function TaskEditor({
                     disabled={readOnly}
                     className="h-3.5 w-3.5 rounded border-input accent-primary"
                   />
-                  {t("langchainEditor.costTracking", "Cost Tracking")}
+                  {t("llmEditor.costTracking", "Cost Tracking")}
                 </label>
                 <label className="inline-flex items-center gap-2 text-xs text-foreground">
                   <input
@@ -829,7 +842,7 @@ function TaskEditor({
                     disabled={readOnly}
                     className="h-3.5 w-3.5 rounded border-input accent-primary"
                   />
-                  {t("langchainEditor.toolCaching", "Tool Caching")}
+                  {t("llmEditor.toolCaching", "Tool Caching")}
                 </label>
               </div>
             </div>
@@ -837,7 +850,7 @@ function TaskEditor({
 
           {/* ══════ Execution ══════ */}
           <Section
-            label={t("langchainEditor.execution", "Execution")}
+            label={t("llmEditor.execution", "Execution")}
             icon={Cpu}
             accent="text-sky-500"
             defaultOpen={false}
@@ -855,15 +868,15 @@ function TaskEditor({
                   className="h-3.5 w-3.5 rounded border-input accent-primary"
                   data-testid="enable-parallel-execution"
                 />
-                {t("langchainEditor.parallelExecution", "Parallel Tool Execution")}
+                {t("llmEditor.parallelExecution", "Parallel Tool Execution")}
               </label>
               <p className="text-[10px] text-muted-foreground ps-5 -mt-2">
-                {t("langchainEditor.parallelExecutionDesc", "Run independent tool calls concurrently instead of sequentially")}
+                {t("llmEditor.parallelExecutionDesc", "Run independent tool calls concurrently instead of sequentially")}
               </p>
               {task.enableParallelExecution && (
                 <div className="flex items-center gap-2 ps-5">
                   <label className="text-xs text-foreground whitespace-nowrap">
-                    {t("langchainEditor.parallelTimeout", "Timeout (ms)")}
+                    {t("llmEditor.parallelTimeout", "Timeout (ms)")}
                   </label>
                   <input
                     type="number"
@@ -879,7 +892,7 @@ function TaskEditor({
 
               <div className="flex items-center gap-2">
                 <label className="text-xs text-foreground whitespace-nowrap">
-                  {t("langchainEditor.maxToolIterations", "Max Tool Iterations")}
+                  {t("llmEditor.maxToolIterations", "Max Tool Iterations")}
                 </label>
                 <input
                   type="number"
@@ -895,7 +908,7 @@ function TaskEditor({
                   className="h-7 w-20 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 />
                 <span className="text-[10px] text-muted-foreground">
-                  {t("langchainEditor.maxToolIterationsHint", "(default 10)")}
+                  {t("llmEditor.maxToolIterationsHint", "(default 10)")}
                 </span>
               </div>
 
@@ -914,13 +927,13 @@ function TaskEditor({
                     disabled={readOnly}
                     className="h-3.5 w-3.5 rounded border-input accent-primary"
                   />
-                  {t("langchainEditor.rateLimiting", "Rate Limiting")}
+                  {t("llmEditor.rateLimiting", "Rate Limiting")}
                 </label>
                 {task.enableRateLimiting && (
                   <>
                     <div className="flex items-center gap-2 ps-5">
                       <label className="text-xs text-foreground whitespace-nowrap">
-                        {t("langchainEditor.defaultRate", "Default Rate (req/min)")}
+                        {t("llmEditor.defaultRate", "Default Rate (req/min)")}
                       </label>
                       <input
                         type="number"
@@ -940,10 +953,10 @@ function TaskEditor({
                     <div className="ps-5">
                       <label className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                         <Gauge className="h-3 w-3" />
-                        {t("langchainEditor.toolRateLimits", "Per-Tool Rate Limits")}
+                        {t("llmEditor.toolRateLimits", "Per-Tool Rate Limits")}
                       </label>
                       <p className="mb-1.5 text-[10px] text-muted-foreground">
-                        {t("langchainEditor.toolRateLimitsDesc", "Override the default rate for specific tools (calls/min)")}
+                        {t("llmEditor.toolRateLimitsDesc", "Override the default rate for specific tools (calls/min)")}
                       </p>
                       <div className="space-y-1.5">
                         {Object.entries(task.toolRateLimits ?? {}).map(([tool, rate], i) => (
@@ -960,7 +973,7 @@ function TaskEditor({
                                 onChange({ ...task, toolRateLimits: Object.fromEntries(deduped) });
                               }}
                               readOnly={readOnly}
-                              placeholder={t("langchainEditor.toolName", "Tool name")}
+                              placeholder={t("llmEditor.toolName", "Tool name")}
                               className="h-7 w-40 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                             />
                             <input
@@ -1007,7 +1020,7 @@ function TaskEditor({
                             className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
                           >
                             <Plus className="h-3 w-3" />
-                            {t("langchainEditor.addToolRate", "Add Tool Rate")}
+                            {t("llmEditor.addToolRate", "Add Tool Rate")}
                           </button>
                         )}
                       </div>
@@ -1020,7 +1033,7 @@ function TaskEditor({
 
           {/* ══════ Model Cascade ══════ */}
           <Section
-            label={t("langchainEditor.cascade", "Model Cascade")}
+            label={t("llmEditor.cascade", "Model Cascade")}
             icon={Layers}
             accent="text-purple-500"
             defaultOpen={!!(task.modelCascade?.enabled)}
@@ -1028,7 +1041,7 @@ function TaskEditor({
             <div className="space-y-3" data-testid="cascade-section">
               {/* Explain what cascade does */}
               <p className="text-[10px] text-muted-foreground leading-relaxed">
-                {t("langchainEditor.cascadeDesc", "Try a cheap/fast model first. If confidence is too low, automatically escalate to a more powerful (and expensive) model. Saves costs without sacrificing quality.")}
+                {t("llmEditor.cascadeDesc", "Try a cheap/fast model first. If confidence is too low, automatically escalate to a more powerful (and expensive) model. Saves costs without sacrificing quality.")}
               </p>
 
               {/* Enable toggle */}
@@ -1054,7 +1067,7 @@ function TaskEditor({
                   data-testid="cascade-enable"
                 />
                 <Layers className="h-3.5 w-3.5 text-primary" />
-                {t("langchainEditor.cascadeEnable", "Enable Model Cascade")}
+                {t("llmEditor.cascadeEnable", "Enable Model Cascade")}
               </label>
 
               {task.modelCascade?.enabled && (
@@ -1063,7 +1076,7 @@ function TaskEditor({
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        {t("langchainEditor.cascadeStrategy", "Strategy")}
+                        {t("llmEditor.cascadeStrategy", "Strategy")}
                       </label>
                       <select
                         value={task.modelCascade.strategy ?? "cascade"}
@@ -1076,16 +1089,16 @@ function TaskEditor({
                         disabled={readOnly}
                         className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
                       >
-                        <option value="cascade">{t("langchainEditor.strategyCascade", "Sequential Escalation")}</option>
-                        <option value="parallel">{t("langchainEditor.strategyParallel", "Parallel (future)")}</option>
+                        <option value="cascade">{t("llmEditor.strategyCascade", "Sequential Escalation")}</option>
+                        <option value="parallel">{t("llmEditor.strategyParallel", "Parallel (future)")}</option>
                       </select>
                       <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        {t("langchainEditor.cascadeStrategyHint", "Sequential tries cheap first, escalates on low confidence")}
+                        {t("llmEditor.cascadeStrategyHint", "Sequential tries cheap first, escalates on low confidence")}
                       </p>
                     </div>
                     <div>
                       <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        {t("langchainEditor.cascadeEvalStrategy", "Confidence Evaluation")}
+                        {t("llmEditor.cascadeEvalStrategy", "Confidence Evaluation")}
                       </label>
                       <select
                         value={task.modelCascade.evaluationStrategy ?? "structured_output"}
@@ -1098,13 +1111,13 @@ function TaskEditor({
                         disabled={readOnly}
                         className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
                       >
-                        <option value="structured_output">{t("langchainEditor.evalStructured", "Structured Output (JSON)")}</option>
-                        <option value="heuristic">{t("langchainEditor.evalHeuristic", "Heuristic (hedging detection)")}</option>
-                        <option value="judge_model">{t("langchainEditor.evalJudge", "Judge Model (secondary LLM)")}</option>
-                        <option value="none">{t("langchainEditor.evalNone", "None (always accept)")}</option>
+                        <option value="structured_output">{t("llmEditor.evalStructured", "Structured Output (JSON)")}</option>
+                        <option value="heuristic">{t("llmEditor.evalHeuristic", "Heuristic (hedging detection)")}</option>
+                        <option value="judge_model">{t("llmEditor.evalJudge", "Judge Model (secondary LLM)")}</option>
+                        <option value="none">{t("llmEditor.evalNone", "None (always accept)")}</option>
                       </select>
                       <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        {t("langchainEditor.cascadeEvalHint", "How to determine if a response is good enough")}
+                        {t("llmEditor.cascadeEvalHint", "How to determine if a response is good enough")}
                       </p>
                     </div>
                   </div>
@@ -1123,17 +1136,17 @@ function TaskEditor({
                       disabled={readOnly}
                       className="h-3.5 w-3.5 rounded border-input accent-primary"
                     />
-                    {t("langchainEditor.cascadeInAgent", "Also use cascade in Agent Mode (with tools)")}
+                    {t("llmEditor.cascadeInAgent", "Also use cascade in Agent Mode (with tools)")}
                   </label>
 
                   {/* Steps */}
                   <div>
                     <label className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                       <ArrowDown className="h-3 w-3" />
-                      {t("langchainEditor.cascadeSteps", "Cascade Steps (cheap → expensive)")}
+                      {t("llmEditor.cascadeSteps", "Cascade Steps (cheap → expensive)")}
                     </label>
                     <p className="mb-2 text-[10px] text-muted-foreground">
-                      {t("langchainEditor.cascadeStepsDesc", "Order matters: first step tried first. Last step is always accepted (set confidence to empty).")}
+                      {t("llmEditor.cascadeStepsDesc", "Order matters: first step tried first. Last step is always accepted (set confidence to empty).")}
                     </p>
 
                     <div className="space-y-2">
@@ -1170,7 +1183,7 @@ function TaskEditor({
                                 onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
                               }}
                               readOnly={readOnly}
-                              placeholder={t("langchainEditor.cascadeModelName", "e.g. gpt-4o-mini")}
+                              placeholder={t("llmEditor.cascadeModelName", "e.g. gpt-4o-mini")}
                               className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                             />
                             {!readOnly && (
@@ -1186,7 +1199,7 @@ function TaskEditor({
                                     onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
                                   }}
                                   className="rounded p-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30"
-                                  title={t("langchainEditor.moveUp", "Move up")}
+                                  title={t("llmEditor.moveUp", "Move up")}
                                 >
                                   <ArrowUp className="h-3.5 w-3.5" />
                                 </button>
@@ -1201,7 +1214,7 @@ function TaskEditor({
                                     onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
                                   }}
                                   className="rounded p-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30"
-                                  title={t("langchainEditor.moveDown", "Move down")}
+                                  title={t("llmEditor.moveDown", "Move down")}
                                 >
                                   <ArrowDown className="h-3.5 w-3.5" />
                                 </button>
@@ -1221,7 +1234,7 @@ function TaskEditor({
                           <div className="grid grid-cols-2 gap-2 ps-7">
                             <div>
                               <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                                {t("langchainEditor.cascadeConfidence", "Min. Confidence (0–1)")}
+                                {t("llmEditor.cascadeConfidence", "Min. Confidence (0–1)")}
                               </label>
                               <input
                                 type="text"
@@ -1238,13 +1251,13 @@ function TaskEditor({
                                   onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
                                 }}
                                 readOnly={readOnly}
-                                placeholder={t("langchainEditor.cascadeConfidencePlaceholder", "empty = always accept")}
+                                placeholder={t("llmEditor.cascadeConfidencePlaceholder", "empty = always accept")}
                                 className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                               />
                             </div>
                             <div>
                               <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                                {t("langchainEditor.cascadeTimeout", "Timeout (ms)")}
+                                {t("llmEditor.cascadeTimeout", "Timeout (ms)")}
                               </label>
                               <input
                                 type="number"
@@ -1274,7 +1287,7 @@ function TaskEditor({
                         data-testid="add-cascade-step"
                       >
                         <Plus className="h-3.5 w-3.5" />
-                        {t("langchainEditor.addCascadeStep", "Add Cascade Step")}
+                        {t("llmEditor.addCascadeStep", "Add Cascade Step")}
                       </button>
                     )}
                   </div>
@@ -1285,20 +1298,20 @@ function TaskEditor({
 
           {/* ══════ Retry Configuration ══════ */}
           <Section
-            label={t("langchainEditor.retryConfig", "Retry Configuration")}
+            label={t("llmEditor.retryConfig", "Retry Configuration")}
             icon={RotateCcw}
             accent="text-orange-500"
             defaultOpen={false}
           >
             <div className="space-y-2" data-testid="retry-section">
               <p className="text-[10px] text-muted-foreground">
-                {t("langchainEditor.retryDesc", "Configure automatic retries for failed LLM API calls with exponential backoff.")}
+                {t("llmEditor.retryDesc", "Configure automatic retries for failed LLM API calls with exponential backoff.")}
               </p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">
                     <RotateCcw className="inline h-3 w-3 me-1" />
-                    {t("langchainEditor.retryMaxAttempts", "Max Attempts")}
+                    {t("llmEditor.retryMaxAttempts", "Max Attempts")}
                   </label>
                   <input
                     type="number"
@@ -1312,7 +1325,7 @@ function TaskEditor({
                 </div>
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                    {t("langchainEditor.retryDelay", "Initial Delay (ms)")}
+                    {t("llmEditor.retryDelay", "Initial Delay (ms)")}
                   </label>
                   <input
                     type="number"
@@ -1326,7 +1339,7 @@ function TaskEditor({
                 </div>
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                    {t("langchainEditor.retryMultiplier", "Backoff Multiplier")}
+                    {t("llmEditor.retryMultiplier", "Backoff Multiplier")}
                   </label>
                   <input
                     type="number"
@@ -1341,7 +1354,7 @@ function TaskEditor({
                 </div>
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                    {t("langchainEditor.retryMaxDelay", "Max Delay (ms)")}
+                    {t("llmEditor.retryMaxDelay", "Max Delay (ms)")}
                   </label>
                   <input
                     type="number"
@@ -1359,21 +1372,21 @@ function TaskEditor({
 
           {/* ══════ RAG Configuration (Phase 8c) ══════ */}
           <Section
-            label={t("langchainEditor.ragConfig", "RAG (Knowledge Retrieval)")}
+            label={t("llmEditor.ragConfig", "RAG (Knowledge Retrieval)")}
             icon={Database}
             accent="text-emerald-500"
             defaultOpen={false}
           >
             <div className="space-y-4" data-testid="rag-section">
               <p className="text-[10px] text-muted-foreground">
-                {t("langchainEditor.ragDesc", "Augment LLM responses with relevant documents from knowledge bases. Three modes can be combined.")}
+                {t("llmEditor.ragDesc", "Augment LLM responses with relevant documents from knowledge bases. Three modes can be combined.")}
               </p>
 
               {/* ── Mode 1: Explicit Knowledge Bases ── */}
               <div className="rounded-md border border-border bg-card/30 p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-foreground">
-                    {t("langchainEditor.knowledgeBases", "Knowledge Bases")}
+                    {t("llmEditor.knowledgeBases", "Knowledge Bases")}
                   </span>
                   {!readOnly && (
                     <button
@@ -1389,12 +1402,12 @@ function TaskEditor({
                       data-testid="add-kb-ref"
                     >
                       <Plus className="h-3 w-3" />
-                      {t("langchainEditor.addKnowledgeBase", "Add KB Reference")}
+                      {t("llmEditor.addKnowledgeBase", "Add KB Reference")}
                     </button>
                   )}
                 </div>
                 <p className="text-[10px] text-muted-foreground">
-                  {t("langchainEditor.knowledgeBasesHint", "Explicitly reference knowledge bases by name. Each name must match a RagConfiguration in the workflow.")}
+                  {t("llmEditor.knowledgeBasesHint", "Explicitly reference knowledge bases by name. Each name must match a RagConfiguration in the workflow.")}
                 </p>
                 {(task.knowledgeBases ?? []).map((kb, kbIdx) => (
                   <div key={kbIdx} className="rounded-md border border-border bg-background p-2.5 space-y-2">
@@ -1408,7 +1421,7 @@ function TaskEditor({
                           onChange({ ...task, knowledgeBases: updated });
                         }}
                         readOnly={readOnly}
-                        placeholder={t("langchainEditor.kbNamePlaceholder", "e.g. product-docs")}
+                        placeholder={t("llmEditor.kbNamePlaceholder", "e.g. product-docs")}
                         className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                         data-testid={`kb-name-${kbIdx}`}
                       />
@@ -1428,7 +1441,7 @@ function TaskEditor({
                     <div className="grid grid-cols-3 gap-2">
                       <div>
                         <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                          {t("langchainEditor.ragMaxResults", "Max Results")}
+                          {t("llmEditor.ragMaxResults", "Max Results")}
                         </label>
                         <input
                           type="number"
@@ -1445,7 +1458,7 @@ function TaskEditor({
                       </div>
                       <div>
                         <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                          {t("langchainEditor.ragMinScore", "Min Score")}
+                          {t("llmEditor.ragMinScore", "Min Score")}
                         </label>
                         <input
                           type="number"
@@ -1465,7 +1478,7 @@ function TaskEditor({
                       </div>
                       <div>
                         <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                          {t("langchainEditor.injectionStrategy", "Injection")}
+                          {t("llmEditor.injectionStrategy", "Injection")}
                         </label>
                         <select
                           value={kb.injectionStrategy ?? "system_message"}
@@ -1486,7 +1499,7 @@ function TaskEditor({
                 ))}
                 {(task.knowledgeBases ?? []).length === 0 && (
                   <p className="text-[10px] text-muted-foreground/60 italic">
-                    {t("langchainEditor.noKnowledgeBases", "No knowledge bases referenced")}
+                    {t("llmEditor.noKnowledgeBases", "No knowledge bases referenced")}
                   </p>
                 )}
               </div>
@@ -1503,21 +1516,21 @@ function TaskEditor({
                     data-testid="enable-workflow-rag"
                   />
                   <span className="text-xs font-semibold text-foreground">
-                    {t("langchainEditor.enableWorkflowRag", "Auto-Discover Workflow RAG")}
+                    {t("llmEditor.enableWorkflowRag", "Auto-Discover Workflow RAG")}
                   </span>
                 </label>
                 <p className="text-[10px] text-muted-foreground">
-                  {t("langchainEditor.workflowRagHint", "Automatically discovers all RAG steps from the workflow. Only used when no explicit knowledge bases are listed above.")}
+                  {t("llmEditor.workflowRagHint", "Automatically discovers all RAG steps from the workflow. Only used when no explicit knowledge bases are listed above.")}
                 </p>
                 {task.enableWorkflowRag && (
                   <div className="ms-6 space-y-2 border-s-2 border-primary/20 ps-3">
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      {t("langchainEditor.ragDefaults", "Default Retrieval Parameters")}
+                      {t("llmEditor.ragDefaults", "Default Retrieval Parameters")}
                     </span>
                     <div className="grid grid-cols-3 gap-2">
                       <div>
                         <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                          {t("langchainEditor.ragMaxResults", "Max Results")}
+                          {t("llmEditor.ragMaxResults", "Max Results")}
                         </label>
                         <input
                           type="number"
@@ -1532,7 +1545,7 @@ function TaskEditor({
                       </div>
                       <div>
                         <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                          {t("langchainEditor.ragMinScore", "Min Score")}
+                          {t("llmEditor.ragMinScore", "Min Score")}
                         </label>
                         <input
                           type="number"
@@ -1550,7 +1563,7 @@ function TaskEditor({
                       </div>
                       <div>
                         <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                          {t("langchainEditor.injectionStrategy", "Injection")}
+                          {t("llmEditor.injectionStrategy", "Injection")}
                         </label>
                         <select
                           value={task.ragDefaults?.injectionStrategy ?? "system_message"}
@@ -1572,17 +1585,17 @@ function TaskEditor({
               {/* ── Mode 3: httpCall RAG (zero-infra) ── */}
               <div className="rounded-md border border-border bg-card/30 p-3 space-y-2">
                 <span className="text-xs font-semibold text-foreground">
-                  {t("langchainEditor.httpCallRag", "httpCall RAG (Zero Infrastructure)")}
+                  {t("llmEditor.httpCallRag", "httpCall RAG (Zero Infrastructure)")}
                 </span>
                 <p className="text-[10px] text-muted-foreground">
-                  {t("langchainEditor.httpCallRagHint", "Execute a named httpCall before the LLM call. The response is injected as context — no vector store needed.")}
+                  {t("llmEditor.httpCallRagHint", "Execute a named httpCall before the LLM call. The response is injected as context — no vector store needed.")}
                 </p>
                 <input
                   type="text"
                   value={task.httpCallRag ?? ""}
                   onChange={(e) => onChange({ ...task, httpCallRag: e.target.value || undefined })}
                   readOnly={readOnly}
-                  placeholder={t("langchainEditor.httpCallRagPlaceholder", "e.g. search_docs, query_wiki")}
+                  placeholder={t("llmEditor.httpCallRagPlaceholder", "e.g. search_docs, query_wiki")}
                   dir="ltr"
                   className="h-7 w-full rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                   data-testid="httpcall-rag"
@@ -1595,11 +1608,11 @@ function TaskEditor({
                   <div className="flex items-center gap-1.5">
                     <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
                     <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
-                      {t("langchainEditor.legacyRag", "Legacy RAG (deprecated)")}
+                      {t("llmEditor.legacyRag", "Legacy RAG (deprecated)")}
                     </span>
                   </div>
                   <p className="text-[10px] text-muted-foreground">
-                    {t("langchainEditor.legacyRagHint", "This configuration uses the deprecated retrievalAugmentor format. Migrate to the modes above.")}
+                    {t("llmEditor.legacyRagHint", "This configuration uses the deprecated retrievalAugmentor format. Migrate to the modes above.")}
                   </p>
                   <div className="grid grid-cols-2 gap-2 opacity-60">
                     <div className="col-span-2">
@@ -1622,7 +1635,7 @@ function TaskEditor({
                       className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 transition-colors"
                     >
                       <Trash2 className="h-3 w-3" />
-                      {t("langchainEditor.removeLegacyRag", "Remove Legacy Config")}
+                      {t("llmEditor.removeLegacyRag", "Remove Legacy Config")}
                     </button>
                   )}
                 </div>
@@ -1633,86 +1646,109 @@ function TaskEditor({
           {/* ══════ Pre/Post Instructions ══════ */}
           <Section
             label={t(
-              "langchainEditor.prePostInstructions",
+              "llmEditor.prePostInstructions",
               "Pre/Post Instructions"
             )}
             icon={FileCode}
             accent="text-teal-500"
-            defaultOpen={!!(task.preRequest || task.postResponse)}
+            defaultOpen={!!(task.preRequest?.propertyInstructions?.length || task.postResponse?.propertyInstructions?.length || task.postResponse?.outputBuildInstructions?.length || task.postResponse?.qrBuildInstructions?.length)}
           >
-            <div className="space-y-3" data-testid="pre-post-section">
+            <div className="space-y-4" data-testid="pre-post-section">
               <p className="text-[10px] text-muted-foreground leading-relaxed">
                 {t(
-                  "langchainEditor.prePostDesc",
-                  "Configure JSON instructions that run before each request or after each response."
+                  "llmEditor.prePostDesc",
+                  "Configure property instructions that run before each LLM request, and output/property instructions that run after each response."
                 )}
               </p>
 
               {/* Pre-Request */}
               <div>
-                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {t("langchainEditor.preRequest", "Pre-Request")}
-                </span>
-                <ContentEditor
-                  value={
-                    task.preRequest
-                      ? (typeof task.preRequest === "string"
-                          ? task.preRequest
-                          : JSON.stringify(task.preRequest, null, 2))
-                      : ""
-                  }
-                  onChange={(v) => {
-                    try {
-                      onChange({ ...task, preRequest: v ? JSON.parse(v) : undefined });
-                    } catch {
-                      // Keep raw string while user is typing
-                      onChange({ ...task, preRequest: v || undefined });
-                    }
-                  }}
-                  readOnly={readOnly}
-                  language="json"
-                  label={t("langchainEditor.preRequest", "Pre-Request")}
-                  placeholder={t(
-                    "langchainEditor.preRequestPlaceholder",
-                    '{"propertyInstructions": [...]}'
+                <h6 className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <ArrowRightLeft className="h-3 w-3" />
+                  {t("llmEditor.preRequest", "Pre-Request")}
+                </h6>
+                <p className="mb-2 text-[10px] text-muted-foreground">
+                  {t(
+                    "llmEditor.preRequestDesc",
+                    "Set or transform properties before the LLM call executes."
                   )}
-                  testId="pre-request-editor"
-                  minLines={3}
-                  maxLines={12}
+                </p>
+                <PropertyInstructionsEditor
+                  instructions={task.preRequest?.propertyInstructions ?? []}
+                  onChange={(list) =>
+                    onChange({
+                      ...task,
+                      preRequest: list.length > 0
+                        ? { ...task.preRequest, propertyInstructions: list }
+                        : undefined,
+                    })
+                  }
+                  readOnly={readOnly}
                 />
               </div>
 
               {/* Post-Response */}
-              <div>
-                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {t("langchainEditor.postResponse", "Post-Response")}
-                </span>
-                <ContentEditor
-                  value={
-                    task.postResponse
-                      ? (typeof task.postResponse === "string"
-                          ? task.postResponse
-                          : JSON.stringify(task.postResponse, null, 2))
-                      : ""
-                  }
-                  onChange={(v) => {
-                    try {
-                      onChange({ ...task, postResponse: v ? JSON.parse(v) : undefined });
-                    } catch {
-                      onChange({ ...task, postResponse: v || undefined });
-                    }
-                  }}
-                  readOnly={readOnly}
-                  language="json"
-                  label={t("langchainEditor.postResponse", "Post-Response")}
-                  placeholder={t(
-                    "langchainEditor.postResponsePlaceholder",
-                    '{"propertyInstructions": [], "outputBuildInstructions": [...]}'
+              <div className="space-y-3">
+                <h6 className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <FileOutput className="h-3 w-3" />
+                  {t("llmEditor.postResponse", "Post-Response")}
+                </h6>
+                <p className="mb-2 text-[10px] text-muted-foreground">
+                  {t(
+                    "llmEditor.postResponseDesc",
+                    "Process LLM output: set properties, build output messages, and generate quick replies."
                   )}
-                  testId="post-response-editor"
-                  minLines={3}
-                  maxLines={12}
-                />
+                </p>
+
+                {/* Post-Response: Property Instructions */}
+                <div>
+                  <span className="mb-1 block text-[10px] font-medium text-muted-foreground">
+                    {t("llmEditor.postPropertyInstructions", "Property Instructions")}
+                  </span>
+                  <PropertyInstructionsEditor
+                    instructions={task.postResponse?.propertyInstructions ?? []}
+                    onChange={(list) => {
+                      const pr: LlmPostResponse = { ...task.postResponse, propertyInstructions: list };
+                      const isEmpty = !pr.propertyInstructions?.length && !pr.outputBuildInstructions?.length && !pr.qrBuildInstructions?.length;
+                      onChange({ ...task, postResponse: isEmpty ? undefined : pr });
+                    }}
+                    readOnly={readOnly}
+                  />
+                </div>
+
+                {/* Post-Response: Output Build Instructions */}
+                <div>
+                  <span className="mb-1 flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                    <FileOutput className="h-2.5 w-2.5" />
+                    {t("llmEditor.postOutputInstructions", "Output Build Instructions")}
+                  </span>
+                  <OutputBuildInstructionsEditor
+                    instructions={task.postResponse?.outputBuildInstructions ?? []}
+                    onChange={(list) => {
+                      const pr: LlmPostResponse = { ...task.postResponse, outputBuildInstructions: list };
+                      const isEmpty = !pr.propertyInstructions?.length && !pr.outputBuildInstructions?.length && !pr.qrBuildInstructions?.length;
+                      onChange({ ...task, postResponse: isEmpty ? undefined : pr });
+                    }}
+                    readOnly={readOnly}
+                  />
+                </div>
+
+                {/* Post-Response: Quick Reply Build Instructions */}
+                <div>
+                  <span className="mb-1 flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                    <MessageCircle className="h-2.5 w-2.5" />
+                    {t("llmEditor.postQrInstructions", "Quick Reply Build Instructions")}
+                  </span>
+                  <QrBuildInstructionsEditor
+                    instructions={task.postResponse?.qrBuildInstructions ?? []}
+                    onChange={(list) => {
+                      const pr: LlmPostResponse = { ...task.postResponse, qrBuildInstructions: list };
+                      const isEmpty = !pr.propertyInstructions?.length && !pr.outputBuildInstructions?.length && !pr.qrBuildInstructions?.length;
+                      onChange({ ...task, postResponse: isEmpty ? undefined : pr });
+                    }}
+                    readOnly={readOnly}
+                  />
+                </div>
               </div>
             </div>
           </Section>
@@ -1747,13 +1783,13 @@ export function LangchainEditor({
   }, [data, onChange]);
 
   return (
-    <div className="space-y-6" data-testid="langchain-editor">
+    <div className="space-y-6" data-testid="llm-editor">
       {/* Tasks list */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <Zap className="h-4 w-4 text-primary" />
-            {t("langchainEditor.tasks", "LangChain Tasks")}
+            {t("llmEditor.tasks", "LLM Tasks")}
           </h3>
           {!readOnly && (
             <button
@@ -1763,14 +1799,14 @@ export function LangchainEditor({
               data-testid="add-task-btn"
             >
               <Plus className="h-3.5 w-3.5" />
-              {t("langchainEditor.addTask", "Add Task")}
+              {t("llmEditor.addTask", "Add Task")}
             </button>
           )}
         </div>
 
         {(data.tasks ?? []).length === 0 && (
           <div className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
-            {t("langchainEditor.noTasks", "No LangChain tasks configured")}
+            {t("llmEditor.noTasks", "No LLM Tasks configured")}
           </div>
         )}
 

@@ -1,7 +1,11 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
+import { configure } from "@testing-library/react";
 import { afterEach, beforeAll, afterAll, vi } from "vitest";
 import { server } from "./mocks/server";
+
+// Increase default waitFor timeout to handle parallel test load
+configure({ asyncUtilTimeout: 5_000 });
 
 // Mock keycloak-js globally so auth-provider doesn't try to connect
 vi.mock("keycloak-js", () => ({
@@ -51,6 +55,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 // Reset handlers after each test
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   server.resetHandlers();
 });
 

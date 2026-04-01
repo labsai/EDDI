@@ -1,5 +1,5 @@
 import { api } from "@/lib/api-client";
-import type { HttpCall } from "@/components/editors/httpcalls-editor";
+import type { HttpCall } from "@/components/editors/apicalls-editor";
 
 /**
  * Result of discovering endpoints from an OpenAPI spec.

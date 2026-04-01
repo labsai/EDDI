@@ -1,9 +1,15 @@
 /**
- * Types and constants for the LangChain editor components.
- * Shared between langchain-editor.tsx and its sub-components.
+ * Types and constants for the LLM editor components.
+ * Shared between llm-editor.tsx and its sub-components.
  */
 
-// ─── Types matching LangChainConfiguration backend model ─────────────────────
+import type {
+  PropertyInstruction,
+  OutputBuildingInstruction,
+  QuickRepliesBuildingInstruction,
+} from "../apicalls-editor";
+
+// ─── Types matching LlmConfiguration backend model ───────────────────────────
 
 export interface A2AAgentConfig {
   url?: string;
@@ -28,7 +34,19 @@ export interface ModelCascadeConfig {
   steps?: CascadeStep[];
 }
 
-export interface LangchainTask {
+/** Pre-request instructions — same model as HttpCalls PreRequest on the backend */
+export interface LlmPreRequest {
+  propertyInstructions?: PropertyInstruction[];
+}
+
+/** Post-response instructions — same model as HttpCalls PostResponse on the backend */
+export interface LlmPostResponse {
+  propertyInstructions?: PropertyInstruction[];
+  outputBuildInstructions?: OutputBuildingInstruction[];
+  qrBuildInstructions?: QuickRepliesBuildingInstruction[];
+}
+
+export interface LlmTask {
   actions?: string[];
   id?: string;
   type?: string;
@@ -36,8 +54,8 @@ export interface LangchainTask {
   parameters?: Record<string, string>;
   responseObjectName?: string;
   responseMetadataObjectName?: string;
-  preRequest?: unknown;
-  postResponse?: unknown;
+  preRequest?: LlmPreRequest;
+  postResponse?: LlmPostResponse;
   tools?: string[];
   a2aAgents?: A2AAgentConfig[];
   enableBuiltInTools?: boolean;
@@ -80,6 +98,9 @@ export interface LangchainTask {
   modelCascade?: ModelCascadeConfig;
 }
 
+/** @deprecated Use LlmTask instead */
+export type LangchainTask = LlmTask;
+
 export interface KnowledgeBaseReference {
   name?: string;
   maxResults?: number;
@@ -88,9 +109,12 @@ export interface KnowledgeBaseReference {
   contextTemplate?: string;
 }
 
-export interface LangchainConfig {
-  tasks: LangchainTask[];
+export interface LlmConfig {
+  tasks: LlmTask[];
 }
+
+/** @deprecated Use LlmConfig instead */
+export type LangchainConfig = LlmConfig;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 

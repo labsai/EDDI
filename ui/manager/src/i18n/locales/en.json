@@ -447,7 +447,7 @@
     "noRules": "No rules in this group",
     "noConditions": "No conditions"
   },
-  "httpcallsEditor": {
+  "apiCallsEditor": {
     "targetServerUrl": "Target Server URL",
     "targetServerUrlPlaceholder": "https://api.example.com",
     "calls": "HTTP Calls",
@@ -486,10 +486,10 @@
     "noActions": "No actions",
     "actionPlaceholder": "e.g. get_weather"
   },
-  "langchainEditor": {
-    "tasks": "LangChain Tasks",
+  "llmEditor": {
+    "tasks": "LLM Tasks",
     "addTask": "Add Task",
-    "noTasks": "No LangChain tasks configured",
+    "noTasks": "No LLM Tasks configured",
     "removeTask": "Remove Task",
     "taskId": "Task ID",
     "description": "Description",
@@ -526,6 +526,11 @@
     "prePostInstructions": "Pre/Post Instructions",
     "preRequest": "Pre-Request",
     "postResponse": "Post-Response",
+    "preRequestDesc": "Set or transform properties before the LLM call executes.",
+    "postResponseDesc": "Process LLM output: set properties, build output messages, and generate quick replies.",
+    "postPropertyInstructions": "Property Instructions",
+    "postOutputInstructions": "Output Build Instructions",
+    "postQrInstructions": "Quick Reply Build Instructions",
     "enableMcpCallTools": "Auto-Discover MCP Call Tools",
     "enableMcpCallToolsDesc": "Automatically expose all mcpcalls extensions from the workflow as LLM tools",
     "a2aAgents": "A2A Agents",

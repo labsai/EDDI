@@ -422,7 +422,7 @@
     "noRules": "Keine Regeln in dieser Gruppe",
     "noConditions": "Keine Bedingungen"
   },
-  "httpcallsEditor": {
+  "apiCallsEditor": {
     "targetServerUrl": "Ziel-Server URL",
     "targetServerUrlPlaceholder": "https://api.example.com",
     "calls": "HTTP-Aufrufe",
@@ -461,10 +461,10 @@
     "noActions": "Keine Aktionen",
     "actionPlaceholder": "z.B. get_weather"
   },
-  "langchainEditor": {
-    "tasks": "LangChain Tasks",
+  "llmEditor": {
+    "tasks": "LLM Tasks",
     "addTask": "Task hinzufügen",
-    "noTasks": "Keine LangChain Tasks konfiguriert",
+    "noTasks": "Keine LLM Tasks konfiguriert",
     "removeTask": "Task entfernen",
     "taskId": "Task ID",
     "description": "Beschreibung",
@@ -559,7 +559,12 @@
     "moveDown": "Move down",
     "moveUp": "Move up",
     "execution": "Execution",
-    "budgetCosts": "Budget & Costs"
+    "budgetCosts": "Budget & Costs",
+    "preRequestDesc": "Eigenschaften vor der LLM-Ausführung setzen oder transformieren.",
+    "postResponseDesc": "LLM-Ausgabe verarbeiten: Eigenschaften setzen, Ausgabe-Nachrichten erstellen und Quick Replies generieren.",
+    "postPropertyInstructions": "Eigenschaften-Anweisungen",
+    "postOutputInstructions": "Ausgabe-Anweisungen",
+    "postQrInstructions": "Quick Reply-Anweisungen"
   },
   "outputEditor": {
     "language": "Sprache",

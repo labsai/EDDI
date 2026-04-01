@@ -422,7 +422,7 @@
     "noRules": "ไม่มีกฎในกลุ่มนี้",
     "noConditions": "ไม่มีเงื่อนไข"
   },
-  "httpcallsEditor": {
+  "apiCallsEditor": {
     "targetServerUrl": "URL เซิร์ฟเวอร์เป้าหมาย",
     "targetServerUrlPlaceholder": "https://api.example.com",
     "calls": "การเรียก HTTP",
@@ -461,7 +461,7 @@
     "noActions": "ไม่มีการดำเนินการ",
     "actionPlaceholder": "เช่น get_weather"
   },
-  "langchainEditor": {
+  "llmEditor": {
     "tasks": "งาน LangChain",
     "addTask": "เพิ่มงาน",
     "noTasks": "ไม่มีงาน LangChain ที่กำหนดค่า",
@@ -559,7 +559,12 @@
     "moveDown": "Move down",
     "moveUp": "Move up",
     "execution": "Execution",
-    "budgetCosts": "Budget & Costs"
+    "budgetCosts": "Budget & Costs",
+    "preRequestDesc": "ตั้งค่าหรือแปลงคุณสมบัติก่อนการทำงานของ LLM",
+    "postResponseDesc": "ประมวลผลเอาต์พุตของ LLM: ตั้งค่าคุณสมบัติ สร้างข้อความเอาต์พุต และสร้างการตอบกลับด่วน",
+    "postPropertyInstructions": "คำสั่งคุณสมบัติ",
+    "postOutputInstructions": "คำสั่งเอาต์พุต",
+    "postQrInstructions": "คำสั่งการตอบกลับด่วน"
   },
   "outputEditor": {
     "language": "ภาษา",

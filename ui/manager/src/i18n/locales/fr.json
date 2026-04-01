@@ -422,7 +422,7 @@
     "noRules": "Aucune règle dans ce groupe",
     "noConditions": "Aucune condition"
   },
-  "httpcallsEditor": {
+  "apiCallsEditor": {
     "targetServerUrl": "URL du serveur cible",
     "targetServerUrlPlaceholder": "https://api.example.com",
     "calls": "Appels HTTP",
@@ -461,7 +461,7 @@
     "noActions": "Aucune action",
     "actionPlaceholder": "ex. get_weather"
   },
-  "langchainEditor": {
+  "llmEditor": {
     "tasks": "Tâches LangChain",
     "addTask": "Ajouter une tâche",
     "noTasks": "Aucune tâche LangChain configurée",
@@ -559,7 +559,12 @@
     "moveDown": "Move down",
     "moveUp": "Move up",
     "execution": "Execution",
-    "budgetCosts": "Budget & Costs"
+    "budgetCosts": "Budget & Costs",
+    "preRequestDesc": "Définir ou transformer les propriétés avant lexécution du LLM.",
+    "postResponseDesc": "Traiter la sortie du LLM : définir les propriétés, construire des messages de sortie et générer des réponses rapides.",
+    "postPropertyInstructions": "Instructions de propriétés",
+    "postOutputInstructions": "Instructions de sortie",
+    "postQrInstructions": "Instructions de réponses rapides"
   },
   "outputEditor": {
     "language": "Langue",

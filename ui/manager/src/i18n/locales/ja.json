@@ -422,7 +422,7 @@
     "noRules": "このグループにルールはありません",
     "noConditions": "条件なし"
   },
-  "httpcallsEditor": {
+  "apiCallsEditor": {
     "targetServerUrl": "ターゲットサーバー URL",
     "targetServerUrlPlaceholder": "https://api.example.com",
     "calls": "HTTP コール",
@@ -461,7 +461,7 @@
     "noActions": "アクションなし",
     "actionPlaceholder": "例: get_weather"
   },
-  "langchainEditor": {
+  "llmEditor": {
     "tasks": "LangChain タスク",
     "addTask": "タスクを追加",
     "noTasks": "LangChain タスクが設定されていません",
@@ -559,7 +559,12 @@
     "moveDown": "Move down",
     "moveUp": "Move up",
     "execution": "Execution",
-    "budgetCosts": "Budget & Costs"
+    "budgetCosts": "Budget & Costs",
+    "preRequestDesc": "LLM が実行される前にプロパティを設定または変換します。",
+    "postResponseDesc": "LLM の出力を処理します：プロパティを設定し、出力メッセージを構築し、クイックリプライを生成します。",
+    "postPropertyInstructions": "プロパティ指示",
+    "postOutputInstructions": "出力構築指示",
+    "postQrInstructions": "クイックリプライ構築指示"
   },
   "outputEditor": {
     "language": "言語",

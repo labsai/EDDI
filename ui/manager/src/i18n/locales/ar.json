@@ -422,7 +422,7 @@
     "noRules": "لا توجد قواعد في هذه المجموعة",
     "noConditions": "لا توجد شروط"
   },
-  "httpcallsEditor": {
+  "apiCallsEditor": {
     "targetServerUrl": "URL الخادم الهدف",
     "targetServerUrlPlaceholder": "https://api.example.com",
     "calls": "استدعاءات HTTP",
@@ -461,7 +461,7 @@
     "noActions": "لا توجد إجراءات",
     "actionPlaceholder": "مثال: get_weather"
   },
-  "langchainEditor": {
+  "llmEditor": {
     "tasks": "مهام LangChain",
     "addTask": "إضافة مهمة",
     "noTasks": "لم يتم تكوين مهام LangChain",
@@ -559,7 +559,12 @@
     "moveDown": "Move down",
     "moveUp": "Move up",
     "execution": "Execution",
-    "budgetCosts": "Budget & Costs"
+    "budgetCosts": "Budget & Costs",
+    "preRequestDesc": "تعيين أو تحويل الخصائص قبل تنفيذ LLM.",
+    "postResponseDesc": "معالجة مخرجات LLM: تعيين الخصائص، وبناء رسائل المخرجات، وإنشاء ردود سريعة.",
+    "postPropertyInstructions": "تعليمات الخصائص",
+    "postOutputInstructions": "تعليمات المخرجات",
+    "postQrInstructions": "تعليمات الردود السريعة"
   },
   "outputEditor": {
     "language": "اللغة",

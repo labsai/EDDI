@@ -1252,6 +1252,32 @@ export const handlers = [
             backoffMultiplier: 2.0,
             maxBackoffDelayMs: 10000,
           },
+          preRequest: {
+            propertyInstructions: [
+              { name: "userContext", valueString: "[[${memory.current.input}]]", scope: "step", override: true },
+            ],
+          },
+          postResponse: {
+            outputBuildInstructions: [
+              {
+                iterationObjectName: "obj",
+                templateFilterExpression: "",
+                outputType: "text",
+                outputValue: "{aiOutput.htmlResponseText}",
+                httpCodeValidator: {},
+              },
+            ],
+            qrBuildInstructions: [
+              {
+                pathToTargetArray: "aiOutput.quickReplies",
+                iterationObjectName: "obj",
+                templateFilterExpression: "",
+                quickReplyValue: "{obj.value}",
+                quickReplyExpressions: "{obj.expressions}",
+                httpCodeValidator: {},
+              },
+            ],
+          },
         },
       ],
     });
@@ -2999,6 +3025,85 @@ export const scheduleHandlers = [
   // Log SSE stream (log viewer) — return empty stream
   http.get("*/logs/stream", () => {
     return new HttpResponse(null, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+  }),
+
+  // ─── Quotas ───────────────────────────────────────────────────────
+  http.get("*/administration/quotas/:tenantId/usage", () => {
+    return HttpResponse.json({
+      tenantId: "default",
+      conversationsToday: 42,
+      apiCallsThisMinute: 8,
+      monthlyCostUsd: 12.34,
+      minuteWindowStart: new Date().toISOString(),
+      dayStart: new Date().toISOString(),
+    });
+  }),
+
+  http.get("*/administration/quotas/:tenantId", () => {
+    return HttpResponse.json({
+      tenantId: "default",
+      maxConversationsPerDay: 1000,
+      maxAgentsPerTenant: 50,
+      maxApiCallsPerMinute: 120,
+      maxMonthlyCostUsd: 500,
+      enabled: true,
+    });
+  }),
+
+  http.put("*/administration/quotas/:tenantId", async ({ request }) => {
+    const body = await request.json();
+    return HttpResponse.json(body);
+  }),
+
+  http.post("*/administration/quotas/:tenantId/usage/reset", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // ─── Generic resource store descriptors ──────────────────────────
+  // One handler per resource store type to avoid catching agent/workflow descriptors.
+  // For version lookups (includePreviousVersions), return filtered results.
+  // For list requests, return sample data so the resource-list test has items.
+  ...["rulestore/rulesets", "apicallstore/apicalls", "outputstore/outputsets",
+      "dictionarystore/dictionaries", "llmstore/llms", "propertysetterstore/propertysetters",
+      "mcpcallsstore/mcpcalls", "ragstore/rags"].map((storePath) => {
+    const store = storePath.split("/")[0];
+    const plural = storePath.split("/")[1];
+    return http.get(`*/${storePath}/descriptors`, ({ request }) => {
+      const url = new URL(request.url);
+      const filter = url.searchParams.get("filter");
+      const isVersionLookup = url.searchParams.get("includePreviousVersions") === "true";
+
+      if (isVersionLookup && filter) {
+        // Version lookup — return a single descriptor matching the filter ID
+        return HttpResponse.json([
+          {
+            resource: `eddi://ai.labs.resource/${store}/${plural}/${filter}?version=1`,
+            name: `Resource ${filter}`,
+            description: "A resource",
+            createdOn: Date.now() - 86400000,
+            lastModifiedOn: Date.now() - 3600000,
+          },
+        ]);
+      }
+
+      // Normal list request
+      return HttpResponse.json([
+        {
+          resource: `eddi://ai.labs.resource/${store}/${plural}/res1?version=1`,
+          name: "Sample Resource 1",
+          description: "A sample resource for testing",
+          createdOn: Date.now() - 86400000,
+          lastModifiedOn: Date.now() - 3600000,
+        },
+        {
+          resource: `eddi://ai.labs.resource/${store}/${plural}/res2?version=2`,
+          name: "Sample Resource 2",
+          description: "Another sample resource",
+          createdOn: Date.now() - 2 * 86400000,
+          lastModifiedOn: Date.now() - 7200000,
+        },
+      ]);
+    });
   }),
 ];
 
