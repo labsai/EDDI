@@ -1143,21 +1143,5 @@
     "confirmDelete": "このグループを削除しますか？",
     "confirmDeleteDesc": "グループの設定が完全に削除されます。",
     "duplicateSuccess": "グループを複製しました"
-  },
-  "dashboard": {
-    "noConversations": "会話はまだありません",
-    "recentConversations": "最近の会話",
-    "platform": "プラットフォーム",
-    "online": "オンライン",
-    "offline": "オフライン",
-    "checking": "確認中…",
-    "coordConnected": "コーディネーター接続済み",
-    "coordDisconnected": "コーディネーター切断",
-    "coordUnknown": "コーディネーター —",
-    "vaultUp": "Vault 準備完了",
-    "vaultDown": "Vault 使用不可",
-    "viewLogs": "ログを見る",
-    "orphanScan": "孤立スキャン",
-    "auditTrail": "監査証跡"
   }
 }

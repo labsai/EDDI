@@ -1143,21 +1143,5 @@
     "confirmDelete": "Excluir este grupo?",
     "confirmDeleteDesc": "A configuração do grupo será excluída permanentemente.",
     "duplicateSuccess": "Grupo duplicado"
-  },
-  "dashboard": {
-    "noConversations": "Nenhuma conversa ainda",
-    "recentConversations": "Conversas recentes",
-    "platform": "Plataforma",
-    "online": "Online",
-    "offline": "Offline",
-    "checking": "Verificando…",
-    "coordConnected": "Coordinator conectado",
-    "coordDisconnected": "Coordinator desconectado",
-    "coordUnknown": "Coordinator —",
-    "vaultUp": "Vault pronto",
-    "vaultDown": "Vault indisponível",
-    "viewLogs": "Ver Logs",
-    "orphanScan": "Scan de órfãos",
-    "auditTrail": "Audit Trail"
   }
 }

@@ -1143,21 +1143,5 @@
     "confirmDelete": "删除此群组？",
     "confirmDeleteDesc": "群组配置将被永久删除。",
     "duplicateSuccess": "群组已复制"
-  },
-  "dashboard": {
-    "noConversations": "暂无对话",
-    "recentConversations": "最近的对话",
-    "platform": "平台",
-    "online": "在线",
-    "offline": "离线",
-    "checking": "检查中…",
-    "coordConnected": "Coordinator 已连接",
-    "coordDisconnected": "Coordinator 已断开",
-    "coordUnknown": "Coordinator —",
-    "vaultUp": "Vault 就绪",
-    "vaultDown": "Vault 不可用",
-    "viewLogs": "查看 Log",
-    "orphanScan": "孤立资源扫描",
-    "auditTrail": "审计日志"
   }
 }

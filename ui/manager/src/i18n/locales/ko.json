@@ -768,137 +768,137 @@
         "step4Desc": "라이트, 다크, 시스템 테마를 전환합니다. EDDI Manager는 11개 언어를 지원합니다. 언어 선택기에서 선택하세요."
       },
       "agents": {
-        "title": "Agents Tour",
-        "step1Title": "Agent Wizard",
-        "step1Desc": "The wizard walks you through creating a fully configured agent — choose a model, set a personality, enable tools, and deploy.",
-        "step2Title": "Manual Creation",
-        "step2Desc": "For power users: create a blank agent and configure it with full JSON control. Perfect for advanced setups.",
-        "step3Title": "Search & Filter",
-        "step3Desc": "Find agents instantly by name. Switch between card and list views with the toggle on the right.",
-        "step4Title": "Your Agent Fleet",
-        "step4Desc": "Each card shows the agent's name, version, and last modified time. Click any agent for its detail page with deploy, chat, and workflow controls."
+        "title": "에이전트 투어",
+        "step1Title": "에이전트 마법사",
+        "step1Desc": "마법사는 모델 선택, 성격 설정, 도구 활성화, 배포 등 완벽하게 구성된 에이전트를 만드는 과정을 안내합니다.",
+        "step2Title": "수동 생성",
+        "step2Desc": "고급 사용자용: 빈 에이전트를 만들고 완전한 JSON 제어로 구성합니다. 복잡한 설정에 적합합니다.",
+        "step3Title": "검색 및 필터",
+        "step3Desc": "이름으로 에이전트를 즉시 찾습니다. 오른쪽 버튼으로 카드 뷰와 목록 뷰를 전환합니다.",
+        "step4Title": "에이전트 목록",
+        "step4Desc": "각 카드는 에이전트 이름, 버전 및 최종 수정 시간을 표시합니다. 에이전트를 클릭하면 배포, 채팅, 워크플로 제어가 있는 세부 정보 페이지가 열립니다."
       },
       "workflows": {
-        "title": "Workflows Tour",
-        "step1Title": "Create a Workflow",
-        "step1Desc": "Workflows define the processing pipeline — a sequence of tasks like LLM calls, behavior rules, and HTTP integrations.",
-        "step2Title": "Your Workflows",
-        "step2Desc": "Each workflow can be attached to one or more agents. Click to open the drag-and-drop pipeline editor.",
-        "step3Title": "Organize Your View",
-        "step3Desc": "Search by name and switch between card grid and sortable table views."
+        "title": "워크플로 투어",
+        "step1Title": "워크플로 생성",
+        "step1Desc": "워크플로는 파이프라인(LLM 호출, 행동 규칙, HTTP 통합과 같은 작업의 시퀀스)을 정의합니다.",
+        "step2Title": "당신의 워크플로",
+        "step2Desc": "각 워크플로는 하나 이상의 에이전트에 연결할 수 있습니다. 클릭하여 드래그 앤 드롭 파이프라인 편집기를 엽니다.",
+        "step3Title": "뷰 구성",
+        "step3Desc": "이름으로 검색하고 카드 그리드와 정렬 가능한 테이블 뷰 간을 전환합니다."
       },
       "chat": {
-        "title": "Chat Tour",
-        "step1Title": "Pick an Agent",
-        "step1Desc": "Select a deployed agent to start a conversation. Only agents that have been deployed appear here.",
-        "step2Title": "Streaming Mode",
-        "step2Desc": "Toggle real-time token streaming. When enabled, the response appears word by word — great for debugging latency.",
-        "step3Title": "Conversation History",
-        "step3Desc": "Open the sidebar to browse and resume previous conversations.",
-        "step4Title": "Start Chatting",
-        "step4Desc": "Type a message and press Enter. The agent responds using the LLM, tools, and workflows you've configured."
+        "title": "채팅 투어",
+        "step1Title": "에이전트 선택",
+        "step1Desc": "배포된 에이전트를 선택하여 대화를 시작하세요. 배포된 상태의 에이전트만 여기에 나타납니다.",
+        "step2Title": "스트리밍 모드",
+        "step2Desc": "실시간 토큰 스트리밍을 전환하세요. 활성화되면 응답이 단어 단위로 나타나며, 지연 시간 디버깅에 매우 유용합니다.",
+        "step3Title": "대화 기록",
+        "step3Desc": "사이드바를 열어 이전 대화를 찾아보고 다시 시작할 수 있습니다.",
+        "step4Title": "채팅 시작",
+        "step4Desc": "메시지를 입력하고 Enter 키를 누르세요. 계정은 구성하신 워크플로, 도구, 그리고 LLM을 사용하여 답변합니다."
       },
       "resources": {
-        "title": "Resources Tour",
-        "step1Title": "Extension Library",
-        "step1Desc": "Resources are the building blocks of workflows. Each type controls a different part of the agent's behavior.",
-        "step2Title": "LLM Configurations",
-        "step2Desc": "Define which AI model powers your agent, its system prompt, tools, MCP servers, and cascade settings. This is the brain.",
-        "step3Title": "Rules & API Calls",
-        "step3Desc": "Behavior Rules control conversation flow. HTTP Calls connect to external APIs. Both can be used as LLM tools."
+        "title": "리소스 투어",
+        "step1Title": "확장 라이브러리",
+        "step1Desc": "리소스는 워크플로의 구성 요소입니다. 각 유형은 에이전트의 다양한 행동 논리를 제어합니다.",
+        "step2Title": "LLM 구성",
+        "step2Desc": "에이전트를 구동하는 AI 모델을 정의하며, 시스템 프롬프트, 도구, MCP 서버 및 연쇄 구성 등이 포함됩니다. 이것은 에이전트의 두뇌입니다.",
+        "step3Title": "규칙 및 API 호출",
+        "step3Desc": "행동 규칙(Rules)은 대화 흐름을 제어합니다. HTTP 호출은 외부 API에 연결합니다. 두 가지 모두 LLM의 도구로 사용할 수 있습니다."
       },
       "conversations": {
-        "title": "Conversations Tour",
-        "step1Title": "Search",
-        "step1Desc": "Find conversations quickly by ID, agent, or recent user messages.",
-        "step2Title": "Status Filters",
-        "step2Desc": "Filter conversations by state: Active, In Progress, Ended, or Error.",
-        "step3Title": "Conversation List",
-        "step3Desc": "Browse all sessions. Click any conversation card to open the timeline and debug."
+        "title": "대화 투어",
+        "step1Title": "검색",
+        "step1Desc": "ID, 에이전트 또는 최신 사용자 메시지를 통해 대화를 빠르게 찾으세요.",
+        "step2Title": "상태 필터",
+        "step2Desc": "대화 상태 (활성화, 처리 중, 끝남 또는 에러) 에 따라 대화를 필터링하세요.",
+        "step3Title": "대화 목록",
+        "step3Desc": "모든 세션을 찾아보세요. 아무 대화 카드나 클릭하면 타임라인이 열리고 디버그 할 수 있습니다."
       },
       "groups": {
-        "title": "Discussion Groups Tour",
-        "step1Title": "Create Group",
-        "step1Desc": "Create an orchestration group to let multiple agents collaborate and debate.",
-        "step2Title": "Group Search",
-        "step2Desc": "Search through your existing multi-agent clusters.",
-        "step3Title": "Group Grid",
-        "step3Desc": "Manage your collaborative environments, edit their policies, or delete stale groups."
+        "title": "토론 그룹 투어",
+        "step1Title": "그룹 만들기",
+        "step1Desc": "통합 채팅 환경을 만들어 다수의 에이전트들이 협력하고 논쟁할 수 있도록 만드세요.",
+        "step2Title": "그룹 검색",
+        "step2Desc": "기존에 존재하던 다단계 클러스터를 찾아보세요.",
+        "step3Title": "그룹 표",
+        "step3Desc": "협동 환경 관리, 정책 수정 및 더 이상 사용되지 않는 그룹들을 삭제하세요."
       },
       "logs": {
-        "title": "System Logs Tour",
-        "step1Title": "Live vs History",
-        "step1Desc": "Switch between a real-time stream of system logs and historical log search.",
-        "step2Title": "Stream Filters",
-        "step2Desc": "Filter the incoming live stream by Agent or by critical Log Level.",
-        "step3Title": "Export",
-        "step3Desc": "Download the current filtered logs as a text file for external analysis."
+        "title": "시스템 로그 투어",
+        "step1Title": "라이브 대 옛 기록",
+        "step1Desc": "시스템 로그의 실시간 스트림과 과거 로그 검색 사이를 쉽게 전환하세요.",
+        "step2Title": "스트림 필터",
+        "step2Desc": "에이전트별이거나 핵심적인 사항들에 한해서 들어오는 라이브 스트림을 필터링 하세요.",
+        "step3Title": "내보내기",
+        "step3Desc": "외부적인 분석을 위해 현재의 필터된 기록들을 텍스트 파일로 다운 받으세요."
       },
       "secrets": {
-        "title": "Secrets Vault Tour",
-        "step1Title": "Create Secret",
-        "step1Desc": "Securely store a new API key, token, or password that your agents can reference.",
-        "step2Title": "Tenant Isolation",
-        "step2Desc": "Filter the vault view to show secrets scoped to a specific tenant ID.",
-        "step3Title": "Reference Syntax",
-        "step3Desc": "Learn how to dynamically inject secrets into your LLM configurations without hardcoding them."
+        "title": "보안 금고 투어",
+        "step1Title": "암호 생성",
+        "step1Desc": "에이전트가 참조할 수 있는 새로운 API 키, 토큰 또는 비밀번호를 안전하게 저장합니다.",
+        "step2Title": "테넌트 격리",
+        "step2Desc": "특정 테넌트 ID로 범위가 지정된 비밀만 표시하도록 볼트 보기를 필터링합니다.",
+        "step3Title": "참조 구문",
+        "step3Desc": "비밀을 정적으로 코딩하지 않고 LLM 구성 요소(${eddivault:...})에 동적으로 주입하는 방법을 알아보세요."
       },
       "audit": {
-        "title": "Audit Ledger Tour",
-        "step1Title": "Search Mode",
-        "step1Desc": "Search the immutable audit ledger by a specific Conversation ID or by an Agent version.",
-        "step2Title": "Execute Search",
-        "step2Desc": "Enter your ID and click search to pull the verifiable execution history.",
-        "step3Title": "Export Ledger",
-        "step3Desc": "Export the retrieved audit records to JSON for compliance and reporting."
+        "title": "감사 원장 투어",
+        "step1Title": "검색 모드",
+        "step1Desc": "특정 대화 ID나 에이전트 버전으로 변형되지 않는 감사 원장을 찾으세요.",
+        "step2Title": "검색 실행",
+        "step2Desc": "아이디를 입력 한 다음 검색을 눌러서 예전의 검증 가능했던 기록들을 불러오세요.",
+        "step3Title": "원장 수출",
+        "step3Desc": "규정 준수 및 보고 목적으로 검색된 감사 기록을 JSON으로 내보냅니다."
       },
       "schedules": {
-        "title": "Schedules Tour",
-        "step1Title": "Create Schedule",
-        "step1Desc": "Set up a new cron job or continuous heartbeat to trigger agent workflows automatically.",
-        "step2Title": "Health Stats",
-        "step2Desc": "Monitor the total, active, and failed schedules across your platform.",
-        "step3Title": "Schedule Management",
-        "step3Desc": "Manage your automated triggers natively: pause, resume, edit, or test-fire them."
+        "title": "스케쥴의 투어",
+        "step1Title": "스케쥴 생성",
+        "step1Desc": "에이전트의 워크플로를 자동으로 트리거할 새로운 Cron 크론 잡 또는 지속되는 하트비트 설정.",
+        "step2Title": "체력 능력치",
+        "step2Desc": "플랫폼 전반의 전체적인 결과물, 일의 양, 및 실패했던 일정들을 전부 모니터링하세요.",
+        "step3Title": "스케쥴 관리",
+        "step3Desc": "작동을 멈추고 지연시키며 수정 또는 파이어 작동을 스스로 체크하며 자동화된 트리거들을 직접 운영 관리 해보세요."
       },
       "quotas": {
-        "title": "Quotas Tour",
-        "step1Title": "Configuration Constraints",
-        "step1Desc": "Define hard limits on total agents, daily conversations, and token costs for this tenant.",
-        "step2Title": "Usage Analytics",
-        "step2Desc": "Monitor how much of the allocated quota the tenant has consumed in real-time.",
-        "step3Title": "Enforce Changes",
-        "step3Desc": "Save your adjusted limits. The platform will block traffic that breaches these ceilings."
+        "title": "할당량 배정의 투어",
+        "step1Title": "구성 제약조건",
+        "step1Desc": "이 테넌트에 대한 총 에이전트, 지속적인 대화들, 그리고 지불해야 될 토큰 비용에 관하여 한계선을 정확히 정의하세요.",
+        "step2Title": "사용 상황 분석",
+        "step2Desc": "배분받은 할당량만큼 테넌트가 어느정도를 잘 소비하고있는지 실시간으로 관찰하고 감시하세요.",
+        "step3Title": "실질적용 단계",
+        "step3Desc": "나에게 맞게 설정값을 정하시고 만약 이 한계점을 벗어난 다른 트래픽이 접근시 시스템이 알아서 차단할 것입니다."
       },
       "coordinator": {
-        "title": "Coordinator Tour",
-        "step1Title": "Live Connection",
-        "step1Desc": "View the heartbeat and event source connected to the backend coordinator system.",
-        "step2Title": "Queue Processing",
-        "step2Desc": "Monitor real-time task queues and active job execution across your cluster.",
-        "step3Title": "Dead Letters",
-        "step3Desc": "Inspect failed tasks and systematically discard or retry them to maintain system stability."
+        "title": "협조 프로그램의 투어",
+        "step1Title": "라이브 커넥션",
+        "step1Desc": "후방의 지원 협력 프로그램에 연결되어 활동하는 상태 창과 진행 현황을 뷰로 열어봅니다.",
+        "step2Title": "큐 처리",
+        "step2Desc": "본인의 클러스터 전체 영역의 실시간 큐 업무와 액티브한 실행 일들을 전부 모니터링합니다.",
+        "step3Title": "사라지는 잔업",
+        "step3Desc": "안좋은 결과물을 초례한 일들을 조사 또는 일련으로 치우거나 재시도를 통하여 본 시스템을 안정적으로 지켜주세요."
       },
       "orphans": {
-        "title": "Orphans Tour",
-        "step1Title": "Trigger Scan",
-        "step1Desc": "Start a platform scan to detect loose configs disconnected from any agent.",
-        "step2Title": "Include Soft-Deleted",
-        "step2Desc": "Optionally toggle to include historically soft-deleted records in the purge.",
-        "step3Title": "Review & Purge",
-        "step3Desc": "Review the scanner's report, select stale objects, and permanently purge to reclaim DB space."
+        "title": "고아객체 투어",
+        "step1Title": "스캔의 불꽃",
+        "step1Desc": "플랫폼 스캔을 시작해보고 혹여라도 에이전트로부터 연결이 끊긴 미흡했던 설정값들을 다시 재발견해줍니다.",
+        "step2Title": "부드러운 삭제기능",
+        "step2Desc": "예전에 부드럽게 기록상 사라져 보였건만 사실상 남겨진 자료들을 완전 삭제하기를 위한 옵션.",
+        "step3Title": "리뷰와 퍼지단계",
+        "step3Desc": "다시 돌아보아 필요없는 요소들을 걸러내어 선택함으로서 DB 공간확보를 위한 비가역의 조치를 이룹니다."
       }
     },
     "help": {
-      "title": "Help & Tour",
-      "platformTour": "Platform Tour",
-      "resetAll": "Reset All Tours",
-      "resetConfirm": "Reset all tour progress?"
+      "title": "도움말 및 투어",
+      "platformTour": "플랫폼 투어",
+      "resetAll": "모든 투어 초기화",
+      "resetConfirm": "모든 투어 진행 상황을 초기화하시겠습니까?"
     },
     "offer": {
-      "message": "New here? Take the {{page}}",
-      "accept": "Show me",
-      "dontAsk": "Don't ask again"
+      "message": "처음이신가요? {{page}}을(를) 확인해 보세요",
+      "accept": "투어 시작",
+      "dontAsk": "다시 묻지 않음"
     }
   },
   "platform": {
@@ -938,21 +938,5 @@
     "confirmDelete": "이 그룹을 삭제하시겠습니까?",
     "confirmDeleteDesc": "그룹 구성이 영구적으로 삭제됩니다.",
     "duplicateSuccess": "그룹이 복제되었습니다"
-  },
-  "dashboard": {
-    "noConversations": "아직 대화가 없습니다",
-    "recentConversations": "최근 대화",
-    "platform": "플랫폼",
-    "online": "온라인",
-    "offline": "오프라인",
-    "checking": "확인 중…",
-    "coordConnected": "Coordinator 연결됨",
-    "coordDisconnected": "Coordinator 연결 끊김",
-    "coordUnknown": "Coordinator —",
-    "vaultUp": "Vault 준비 완료",
-    "vaultDown": "Vault 사용 불가",
-    "viewLogs": "로그 보기",
-    "orphanScan": "고아 스캔",
-    "auditTrail": "감사 기록"
   }
 }

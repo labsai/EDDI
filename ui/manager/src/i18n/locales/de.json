@@ -1143,21 +1143,5 @@
     "confirmDelete": "Diese Gruppe löschen?",
     "confirmDeleteDesc": "Die Gruppenkonfiguration wird dauerhaft gelöscht.",
     "duplicateSuccess": "Gruppe dupliziert"
-  },
-  "dashboard": {
-    "noConversations": "Noch keine Konversationen",
-    "recentConversations": "Letzte Konversationen",
-    "platform": "Plattform",
-    "online": "Online",
-    "offline": "Offline",
-    "checking": "Prüfe…",
-    "coordConnected": "Coordinator verbunden",
-    "coordDisconnected": "Coordinator nicht verbunden",
-    "coordUnknown": "Coordinator —",
-    "vaultUp": "Vault bereit",
-    "vaultDown": "Vault nicht verfügbar",
-    "viewLogs": "Logs anzeigen",
-    "orphanScan": "Orphan-Scan",
-    "auditTrail": "Audit Trail"
   }
 }
