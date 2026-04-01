@@ -71,12 +71,14 @@ src/
 ├── components/
 │   ├── editors/              # Form editors + shared editor chrome
 │   │   ├── config-editor-layout.tsx   # Tabs (Form|JSON), version picker, save
-│   │   ├── behavior-editor.tsx        # Phase 3.17
-│   │   ├── httpcalls-editor.tsx       # Phase 3.17
-│   │   ├── langchain-editor.tsx       # Phase 3.18
-│   │   ├── output-editor.tsx          # Phase 3.18
-│   │   ├── propertysetter-editor.tsx  # Phase 3.18
-│   │   └── dictionary-editor.tsx      # Phase 3.18
+│   │   ├── rules-editor.tsx           # Behavior rules editor
+│   │   ├── apicalls-editor.tsx        # HTTP API calls editor
+│   │   ├── llm-editor.tsx             # LLM/langchain task editor
+│   │   ├── output-editor.tsx          # Output sets editor
+│   │   ├── propertysetter-editor.tsx  # Property setter editor
+│   │   ├── dictionary-editor.tsx      # Dictionary/parser editor
+│   │   ├── mcpcalls-editor.tsx        # MCP calls editor
+│   │   └── rag-editor.tsx             # RAG config editor
 │   ├── layout/                # Sidebar, top-bar, theme-provider
 │   └── ui/                    # Reusable UI primitives
 ├── hooks/                     # TanStack Query hooks
@@ -98,27 +100,18 @@ src/
 
 All extension editors plug into `ConfigEditorLayout` via `renderFormEditor` in `resource-detail.tsx`:
 
+Editors are wired in `resource-detail.tsx` via a `FORM_EDITORS` map keyed by resource type slug:
+
 ```tsx
-<ConfigEditorLayout
-  renderFormEditor={
-    type === 'behavior'
-      ? (parsed, onFormChange, ro) => (
-          <BehaviorEditor data={parsed} onChange={onFormChange} readOnly={ro} />
-        )
-      : type === 'langchain'
-        ? (parsed, onFormChange, ro) => (
-            <LangchainEditor
-              data={parsed}
-              onChange={onFormChange}
-              readOnly={ro}
-            />
-          )
-        : undefined // Falls back to JSON-only
-  }
-/>
+const FORM_EDITORS: Record<string, (p, o, r) => ReactNode> = {
+  rules:    (p, o, r) => <RulesEditor data={p} onChange={o} readOnly={r} />,
+  llm:      (p, o, r) => <LlmEditor data={p} onChange={o} readOnly={r} />,
+  apicalls: (p, o, r) => <ApiCallsEditor data={p} onChange={o} readOnly={r} />,
+  // ... output, dictionary, propertysetter, mcpcalls, rag
+};
 ```
 
-To add a new editor: create the component, add the type check in the ternary, add MSW handler, add i18n keys, add test file.
+To add a new editor: create the component, add to the map, add MSW handler, add i18n keys, add test file.
 
 #### 2. Resource Type Config
 
@@ -135,6 +128,22 @@ All 8 resource types are in `src/lib/api/resources.ts` as `RESOURCE_TYPES`:
 | `mcpcalls`         | `mcpcallsstore`          | `mcpcalls`            |
 | `rag`              | `ragstore`               | `rags`                |
 
+> **⚠️ Parser vs Dictionary — these are separate stores!**
+>
+> The backend has **two distinct stores** for the parser subsystem:
+>
+> | Store | Path | Extension | Config Model | Purpose |
+> |-------|------|-----------|--------------|--------|
+> | **DictionaryStore** | `dictionarystore/dictionaries` | `ai.labs.dictionary` | `RegularDictionaryConfiguration` | Word→expression mappings, phrases, regex patterns |
+> | **ParserStore** | `parserstore/parsers` | `ai.labs.parser` | `ParserConfiguration` | Parser pipeline config that *references* dictionaries |
+>
+> - A **workflow** references a **parser** (`eddi://ai.labs.parser/parserstore/parsers/{id}`)
+> - A **parser config** references one or more **dictionaries** (`eddi://ai.labs.dictionary/dictionarystore/dictionaries/{id}`)
+> - The `dictionary` resource type in the Manager maps to `dictionarystore/dictionaries` — this is what users create and edit
+> - The parser config is not yet directly editable in the Manager (future enhancement)
+> - The `pipeline-builder.tsx` storeMap maps **both** `dictionarystore` and `parserstore` → `dictionary` slug for URI resolution
+> - **Do NOT confuse these stores.** `parserstore` ≠ `dictionarystore`.
+
 #### 3. MSW Mock Handlers
 
 - All handlers are in `src/test/mocks/handlers.ts`
@@ -143,7 +152,7 @@ All 8 resource types are in `src/lib/api/resources.ts` as `RESOURCE_TYPES`:
 
 #### 4. i18n
 
-- Each editor has its own namespace: `langchainEditor.*`, `outputEditor.*`, etc.
+- Each editor has its own namespace: `llmEditor.*`, `apiCallsEditor.*`, `rulesEditor.*`, `outputEditor.*`, etc.
 - Add to `en.json` first, then propagate to all 10 other locale files
 - Fallback values are inline in the component: `t("key", "Fallback")`
 
