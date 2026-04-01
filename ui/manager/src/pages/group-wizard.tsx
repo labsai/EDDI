@@ -24,6 +24,7 @@ import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { useCreateGroup } from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import {
@@ -1071,12 +1072,11 @@ function MemberCard({
                   <label className="mb-1 block text-xs font-medium text-muted-foreground">
                     {t("groupWizard.apiKey", "API Key")}
                   </label>
-                  <input
-                    type="password"
+                  <SecretKeyPicker
                     value={member.apiKey}
-                    onChange={(e) => onUpdate({ apiKey: e.target.value })}
-                    className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    onChange={(v) => onUpdate({ apiKey: v })}
                     placeholder={t("groupWizard.apiKeyPlaceholder", "sk-…")}
+                    testId={`gw-apikey-${index}`}
                   />
                 </div>
               )}
@@ -1229,13 +1229,17 @@ function ModeratorCard({
             />
           </div>
           {providerConfig?.needsKey && (
-            <input
-              type="password"
-              value={moderator.apiKey}
-              onChange={(e) => onChange({ apiKey: e.target.value })}
-              className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              placeholder={t("groupWizard.apiKeyPlaceholder", "sk-…")}
-            />
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                {t("groupWizard.apiKey", "API Key")}
+              </label>
+              <SecretKeyPicker
+                value={moderator.apiKey}
+                onChange={(v) => onChange({ apiKey: v })}
+                placeholder={t("groupWizard.apiKeyPlaceholder", "sk-…")}
+                testId="gw-moderator-apikey"
+              />
+            </div>
           )}
           <button
             onClick={onCreateAgent}

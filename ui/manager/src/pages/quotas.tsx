@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect } from "react";
+import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import {
-  Gauge,
+  SlidersHorizontal,
   Activity,
   RefreshCw,
   Save,
@@ -23,6 +24,9 @@ export function QuotasPage() {
   // Local form state — initialized from server data
   const [form, setForm] = useState<TenantQuota | null>(null);
   const [dirty, setDirty] = useState(false);
+
+  const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
+  useEffect(() => { const t = setTimeout(() => maybeAutoStart("quotas"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
 
   // Sync form with server data when it arrives (or after save)
   useEffect(() => {
@@ -64,7 +68,7 @@ export function QuotasPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-amber-500 to-orange-600 text-white shadow-md">
-            <Gauge className="h-5 w-5" />
+            <SlidersHorizontal className="h-5 w-5" />
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-foreground">

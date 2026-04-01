@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
@@ -47,6 +48,10 @@ function formatTime(iso: string): string {
 
 export function CoordinatorPage() {
   const { t } = useTranslation();
+
+  const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
+  useEffect(() => { const t = setTimeout(() => maybeAutoStart("coordinator"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
+
   const { data: status, isLoading: statusLoading, refetch: refetchStatus } = useCoordinatorStatus();
   const { data: deadLetters, isLoading: dlLoading, refetch: refetchDL } = useDeadLetters();
   const { liveStatus, sseConnected, eventHistory } = useCoordinatorSSE();
@@ -293,7 +298,17 @@ export function CoordinatorPage() {
             </div>
           </div>
         </>
-      ) : null}
+      ) : (
+        <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border py-16">
+          <Activity className="h-12 w-12 text-muted-foreground/40" />
+          <p className="mt-4 text-lg font-medium text-muted-foreground">
+            {t("coordinator.empty", "No coordinator data available")}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground/70">
+            {t("coordinator.emptyHint", "The coordinator service may still be starting up. Data will appear automatically.")}
+          </p>
+        </div>
+      )}
 
       {/* Error category breakdown */}
       {errorCategories.length > 0 && (

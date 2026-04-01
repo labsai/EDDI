@@ -14,8 +14,6 @@ import {
   Upload,
   Link as LinkIcon,
   FileCode2,
-  Eye,
-  EyeOff,
   Sparkles,
   MessageSquarePlus,
   BarChart3,
@@ -36,6 +34,7 @@ import {
 } from "@/lib/api/agent-setup";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 
 /* ================================================================
    Types & Constants
@@ -174,7 +173,6 @@ export function AgentWizardPage() {
   const [state, setState] = useState<WizardState>(INITIAL_STATE);
   const [result, setResult] = useState<SetupResult | null>(null);
   const [error, setError] = useState<string>("");
-  const [showKey, setShowKey] = useState(false);
 
   const setupAgent = useSetupAgent();
   const createApiAgent = useCreateApiAgent();
@@ -434,12 +432,10 @@ export function AgentWizardPage() {
             model={state.model}
             apiKey={state.apiKey}
             baseUrl={state.baseUrl}
-            showKey={showKey}
             onProviderChange={handleProviderChange}
             onModelChange={(model) => update({ model })}
             onApiKeyChange={(apiKey) => update({ apiKey })}
             onBaseUrlChange={(baseUrl) => update({ baseUrl })}
-            onToggleKey={() => setShowKey(!showKey)}
           />
         )}
         {step?.id === "apispec" && (
@@ -713,23 +709,19 @@ function LlmStep({
   model,
   apiKey,
   baseUrl,
-  showKey,
   onProviderChange,
   onModelChange,
   onApiKeyChange,
   onBaseUrlChange,
-  onToggleKey,
 }: {
   provider: string;
   model: string;
   apiKey: string;
   baseUrl: string;
-  showKey: boolean;
   onProviderChange: (v: string) => void;
   onModelChange: (v: string) => void;
   onApiKeyChange: (v: string) => void;
   onBaseUrlChange: (v: string) => void;
-  onToggleKey: () => void;
 }) {
   const { t } = useTranslation();
   const prov = getProviderConfig(provider);
@@ -810,24 +802,12 @@ function LlmStep({
             >
               {t("setupWizard.apiKey", "API Key")} *
             </label>
-            <div className="relative">
-              <input
-                id="wizard-apikey"
-                type={showKey ? "text" : "password"}
-                value={apiKey}
-                onChange={(e) => onApiKeyChange(e.target.value)}
-                placeholder="sk-..."
-                className="w-full rounded-lg border border-input bg-background px-3 py-2.5 pe-10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow font-mono"
-                data-testid="wizard-apikey"
-              />
-              <button
-                type="button"
-                onClick={onToggleKey}
-                className="absolute inset-e-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
+            <SecretKeyPicker
+              value={apiKey}
+              onChange={onApiKeyChange}
+              placeholder="sk-..."
+              testId="wizard-apikey"
+            />
           </div>
         )}
 
@@ -1092,13 +1072,11 @@ function ApiSpecStep({
                 ({t("setupWizard.optional", "optional")})
               </span>
             </label>
-            <input
-              type="text"
+            <SecretKeyPicker
               value={apiAuth}
-              onChange={(e) => onApiAuthChange(e.target.value)}
+              onChange={onApiAuthChange}
               placeholder="Bearer sk-..."
-              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow font-mono"
-              data-testid="wizard-api-auth"
+              testId="wizard-api-auth"
             />
           </div>
         </div>

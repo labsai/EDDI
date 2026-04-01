@@ -1,4 +1,5 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
+import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -81,6 +82,10 @@ function extractVersionFromUri(uri: string): string | null {
 
 export function OrphansPage() {
   const { t } = useTranslation();
+
+  const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
+  useEffect(() => { const t = setTimeout(() => maybeAutoStart("orphans"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
+
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [showPurgeConfirm, setShowPurgeConfirm] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());

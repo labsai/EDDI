@@ -24,6 +24,7 @@ vi.mock("@/hooks/use-dashboard", () => ({
 }));
 
 vi.mock("@/hooks/use-agents", () => ({
+  useAgentDescriptors: () => ({ data: [] }),
   groupAgentsByName: () => [],
 }));
 

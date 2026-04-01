@@ -135,7 +135,8 @@
     "import": "นำเข้า Agent",
     "importing": "กำลังนำเข้า...",
     "importSuccess": "นำเข้า Agent สำเร็จ",
-    "importError": "นำเข้า Agent ล้มเหลว"
+    "importError": "นำเข้า Agent ล้มเหลว",
+    "emptyDescription": "ใช้วิซาร์ดสร้าง Agent ที่กำหนดค่าสมบูรณ์ได้ในไม่กี่นาที"
   },
   "agentDetail": {
     "title": "รายละเอียด Agent",
@@ -257,7 +258,8 @@
     "empty": "ยังไม่มี Workflow สร้าง Workflow แรกของคุณเลย!",
     "confirmDelete": "คุณแน่ใจหรือไม่ว่าต้องการลบ Workflow นี้?",
     "count_one": "{{count}} Workflow",
-    "count_other": "{{count}} Workflows"
+    "count_other": "{{count}} Workflows",
+    "emptyDescription": "Workflow กำหนด Pipeline การประมวลผลสำหรับ Agent ของคุณ"
   },
   "packageDetail": {
     "title": "รายละเอียด Workflow",
@@ -289,7 +291,8 @@
     "empty": "ยังไม่มีการสนทนา Deploy Agent และเริ่มแชทเลย!",
     "confirmDelete": "คุณแน่ใจหรือไม่ว่าต้องการลบการสนทนานี้?",
     "count_one": "{{count}} การสนทนา",
-    "count_other": "{{count}} การสนทนา"
+    "count_other": "{{count}} การสนทนา",
+    "emptyDescription": "Deploy Agent แล้วเริ่มการสนทนาจากหน้า Chat"
   },
   "conversationDetail": {
     "title": "การสนทนา",
@@ -365,7 +368,8 @@
         "name": "Knowledge Bases",
         "description": "Configure RAG knowledge bases for document retrieval"
       }
-    }
+    },
+    "emptyDescription": "สร้าง {{type}} แรกของคุณเพื่อใช้ใน Workflow"
   },
   "editor": {
     "formTab": "ฟอร์ม",
@@ -642,7 +646,9 @@
     "discardSuccess": "ละทิ้ง Dead-Letter แล้ว",
     "discardError": "ละทิ้งล้มเหลว",
     "purgeSuccess": "ล้างรายการ Dead-Letter ทั้งหมดแล้ว",
-    "purgeError": "ล้างล้มเหลว"
+    "purgeError": "ล้างล้มเหลว",
+    "empty": "ไม่มีข้อมูล Coordinator ที่พร้อมใช้งาน",
+    "emptyHint": "บริการ Coordinator อาจยังไม่เริ่มทำงาน ข้อมูลจะปรากฏโดยอัตโนมัติ"
   },
   "contentEditor": {
     "expand": "ขยาย",
@@ -675,7 +681,9 @@
     "showStacktrace": "แสดง Stacktrace ({{count}} เฟรม)",
     "hideStacktrace": "ซ่อน Stacktrace",
     "allAgents": "All Agents",
-    "allConversations": "All Conversations"
+    "allConversations": "All Conversations",
+    "waitingHint": "Log จะปรากฏที่นี่เมื่อ Stream เข้ามาจาก Backend",
+    "noHistoryHint": "ลองปรับตัวกรองหรือค้นหา Agent หรือ Conversation อื่น"
   },
   "secrets": {
     "title": "Secrets Vault",
@@ -944,7 +952,8 @@
       "readyTitle": "Ready to Start?",
       "readySubtitle": "You can restart any tour from the sidebar Help menu",
       "startTour": "Start the Tour",
-      "exploreOwn": "I'll Explore on My Own"
+      "exploreOwn": "I'll Explore on My Own",
+      "capabilitiesSubtitle": "ทุกอย่างที่คุณต้องการเพื่อสร้าง AI Agent ระดับ Production"
     },
     "tour": {
       "back": "Back",
@@ -1002,6 +1011,87 @@
         "step2Desc": "Define which AI model powers your agent, its system prompt, tools, MCP servers, and cascade settings. This is the brain.",
         "step3Title": "Rules & API Calls",
         "step3Desc": "Behavior Rules control conversation flow. HTTP Calls connect to external APIs. Both can be used as LLM tools."
+      },
+      "conversations": {
+        "title": "Conversations Tour",
+        "step1Title": "Search",
+        "step1Desc": "Find conversations quickly by ID, agent, or recent user messages.",
+        "step2Title": "Status Filters",
+        "step2Desc": "Filter conversations by state: Active, In Progress, Ended, or Error.",
+        "step3Title": "Conversation List",
+        "step3Desc": "Browse all sessions. Click any conversation card to open the timeline and debug."
+      },
+      "groups": {
+        "title": "Discussion Groups Tour",
+        "step1Title": "Create Group",
+        "step1Desc": "Create an orchestration group to let multiple agents collaborate and debate.",
+        "step2Title": "Group Search",
+        "step2Desc": "Search through your existing multi-agent clusters.",
+        "step3Title": "Group Grid",
+        "step3Desc": "Manage your collaborative environments, edit their policies, or delete stale groups."
+      },
+      "logs": {
+        "title": "System Logs Tour",
+        "step1Title": "Live vs History",
+        "step1Desc": "Switch between a real-time stream of system logs and historical log search.",
+        "step2Title": "Stream Filters",
+        "step2Desc": "Filter the incoming live stream by Agent or by critical Log Level.",
+        "step3Title": "Export",
+        "step3Desc": "Download the current filtered logs as a text file for external analysis."
+      },
+      "secrets": {
+        "title": "Secrets Vault Tour",
+        "step1Title": "Create Secret",
+        "step1Desc": "Securely store a new API key, token, or password that your agents can reference.",
+        "step2Title": "Tenant Isolation",
+        "step2Desc": "Filter the vault view to show secrets scoped to a specific tenant ID.",
+        "step3Title": "Reference Syntax",
+        "step3Desc": "Learn how to dynamically inject secrets into your LLM configurations without hardcoding them."
+      },
+      "audit": {
+        "title": "Audit Ledger Tour",
+        "step1Title": "Search Mode",
+        "step1Desc": "Search the immutable audit ledger by a specific Conversation ID or by an Agent version.",
+        "step2Title": "Execute Search",
+        "step2Desc": "Enter your ID and click search to pull the verifiable execution history.",
+        "step3Title": "Export Ledger",
+        "step3Desc": "Export the retrieved audit records to JSON for compliance and reporting."
+      },
+      "schedules": {
+        "title": "Schedules Tour",
+        "step1Title": "Create Schedule",
+        "step1Desc": "Set up a new cron job or continuous heartbeat to trigger agent workflows automatically.",
+        "step2Title": "Health Stats",
+        "step2Desc": "Monitor the total, active, and failed schedules across your platform.",
+        "step3Title": "Schedule Management",
+        "step3Desc": "Manage your automated triggers natively: pause, resume, edit, or test-fire them."
+      },
+      "quotas": {
+        "title": "Quotas Tour",
+        "step1Title": "Configuration Constraints",
+        "step1Desc": "Define hard limits on total agents, daily conversations, and token costs for this tenant.",
+        "step2Title": "Usage Analytics",
+        "step2Desc": "Monitor how much of the allocated quota the tenant has consumed in real-time.",
+        "step3Title": "Enforce Changes",
+        "step3Desc": "Save your adjusted limits. The platform will block traffic that breaches these ceilings."
+      },
+      "coordinator": {
+        "title": "Coordinator Tour",
+        "step1Title": "Live Connection",
+        "step1Desc": "View the heartbeat and event source connected to the backend coordinator system.",
+        "step2Title": "Queue Processing",
+        "step2Desc": "Monitor real-time task queues and active job execution across your cluster.",
+        "step3Title": "Dead Letters",
+        "step3Desc": "Inspect failed tasks and systematically discard or retry them to maintain system stability."
+      },
+      "orphans": {
+        "title": "Orphans Tour",
+        "step1Title": "Trigger Scan",
+        "step1Desc": "Start a platform scan to detect loose configs disconnected from any agent.",
+        "step2Title": "Include Soft-Deleted",
+        "step2Desc": "Optionally toggle to include historically soft-deleted records in the purge.",
+        "step3Title": "Review & Purge",
+        "step3Desc": "Review the scanner's report, select stale objects, and permanently purge to reclaim DB space."
       }
     },
     "help": {
@@ -1042,5 +1132,32 @@
     "quickCreateDesc": "Set a name and description, configure details later.",
     "guidedSetup": "Guided Setup",
     "guidedSetupDesc": "Step-by-step wizard with LLM provider, prompts, and deployment."
+  },
+  "groups": {
+    "empty": "ยังไม่มี Group",
+    "emptyDescription": "Group ช่วยให้ Agent หลายตัวทำงานร่วมกันในการสนทนาเชิงโครงสร้าง",
+    "createGroup": "สร้าง Group",
+    "unnamed": "Group ไม่มีชื่อ",
+    "count_one": "{{count}} กลุ่ม",
+    "count_other": "{{count}} กลุ่ม",
+    "confirmDelete": "ลบกลุ่มนี้?",
+    "confirmDeleteDesc": "การกำหนดค่ากลุ่มจะถูกลบอย่างถาวร",
+    "duplicateSuccess": "Group ถูกทำซ้ำแล้ว"
+  },
+  "dashboard": {
+    "noConversations": "ยังไม่มี Conversation",
+    "recentConversations": "Conversation ล่าสุด",
+    "platform": "แพลตฟอร์ม",
+    "online": "ออนไลน์",
+    "offline": "ออฟไลน์",
+    "checking": "กำลังตรวจสอบ…",
+    "coordConnected": "Coordinator เชื่อมต่อแล้ว",
+    "coordDisconnected": "Coordinator ไม่ได้เชื่อมต่อ",
+    "coordUnknown": "Coordinator —",
+    "vaultUp": "Vault พร้อม",
+    "vaultDown": "Vault ไม่พร้อม",
+    "viewLogs": "ดู Log",
+    "orphanScan": "สแกนรายการกำพร้า",
+    "auditTrail": "Audit Trail"
   }
 }

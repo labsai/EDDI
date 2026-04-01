@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import {
   ScrollText,
@@ -113,6 +114,10 @@ type Tab = "live" | "history";
 
 export function LogsPage() {
   const { t } = useTranslation();
+  
+  const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
+  useEffect(() => { const t = setTimeout(() => maybeAutoStart("logs"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
+
   const [activeTab, setActiveTab] = useState<Tab>("live");
 
   return (
@@ -134,7 +139,7 @@ export function LogsPage() {
       </div>
 
       {/* Tab bar */}
-      <div className="mb-4 flex gap-1 rounded-lg border border-border bg-muted/30 p-1">
+      <div className="mb-4 flex gap-1 rounded-lg border border-border bg-muted/30 p-1" data-tour="logs-tabs">
         <button
           className={`inline-flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-all ${
             activeTab === "live"
@@ -238,7 +243,7 @@ function LiveTab() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Toolbar */}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2" data-tour="logs-filters">
         {/* SSE stream status */}
         <StreamBadge connected={sseConnected} />
 
@@ -361,10 +366,25 @@ function LiveTab() {
         }}
       >
         {entries.length === 0 ? (
-          <div className="flex h-full items-center justify-center p-8 text-sm text-muted-foreground">
-            {sseConnected
-              ? t("logs.waitingForLogs", "Waiting for logs...")
-              : t("logs.connectingStream", "Connecting to stream...")}
+          <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
+            {sseConnected ? (
+              <>
+                <Radio className="h-10 w-10 text-muted-foreground/40 animate-pulse" />
+                <p className="text-sm font-medium text-muted-foreground">
+                  {t("logs.waitingForLogs", "Waiting for logs...")}
+                </p>
+                <p className="text-xs text-muted-foreground/60">
+                  {t("logs.waitingHint", "Logs will appear here as they stream in from the backend.")}
+                </p>
+              </>
+            ) : (
+              <>
+                <Loader2 className="h-10 w-10 text-muted-foreground/40 animate-spin" />
+                <p className="text-sm font-medium text-muted-foreground">
+                  {t("logs.connectingStream", "Connecting to stream...")}
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div className="divide-y divide-border/50 font-mono text-xs">
@@ -452,10 +472,16 @@ function HistoryTab() {
           </div>
         ) : !logs || logs.length === 0 ? (
           <div
-            className="flex h-full items-center justify-center p-8 text-sm text-muted-foreground"
+            className="flex h-full flex-col items-center justify-center gap-3 p-8"
             data-testid="history-empty"
           >
-            {t("logs.noHistoryLogs", "No historical logs found.")}
+            <History className="h-10 w-10 text-muted-foreground/40" />
+            <p className="text-sm font-medium text-muted-foreground">
+              {t("logs.noHistoryLogs", "No historical logs found.")}
+            </p>
+            <p className="text-xs text-muted-foreground/60">
+              {t("logs.noHistoryHint", "Try adjusting the filters or search for a different agent or conversation.")}
+            </p>
           </div>
         ) : (
           <div className="divide-y divide-border/50 font-mono text-xs">

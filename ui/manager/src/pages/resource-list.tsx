@@ -191,6 +191,7 @@ export function ResourceListPage() {
         <EmptyState
           icon={Icon}
           title={search ? t("common.noResults") : t("resources.empty", { type: typeName })}
+          description={!search ? t("resources.emptyDescription", { type: typeName, defaultValue: "Create your first {{type}} to use it in workflows." }) : undefined}
           actionLabel={!search ? t("resources.create", { type: typeName }) : undefined}
           onAction={!search ? () => setCreateOpen(true) : undefined}
         />

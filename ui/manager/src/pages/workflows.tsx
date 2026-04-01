@@ -175,6 +175,7 @@ export function WorkflowsPage() {
         <EmptyState
           icon={Workflow}
           title={search ? t("common.noResults") : t("packages.empty")}
+          description={!search ? t("packages.emptyDescription", "Workflows define the processing pipeline for your agents.") : undefined}
           actionLabel={!search ? t("packages.createWorkflow") : undefined}
           onAction={!search ? () => setCreateOpen(true) : undefined}
         />

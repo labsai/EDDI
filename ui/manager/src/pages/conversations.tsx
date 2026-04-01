@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   MessageSquare,
   Search,
@@ -21,6 +22,7 @@ import {
   useDeleteConversation,
   useConversationStepCount,
 } from "@/hooks/use-conversations";
+import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { parseConversationUri, type ConversationState } from "@/lib/api/conversations";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -51,7 +53,10 @@ const STATE_FILTER_VALUES: (ConversationState | "ALL")[] = [
 
 export function ConversationsPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
+  const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
+  useEffect(() => { const t = setTimeout(() => maybeAutoStart("conversations"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
   const [stateFilter, setStateFilter] = useState<ConversationState | "ALL">("ALL");
 
   // i18n labels for conversation states
@@ -73,6 +78,7 @@ export function ConversationsPage() {
       "",
       stateFilter === "ALL" ? undefined : stateFilter
     );
+  const { data: agents = [] } = useAgentDescriptors(50);
   const deleteMutation = useDeleteConversation();
 
   function confirmDelete() {
@@ -124,7 +130,7 @@ export function ConversationsPage() {
         </div>
 
         {/* State filter + view toggle */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3" data-tour="conversations-filters">
           <div className="flex items-center gap-1.5">
             <Filter className="h-4 w-4 text-muted-foreground" />
             {STATE_FILTER_VALUES.map((sf) => (
@@ -144,6 +150,7 @@ export function ConversationsPage() {
       </div>
 
       {/* Content */}
+      <div data-tour="conversations-content">
       {isLoading && (
         <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
           <div className="space-y-0">
@@ -176,6 +183,13 @@ export function ConversationsPage() {
               ? t("common.noResults")
               : t("conversations.empty")
           }
+          description={
+            !search && stateFilter === "ALL"
+              ? t("conversations.emptyDescription", "Deploy an agent and start a conversation from the Chat page.")
+              : undefined
+          }
+          actionLabel={!search && stateFilter === "ALL" ? t("nav.chat") : undefined}
+          onAction={!search && stateFilter === "ALL" ? () => navigate("/manage/chat") : undefined}
         />
       )}
 
@@ -198,7 +212,9 @@ export function ConversationsPage() {
                 const convId = parseConversationUri(conv.resource);
                 const state = conv.conversationState || "READY";
                 const config = stateIcons[state];
-                const stateLabel = stateLabels[state];                const StateIcon = config.icon;
+                const stateLabel = stateLabels[state];
+                const StateIcon = config.icon;
+                const agentName = agents ? groupAgentsByName(agents).find(a => a.id === conv.agentId)?.name : null;
 
                 return (
                   <Link
@@ -246,8 +262,8 @@ export function ConversationsPage() {
                     {conv.agentId && (
                       <div className="mt-2 flex items-center gap-1.5">
                         <Bot className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground truncate">
-                          {conv.agentId}
+                        <span className="text-xs text-muted-foreground truncate" title={agentName || conv.agentId}>
+                          {agentName || conv.agentId}
                           {conv.agentVersion ? ` v${conv.agentVersion}` : ""}
                         </span>
                       </div>
@@ -305,6 +321,7 @@ export function ConversationsPage() {
                     const state = conv.conversationState || "READY";
                     const config = stateIcons[state];
                     const StateIcon = config.icon;
+                    const agentName = agents ? groupAgentsByName(agents).find(a => a.id === conv.agentId)?.name || conv.agentId : conv.agentId;
 
                     return (
                       <tr
@@ -325,7 +342,7 @@ export function ConversationsPage() {
                         <td className="px-5 py-3">
                           <span className="text-sm text-muted-foreground">
                             {conv.agentId
-                              ? `${conv.agentId.length > 12 ? conv.agentId.slice(0, 12) + "…" : conv.agentId}${conv.agentVersion ? ` v${conv.agentVersion}` : ""}`
+                              ? `${agentName}${conv.agentVersion ? ` v${conv.agentVersion}` : ""}`
                               : "—"}
                           </span>
                         </td>
@@ -372,6 +389,8 @@ export function ConversationsPage() {
           )}
         </>
       )}
+
+      </div>
 
       {/* Delete confirmation */}
       <AlertDialog

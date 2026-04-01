@@ -1,4 +1,5 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
+import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -17,6 +18,7 @@ import {
   Copy,
   RefreshCw,
   FileText,
+  Bot,
 } from "lucide-react";
 import {
   useSecrets,
@@ -31,6 +33,9 @@ const DEFAULT_TENANT = "default";
 export function SecretsPage() {
   const { t } = useTranslation();
 
+  const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
+  useEffect(() => { const t = setTimeout(() => maybeAutoStart("secrets"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
+
   /* ─── Namespace state ─── */
   const [tenantId, setTenantId] = useState(DEFAULT_TENANT);
 
@@ -41,6 +46,7 @@ export function SecretsPage() {
   const [newDescription, setNewDescription] = useState("");
   const [valueVisible, setValueVisible] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SecretMetadata | null>(null);
+  const [newAllowedAgents, setNewAllowedAgents] = useState<string[]>([]);
 
   /* ─── Queries ─── */
   const { data: secrets, isLoading } = useSecrets(tenantId);
@@ -78,6 +84,7 @@ export function SecretsPage() {
         keyName: newKeyName.trim(),
         value: newValue.trim(),
         description: newDescription.trim() || undefined,
+        allowedAgents: newAllowedAgents.length > 0 ? newAllowedAgents : undefined,
       },
       {
         onSuccess: () => {
@@ -92,12 +99,13 @@ export function SecretsPage() {
           setNewValue("");
           setNewDescription("");
           setValueVisible(false);
+          setNewAllowedAgents([]);
         },
         onError: (err) =>
           toast.error(err instanceof Error ? err.message : String(err)),
       },
     );
-  }, [tenantId, newKeyName, newValue, newDescription, storeMut, t]);
+  }, [tenantId, newKeyName, newValue, newDescription, newAllowedAgents, storeMut, t]);
 
   const handleDelete = useCallback(() => {
     if (!deleteTarget) return;
@@ -220,7 +228,7 @@ export function SecretsPage() {
           )}
         </div>
       ) : (
-        <div className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
+        <div className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3" data-tour="secrets-info">
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">
@@ -306,6 +314,12 @@ export function SecretsPage() {
                       {t("secrets.checksum", "Checksum")}
                     </span>
                   </th>
+                  <th className="px-4 py-3 text-start font-semibold text-foreground">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Bot className="h-3.5 w-3.5" />
+                      {t("secrets.allowedAgents", "Allowed Agents")}
+                    </span>
+                  </th>
                   <th className="px-4 py-3 text-end font-semibold text-foreground">
                     {t("secrets.actions", "Actions")}
                   </th>
@@ -353,6 +367,26 @@ export function SecretsPage() {
                           ? s.checksum.substring(0, 12) + "…"
                           : "—"}
                       </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {(s.allowedAgents ?? ["*"]).map((a) => (
+                          <span
+                            key={a}
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                              a === "*"
+                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                : "bg-primary/10 text-primary"
+                            }`}
+                          >
+                            {a === "*" ? (
+                              <>{t("secrets.allAgents", "All agents")}</>
+                            ) : (
+                              <><Bot className="h-2.5 w-2.5" />{a.length > 16 ? a.slice(0, 16) + "…" : a}</>
+                            )}
+                          </span>
+                        ))}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-end">
                       <button
@@ -405,6 +439,7 @@ export function SecretsPage() {
             setNewValue("");
             setNewDescription("");
             setValueVisible(false);
+            setNewAllowedAgents([]);
           }}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
@@ -413,6 +448,7 @@ export function SecretsPage() {
               setNewValue("");
               setNewDescription("");
               setValueVisible(false);
+              setNewAllowedAgents([]);
             }
           }}
         >
@@ -437,6 +473,7 @@ export function SecretsPage() {
                   setNewValue("");
                   setNewDescription("");
                   setValueVisible(false);
+                  setNewAllowedAgents([]);
                 }}
                 className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted"
               >
@@ -547,6 +584,59 @@ export function SecretsPage() {
                   autoComplete="off"
                 />
               </div>
+              {/* Allowed Agents */}
+              <div>
+                <label
+                  htmlFor="new-allowed-agents"
+                  className="mb-1.5 block text-xs font-medium text-muted-foreground"
+                >
+                  {t("secrets.allowedAgentsLabel", "Allowed Agents (optional)")}
+                </label>
+                <div className="space-y-1.5">
+                  {newAllowedAgents.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {newAllowedAgents.map((agentId) => (
+                        <span
+                          key={agentId}
+                          className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+                        >
+                          <Bot className="h-2.5 w-2.5" />
+                          {agentId.length > 20 ? agentId.slice(0, 20) + "…" : agentId}
+                          <button
+                            type="button"
+                            onClick={() => setNewAllowedAgents((prev) => prev.filter((a) => a !== agentId))}
+                            className="ms-0.5 rounded-full p-0.5 text-primary/60 hover:text-primary transition-colors"
+                          >
+                            <X className="h-2.5 w-2.5" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <input
+                    id="new-allowed-agents"
+                    type="text"
+                    placeholder={t("secrets.allowedAgentsPlaceholder", "Type agent ID and press Enter (empty = all agents)")}
+                    className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    data-testid="new-allowed-agents-input"
+                    autoComplete="off"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === ",") {
+                        e.preventDefault();
+                        const input = e.currentTarget;
+                        const val = input.value.trim().replace(/,$/,"");
+                        if (val && !newAllowedAgents.includes(val)) {
+                          setNewAllowedAgents((prev) => [...prev, val]);
+                          input.value = "";
+                        }
+                      }
+                    }}
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    {t("secrets.allowedAgentsHint", "Leave empty for all agents. Adding agent IDs helps track which agents use this secret.")}
+                  </p>
+                </div>
+              </div>
               <p className="text-xs text-muted-foreground">
                 {t(
                   "secrets.storeWarning",
@@ -563,6 +653,7 @@ export function SecretsPage() {
                   setNewValue("");
                   setNewDescription("");
                   setValueVisible(false);
+                  setNewAllowedAgents([]);
                 }}
                 className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
               >

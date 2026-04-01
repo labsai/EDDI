@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import {
   ShieldCheck,
@@ -203,6 +204,10 @@ function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTra
 
 export function AuditPage() {
   const { t } = useTranslation();
+
+  const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
+  useEffect(() => { const t = setTimeout(() => maybeAutoStart("audit"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
+
   const [mode, setMode] = useState<SearchMode>("conversation");
   const [conversationId, setConversationId] = useState("");
   const [agentId, setAgentId] = useState("");
@@ -358,7 +363,7 @@ export function AuditPage() {
       {/* Search bar */}
       <div className="rounded-xl border border-border bg-card p-4">
         {/* Mode toggle */}
-        <div className="mb-3 flex items-center gap-2">
+        <div className="mb-3 flex items-center gap-2" data-tour="audit-mode-toggle">
           <button
             onClick={() => setMode("conversation")}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${

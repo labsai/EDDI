@@ -19,8 +19,8 @@ import {
   ScrollText,
   KeyRound,
   ShieldCheck,
-  Gauge,
-  Users,
+  SlidersHorizontal,
+  Boxes,
   HelpCircle,
   Check,
   RotateCcw,
@@ -39,7 +39,7 @@ const navSections = [
       { path: "/manage", icon: LayoutDashboard, labelKey: "nav.dashboard" },
       { path: "/manage/agents", icon: Bot, labelKey: "nav.agents" },
       { path: "/manage/workflows", icon: Workflow, labelKey: "nav.packages" },
-      { path: "/manage/groups", icon: Users, labelKey: "nav.groups" },
+      { path: "/manage/groups", icon: Boxes, labelKey: "nav.groups" },
     ],
   },
   {
@@ -62,7 +62,7 @@ const navSections = [
     labelKey: "nav.sectionAdmin",
     items: [
       { path: "/manage/secrets", icon: KeyRound, labelKey: "nav.secrets" },
-      { path: "/manage/quotas", icon: Gauge, labelKey: "nav.quotas" },
+      { path: "/manage/quotas", icon: SlidersHorizontal, labelKey: "nav.quotas" },
       { path: "/manage/schedules", icon: CalendarClock, labelKey: "nav.schedules" },
       { path: "/manage/orphans", icon: Link2Off, labelKey: "nav.orphans" },
     ],
@@ -297,6 +297,15 @@ const CHAPTER_ROUTES: Record<TourChapterId, string> = {
   workflows: "/manage/workflows",
   chat: "/manage/chat",
   resources: "/manage/resources",
+  conversations: "/manage/conversations",
+  groups: "/manage/groups",
+  logs: "/manage/logs",
+  secrets: "/manage/secrets",
+  audit: "/manage/audit",
+  schedules: "/manage/schedules",
+  quotas: "/manage/quotas",
+  coordinator: "/manage/coordinator",
+  orphans: "/manage/orphans",
 };
 
 function HelpMenu({ collapsed }: { collapsed: boolean }) {

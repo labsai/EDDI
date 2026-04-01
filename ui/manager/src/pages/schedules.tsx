@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
+import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import {
   Clock,
@@ -475,6 +476,10 @@ function CreateScheduleDialog({
 
 export function SchedulesPage() {
   const { t } = useTranslation();
+  
+  const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
+  useEffect(() => { const t = setTimeout(() => maybeAutoStart("schedules"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
+
   const { data: schedules, isLoading } = useSchedules();
   const deleteMutation = useDeleteSchedule();
   const toggleMutation = useToggleSchedule();
@@ -581,7 +586,7 @@ export function SchedulesPage() {
           ))}
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" data-tour="schedules-stats">
           {/* Total */}
           <div
             className="rounded-xl border border-border bg-card p-5"

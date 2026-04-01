@@ -8,7 +8,16 @@ export type TourChapterId =
   | "agents"
   | "workflows"
   | "chat"
-  | "resources";
+  | "resources"
+  | "conversations"
+  | "groups"
+  | "logs"
+  | "secrets"
+  | "audit"
+  | "schedules"
+  | "quotas"
+  | "coordinator"
+  | "orphans";
 
 export const ALL_CHAPTERS: TourChapterId[] = [
   "dashboard",
@@ -16,6 +25,15 @@ export const ALL_CHAPTERS: TourChapterId[] = [
   "workflows",
   "chat",
   "resources",
+  "conversations",
+  "groups",
+  "logs",
+  "secrets",
+  "audit",
+  "schedules",
+  "quotas",
+  "coordinator",
+  "orphans",
 ];
 
 /* ================================================================

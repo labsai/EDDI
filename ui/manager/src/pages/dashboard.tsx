@@ -35,6 +35,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { parseConversationUri } from "@/lib/api/conversations";
+import { useAgentDescriptors } from "@/hooks/use-agents";
 
 // ─── State badge color helper ────────────────────────────────────────────────
 
@@ -55,8 +56,17 @@ export function DashboardPage() {
   const { data: coordinatorStatus } = useCoordinatorStatusLight();
   const platformStatus = usePlatformStatus();
   const { data: vaultHealth } = useVaultHealth();
+  const { data: agentDescriptors = [] } = useAgentDescriptors(50);
 
   const recentAgents = recentAgentsRaw ? groupAgentsByName(recentAgentsRaw).slice(0, 4) : [];
+
+  // Build a lookup map: agentId → agent name (latest version)
+  const agentNameMap = new Map<string, string>();
+  if (agentDescriptors.length > 0) {
+    for (const a of groupAgentsByName(agentDescriptors)) {
+      if (a.name) agentNameMap.set(a.id, a.name);
+    }
+  }
 
   // Auto-trigger dashboard onboarding chapter on first visit
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
@@ -300,31 +310,33 @@ export function DashboardPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-2" data-testid="recent-conversations">
+          <div className="space-y-1.5" data-testid="recent-conversations">
             {recentConversations.map((conv) => {
               const convId = parseConversationUri(conv.resource);
+              const agentName = agentNameMap.get(conv.agentId);
+              const displayTitle = conv.name || agentName || t("agents.unnamed", "Unnamed Agent");
               return (
-                <Link key={convId} to={`/manage/conversations/${convId}`}>
+                <Link key={convId} to={`/manage/conversationview/${convId}`}>
                   <Card className="transition-all hover:shadow-sm hover:border-primary/20">
                     <CardContent className="flex items-center gap-3 py-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10">
-                        <MessageSquare className="h-4 w-4 text-blue-500" />
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                        <Bot className="h-4 w-4 text-primary" />
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-foreground">
-                          {conv.name || conv.agentId || convId.slice(0, 12)}
+                          {displayTitle}
                         </p>
-                        <p className="text-xs text-muted-foreground">
-                          {conv.agentId} • v{conv.agentVersion}
+                        <p className="truncate text-xs text-muted-foreground">
+                          {convId.slice(0, 12)}… · v{conv.agentVersion}
                         </p>
                       </div>
                       <span className={cn(
-                        "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                        "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
                         STATE_COLORS[conv.conversationState] ?? STATE_COLORS.ENDED,
                       )}>
                         {conv.conversationState}
                       </span>
-                      <span className="text-xs text-muted-foreground tabular-nums">
+                      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
                         {conv.lastModifiedOn ? formatRelativeTime(conv.lastModifiedOn) : "—"}
                       </span>
                     </CardContent>

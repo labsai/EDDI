@@ -198,6 +198,7 @@ export function AgentsPage() {
         <EmptyState
           icon={Bot}
           title={search ? t("common.noResults") : t("agents.empty")}
+          description={!search ? t("agents.emptyDescription", "Use the wizard to create a fully configured agent in minutes.") : undefined}
           actionLabel={!search ? t("agents.createAgent") : undefined}
           onAction={!search ? () => setCreateOpen(true) : undefined}
         />

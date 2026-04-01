@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Users, Search, Plus, ExternalLink, Copy, Trash2 } from "lucide-react";
+import { Boxes, Search, Plus, ExternalLink, Copy, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useGroupDescriptors, useDeleteGroup, useDuplicateGroup } from "@/hooks/use-groups";
 import { GroupCard } from "@/components/groups/group-card";
@@ -28,6 +29,9 @@ export function GroupsPage() {
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("groups"));
+
+  const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
+  useEffect(() => { const t = setTimeout(() => maybeAutoStart("groups"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
 
   const { data: groups, isLoading, isError, refetch } = useGroupDescriptors(100, 0, search);
   const deleteMutation = useDeleteGroup();
@@ -72,7 +76,7 @@ export function GroupsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
-            <Users className="h-8 w-8 text-primary" />
+            <Boxes className="h-8 w-8 text-primary" />
             {t("pages.groups.title", "Groups")}
           </h1>
           <p className="mt-1 text-muted-foreground">
@@ -104,6 +108,7 @@ export function GroupsPage() {
       </div>
 
       {/* Loading */}
+      <div data-tour="groups-content">
       {isLoading && (
         <div
           className={cn(
@@ -130,8 +135,9 @@ export function GroupsPage() {
       {/* Empty */}
       {!isLoading && !isError && groupedGroups.length === 0 && (
         <EmptyState
-          icon={Users}
+          icon={Boxes}
           title={search ? t("common.noResults") : t("groups.empty", "No groups yet")}
+          description={!search ? t("groups.emptyDescription", "Groups let multiple agents collaborate on structured discussions.") : undefined}
           actionLabel={!search ? t("groups.createGroup", "Create Group") : undefined}
           onAction={!search ? () => setCreateOpen(true) : undefined}
         />
@@ -245,6 +251,7 @@ export function GroupsPage() {
           )}
         </>
       )}
+      </div>
 
       {/* Create or Wizard dialog */}
       <CreateOrWizardDialog

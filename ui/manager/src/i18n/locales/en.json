@@ -153,6 +153,7 @@
     "description": "Description",
     "descriptionPlaceholder": "Describe what this agent does...",
     "empty": "No agents yet. Create your first agent!",
+    "emptyDescription": "Use the wizard to create a fully configured agent in minutes.",
     "confirmDelete": "Are you sure you want to delete this agent?",
     "count_one": "{{count}} agent",
     "count_other": "{{count}} agents",
@@ -282,6 +283,7 @@
     "descriptionPlaceholder": "Describe what this workflow does...",
     "noDescription": "No description",
     "empty": "No workflows yet. Create your first workflow!",
+    "emptyDescription": "Workflows define the processing pipeline for your agents.",
     "confirmDelete": "Are you sure you want to delete this workflow?",
     "count_one": "{{count}} workflow",
     "count_other": "{{count}} workflows"
@@ -312,6 +314,7 @@
     "lastActivity": "Last Activity",
     "actions": "Actions",
     "empty": "No conversations yet. Deploy a agent and start chatting!",
+    "emptyDescription": "Deploy an agent and start a conversation from the Chat page.",
     "confirmDelete": "Are you sure you want to delete this conversation?",
     "count_one": "{{count}} conversation",
     "count_other": "{{count}} conversations"
@@ -353,6 +356,7 @@
     "createDescription": "Create an empty {{type}} configuration. You can edit it after creation.",
     "confirmDelete": "Are you sure you want to delete this {{type}}?",
     "empty": "No {{type}} resources yet.",
+    "emptyDescription": "Create your first {{type}} to use it in workflows.",
     "itemCount_one": "{{count}} item",
     "itemCount_other": "{{count}} items",
     "count_one": "{{count}} resource",
@@ -667,7 +671,9 @@
     "discardSuccess": "Dead-letter discarded",
     "discardError": "Failed to discard",
     "purgeSuccess": "Purged all dead-letter entries",
-    "purgeError": "Failed to purge"
+    "purgeError": "Failed to purge",
+    "empty": "No coordinator data available",
+    "emptyHint": "The coordinator service may still be starting up. Data will appear automatically."
   },
   "contentEditor": {
     "expand": "Expand",
@@ -696,6 +702,8 @@
     "waitingForLogs": "Waiting for logs...",
     "connectingStream": "Connecting to stream...",
     "noHistoryLogs": "No historical logs found.",
+    "noHistoryHint": "Try adjusting the filters or search for a different agent or conversation.",
+    "waitingHint": "Logs will appear here as they stream in from the backend.",
     "entryCount": "{{count}} entries",
     "showStacktrace": "Show stacktrace ({{count}} frames)",
     "hideStacktrace": "Hide stacktrace",
@@ -954,6 +962,7 @@
       "subtitle": "Your AI Agent Command Center",
       "introText": "EDDI Manager is your command center for building, testing, and operating conversational AI agents.",
       "capabilitiesTitle": "What You Can Do",
+      "capabilitiesSubtitle": "Everything you need to build production-ready AI agents",
       "buildAgents": "Build Agents",
       "buildAgentsDesc": "Create and configure AI agents with the wizard or from scratch",
       "designWorkflows": "Design Workflows",
@@ -1023,6 +1032,87 @@
         "step2Desc": "Define which AI model powers your agent, its system prompt, tools, MCP servers, and cascade settings. This is the brain.",
         "step3Title": "Rules & API Calls",
         "step3Desc": "Behavior Rules control conversation flow. HTTP Calls connect to external APIs. Both can be used as LLM tools."
+      },
+      "conversations": {
+        "title": "Conversations Tour",
+        "step1Title": "Search",
+        "step1Desc": "Find conversations quickly by ID, agent, or recent user messages.",
+        "step2Title": "Status Filters",
+        "step2Desc": "Filter conversations by state: Active, In Progress, Ended, or Error.",
+        "step3Title": "Conversation List",
+        "step3Desc": "Browse all sessions. Click any conversation card to open the timeline and debug."
+      },
+      "groups": {
+        "title": "Discussion Groups Tour",
+        "step1Title": "Create Group",
+        "step1Desc": "Create an orchestration group to let multiple agents collaborate and debate.",
+        "step2Title": "Group Search",
+        "step2Desc": "Search through your existing multi-agent clusters.",
+        "step3Title": "Group Grid",
+        "step3Desc": "Manage your collaborative environments, edit their policies, or delete stale groups."
+      },
+      "logs": {
+        "title": "System Logs Tour",
+        "step1Title": "Live vs History",
+        "step1Desc": "Switch between a real-time stream of system logs and historical log search.",
+        "step2Title": "Stream Filters",
+        "step2Desc": "Filter the incoming live stream by Agent or by critical Log Level.",
+        "step3Title": "Export",
+        "step3Desc": "Download the current filtered logs as a text file for external analysis."
+      },
+      "secrets": {
+        "title": "Secrets Vault Tour",
+        "step1Title": "Create Secret",
+        "step1Desc": "Securely store a new API key, token, or password that your agents can reference.",
+        "step2Title": "Tenant Isolation",
+        "step2Desc": "Filter the vault view to show secrets scoped to a specific tenant ID.",
+        "step3Title": "Reference Syntax",
+        "step3Desc": "Learn how to dynamically inject secrets into your LLM configurations without hardcoding them."
+      },
+      "audit": {
+        "title": "Audit Ledger Tour",
+        "step1Title": "Search Mode",
+        "step1Desc": "Search the immutable audit ledger by a specific Conversation ID or by an Agent version.",
+        "step2Title": "Execute Search",
+        "step2Desc": "Enter your ID and click search to pull the verifiable execution history.",
+        "step3Title": "Export Ledger",
+        "step3Desc": "Export the retrieved audit records to JSON for compliance and reporting."
+      },
+      "schedules": {
+        "title": "Schedules Tour",
+        "step1Title": "Create Schedule",
+        "step1Desc": "Set up a new cron job or continuous heartbeat to trigger agent workflows automatically.",
+        "step2Title": "Health Stats",
+        "step2Desc": "Monitor the total, active, and failed schedules across your platform.",
+        "step3Title": "Schedule Management",
+        "step3Desc": "Manage your automated triggers natively: pause, resume, edit, or test-fire them."
+      },
+      "quotas": {
+        "title": "Quotas Tour",
+        "step1Title": "Configuration Constraints",
+        "step1Desc": "Define hard limits on total agents, daily conversations, and token costs for this tenant.",
+        "step2Title": "Usage Analytics",
+        "step2Desc": "Monitor how much of the allocated quota the tenant has consumed in real-time.",
+        "step3Title": "Enforce Changes",
+        "step3Desc": "Save your adjusted limits. The platform will block traffic that breaches these ceilings."
+      },
+      "coordinator": {
+        "title": "Coordinator Tour",
+        "step1Title": "Live Connection",
+        "step1Desc": "View the heartbeat and event source connected to the backend coordinator system.",
+        "step2Title": "Queue Processing",
+        "step2Desc": "Monitor real-time task queues and active job execution across your cluster.",
+        "step3Title": "Dead Letters",
+        "step3Desc": "Inspect failed tasks and systematically discard or retry them to maintain system stability."
+      },
+      "orphans": {
+        "title": "Orphans Tour",
+        "step1Title": "Trigger Scan",
+        "step1Desc": "Start a platform scan to detect loose configs disconnected from any agent.",
+        "step2Title": "Include Soft-Deleted",
+        "step2Desc": "Optionally toggle to include historically soft-deleted records in the purge.",
+        "step3Title": "Review & Purge",
+        "step3Desc": "Review the scanner's report, select stale objects, and permanently purge to reclaim DB space."
       }
     },
     "help": {
@@ -1036,5 +1126,32 @@
       "accept": "Show me",
       "dontAsk": "Don't ask again"
     }
+  },
+  "groups": {
+    "empty": "No groups yet",
+    "emptyDescription": "Groups let multiple agents collaborate on structured discussions.",
+    "createGroup": "Create Group",
+    "unnamed": "Unnamed Group",
+    "count_one": "{{count}} group",
+    "count_other": "{{count}} groups",
+    "confirmDelete": "Delete this group?",
+    "confirmDeleteDesc": "This will permanently delete the group configuration.",
+    "duplicateSuccess": "Group duplicated"
+  },
+  "dashboard": {
+    "noConversations": "No conversations yet",
+    "recentConversations": "Recent Conversations",
+    "platform": "Platform",
+    "online": "Online",
+    "offline": "Offline",
+    "checking": "Checking…",
+    "coordConnected": "Coordinator connected",
+    "coordDisconnected": "Coordinator disconnected",
+    "coordUnknown": "Coordinator —",
+    "vaultUp": "Vault ready",
+    "vaultDown": "Vault unavailable",
+    "viewLogs": "View Logs",
+    "orphanScan": "Orphan Scan",
+    "auditTrail": "Audit Trail"
   }
 }

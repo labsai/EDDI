@@ -162,16 +162,19 @@ export function WelcomeModal() {
           {/* Panel 2: Capabilities */}
           {panel === 1 && (
             <div className="animate-[fadeIn_300ms_ease-out]">
-              <h2 className="mb-5 text-center text-xl font-bold text-white">
+              <h2 className="mb-2 text-center text-xl font-bold text-white">
                 {t("onboarding.welcome.capabilitiesTitle")}
               </h2>
+              <p className="mb-5 text-center text-sm text-sidebar-foreground/50">
+                {t("onboarding.welcome.capabilitiesSubtitle", "Everything you need to build production-ready AI agents")}
+              </p>
               <div className="grid grid-cols-2 gap-3">
                 {CAPABILITIES.map((cap) => {
                   const Icon = cap.icon;
                   return (
                     <div
                       key={cap.titleKey}
-                      className="group rounded-xl border border-sidebar-border bg-sidebar-border/20 p-4 transition-all hover:border-primary/30 hover:-translate-y-0.5"
+                      className="rounded-xl border border-sidebar-border/50 bg-sidebar-border/10 p-4"
                     >
                       <div
                         className={cn(
