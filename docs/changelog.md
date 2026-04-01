@@ -28,6 +28,26 @@ User-reported bug: running `iwr -useb .../install.ps1 | iex` fails immediately w
 
 ---
 
+## Fix: Keycloak auth install hangs forever at health check (2026-04-01)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Installing with `-WithAuth` / `--with-auth` caused the health check to hang forever because EDDI never started.
+
+| Issue | Severity | Fix |
+|---|---|---|
+| **Missing realm JSON** | 🔴 Critical | `--import-realm` flag was set but no realm file was mounted. The `eddi` realm never existed, so EDDI's OIDC client couldn't connect and startup failed. Created `keycloak/eddi-realm.json` with `eddi-backend` (bearer-only), `eddi-frontend` (public SPA) clients, roles (`eddi-admin`, `eddi-editor`, `eddi-viewer`), and test users (`eddi/eddi`, `viewer/viewer`) |
+| **Healthcheck wrong port** | 🔴 Critical | Keycloak 25+ moved health endpoints from port 8080 to port 9000. Healthcheck was probing 8080 and never succeeded → Docker never marked Keycloak as healthy → EDDI's `depends_on: condition: service_healthy` blocked forever |
+| **`KC_HEALTH_ENABLED` missing** | 🔴 Critical | Health endpoints require `KC_HEALTH_ENABLED=true` to be set |
+| **Timeout too short** | 🟡 Significant | 120s timeout not enough when Keycloak + EDDI need sequential startup. Keycloak alone takes 60-90s on first boot with realm import. Extended to 240s when auth is enabled |
+| **Realm file not downloaded** | 🟡 Significant | Remote installs (`iwr\|iex`, `curl\|bash`) didn't download the realm file. Added `keycloak/eddi-realm.json` to the download list in both installers |
+
+**Files:** 1 new (`keycloak/eddi-realm.json`), 3 modified (`docker-compose.auth.yml`, `install.ps1`, `install.sh`).
+
+---
+
 ## PowerShell Script Hardening & Best Practices (2026-03-31)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

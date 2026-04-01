@@ -608,6 +608,30 @@ resolve_compose_files() {
     done
   fi
 
+  # Download Keycloak realm if auth enabled
+  if [[ "$WITH_AUTH" == "true" ]]; then
+    local kc_files=("keycloak/eddi-realm.json")
+    for kf in "${kc_files[@]}"; do
+      local kf_target="$EDDI_DIR/$kf"
+      local kf_dir
+      kf_dir=$(dirname "$kf_target")
+      mkdir -p "$kf_dir"
+
+      if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/$kf" ]]; then
+        cp "$SCRIPT_DIR/$kf" "$kf_target"
+        echo -e "  Using local ${kf} ${GREEN}✅${RESET}"
+      else
+        local kf_url="${COMPOSE_BASE_URL}/${kf}"
+        echo -ne "  Downloading ${kf}... "
+        if curl -fsSL "${kf_url}" -o "$kf_target"; then
+          echo -e "${GREEN}✅${RESET}"
+        else
+          fail "Failed to download ${kf} (required for Keycloak).\n     URL: ${kf_url}"
+        fi
+      fi
+    done
+  fi
+
   # Save config for eddi CLI wrapper (no secrets — vault key stays in .env only)
   echo "COMPOSE_FILES=\"${COMPOSE_FILES[*]}\"" > "$EDDI_DIR/.eddi-config"
   echo "EDDI_PORT=$EDDI_PORT" >> "$EDDI_DIR/.eddi-config"
@@ -686,7 +710,9 @@ start_eddi() {
 # ── Health check ──────────────────────────────────────────
 
 wait_for_ready() {
+  # Keycloak can take 60-90s to start; EDDI won't start until it's healthy
   local max_wait=120
+  if [[ "$WITH_AUTH" == "true" ]]; then max_wait=240; fi
   local elapsed=0
   echo -ne "  Health check             "
 

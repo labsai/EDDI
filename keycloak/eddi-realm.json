@@ -1,0 +1,112 @@
+{
+  "realm": "eddi",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "roles": {
+    "realm": [
+      {
+        "name": "eddi-admin",
+        "description": "Full EDDI administration access"
+      },
+      {
+        "name": "eddi-editor",
+        "description": "Create and edit agents, configs, and secrets"
+      },
+      {
+        "name": "eddi-viewer",
+        "description": "Read-only access to EDDI resources"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "eddi-backend",
+      "name": "EDDI Backend",
+      "description": "Server-side OIDC client for the EDDI Quarkus backend",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false
+    },
+    {
+      "clientId": "eddi-frontend",
+      "name": "EDDI Manager",
+      "description": "Public SPA client for the EDDI Manager dashboard",
+      "enabled": true,
+      "publicClient": true,
+      "bearerOnly": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": [
+        "http://localhost:*",
+        "https://localhost:*"
+      ],
+      "webOrigins": [
+        "+"
+      ],
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "protocolMappers": [
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "realm_access.roles",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "eddi",
+      "email": "eddi@localhost",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "eddi",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "eddi-admin",
+        "eddi-editor"
+      ]
+    },
+    {
+      "username": "viewer",
+      "email": "viewer@localhost",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "viewer",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "eddi-viewer"
+      ]
+    }
+  ]
+}

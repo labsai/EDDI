@@ -545,6 +545,33 @@ function Get-ComposeFiles {
         }
     }
 
+    # Download Keycloak realm if auth enabled
+    if ($WithAuth) {
+        $kcFiles = @("keycloak/eddi-realm.json")
+        foreach ($kf in $kcFiles) {
+            $kfTarget = Join-Path -Path $EddiDir -ChildPath $kf
+            $kfLocalFile = if ($ScriptDir) { Join-Path -Path $ScriptDir -ChildPath $kf } else { "" }
+            $kfDir = Split-Path -Path $kfTarget -Parent
+            if (-not (Test-Path $kfDir)) { New-Item -ItemType Directory -Force -Path $kfDir | Out-Null }
+
+            if ($kfLocalFile -and (Test-Path $kfLocalFile)) {
+                Copy-Item -Path $kfLocalFile -Destination $kfTarget -Force
+                Write-Information -MessageData "  Using local $kf ✅"
+            }
+            else {
+                $kfUrl = "$ComposeBaseUrl/$kf"
+                Write-Information -MessageData "  Downloading $kf... "
+                try {
+                    Invoke-WebRequest -Uri $kfUrl -OutFile $kfTarget -UseBasicParsing -ErrorAction Stop
+                    Write-Information -MessageData "✅"
+                }
+                catch {
+                    Write-Fail "Failed to download $kf (required for Keycloak).`n     URL: $kfUrl"
+                }
+            }
+        }
+    }
+
     # Build compose flags
     $script:ComposeCmdFiles = ($ComposeFiles | ForEach-Object { "-f `"$_`"" }) -join " "
 
@@ -644,7 +671,8 @@ function Start-Eddi {
 # ── Health check ─────────────────────────────────────────
 
 function Wait-ForReady {
-    $maxWait = 120
+    # Keycloak can take 60-90s to start; EDDI won't start until it's healthy
+    $maxWait = if ($WithAuth) { 240 } else { 120 }
     $elapsed = 0
     Write-Information -MessageData "  Health check             "
 
