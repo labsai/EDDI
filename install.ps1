@@ -60,7 +60,6 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [switch]$Defaults,
-    [ValidateSet("mongodb", "postgres")]
     [string]$Database = "",
     [string]$VaultKey = "",
     [switch]$WithAuth,
@@ -91,6 +90,11 @@ if (-not [Environment]::UserInteractive -or $Host.Name -eq 'Default Host') {
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 # Suppress Invoke-WebRequest progress bar (drastically speeds up downloads)
 $ProgressPreference = 'SilentlyContinue'
+
+# Validate -Database if provided (replaces [ValidateSet] which breaks iwr|iex)
+if ($Database -and $Database -notin @("mongodb", "postgres")) {
+    throw "Invalid -Database value '$Database'. Must be 'mongodb' or 'postgres'."
+}
 
 # ── Configuration ──────────────────────────────────────────
 if (-not $EddiPort) { $EddiPort = "7070" }

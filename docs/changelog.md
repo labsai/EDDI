@@ -12,6 +12,22 @@ Each entry follows this format:
 - **Repo** — Which repository was modified
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
+## Fix: `install.ps1` crashes on `iwr | iex` — ValidateSet on empty default (2026-04-01)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+User-reported bug: running `iwr -useb .../install.ps1 | iex` fails immediately with `ValidateSetFailure` on the `$Database` parameter. The error (in German): *"Das Attribut kann nicht hinzugefügt werden, da dadurch die Variable 'Database' mit dem Wert '' nicht mehr gültig wäre."*
+
+**Root cause:** The `[ValidateSet("mongodb", "postgres")]` attribute on the `$Database` parameter has a default value of `""` (empty string). When running the script directly (`.\install.ps1`), PowerShell is lenient about empty defaults. But when invoked via `Invoke-Expression` (piped `iex`), PowerShell validates the default against the set during parameter binding and rejects `""` because it's not `"mongodb"` or `"postgres"`.
+
+**Fix:** Removed `[ValidateSet]` attribute from the param block and added equivalent runtime validation after script initialization. This preserves the same error behavior for invalid explicit values while allowing the empty default to pass through to the interactive wizard.
+
+**Files:** 1 modified (`install.ps1`).
+
+---
+
 ## PowerShell Script Hardening & Best Practices (2026-03-31)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
