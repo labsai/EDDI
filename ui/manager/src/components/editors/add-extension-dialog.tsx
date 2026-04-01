@@ -56,6 +56,7 @@ function getIcon(type: string): React.ComponentType<{ className?: string }> {
 function buildEddiUri(rt: ResourceTypeConfig, id: string, version: number): string {
   // Extension type slug → eddi host mapping
   const slugToHost: Record<string, string> = {
+    dictionary: "ai.labs.dictionary",
     rules: "ai.labs.rules",
     apicalls: "ai.labs.apicalls",
     llm: "ai.labs.llm",

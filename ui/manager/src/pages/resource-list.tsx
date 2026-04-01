@@ -10,8 +10,10 @@ import {
   Globe,
   MessageSquareText,
   BookOpen,
+  BookOpenCheck,
   Brain,
   Settings,
+  Plug,
   ExternalLink,
   Copy,
   Trash2,
@@ -42,8 +44,10 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Globe,
   MessageSquareText,
   BookOpen,
+  BookOpenCheck,
   Brain,
   Settings,
+  Plug,
 };
 
 export function ResourceListPage() {
@@ -317,7 +321,7 @@ export function ResourceListPage() {
         open={deleteTarget !== null}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title={t("resources.confirmDelete", { type: typeName })}
-        description={t("resources.confirmDelete", { type: typeName })}
+        description={t("resources.confirmDeleteDescription", { type: typeName, defaultValue: "This action cannot be undone. The {{type}} will be permanently deleted." })}
         confirmLabel={t("common.delete")}
         cancelLabel={t("common.cancel")}
         onConfirm={confirmDelete}

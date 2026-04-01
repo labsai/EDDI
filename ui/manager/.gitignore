@@ -15,3 +15,5 @@ coverage
 .firebaserc
 firebase.json
 playwright-report/
+test-output*.txt
+vitest-results.json

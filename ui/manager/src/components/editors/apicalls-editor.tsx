@@ -1484,17 +1484,19 @@ function DiscoveredEndpointsPanel({
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-export interface HttpCallsEditorProps {
+export interface ApiCallsEditorProps {
   data: HttpCallsConfig;
   onChange: (data: HttpCallsConfig) => void;
   readOnly?: boolean;
 }
+/** @deprecated Use ApiCallsEditorProps */
+export type HttpCallsEditorProps = ApiCallsEditorProps;
 
-export function HttpCallsEditor({
+export function ApiCallsEditor({
   data,
   onChange,
   readOnly,
-}: HttpCallsEditorProps) {
+}: ApiCallsEditorProps) {
   const { t } = useTranslation();
 
   // Discovery state

@@ -1,3 +1,0 @@
-
-[1m[46m RUN [49m[22m [36mv3.2.4 [39m[90mC:/dev/git/EDDI-Manager[39m
-

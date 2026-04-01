@@ -74,13 +74,13 @@ const agentsChapter: TourChapter = {
   route: "/manage/agents",
   steps: [
     {
-      target: '[data-testid="agent-wizard-btn"]',
+      target: '[data-testid="create-agent-btn"]',
       titleKey: "onboarding.tour.agents.step1Title",
       descriptionKey: "onboarding.tour.agents.step1Desc",
       placement: "bottom",
     },
     {
-      target: '[data-testid="create-agent-btn"]',
+      target: '[data-testid="import-agent-btn"]',
       titleKey: "onboarding.tour.agents.step2Title",
       descriptionKey: "onboarding.tour.agents.step2Desc",
       placement: "bottom",

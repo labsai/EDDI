@@ -499,7 +499,7 @@ function TaskEditor({
                               ...task,
                               builtInToolsWhitelist: e.target.checked
                                 ? [...wl, tool]
-                                : wl.filter((t) => t !== tool),
+                                : wl.filter((item) => item !== tool),
                             });
                           }}
                           disabled={readOnly}
@@ -1760,17 +1760,19 @@ function TaskEditor({
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-export interface LangchainEditorProps {
+export interface LlmEditorProps {
   data: LangchainConfig;
   onChange: (data: LangchainConfig) => void;
   readOnly?: boolean;
 }
+/** @deprecated Use LlmEditorProps */
+export type LangchainEditorProps = LlmEditorProps;
 
-export function LangchainEditor({
+export function LlmEditor({
   data,
   onChange,
   readOnly,
-}: LangchainEditorProps) {
+}: LlmEditorProps) {
   const { t } = useTranslation();
 
   const addTask = useCallback(() => {

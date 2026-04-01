@@ -38,8 +38,8 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
   },
   {
     slug: "dictionary",
-    store: "parserstore",
-    plural: "parsers",
+    store: "dictionarystore",
+    plural: "dictionaries",
     labelKey: "resources.types.dictionary",
     icon: "BookOpen",
   },

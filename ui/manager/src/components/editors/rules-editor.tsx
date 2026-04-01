@@ -93,7 +93,7 @@ function ActionTags({
         ))}
         {actions.length === 0 && (
           <span className="text-xs text-muted-foreground italic">
-            {t("behaviorEditor.noActions", "No actions")}
+            {t("rulesEditor.noActions", "No actions")}
           </span>
         )}
       </div>
@@ -110,7 +110,7 @@ function ActionTags({
               }
             }}
             placeholder={t(
-              "behaviorEditor.actionPlaceholder",
+              "rulesEditor.actionPlaceholder",
               "e.g. greet, get_weather"
             )}
             className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -121,7 +121,7 @@ function ActionTags({
             className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
           >
             <Plus className="h-3 w-3" />
-            {t("behaviorEditor.addAction", "Add")}
+            {t("rulesEditor.addAction", "Add")}
           </button>
         </div>
       )}
@@ -152,7 +152,7 @@ function KeyValueRow({
         value={configKey}
         onChange={(e) => onKeyChange(e.target.value)}
         readOnly={readOnly}
-        placeholder={t("behaviorEditor.configKey", "Key")}
+        placeholder={t("rulesEditor.configKey", "Key")}
         className="h-7 w-28 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
       />
       <span className="text-xs text-muted-foreground">=</span>
@@ -161,7 +161,7 @@ function KeyValueRow({
         value={value}
         onChange={(e) => onValueChange(e.target.value)}
         readOnly={readOnly}
-        placeholder={t("behaviorEditor.configValue", "Value")}
+        placeholder={t("rulesEditor.configValue", "Value")}
         className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
       />
       {!readOnly && (
@@ -273,7 +273,7 @@ function ConditionEditor({
             type="button"
             onClick={onRemove}
             className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
-            aria-label={t("behaviorEditor.removeCondition", "Remove")}
+            aria-label={t("rulesEditor.removeCondition", "Remove")}
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -300,7 +300,7 @@ function ConditionEditor({
               className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
               <Plus className="h-3 w-3" />
-              {t("behaviorEditor.addConfig", "Add config")}
+              {t("rulesEditor.addConfig", "Add config")}
             </button>
           )}
 
@@ -308,7 +308,7 @@ function ConditionEditor({
           {hasNested && (
             <div className="mt-2 space-y-2 ps-3 border-s-2 border-muted">
               <span className="text-xs font-medium text-muted-foreground">
-                {t("behaviorEditor.nestedConditions", "Nested Conditions")}
+                {t("rulesEditor.nestedConditions", "Nested Conditions")}
               </span>
               {(condition.conditions ?? []).map((nc, ni) => (
                 <ConditionEditor
@@ -338,7 +338,7 @@ function ConditionEditor({
                   className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
                   <Plus className="h-3 w-3" />
-                  {t("behaviorEditor.addCondition", "Add Condition")}
+                  {t("rulesEditor.addCondition", "Add Condition")}
                 </button>
               )}
             </div>
@@ -386,7 +386,7 @@ function RuleEditor({
           value={rule.name}
           onChange={(e) => onChange({ ...rule, name: e.target.value })}
           readOnly={readOnly}
-          placeholder={t("behaviorEditor.ruleName", "Rule Name")}
+          placeholder={t("rulesEditor.ruleName", "Rule Name")}
           className="h-8 flex-1 rounded-md border border-input bg-background px-3 text-sm font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           data-testid="rule-name-input"
         />
@@ -395,7 +395,7 @@ function RuleEditor({
             type="button"
             onClick={onRemove}
             className="rounded p-1.5 text-muted-foreground hover:text-destructive transition-colors"
-            aria-label={t("behaviorEditor.removeRule", "Remove Rule")}
+            aria-label={t("rulesEditor.removeRule", "Remove Rule")}
           >
             <Trash2 className="h-4 w-4" />
           </button>
@@ -407,7 +407,7 @@ function RuleEditor({
           {/* Actions */}
           <div>
             <h5 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {t("behaviorEditor.actions", "Actions")}
+              {t("rulesEditor.actions", "Actions")}
             </h5>
             <ActionTags
               actions={rule.actions}
@@ -467,7 +467,7 @@ function RuleEditor({
                   data-testid="add-condition-btn"
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  {t("behaviorEditor.addCondition", "Add Condition")}
+                  {t("rulesEditor.addCondition", "Add Condition")}
                 </button>
               )}
             </div>
@@ -562,7 +562,7 @@ export function RulesEditor({
             disabled={readOnly}
             className="h-4 w-4 rounded border-input accent-primary"
           />
-          {t("behaviorEditor.appendActions", "Append Actions")}
+          {t("rulesEditor.appendActions", "Append Actions")}
         </label>
         <label className="inline-flex items-center gap-2 text-sm text-foreground">
           <input
@@ -574,7 +574,7 @@ export function RulesEditor({
             disabled={readOnly}
             className="h-4 w-4 rounded border-input accent-primary"
           />
-          {t("behaviorEditor.expressionsAsActions", "Expressions as Actions")}
+          {t("rulesEditor.expressionsAsActions", "Expressions as Actions")}
         </label>
       </div>
 
@@ -583,7 +583,7 @@ export function RulesEditor({
         <div className="flex items-center justify-between">
           <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <GitBranch className="h-4 w-4 text-primary" />
-            {t("behaviorEditor.groups", "Behavior Groups")}
+            {t("rulesEditor.groups", "Behavior Groups")}
           </h3>
           {!readOnly && (
             <button
@@ -593,7 +593,7 @@ export function RulesEditor({
               data-testid="add-group-btn"
             >
               <Plus className="h-3.5 w-3.5" />
-              {t("behaviorEditor.addGroup", "Add Group")}
+              {t("rulesEditor.addGroup", "Add Group")}
             </button>
           )}
         </div>
@@ -630,7 +630,7 @@ export function RulesEditor({
                   updateGroup(gi, { ...group, name: e.target.value })
                 }
                 readOnly={readOnly}
-                placeholder={t("behaviorEditor.groupName", "Group Name")}
+                placeholder={t("rulesEditor.groupName", "Group Name")}
                 className="h-8 flex-1 rounded-md border border-input bg-background px-3 text-sm font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               />
               <select
@@ -655,7 +655,7 @@ export function RulesEditor({
                   type="button"
                   onClick={() => removeGroup(gi)}
                   className="rounded p-1.5 text-muted-foreground hover:text-destructive transition-colors"
-                  aria-label={t("behaviorEditor.removeGroup", "Remove Group")}
+                  aria-label={t("rulesEditor.removeGroup", "Remove Group")}
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -698,7 +698,7 @@ export function RulesEditor({
                     data-testid="add-rule-btn"
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    {t("behaviorEditor.addRule", "Add Rule")}
+                    {t("rulesEditor.addRule", "Add Rule")}
                   </button>
                 )}
               </div>

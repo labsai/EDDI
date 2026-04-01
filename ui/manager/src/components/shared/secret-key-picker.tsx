@@ -51,12 +51,10 @@ function toVaultRef(keyName: string): string {
 // ─── Sub-Component ───────────────────────────────────────────────────────────
 
 function CreateSecretModal({
-  isOpen,
   onClose,
   tenantId,
   onSuccess,
 }: {
-  isOpen: boolean;
   onClose: () => void;
   tenantId: string;
   onSuccess: (keyName: string) => void;
@@ -80,8 +78,6 @@ function CreateSecretModal({
     resetForm();
     onClose();
   }, [resetForm, onClose]);
-
-  if (!isOpen) return null;
 
   const handleCreate = () => {
     if (!newKeyName.trim() || !newValue.trim()) return;
@@ -419,7 +415,6 @@ export function SecretKeyPicker({
       
       {showCreateDialog && (
         <CreateSecretModal
-          isOpen={showCreateDialog}
           onClose={() => setShowCreateDialog(false)}
           tenantId={tenantId}
           onSuccess={(keyName) => {

@@ -1330,7 +1330,7 @@ export const handlers = [
   }),
 
   // Dictionary mock data
-  http.get("*/parserstore/parsers/:id", ({ request }) => {
+  http.get("*/dictionarystore/dictionaries/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
     if (url.pathname.endsWith("/descriptors") || includePrevious) return;
@@ -3068,7 +3068,7 @@ export const scheduleHandlers = [
   // For version lookups (includePreviousVersions), return filtered results.
   // For list requests, return sample data so the resource-list test has items.
   ...["rulestore/rulesets", "apicallstore/apicalls", "outputstore/outputsets",
-      "dictionarystore/dictionaries", "llmstore/llms", "propertysetterstore/propertysetters",
+      "dictionarystore/dictionaries", "parserstore/parsers", "llmstore/llms", "propertysetterstore/propertysetters",
       "mcpcallsstore/mcpcalls", "ragstore/rags"].map((storePath) => {
     const store = storePath.split("/")[0];
     const plural = storePath.split("/")[1];

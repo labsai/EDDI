@@ -55,10 +55,12 @@ export function getExtensionLabel(type: string): string {
 
 /**
  * Map from EDDI extension type to the resource slug used in RESOURCE_TYPES.
- * Extension types without a standalone resource store (e.g. parser, templating)
+ * Extension types without a standalone resource store (e.g. templating)
  * are not included — they use embedded config or have no separate store.
  */
 export const EXTENSION_TO_RESOURCE_SLUG: Record<string, string> = {
+  "ai.labs.dictionary": "dictionary",
+  "ai.labs.parser": "dictionary",
   "ai.labs.rules": "rules",
   "ai.labs.httpcalls": "apicalls",
   "ai.labs.apicalls": "apicalls",

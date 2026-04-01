@@ -7,8 +7,10 @@ import {
   Globe,
   MessageSquareText,
   BookOpen,
+  BookOpenCheck,
   Brain,
   Settings,
+  Plug,
   ChevronRight,
 } from "lucide-react";
 import { RESOURCE_TYPES } from "@/lib/api/resources";
@@ -22,8 +24,10 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Globe,
   MessageSquareText,
   BookOpen,
+  BookOpenCheck,
   Brain,
   Settings,
+  Plug,
 };
 
 function ResourceTypeCard({

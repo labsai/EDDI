@@ -69,7 +69,7 @@ export function ImportOpenApiDialog({
       const msg =
         err && typeof err === "object" && "message" in err
           ? String((err as { message: string }).message)
-          : t("httpcallsEditor.discoveryError", "Could not parse OpenAPI spec");
+          : t("apiCallsEditor.discoveryError", "Could not parse OpenAPI spec");
       setError(msg);
     } finally {
       setIsDiscovering(false);
@@ -186,7 +186,7 @@ export function ImportOpenApiDialog({
           {/* Spec URL */}
           <div>
             <label className="mb-1.5 block text-sm font-medium text-foreground">
-              {t("httpcallsEditor.openApiSpecUrl", "OpenAPI Spec URL")}
+              {t("apiCallsEditor.openApiSpecUrl", "OpenAPI Spec URL")}
             </label>
             <div className="flex gap-2">
               <input
@@ -194,7 +194,7 @@ export function ImportOpenApiDialog({
                 value={specUrl}
                 onChange={(e) => setSpecUrl(e.target.value)}
                 placeholder={t(
-                  "httpcallsEditor.specUrlPlaceholder",
+                  "apiCallsEditor.specUrlPlaceholder",
                   "https://api.example.com/openapi.json"
                 )}
                 className="h-9 flex-1 rounded-lg border border-input bg-background px-3 font-mono text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -211,7 +211,7 @@ export function ImportOpenApiDialog({
                 type="button"
                 onClick={handleDiscover}
                 disabled={isDiscovering || !specUrlValid}
-                title={specUrl.trim() && !specUrlValid ? t("httpcallsEditor.invalidUrl", "Enter a valid http:// or https:// URL") : undefined}
+                title={specUrl.trim() && !specUrlValid ? t("apiCallsEditor.invalidUrl", "Enter a valid http:// or https:// URL") : undefined}
                 className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 data-testid="import-discover-btn"
               >
@@ -221,8 +221,8 @@ export function ImportOpenApiDialog({
                   <Search className="h-4 w-4" />
                 )}
                 {isDiscovering
-                  ? t("httpcallsEditor.discovering", "Parsing…")
-                  : t("httpcallsEditor.discoverEndpoints", "Discover")}
+                  ? t("apiCallsEditor.discovering", "Parsing…")
+                  : t("apiCallsEditor.discoverEndpoints", "Discover")}
               </button>
             </div>
           </div>
@@ -238,7 +238,7 @@ export function ImportOpenApiDialog({
                 className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors"
               >
                 <RefreshCw className="h-3 w-3" />
-                {t("httpcallsEditor.retry", "Retry")}
+                {t("apiCallsEditor.retry", "Retry")}
               </button>
             </div>
           )}
@@ -247,7 +247,7 @@ export function ImportOpenApiDialog({
           {isDiscovering && (
             <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin text-primary" />
-              {t("httpcallsEditor.discovering", "Parsing…")}
+              {t("apiCallsEditor.discovering", "Parsing…")}
             </div>
           )}
 

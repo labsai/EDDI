@@ -47,11 +47,11 @@ import {
   type RulesConfig,
 } from "@/components/editors/rules-editor";
 import {
-  LangchainEditor as LlmEditor,
-  type LangchainConfig as LlmConfig,
+  LlmEditor,
+  type LlmConfig,
 } from "@/components/editors/llm-editor";
 import {
-  HttpCallsEditor as ApiCallsEditor,
+  ApiCallsEditor,
   type HttpCallsConfig as ApiCallsConfig,
 } from "@/components/editors/apicalls-editor";
 import {
