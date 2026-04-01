@@ -38,6 +38,14 @@ curl -fsSL https://raw.githubusercontent.com/labsai/EDDI/main/install.sh | bash
 iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1 | iex
 ```
 
+> **Note:** If your Antivirus blocks this command as "malicious content", securely download and run it instead:
+>
+> ```powershell
+> Invoke-WebRequest -Uri "https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1" -OutFile "install.ps1"
+> Unblock-File .\install.ps1
+> .\install.ps1
+> ```
+
 The wizard guides you through choosing a database (MongoDB or PostgreSQL), optional authentication (Keycloak), and monitoring (Grafana). After setup, Agent Father is deployed automatically to help you create your first AI agent.
 
 ### Option 1 - EDDI with Docker (Manual)

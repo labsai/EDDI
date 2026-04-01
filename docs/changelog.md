@@ -12,6 +12,20 @@ Each entry follows this format:
 - **Repo** — Which repository was modified
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
+
+---
+
+## Fix: Update Windows PowerShell Installation Docs for AV Workaround (2026-04-01)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:** 
+Added a troubleshooting note to `README.md` and `docs/getting-started.md` instructing Windows users on how to bypass Windows Defender AMSI "malicious content" blocks when running the one-line `iwr | iex` installation script.
+
+**Design decision:** 
+The `Invoke-WebRequest ... | Invoke-Expression` pipeline is frequently flagged by enterprise EDRs and Windows Defender because it executes downloaded code entirely in memory. It's a pragmatic necessity to document the canonical "download to disk, Unblock-File, and run locally" fallback prominently instead of trying to obfuscate the script contents (which inevitably fails against heuristic scanners anyway). 
+
+**Files:** `README.md`, `docs/getting-started.md`
 ## Fix: Suppress type safety warnings for generic Instance mocks (2026-04-01)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
