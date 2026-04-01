@@ -269,7 +269,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       <div className="border-t border-sidebar-border p-2">
         {!collapsed && (
           <p className="mb-1 px-3 text-center text-[10px] text-sidebar-foreground/30">
-            EDDI Manager v{__APP_VERSION__}
+            EDDI Manager {__APP_VERSION__}
           </p>
         )}
         <button
