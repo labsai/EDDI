@@ -69,7 +69,7 @@ function parseExtensionUri(uri: string): { slug: string; id: string } | null {
         apicallstore: "apicalls",
         llmstore: "llm",
         outputstore: "output",
-        dictionarystore: "dictionary",
+        parserstore: "dictionary",
         propertysetterstore: "propertysetter",
         mcpcallsstore: "mcpcalls",
       };

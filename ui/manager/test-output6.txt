@@ -1,0 +1,2018 @@
+
+[1m[46m RUN [49m[22m [36mv3.2.4 [39m[90mC:/dev/git/EDDI-Manager[39m
+
+stderr | src/components/agents/__tests__/import-agent-dialog.test.tsx > ImportAgentDialog > renders nothing when closed
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/schedules.test.tsx > SchedulesPage > renders the page title
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/quotas.test.tsx > QuotasPage > renders the page header
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/coordinator.test.tsx > CoordinatorPage > renders the page title
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/secrets.test.tsx > SecretsPage > renders the page title and description
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/agent-wizard.test.tsx > AgentWizardPage > renders wizard heading
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/group-wizard.test.tsx > GroupWizardPage > renders wizard heading and step indicator
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/workflow-detail.test.tsx > WorkflowDetailPage > renders page heading
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/agent-detail.test.tsx > AgentDetailPage > renders agent detail title
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/audit.test.tsx > AuditPage > renders the page title and description
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/agent-detail.test.tsx > AgentDetailPage > renders agent detail title
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/workflow-detail.test.tsx > WorkflowDetailPage > renders page heading
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/agent-detail.test.tsx > AgentDetailPage > shows deployment status badge
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/agent-detail.test.tsx > AgentDetailPage > renders deploy button
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/agent-detail.test.tsx > AgentDetailPage > renders duplicate button
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/workflow-detail.test.tsx > WorkflowDetailPage > renders page heading
+[MSW] Error: intercepted a request without a matching request handler:
+
+  ÔÇó GET /parserstore/parsers/descriptors?filter=parser1&includePreviousVersions=true
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | src/pages/__tests__/agent-detail.test.tsx > AgentDetailPage > renders export button
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/agent-detail.test.tsx > AgentDetailPage > renders delete button
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/workflow-detail.test.tsx > WorkflowDetailPage > renders pipeline with extension items
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/agent-detail.test.tsx > AgentDetailPage > renders environment badges section
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+ [32mÔ£ô[39m src/pages/__tests__/quotas.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[33m 7360[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m QuotasPage[2m > [22mrenders the page header [33m 549[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m QuotasPage[2m > [22mloads and displays quota configuration fields [33m 3645[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m QuotasPage[2m > [22mloads and displays usage data [33m 572[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m QuotasPage[2m > [22mshows the toggle enabled button [33m 828[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m QuotasPage[2m > [22mshows reset usage button [33m 604[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m QuotasPage[2m > [22mdisplays tenant ID in usage card [33m 561[2mms[22m[39m
+stderr | src/pages/__tests__/agent-detail.test.tsx > AgentDetailPage > renders add package button
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/workflow-detail.test.tsx > WorkflowDetailPage > renders pipeline with extension items
+[MSW] Error: intercepted a request without a matching request handler:
+
+  ÔÇó GET /parserstore/parsers/descriptors?filter=parser1&includePreviousVersions=true
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+ [32mÔ£ô[39m src/components/agents/__tests__/import-agent-dialog.test.tsx [2m([22m[2m15 tests[22m[2m)[22m[33m 8280[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ImportAgentDialog[2m > [22mtransitions to strategy step after file selection [33m 563[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ImportAgentDialog[2m > [22mcan switch to merge strategy [33m 770[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ImportAgentDialog[2m > [22mImport Now calls import mutation [33m 609[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ImportAgentDialog[2m > [22mcreate import calls onSuccess on completion [33m 443[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ImportAgentDialog[2m > [22mPreview Changes calls preview mutation [33m 873[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ImportAgentDialog[2m > [22mpreview renders resource table [33m 926[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ImportAgentDialog[2m > [22mpreview has checkboxes, all checked by default [33m 1063[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ImportAgentDialog[2m > [22munchecking a checkbox updates selection [33m 940[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ImportAgentDialog[2m > [22mmerge confirm calls merge mutation with selected IDs and triggers onSuccess [33m 700[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ImportAgentDialog[2m > [22mback button returns to upload [33m 356[2mms[22m[39m
+stderr | src/pages/__tests__/agent-detail.test.tsx > AgentDetailPage > shows packages section with count
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/workflow-detail.test.tsx > WorkflowDetailPage > renders extension pipeline section header
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/agent-detail.test.tsx > AgentDetailPage > renders A2A protocol section
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/resource-detail-mcpcalls.test.tsx > MCP Calls Editor > renders mcpcalls form editor
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/resource-detail-rag.test.tsx > RAG Knowledge Base Editor > renders rag form editor
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/resource-detail-llm.test.tsx > LangChain Editor > renders langchain editor with tasks
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/resource-detail-propertysetter.test.tsx > Property Setter Editor > renders propertysetter editor
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/resource-detail-behavior.test.tsx > Behavior Editor > renders behavior editor with groups
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/agent-detail.test.tsx > AgentDetailPage > shows A2A enabled state with description and skills
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/resource-detail-httpcalls.test.tsx > HTTP Calls Editor > renders httpcalls editor
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/resource-detail-dictionary.test.tsx > Dictionary Editor > renders dictionary editor
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/resource-detail-output.test.tsx > Output Editor > renders output editor
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/resources.test.tsx > ResourcesPage (Hub) > renders page heading
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/agent-detail.test.tsx > AgentDetailPage > shows A2A endpoint URLs when enabled
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/workflow-detail.test.tsx > WorkflowDetailPage > renders extension pipeline section header
+[MSW] Error: intercepted a request without a matching request handler:
+
+  ÔÇó GET /parserstore/parsers/descriptors?filter=parser1&includePreviousVersions=true
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | src/pages/__tests__/schedules.test.tsx > SchedulesPage > opens Create Schedule dialog on button click
+An update to SchedulesPage inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/pages/__tests__/agent-detail.test.tsx > AgentDetailPage > shows Agent Card Preview toggle when A2A is enabled
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/workflow-detail.test.tsx > WorkflowDetailPage > renders add extension button
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/schedules.test.tsx > SchedulesPage > shows cron/heartbeat trigger type tabs in dialog
+An update to SchedulesPage inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/pages/__tests__/schedules.test.tsx > SchedulesPage > Create button is disabled when form is empty
+An update to SchedulesPage inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/pages/__tests__/agent-detail.test.tsx > AgentDetailPage > shows A2A skills from mock data
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+ [32mÔ£ô[39m src/pages/__tests__/agent-detail.test.tsx [2m([22m[2m14 tests[22m[2m)[22m[33m 10305[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentDetailPage[2m > [22mrenders agent detail title [33m 1710[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentDetailPage[2m > [22mshows deployment status badge [33m 675[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentDetailPage[2m > [22mrenders deploy button [33m 820[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentDetailPage[2m > [22mrenders duplicate button [33m 526[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentDetailPage[2m > [22mrenders export button [33m 612[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentDetailPage[2m > [22mrenders delete button [33m 572[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentDetailPage[2m > [22mrenders environment badges section [33m 591[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentDetailPage[2m > [22mrenders add package button [33m 529[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentDetailPage[2m > [22mshows packages section with count [33m 515[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentDetailPage[2m > [22mrenders A2A protocol section [33m 647[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentDetailPage[2m > [22mshows A2A enabled state with description and skills [33m 717[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentDetailPage[2m > [22mshows A2A endpoint URLs when enabled [33m 651[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentDetailPage[2m > [22mshows Agent Card Preview toggle when A2A is enabled [33m 773[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentDetailPage[2m > [22mshows A2A skills from mock data [33m 949[2mms[22m[39m
+stderr | src/pages/__tests__/workflow-detail.test.tsx > WorkflowDetailPage > renders add extension button
+[MSW] Error: intercepted a request without a matching request handler:
+
+  ÔÇó GET /parserstore/parsers/descriptors?filter=parser1&includePreviousVersions=true
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+ [32mÔ£ô[39m src/pages/__tests__/schedules.test.tsx [2m([22m[2m27 tests[22m[2m)[22m[33m 13671[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mrenders the page title [33m 655[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mrenders the create schedule button [33m 304[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mrenders total schedules card [33m 560[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mrenders active schedules card [33m 531[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mrenders failed schedules card [33m 821[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mrenders next fire card [33m 547[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mshows correct total count from mock data [33m 621[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mshows correct active count from mock data [33m 544[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mshows correct failed count from mock data [33m 452[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mrenders the schedule table [33m 644[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mshows schedule names from mock data [33m 515[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mshows cron type badge [33m 590[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mshows heartbeat type badge [33m 394[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mshows cron expression in table [33m 563[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mshows heartbeat interval in table [33m 325[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mshows status badges [33m 369[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mshows cron description [33m 367[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mrenders toggle buttons for each schedule [33m 365[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mrenders fire buttons for each schedule [33m 523[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mrenders retry button only for dead-lettered schedules [33m 410[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mrenders delete buttons for each schedule [33m 372[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mrenders fire history buttons [33m 452[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mopens Create Schedule dialog on button click [33m 641[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mshows cron/heartbeat trigger type tabs in dialog [33m 507[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mCreate button is disabled when form is empty [33m 600[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SchedulesPage[2m > [22mshows fail count indicator for failed schedules [33m 672[2mms[22m[39m
+ [32mÔ£ô[39m src/pages/__tests__/coordinator.test.tsx [2m([22m[2m15 tests[22m[2m)[22m[33m 13005[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CoordinatorPage[2m > [22mrenders the page title [33m 1131[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CoordinatorPage[2m > [22mrenders coordinator type card [33m 1720[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CoordinatorPage[2m > [22mrenders connection status card [33m 862[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CoordinatorPage[2m > [22mrenders tasks processed card [33m 805[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CoordinatorPage[2m > [22mrenders dead-lettered card [33m 822[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CoordinatorPage[2m > [22mshows NATS JetStream coordinator type from mock data [33m 787[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CoordinatorPage[2m > [22mshows CONNECTED status from mock data [33m 748[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CoordinatorPage[2m > [22mrenders dead-letter table with entries [33m 736[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CoordinatorPage[2m > [22mshows dead-letter error messages [33m 813[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CoordinatorPage[2m > [22mrenders purge all button [33m 621[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CoordinatorPage[2m > [22mrenders replay and discard buttons for dead-letter entries [33m 840[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CoordinatorPage[2m > [22mrenders active queue depths [33m 862[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CoordinatorPage[2m > [22mrenders refresh interval selector [33m 883[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CoordinatorPage[2m > [22mrefresh interval defaults to 10s [33m 520[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CoordinatorPage[2m > [22mrenders dead-letter payload toggle buttons when payload exists [33m 835[2mms[22m[39m
+stderr | src/pages/__tests__/workflow-detail.test.tsx > WorkflowDetailPage > renders save and discard buttons
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+stderr | src/pages/__tests__/workflow-detail.test.tsx > WorkflowDetailPage > renders save and discard buttons
+[MSW] Error: intercepted a request without a matching request handler:
+
+  ÔÇó GET /parserstore/parsers/descriptors?filter=parser1&includePreviousVersions=true
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | src/pages/__tests__/workflow-detail.test.tsx > WorkflowDetailPage > renders delete button
+Encountered two children with the same key, `2`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+Encountered two children with the same key, `1`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted ÔÇö the behavior is unsupported and could change in a future version.
+
+ [32mÔ£ô[39m src/pages/__tests__/group-wizard.test.tsx [2m([22m[2m10 tests[22m[2m)[22m[33m 15649[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m GroupWizardPage[2m > [22mrenders wizard heading and step indicator [33m 580[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m GroupWizardPage[2m > [22mshows template cards on step 1 [33m 322[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m GroupWizardPage[2m > [22mselecting a template advances to config step [33m 947[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m GroupWizardPage[2m > [22mconfig step Next is disabled without name [33m 442[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m GroupWizardPage[2m > [22mconfig step Next enables after entering name [33m 1475[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m GroupWizardPage[2m > [22mmembers step requires at least 2 members to proceed [33m 2248[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m GroupWizardPage[2m > [22madvisory board template pre-fills 5 member cards [33m 2236[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m GroupWizardPage[2m > [22madd member button creates new member card [33m 3128[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m GroupWizardPage[2m > [22mback button navigates to previous step [33m 944[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m GroupWizardPage[2m > [22mreview step shows auto-create notice for new agents [33m 3242[2mms[22m[39m
+ [32mÔ£ô[39m src/pages/__tests__/resource-detail-dictionary.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[33m 8092[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Dictionary Editor[2m > [22mrenders dictionary editor [33m 2300[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Dictionary Editor[2m > [22mrenders word rows [33m 703[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Dictionary Editor[2m > [22mrenders phrase rows [33m 1740[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Dictionary Editor[2m > [22mrenders regex rows [33m 1111[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Dictionary Editor[2m > [22mrenders add word button [33m 1368[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Dictionary Editor[2m > [22mrenders form tab as default [33m 853[2mms[22m[39m
+ [32mÔ£ô[39m src/pages/__tests__/resource-detail-propertysetter.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[33m 8233[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Property Setter Editor[2m > [22mrenders propertysetter editor [33m 2706[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Property Setter Editor[2m > [22mrenders setter cards [33m 1398[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Property Setter Editor[2m > [22mrenders property rows [33m 890[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Property Setter Editor[2m > [22mrenders scope dropdown [33m 943[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Property Setter Editor[2m > [22mrenders add setter button [33m 1194[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Property Setter Editor[2m > [22mrenders form tab as default [33m 1079[2mms[22m[39m
+stderr | src/pages/__tests__/workflow-detail.test.tsx > WorkflowDetailPage > renders delete button
+[MSW] Error: intercepted a request without a matching request handler:
+
+  ÔÇó GET /parserstore/parsers/descriptors?filter=parser1&includePreviousVersions=true
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+ [32mÔ£ô[39m src/pages/__tests__/resource-detail-behavior.test.tsx [2m([22m[2m7 tests[22m[2m)[22m[33m 9186[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Behavior Editor[2m > [22mrenders behavior editor with groups [33m 2023[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Behavior Editor[2m > [22mrenders behavior group with rules [33m 1091[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Behavior Editor[2m > [22mrenders rule editors with name inputs [33m 1322[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Behavior Editor[2m > [22mrenders condition type dropdowns [33m 1255[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Behavior Editor[2m > [22mrenders add group button [33m 1185[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Behavior Editor[2m > [22mrenders add rule buttons [33m 1490[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Behavior Editor[2m > [22mrenders form tab as default when editor exists [33m 799[2mms[22m[39m
+ [32mÔ£ô[39m src/pages/__tests__/workflow-detail.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[33m 16966[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m WorkflowDetailPage[2m > [22mrenders page heading [33m 4292[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m WorkflowDetailPage[2m > [22mrenders pipeline with extension items [33m 2085[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m WorkflowDetailPage[2m > [22mrenders extension pipeline section header [33m 2566[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m WorkflowDetailPage[2m > [22mrenders add extension button [33m 2517[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m WorkflowDetailPage[2m > [22mrenders save and discard buttons [33m 2984[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m WorkflowDetailPage[2m > [22mrenders delete button [33m 2497[2mms[22m[39m
+ [32mÔ£ô[39m src/pages/__tests__/resource-detail-output.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[33m 9961[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Output Editor[2m > [22mrenders output editor [33m 2581[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Output Editor[2m > [22mrenders output config entries [33m 1261[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Output Editor[2m > [22mrenders action name input [33m 1263[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Output Editor[2m > [22mrenders output item rows [33m 1301[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Output Editor[2m > [22mrenders quick replies section [33m 990[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Output Editor[2m > [22mrenders quick reply rows [33m 945[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Output Editor[2m > [22mrenders add output set button [33m 920[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Output Editor[2m > [22mrenders form tab as default [33m 666[2mms[22m[39m
+ [32mÔ£ô[39m src/pages/__tests__/secrets.test.tsx [2m([22m[2m13 tests[22m[2m)[22m[33m 18921[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SecretsPage[2m > [22mrenders the page title and description [33m 480[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SecretsPage[2m > [22mAdd Secret button is enabled when vault is UP [33m 2553[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SecretsPage[2m > [22mloads and displays secrets for default tenant [33m 1165[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SecretsPage[2m > [22mshows description column [33m 768[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SecretsPage[2m > [22mshows copy reference buttons [33m 494[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SecretsPage[2m > [22mopens create dialog when Add Secret is clicked [33m 1247[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SecretsPage[2m > [22mcreate dialog has password input with autocomplete off [33m 904[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SecretsPage[2m > [22meye toggle reveals secret value [33m 1660[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SecretsPage[2m > [22mshows reference preview when key name is entered [33m 3323[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SecretsPage[2m > [22mconfirm create button is disabled until key and value are entered [33m 4769[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m SecretsPage[2m > [22mshows delete confirmation when delete is clicked [33m 1003[2mms[22m[39m
+ [31mÔØ»[39m src/pages/__tests__/resource-detail-httpcalls.test.tsx [2m([22m[2m7 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 11389[2mms[22m[39m
+[31m   [31m├ù[31m HTTP Calls Editor[2m > [22mrenders httpcalls editor[39m[33m 5698[2mms[22m[39m
+[31m     ÔåÆ Unable to find an element by: [data-testid="httpcalls-editor"]
+
+Ignored nodes: comments, script, style
+[36m<body>[31m
+  [36m<div>[31m
+    [36m<div[31m
+      [33mclass[31m=[32m"space-y-6"[31m
+    [36m>[31m
+      [36m<a[31m
+        [33mclass[31m=[32m"inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"[31m
+        [33mdata-testid[31m=[32m"back-to-list"[31m
+        [33mhref[31m=[32m"/manage/resources/apicalls"[31m
+      [36m>[31m
+        [36m<svg[31m
+          [33mclass[31m=[32m"lucide lucide-arrow-left h-4 w-4"[31m
+          [33mfill[31m=[32m"none"[31m
+          [33mheight[31m=[32m"24"[31m
+          [33mstroke[31m=[32m"currentColor"[31m
+          [33mstroke-linecap[31m=[32m"round"[31m
+          [33mstroke-linejoin[31m=[32m"round"[31m
+          [33mstroke-width[31m=[32m"2"[31m
+          [33mviewBox[31m=[32m"0 0 24 24"[31m
+          [33mwidth[31m=[32m"24"[31m
+          [33mxmlns[31m=[32m"http://www.w3.org/2000/svg"[31m
+        [36m>[31m
+          [36m<path[31m
+            [33md[31m=[32m"m12 19-7-7 7-7"[31m
+          [36m/>[31m
+          [36m<path[31m
+            [33md[31m=[32m"M19 12H5"[31m
+          [36m/>[31m
+        [36m</svg>[31m
+        [0mBack to API Calls[0m
+      [36m</a>[31m
+      [36m<div[31m
+        [33mclass[31m=[32m"flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"[31m
+      [36m>[31m
+        [36m<div>[31m
+          [36m<h1[31m
+            [33mclass[31m=[32m"flex items-center gap-2 text-3xl font-bold text-foreground"[31m
+          [36m>[31m
+            [36m<svg[31m
+              [33mclass[31m=[32m"lucide lucide-globe h-8 w-8 text-primary"[31m
+              [33mfill[31m=[32m"none"[31m
+              [33mheight[31m=[32m"24"[31m
+              [33mstroke[31m=[32m"currentColor"[31m
+              [33mstroke-linecap[31m=[32m"round"[31m
+              [33mstroke-linejoin[31m=[32m"round"[31m
+              [33mstroke-width[31m=[32m"2"[31m
+              [33mviewBox[31m=[32m"0 0 24 24"[31m
+              [33mwidth[31m=[32m"24"[31m
+              [33mxmlns[31m=[32m"http://www.w3.org/2000/svg"[31m
+            [36m>[31m
+              [36m<circle[31m
+                [33mcx[31m=[32m"12"[31m
+                [33mcy[31m=[32m"12"[31m
+                [33mr[31m=[32m"10"[31m
+              [36m/>[31m
+              [36m<path[31m
+                [33md[31m=[32m"M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"[31m
+              [36m/>[31m
+              [36m<path[31m
+                [33md[31m=[32m"M2 12h20"[31m
+              [36m/>[31m
+            [36m</svg>[31m
+            [0mapicalls Config[0m
+          [36m</h1>[31m
+          [36m<p[31m
+            [33mclass[31m=[32m"mt-1 font-mono text-xs text-muted-foreground"[31m
+          [36m>[31m
+            [0mres1[0m
+            [36m<span[31m
+              [33mclass[31m=[32m"ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary"[31m
+            [36m>[31m
+              [0mv[0m
+              [0m1[0m
+            [36m</span>[31m
+          [36m</p>[31m
+        [36m</div>[31m
+        [36m<div[31m
+          [33mclass[31m=[32m"flex gap-2"[31m
+        [36m>[31m
+          [36m<button[31m
+            [33mclass[31m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-secondary hover:text-secondary-foreground h-10 px-4 py-2.5"[31m
+          [36m>[31m
+            [36m<svg[31m
+              [33mclass[31m=[32m"lucide lucide-copy h-4 w-4"[31m
+              [33mfill[31m=[32m"none"[31m
+              [33mheight[31m=[32m"24"[31m
+              [33mstroke[31m=[32m"currentColor"[31m
+              [33mstroke-linecap[31m=[32m"round"[31m
+              [33mstroke-linejoin[31m=[32m"round"[31m
+              [33mstroke-width[31m=[32m"2"[31m
+              [33mviewBox[31m=[32m"0 0 24 24"[31m
+              [33mwidth[31m=[32m"24"[31m
+              [33mxmlns[31m=[32m"http://www.w3.org/2000/svg"[31m
+            [36m>[31m
+              [36m<rect[31m
+                [33mheight[31m=[32m"14"[31m
+                [33mrx[31m=[32m"2"[31m
+                [33mry[31m=[32m"2"[31m
+                [33mwidth[31m=[32m"14"[31m
+                [33mx[31m=[32m"8"[31m
+                [33my[31m=[32m"8"[31m
+              [36m/>[31m
+              [36m<path[31m
+                [33md[31m=[32m"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"[31m
+              [36m/>[31m
+            [36m</svg>[31m
+            [0mDuplicate[0m
+          [36m</button>[31m
+          [36m<button[31m
+            [33mclass[31m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 h-10 px-4 py-2.5"[31m
+          [36m>[31m
+            [36m<svg[31m
+              [33mclass[31m=[32m"lucide lucide-trash2 h-4 w-4"[31m
+              [33mfill[31m=[32m"none"[31m
+              [33mheight[31m=[32m"24"[31m
+              [33mstroke[31m=[32m"currentColor"[31m
+              [33mstroke-linecap[31m=[32m"round"[31m
+              [33mstroke-linejoin[31m=[32m"round"[31m
+              [33mstroke-width[31m=[32m"2"[31m
+              [33mviewBox[31m=[32m"0 0 24 24"[31m
+              [33mwidth[31m=[32m"24"[31m
+              [33mxmlns[31m=[32m"http://www.w3.org/2000/svg"[31m
+            [36m>[31m
+              [36m<path[31m
+                [33md[31m=[32m"M3 6h18"[31m
+              [36m/>[31m
+              [36m<path[31m
+                [33md[31m=[32m"M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"[31m
+              [36m/>[31m
+              [36m<path[31m
+                [33md[31m=[32m"M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"[31m
+              [36m/>[31m
+              [36m<line[31m
+                [33mx1[31m=[32m"10"[31m
+                [33mx2[31m=[32m"10"[31m
+                [33my1[31m=[32m"11"[31m
+                [33my2[31m=[32m"17"[31m
+              [36m/>[31m
+              [36m<line[31m
+                [33mx1[31m=[32m"14"[31m
+                [33mx2[31m=[32m"14"[31m
+                [33my1[31m=[32m"11"[31m
+                [33my2[31m=[32m"17"[31m
+              [36m/>[31m
+            [36m</svg>[...
+
+Ignored nodes: comments, script, style
+[36m<html[31m
+  [33mclass[31m=[32m"light"[31m
+  [33mdir[31m=[32m"ltr"[31m
+  [33mlang[31m=[32m"en-US"[31m
+[36m>[31m
+  [36m<head />[31m
+  [36m<body>[31m
+    [36m<div>[31m
+      [36m<div[31m
+        [33mclass[31m=[32m"space-y-6"[31m
+      [36m>[31m
+        [36m<a[31m
+          [33mclass[31m=[32m"inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"[31m
+          [33mdata-testid[31m=[32m"back-to-list"[31m
+          [33mhref[31m=[32m"/manage/resources/apicalls"[31m
+        [36m>[31m
+          [36m<svg[31m
+            [33mclass[31m=[32m"lucide lucide-arrow-left h-4 w-4"[31m
+            [33mfill[31m=[32m"none"[31m
+            [33mheight[31m=[32m"24"[31m
+            [33mstroke[31m=[32m"currentColor"[31m
+            [33mstroke-linecap[31m=[32m"round"[31m
+            [33mstroke-linejoin[31m=[32m"round"[31m
+            [33mstroke-width[31m=[32m"2"[31m
+            [33mviewBox[31m=[32m"0 0 24 24"[31m
+            [33mwidth[31m=[32m"24"[31m
+            [33mxmlns[31m=[32m"http://www.w3.org/2000/svg"[31m
+          [36m>[31m
+            [36m<path[31m
+              [33md[31m=[32m"m12 19-7-7 7-7"[31m
+            [36m/>[31m
+            [36m<path[31m
+              [33md[31m=[32m"M19 12H5"[31m
+            [36m/>[31m
+          [36m</svg>[31m
+          [0mBack to API Calls[0m
+        [36m</a>[31m
+        [36m<div[31m
+          [33mclass[31m=[32m"flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"[31m
+        [36m>[31m
+          [36m<div>[31m
+            [36m<h1[31m
+              [33mclass[31m=[32m"flex items-center gap-2 text-3xl font-bold text-foreground"[31m
+            [36m>[31m
+              [36m<svg[31m
+                [33mclass[31m=[32m"lucide lucide-globe h-8 w-8 text-primary"[31m
+                [33mfill[31m=[32m"none"[31m
+                [33mheight[31m=[32m"24"[31m
+                [33mstroke[31m=[32m"currentColor"[31m
+                [33mstroke-linecap[31m=[32m"round"[31m
+                [33mstroke-linejoin[31m=[32m"round"[31m
+                [33mstroke-width[31m=[32m"2"[31m
+                [33mviewBox[31m=[32m"0 0 24 24"[31m
+                [33mwidth[31m=[32m"24"[31m
+                [33mxmlns[31m=[32m"http://www.w3.org/2000/svg"[31m
+              [36m>[31m
+                [36m<circle[31m
+                  [33mcx[31m=[32m"12"[31m
+                  [33mcy[31m=[32m"12"[31m
+                  [33mr[31m=[32m"10"[31m
+                [36m/>[31m
+                [36m<path[31m
+                  [33md[31m=[32m"M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"[31m
+                [36m/>[31m
+                [36m<path[31m
+                  [33md[31m=[32m"M2 12h20"[31m
+                [36m/>[31m
+              [36m</svg>[31m
+              [0mapicalls Config[0m
+            [36m</h1>[31m
+            [36m<p[31m
+              [33mclass[31m=[32m"mt-1 font-mono text-xs text-muted-foreground"[31m
+            [36m>[31m
+              [0mres1[0m
+              [36m<span[31m
+                [33mclass[31m=[32m"ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary"[31m
+              [36m>[31m
+                [0mv[0m
+                [0m1[0m
+              [36m</span>[31m
+            [36m</p>[31m
+          [36m</div>[31m
+          [36m<div[31m
+            [33mclass[31m=[32m"flex gap-2"[31m
+          [36m>[31m
+            [36m<button[31m
+              [33mclass[31m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-secondary hover:text-secondary-foreground h-10 px-4 py-2.5"[31m
+            [36m>[31m
+              [36m<svg[31m
+                [33mclass[31m=[32m"lucide lucide-copy h-4 w-4"[31m
+                [33mfill[31m=[32m"none"[31m
+                [33mheight[31m=[32m"24"[31m
+                [33mstroke[31m=[32m"currentColor"[31m
+                [33mstroke-linecap[31m=[32m"round"[31m
+                [33mstroke-linejoin[31m=[32m"round"[31m
+                [33mstroke-width[31m=[32m"2"[31m
+                [33mviewBox[31m=[32m"0 0 24 24"[31m
+                [33mwidth[31m=[32m"24"[31m
+                [33mxmlns[31m=[32m"http://www.w3.org/2000/svg"[31m
+              [36m>[31m
+                [36m<rect[31m
+                  [33mheight[31m=[32m"14"[31m
+                  [33mrx[31m=[32m"2"[31m
+                  [33mry[31m=[32m"2"[31m
+                  [33mwidth[31m=[32m"14"[31m
+                  [33mx[31m=[32m"8"[31m
+                  [33my[31m=[32m"8"[31m
+                [36m/>[31m
+                [36m<path[31m
+                  [33md[31m=[32m"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"[31m
+                [36m/>[31m
+              [36m</svg>[31m
+              [0mDuplicate[0m
+            [36m</button>[31m
+            [36m<button[31m
+              [33mclass[31m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 h-10 px-4 py-2.5"[31m
+            [36m>[31m
+              [36m<svg[31m
+                [33mclass[31m=[32m"lucide lucide-trash2 h-4 w-4"[31m
+                [33mfill[31m=[32m"none"[31m
+                [33mheight[31m=[32m"24"[31m
+                [33mstroke[31m=[32m"currentColor"[31m
+                [33mstroke-linecap[31m=[32m"round"[31m
+                [33mstroke-linejoin[31m=[32m"round"[31m
+                [33mstroke-width[31m=[32m"2"[31m
+                [33mviewBox[31m=[32m"0 0 24 24"[31m
+                [33mwidth[31m=[32m"24"[31m
+                [33mxmlns[31m=[32m"http://www.w3.org/2000/svg"[31m
+              [36m>[31m
+                [36m<path[31m
+                  [33md[31m=[32m"M3 6h18"[31m
+                [36m/>[31m
+                [36m<path[31m
+                  [33md[31m=[32m"M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"[31m
+                [36m/>[31m
+                [36m<path[31m
+                  [33md[31m=[32m"M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"[31m
+                [36m/>[31m
+                [36m<line[31m
+                  [33mx1[31m=[32m"10"[3...[39m
+   [33m[2mÔ£ô[22m[39m HTTP Calls Editor[2m > [22mrenders server URL input [33m 1276[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m HTTP Calls Editor[2m > [22mrenders HTTP call editor card [33m 1054[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m HTTP Calls Editor[2m > [22mrenders method select dropdown [33m 996[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m HTTP Calls Editor[2m > [22mrenders add call button [33m 881[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m HTTP Calls Editor[2m > [22mrenders call name input [33m 643[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m HTTP Calls Editor[2m > [22mrenders form tab as default when editor exists [33m 818[2mms[22m[39m
+ [32mÔ£ô[39m src/pages/__tests__/agent-wizard.test.tsx [2m([22m[2m11 tests[22m[2m)[22m[33m 20923[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentWizardPage[2m > [22mrenders wizard heading [33m 404[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentWizardPage[2m > [22mselects Standard Agent and navigates to step 2 [33m 1040[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentWizardPage[2m > [22mselects API Agent and navigates to step 2 [33m 924[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentWizardPage[2m > [22mback button navigates to previous step [33m 756[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentWizardPage[2m > [22mstep 2 next is disabled without name and prompt [33m 2787[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentWizardPage[2m > [22mnavigates Standard Agent to LLM step with provider selector [33m 4809[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentWizardPage[2m > [22mAPI Agent shows OpenAPI spec input on step 3 [33m 5363[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentWizardPage[2m > [22mnavigates all the way to review step (Standard) [33m 4438[2mms[22m[39m
+ [32mÔ£ô[39m src/pages/__tests__/resources.test.tsx [2m([22m[2m15 tests[22m[2m)[22m[33m 16726[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ResourcesPage (Hub)[2m > [22mrenders page heading [33m 1055[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ResourcesPage (Hub)[2m > [22mrenders subtitle [33m 789[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ResourcesPage (Hub)[2m > [22mrenders all 6 resource type cards [33m 1008[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ResourcesPage (Hub)[2m > [22mrenders type descriptions [33m 1266[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ResourceListPage[2m > [22mrenders heading for behavior type [33m 1159[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ResourceListPage[2m > [22mrenders search input [33m 478[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ResourceListPage[2m > [22mrenders create button [33m 965[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ResourceListPage[2m > [22mrenders back link [33m 803[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ResourceListPage[2m > [22mshows error for unknown type [33m 566[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ResourceListPage[2m > [22mloads and displays resource cards [33m 2418[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ResourceDetailPage[2m > [22mrenders duplicate button [33m 377[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ResourceDetailPage[2m > [22mloads and displays config editor layout [33m 1901[2mms[22m[39m
+ [32mÔ£ô[39m src/pages/__tests__/resource-detail-rag.test.tsx [2m([22m[2m20 tests[22m[2m)[22m[33m 21354[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mrenders rag form editor [33m 2212[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mrenders form tab as default when editor exists [33m 1208[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mrenders KB name input from mock data [33m 1243[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mrenders embedding provider dropdown from mock data [33m 1025[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mrenders all 7 embedding providers in dropdown [33m 1785[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mrenders vector store selection with pgvector selected [33m 1043[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mrenders max results slider with mock value [33m 833[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mrenders min score slider with mock value [33m 852[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mrenders all five store type buttons [33m 700[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mmarks dirty when KB name is changed [33m 901[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mswitches embedding provider via dropdown [33m 886[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mswitches to azure-openai provider [33m 677[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mswitches store type and highlights the new selection [33m 1168[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mswitches to elasticsearch store [33m 867[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mchanges max results slider value [33m 1053[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mchanges min score slider value [33m 775[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mexpands chunking section to reveal chunk size slider [33m 1160[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mexpands chunking section and validates overlap slider [33m 865[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mchanges chunk strategy from dropdown [33m 1227[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m RAG Knowledge Base Editor[2m > [22mswitches to JSON tab and shows JSON view [33m 850[2mms[22m[39m
+ [32mÔ£ô[39m src/pages/__tests__/audit.test.tsx [2m([22m[2m18 tests[22m[2m)[22m[33m 34537[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AuditPage[2m > [22mrenders the page title and description [33m 727[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AuditPage[2m > [22mrenders the audit-page container [33m 699[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AuditPage[2m > [22mshows conversation ID input by default [33m 540[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AuditPage[2m > [22mshows agent search mode when toggled [33m 3127[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AuditPage[2m > [22mauto-loads recent entries on mount (no initial empty state) [33m 1051[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AuditPage[2m > [22mloads entries after entering conversation ID and searching [33m 3478[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AuditPage[2m > [22mdisplays task type badges with correct labels [33m 3855[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AuditPage[2m > [22mshows duration on entry cards [33m 3085[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AuditPage[2m > [22mshows cost when > 0 [33m 2315[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AuditPage[2m > [22mshows action badges [33m 2145[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AuditPage[2m > [22mexpands input section on click [33m 2365[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AuditPage[2m > [22mshows LLM detail section for langchain tasks [33m 2335[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AuditPage[2m > [22mshows the summary strip after search [33m 2210[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AuditPage[2m > [22mrenders export button [33m 1104[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AuditPage[2m > [22mshows auto-refresh toggle after search [33m 2210[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AuditPage[2m > [22mexport button becomes enabled after search returns results [33m 2499[2mms[22m[39m
+ [32mÔ£ô[39m src/pages/__tests__/resource-detail-mcpcalls.test.tsx [2m([22m[2m23 tests[22m[2m)[22m[33m 30317[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mrenders mcpcalls form editor [33m 2646[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mrenders form tab as default when editor exists [33m 1726[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mrenders server connection section with name input [33m 1611[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mrenders MCP server URL input [33m 1727[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mrenders transport select dropdown [33m 1765[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mrenders API key input [33m 1225[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mrenders tool governance whitelist [33m 1162[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mrenders tool governance blacklist [33m 1144[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mrenders MCP call editor card from mock data [33m 978[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mrenders tool name input inside call editor [33m 1156[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mrenders trigger actions for call [33m 1110[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mrenders add MCP call button [33m 1105[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mpopulates server URL from mock data [33m 1280[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mpopulates display name from mock data [33m 908[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mpopulates transport from mock data [33m 880[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mpopulates API key from mock data [33m 1100[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mpopulates tool name in call editor from mock data [33m 1055[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mrenders whitelist tags from mock data [33m 1005[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mrenders discover tools button [33m 1134[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mshows discovered tools panel after clicking discover [33m 1525[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mshows discovered tool items with names [33m 1467[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mshows tool descriptions in discovered panel [33m 1431[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m MCP Calls Editor[2m > [22mshows tool count in discovered panel header [33m 1148[2mms[22m[39m
+ [32mÔ£ô[39m src/lib/api/__tests__/resources.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 1727[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m getResourceDescriptors[2m > [22mreturns descriptor array from MSW [33m 471[2mms[22m[39m
+stderr | src/components/debugger/__tests__/debug-drawer.test.tsx > DebugDrawer > renders toggle button
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/config-editor.test.tsx > VersionPicker > renders as badge when only one version
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/logs.test.tsx > LogsPage > renders the logs-page container
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/components/debugger/__tests__/cost-dashboard.test.tsx > CostDashboard > renders component
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ [32mÔ£ô[39m src/components/debugger/__tests__/debug-drawer.test.tsx [2m([22m[2m9 tests[22m[2m)[22m[33m 4900[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m DebugDrawer[2m > [22mopens drawer on toggle click [33m 844[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m DebugDrawer[2m > [22mrenders all 5 tabs when open [33m 477[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m DebugDrawer[2m > [22mtabs have proper ARIA roles [33m 349[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m DebugDrawer[2m > [22mswitches tab on click [33m 1674[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m DebugDrawer[2m > [22mrenders pipeline trace by default when open [33m 396[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m DebugDrawer[2m > [22mrenders cost dashboard when costs tab selected [33m 853[2mms[22m[39m
+stderr | src/components/editors/__tests__/content-editor.test.tsx > ContentEditor > renders with default testId
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ [32mÔ£ô[39m src/components/debugger/__tests__/cost-dashboard.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[33m 3032[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CostDashboard[2m > [22mrenders component [33m 1588[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m CostDashboard[2m > [22mdisplays section titles from i18n when data loads [33m 1357[2mms[22m[39m
+stderr | src/pages/__tests__/backup.test.tsx > AgentsPage ÔÇö Import/Export > renders import agent button
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ [32mÔ£ô[39m src/pages/__tests__/config-editor.test.tsx [2m([22m[2m16 tests[22m[2m)[22m[33m 5650[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m VersionPicker[2m > [22mcalls onChange when version selected [33m 693[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ConfigEditorLayout[2m > [22mrenders editor layout container [33m 317[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ConfigEditorLayout[2m > [22mswitches to Form tab on click [33m 371[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ResourceDetailPage with editor[2m > [22mrenders editor layout when data loads [33m 1703[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ResourceDetailPage with editor[2m > [22mrenders Form and JSON tabs [33m 853[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ResourceDetailPage with editor[2m > [22mrenders delete and duplicate buttons [33m 359[2mms[22m[39m
+stderr | src/components/debugger/__tests__/prompt-viewer.test.tsx > PromptViewer > renders empty state when no conversationId
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ [31mÔØ»[39m src/pages/__tests__/resource-detail-llm.test.tsx [2m([22m[2m25 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 39875[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders langchain editor with tasks [33m 2986[2mms[22m[39m
+[31m   [31m├ù[31m LangChain Editor[2m > [22mrenders task card with model type select[39m[33m 5791[2mms[22m[39m
+[31m     ÔåÆ Unable to find an element by: [data-testid="langchain-task-editor"]
+
+Ignored nodes: comments, script, style
+[36m<body>[31m
+  [36m<div>[31m
+    [36m<div[31m
+      [33mclass[31m=[32m"space-y-6"[31m
+    [36m>[31m
+      [36m<a[31m
+        [33mclass[31m=[32m"inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"[31m
+        [33mdata-testid[31m=[32m"back-to-list"[31m
+        [33mhref[31m=[32m"/manage/resources/llm"[31m
+      [36m>[31m
+        [36m<svg[31m
+          [33mclass[31m=[32m"lucide lucide-arrow-left h-4 w-4"[31m
+          [33mfill[31m=[32m"none"[31m
+          [33mheight[31m=[32m"24"[31m
+          [33mstroke[31m=[32m"currentColor"[31m
+          [33mstroke-linecap[31m=[32m"round"[31m
+          [33mstroke-linejoin[31m=[32m"round"[31m
+          [33mstroke-width[31m=[32m"2"[31m
+          [33mviewBox[31m=[32m"0 0 24 24"[31m
+          [33mwidth[31m=[32m"24"[31m
+          [33mxmlns[31m=[32m"http://www.w3.org/2000/svg"[31m
+        [36m>[31m
+          [36m<path[31m
+            [33md[31m=[32m"m12 19-7-7 7-7"[31m
+          [36m/>[31m
+          [36m<path[31m
+            [33md[31m=[32m"M19 12H5"[31m
+          [36m/>[31m
+        [36m</svg>[31m
+        [0mBack to LLM[0m
+      [36m</a>[31m
+      [36m<div[31m
+        [33mclass[31m=[32m"flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"[31m
+      [36m>[31m
+        [36m<div>[31m
+          [36m<h1[31m
+            [33mclass[31m=[32m"flex items-center gap-2 text-3xl font-bold text-foreground"[31m
+          [36m>[31m
+            [36m<svg[31m
+              [33mclass[31m=[32m"lucide lucide-brain h-8 w-8 text-primary"[31m
+              [33mfill[31m=[32m"none"[31m
+              [33mheight[31m=[32m"24"[31m
+              [33mstroke[31m=[32m"currentColor"[31m
+              [33mstroke-linecap[31m=[32m"round"[31m
+              [33mstroke-linejoin[31m=[32m"round"[31m
+              [33mstroke-width[31m=[32m"2"[31m
+              [33mviewBox[31m=[32m"0 0 24 24"[31m
+              [33mwidth[31m=[32m"24"[31m
+              [33mxmlns[31m=[32m"http://www.w3.org/2000/svg"[31m
+            [36m>[31m
+              [36m<path[31m
+                [33md[31m=[32m"M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"[31m
+              [36m/>[31m
+              [36m<path[31m
+                [33md[31m=[32m"M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"[31m
+              [36m/>[31m
+              [36m<path[31m
+                [33md[31m=[32m"M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"[31m
+              [36m/>[31m
+              [36m<path[31m
+                [33md[31m=[32m"M17.599 6.5a3 3 0 0 0 .399-1.375"[31m
+              [36m/>[31m
+              [36m<path[31m
+                [33md[31m=[32m"M6.003 5.125A3 3 0 0 0 6.401 6.5"[31m
+              [36m/>[31m
+              [36m<path[31m
+                [33md[31m=[32m"M3.477 10.896a4 4 0 0 1 .585-.396"[31m
+              [36m/>[31m
+              [36m<path[31m
+                [33md[31m=[32m"M19.938 10.5a4 4 0 0 1 .585.396"[31m
+              [36m/>[31m
+              [36m<path[31m
+                [33md[31m=[32m"M6 18a4 4 0 0 1-1.967-.516"[31m
+              [36m/>[31m
+              [36m<path[31m
+                [33md[31m=[32m"M19.967 17.484A4 4 0 0 1 18 18"[31m
+              [36m/>[31m
+            [36m</svg>[31m
+            [0mllm Config[0m
+          [36m</h1>[31m
+          [36m<p[31m
+            [33mclass[31m=[32m"mt-1 font-mono text-xs text-muted-foreground"[31m
+          [36m>[31m
+            [0mres1[0m
+            [36m<span[31m
+              [33mclass[31m=[32m"ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary"[31m
+            [36m>[31m
+              [0mv[0m
+              [0m1[0m
+            [36m</span>[31m
+          [36m</p>[31m
+        [36m</div>[31m
+        [36m<div[31m
+          [33mclass[31m=[32m"flex gap-2"[31m
+        [36m>[31m
+          [36m<button[31m
+            [33mclass[31m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-secondary hover:text-secondary-foreground h-10 px-4 py-2.5"[31m
+          [36m>[31m
+            [36m<svg[31m
+              [33mclass[31m=[32m"lucide lucide-copy h-4 w-4"[31m
+              [33mfill[31m=[32m"none"[31m
+              [33mheight[31m=[32m"24"[31m
+              [33mstroke[31m=[32m"currentColor"[31m
+              [33mstroke-linecap[31m=[32m"round"[31m
+              [33mstroke-linejoin[31m=[32m"round"[31m
+              [33mstroke-width[31m=[32m"2"[31m
+              [33mviewBox[31m=[32m"0 0 24 24"[31m
+              [33mwidth[31m=[32m"24"[31m
+              [33mxmlns[31m=[32m"http://www.w3.org/2000/svg"[31m
+            [36m>[31m
+              [36m<rect[31m
+                [33mheight[31m=[32m"14"[31m
+                [33mrx[31m=[32m"2"[31m
+                [33mry[31m=[32m"2"[31m
+                [33mwidth[31m=[32m"14"[31m
+                [33mx[31m=[32m"8"[31m
+                [33my[31m=[32m"8"[31m
+              [36m/>[31m
+              [36m<path[31m
+                [33md[31m=[32m"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"[31m
+              [36m/>[31m
+            [36m</svg>[31m
+            [0mDuplicate[0m
+          [36m</button>[31m
+          [36m<button[31m
+            [33mclass[31m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 h-10 px-4 py-2.5"[31m
+          [36m>[31m
+            [36m<svg[31m
+              [33mclass[31m=[32m"lucide lucide-trash2 h-4 w-4"[31m
+              [33mfill[31m=[32m"none"[31m
+              [33mheight[31m=[32m"24"[31m
+              [33mstroke[31m=[32m"currentColor"[31m
+              [33mstroke-linecap[31m=[32m"round"[31m
+              [33mstroke-linejoin[31m=[32m"round"[31m
+              [33mstroke-width[31m=[32m"2"[31m
+              [33mviewBox[31m=[32m"0 0 24 24"[31m
+              [33mwidth[31m=[32m"24"[31m
+              [33mxmlns[31m=[32m"http://www.w3.org/2000/svg"[31m
+            [36m>[31m
+              [36m<path[31m
+              ...
+
+Ignored nodes: comments, script, style
+[36m<html[31m
+  [33mclass[31m=[32m"light"[31m
+  [33mdir[31m=[32m"ltr"[31m
+  [33mlang[31m=[32m"en-US"[31m
+[36m>[31m
+  [36m<head />[31m
+  [36m<body>[31m
+    [36m<div>[31m
+      [36m<div[31m
+        [33mclass[31m=[32m"space-y-6"[31m
+      [36m>[31m
+        [36m<a[31m
+          [33mclass[31m=[32m"inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"[31m
+          [33mdata-testid[31m=[32m"back-to-list"[31m
+          [33mhref[31m=[32m"/manage/resources/llm"[31m
+        [36m>[31m
+          [36m<svg[31m
+            [33mclass[31m=[32m"lucide lucide-arrow-left h-4 w-4"[31m
+            [33mfill[31m=[32m"none"[31m
+            [33mheight[31m=[32m"24"[31m
+            [33mstroke[31m=[32m"currentColor"[31m
+            [33mstroke-linecap[31m=[32m"round"[31m
+            [33mstroke-linejoin[31m=[32m"round"[31m
+            [33mstroke-width[31m=[32m"2"[31m
+            [33mviewBox[31m=[32m"0 0 24 24"[31m
+            [33mwidth[31m=[32m"24"[31m
+            [33mxmlns[31m=[32m"http://www.w3.org/2000/svg"[31m
+          [36m>[31m
+            [36m<path[31m
+              [33md[31m=[32m"m12 19-7-7 7-7"[31m
+            [36m/>[31m
+            [36m<path[31m
+              [33md[31m=[32m"M19 12H5"[31m
+            [36m/>[31m
+          [36m</svg>[31m
+          [0mBack to LLM[0m
+        [36m</a>[31m
+        [36m<div[31m
+          [33mclass[31m=[32m"flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"[31m
+        [36m>[31m
+          [36m<div>[31m
+            [36m<h1[31m
+              [33mclass[31m=[32m"flex items-center gap-2 text-3xl font-bold text-foreground"[31m
+            [36m>[31m
+              [36m<svg[31m
+                [33mclass[31m=[32m"lucide lucide-brain h-8 w-8 text-primary"[31m
+                [33mfill[31m=[32m"none"[31m
+                [33mheight[31m=[32m"24"[31m
+                [33mstroke[31m=[32m"currentColor"[31m
+                [33mstroke-linecap[31m=[32m"round"[31m
+                [33mstroke-linejoin[31m=[32m"round"[31m
+                [33mstroke-width[31m=[32m"2"[31m
+                [33mviewBox[31m=[32m"0 0 24 24"[31m
+                [33mwidth[31m=[32m"24"[31m
+                [33mxmlns[31m=[32m"http://www.w3.org/2000/svg"[31m
+              [36m>[31m
+                [36m<path[31m
+                  [33md[31m=[32m"M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"[31m
+                [36m/>[31m
+                [36m<path[31m
+                  [33md[31m=[32m"M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"[31m
+                [36m/>[31m
+                [36m<path[31m
+                  [33md[31m=[32m"M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"[31m
+                [36m/>[31m
+                [36m<path[31m
+                  [33md[31m=[32m"M17.599 6.5a3 3 0 0 0 .399-1.375"[31m
+                [36m/>[31m
+                [36m<path[31m
+                  [33md[31m=[32m"M6.003 5.125A3 3 0 0 0 6.401 6.5"[31m
+                [36m/>[31m
+                [36m<path[31m
+                  [33md[31m=[32m"M3.477 10.896a4 4 0 0 1 .585-.396"[31m
+                [36m/>[31m
+                [36m<path[31m
+                  [33md[31m=[32m"M19.938 10.5a4 4 0 0 1 .585.396"[31m
+                [36m/>[31m
+                [36m<path[31m
+                  [33md[31m=[32m"M6 18a4 4 0 0 1-1.967-.516"[31m
+                [36m/>[31m
+                [36m<path[31m
+                  [33md[31m=[32m"M19.967 17.484A4 4 0 0 1 18 18"[31m
+                [36m/>[31m
+              [36m</svg>[31m
+              [0mllm Config[0m
+            [36m</h1>[31m
+            [36m<p[31m
+              [33mclass[31m=[32m"mt-1 font-mono text-xs text-muted-foreground"[31m
+            [36m>[31m
+              [0mres1[0m
+              [36m<span[31m
+                [33mclass[31m=[32m"ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary"[31m
+              [36m>[31m
+                [0mv[0m
+                [0m1[0m
+              [36m</span>[31m
+            [36m</p>[31m
+          [36m</div>[31m
+          [36m<div[31m
+            [33mclass[31m=[32m"flex gap-2"[31m
+          [36m>[31m
+            [36m<button[31m
+              [33mclass[31m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-secondary hover:text-secondary-foreground h-10 px-4 py-2.5"[31m
+            [36m>[31m
+              [36m<svg[31m
+                [33mclass[31m=[32m"lucide lucide-copy h-4 w-4"[31m
+                [33mfill[31m=[32m"none"[31m
+                [33mheight[31m=[32m"24"[31m
+                [33mstroke[31m=[32m"currentColor"[31m
+                [33mstroke-linecap[31m=[32m"round"[31m
+                [33mstroke-linejoin[31m=[32m"round"[31m
+                [33mstroke-width[31m=[32m"2"[31m
+                [33mviewBox[31m=[32m"0 0 24 24"[31m
+                [33mwidth[31m=[32m"24"[31m
+                [33mxmlns[31m=[32m"http://www.w3.org/2000/svg"[31m
+              [36m>[31m
+                [36m<rect[31m
+                  [33mheight[31m=[32m"14"[31m
+                  [33mrx[31m=[32m"2"[31m
+                  [33mry[31m=[32m"2"[31m
+                  [33mwidth[31m=[32m"14"[31m
+                  [33mx[31m=[32m"8"[31m
+                  [33my[31m=[32m"8"[31m
+                [36m/>[31m
+                [36m<path[31m
+                  [33md[31m=[32m"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"[31m
+                [36m/>[31m
+              [36m</svg>[31m
+              [0mDuplicate[0m
+            [36m</button>[31m
+            [36m<button[31m
+              [33mclass[31m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 h-10 px-4 py-2.5"[31m
+            [36m>[31m
+              [36m<svg[31m
+                [33mclass[31m=[32m"lucide lucide-trash2 h-4 w-4"[31m
+                [33mfill[31m=[32m"none"[31m
+                [33mheight[31m=[32m"24"[31m
+                [33mstroke[31m=[32m"curre...[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders model type dropdown [33m 1685[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders mode badge (agent/chat) [33m 1218[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders system prompt content editor [33m 1368[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders enable built-in tools checkbox [33m 1317[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders add task button [33m 1401[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders form tab as default [33m 1353[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders add A2A agent button [33m 1476[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders A2A agent config from mock data [33m 1308[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mshows A2A Agents section header [33m 1432[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders A2A agent URL from mock data [33m 1156[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders A2A agent name from mock data [33m 996[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders model cascade section header [33m 1152[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders cascade enable toggle [33m 1082[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders cascade step from mock data [33m 1148[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders budget and costs section header [33m 1410[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders execution section header [33m 1447[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders retry section header [33m 1302[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders RAG section header [33m 1149[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders httpCall RAG input when RAG section is expanded [33m 1480[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders enable-workflow-rag checkbox when RAG section is expanded [33m 1353[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mrenders add KB reference button [33m 1505[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22madds a KB reference when button is clicked [33m 1745[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LangChain Editor[2m > [22mtypes a value into httpCall RAG input [33m 1585[2mms[22m[39m
+stderr | src/components/debugger/__tests__/pipeline-trace.test.tsx > PipelineTrace > renders empty state when no events
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/logs.test.tsx
+[MSW] Error: intercepted a request without a matching request handler:
+
+  ÔÇó GET /administration/logs/instance
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | src/pages/__tests__/logs.test.tsx
+[MSW] Error: intercepted a request without a matching request handler:
+
+  ÔÇó GET /administration/logs/instance
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | src/pages/__tests__/logs.test.tsx
+[MSW] Error: intercepted a request without a matching request handler:
+
+  ÔÇó GET /administration/logs/instance
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+ [32mÔ£ô[39m src/components/debugger/__tests__/prompt-viewer.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[33m 1707[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m PromptViewer[2m > [22mrenders empty state when no LLM data [33m 819[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m PromptViewer[2m > [22mrenders testid prompt-viewer when data loads [33m 580[2mms[22m[39m
+stderr | src/pages/__tests__/logs.test.tsx
+[MSW] Error: intercepted a request without a matching request handler:
+
+  ÔÇó GET /administration/logs/instance
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+ [32mÔ£ô[39m src/components/editors/__tests__/content-editor.test.tsx [2m([22m[2m17 tests[22m[2m)[22m[33m 3010[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ContentEditor[2m > [22mrenders with default testId [33m 427[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ContentEditor[2m > [22mcalls onChange when text is modified [33m 721[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ContentEditor[2m > [22mopens fullscreen dialog when expand button clicked [33m 481[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ContentEditor[2m > [22mfullscreen dialog shows read-only badge when readOnly [33m 365[2mms[22m[39m
+stderr | src/pages/__tests__/logs.test.tsx
+[MSW] Error: intercepted a request without a matching request handler:
+
+  ÔÇó GET /administration/logs/instance
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | src/pages/__tests__/logs.test.tsx
+[MSW] Error: intercepted a request without a matching request handler:
+
+  ÔÇó GET /administration/logs/instance
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | src/pages/__tests__/logs.test.tsx
+[MSW] Error: intercepted a request without a matching request handler:
+
+  ÔÇó GET /administration/logs/instance
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | src/pages/__tests__/logs.test.tsx
+[MSW] Error: intercepted a request without a matching request handler:
+
+  ÔÇó GET /administration/logs/instance
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+stderr | src/pages/__tests__/logs.test.tsx
+[MSW] Error: intercepted a request without a matching request handler:
+
+  ÔÇó GET /administration/logs/instance
+
+If you still wish to intercept this unhandled request, please create a request handler for it.
+Read more: https://mswjs.io/docs/http/intercepting-requests
+
+ [32mÔ£ô[39m src/pages/__tests__/logs.test.tsx [2m([22m[2m9 tests[22m[2m)[22m[33m 5175[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LogsPage[2m > [22mrenders the logs-page container [33m 662[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LogsPage[2m > [22mrenders the page title [33m 421[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LogsPage[2m > [22mrenders Live and History tabs [33m 391[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LogsPage[2m > [22mshows stream badge for SSE connection [33m 360[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LogsPage[2m > [22mrenders agent filter input [33m 721[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LogsPage[2m > [22mrenders level filter dropdown [33m 346[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m LogsPage[2m > [22mrenders pause button [33m 464[2mms[22m[39m
+ [32mÔ£ô[39m src/pages/__tests__/backup.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[33m 3613[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentsPage ÔÇö Import/Export[2m > [22mrenders import agent button [33m 472[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentsPage ÔÇö Import/Export[2m > [22mrenders create-agent-btn that opens the choice dialog [33m 1846[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m AgentsPage ÔÇö Import/Export[2m > [22mimport button opens import dialog on click [33m 1120[2mms[22m[39m
+ [32mÔ£ô[39m src/components/debugger/__tests__/pipeline-trace.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[33m 1986[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m PipelineTrace[2m > [22mrenders empty state when no events [33m 1132[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m PipelineTrace[2m > [22mrenders live processing indicator for in-progress events [33m 352[2mms[22m[39m
+stderr | src/components/layout/__tests__/top-bar.test.tsx > TopBar > renders theme toggle buttons
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/dashboard.test.tsx > DashboardPage > renders page heading
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/components/layout/__tests__/sidebar.test.tsx > Sidebar > renders all navigation items
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/conversations.test.tsx > ConversationsPage > renders page heading
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ [32mÔ£ô[39m src/components/layout/__tests__/top-bar.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[33m 2572[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m TopBar[2m > [22mrenders theme toggle buttons [33m 471[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m TopBar[2m > [22mchanges theme on button click [33m 1560[2mms[22m[39m
+ [32mÔ£ô[39m src/pages/__tests__/dashboard.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[33m 1607[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m DashboardPage[2m > [22mrenders page heading [33m 695[2mms[22m[39m
+ [32mÔ£ô[39m src/components/layout/__tests__/sidebar.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[33m 1423[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Sidebar[2m > [22mrenders all navigation items [33m 553[2mms[22m[39m
+ [32mÔ£ô[39m src/pages/__tests__/conversations.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[33m 1375[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ConversationsPage[2m > [22mrenders page heading [33m 587[2mms[22m[39m
+stderr | src/pages/__tests__/workflows.test.tsx > WorkflowsPage > renders page heading
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ [32mÔ£ô[39m src/pages/__tests__/workflows.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[33m 1062[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m WorkflowsPage[2m > [22mrenders page heading [33m 409[2mms[22m[39m
+stderr | src/pages/__tests__/chat.test.tsx > ChatPage > renders page heading
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/pages/__tests__/onboarding.test.tsx > Onboarding ÔÇö Welcome Modal > renders when showWelcome is true
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+stderr | src/components/auth/__tests__/auth-provider.test.tsx > AuthProvider > renders children immediately when auth is disabled
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ [32mÔ£ô[39m src/pages/__tests__/chat.test.tsx [2m([22m[2m7 tests[22m[2m)[22m[33m 2930[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ChatPage[2m > [22mrenders page heading [33m 771[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ChatPage[2m > [22mrenders page subtitle [33m 306[2mms[22m[39m
+[90mstdout[2m | src/components/auth/__tests__/auth-provider.test.tsx[2m > [22m[2mAuthProvider[2m > [22m[2mshows loading screen when keycloak auth is initializing
+[22m[39m[EDDI Auth] Keycloak initialized, authenticated: [33mfalse[39m
+
+stderr | src/components/auth/__tests__/auth-provider.test.tsx > AuthProvider > shows loading screen when keycloak auth is initializing
+An update to KeycloakAuthProvider inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ [32mÔ£ô[39m src/pages/__tests__/onboarding.test.tsx [2m([22m[2m26 tests[22m[2m)[22m[33m 1360[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Onboarding ÔÇö Welcome Modal[2m > [22mrenders when showWelcome is true [33m 347[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m Onboarding ÔÇö Welcome Modal[2m > [22m'Start the Tour' button closes modal and starts dashboard chapter [33m 497[2mms[22m[39m
+ [32mÔ£ô[39m src/components/auth/__tests__/auth-provider.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[32m 259[2mms[22m[39m
+ [32mÔ£ô[39m src/lib/api/__tests__/agents.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 61[2mms[22m[39m
+ [31mÔØ»[39m src/i18n/__tests__/config.test.ts [2m([22m[2m15 tests[22m[2m | [22m[31m10 failed[39m[2m)[22m[32m 167[2mms[22m[39m
+   [32mÔ£ô[39m i18n config[2m > [22midentifies Arabic as RTL[32m 3[2mms[22m[39m
+   [32mÔ£ô[39m i18n config[2m > [22midentifies Hebrew as RTL[32m 1[2mms[22m[39m
+   [32mÔ£ô[39m i18n config[2m > [22midentifies English as LTR[32m 1[2mms[22m[39m
+   [32mÔ£ô[39m i18n config[2m > [22midentifies German as LTR[32m 1[2mms[22m[39m
+   [32mÔ£ô[39m i18n config[2m > [22mhandles language with region code[32m 0[2mms[22m[39m
+[31m   [31m├ù[31m i18n key parity[2m > [22mde.json has all keys from en.json[39m[32m 46[2mms[22m[39m
+[31m     ÔåÆ expected [ ÔÇª(5) ] to deeply equal [][39m
+[31m   [31m├ù[31m i18n key parity[2m > [22mfr.json has all keys from en.json[39m[32m 19[2mms[22m[39m
+[31m     ÔåÆ expected [ ÔÇª(5) ] to deeply equal [][39m
+[31m   [31m├ù[31m i18n key parity[2m > [22mes.json has all keys from en.json[39m[32m 11[2mms[22m[39m
+[31m     ÔåÆ expected [ ÔÇª(5) ] to deeply equal [][39m
+[31m   [31m├ù[31m i18n key parity[2m > [22mar.json has all keys from en.json[39m[32m 12[2mms[22m[39m
+[31m     ÔåÆ expected [ ÔÇª(5) ] to deeply equal [][39m
+[31m   [31m├ù[31m i18n key parity[2m > [22mzh.json has all keys from en.json[39m[32m 9[2mms[22m[39m
+[31m     ÔåÆ expected [ ÔÇª(5) ] to deeply equal [][39m
+[31m   [31m├ù[31m i18n key parity[2m > [22mth.json has all keys from en.json[39m[32m 9[2mms[22m[39m
+[31m     ÔåÆ expected [ ÔÇª(5) ] to deeply equal [][39m
+[31m   [31m├ù[31m i18n key parity[2m > [22mja.json has all keys from en.json[39m[32m 11[2mms[22m[39m
+[31m     ÔåÆ expected [ ÔÇª(5) ] to deeply equal [][39m
+[31m   [31m├ù[31m i18n key parity[2m > [22mko.json has all keys from en.json[39m[32m 9[2mms[22m[39m
+[31m     ÔåÆ expected [ ÔÇª(5) ] to deeply equal [][39m
+[31m   [31m├ù[31m i18n key parity[2m > [22mpt.json has all keys from en.json[39m[32m 12[2mms[22m[39m
+[31m     ÔåÆ expected [ ÔÇª(5) ] to deeply equal [][39m
+[31m   [31m├ù[31m i18n key parity[2m > [22mhi.json has all keys from en.json[39m[32m 8[2mms[22m[39m
+[31m     ÔåÆ expected [ ÔÇª(5) ] to deeply equal [][39m
+stderr | src/components/studio/__tests__/pipeline-railroad.test.tsx > PipelineRailroad > renders railroad container
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ [32mÔ£ô[39m src/components/shared/__tests__/view-toggle.test.tsx [2m([22m[2m11 tests[22m[2m)[22m[33m 766[2mms[22m[39m
+   [33m[2mÔ£ô[22m[39m ViewToggle[2m > [22mcalls onChange with 'list' when list button is clicked [33m 305[2mms[22m[39m
+ [32mÔ£ô[39m src/components/studio/__tests__/pipeline-railroad.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[33m 695[2mms[22m[39m
+stderr | src/pages/__tests__/agents.test.tsx > AgentsPage > renders page heading
+ÔÜá´©Å React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+ÔÜá´©Å React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ [32mÔ£ô[39m src/pages/__tests__/agents.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[33m 568[2mms[22m[39m
+ [32mÔ£ô[39m src/components/ui/__tests__/error-boundary.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[33m 314[2mms[22m[39m
+
+ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ» Failed Tests 12 ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»
+
+ FAIL  src/i18n/__tests__/config.test.ts > i18n key parity > de.json has all keys from en.json
+ FAIL  src/i18n/__tests__/config.test.ts > i18n key parity > fr.json has all keys from en.json
+ FAIL  src/i18n/__tests__/config.test.ts > i18n key parity > es.json has all keys from en.json
+ FAIL  src/i18n/__tests__/config.test.ts > i18n key parity > ar.json has all keys from en.json
+ FAIL  src/i18n/__tests__/config.test.ts > i18n key parity > zh.json has all keys from en.json
+ FAIL  src/i18n/__tests__/config.test.ts > i18n key parity > th.json has all keys from en.json
+ FAIL  src/i18n/__tests__/config.test.ts > i18n key parity > ja.json has all keys from en.json
+ FAIL  src/i18n/__tests__/config.test.ts > i18n key parity > ko.json has all keys from en.json
+ FAIL  src/i18n/__tests__/config.test.ts > i18n key parity > pt.json has all keys from en.json
+ FAIL  src/i18n/__tests__/config.test.ts > i18n key parity > hi.json has all keys from en.json
+AssertionError: expected [ ÔÇª(5) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "langchainEditor.preRequestDesc",
++   "langchainEditor.postResponseDesc",
++   "langchainEditor.postPropertyInstructions",
++   "langchainEditor.postOutputInstructions",
++   "langchainEditor.postQrInstructions",
++ ]
+
+ ÔØ» src/i18n/__tests__/config.test.ts:70:23
+     68|       const localeKeys = new Set(getKeys(locale));
+     69|       const missing = enKeys.filter((k) => !localeKeys.has(k));
+     70|       expect(missing).toEqual([]);
+       |                       ^
+     71|     });
+     72|   });
+
+ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»[1/12]ÔÄ»
+
+ FAIL  src/pages/__tests__/resource-detail-httpcalls.test.tsx > HTTP Calls Editor > renders httpcalls editor
+TestingLibraryElementError: Unable to find an element by: [data-testid="httpcalls-editor"]
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="space-y-6"
+    >
+      <a
+        class="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        data-testid="back-to-list"
+        href="/manage/resources/apicalls"
+      >
+        <svg
+          class="lucide lucide-arrow-left h-4 w-4"
+          fill="none"
+          height="24"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="m12 19-7-7 7-7"
+          />
+          <path
+            d="M19 12H5"
+          />
+        </svg>
+        Back to API Calls
+      </a>
+      <div
+        class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+      >
+        <div>
+          <h1
+            class="flex items-center gap-2 text-3xl font-bold text-foreground"
+          >
+            <svg
+              class="lucide lucide-globe h-8 w-8 text-primary"
+              fill="none"
+              height="24"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+              width="24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <circle
+                cx="12"
+                cy="12"
+                r="10"
+              />
+              <path
+                d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"
+              />
+              <path
+                d="M2 12h20"
+              />
+            </svg>
+            apicalls Config
+          </h1>
+          <p
+            class="mt-1 font-mono text-xs text-muted-foreground"
+          >
+            res1
+            <span
+              class="ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary"
+            >
+              v
+              1
+            </span>
+          </p>
+        </div>
+        <div
+          class="flex gap-2"
+        >
+          <button
+            class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-secondary hover:text-secondary-foreground h-10 px-4 py-2.5"
+          >
+            <svg
+              class="lucide lucide-copy h-4 w-4"
+              fill="none"
+              height="24"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+              width="24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <rect
+                height="14"
+                rx="2"
+                ry="2"
+                width="14"
+                x="8"
+                y="8"
+              />
+              <path
+                d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"
+              />
+            </svg>
+            Duplicate
+          </button>
+          <button
+            class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 h-10 px-4 py-2.5"
+          >
+            <svg
+              class="lucide lucide-trash2 h-4 w-4"
+              fill="none"
+              height="24"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+              width="24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M3 6h18"
+              />
+              <path
+                d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"
+              />
+              <path
+                d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"
+              />
+              <line
+                x1="10"
+                x2="10"
+                y1="11"
+                y2="17"
+              />
+              <line
+                x1="14"
+                x2="14"
+                y1="11"
+                y2="17"
+              />
+            </svg>[...
+
+Ignored nodes: comments, script, style
+<html
+  class="light"
+  dir="ltr"
+  lang="en-US"
+>
+  <head />
+  <body>
+    <div>
+      <div
+        class="space-y-6"
+      >
+        <a
+          class="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          data-testid="back-to-list"
+          href="/manage/resources/apicalls"
+        >
+          <svg
+            class="lucide lucide-arrow-left h-4 w-4"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="m12 19-7-7 7-7"
+            />
+            <path
+              d="M19 12H5"
+            />
+          </svg>
+          Back to API Calls
+        </a>
+        <div
+          class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div>
+            <h1
+              class="flex items-center gap-2 text-3xl font-bold text-foreground"
+            >
+              <svg
+                class="lucide lucide-globe h-8 w-8 text-primary"
+                fill="none"
+                height="24"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                />
+                <path
+                  d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"
+                />
+                <path
+                  d="M2 12h20"
+                />
+              </svg>
+              apicalls Config
+            </h1>
+            <p
+              class="mt-1 font-mono text-xs text-muted-foreground"
+            >
+              res1
+              <span
+                class="ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary"
+              >
+                v
+                1
+              </span>
+            </p>
+          </div>
+          <div
+            class="flex gap-2"
+          >
+            <button
+              class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-secondary hover:text-secondary-foreground h-10 px-4 py-2.5"
+            >
+              <svg
+                class="lucide lucide-copy h-4 w-4"
+                fill="none"
+                height="24"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <rect
+                  height="14"
+                  rx="2"
+                  ry="2"
+                  width="14"
+                  x="8"
+                  y="8"
+                />
+                <path
+                  d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"
+                />
+              </svg>
+              Duplicate
+            </button>
+            <button
+              class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 h-10 px-4 py-2.5"
+            >
+              <svg
+                class="lucide lucide-trash2 h-4 w-4"
+                fill="none"
+                height="24"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M3 6h18"
+                />
+                <path
+                  d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"
+                />
+                <path
+                  d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"
+                />
+                <line
+                  x1="10"[3...
+ ÔØ» waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ÔØ» src/pages/__tests__/resource-detail-httpcalls.test.tsx:37:11
+     35|     renderPage("apicalls");
+     36| 
+     37|     await waitFor(() => {
+       |           ^
+     38|       expect(screen.getByTestId("apicalls-editor")).toBeInTheDocument(ÔÇª
+     39|     });
+
+ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»[2/12]ÔÄ»
+
+ FAIL  src/pages/__tests__/resource-detail-llm.test.tsx > LangChain Editor > renders task card with model type select
+TestingLibraryElementError: Unable to find an element by: [data-testid="langchain-task-editor"]
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="space-y-6"
+    >
+      <a
+        class="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        data-testid="back-to-list"
+        href="/manage/resources/llm"
+      >
+        <svg
+          class="lucide lucide-arrow-left h-4 w-4"
+          fill="none"
+          height="24"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="m12 19-7-7 7-7"
+          />
+          <path
+            d="M19 12H5"
+          />
+        </svg>
+        Back to LLM
+      </a>
+      <div
+        class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+      >
+        <div>
+          <h1
+            class="flex items-center gap-2 text-3xl font-bold text-foreground"
+          >
+            <svg
+              class="lucide lucide-brain h-8 w-8 text-primary"
+              fill="none"
+              height="24"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+              width="24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"
+              />
+              <path
+                d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"
+              />
+              <path
+                d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"
+              />
+              <path
+                d="M17.599 6.5a3 3 0 0 0 .399-1.375"
+              />
+              <path
+                d="M6.003 5.125A3 3 0 0 0 6.401 6.5"
+              />
+              <path
+                d="M3.477 10.896a4 4 0 0 1 .585-.396"
+              />
+              <path
+                d="M19.938 10.5a4 4 0 0 1 .585.396"
+              />
+              <path
+                d="M6 18a4 4 0 0 1-1.967-.516"
+              />
+              <path
+                d="M19.967 17.484A4 4 0 0 1 18 18"
+              />
+            </svg>
+            llm Config
+          </h1>
+          <p
+            class="mt-1 font-mono text-xs text-muted-foreground"
+          >
+            res1
+            <span
+              class="ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary"
+            >
+              v
+              1
+            </span>
+          </p>
+        </div>
+        <div
+          class="flex gap-2"
+        >
+          <button
+            class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-secondary hover:text-secondary-foreground h-10 px-4 py-2.5"
+          >
+            <svg
+              class="lucide lucide-copy h-4 w-4"
+              fill="none"
+              height="24"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+              width="24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <rect
+                height="14"
+                rx="2"
+                ry="2"
+                width="14"
+                x="8"
+                y="8"
+              />
+              <path
+                d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"
+              />
+            </svg>
+            Duplicate
+          </button>
+          <button
+            class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 h-10 px-4 py-2.5"
+          >
+            <svg
+              class="lucide lucide-trash2 h-4 w-4"
+              fill="none"
+              height="24"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+              width="24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+              ...
+
+Ignored nodes: comments, script, style
+<html
+  class="light"
+  dir="ltr"
+  lang="en-US"
+>
+  <head />
+  <body>
+    <div>
+      <div
+        class="space-y-6"
+      >
+        <a
+          class="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          data-testid="back-to-list"
+          href="/manage/resources/llm"
+        >
+          <svg
+            class="lucide lucide-arrow-left h-4 w-4"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="m12 19-7-7 7-7"
+            />
+            <path
+              d="M19 12H5"
+            />
+          </svg>
+          Back to LLM
+        </a>
+        <div
+          class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div>
+            <h1
+              class="flex items-center gap-2 text-3xl font-bold text-foreground"
+            >
+              <svg
+                class="lucide lucide-brain h-8 w-8 text-primary"
+                fill="none"
+                height="24"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"
+                />
+                <path
+                  d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"
+                />
+                <path
+                  d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"
+                />
+                <path
+                  d="M17.599 6.5a3 3 0 0 0 .399-1.375"
+                />
+                <path
+                  d="M6.003 5.125A3 3 0 0 0 6.401 6.5"
+                />
+                <path
+                  d="M3.477 10.896a4 4 0 0 1 .585-.396"
+                />
+                <path
+                  d="M19.938 10.5a4 4 0 0 1 .585.396"
+                />
+                <path
+                  d="M6 18a4 4 0 0 1-1.967-.516"
+                />
+                <path
+                  d="M19.967 17.484A4 4 0 0 1 18 18"
+                />
+              </svg>
+              llm Config
+            </h1>
+            <p
+              class="mt-1 font-mono text-xs text-muted-foreground"
+            >
+              res1
+              <span
+                class="ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary"
+              >
+                v
+                1
+              </span>
+            </p>
+          </div>
+          <div
+            class="flex gap-2"
+          >
+            <button
+              class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-secondary hover:text-secondary-foreground h-10 px-4 py-2.5"
+            >
+              <svg
+                class="lucide lucide-copy h-4 w-4"
+                fill="none"
+                height="24"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <rect
+                  height="14"
+                  rx="2"
+                  ry="2"
+                  width="14"
+                  x="8"
+                  y="8"
+                />
+                <path
+                  d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"
+                />
+              </svg>
+              Duplicate
+            </button>
+            <button
+              class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 h-10 px-4 py-2.5"
+            >
+              <svg
+                class="lucide lucide-trash2 h-4 w-4"
+                fill="none"
+                height="24"
+                stroke="curre...
+ ÔØ» waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ÔØ» src/pages/__tests__/resource-detail-llm.test.tsx:43:11
+     41|   it("renders task card with model type select", async () => {
+     42|     renderPage("llm");
+     43|     await waitFor(() => {
+       |           ^
+     44|       expect(screen.getAllByTestId("llm-task-editor").length).toBeGreaÔÇª
+     45|     });
+
+
+ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»[3/12]ÔÄ»
+
+[2m Test Files [22m [1m[31m3 failed[39m[22m[2m | [22m[1m[32m39 passed[39m[22m[90m (42)[39m
+[2m      Tests [22m [1m[31m12 failed[39m[22m[2m | [22m[1m[32m427 passed[39m[22m[90m (439)[39m
+[2m   Start at [22m 03:29:46
+[2m   Duration [22m 108.51s[2m (transform 38.96s, setup 305.55s, collect 703.05s, tests 360.71s, environment 310.04s, prepare 64.09s)[22m
+

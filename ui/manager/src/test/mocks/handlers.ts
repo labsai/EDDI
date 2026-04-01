@@ -1330,7 +1330,7 @@ export const handlers = [
   }),
 
   // Dictionary mock data
-  http.get("*/dictionarystore/dictionaries/:id", ({ request }) => {
+  http.get("*/parserstore/parsers/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
     if (url.pathname.endsWith("/descriptors") || includePrevious) return;
@@ -1741,6 +1741,7 @@ export const handlers = [
   ),
   ...createResourceHandlers("mcpcallsstore", "mcpcalls", "mcpcalls"),
   ...createResourceHandlers("ragstore", "rags", "rag"),
+  ...createResourceHandlers("parserstore", "parsers", "parser"),
 ];
 
 function createResourceHandlers(
@@ -1789,6 +1790,9 @@ function createResourceHandlers(
       { id: "rag1", name: "Product Knowledge Base", desc: "Vector store of 10k product descriptions with pgvector embeddings" },
       { id: "rag2", name: "Legal Document Store", desc: "Contract clauses and regulatory texts for compliance review" },
       { id: "rag3", name: "Employee Handbook", desc: "HR policies, benefits info, and onboarding procedures" },
+    ],
+    parser: [
+      { id: "par1", name: "Default Parser", desc: "Standard expression parser" },
     ],
   };
 
@@ -1975,8 +1979,8 @@ const ORPHAN_REPORT_MOCK = {
       deleted: false,
     },
     {
-      resourceUri: "eddi://ai.labs.dictionary/dictionarystore/dictionaries/orphan4?version=1",
-      type: "ai.labs.dictionary",
+      resourceUri: "eddi://ai.labs.parser/parserstore/parsers/orphan4?version=1",
+      type: "ai.labs.parser",
       name: "Test Intent Dictionary",
       deleted: false,
     },
