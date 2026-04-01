@@ -101,9 +101,18 @@ eddi_tool_cache_size                        # Current entries (gauge)
 ### Rate Limiting Metrics
 
 ```
-eddi_tool_ratelimit_allowed_total           # Allowed calls
-eddi_tool_ratelimit_denied_total            # Denied calls
-eddi_tool_ratelimit_remaining               # Remaining capacity (gauge)
+eddi_tool_ratelimit_allowed_total{tool="..."}  # Allowed calls (per tool)
+eddi_tool_ratelimit_denied_total{tool="..."}   # Denied calls (per tool)
+eddi_tool_ratelimit_remaining                  # Remaining capacity (gauge)
+```
+
+Per-tool and aggregate queries:
+```promql
+# Per-tool denied rate
+rate(eddi_tool_ratelimit_denied_total{tool="weather"}[5m])
+
+# Aggregate allowed rate across all tools
+sum(rate(eddi_tool_ratelimit_allowed_total[5m]))
 ```
 
 ### Cost Tracking Metrics

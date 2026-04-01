@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.llm.tools;
 
-import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -27,15 +26,8 @@ public class ToolRateLimiter {
 
     private final Map<String, RateLimitBucket> buckets = new ConcurrentHashMap<>();
 
-    // Metrics
-    private Counter rateLimitAllowedCounter;
-    private Counter rateLimitDeniedCounter;
-
     @PostConstruct
     public void init() {
-        this.rateLimitAllowedCounter = meterRegistry.counter("eddi.tool.ratelimit.allowed");
-        this.rateLimitDeniedCounter = meterRegistry.counter("eddi.tool.ratelimit.denied");
-
         LOGGER.info("Tool rate limiter initialized with metrics");
     }
 
@@ -130,10 +122,8 @@ public class ToolRateLimiter {
         boolean acquired = bucket.tryAcquire();
 
         if (acquired) {
-            rateLimitAllowedCounter.increment();
             meterRegistry.counter("eddi.tool.ratelimit.allowed", "tool", toolName).increment();
         } else {
-            rateLimitDeniedCounter.increment();
             meterRegistry.counter("eddi.tool.ratelimit.denied", "tool", toolName).increment();
 
             long resetTime = bucket.getResetTimeMs();

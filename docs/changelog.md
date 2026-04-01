@@ -12,6 +12,22 @@ Each entry follows this format:
 - **Repo** — Which repository was modified
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
+## Fix: Prometheus meter conflict in ToolRateLimiter — duplicate tag keys (2026-04-01)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+`ToolRateLimiter` registered the same counter names (`eddi.tool.ratelimit.allowed` / `denied`) both **without tags** (aggregate counters in `init()`) and **with a `tool` tag** (per-tool counters in `tryAcquire()`). Prometheus requires all meters with the same name to have identical tag key sets, causing `IllegalArgumentException` at runtime during tests.
+
+**Fix:** Removed the tag-less aggregate counters. Only per-tool tagged counters remain. Aggregates are derived in PromQL via `sum(eddi_tool_ratelimit_allowed_total)` — the Grafana dashboard already uses this pattern.
+
+**Docs:** Updated `docs/metrics.md` Rate Limiting section to document the `tool` label and show per-tool + aggregate PromQL examples.
+
+**Files:** 2 modified (`ToolRateLimiter.java`, `docs/metrics.md`).
+
+---
+
 ## Fix: MongoDB stores load in Postgres mode — health check 503 (2026-04-01)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
