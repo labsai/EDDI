@@ -80,8 +80,14 @@ public class BoundedLogStore {
         return new BoundedLogStore(instanceIdProducer, databaseLogs, bufferSize, dbEnabled, dbFlushIntervalSeconds, dbPersistMinLevel);
     }
 
+    private volatile boolean initialized;
+
     @PostConstruct
     void init() {
+        if (initialized)
+            return;
+        initialized = true;
+
         // Start async DB writer if enabled
         if (dbEnabled) {
             dbWriter = Executors.newSingleThreadScheduledExecutor(r -> {

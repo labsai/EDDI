@@ -10,6 +10,7 @@ import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.bson.Document;
 import org.jboss.logging.Logger;
 
@@ -38,14 +39,21 @@ public class PropertiesMigrationService {
 
     private final MongoDatabase database;
     private final IUserMemoryStore userMemoryStore;
+    private final String datastoreType;
 
     @Inject
-    public PropertiesMigrationService(MongoDatabase database, IUserMemoryStore userMemoryStore) {
+    public PropertiesMigrationService(MongoDatabase database, IUserMemoryStore userMemoryStore,
+            @ConfigProperty(name = "eddi.datastore.type", defaultValue = "mongodb") String datastoreType) {
         this.database = database;
         this.userMemoryStore = userMemoryStore;
+        this.datastoreType = datastoreType;
     }
 
     void onStartup(@Observes StartupEvent event) {
+        if (!"mongodb".equals(datastoreType)) {
+            LOGGER.debug("[MIGRATION] Skipping properties migration — not in MongoDB mode");
+            return;
+        }
         try {
             migrateIfNeeded();
         } catch (Exception e) {
