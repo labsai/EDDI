@@ -8,6 +8,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 import java.sql.*;
 import java.util.ArrayList;
@@ -40,18 +41,18 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
             )
             """;
 
-    private final DataSource dataSource;
+    private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
 
     @Inject
-    public PostgresDatabaseLogs(DataSource dataSource) {
-        this.dataSource = dataSource;
+    public PostgresDatabaseLogs(Instance<DataSource> dataSourceInstance) {
+        this.dataSourceInstance = dataSourceInstance;
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -78,7 +79,7 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
                  AGENT_ID, AGENT_VERSION, conversation_id, user_id, instance_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             for (LogEntry entry : entries) {
                 ps.setString(1, entry.message());
                 ps.setString(2, entry.level());
@@ -140,7 +141,7 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
             sql.append(" OFFSET ").append(skip);
         }
 
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql.toString())) {
             for (int i = 0; i < params.size(); i++) {
                 ps.setObject(i + 1, params.get(i));
             }

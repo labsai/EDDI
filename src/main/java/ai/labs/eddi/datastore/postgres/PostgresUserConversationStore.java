@@ -9,6 +9,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 import java.sql.*;
 
@@ -31,20 +32,20 @@ public class PostgresUserConversationStore implements IUserConversationStore {
             )
             """;
 
-    private final DataSource dataSource;
+    private final Instance<DataSource> dataSourceInstance;
     private final IJsonSerialization jsonSerialization;
     private volatile boolean schemaInitialized = false;
 
     @Inject
-    public PostgresUserConversationStore(DataSource dataSource, IJsonSerialization jsonSerialization) {
-        this.dataSource = dataSource;
+    public PostgresUserConversationStore(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization) {
+        this.dataSourceInstance = dataSourceInstance;
         this.jsonSerialization = jsonSerialization;
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -56,7 +57,7 @@ public class PostgresUserConversationStore implements IUserConversationStore {
     public UserConversation readUserConversation(String intent, String userId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "SELECT data FROM user_conversations WHERE intent = ? AND user_id = ?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, intent);
             ps.setString(2, userId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -83,7 +84,7 @@ public class PostgresUserConversationStore implements IUserConversationStore {
         }
 
         String sql = "INSERT INTO user_conversations (intent, user_id, data) VALUES (?, ?, ?::jsonb)";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userConversation.getIntent());
             ps.setString(2, userConversation.getUserId());
             ps.setString(3, jsonSerialization.serialize(userConversation));
@@ -97,7 +98,7 @@ public class PostgresUserConversationStore implements IUserConversationStore {
     public void deleteUserConversation(String intent, String userId) {
         ensureSchema();
         String sql = "DELETE FROM user_conversations WHERE intent = ? AND user_id = ?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, intent);
             ps.setString(2, userId);
             ps.executeUpdate();

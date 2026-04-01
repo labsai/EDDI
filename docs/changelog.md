@@ -13,6 +13,20 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Fix: PostgreSQL stores trigger InactiveBeanException in MongoDB mode (2026-04-01)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:** 
+Refactored all 13 PostgreSQL store implementations to inject `Instance<DataSource>` instead of `DataSource` directly. 
+
+**Design decision:** 
+Previously, the unified `DataStoreProducers` caused Quarkus to eagerly validate the `@Inject DataSource` requirement for Postgres stores globally on startup. When running with `--database mongodb` (or default configuration), the `DataSource` bean is correctly deactivated, which inherently triggered an `InactiveBeanException`, crashing the backend. By converting direct injections to lazy resolutions (`Instance<DataSource>.get()`), Quarkus ignores the inactive Postgres connections until explicitly requested by `EDDI_DATASTORE_TYPE=postgres`, stabilizing the unified single-docker-image strategy for both databases.
+
+**Files:** `PostgresResourceStorageFactory.java`, `PostgresScheduleStore.java`, `PostgresAgentTriggerStore.java`, `DataStoreProducersTest.java`, `PostgresResourceStorageFactoryTest.java`, and other Postgres stores.
+
+---
+
 ## Fix: OpenAPI SROAP07903 Duplicate operationId Warnings (2026-04-01)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
@@ -2792,5 +2806,3 @@ _For recording decisions that come up during implementation that aren't in the p
 _Track any regressions introduced during implementation for quick debugging._
 
 | Date | Regression | Cause | Fix | Commit |
-| ---- | ---------- | ----- | --- | ------ |
-|      |            |       |     |        |

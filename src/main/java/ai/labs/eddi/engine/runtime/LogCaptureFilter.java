@@ -44,42 +44,30 @@ import java.util.logging.LogRecord;
 public final class LogCaptureFilter implements Filter {
 
     /**
-     * Lazily resolved reference to the BoundedLogStore CDI bean. Null until the CDI
-     * container is ready and the bean is first looked up.
+     * Statically registered reference to the BoundedLogStore CDI bean. Populated by
+     * BoundedLogStore during its @PostConstruct phase.
      */
-    private volatile BoundedLogStore store;
+    private static volatile BoundedLogStore staticStore;
+
+    /**
+     * Registers the active BoundedLogStore.
+     *
+     * @param store
+     *            the fully initialized store proxy
+     */
+    public static void setStore(BoundedLogStore store) {
+        LogCaptureFilter.staticStore = store;
+    }
 
     @Override
     public boolean isLoggable(LogRecord record) {
-        // Fast path: store already resolved
+        BoundedLogStore store = staticStore;
         if (store != null) {
             try {
                 store.capture(record);
-                return true;
             } catch (Exception _) {
-                // Stale CDI proxy after dev-mode hot-reload — the old Arc
-                // container was shut down, so the cached proxy is invalid.
-                // Reset and fall through to re-resolve from the new container.
-                store = null;
+                // Ignore errors during hot-reload or shutdown
             }
-        }
-
-        // Slow path: try to resolve the CDI bean lazily.
-        // During early bootstrap, Arc.container() throws IllegalStateException
-        // because the CDI container isn't initialized yet. We silently skip
-        // those early log records — they still appear on the console, just
-        // not in the ring buffer.
-        try {
-            var container = io.quarkus.arc.Arc.container();
-            if (container != null) {
-                var instance = container.instance(BoundedLogStore.class);
-                if (instance.isAvailable()) {
-                    store = instance.get();
-                    store.capture(record);
-                }
-            }
-        } catch (Exception _) {
-            // CDI not ready yet — silently skip this record
         }
 
         // Always return true — we never suppress log records

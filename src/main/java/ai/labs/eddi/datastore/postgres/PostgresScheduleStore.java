@@ -10,6 +10,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 import java.sql.*;
 import java.time.Instant;
@@ -84,18 +85,18 @@ public class PostgresScheduleStore implements IScheduleStore {
             CREATE INDEX IF NOT EXISTS idx_fire_logs_status ON eddi_schedule_fire_logs (status, started_at DESC);
             """;
 
-    private final DataSource dataSource;
+    private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
 
     @Inject
-    public PostgresScheduleStore(DataSource dataSource) {
-        this.dataSource = dataSource;
+    public PostgresScheduleStore(Instance<DataSource> dataSourceInstance) {
+        this.dataSourceInstance = dataSourceInstance;
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_SCHEDULES_TABLE);
             stmt.execute(CREATE_FIRE_LOGS_TABLE);
             for (String idx : CREATE_INDEXES.split(";")) {
@@ -128,7 +129,7 @@ public class PostgresScheduleStore implements IScheduleStore {
                     enabled, next_fire, fire_status, fail_count, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
                 """;
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
             ps.setString(2, schedule.getName());
             ps.setString(3, schedule.getAgentId());
@@ -156,7 +157,7 @@ public class PostgresScheduleStore implements IScheduleStore {
     public ScheduleConfiguration readSchedule(String scheduleId)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         ensureSchema();
-        try (Connection conn = dataSource.getConnection();
+        try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement("SELECT * FROM eddi_schedules WHERE id = ?")) {
             ps.setString(1, scheduleId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -183,7 +184,7 @@ public class PostgresScheduleStore implements IScheduleStore {
                     enabled=?, next_fire=?, fire_status=?, fail_count=?, updated_at=?
                 WHERE id=?
                 """;
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, schedule.getName());
             ps.setString(2, schedule.getAgentId());
             ps.setString(3, schedule.getTenantId());
@@ -216,7 +217,7 @@ public class PostgresScheduleStore implements IScheduleStore {
         String sql = enabled && nextFire != null
                 ? "UPDATE eddi_schedules SET enabled=?, next_fire=?, fire_status=?, fail_count=0, updated_at=? WHERE id=?"
                 : "UPDATE eddi_schedules SET enabled=?, updated_at=? WHERE id=?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             long now = Instant.now().toEpochMilli();
             if (enabled && nextFire != null) {
                 ps.setBoolean(1, true);
@@ -243,7 +244,8 @@ public class PostgresScheduleStore implements IScheduleStore {
     @Override
     public void deleteSchedule(String scheduleId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement("DELETE FROM eddi_schedules WHERE id = ?")) {
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("DELETE FROM eddi_schedules WHERE id = ?")) {
             ps.setString(1, scheduleId);
             ps.executeUpdate();
             LOGGER.infof("Deleted schedule id=%s", scheduleId);
@@ -255,7 +257,7 @@ public class PostgresScheduleStore implements IScheduleStore {
     @Override
     public int deleteSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
-        try (Connection conn = dataSource.getConnection();
+        try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement("DELETE FROM eddi_schedules WHERE agent_id = ?")) {
             ps.setString(1, agentId);
             int count = ps.executeUpdate();
@@ -271,7 +273,7 @@ public class PostgresScheduleStore implements IScheduleStore {
     @Override
     public List<ScheduleConfiguration> readAllSchedules(int limit) throws IResourceStore.ResourceStoreException {
         ensureSchema();
-        try (Connection conn = dataSource.getConnection();
+        try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement("SELECT * FROM eddi_schedules ORDER BY created_at DESC LIMIT ?")) {
             ps.setInt(1, limit);
             return readScheduleList(ps);
@@ -283,7 +285,7 @@ public class PostgresScheduleStore implements IScheduleStore {
     @Override
     public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
-        try (Connection conn = dataSource.getConnection();
+        try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement("SELECT * FROM eddi_schedules WHERE agent_id = ? LIMIT 500")) {
             ps.setString(1, agentId);
             return readScheduleList(ps);
@@ -311,7 +313,7 @@ public class PostgresScheduleStore implements IScheduleStore {
                 )
                 LIMIT 100
                 """;
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, nowMs);
             ps.setLong(2, leaseMs);
             ps.setLong(3, nowMs);
@@ -333,7 +335,7 @@ public class PostgresScheduleStore implements IScheduleStore {
                 SET fire_status = 'CLAIMED', claimed_by = ?, claimed_at = ?, fire_id = ?, updated_at = ?
                 WHERE id = ? AND (fire_status = 'PENDING' OR (fire_status = 'FAILED' AND next_retry_at <= ?))
                 """;
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, instanceId);
             ps.setLong(2, nowMs);
             ps.setString(3, fireId);
@@ -364,7 +366,7 @@ public class PostgresScheduleStore implements IScheduleStore {
                     claimed_by=NULL, claimed_at=NULL, fire_id=NULL, next_retry_at=NULL,
                     enabled=false, next_fire=NULL, updated_at=? WHERE id=?
                 """;
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, nowMs);
             if (nextFire != null) {
                 ps.setLong(2, nextFire.toEpochMilli());
@@ -389,7 +391,7 @@ public class PostgresScheduleStore implements IScheduleStore {
                     claimed_by=NULL, claimed_at=NULL, fail_count=fail_count+1, updated_at=?
                 WHERE id=?
                 """;
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, nextRetryAt.toEpochMilli());
             ps.setLong(2, nowMs);
             ps.setString(3, scheduleId);
@@ -408,7 +410,7 @@ public class PostgresScheduleStore implements IScheduleStore {
                     claimed_by=NULL, claimed_at=NULL, updated_at=?
                 WHERE id=?
                 """;
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, nowMs);
             ps.setString(2, scheduleId);
             ps.executeUpdate();
@@ -427,7 +429,7 @@ public class PostgresScheduleStore implements IScheduleStore {
                     claimed_by=NULL, claimed_at=NULL, next_fire=?, updated_at=?
                 WHERE id=? AND fire_status='DEAD_LETTERED'
                 """;
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, nowMs);
             ps.setLong(2, nowMs);
             ps.setString(3, scheduleId);
@@ -453,7 +455,7 @@ public class PostgresScheduleStore implements IScheduleStore {
                     status, instance_id, conversation_id, error_message, attempt_number, cost)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, fireLog.id());
             ps.setString(2, fireLog.scheduleId());
             ps.setString(3, fireLog.fireId());
@@ -476,7 +478,7 @@ public class PostgresScheduleStore implements IScheduleStore {
     public List<ScheduleFireLog> readFireLogs(String scheduleId, int limit) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "SELECT * FROM eddi_schedule_fire_logs WHERE schedule_id = ? ORDER BY started_at DESC LIMIT ?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, scheduleId);
             ps.setInt(2, limit);
             return readFireLogList(ps);
@@ -493,7 +495,7 @@ public class PostgresScheduleStore implements IScheduleStore {
                 WHERE status IN ('FAILED', 'DEAD_LETTERED')
                 ORDER BY started_at DESC LIMIT ?
                 """;
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, limit);
             return readFireLogList(ps);
         } catch (SQLException e) {

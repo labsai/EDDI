@@ -147,7 +147,7 @@ If you prefer manual control over Docker Compose:
 docker compose up
 
 # PostgreSQL instead of MongoDB
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml up
+EDDI_DATASTORE_TYPE=postgres docker compose -f docker-compose.yml -f docker-compose.postgres.yml up
 
 # With Keycloak authentication
 docker compose -f docker-compose.yml -f docker-compose.auth.yml up

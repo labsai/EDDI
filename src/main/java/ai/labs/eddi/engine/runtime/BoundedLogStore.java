@@ -88,6 +88,9 @@ public class BoundedLogStore {
             return;
         initialized = true;
 
+        // Register with the global logging filter BEFORE emitting internal logs
+        LogCaptureFilter.setStore(this);
+
         // Start async DB writer if enabled
         if (dbEnabled) {
             dbWriter = Executors.newSingleThreadScheduledExecutor(r -> {

@@ -593,6 +593,7 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
 # WARNING: The vault master key encrypts all stored API keys.
 #          If you lose this key, encrypted secrets are UNRECOVERABLE.
 EDDI_VAULT_MASTER_KEY="$escapedKey"
+EDDI_DATASTORE_TYPE=$Database
 EDDI_PORT=$EddiPort
 EDDI_HTTPS_PORT=$EddiHttpsPort
 "@
@@ -674,7 +675,7 @@ function Start-Eddi {
 
 function Wait-ForReady {
     # Keycloak can take 60-90s to start; EDDI won't start until it's healthy
-    $maxWait = if ($WithAuth) { 240 } else { 120 }
+    $maxWait = 120
     $elapsed = 0
     Write-Information -MessageData "  Health check             "
 

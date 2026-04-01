@@ -8,6 +8,7 @@ import io.quarkus.arc.DefaultBean;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 
 /**
@@ -27,12 +28,12 @@ import javax.sql.DataSource;
 @DefaultBean
 public class PostgresResourceStorageFactory implements IResourceStorageFactory {
 
-    private final DataSource dataSource;
+    private final Instance<DataSource> dataSourceInstance;
     private final IJsonSerialization jsonSerialization;
 
     @Inject
-    public PostgresResourceStorageFactory(DataSource dataSource, IJsonSerialization jsonSerialization) {
-        this.dataSource = dataSource;
+    public PostgresResourceStorageFactory(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization) {
+        this.dataSourceInstance = dataSourceInstance;
         this.jsonSerialization = jsonSerialization;
     }
 
@@ -42,13 +43,13 @@ public class PostgresResourceStorageFactory implements IResourceStorageFactory {
         // conversion.
         // The documentBuilder parameter is accepted for interface compatibility but not
         // used.
-        return new PostgresResourceStorage<>(dataSource, collectionName, jsonSerialization, documentType);
+        return new PostgresResourceStorage<>(dataSourceInstance.get(), collectionName, jsonSerialization, documentType);
     }
 
     /**
      * Expose the underlying DataSource for stores that need direct JDBC access.
      */
     public DataSource getDataSource() {
-        return dataSource;
+        return dataSourceInstance.get();
     }
 }

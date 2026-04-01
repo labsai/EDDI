@@ -8,6 +8,7 @@ import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 import java.io.IOException;
 import java.sql.*;
@@ -65,20 +66,20 @@ public class PostgresAuditStore implements IAuditStore {
             step_index, task_id, task_type, task_index, duration_ms, cost, hmac, created_at, data
             """;
 
-    private final DataSource dataSource;
+    private final Instance<DataSource> dataSourceInstance;
     private final IJsonSerialization jsonSerialization;
     private volatile boolean schemaInitialized = false;
 
     @Inject
-    public PostgresAuditStore(DataSource dataSource, IJsonSerialization jsonSerialization) {
-        this.dataSource = dataSource;
+    public PostgresAuditStore(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization) {
+        this.dataSourceInstance = dataSourceInstance;
         this.jsonSerialization = jsonSerialization;
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
             stmt.execute(CREATE_INDEX_CONV);
             stmt.execute(CREATE_INDEX_AGENT);
@@ -92,7 +93,7 @@ public class PostgresAuditStore implements IAuditStore {
     @Override
     public void appendEntry(AuditEntry entry) {
         ensureSchema();
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(INSERT_SQL)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(INSERT_SQL)) {
             setEntryParams(ps, entry);
             ps.executeUpdate();
         } catch (SQLException | IOException e) {
@@ -105,7 +106,7 @@ public class PostgresAuditStore implements IAuditStore {
         if (entries == null || entries.isEmpty())
             return;
         ensureSchema();
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(INSERT_SQL)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(INSERT_SQL)) {
             for (AuditEntry entry : entries) {
                 setEntryParams(ps, entry);
                 ps.addBatch();
@@ -129,7 +130,7 @@ public class PostgresAuditStore implements IAuditStore {
         if (agentVersion != null) {
             String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger"
                     + " WHERE AGENT_ID = ? AND AGENT_VERSION = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
-            try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, agentId);
                 ps.setInt(2, agentVersion);
                 ps.setInt(3, limit);
@@ -148,7 +149,7 @@ public class PostgresAuditStore implements IAuditStore {
     public long countByConversation(String conversationId) {
         ensureSchema();
         String sql = "SELECT COUNT(*) FROM audit_ledger WHERE conversation_id = ?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, conversationId);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
@@ -193,7 +194,7 @@ public class PostgresAuditStore implements IAuditStore {
     }
 
     private List<AuditEntry> queryEntries(String sql, String param, int limit, int skip) {
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, param);
             ps.setInt(2, limit);
             ps.setInt(3, skip);

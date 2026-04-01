@@ -11,6 +11,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 import java.sql.*;
 import java.util.*;
@@ -61,18 +62,18 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                 ON usermemories (user_id, key, source_agent_id) WHERE visibility != 'global';
             """;
 
-    private final DataSource dataSource;
+    private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
 
     @Inject
-    public PostgresUserMemoryStore(DataSource dataSource) {
-        this.dataSource = dataSource;
+    public PostgresUserMemoryStore(Instance<DataSource> dataSourceInstance) {
+        this.dataSourceInstance = dataSourceInstance;
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
             for (String sql : CREATE_INDEXES.split(";")) {
                 sql = sql.trim();
@@ -92,7 +93,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     public Properties readProperties(String userId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "SELECT key, value FROM usermemories WHERE user_id = ? AND visibility = 'global'";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
             Properties props = new Properties();
             try (ResultSet rs = ps.executeQuery()) {
@@ -124,7 +125,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                 ON CONFLICT (user_id, key) WHERE visibility = 'global'
                 DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
                 """;
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             for (Map.Entry<String, Object> entry : properties.entrySet()) {
                 String key = entry.getKey();
                 if ("_id".equals(key) || "userId".equals(key))
@@ -144,7 +145,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     public void deleteProperties(String userId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "DELETE FROM usermemories WHERE user_id = ? AND visibility = 'global'";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
             ps.executeUpdate();
         } catch (SQLException e) {
@@ -162,7 +163,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         // Check for cross-agent global overwrite
         if (entry.visibility() == Visibility.global) {
             String checkSql = "SELECT source_agent_id FROM usermemories WHERE user_id = ? AND key = ? AND visibility = 'global'";
-            try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(checkSql)) {
+            try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(checkSql)) {
                 ps.setString(1, entry.userId());
                 ps.setString(2, entry.key());
                 try (ResultSet rs = ps.executeQuery()) {
@@ -207,7 +208,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                     """;
         }
 
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(upsertSql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(upsertSql)) {
             ps.setString(1, entry.userId());
             ps.setString(2, entry.key());
             ps.setString(3, MAPPER.writeValueAsString(entry.value()));
@@ -232,7 +233,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     public void deleteEntry(String entryId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "DELETE FROM usermemories WHERE id = ?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, entryId);
             ps.executeUpdate();
         } catch (SQLException e) {
@@ -264,7 +265,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         String orderBy = "most_accessed".equals(recallOrder) ? " ORDER BY access_count DESC" : " ORDER BY updated_at DESC";
         sql.append(orderBy).append(" LIMIT ?");
 
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql.toString())) {
             int paramIndex = 1;
             ps.setString(paramIndex++, userId);
             ps.setString(paramIndex++, agentId);
@@ -307,7 +308,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         }
         String sql = "SELECT * FROM usermemories WHERE user_id = ? AND (key ILIKE ? OR value::text ILIKE ?) ORDER BY updated_at DESC";
         String pattern = "%" + query + "%";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
             ps.setString(2, pattern);
             ps.setString(3, pattern);
@@ -327,7 +328,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     public List<UserMemoryEntry> getEntriesByCategory(String userId, String category) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "SELECT * FROM usermemories WHERE user_id = ? AND category = ? ORDER BY updated_at DESC";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
             ps.setString(2, category);
             List<UserMemoryEntry> entries = new ArrayList<>();
@@ -346,7 +347,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     public Optional<UserMemoryEntry> getByKey(String userId, String key) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "SELECT * FROM usermemories WHERE user_id = ? AND key = ? LIMIT 1";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
             ps.setString(2, key);
             try (ResultSet rs = ps.executeQuery()) {
@@ -364,7 +365,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     public List<UserMemoryEntry> getAllEntries(String userId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "SELECT * FROM usermemories WHERE user_id = ? ORDER BY updated_at DESC";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
             List<UserMemoryEntry> entries = new ArrayList<>();
             try (ResultSet rs = ps.executeQuery()) {
@@ -383,7 +384,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     @Override
     public void deleteAllForUser(String userId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
-        try (Connection conn = dataSource.getConnection()) {
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
             try (PreparedStatement ps = conn.prepareStatement("DELETE FROM usermemories WHERE user_id = ?")) {
                 ps.setString(1, userId);
                 int count = ps.executeUpdate();
@@ -398,7 +399,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     public long countEntries(String userId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "SELECT COUNT(*) FROM usermemories WHERE user_id = ?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next())

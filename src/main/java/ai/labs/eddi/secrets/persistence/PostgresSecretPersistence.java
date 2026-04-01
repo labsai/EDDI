@@ -8,6 +8,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 import java.sql.*;
 import java.time.Instant;
@@ -66,18 +67,18 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             CREATE INDEX IF NOT EXISTS idx_svd_tenant ON secret_vault_deks (tenant_id)
             """;
 
-    private final DataSource dataSource;
+    private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
 
     @Inject
-    public PostgresSecretPersistence(DataSource dataSource) {
-        this.dataSource = dataSource;
+    public PostgresSecretPersistence(Instance<DataSource> dataSourceInstance) {
+        this.dataSourceInstance = dataSourceInstance;
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_SECRETS_TABLE);
             stmt.execute(CREATE_DEKS_TABLE);
             for (String sql : CREATE_INDEXES.split(";")) {
@@ -107,7 +108,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
                     description = EXCLUDED.description, allowed_agents = EXCLUDED.allowed_agents,
                     last_accessed_at = EXCLUDED.last_accessed_at, last_rotated_at = EXCLUDED.last_rotated_at
                 """;
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, secret.getTenantId());
             ps.setString(2, secret.getKeyName());
             ps.setString(3, secret.getEncryptedValue());
@@ -129,7 +130,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
     public Optional<EncryptedSecret> findSecret(String tenantId, String keyName) {
         ensureSchema();
         String sql = "SELECT * FROM secret_vault_secrets WHERE tenant_id = ? AND key_name = ?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, tenantId);
             ps.setString(2, keyName);
             try (ResultSet rs = ps.executeQuery()) {
@@ -146,7 +147,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
     public boolean deleteSecret(String tenantId, String keyName) {
         ensureSchema();
         String sql = "DELETE FROM secret_vault_secrets WHERE tenant_id = ? AND key_name = ?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, tenantId);
             ps.setString(2, keyName);
             return ps.executeUpdate() > 0;
@@ -160,7 +161,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
         ensureSchema();
         String sql = "SELECT * FROM secret_vault_secrets WHERE tenant_id = ? ORDER BY created_at DESC";
         List<EncryptedSecret> secrets = new ArrayList<>();
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, tenantId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next())
@@ -183,7 +184,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
                 ON CONFLICT (tenant_id)
                 DO UPDATE SET encrypted_dek = EXCLUDED.encrypted_dek, iv = EXCLUDED.iv
                 """;
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, dek.getTenantId());
             ps.setString(2, dek.getEncryptedDek());
             ps.setString(3, dek.getIv());
@@ -198,7 +199,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
     public Optional<EncryptedDek> findDek(String tenantId) {
         ensureSchema();
         String sql = "SELECT * FROM secret_vault_deks WHERE tenant_id = ?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, tenantId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
@@ -217,7 +218,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
     public void deleteDek(String tenantId) {
         ensureSchema();
         String sql = "DELETE FROM secret_vault_deks WHERE tenant_id = ?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, tenantId);
             ps.executeUpdate();
         } catch (SQLException e) {
@@ -230,7 +231,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
         ensureSchema();
         String sql = "SELECT * FROM secret_vault_deks ORDER BY tenant_id";
         List<EncryptedDek> deks = new ArrayList<>();
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     Timestamp createdTs = rs.getTimestamp("created_at");

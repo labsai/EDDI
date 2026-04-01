@@ -4,6 +4,7 @@ import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -22,6 +23,9 @@ class PostgresResourceStorageFactoryTest {
     @Test
     void shouldImplementFactoryInterface() throws Exception {
         DataSource dataSource = mock(DataSource.class);
+        Instance<DataSource> dataSourceInstance = mock(Instance.class);
+        when(dataSourceInstance.get()).thenReturn(dataSource);
+
         Connection connection = mock(Connection.class);
         Statement statement = mock(Statement.class);
         IJsonSerialization jsonSerialization = mock(IJsonSerialization.class);
@@ -29,7 +33,7 @@ class PostgresResourceStorageFactoryTest {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.createStatement()).thenReturn(statement);
 
-        PostgresResourceStorageFactory factory = new PostgresResourceStorageFactory(dataSource, jsonSerialization);
+        PostgresResourceStorageFactory factory = new PostgresResourceStorageFactory(dataSourceInstance, jsonSerialization);
 
         assertInstanceOf(IResourceStorageFactory.class, factory);
     }
@@ -37,6 +41,9 @@ class PostgresResourceStorageFactoryTest {
     @Test
     void shouldCreatePostgresStorage() throws Exception {
         DataSource dataSource = mock(DataSource.class);
+        Instance<DataSource> dataSourceInstance = mock(Instance.class);
+        when(dataSourceInstance.get()).thenReturn(dataSource);
+
         Connection connection = mock(Connection.class);
         Statement statement = mock(Statement.class);
         IJsonSerialization jsonSerialization = mock(IJsonSerialization.class);
@@ -45,7 +52,7 @@ class PostgresResourceStorageFactoryTest {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.createStatement()).thenReturn(statement);
 
-        PostgresResourceStorageFactory factory = new PostgresResourceStorageFactory(dataSource, jsonSerialization);
+        PostgresResourceStorageFactory factory = new PostgresResourceStorageFactory(dataSourceInstance, jsonSerialization);
 
         IResourceStorage<String> storage = factory.create("test_collection", documentBuilder, String.class);
 
@@ -56,9 +63,12 @@ class PostgresResourceStorageFactoryTest {
     @Test
     void shouldExposeDataSource() throws Exception {
         DataSource dataSource = mock(DataSource.class);
+        Instance<DataSource> dataSourceInstance = mock(Instance.class);
+        when(dataSourceInstance.get()).thenReturn(dataSource);
+
         IJsonSerialization jsonSerialization = mock(IJsonSerialization.class);
 
-        PostgresResourceStorageFactory factory = new PostgresResourceStorageFactory(dataSource, jsonSerialization);
+        PostgresResourceStorageFactory factory = new PostgresResourceStorageFactory(dataSourceInstance, jsonSerialization);
 
         assertSame(dataSource, factory.getDataSource());
     }

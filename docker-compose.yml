@@ -3,6 +3,7 @@ services:
     image: labsai/eddi:latest
     environment:
       - "EDDI_VAULT_MASTER_KEY=${EDDI_VAULT_MASTER_KEY:-}"
+      - "EDDI_DATASTORE_TYPE=${EDDI_DATASTORE_TYPE:-mongodb}"
 #      - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"
     extra_hosts:
       - "host.docker.internal:host-gateway"

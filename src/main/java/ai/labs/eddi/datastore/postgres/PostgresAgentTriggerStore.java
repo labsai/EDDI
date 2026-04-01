@@ -9,6 +9,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 import java.sql.*;
 import java.util.ArrayList;
@@ -31,20 +32,20 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
             )
             """;
 
-    private final DataSource dataSource;
+    private final Instance<DataSource> dataSourceInstance;
     private final IJsonSerialization jsonSerialization;
     private volatile boolean schemaInitialized = false;
 
     @Inject
-    public PostgresAgentTriggerStore(DataSource dataSource, IJsonSerialization jsonSerialization) {
-        this.dataSource = dataSource;
+    public PostgresAgentTriggerStore(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization) {
+        this.dataSourceInstance = dataSourceInstance;
         this.jsonSerialization = jsonSerialization;
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -57,7 +58,9 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
         ensureSchema();
         String sql = "SELECT data FROM agent_triggers";
         List<AgentTriggerConfiguration> triggers = new ArrayList<>();
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql); ResultSet rs = ps.executeQuery()) {
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement(sql);
+                ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
                 triggers.add(jsonSerialization.deserialize(rs.getString("data"), AgentTriggerConfiguration.class));
             }
@@ -72,7 +75,7 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "SELECT data FROM agent_triggers WHERE intent = ?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, intent);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
@@ -90,7 +93,7 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         ensureSchema();
         String sql = "UPDATE agent_triggers SET data = ?::jsonb WHERE intent = ?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, jsonSerialization.serialize(agentTriggerConfiguration));
             ps.setString(2, intent);
             int rows = ps.executeUpdate();
@@ -110,7 +113,7 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
         ensureSchema();
         // Check existence
         String check = "SELECT 1 FROM agent_triggers WHERE intent = ?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(check)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(check)) {
             ps.setString(1, agentTriggerConfiguration.getIntent());
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
@@ -125,7 +128,7 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
         }
 
         String sql = "INSERT INTO agent_triggers (intent, data) VALUES (?, ?::jsonb)";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, agentTriggerConfiguration.getIntent());
             ps.setString(2, jsonSerialization.serialize(agentTriggerConfiguration));
             ps.executeUpdate();
@@ -138,7 +141,7 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
     public void deleteAgentTrigger(String intent) {
         ensureSchema();
         String sql = "DELETE FROM agent_triggers WHERE intent = ?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, intent);
             ps.executeUpdate();
         } catch (SQLException e) {

@@ -6,6 +6,7 @@ import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
+import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 import jakarta.inject.Inject;
 import java.sql.*;
@@ -28,18 +29,18 @@ public class PostgresMigrationLogStore implements IMigrationLogStore {
             )
             """;
 
-    private final DataSource dataSource;
+    private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
 
     @Inject
-    public PostgresMigrationLogStore(DataSource dataSource) {
-        this.dataSource = dataSource;
+    public PostgresMigrationLogStore(Instance<DataSource> dataSourceInstance) {
+        this.dataSourceInstance = dataSourceInstance;
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -51,7 +52,7 @@ public class PostgresMigrationLogStore implements IMigrationLogStore {
     public MigrationLog readMigrationLog(String name) {
         ensureSchema();
         String sql = "SELECT name, created_at FROM migration_log WHERE name = ?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, name);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
@@ -68,7 +69,7 @@ public class PostgresMigrationLogStore implements IMigrationLogStore {
     public void createMigrationLog(MigrationLog migrationLog) {
         ensureSchema();
         String sql = "INSERT INTO migration_log (name) VALUES (?) ON CONFLICT (name) DO NOTHING";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, migrationLog.getName());
             ps.executeUpdate();
         } catch (SQLException e) {

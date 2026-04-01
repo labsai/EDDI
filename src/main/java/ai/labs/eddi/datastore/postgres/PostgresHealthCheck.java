@@ -8,6 +8,7 @@ import org.eclipse.microprofile.health.HealthCheckResponse;
 import org.eclipse.microprofile.health.HealthCheckResponseBuilder;
 import org.eclipse.microprofile.health.Readiness;
 
+import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.Statement;
@@ -23,17 +24,17 @@ import java.sql.Statement;
 @DefaultBean
 public class PostgresHealthCheck implements HealthCheck {
 
-    private final DataSource dataSource;
+    private final Instance<DataSource> dataSourceInstance;
 
     @Inject
-    public PostgresHealthCheck(DataSource dataSource) {
-        this.dataSource = dataSource;
+    public PostgresHealthCheck(Instance<DataSource> dataSourceInstance) {
+        this.dataSourceInstance = dataSourceInstance;
     }
 
     @Override
     public HealthCheckResponse call() {
         HealthCheckResponseBuilder builder = HealthCheckResponse.named("PostgreSQL connection");
-        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute("SELECT 1");
             return builder.up().withData("database", conn.getMetaData().getDatabaseProductName()).withData("url", conn.getMetaData().getURL())
                     .build();
