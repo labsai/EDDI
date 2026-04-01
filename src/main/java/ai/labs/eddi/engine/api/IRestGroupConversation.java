@@ -35,8 +35,8 @@ public interface IRestGroupConversation {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.SERVER_SENT_EVENTS)
     @Operation(summary = "Start a group discussion with SSE streaming", description = "Starts a group discussion asynchronously and streams progress events "
-            + "(group_start, phase_start, speaker_start, speaker_complete, phase_complete, "
-            + "synthesis_start, group_complete, group_error) via Server-Sent Events.")
+            + "(group_start, phase_start, speaker_start, speaker_complete, " + "phase_complete, synthesis_start, group_complete, group_error) "
+            + "via Server-Sent Events.")
     @APIResponse(responseCode = "200", description = "SSE event stream of discussion progress.")
     @APIResponse(responseCode = "404", description = "Group not found.")
     void discussStreaming(@PathParam("groupId") String groupId, DiscussRequest request, @Context SseEventSink eventSink, @Context Sse sse);
