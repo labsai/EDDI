@@ -23,6 +23,7 @@ class PostgresResourceStorageFactoryTest {
     @Test
     void shouldImplementFactoryInterface() throws Exception {
         DataSource dataSource = mock(DataSource.class);
+        @SuppressWarnings("unchecked")
         Instance<DataSource> dataSourceInstance = mock(Instance.class);
         when(dataSourceInstance.get()).thenReturn(dataSource);
 
@@ -41,6 +42,7 @@ class PostgresResourceStorageFactoryTest {
     @Test
     void shouldCreatePostgresStorage() throws Exception {
         DataSource dataSource = mock(DataSource.class);
+        @SuppressWarnings("unchecked")
         Instance<DataSource> dataSourceInstance = mock(Instance.class);
         when(dataSourceInstance.get()).thenReturn(dataSource);
 
@@ -63,6 +65,7 @@ class PostgresResourceStorageFactoryTest {
     @Test
     void shouldExposeDataSource() throws Exception {
         DataSource dataSource = mock(DataSource.class);
+        @SuppressWarnings("unchecked")
         Instance<DataSource> dataSourceInstance = mock(Instance.class);
         when(dataSourceInstance.get()).thenReturn(dataSource);
 

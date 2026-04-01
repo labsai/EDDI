@@ -12,6 +12,19 @@ Each entry follows this format:
 - **Repo** — Which repository was modified
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
+## Fix: Suppress type safety warnings for generic Instance mocks (2026-04-01)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:** 
+Added `@SuppressWarnings("unchecked")` to `Instance<DataSource>` mock declarations in `PostgresResourceStorageFactoryTest`.
+
+**Design decision:** 
+Mockito's `mock(Class<T>)` returns a raw type when mocking generic classes like `Instance`. This explicitly suppresses the unchecked assignment warnings since we are intentionally creating a mock of a generic type, resulting in a cleaner compilation output without spurious warnings.
+
+**Files:** `PostgresResourceStorageFactoryTest.java`
+
+---
 
 ## Fix: PostgreSQL stores trigger InactiveBeanException in MongoDB mode (2026-04-01)
 
