@@ -13,6 +13,7 @@ import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.result.UpdateResult;
 import io.quarkus.arc.DefaultBean;
+import io.quarkus.arc.profile.IfBuildProfile;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
@@ -42,6 +43,7 @@ import static com.mongodb.client.model.Updates.*;
  */
 @ApplicationScoped
 @DefaultBean
+@IfBuildProfile("!postgres")
 public class MongoScheduleStore implements IScheduleStore {
 
     private static final Logger LOGGER = Logger.getLogger(MongoScheduleStore.class);

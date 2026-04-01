@@ -365,6 +365,8 @@ function Step-Security {
     if (Test-Path $envFile) {
         $existingKey = (Get-Content $envFile | Where-Object { $_ -match '^EDDI_VAULT_MASTER_KEY=(.+)$' } | ForEach-Object { $Matches[1] }) | Select-Object -First 1
         if ($existingKey) {
+            # Strip surrounding quotes to prevent quote accumulation on re-runs
+            $existingKey = $existingKey.Trim('"')
             $script:EddiVaultMasterKey = $existingKey
             Write-Ok "Vault key preserved from previous install"
             return

@@ -9,6 +9,7 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
 import io.quarkus.arc.DefaultBean;
+import io.quarkus.arc.profile.IfBuildProfile;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
@@ -33,6 +34,7 @@ import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
  */
 @ApplicationScoped
 @DefaultBean
+@IfBuildProfile("!postgres")
 public class ConversationMemoryStore implements IConversationMemoryStore, IResourceStore<ConversationMemorySnapshot> {
     private static final String CONVERSATION_COLLECTION = "conversationmemories";
     private static final String OBJECT_ID = "_id";

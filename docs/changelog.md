@@ -12,6 +12,43 @@ Each entry follows this format:
 - **Repo** — Which repository was modified
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
+## Fix: MongoDB stores load in Postgres mode — health check 503 (2026-04-01)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+When running EDDI with `QUARKUS_PROFILE=postgres` (no MongoDB container), the health check returned **503 Service Unavailable** despite EDDI starting successfully. Root cause: all MongoDB `@DefaultBean` stores were still instantiated and tried to connect to `mongodb:27017`, which doesn't exist in postgres mode. The MongoDB health indicator detected the dead connection and reported the entire app as DOWN.
+
+**Root fix:** Added `@IfBuildProfile("!postgres")` to `PersistenceModule` (the CDI producer for `MongoDatabase`), which prevents the MongoDB client from being created at all in postgres mode. Without the `MongoDatabase` bean, no MongoDB store can be instantiated.
+
+**Defense-in-depth:** Also added `@IfBuildProfile("!postgres")` to all 13 individual MongoDB `@DefaultBean` stores so they cannot load even if a `MongoDatabase` bean is provided by another means.
+
+| Component | Action |
+|---|---|
+| `PersistenceModule` | Added `@IfBuildProfile("!postgres")` — root guard |
+| `MongoScheduleStore` | Added `@IfBuildProfile("!postgres")` |
+| `DatabaseLogs` | Added `@IfBuildProfile("!postgres")` |
+| `MongoUserMemoryStore` | Added `@IfBuildProfile("!postgres")` |
+| `ConversationMemoryStore` | Added `@IfBuildProfile("!postgres")` |
+| `AuditStore` | Added `@IfBuildProfile("!postgres")` |
+| `AgentTriggerStore` | Added `@IfBuildProfile("!postgres")` |
+| `UserConversationStore` | Added `@IfBuildProfile("!postgres")` |
+| `MongoDeploymentStorage` | Added `@IfBuildProfile("!postgres")` |
+| `MigrationLogStore` | Added `@IfBuildProfile("!postgres")` |
+| `MigrationManager` | Added `@IfBuildProfile("!postgres")` |
+| `MongoResourceStorageFactory` | Added `@IfBuildProfile("!postgres")` |
+| `MongoSecretPersistence` | Added `@IfBuildProfile("!postgres")` |
+| `V6QuteMigration` | Added `@IfBuildProfile("!postgres")` |
+| `V6RenameMigration` | Added `@IfBuildProfile("!postgres")` |
+| **`PostgresScheduleStore`** | **[NEW]** Full PostgreSQL implementation of `IScheduleStore` |
+
+**Design decision:** The `@DefaultBean` mechanism alone is insufficient because CDI still instantiates the default bean (running its constructor) even when an alternative exists. The constructor of Mongo stores calls `database.getCollection()` which triggers a MongoDB connection attempt. The explicit `@IfBuildProfile` annotation prevents instantiation entirely.
+
+**Files:** 1 new (`PostgresScheduleStore.java`), 15 modified.
+
+---
+
 ## Fix: `install.ps1` crashes on `iwr | iex` — ValidateSet on empty default (2026-04-01)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

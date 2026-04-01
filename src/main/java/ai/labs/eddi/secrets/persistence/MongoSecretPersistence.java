@@ -10,6 +10,7 @@ import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.Updates;
 import io.quarkus.arc.DefaultBean;
+import io.quarkus.arc.profile.IfBuildProfile;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
@@ -36,6 +37,7 @@ import static com.mongodb.client.model.Filters.eq;
  */
 @ApplicationScoped
 @DefaultBean
+@IfBuildProfile("!postgres")
 public class MongoSecretPersistence implements ISecretPersistence {
 
     private static final Logger LOGGER = Logger.getLogger(MongoSecretPersistence.class);

@@ -11,6 +11,7 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.*;
 import com.mongodb.client.result.DeleteResult;
 import io.quarkus.arc.DefaultBean;
+import io.quarkus.arc.profile.IfBuildProfile;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
@@ -37,6 +38,7 @@ import static com.mongodb.client.model.Sorts.descending;
  */
 @ApplicationScoped
 @DefaultBean
+@IfBuildProfile("!postgres")
 public class MongoUserMemoryStore implements IUserMemoryStore {
 
     private static final Logger LOGGER = Logger.getLogger(MongoUserMemoryStore.class);

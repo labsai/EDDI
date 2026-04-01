@@ -7,6 +7,7 @@ import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 
 import io.quarkus.arc.DefaultBean;
+import io.quarkus.arc.profile.IfBuildProfile;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -16,6 +17,7 @@ import jakarta.inject.Inject;
  */
 @ApplicationScoped
 @DefaultBean
+@IfBuildProfile("!postgres")
 public class MigrationLogStore implements IMigrationLogStore {
     private static final String COLLECTION_MIGRATION_LOG = "migrationlog";
     private final MongoCollection<MigrationLog> collection;
