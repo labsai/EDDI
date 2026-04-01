@@ -6,7 +6,7 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
-import io.quarkus.arc.profile.IfBuildProfile;
+import io.quarkus.arc.DefaultBean;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -29,7 +29,7 @@ import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
  * efficient querying.
  */
 @ApplicationScoped
-@IfBuildProfile("postgres")
+@DefaultBean
 public class PostgresConversationMemoryStore implements IConversationMemoryStore, IResourceStore<ConversationMemorySnapshot> {
 
     private static final String CREATE_TABLE = """

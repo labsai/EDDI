@@ -5,7 +5,6 @@ import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import com.mongodb.client.MongoDatabase;
 import io.quarkus.arc.DefaultBean;
-import io.quarkus.arc.profile.IfBuildProfile;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -23,7 +22,6 @@ import jakarta.inject.Inject;
  */
 @ApplicationScoped
 @DefaultBean
-@IfBuildProfile("!postgres")
 public class MongoResourceStorageFactory implements IResourceStorageFactory {
 
     private final MongoDatabase database;

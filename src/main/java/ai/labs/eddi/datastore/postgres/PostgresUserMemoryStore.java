@@ -6,7 +6,7 @@ import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.quarkus.arc.profile.IfBuildProfile;
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -24,7 +24,7 @@ import java.util.*;
  * @since 6.0.0
  */
 @ApplicationScoped
-@IfBuildProfile("postgres")
+@DefaultBean
 public class PostgresUserMemoryStore implements IUserMemoryStore {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresUserMemoryStore.class);

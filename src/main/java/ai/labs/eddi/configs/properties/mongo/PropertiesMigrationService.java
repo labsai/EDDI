@@ -6,7 +6,6 @@ import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import com.mongodb.MongoNamespace;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
-import io.quarkus.arc.profile.IfBuildProfile;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -31,7 +30,6 @@ import java.util.List;
  * @since 6.0.0
  */
 @ApplicationScoped
-@IfBuildProfile("!postgres")
 public class PropertiesMigrationService {
 
     private static final Logger LOGGER = Logger.getLogger(PropertiesMigrationService.class);

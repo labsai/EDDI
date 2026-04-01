@@ -24,21 +24,20 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import java.net.URI;
 import java.net.URISyntaxException;
 import io.quarkus.arc.DefaultBean;
-import io.quarkus.arc.profile.IfBuildProfile;
 
 import static org.bson.codecs.configuration.CodecRegistries.*;
 
 /**
  * MongoDB persistence module. Produces the {@link MongoDatabase} CDI bean.
  * <p>
- * Annotated {@code @DefaultBean} and {@code @IfBuildProfile("!postgres")} so it
- * is NOT activated when PostgreSQL mode overrides the datastore layer.
+ * Annotated {@code @DefaultBean} so it yields to the PostgreSQL datastore layer
+ * when the {@code postgres} profile is active. CDI lazy initialization ensures
+ * {@code MongoDatabase} is never created if no active bean injects it.
  *
  * @author ginccc
  */
 @ApplicationScoped
 @DefaultBean
-@IfBuildProfile("!postgres")
 public class PersistenceModule {
     @Produces
     @ApplicationScoped

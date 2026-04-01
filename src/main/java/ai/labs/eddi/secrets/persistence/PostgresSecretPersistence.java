@@ -3,7 +3,7 @@ package ai.labs.eddi.secrets.persistence;
 import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.quarkus.arc.profile.IfBuildProfile;
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -21,13 +21,13 @@ import java.util.Optional;
  * {@code secret_vault_deks}.
  * <p>
  * Activated only when the {@code postgres} build profile is active
- * ({@code @IfBuildProfile("postgres")}).
+ * ({@code @DefaultBean}).
  *
  * @author ginccc
  * @since 6.0.0
  */
 @ApplicationScoped
-@IfBuildProfile("postgres")
+@DefaultBean
 public class PostgresSecretPersistence implements ISecretPersistence {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresSecretPersistence.class);

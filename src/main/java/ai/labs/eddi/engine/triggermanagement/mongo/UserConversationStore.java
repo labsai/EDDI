@@ -12,7 +12,6 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import io.quarkus.arc.DefaultBean;
-import io.quarkus.arc.profile.IfBuildProfile;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
@@ -27,7 +26,6 @@ import java.io.IOException;
  */
 @ApplicationScoped
 @DefaultBean
-@IfBuildProfile("!postgres")
 public class UserConversationStore implements IUserConversationStore {
     private static final String COLLECTION_USER_CONVERSATIONS = "userconversations";
     private static final String INTENT_FIELD = "intent";

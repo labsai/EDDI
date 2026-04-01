@@ -10,7 +10,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import io.quarkus.arc.DefaultBean;
-import io.quarkus.arc.profile.IfBuildProfile;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.Arrays;
@@ -27,7 +26,6 @@ import static java.lang.String.format;
 
 @ApplicationScoped
 @DefaultBean
-@IfBuildProfile("!postgres")
 public class MigrationManager implements IMigrationManager {
     private static final Logger LOGGER = Logger.getLogger(MigrationManager.class);
 

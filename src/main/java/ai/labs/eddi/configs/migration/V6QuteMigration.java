@@ -7,7 +7,6 @@ import org.bson.Document;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import io.quarkus.arc.profile.IfBuildProfile;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.ArrayList;
@@ -26,7 +25,6 @@ import static com.mongodb.client.model.Filters.eq;
  * @since 6.0.0
  */
 @ApplicationScoped
-@IfBuildProfile("!postgres")
 public class V6QuteMigration {
 
     private static final Logger LOGGER = Logger.getLogger(V6QuteMigration.class);

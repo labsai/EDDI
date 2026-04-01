@@ -8,7 +8,6 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Indexes;
 import io.quarkus.arc.DefaultBean;
-import io.quarkus.arc.profile.IfBuildProfile;
 import org.bson.Document;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -24,7 +23,6 @@ import static com.mongodb.client.model.Filters.eq;
  */
 @ApplicationScoped
 @DefaultBean
-@IfBuildProfile("!postgres")
 public class MongoDeploymentStorage implements IDeploymentStorage {
 
     private static final String COLLECTION_DEPLOYMENTS = "deployments";

@@ -2,7 +2,7 @@ package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.configs.migration.IDocumentMigration;
 import ai.labs.eddi.configs.migration.IMigrationManager;
-import io.quarkus.arc.profile.IfBuildProfile;
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
@@ -13,7 +13,7 @@ import org.jboss.logging.Logger;
  * document-level migrations from the MongoDB era are not applicable.
  */
 @ApplicationScoped
-@IfBuildProfile("postgres")
+@DefaultBean
 public class PostgresMigrationManager implements IMigrationManager {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresMigrationManager.class);

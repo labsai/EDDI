@@ -4,7 +4,7 @@ import ai.labs.eddi.configs.deployment.IDeploymentStorage;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.model.Deployment.Environment;
-import io.quarkus.arc.profile.IfBuildProfile;
+import io.quarkus.arc.DefaultBean;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -19,7 +19,7 @@ import java.util.List;
  * Uses a dedicated {@code deployments} table with composite PK.
  */
 @ApplicationScoped
-@IfBuildProfile("postgres")
+@DefaultBean
 public class PostgresDeploymentStorage implements IDeploymentStorage {
 
     private static final String CREATE_TABLE = """

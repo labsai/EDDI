@@ -5,7 +5,7 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
-import io.quarkus.arc.profile.IfBuildProfile;
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -23,13 +23,13 @@ import java.util.UUID;
  * Uses {@code SELECT ... FOR UPDATE SKIP LOCKED} for atomic CAS claiming,
  * ensuring exactly-one-instance execution in clustered deployments.
  * <p>
- * Activated via {@code @IfBuildProfile("postgres")}.
+ * Activated via {@code @DefaultBean}.
  *
  * @author ginccc
  * @since 6.0.0
  */
 @ApplicationScoped
-@IfBuildProfile("postgres")
+@DefaultBean
 public class PostgresScheduleStore implements IScheduleStore {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresScheduleStore.class);

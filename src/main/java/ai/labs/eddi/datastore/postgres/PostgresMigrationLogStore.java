@@ -2,7 +2,7 @@ package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.configs.migration.IMigrationLogStore;
 import ai.labs.eddi.configs.migration.model.MigrationLog;
-import io.quarkus.arc.profile.IfBuildProfile;
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
@@ -15,7 +15,7 @@ import java.sql.*;
  * status in a simple table.
  */
 @ApplicationScoped
-@IfBuildProfile("postgres")
+@DefaultBean
 public class PostgresMigrationLogStore implements IMigrationLogStore {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresMigrationLogStore.class);

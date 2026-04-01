@@ -4,7 +4,7 @@ import ai.labs.eddi.engine.triggermanagement.IAgentTriggerStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
-import io.quarkus.arc.profile.IfBuildProfile;
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -18,7 +18,7 @@ import java.util.List;
  * PostgreSQL implementation of {@link IAgentTriggerStore}.
  */
 @ApplicationScoped
-@IfBuildProfile("postgres")
+@DefaultBean
 public class PostgresAgentTriggerStore implements IAgentTriggerStore {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresAgentTriggerStore.class);

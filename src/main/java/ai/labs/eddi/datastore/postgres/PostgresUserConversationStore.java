@@ -4,7 +4,7 @@ import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
-import io.quarkus.arc.profile.IfBuildProfile;
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -16,7 +16,7 @@ import java.sql.*;
  * PostgreSQL implementation of {@link IUserConversationStore}.
  */
 @ApplicationScoped
-@IfBuildProfile("postgres")
+@DefaultBean
 public class PostgresUserConversationStore implements IUserConversationStore {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresUserConversationStore.class);

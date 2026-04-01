@@ -3,7 +3,7 @@ package ai.labs.eddi.datastore.postgres;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
-import io.quarkus.arc.profile.IfBuildProfile;
+import io.quarkus.arc.DefaultBean;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -20,13 +20,13 @@ import java.util.*;
  * Uses a dedicated {@code audit_ledger} table with INSERT-only semantics. No
  * UPDATE or DELETE operations — enforces the write-once contract.
  * <p>
- * Activated via {@code @IfBuildProfile("postgres")}.
+ * Activated via {@code @DefaultBean}.
  *
  * @author ginccc
  * @since 6.0.0
  */
 @ApplicationScoped
-@IfBuildProfile("postgres")
+@DefaultBean
 public class PostgresAuditStore implements IAuditStore {
 
     private static final String CREATE_TABLE = """

@@ -3,7 +3,7 @@ package ai.labs.eddi.datastore.postgres;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
-import io.quarkus.arc.profile.IfBuildProfile;
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -19,7 +19,7 @@ import java.util.List;
  * @author ginccc
  */
 @ApplicationScoped
-@IfBuildProfile("postgres")
+@DefaultBean
 public class PostgresDatabaseLogs implements IDatabaseLogs {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresDatabaseLogs.class);

@@ -8,7 +8,6 @@ import org.bson.types.ObjectId;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import io.quarkus.arc.profile.IfBuildProfile;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.*;
@@ -29,7 +28,6 @@ import static com.mongodb.client.model.Filters.eq;
  * @since 6.0.0
  */
 @ApplicationScoped
-@IfBuildProfile("!postgres")
 public class V6RenameMigration {
 
     private static final Logger LOGGER = Logger.getLogger(V6RenameMigration.class);
