@@ -160,19 +160,13 @@ Manager tests updated: `integration-helpers.ts` and `deployment.integration.spec
 
 ---
 
-### 🔵 What's Next — Phase 14 Continuation (3 remaining items)
+### What's Next — Manager v6 Complete 🚀
 
-Phase 14 UX Hardening is partially complete. **G.1** (chat history fix), **A** (logs), **D** (audit), **E** (create+wizard), **C** (orphan polish), and **G.3** (sidebar) are DONE.
+All Phase 14 UX hardening items (Secret Vault Key Picker, Coordinator Enrichment, Dashboard Enrichment) and the full UI test suite stabilization have been successfully completed. The EDDI Manager UI rewrite and hardening phases are now fully finished.
 
-Three items remain:
-
-| ID | Item | What To Do | Key Files |
-|----|------|------------|----------|
-| **G.2** | **Secret Vault Key Picker** | Create `SecretKeyPicker` component (password input OR vault dropdown). Integrate into every `apiKey` field across the app. When user selects a vault key, value becomes `vault:<keyName>`. Auto-detect vault refs on load. Graceful 503 degradation. | New: `src/components/shared/secret-key-picker.tsx`. Modify: `langchain-editor.tsx` (3 apiKey fields: LLM task, MCP server, A2A agent), `mcpcalls-editor.tsx` (1 field), `rag-editor.tsx` (2 fields: embedding + store), `agent-wizard.tsx` (1 field), `group-wizard.tsx` (1 field). Use `useSecrets('default')` hook. |
-| **B** | **Coordinator Enrichment** | Reorganise stat cards (hero + 3 metrics), add success rate ratio bar, promote Active Queues with conversation links, add SSE event history buffer (last 20 snapshots as compact log). Update `use-coordinator.ts` to buffer `eventHistory[]`. | Modify: `coordinator.tsx`, `use-coordinator.ts`. Backend SSE only sends aggregate `CoordinatorStatus` — work within that constraint. |
-| **F** | **Dashboard Enrichment** | Add Recent Conversations section (last 5, clickable), Platform Health strip, expand Quick Actions (Logs, Orphan Scan, Audit Trail), visual polish on stat cards (gradient, hover lift). Add `useRecentConversations()` hook. | Modify: `dashboard.tsx`, `use-dashboard.ts`. Keep lightweight — each new data source adds load time. |
-
-After all three, run full verification: `npx tsc -b`, `npm run test`, `npm run build`.
+The next steps in the overall EDDI project roadmap occur in other repositories:
+- **Website Migration**: Rewriting the marketing website into an **Astro** static site (`eddi-website` repository - Phase 14).
+- **Backend Deep Tech**: Implementation of DAG + OTel tracing (Phase 9), Human-In-The-Loop (Phase 9b), Persistent User Memory (Phase 11), and CI/CD (Phase 12) in the core `EDDI` repository.
 
 **Implementation plan artifact**: See `implementation_plan.md` in conversation `8bdeea74` for full technical details on each phase.
 
