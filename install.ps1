@@ -100,7 +100,12 @@ if ($Database -and $Database -notin @("mongodb", "postgres")) {
 if (-not $EddiPort) { $EddiPort = "7070" }
 if (-not $EddiHttpsPort) { $EddiHttpsPort = "7443" }
 if (-not $EddiDir) { $EddiDir = Join-Path -Path $HOME -ChildPath ".eddi" }
+$EddiDir = $EddiDir.TrimEnd('\', '/')
 $EddiBranch = if ($env:EDDI_BRANCH) { $env:EDDI_BRANCH } else { "main" }
+# Validate branch name (prevent path traversal in download URLs)
+if ($EddiBranch -notmatch '^[a-zA-Z0-9._/-]+$') {
+    throw "Invalid EDDI_BRANCH: '$EddiBranch'. Only alphanumeric, dots, slashes, hyphens allowed."
+}
 $ComposeBaseUrl = "https://raw.githubusercontent.com/labsai/EDDI/$EddiBranch"
 
 if ($Full) {
@@ -596,14 +601,23 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
     $envPath = Join-Path -Path $EddiDir -ChildPath ".env"
     $envContent | Set-Content -Path $envPath
 
-    # Restrict sensitive file permissions (owner-only read/write)
+    # Restrict sensitive file permissions — remove broad read access but keep SYSTEM/Admins
     foreach ($securePath in @($envPath, $configPath)) {
         try {
             $acl = Get-Acl $securePath
-            $acl.SetAccessRuleProtection($true, $false)
+            # Protect from inheritance but copy existing inherited ACEs as explicit rules
+            $acl.SetAccessRuleProtection($true, $true)
+            # Remove 'Users' and 'Everyone' groups (keep SYSTEM, Administrators, current user)
             $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($currentUser, "FullControl", "Allow")
-            $acl.AddAccessRule($rule)
+            foreach ($rule in $acl.Access) {
+                $identity = $rule.IdentityReference.Value
+                if ($identity -match '\\(Users|Everyone|Authenticated Users)$') {
+                    $acl.RemoveAccessRule($rule) | Out-Null
+                }
+            }
+            # Ensure current user has full control
+            $userRule = New-Object System.Security.AccessControl.FileSystemAccessRule($currentUser, "FullControl", "Allow")
+            $acl.AddAccessRule($userRule)
             Set-Acl $securePath $acl
         }
         catch {
@@ -620,10 +634,10 @@ function Start-Eddi {
     if (-not $PSCmdlet.ShouldProcess("EDDI", "Start Containers")) { return }
     Write-Section "Starting EDDI"
 
-    # Export env vars so docker-compose variable substitution picks them up
+    # Export port env vars so docker-compose variable substitution picks them up
+    # Note: vault key is NOT exported — it's read from --env-file only
     $env:EDDI_PORT = $EddiPort
     $env:EDDI_HTTPS_PORT = $EddiHttpsPort
-    $env:EDDI_VAULT_MASTER_KEY = $EddiVaultMasterKey
 
     if ($Local) {
         Write-Information -MessageData "  Building local Docker image..."
@@ -788,8 +802,15 @@ if not exist "%ENV_FILE%" (
     exit /b 1
 )
 
-rem Load config (only COMPOSE_FILES, EDDI_PORT, EDDI_HTTPS_PORT — no secrets)
-for /f "usebackq tokens=1,* delims==" %%A in ("%CONFIG_FILE%") do set "%%A=%%B"
+rem Safe config parsing — only extract known keys to prevent variable injection
+set "COMPOSE_FILES="
+set "EDDI_PORT="
+set "EDDI_HTTPS_PORT="
+for /f "usebackq tokens=1,* delims==" %%A in ("%CONFIG_FILE%") do (
+    if "%%A"=="COMPOSE_FILES" set "COMPOSE_FILES=%%B"
+    if "%%A"=="EDDI_PORT" set "EDDI_PORT=%%B"
+    if "%%A"=="EDDI_HTTPS_PORT" set "EDDI_HTTPS_PORT=%%B"
+)
 
 rem Build compose flags with delayed expansion for proper quoting
 set "FLAGS=--env-file "%ENV_FILE%""
@@ -834,7 +855,7 @@ goto :eof
 
 :cmd_logs
 shift
-docker compose %FLAGS% logs %1 %2 %3 %4 %5
+docker compose %FLAGS% logs %1 %2 %3 %4 %5 %6 %7 %8 %9
 goto :eof
 
 :cmd_update
@@ -845,12 +866,21 @@ echo EDDI updated.
 goto :eof
 
 :cmd_uninstall
+rem Sanity check: refuse to delete if EDDI_DIR doesn't contain .eddi
+echo %EDDI_DIR% | findstr /c:".eddi" >nul
+if errorlevel 1 (
+    echo EDDI_DIR doesn't look safe to delete: %EDDI_DIR%
+    goto :eof
+)
 echo This will stop EDDI and remove all data.
 set /p CONFIRM="Are you sure? [y/N]: "
 if /i "%CONFIRM%"=="y" (
     docker compose %FLAGS% down -v
+    rem Remove EDDI_DIR from user PATH before deleting
+    powershell -Command "[Environment]::SetEnvironmentVariable('PATH', (([Environment]::GetEnvironmentVariable('PATH','User') -split ';' | Where-Object { $_ -ne '%EDDI_DIR%' }) -join ';'), 'User')" 2>nul
     rmdir /s /q "%EDDI_DIR%"
     echo EDDI uninstalled.
+    echo PATH entry removed. Restart your terminal.
 )
 goto :eof
 
@@ -941,4 +971,9 @@ catch {
         & docker @cleanupArgs 2>$null
     }
     throw
+}
+finally {
+    # Scrub vault key from process environment and variable (defense-in-depth)
+    Remove-Item Env:\EDDI_VAULT_MASTER_KEY -ErrorAction SilentlyContinue
+    $EddiVaultMasterKey = $null
 }

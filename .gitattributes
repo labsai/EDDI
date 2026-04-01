@@ -1,1 +1,5 @@
 licenses/** linguist-generated
+
+# Install scripts — enforce correct line endings per platform
+*.sh text eol=lf
+*.ps1 text eol=crlf

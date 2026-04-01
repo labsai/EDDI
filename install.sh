@@ -16,6 +16,12 @@ EDDI_BRANCH="${EDDI_BRANCH:-main}"
 EDDI_PORT="${EDDI_PORT:-7070}"
 EDDI_HTTPS_PORT="${EDDI_HTTPS_PORT:-7443}"
 EDDI_DIR="${EDDI_DIR:-$HOME/.eddi}"
+# Strip trailing slash to avoid double-slash paths in output/config
+EDDI_DIR="${EDDI_DIR%/}"
+# Validate branch name (prevent path traversal in download URLs)
+if [[ ! "$EDDI_BRANCH" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+  echo "Invalid EDDI_BRANCH: $EDDI_BRANCH" >&2; exit 1
+fi
 COMPOSE_BASE_URL="https://raw.githubusercontent.com/labsai/EDDI/${EDDI_BRANCH}"
 EDDI_ALREADY_RUNNING=false
 
@@ -157,7 +163,7 @@ read_port() {
     read -r reply </dev/tty 2>/dev/null || reply=""
     reply="${reply:-$suggested}"
     if [[ "$reply" =~ ^[0-9]+$ ]] && (( reply >= 1024 && reply <= 65535 )); then
-      if [[ "$reply" != "$default_port" ]] && port_in_use "$reply"; then
+      if port_in_use "$reply"; then
         warn "Port ${reply} is in use. Try another." >&2
       else
         info "${port_name} port: ${reply}" >&2
@@ -672,10 +678,10 @@ compose_cmd() {
 start_eddi() {
   section "Starting EDDI"
 
-  # Export env vars so docker-compose variable substitution picks them up
+  # Export port env vars so docker-compose variable substitution picks them up
+  # Note: vault key is NOT exported — it's read from --env-file only
   export EDDI_PORT
   export EDDI_HTTPS_PORT
-  export EDDI_VAULT_MASTER_KEY
 
   if [[ "$LOCAL_IMAGE" == "true" ]]; then
     echo "  Building local Docker image..."
@@ -739,7 +745,9 @@ wait_for_ready() {
   echo "    cd $EDDI_DIR && docker compose ${COMPOSE_FILES[*]/#/-f } logs"
   echo ""
   echo "  Containers left running for inspection."
-  HEALTHY=false
+  # Mark healthy to prevent cleanup trap from tearing down containers
+  # (we explicitly told the user containers are left running)
+  HEALTHY=true
   exit 1
 }
 
@@ -890,6 +898,11 @@ case "${1:-help}" in
     echo "EDDI updated."
     ;;
   uninstall)
+    # Sanity check: refuse to delete if EDDI_DIR doesn't look right
+    if [[ ! "$EDDI_DIR" == *"/.eddi"* ]] && [[ ! "$EDDI_DIR" == *"\.eddi"* ]]; then
+      echo "EDDI_DIR doesn't look safe to delete: $EDDI_DIR"
+      exit 1
+    fi
     echo "This will stop EDDI and remove all data."
     read -rp "Are you sure? [y/N]: " confirm
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
