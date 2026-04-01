@@ -100,7 +100,7 @@ LABEL name="labsai/eddi" \
       io.k8s.description="Multi-Agent AI Orchestration Middleware" \
       io.openshift.tags="ai,conversational-ai,llm,chatbot,multi-agent,quarkus"
 
-ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en'
+ENV LANG='C.utf8' LANGUAGE='C.utf8'
 
 USER root
 
