@@ -41,7 +41,8 @@ public interface IRestLogAdmin {
     @Path("/history")
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(summary = "Get historical logs from database", description = "Returns historical logs from the database. Survives restarts and works cross-instance.")
+    @Operation(summary = "Get historical logs from database", description = "Returns historical logs from the database. "
+            + "Survives restarts and works cross-instance.")
     @APIResponse(responseCode = "200", description = "List of historical log entries.")
     List<LogEntry> getHistoryLogs(@QueryParam("environment") Deployment.Environment environment,
             @Parameter(description = "Filter by agent ID.") @QueryParam("agentId") String agentId, @QueryParam("agentVersion") Integer agentVersion,

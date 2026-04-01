@@ -19,6 +19,12 @@
         <property name="files" value=".*[\\/]target[\\/].*"/>
     </module>
 
+    <!-- Suppress MethodName in MCP tools — MCP protocol requires snake_case -->
+    <module name="SuppressionSingleFilter">
+        <property name="checks" value="MethodName"/>
+        <property name="files" value=".*[\\/]mcp[\\/]Mcp.*\.java$"/>
+    </module>
+
     <!-- File-level checks -->
     <module name="FileLength">
         <property name="max" value="2000"/>

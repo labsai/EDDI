@@ -29,7 +29,8 @@ public interface IRestUserMemoryStore {
     @GET
     @Path("/{userId}/visible")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(summary = "Get visible memories for an agent", description = "Returns memories visible to a specific agent, considering self/group/global visibility.")
+    @Operation(summary = "Get visible memories for an agent", description = "Returns memories visible to a specific agent, "
+            + "considering self/group/global visibility.")
     List<UserMemoryEntry> getVisibleMemories(@PathParam("userId") String userId, @QueryParam("agentId") String agentId,
             @QueryParam("groupId") List<String> groupIds, @QueryParam("order") @DefaultValue("most_recent") String recallOrder,
             @QueryParam("limit") @DefaultValue("50") int maxEntries);
@@ -65,7 +66,8 @@ public interface IRestUserMemoryStore {
 
     @DELETE
     @Path("/{userId}")
-    @Operation(summary = "Delete all memories for a user (GDPR)", description = "Permanently removes all memory entries for a user. Intended for GDPR right-to-erasure requests.")
+    @Operation(summary = "Delete all memories for a user (GDPR)", description = "Permanently removes all memory entries for a user. "
+            + "Intended for GDPR right-to-erasure requests.")
     Response deleteAllForUser(@PathParam("userId") String userId);
 
     @GET

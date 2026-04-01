@@ -63,6 +63,7 @@ public interface IRestCoordinatorAdmin {
     @GET
     @Path("/stream")
     @Produces(MediaType.SERVER_SENT_EVENTS)
-    @Operation(summary = "Stream coordinator events via SSE", description = "Live-tail of coordinator events: task_submitted, task_completed, task_failed, task_dead_lettered.")
+    @Operation(summary = "Stream coordinator events via SSE", description = "Live-tail of coordinator events: task_submitted, "
+            + "task_completed, task_failed, task_dead_lettered.")
     void streamEvents(@Context SseEventSink eventSink, @Context Sse sse);
 }

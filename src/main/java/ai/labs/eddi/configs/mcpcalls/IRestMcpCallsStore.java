@@ -73,7 +73,8 @@ public interface IRestMcpCallsStore extends IRestVersionInfo {
     @GET
     @Path("/discover-tools")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(summary = "Discover MCP tools", description = "Probe a live MCP server to discover available tools. Used by the Manager UI for whitelist/blacklist selection.")
+    @Operation(summary = "Discover MCP tools", description = "Probe a live MCP server to discover available tools. "
+            + "Used by the Manager UI for whitelist/blacklist selection.")
     Response discoverTools(@QueryParam("url") String url, @QueryParam("transport") @DefaultValue("http") String transport,
             @QueryParam("apiKey") @DefaultValue("") String apiKey);
 }

@@ -100,7 +100,8 @@ public class PostgresSecretPersistence implements ISecretPersistence {
         ensureSchema();
         String sql = """
                 INSERT INTO secret_vault_secrets
-                    (tenant_id, key_name, encrypted_value, iv, dek_id, checksum, description, allowed_agents, created_at, last_accessed_at, last_rotated_at)
+                    (tenant_id, key_name, encrypted_value, iv, dek_id, checksum,
+                     description, allowed_agents, created_at, last_accessed_at, last_rotated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
                 ON CONFLICT (tenant_id, key_name)
                 DO UPDATE SET encrypted_value = EXCLUDED.encrypted_value,

@@ -631,6 +631,9 @@ public class GroupConversationService implements IGroupConversationService {
                 data.put("transcript", fullTranscript);
                 data.put("totalPhases", phaseIdx);
             }
+            default -> {
+                // All PhaseType values handled above; default required by checkstyle
+            }
         }
 
         try {
