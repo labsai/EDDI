@@ -28,13 +28,13 @@ public interface IRestAgentStore extends IRestVersionInfo {
     @Path("/jsonSchema")
     @Produces(MediaType.APPLICATION_JSON)
     @APIResponse(responseCode = "200", description = "JSON Schema (for validation).")
-    @Operation(description = "Read JSON Schema for Agent definition.")
+    @Operation(operationId = "readAgentJsonSchema", description = "Read JSON Schema for Agent definition.")
     Response readJsonSchema();
 
     @GET
     @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Read list of Agent descriptors.")
+    @Operation(operationId = "readAgentDescriptors", description = "Read list of Agent descriptors.")
     List<DocumentDescriptor> readAgentDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
             @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
 
@@ -42,7 +42,7 @@ public interface IRestAgentStore extends IRestVersionInfo {
     @Path("descriptors")
     @Consumes(MediaType.TEXT_PLAIN)
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Read list of Agent descriptors including a given workflowUri.")
+    @Operation(operationId = "readAgentDescriptorsWithWorkflow", description = "Read list of Agent descriptors including a given workflowUri.")
     // @formatter:off
     List<DocumentDescriptor> readAgentDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
             @QueryParam("index") @DefaultValue("0") Integer index,

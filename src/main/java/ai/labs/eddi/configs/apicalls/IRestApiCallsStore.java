@@ -28,7 +28,7 @@ public interface IRestApiCallsStore extends IRestVersionInfo {
     @Path("/jsonSchema")
     @Produces(MediaType.APPLICATION_JSON)
     @APIResponse(responseCode = "200", description = "JSON Schema (for validation).")
-    @Operation(description = "Read JSON Schema for regular httpCalls definition.")
+    @Operation(operationId = "readApiCallsJsonSchema", description = "Read JSON Schema for regular httpCalls definition.")
     Response readJsonSchema();
 
     @GET

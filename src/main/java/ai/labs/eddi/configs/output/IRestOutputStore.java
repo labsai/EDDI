@@ -30,7 +30,7 @@ public interface IRestOutputStore extends IRestVersionInfo {
     @Path("/jsonSchema")
     @Produces(MediaType.APPLICATION_JSON)
     @APIResponse(responseCode = "200", description = "JSON Schema (for validation).")
-    @Operation(description = "Read JSON Schema for output definition.")
+    @Operation(operationId = "readOutputJsonSchema", description = "Read JSON Schema for output definition.")
     Response readJsonSchema();
 
     @GET

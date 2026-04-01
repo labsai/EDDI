@@ -28,7 +28,7 @@ public interface IRestPropertySetterStore extends IRestVersionInfo {
     @Path("/jsonSchema")
     @Produces(MediaType.APPLICATION_JSON)
     @APIResponse(responseCode = "200", description = "JSON Schema (for validation).")
-    @Operation(description = "Read JSON Schema for regular propertySetter definition.")
+    @Operation(operationId = "readPropertySetterJsonSchema", description = "Read JSON Schema for regular propertySetter definition.")
     Response readJsonSchema();
 
     @GET

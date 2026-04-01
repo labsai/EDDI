@@ -28,7 +28,7 @@ public interface IRestRagStore extends IRestVersionInfo {
     @Path("/jsonSchema")
     @Produces(MediaType.APPLICATION_JSON)
     @APIResponse(responseCode = "200", description = "JSON Schema for RAG validation.")
-    @Operation(summary = "Get JSON Schema", description = "Read JSON Schema for RAG configuration.")
+    @Operation(operationId = "readRagJsonSchema", summary = "Get JSON Schema", description = "Read JSON Schema for RAG configuration.")
     Response readJsonSchema();
 
     @GET

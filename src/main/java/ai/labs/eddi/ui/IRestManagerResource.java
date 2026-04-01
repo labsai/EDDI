@@ -8,6 +8,8 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.resteasy.reactive.Cache;
 
+import org.eclipse.microprofile.openapi.annotations.Operation;
+
 /**
  * Internal SPA serving endpoint — not a public API.
  */
@@ -18,11 +20,13 @@ public interface IRestManagerResource {
     @Cache(noCache = true, mustRevalidate = true)
     @Path("/manage")
     @Produces(MediaType.TEXT_HTML)
+    @Operation(hidden = true)
     Response fetchManagerResources();
 
     @GET
     @Cache(noCache = true, mustRevalidate = true)
     @Path("/manage/{path:.*}")
     @Produces(MediaType.TEXT_HTML)
+    @Operation(hidden = true)
     Response fetchManagerResources(@PathParam("path") String path);
 }

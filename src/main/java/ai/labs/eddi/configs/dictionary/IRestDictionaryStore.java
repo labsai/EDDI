@@ -28,7 +28,7 @@ public interface IRestDictionaryStore extends IRestVersionInfo {
     @Path("/jsonSchema")
     @Produces(MediaType.APPLICATION_JSON)
     @APIResponse(responseCode = "200", description = "JSON Schema (for validation).")
-    @Operation(description = "Read JSON Schema for regular dictionary definition.")
+    @Operation(operationId = "readDictionaryJsonSchema", description = "Read JSON Schema for regular dictionary definition.")
     Response readJsonSchema();
 
     @GET
@@ -52,7 +52,7 @@ public interface IRestDictionaryStore extends IRestVersionInfo {
     @GET
     @Path("/{id}/expressions")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Read expressions of regular dictionary.")
+    @Operation(operationId = "readDictionaryExpressions", description = "Read expressions of regular dictionary.")
     List<String> readExpressions(@PathParam("id") String id,
             @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
             @QueryParam("filter") @DefaultValue("") String filter, @QueryParam("order") @DefaultValue("") String order,

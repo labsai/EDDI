@@ -30,7 +30,7 @@ public interface IRestAgentGroupStore extends IRestVersionInfo {
     @Path("/jsonSchema")
     @Produces(MediaType.APPLICATION_JSON)
     @APIResponse(responseCode = "200", description = "JSON Schema (for validation).")
-    @Operation(description = "Read JSON Schema for group definition.")
+    @Operation(operationId = "readAgentGroupJsonSchema", description = "Read JSON Schema for group definition.")
     Response readJsonSchema();
 
     @GET

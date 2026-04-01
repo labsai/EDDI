@@ -28,7 +28,7 @@ public interface IRestMcpCallsStore extends IRestVersionInfo {
     @Path("/jsonSchema")
     @Produces(MediaType.APPLICATION_JSON)
     @APIResponse(responseCode = "200", description = "JSON Schema for McpCalls validation.")
-    @Operation(summary = "Get JSON Schema", description = "Read JSON Schema for MCP Calls configuration.")
+    @Operation(operationId = "readMcpCallsJsonSchema", summary = "Get JSON Schema", description = "Read JSON Schema for MCP Calls configuration.")
     Response readJsonSchema();
 
     @GET

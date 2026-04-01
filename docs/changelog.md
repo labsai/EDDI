@@ -12,6 +12,67 @@ Each entry follows this format:
 - **Repo** — Which repository was modified
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
+
+## Fix: OpenAPI SROAP07903 Duplicate operationId Warnings (2026-04-01)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:** 
+Resolved duplicate `operationId` warnings stemming from Quarkus Open API scanning (`io.smallrye.openapi.runtime.scanner.spi`) on startup. We applied explicit `@Operation(operationId="...")` values to over twenty endpoint methods across 12 JAX-RS interfaces to satisfy the OpenAPI spec requiring globally unique identifiers.
+
+**Design decision:** 
+Quarkus derives the `operationId` linearly from the method name in JAX-RS interfaces. When config stores all used `readJsonSchema()` across their distinct interface components, or when overloaded `readAgentDescriptors()` methodologies triggered conflicts, Quarkus flagged these as schema collision warnings. By explicitly setting unique contextual IDs (e.g., `readAgentJsonSchema`, `readRuleSetJsonSchema`, `sayWithinManagedContext`), we ensure valid OpenAPI docs and cleaner server logs while keeping the internal method signatures consistent. We also hid the UI SPA routing endpoints using `@Operation(hidden = true)`.
+
+**Files:** `IRestAgentStore.java`, `IRestApiCallsStore.java`, `IRestDictionaryStore.java`, `IRestAgentGroupStore.java`, `IRestLlmStore.java`, `IRestMcpCallsStore.java`, `IRestOutputStore.java`, `IRestPropertySetterStore.java`, `IRestRagStore.java`, `IRestRuleSetStore.java`, `IRestWorkflowStore.java`, `IRestAgentEngine.java`, `IRestAgentManagement.java`, `IRestManagerResource.java`
+## Fix: LogCaptureFilter recursive proxy instantiation causing 196+ BoundedLogStore instances (2026-04-01)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:** 
+Refactored `LogCaptureFilter` to use a statically registered reference of `BoundedLogStore` explicitly populated during its own `@PostConstruct` phase, rather than lazily resolving it via `Arc.container().instance(BoundedLogStore.class)` on every intercepted log record. 
+
+**Design decision:** During early application bootstrap, JBoss Logging intercepted structural initialization messages while Quarkus' `ApplicationScoped` contexts were not yet fully stabilized. `LogCaptureFilter` would request a `BoundedLogStore` proxy, which inherently triggered an incomplete instantiation that tried to log its own initialization string. This logger invocation recursively threw inside `LogCaptureFilter`, causing ArC to discard the singleton context and retry ~196 times (once for every single early log event). The new approach fully inverts control: the filter ignores all logs until `BoundedLogStore` proves its own valid initialization state by pushing `this` to the log filter.
+
+**Files:** `LogCaptureFilter.java`, `BoundedLogStore.java`
+
+---
+
+## Fix: Install scripts runtime configuration parity for unified Postgres/MongoDB builds (2026-04-01)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:** 
+Updated both `install.ps1` and `install.sh` wizards to explicitly output `EDDI_DATASTORE_TYPE` directly inside the generated `.env` configuration template, mapping user-selected values (`mongodb` or `postgres`) to environment properties globally visible to the Docker Compose setup. Updated both corresponding `docker-compose.yml` models to read `${EDDI_DATASTORE_TYPE:-mongodb}` optionally.
+
+**Design decision:** Our refactoring replaced build-time Maven tags (`latest` vs `latest-postgresql`) with a centralized Docker image capable of dynamic dependency injection based on `EDDI_DATASTORE_TYPE`. However, the install wizards didn't know this flag existed yet, leaving runtime behavior undefined or reverting to defaults. Binding the flag locally guarantees complete runtime compatibility parity across fresh container evaluations.
+
+**Files:** `install.ps1`, `install.sh`, `docker-compose.yml`, `docker-compose.postgres-only.yml`
+
+---
+
+## Runtime database store selection — single image for MongoDB + PostgreSQL (2026-04-01)
+
+**Repo:** EDDI (`main`)
+
+**What changed:**
+
+Replaced build-time `@IfBuildProfile("postgres")` annotations on all 13 PostgreSQL store implementations with `@DefaultBean`. Added a new `DataStoreProducers` class that selects the correct store implementation at **runtime** based on the `eddi.datastore.type` configuration property (default: `mongodb`).
+
+**Design decision:** The previous approach required separate Docker images per database backend (build-time profile embedding). The new `@DefaultBean` + `@Produces` + `Instance<T>` pattern enables a **single Docker image** that supports both MongoDB and PostgreSQL. The `DataStoreProducers` class uses lazy `Instance<T>` handles — only the selected DB's stores are ever instantiated. In postgres mode, `MongoDatabase` producer is never called, so no MongoDB connection is attempted.
+
+**How it works:**
+- Both Mongo and Postgres stores are `@DefaultBean` (eligible but low-priority)
+- `DataStoreProducers` has non-default `@Produces` methods that win over `@DefaultBean`
+- Each producer uses `Instance<MongoXxx>` / `Instance<PostgresXxx>` for lazy resolution
+- `eddi.datastore.type=postgres` → only Postgres stores instantiated
+- `eddi.datastore.type=mongodb` (default) → only Mongo stores instantiated
+
+**Activation:** Set `EDDI_DATASTORE_TYPE=postgres` env var, or use `QUARKUS_PROFILE=postgres` (which loads `%postgres.eddi.datastore.type=postgres` from `application.properties`).
+
+**Files:** 31 changed — 13 Postgres stores, 12 Mongo stores (removed `@UnlessBuildProfile`), `DataStoreProducers.java` (new), `application.properties`.
+
+---
+
 ## Fix: Prometheus meter conflict in ToolRateLimiter — duplicate tag keys (2026-04-01)
 
 **Repo:** EDDI (`feature/version-6.0.0`)

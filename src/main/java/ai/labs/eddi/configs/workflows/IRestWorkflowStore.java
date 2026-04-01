@@ -28,13 +28,13 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
     @Path("/jsonSchema")
     @Produces(MediaType.APPLICATION_JSON)
     @APIResponse(responseCode = "200", description = "JSON Schema (for validation).")
-    @Operation(description = "Read JSON Schema for workflow definition.")
+    @Operation(operationId = "readWorkflowJsonSchema", description = "Read JSON Schema for workflow definition.")
     Response readJsonSchema();
 
     @GET
     @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Read list of workflow descriptors.")
+    @Operation(operationId = "readWorkflowDescriptors", description = "Read list of workflow descriptors.")
     List<DocumentDescriptor> readWorkflowDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
             @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
 
@@ -42,7 +42,7 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
     @Path("descriptors")
     @Consumes(MediaType.TEXT_PLAIN)
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Read list of workflow descriptors including a given resourceUri.")
+    @Operation(operationId = "readWorkflowDescriptorsWithResource", description = "Read list of workflow descriptors including a given resourceUri.")
     List<DocumentDescriptor> readWorkflowDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
             @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit,
             @Parameter(name = "body", description = "eddi://ai.labs.TYPE/PATH/ID?version=VERSION") @DefaultValue("") String containingResourceUri,

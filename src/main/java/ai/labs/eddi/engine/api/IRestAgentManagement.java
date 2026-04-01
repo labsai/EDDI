@@ -44,7 +44,7 @@ public interface IRestAgentManagement {
     @Path("/{intent}/{userId}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(summary = "Talk to managed agent with context", description = "Send a structured message with context to the managed conversation.")
+    @Operation(operationId = "sayWithinManagedContext", summary = "Talk to managed agent with context", description = "Send a structured message with context to the managed conversation.")
     void sayWithinContext(@PathParam("intent") String intent, @PathParam("userId") String userId,
             @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
             @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
@@ -59,24 +59,24 @@ public interface IRestAgentManagement {
     @GET
     @Path("/{intent}/{userId}/undo")
     @Produces(MediaType.TEXT_PLAIN)
-    @Operation(summary = "Check undo availability (managed)", description = "Returns true if undo is available for the managed conversation.")
+    @Operation(operationId = "isManagedUndoAvailable", summary = "Check undo availability (managed)", description = "Returns true if undo is available for the managed conversation.")
     Boolean isUndoAvailable(@PathParam("intent") String intent, @PathParam("userId") String userId);
 
     @POST
     @Path("/{intent}/{userId}/undo")
-    @Operation(summary = "Undo last step (managed)", description = "Undoes the last conversation step for the managed conversation.")
+    @Operation(operationId = "managedUndo", summary = "Undo last step (managed)", description = "Undoes the last conversation step for the managed conversation.")
     @APIResponse(responseCode = "200", description = "Undo successful.")
     Response undo(@PathParam("intent") String intent, @PathParam("userId") String userId);
 
     @GET
     @Path("/{intent}/{userId}/redo")
     @Produces(MediaType.TEXT_PLAIN)
-    @Operation(summary = "Check redo availability (managed)", description = "Returns true if redo is available for the managed conversation.")
+    @Operation(operationId = "isManagedRedoAvailable", summary = "Check redo availability (managed)", description = "Returns true if redo is available for the managed conversation.")
     Boolean isRedoAvailable(@PathParam("intent") String intent, @PathParam("userId") String userId);
 
     @POST
     @Path("/{intent}/{userId}/redo")
-    @Operation(summary = "Redo last undone step (managed)", description = "Redoes the last undone step for the managed conversation.")
+    @Operation(operationId = "managedRedo", summary = "Redo last undone step (managed)", description = "Redoes the last undone step for the managed conversation.")
     @APIResponse(responseCode = "200", description = "Redo successful.")
     Response redo(@PathParam("intent") String intent, @PathParam("userId") String userId);
 }

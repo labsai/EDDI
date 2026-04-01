@@ -28,7 +28,7 @@ public interface IRestLlmStore extends IRestVersionInfo {
     @Path("/jsonSchema")
     @Produces(MediaType.APPLICATION_JSON)
     @APIResponse(responseCode = "200", description = "JSON Schema (for validation).")
-    @Operation(description = "Read JSON Schema for regular LLM config definition.")
+    @Operation(operationId = "readLlmJsonSchema", description = "Read JSON Schema for regular LLM config definition.")
     Response readJsonSchema();
 
     @GET
