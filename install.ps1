@@ -776,52 +776,6 @@ function Write-ConfigSummary {
     Write-Information -MessageData "  Install dir:    $EddiDir"
 }
 
-# ── Main ─────────────────────────────────────────────────
-
-$startTime = Get-Date
-
-try {
-    Write-Banner
-    Test-Prerequisites
-
-    if ($EddiAlreadyRunning) {
-        Write-Section "EDDI Already Running"
-        Import-InitialAgents
-        Write-Success
-        Install-CliWrapper
-        exit 0
-    }
-
-    Step-Database
-    Step-Security
-    Step-Auth
-    Step-Monitoring
-    Step-Ports
-
-    Write-ConfigSummary
-    Get-ComposeFiles
-
-    Start-Eddi
-    Wait-ForReady
-    Import-InitialAgents
-    Write-Success
-    $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds)
-    Write-Information -MessageData "  Total setup time: ${elapsed}s"
-    Write-Information -MessageData ""
-}
-catch {
-    if ($ContainersStarted -and -not $Healthy) {
-        Write-Information -MessageData ""
-        Write-Information -MessageData "⚠️  Setup interrupted. Cleaning up containers..."
-        $envFile = Join-Path -Path $EddiDir -ChildPath ".env"
-        $cleanupArgs = @("compose")
-        if (Test-Path $envFile) { $cleanupArgs += @("--env-file", $envFile) }
-        $cleanupArgs += ($ComposeFiles | ForEach-Object { @("-f", $_) }) + @("down")
-        & docker @cleanupArgs 2>$null
-    }
-    throw
-}
-
 # ── Install CLI wrapper ─────────────────────────────────
 
 function Install-CliWrapper {
@@ -935,4 +889,49 @@ goto :eof
     }
 }
 
-Install-CliWrapper
+# ── Main ─────────────────────────────────────────────────
+
+$startTime = Get-Date
+
+try {
+    Write-Banner
+    Test-Prerequisites
+
+    if ($EddiAlreadyRunning) {
+        Write-Section "EDDI Already Running"
+        Import-InitialAgents
+        Write-Success
+        Install-CliWrapper
+        exit 0
+    }
+
+    Step-Database
+    Step-Security
+    Step-Auth
+    Step-Monitoring
+    Step-Ports
+
+    Write-ConfigSummary
+    Get-ComposeFiles
+
+    Start-Eddi
+    Wait-ForReady
+    Import-InitialAgents
+    Write-Success
+    Install-CliWrapper
+    $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds)
+    Write-Information -MessageData "  Total setup time: ${elapsed}s"
+    Write-Information -MessageData ""
+}
+catch {
+    if ($ContainersStarted -and -not $Healthy) {
+        Write-Information -MessageData ""
+        Write-Information -MessageData "⚠️  Setup interrupted. Cleaning up containers..."
+        $envFile = Join-Path -Path $EddiDir -ChildPath ".env"
+        $cleanupArgs = @("compose")
+        if (Test-Path $envFile) { $cleanupArgs += @("--env-file", $envFile) }
+        $cleanupArgs += ($ComposeFiles | ForEach-Object { @("-f", $_) }) + @("down")
+        & docker @cleanupArgs 2>$null
+    }
+    throw
+}
