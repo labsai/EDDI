@@ -118,7 +118,6 @@ $ContainersStarted = $false
 $Healthy = $false
 $EddiAlreadyRunning = $false
 $ComposeFiles = @()
-$ComposeCmdFiles = ""
 $EddiVaultMasterKey = ""
 
 # ── Helpers ────────────────────────────────────────────────
@@ -574,9 +573,6 @@ function Get-ComposeFiles {
         }
     }
 
-    # Build compose flags
-    $script:ComposeCmdFiles = ($ComposeFiles | ForEach-Object { "-f `"$_`"" }) -join " "
-
     # Save config for CLI wrapper (vault key NOT stored here — it's in .env only)
     $configPath = Join-Path -Path $EddiDir -ChildPath ".eddi-config"
     @"
@@ -899,6 +895,17 @@ try {
 
     if ($EddiAlreadyRunning) {
         Write-Section "EDDI Already Running"
+        # Ensure .eddi-config exists (may be missing if EDDI was started manually)
+        $configPath = Join-Path -Path $EddiDir -ChildPath ".eddi-config"
+        if (-not (Test-Path $configPath)) {
+            Write-Warn "No .eddi-config found — creating minimal config for CLI wrapper."
+            New-Item -ItemType Directory -Force -Path $EddiDir | Out-Null
+            @"
+COMPOSE_FILES=$(Join-Path -Path $EddiDir -ChildPath 'docker-compose.yml')
+EDDI_PORT=$EddiPort
+EDDI_HTTPS_PORT=$EddiHttpsPort
+"@ | Set-Content -Path $configPath
+        }
         Import-InitialAgents
         Write-Success
         Install-CliWrapper

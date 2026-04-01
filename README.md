@@ -146,6 +146,41 @@ bash install.sh --local        # Build Docker image + start containers
 
 </details>
 
+### 🔄 Updating
+
+The installer creates an `eddi` CLI wrapper that makes updating easy:
+
+```bash
+eddi update
+```
+
+This pulls the latest Docker image from the registry and restarts the containers. It works even when the same tag (e.g. `6.0.0-RC1`) was re-published — Docker always checks the remote digest for changes.
+
+> **`eddi` command not found?** The CLI lives at `~/.eddi/eddi` (Linux/macOS) or `~/.eddi/eddi.cmd` (Windows). Either restart your terminal so the PATH takes effect, or use the full path:
+>
+> ```bash
+> # Linux / macOS
+> ~/.eddi/eddi update
+>
+> # Windows (PowerShell)
+> & "$HOME\.eddi\eddi.cmd" update
+> ```
+
+<details>
+<summary><strong>Manual update (without the CLI)</strong></summary>
+
+If the `eddi` CLI isn't available, run the equivalent docker commands from your install directory (`~/.eddi` by default):
+
+```bash
+cd ~/.eddi
+docker compose --env-file .env -f docker-compose.yml pull
+docker compose --env-file .env -f docker-compose.yml up -d
+```
+
+Adjust the `-f` flags to match your setup (e.g. add `-f docker-compose.auth.yml` if using Keycloak).
+
+</details>
+
 ### 🐳 Docker Compose (Manual)
 
 If you prefer manual control over Docker Compose:

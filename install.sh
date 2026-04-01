@@ -633,7 +633,7 @@ resolve_compose_files() {
   fi
 
   # Save config for eddi CLI wrapper (no secrets — vault key stays in .env only)
-  echo "COMPOSE_FILES=\"${COMPOSE_FILES[*]}\"" > "$EDDI_DIR/.eddi-config"
+  echo "COMPOSE_FILES=${COMPOSE_FILES[*]}" > "$EDDI_DIR/.eddi-config"
   echo "EDDI_PORT=$EDDI_PORT" >> "$EDDI_DIR/.eddi-config"
   echo "EDDI_HTTPS_PORT=$EDDI_HTTPS_PORT" >> "$EDDI_DIR/.eddi-config"
 
@@ -964,6 +964,17 @@ main() {
   if [[ "$EDDI_ALREADY_RUNNING" == "true" ]]; then
     # EDDI is already running — skip infra, check agents
     section "EDDI Already Running"
+    # Ensure .eddi-config exists (may be missing if EDDI was started manually)
+    if [[ ! -f "$EDDI_DIR/.eddi-config" ]]; then
+      warn "No .eddi-config found — creating minimal config for CLI wrapper."
+      mkdir -p "$EDDI_DIR"
+      cat > "$EDDI_DIR/.eddi-config" <<CFGEOF
+COMPOSE_FILES=$EDDI_DIR/docker-compose.yml
+EDDI_PORT=$EDDI_PORT
+EDDI_HTTPS_PORT=$EDDI_HTTPS_PORT
+CFGEOF
+      chmod 600 "$EDDI_DIR/.eddi-config"
+    fi
     maybe_import_initial_agents
     install_cli_wrapper
     print_success
