@@ -186,7 +186,7 @@ public class MigrationManager implements IMigrationManager {
     }
 
     private boolean iterateMigration(String documentType, IDocumentMigration migration, MongoCollection<Document> collection,
-            MongoCollection<Document> collectionHistory) {
+                                     MongoCollection<Document> collectionHistory) {
 
         var migrationHasExecuted = migrateDocuments(documentType, collection.find(), migration, collection, false);
 
@@ -198,7 +198,7 @@ public class MigrationManager implements IMigrationManager {
     }
 
     private boolean migrateDocuments(String documentType, Iterable<Document> documents, IDocumentMigration migration,
-            MongoCollection<Document> collection, boolean isHistory) {
+                                     MongoCollection<Document> collection, boolean isHistory) {
 
         boolean migrationHasExecuted = false;
         for (var document : documents) {

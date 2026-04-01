@@ -15,5 +15,8 @@ public interface IRestOutputActions {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     List<String> readOutputActions(@QueryParam("workflowId") String workflowId, @QueryParam("workflowVersion") Integer workflowVersion,
-            @QueryParam("filter") @DefaultValue("") String filter, @QueryParam("limit") @DefaultValue("20") Integer limit);
+                                   @QueryParam("filter")
+                                   @DefaultValue("") String filter,
+                                   @QueryParam("limit")
+                                   @DefaultValue("20") Integer limit);
 }

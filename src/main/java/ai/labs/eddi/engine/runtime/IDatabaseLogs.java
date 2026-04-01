@@ -8,7 +8,7 @@ import java.util.List;
 public interface IDatabaseLogs {
 
     List<LogEntry> getLogs(Deployment.Environment environment, String agentId, Integer agentVersion, String conversationId, String userId,
-            String instanceId, Integer skip, Integer limit);
+                           String instanceId, Integer skip, Integer limit);
 
     /**
      * Batch insert log entries. Used by the async DB writer in

@@ -79,7 +79,8 @@ class AgentExecutionHelper {
      * Executes chat model with retry logic based on configuration.
      */
     static ChatResponse executeChatWithRetry(ChatModel chatModel, java.util.List<dev.langchain4j.data.message.ChatMessage> messages,
-            LlmConfiguration.Task task) throws LifecycleException {
+                                             LlmConfiguration.Task task)
+            throws LifecycleException {
 
         return executeWithRetry(() -> chatModel.chat(messages), task, "Chat model execution");
     }

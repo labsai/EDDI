@@ -62,7 +62,7 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
 
     @Override
     public List<LogEntry> getLogs(Environment environment, String agentId, Integer agentVersion, String conversationId, String userId,
-            String instanceId, Integer skip, Integer limit) {
+                                  String instanceId, Integer skip, Integer limit) {
         ensureSchema();
         return getLogsInternal(environment != null ? environment.toString() : null, agentId, agentVersion, conversationId, userId, instanceId, skip,
                 limit);
@@ -104,7 +104,7 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
     }
 
     private List<LogEntry> getLogsInternal(String environment, String agentId, Integer agentVersion, String conversationId, String userId,
-            String instanceId, Integer skip, Integer limit) {
+                                           String instanceId, Integer skip, Integer limit) {
         List<LogEntry> logs = new ArrayList<>();
         StringBuilder sql = new StringBuilder("SELECT * FROM database_logs WHERE 1=1");
         List<Object> params = new ArrayList<>();

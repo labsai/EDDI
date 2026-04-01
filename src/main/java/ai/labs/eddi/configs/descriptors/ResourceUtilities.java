@@ -39,7 +39,8 @@ public class ResourceUtilities {
     }
 
     public static void createDocumentDescriptorForDuplicate(IDocumentDescriptorStore documentDescriptorStore, String oldId, Integer oldVersion,
-            URI newResourceLocation) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+                                                            URI newResourceLocation)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         var oldDescriptor = documentDescriptorStore.readDescriptor(oldId, oldVersion);
 

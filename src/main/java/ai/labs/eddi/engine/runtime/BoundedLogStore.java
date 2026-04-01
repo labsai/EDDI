@@ -76,7 +76,7 @@ public class BoundedLogStore {
      * {@link #init()} after construction to start the DB writer.
      */
     static BoundedLogStore createForTesting(InstanceIdProducer instanceIdProducer, IDatabaseLogs databaseLogs, int bufferSize, boolean dbEnabled,
-            int dbFlushIntervalSeconds, String dbPersistMinLevel) {
+                                            int dbFlushIntervalSeconds, String dbPersistMinLevel) {
         return new BoundedLogStore(instanceIdProducer, databaseLogs, bufferSize, dbEnabled, dbFlushIntervalSeconds, dbPersistMinLevel);
     }
 

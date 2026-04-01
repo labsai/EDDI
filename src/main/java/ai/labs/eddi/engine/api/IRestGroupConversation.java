@@ -34,9 +34,11 @@ public interface IRestGroupConversation {
     @Path("/stream")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.SERVER_SENT_EVENTS)
-    @Operation(summary = "Start a group discussion with SSE streaming", description = "Starts a group discussion asynchronously and streams progress events "
-            + "(group_start, phase_start, speaker_start, speaker_complete, " + "phase_complete, synthesis_start, group_complete, group_error) "
-            + "via Server-Sent Events.")
+    @Operation(summary = "Start a group discussion with SSE streaming",
+               description = "Starts a group discussion asynchronously and streams progress events "
+                       + "(group_start, phase_start, speaker_start, speaker_complete, "
+                       + "phase_complete, synthesis_start, group_complete, group_error) "
+                       + "via Server-Sent Events.")
     @APIResponse(responseCode = "200", description = "SSE event stream of discussion progress.")
     @APIResponse(responseCode = "404", description = "Group not found.")
     void discussStreaming(@PathParam("groupId") String groupId, DiscussRequest request, @Context SseEventSink eventSink, @Context Sse sse);
@@ -60,8 +62,10 @@ public interface IRestGroupConversation {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "List group conversations", description = "Lists group conversation transcripts for a group with pagination.")
     @APIResponse(responseCode = "200", description = "Paginated list of group conversations.")
-    List<GroupConversation> listGroupConversations(@PathParam("groupId") String groupId, @QueryParam("index") @DefaultValue("0") Integer index,
-            @QueryParam("limit") @DefaultValue("20") Integer limit);
+    List<GroupConversation> listGroupConversations(@PathParam("groupId") String groupId, @QueryParam("index")
+    @DefaultValue("0") Integer index,
+                                                   @QueryParam("limit")
+                                                   @DefaultValue("20") Integer limit);
 
     /**
      * Request body for starting a group discussion.

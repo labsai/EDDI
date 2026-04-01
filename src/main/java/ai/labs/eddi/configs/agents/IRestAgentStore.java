@@ -35,8 +35,12 @@ public interface IRestAgentStore extends IRestVersionInfo {
     @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(operationId = "readAgentDescriptors", description = "Read list of Agent descriptors.")
-    List<DocumentDescriptor> readAgentDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
+    List<DocumentDescriptor> readAgentDescriptors(@QueryParam("filter")
+    @DefaultValue("") String filter,
+                                                  @QueryParam("index")
+                                                  @DefaultValue("0") Integer index,
+                                                  @QueryParam("limit")
+                                                  @DefaultValue("20") Integer limit);
 
     @POST
     @Path("descriptors")
@@ -58,22 +62,26 @@ public interface IRestAgentStore extends IRestVersionInfo {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read agent.")
     AgentConfiguration readAgent(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
+                                 @Parameter(name = "version", required = true, example = "1")
+                                 @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update agent.")
     Response updateAgent(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            AgentConfiguration agentConfiguration);
+                         @Parameter(name = "version", required = true, example = "1")
+                         @QueryParam("version") Integer version,
+                         AgentConfiguration agentConfiguration);
 
     @PUT
     @Path("/{id}/updateResourceUri")
     @Consumes(MediaType.TEXT_PLAIN)
     @Operation(description = "Update references to other resources within this Agent resource.")
     Response updateResourceInAgent(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version, URI resourceURI);
+                                   @Parameter(name = "version", required = true, example = "1")
+                                   @QueryParam("version") Integer version,
+                                   URI resourceURI);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -84,14 +92,16 @@ public interface IRestAgentStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(description = "Duplicate this agent.")
     Response duplicateAgent(@PathParam("id") String id, @QueryParam("version") Integer version,
-            @QueryParam("deepCopy") @DefaultValue("false") Boolean deepCopy);
+                            @QueryParam("deepCopy")
+                            @DefaultValue("false") Boolean deepCopy);
 
     @DELETE
     @Path("/{id}")
     @Operation(summary = "Delete agent", description = "Delete a Agent configuration. When cascade=true, also deletes referenced packages "
             + "and their extension resources (behavior sets, HTTP calls, output sets, langchains, "
             + "property setters, dictionaries). Shared resources (packages used by other agents, "
-            + "extensions used by other packages) are skipped. " + "Partial failures are logged but do not prevent the Agent from being deleted.")
+            + "extensions used by other packages) are skipped. "
+            + "Partial failures are logged but do not prevent the Agent from being deleted.")
     @APIResponse(responseCode = "200", description = "Agent deleted successfully.")
     @APIResponse(responseCode = "404", description = "Agent not found.")
     // @formatter:off

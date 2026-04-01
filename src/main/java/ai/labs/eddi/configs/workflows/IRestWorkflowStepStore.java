@@ -15,5 +15,6 @@ import java.util.List;
 public interface IRestWorkflowStepStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    List<ExtensionDescriptor> getWorkflowSteps(@QueryParam("filter") @DefaultValue("") String filter);
+    List<ExtensionDescriptor> getWorkflowSteps(@QueryParam("filter")
+    @DefaultValue("") String filter);
 }

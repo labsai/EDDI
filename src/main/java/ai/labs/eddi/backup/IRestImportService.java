@@ -29,8 +29,9 @@ public interface IRestImportService {
     @Consumes("application/zip")
     @Operation(description = "Import a Agent from a zip file. " + "strategy=create (default) always creates new resources. "
             + "strategy=merge looks up existing resources by origin ID and updates them.")
-    void importAgent(InputStream zippedAgentConfigFiles, @QueryParam("strategy") @DefaultValue("create") String strategy,
-            @QueryParam("selectedResources") String selectedOriginIds, @Suspended AsyncResponse response);
+    void importAgent(InputStream zippedAgentConfigFiles, @QueryParam("strategy")
+    @DefaultValue("create") String strategy,
+                     @QueryParam("selectedResources") String selectedOriginIds, @Suspended AsyncResponse response);
 
     @POST
     @Path("/preview")

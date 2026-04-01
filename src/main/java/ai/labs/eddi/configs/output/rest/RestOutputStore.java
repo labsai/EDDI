@@ -96,7 +96,8 @@ public class RestOutputStore implements IRestOutputStore {
     }
 
     private OutputConfigurationSet patchDocument(OutputConfigurationSet currentOutputConfigurationSet,
-            List<PatchInstruction<OutputConfigurationSet>> patchInstructions) throws IResourceStore.ResourceStoreException {
+                                                 List<PatchInstruction<OutputConfigurationSet>> patchInstructions)
+            throws IResourceStore.ResourceStoreException {
 
         for (var patchInstruction : patchInstructions) {
             var outputConfigurationSetPatch = patchInstruction.getDocument();

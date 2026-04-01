@@ -25,10 +25,15 @@ public interface IRestRagIngestion {
     @APIResponse(responseCode = "202", description = "Ingestion started — returns ingestion ID for status polling.")
     @Operation(summary = "Ingest document", description = "Ingest a text document into a knowledge base. Runs async on a virtual thread.")
     Response ingestDocument(@PathParam("id") String ragConfigId,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @Parameter(name = "kbId", description = "Knowledge base ID (defaults to RAG config name)") @QueryParam("kbId") String kbId,
-            @Parameter(name = "documentName", description = "Display name for the document") @QueryParam("documentName") @DefaultValue("unnamed") String documentName,
-            String documentContent);
+                            @Parameter(name = "version", required = true, example = "1")
+                            @QueryParam("version") Integer version,
+                            @Parameter(name = "kbId", description = "Knowledge base ID (defaults to RAG config name)")
+                            @QueryParam("kbId") String kbId,
+                            @Parameter(name = "documentName",
+                                       description = "Display name for the document")
+                            @QueryParam("documentName")
+                            @DefaultValue("unnamed") String documentName,
+                            String documentContent);
 
     @GET
     @Path("/{id}/ingestion/{ingestionId}/status")

@@ -51,7 +51,7 @@ public class McpMemoryTools {
     @Tool(name = "list_user_memories", description = "List all persistent memory entries for a user. "
             + "Returns structured facts, preferences, and context that agents have remembered about the user.")
     public String listUserMemories(@ToolArg(description = "User ID (required)") String userId,
-            @ToolArg(description = "Maximum number of entries to return (default: 50)") Integer limit) {
+                                   @ToolArg(description = "Maximum number of entries to return (default: 50)") Integer limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
@@ -77,10 +77,10 @@ public class McpMemoryTools {
             + "considering self/group/global visibility scopes. "
             + "Returns the memories that would be injected into a conversation with this agent.")
     public String getVisibleMemories(@ToolArg(description = "User ID (required)") String userId,
-            @ToolArg(description = "Agent ID to check visibility for (required)") String agentId,
-            @ToolArg(description = "Comma-separated group IDs (optional)") String groupIds,
-            @ToolArg(description = "Recall order: 'most_recent' or 'most_accessed' (default: most_recent)") String order,
-            @ToolArg(description = "Maximum number of entries (default: 50)") Integer limit) {
+                                     @ToolArg(description = "Agent ID to check visibility for (required)") String agentId,
+                                     @ToolArg(description = "Comma-separated group IDs (optional)") String groupIds,
+                                     @ToolArg(description = "Recall order: 'most_recent' or 'most_accessed' (default: most_recent)") String order,
+                                     @ToolArg(description = "Maximum number of entries (default: 50)") Integer limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
@@ -107,7 +107,7 @@ public class McpMemoryTools {
 
     @Tool(name = "search_user_memories", description = "Search user memories by keyword. " + "Filters across memory keys and values.")
     public String searchUserMemories(@ToolArg(description = "User ID (required)") String userId,
-            @ToolArg(description = "Search query (required)") String query) {
+                                     @ToolArg(description = "Search query (required)") String query) {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
@@ -130,7 +130,7 @@ public class McpMemoryTools {
 
     @Tool(name = "get_memory_by_key", description = "Get a specific memory entry by its key name.")
     public String getMemoryByKey(@ToolArg(description = "User ID (required)") String userId,
-            @ToolArg(description = "Memory key name (required)") String key) {
+                                 @ToolArg(description = "Memory key name (required)") String key) {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
@@ -152,10 +152,11 @@ public class McpMemoryTools {
     @Tool(name = "upsert_user_memory", description = "Insert or update a user memory entry. "
             + "Upsert semantics: self/group memories are keyed by (userId, key, agentId); " + "global memories are keyed by (userId, key).")
     public String upsertUserMemory(@ToolArg(description = "User ID (required)") String userId,
-            @ToolArg(description = "Memory key/name (required)") String key, @ToolArg(description = "Memory value (required)") String value,
-            @ToolArg(description = "Source agent ID (required)") String agentId,
-            @ToolArg(description = "Category: 'preference', 'fact', or 'context' (default: fact)") String category,
-            @ToolArg(description = "Visibility: 'self', 'group', or 'global' (default: self)") String visibility) {
+                                   @ToolArg(description = "Memory key/name (required)") String key,
+                                   @ToolArg(description = "Memory value (required)") String value,
+                                   @ToolArg(description = "Source agent ID (required)") String agentId,
+                                   @ToolArg(description = "Category: 'preference', 'fact', or 'context' (default: fact)") String category,
+                                   @ToolArg(description = "Visibility: 'self', 'group', or 'global' (default: self)") String visibility) {
         requireRole(identity, authEnabled, "eddi-admin");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
@@ -198,7 +199,7 @@ public class McpMemoryTools {
     @Tool(name = "delete_all_user_memories", description = "Delete ALL memories for a user (GDPR right-to-erasure). "
             + "This action is irreversible!")
     public String deleteAllUserMemories(@ToolArg(description = "User ID (required)") String userId,
-            @ToolArg(description = "Confirmation: must be 'CONFIRM' to proceed") String confirmation) {
+                                        @ToolArg(description = "Confirmation: must be 'CONFIRM' to proceed") String confirmation) {
         requireRole(identity, authEnabled, "eddi-admin");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");

@@ -363,7 +363,8 @@ public class AgentSetupService {
      * Create LLM config with the specified model, system prompt, and tool settings.
      */
     public LlmConfiguration createLlmConfig(String modelType, String modelId, String apiKey, String systemPrompt, boolean enableTooling,
-            String toolsWhitelist, String baseUrl, String promptResponseJson, boolean quickReplies, boolean sentiment, List<String> toolUris) {
+                                            String toolsWhitelist, String baseUrl, String promptResponseJson, boolean quickReplies, boolean sentiment,
+                                            List<String> toolUris) {
         var task = new LlmConfiguration.Task();
         task.setActions(List.of("send_message"));
         task.setId(modelType);
@@ -518,7 +519,7 @@ public class AgentSetupService {
      * langchain [+ output].
      */
     public WorkflowConfiguration createWorkflowConfig(String parserLocation, String behaviorLocation, List<String> httpCallsLocations,
-            List<String> mcpCallsLocations, String langchainLocation, String outputLocation) {
+                                                      List<String> mcpCallsLocations, String langchainLocation, String outputLocation) {
         var extensions = new ArrayList<WorkflowConfiguration.WorkflowStep>();
 
         if (parserLocation != null) {

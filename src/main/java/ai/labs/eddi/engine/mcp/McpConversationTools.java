@@ -109,7 +109,7 @@ public class McpConversationTools {
     @Tool(name = "list_agent_configs", description = "List all Agent configurations (including those not yet deployed). "
             + "Returns a JSON array of Agent descriptors with name, description, and IDs.")
     public String listAgentConfigs(@ToolArg(description = "Optional filter string to search Agent names") String filter,
-            @ToolArg(description = "Maximum number of results (default 20)") Integer limit) {
+                                   @ToolArg(description = "Maximum number of results (default 20)") Integer limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
             int limitInt = limit != null ? limit : 20;
@@ -126,7 +126,7 @@ public class McpConversationTools {
             + "Returns the conversationId which you need for subsequent talk_to_agent calls. "
             + "Tip: Use chat_with_agent instead if you want to send a message immediately.")
     public String createConversation(@ToolArg(description = "Agent ID (required)") String agentId,
-            @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
+                                     @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
@@ -145,9 +145,9 @@ public class McpConversationTools {
     @Tool(name = "talk_to_agent", description = "Send a message to a Agent in an existing conversation and get the agent's response. "
             + "You must first call create_conversation to get a conversationId, " + "or use chat_with_agent for a single-call alternative.")
     public String talkToAgent(@ToolArg(description = "Agent ID (required)") String agentId,
-            @ToolArg(description = "Conversation ID from create_conversation (required)") String conversationId,
-            @ToolArg(description = "The user message to send to the Agent (required)") String message,
-            @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
+                              @ToolArg(description = "Conversation ID from create_conversation (required)") String conversationId,
+                              @ToolArg(description = "The user message to send to the Agent (required)") String message,
+                              @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
@@ -170,9 +170,9 @@ public class McpConversationTools {
             + "This is the simplest way to interact with a Agent — combines create_conversation + "
             + "talk_to_agent into a single call. Returns the Agent response and conversationId " + "for follow-up messages.")
     public String chatWithAgent(@ToolArg(description = "Agent ID (required)") String agentId,
-            @ToolArg(description = "The user message to send to the Agent (required)") String message,
-            @ToolArg(description = "Conversation ID to continue (optional — creates new if omitted)") String conversationId,
-            @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
+                                @ToolArg(description = "The user message to send to the Agent (required)") String message,
+                                @ToolArg(description = "Conversation ID to continue (optional — creates new if omitted)") String conversationId,
+                                @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
@@ -207,12 +207,12 @@ public class McpConversationTools {
             + "Returns the conversation memory snapshot. Use returningFields to limit "
             + "output size, or use read_conversation_log for a human-readable summary.")
     public String readConversation(@ToolArg(description = "Agent ID (deprecated — ignored, resolved from conversation)") String agentId,
-            @ToolArg(description = "Conversation ID (required)") String conversationId,
-            @ToolArg(description = "Deprecated — ignored, resolved from conversation") String environment,
-            @ToolArg(description = "Return only the current (latest) step? (default: true)") Boolean currentStepOnly,
-            @ToolArg(description = "Return detailed internal data? (default: false)") Boolean returnDetailed,
-            @ToolArg(description = "Comma-separated list of fields to return (e.g. 'input,output,actions'). "
-                    + "Empty = all fields.") String returningFields) {
+                                   @ToolArg(description = "Conversation ID (required)") String conversationId,
+                                   @ToolArg(description = "Deprecated — ignored, resolved from conversation") String environment,
+                                   @ToolArg(description = "Return only the current (latest) step? (default: true)") Boolean currentStepOnly,
+                                   @ToolArg(description = "Return detailed internal data? (default: false)") Boolean returnDetailed,
+                                   @ToolArg(description = "Comma-separated list of fields to return (e.g. 'input,output,actions'). "
+                                           + "Empty = all fields.") String returningFields) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
             boolean stepOnly = currentStepOnly != null ? currentStepOnly : true;
@@ -235,7 +235,7 @@ public class McpConversationTools {
             + "Returns the conversation history in a human-readable format. "
             + "This is the preferred tool for reviewing what was said in a conversation.")
     public String readConversationLog(@ToolArg(description = "Conversation ID (required)") String conversationId,
-            @ToolArg(description = "Number of recent steps to include (default: all)") Integer logSize) {
+                                      @ToolArg(description = "Number of recent steps to include (default: all)") Integer logSize) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
             var result = conversationService.readConversationLog(conversationId, "text", logSize != null && logSize > 0 ? logSize : null);
@@ -250,9 +250,10 @@ public class McpConversationTools {
             + "Returns conversation descriptors with IDs, creation time, and state. "
             + "Useful for finding conversation IDs without knowing them beforehand.")
     public String listConversations(@ToolArg(description = "Agent ID (required)") String agentId,
-            @ToolArg(description = "Agent version (default: latest)") Integer agentVersion,
-            @ToolArg(description = "Filter by state: 'READY', 'IN_PROGRESS', 'ENDED', 'ERROR' (default: all)") String conversationState,
-            @ToolArg(description = "Maximum number of results (default: 20, max: 100)") Integer limit) {
+                                    @ToolArg(description = "Agent version (default: latest)") Integer agentVersion,
+                                    @ToolArg(description = "Filter by state: 'READY', 'IN_PROGRESS', "
+                                            + "'ENDED', 'ERROR' (default: all)") String conversationState,
+                                    @ToolArg(description = "Maximum number of results (default: 20, max: 100)") Integer limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
@@ -294,7 +295,7 @@ public class McpConversationTools {
     @Tool(name = "get_agent", description = "Get an agent's full configuration including its packages, name, and description. "
             + "Returns the AgentConfiguration JSON with all package references.")
     public String getAgent(@ToolArg(description = "Agent ID (required)") String agentId,
-            @ToolArg(description = "Version number (default: latest)") Integer version) {
+                           @ToolArg(description = "Version number (default: latest)") Integer version) {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
@@ -334,9 +335,9 @@ public class McpConversationTools {
             + "that are NOT visible in conversation memory. Essential for debugging 'why did the Agent fail?' "
             + "Filter by agentId, conversationId, and/or log level.")
     public String readAgentLogs(@ToolArg(description = "Filter by Agent ID (optional)") String agentId,
-            @ToolArg(description = "Filter by conversation ID (optional)") String conversationId,
-            @ToolArg(description = "Filter by log level: 'ERROR', 'WARN', 'INFO', 'DEBUG' (optional)") String level,
-            @ToolArg(description = "Maximum number of log entries to return (default: 50)") Integer limit) {
+                                @ToolArg(description = "Filter by conversation ID (optional)") String conversationId,
+                                @ToolArg(description = "Filter by log level: 'ERROR', 'WARN', 'INFO', 'DEBUG' (optional)") String level,
+                                @ToolArg(description = "Maximum number of log entries to return (default: 50)") Integer limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
             int limitInt = limit != null ? limit : 50;
@@ -368,7 +369,7 @@ public class McpConversationTools {
             + "LLM details (model, prompt, tokens, cost), tool calls, actions emitted, and timing. "
             + "This shows EXACTLY what happened at each workflow step — essential for optimizing Agent behavior.")
     public String readAuditTrail(@ToolArg(description = "Conversation ID (required)") String conversationId,
-            @ToolArg(description = "Maximum number of entries to return (default: 20)") Integer limit) {
+                                 @ToolArg(description = "Maximum number of entries to return (default: 20)") Integer limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (conversationId == null || conversationId.isBlank())
             return errorJson("conversationId is required");
@@ -392,7 +393,7 @@ public class McpConversationTools {
             + "from Agent triggers. Each Agent entry includes: agentId, name, description, version, status, "
             + "and any intents it serves. This is the best way to find agents by purpose.")
     public String discoverAgents(@ToolArg(description = "Optional filter string to search Agent names") String filter,
-            @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
+                                 @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
             var env = parseEnvironment(environment);
@@ -459,9 +460,9 @@ public class McpConversationTools {
             + "first message and reused on subsequent calls. Requires a Agent trigger to be configured "
             + "for the intent (see list_agent_triggers / create_agent_trigger).")
     public String chatManaged(@ToolArg(description = "Intent that maps to a Agent trigger (required). E.g. 'customer_support'") String intent,
-            @ToolArg(description = "User ID for conversation management (required)") String userId,
-            @ToolArg(description = "The user message to send (required)") String message,
-            @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
+                              @ToolArg(description = "User ID for conversation management (required)") String userId,
+                              @ToolArg(description = "The user message to send (required)") String message,
+                              @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (intent == null || intent.isBlank())
             return errorJson("intent is required");

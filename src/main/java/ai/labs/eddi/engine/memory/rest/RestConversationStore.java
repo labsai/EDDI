@@ -69,7 +69,8 @@ public class RestConversationStore implements IRestConversationStore {
 
     @Override
     public List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter, String conversationId,
-            String agentId, Integer agentVersion, ConversationState conversationState, ConversationDescriptor.ViewState viewState) {
+                                                                    String agentId, Integer agentVersion, ConversationState conversationState,
+                                                                    ConversationDescriptor.ViewState viewState) {
         try {
             List<ConversationDescriptor> conversationDescriptors;
             List<ConversationDescriptor> retConversationDescriptors = new LinkedList<>();
@@ -168,7 +169,7 @@ public class RestConversationStore implements IRestConversationStore {
 
     @Override
     public SimpleConversationMemorySnapshot readSimpleConversationLog(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
-            List<String> returningFields) {
+                                                                      List<String> returningFields) {
         checkNotNull(conversationId, "conversationId");
         checkNotNull(returnDetailed, "returnDetailed");
         checkNotNull(returnCurrentStepOnly, "returnCurrentStepOnly");

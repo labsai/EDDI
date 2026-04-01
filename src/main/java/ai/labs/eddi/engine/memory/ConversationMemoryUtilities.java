@@ -136,7 +136,7 @@ public class ConversationMemoryUtilities {
     }
 
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot,
-            boolean returnDetailed, boolean returnCurrentStepOnly) {
+                                                                                   boolean returnDetailed, boolean returnCurrentStepOnly) {
 
         var newSnapshot = getSimpleMemorySnapshot(conversationMemorySnapshot);
         newSnapshot.getConversationProperties().putAll(conversationMemorySnapshot.getConversationProperties());
@@ -207,14 +207,16 @@ public class ConversationMemoryUtilities {
     }
 
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(IConversationMemory returnConversationMemory,
-            Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields) {
+                                                                                           Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                                                                                           List<String> returningFields) {
 
         return convertSimpleConversationMemorySnapshot(convertConversationMemory(returnConversationMemory), returnDetailed, returnCurrentStepOnly,
                 returningFields);
     }
 
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(ConversationMemorySnapshot conversationMemorySnapshot,
-            Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields) {
+                                                                                           Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                                                                                           List<String> returningFields) {
 
         var memorySnapshot = convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed, returnCurrentStepOnly);
 

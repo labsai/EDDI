@@ -60,7 +60,7 @@ public interface IConversationService {
      *             if the conversation is not found
      */
     SimpleConversationMemorySnapshot readConversation(Environment environment, String agentId, String conversationId, Boolean returnDetailed,
-            Boolean returnCurrentStepOnly, List<String> returningFields)
+                                                      Boolean returnCurrentStepOnly, List<String> returningFields)
             throws AgentMismatchException, ResourceStoreException, ResourceNotFoundException;
 
     /**
@@ -89,7 +89,8 @@ public interface IConversationService {
      *             if the conversation is not found
      */
     void say(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
-            List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler) throws Exception;
+             List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler)
+            throws Exception;
 
     @FunctionalInterface
     interface ConversationResponseHandler {
@@ -116,7 +117,8 @@ public interface IConversationService {
      * via the streamingHandler callback.
      */
     void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
-            List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler) throws Exception;
+                      List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler)
+            throws Exception;
 
     Boolean isUndoAvailable(Environment environment, String agentId, String conversationId) throws ResourceStoreException, ResourceNotFoundException;
 
@@ -142,7 +144,8 @@ public interface IConversationService {
      * stored record.
      */
     SimpleConversationMemorySnapshot readConversation(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
-            List<String> returningFields) throws ResourceStoreException, ResourceNotFoundException;
+                                                      List<String> returningFields)
+            throws ResourceStoreException, ResourceNotFoundException;
 
     /**
      * Get the conversation state — no environment needed.
@@ -153,14 +156,16 @@ public interface IConversationService {
      * Process user input — resolves agentId + environment from the stored record.
      */
     void say(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields, InputData inputData,
-            boolean rerunOnly, ConversationResponseHandler responseHandler) throws Exception;
+             boolean rerunOnly, ConversationResponseHandler responseHandler)
+            throws Exception;
 
     /**
      * Process user input with SSE streaming — resolves agentId + environment from
      * the stored record.
      */
     void sayStreaming(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields, InputData inputData,
-            StreamingResponseHandler streamingHandler) throws Exception;
+                      StreamingResponseHandler streamingHandler)
+            throws Exception;
 
     Boolean isUndoAvailable(String conversationId) throws ResourceStoreException, ResourceNotFoundException;
 

@@ -23,7 +23,9 @@ public interface IRestSemanticParser {
     @Operation(summary = "Parse a sentence", description = "Parses the given sentence using the specified parser configuration.")
     @APIResponse(responseCode = "200", description = "Parsing result as JSON array.")
     @APIResponse(responseCode = "400", description = "Missing parserId or invalid configuration.")
-    void parse(@Parameter(name = "parserId", example = "507f1f77bcf86cd799439011", required = true) @PathParam("parserId") String parserId,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version, String sentence,
-            @Suspended AsyncResponse asyncResponse);
+    void parse(@Parameter(name = "parserId", example = "507f1f77bcf86cd799439011", required = true)
+    @PathParam("parserId") String parserId,
+               @Parameter(name = "version", required = true, example = "1")
+               @QueryParam("version") Integer version, String sentence,
+               @Suspended AsyncResponse asyncResponse);
 }

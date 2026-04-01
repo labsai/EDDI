@@ -43,7 +43,7 @@ public class PersistenceModule {
     @ApplicationScoped
     @DefaultBean
     public MongoDatabase provideMongoDB(@ConfigProperty(name = "mongodb.connectionString") String connectionString,
-            @ConfigProperty(name = "mongodb.database") String database) {
+                                        @ConfigProperty(name = "mongodb.database") String database) {
         BsonFactory bsonFactory = new BsonFactory();
         bsonFactory.enable(BsonParser.Feature.HONOR_DOCUMENT_LENGTH);
 

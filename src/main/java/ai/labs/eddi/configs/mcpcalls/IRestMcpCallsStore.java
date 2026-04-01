@@ -35,23 +35,29 @@ public interface IRestMcpCallsStore extends IRestVersionInfo {
     @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "List MCP Calls descriptors", description = "Read list of MCP Calls configuration descriptors.")
-    List<DocumentDescriptor> readMcpCallsDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
+    List<DocumentDescriptor> readMcpCallsDescriptors(@QueryParam("filter")
+    @DefaultValue("") String filter,
+                                                     @QueryParam("index")
+                                                     @DefaultValue("0") Integer index,
+                                                     @QueryParam("limit")
+                                                     @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Read MCP Calls config", description = "Read a specific MCP Calls configuration.")
     McpCallsConfiguration readMcpCalls(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
+                                       @Parameter(name = "version", required = true, example = "1")
+                                       @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(summary = "Update MCP Calls config", description = "Update an existing MCP Calls configuration.")
     Response updateMcpCalls(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            McpCallsConfiguration mcpCallsConfiguration);
+                            @Parameter(name = "version", required = true, example = "1")
+                            @QueryParam("version") Integer version,
+                            McpCallsConfiguration mcpCallsConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -67,14 +73,18 @@ public interface IRestMcpCallsStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(summary = "Delete MCP Calls config", description = "Delete an MCP Calls configuration.")
     Response deleteMcpCalls(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
+                            @Parameter(name = "version", required = true, example = "1")
+                            @QueryParam("version") Integer version,
+                            @QueryParam("permanent")
+                            @DefaultValue("false") Boolean permanent);
 
     @GET
     @Path("/discover-tools")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Discover MCP tools", description = "Probe a live MCP server to discover available tools. "
             + "Used by the Manager UI for whitelist/blacklist selection.")
-    Response discoverTools(@QueryParam("url") String url, @QueryParam("transport") @DefaultValue("http") String transport,
-            @QueryParam("apiKey") @DefaultValue("") String apiKey);
+    Response discoverTools(@QueryParam("url") String url, @QueryParam("transport")
+    @DefaultValue("http") String transport,
+                           @QueryParam("apiKey")
+                           @DefaultValue("") String apiKey);
 }

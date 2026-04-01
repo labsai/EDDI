@@ -32,8 +32,10 @@ public interface IRestUserMemoryStore {
     @Operation(summary = "Get visible memories for an agent", description = "Returns memories visible to a specific agent, "
             + "considering self/group/global visibility.")
     List<UserMemoryEntry> getVisibleMemories(@PathParam("userId") String userId, @QueryParam("agentId") String agentId,
-            @QueryParam("groupId") List<String> groupIds, @QueryParam("order") @DefaultValue("most_recent") String recallOrder,
-            @QueryParam("limit") @DefaultValue("50") int maxEntries);
+                                             @QueryParam("groupId") List<String> groupIds, @QueryParam("order")
+                                             @DefaultValue("most_recent") String recallOrder,
+                                             @QueryParam("limit")
+                                             @DefaultValue("50") int maxEntries);
 
     @GET
     @Path("/{userId}/search")

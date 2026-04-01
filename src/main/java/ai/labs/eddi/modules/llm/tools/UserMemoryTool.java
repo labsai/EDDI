@@ -56,8 +56,8 @@ public class UserMemoryTool {
             + "Categories: 'preference', 'fact', 'context'. Visibility: 'self' (this agent only), "
             + "'group' (agents in same group), 'global' (all agents).")
     public String rememberFact(@P("Short key name for the fact, e.g. 'favorite_color', 'dietary_restriction'") String key,
-            @P("The value to remember") String value, @P("Category: 'preference', 'fact', or 'context'") String category,
-            @P("Visibility: 'self', 'group', or 'global'. Default: 'self'") String visibility) {
+                               @P("The value to remember") String value, @P("Category: 'preference', 'fact', or 'context'") String category,
+                               @P("Visibility: 'self', 'group', or 'global'. Default: 'self'") String visibility) {
 
         // Guardrail: write-rate limit
         if (writesThisTurn >= guardrails.getMaxWritesPerTurn()) {

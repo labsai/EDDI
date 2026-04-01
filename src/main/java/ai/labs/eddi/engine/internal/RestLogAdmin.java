@@ -46,7 +46,7 @@ public class RestLogAdmin implements IRestLogAdmin {
 
     @Override
     public List<LogEntry> getHistoryLogs(Deployment.Environment environment, String agentId, Integer agentVersion, String conversationId,
-            String userId, String instanceId, Integer skip, Integer limit) {
+                                         String userId, String instanceId, Integer skip, Integer limit) {
         return databaseLogs.getLogs(environment, agentId, agentVersion, conversationId, userId, instanceId, skip, limit);
     }
 

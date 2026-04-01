@@ -48,7 +48,7 @@ class ConversationHistoryBuilder {
      * @return ordered list of ChatMessages (system → history → user/prompt)
      */
     List<ChatMessage> buildMessages(IConversationMemory memory, String systemMessage, String prompt, int logSizeLimit,
-            boolean includeFirstAgentMessage) {
+                                    boolean includeFirstAgentMessage) {
         return buildMessages(memory, systemMessage, prompt, logSizeLimit, includeFirstAgentMessage, null, 0);
     }
 
@@ -74,7 +74,7 @@ class ConversationHistoryBuilder {
      * @return ordered list of ChatMessages (system → history → user/prompt)
      */
     List<ChatMessage> buildMessages(IConversationMemory memory, String systemMessage, String prompt, int logSizeLimit,
-            boolean includeFirstAgentMessage, String summaryPrefix, int skipSteps) {
+                                    boolean includeFirstAgentMessage, String summaryPrefix, int skipSteps) {
 
         // Prepend summary to system message if present
         if (!isNullOrEmpty(summaryPrefix)) {
@@ -143,7 +143,7 @@ class ConversationHistoryBuilder {
      * @return ordered list of ChatMessages fitting within the token budget
      */
     List<ChatMessage> buildTokenAwareMessages(IConversationMemory memory, String systemMessage, String prompt, int maxContextTokens,
-            int anchorFirstSteps, boolean includeFirstAgentMessage, TokenCountEstimator estimator) {
+                                              int anchorFirstSteps, boolean includeFirstAgentMessage, TokenCountEstimator estimator) {
         return buildTokenAwareMessages(memory, systemMessage, prompt, maxContextTokens, anchorFirstSteps, includeFirstAgentMessage, estimator, null,
                 0);
     }
@@ -175,7 +175,8 @@ class ConversationHistoryBuilder {
      * @return ordered list of ChatMessages fitting within the token budget
      */
     List<ChatMessage> buildTokenAwareMessages(IConversationMemory memory, String systemMessage, String prompt, int maxContextTokens,
-            int anchorFirstSteps, boolean includeFirstAgentMessage, TokenCountEstimator estimator, String summaryPrefix, int skipSteps) {
+                                              int anchorFirstSteps, boolean includeFirstAgentMessage, TokenCountEstimator estimator,
+                                              String summaryPrefix, int skipSteps) {
 
         // Prepend summary to system message if present
         if (!isNullOrEmpty(summaryPrefix)) {
@@ -300,7 +301,7 @@ class ConversationHistoryBuilder {
      * @return mutable list of ChatMessages from the non-skipped section
      */
     private ArrayList<ChatMessage> generateMessagesFromOutputs(IConversationMemory memory, int skipSteps, int logSizeLimit,
-            boolean includeFirstAgentMessage) {
+                                                               boolean includeFirstAgentMessage) {
 
         var outputs = memory.getConversationOutputs();
         int startIndex = Math.min(skipSteps, outputs.size());

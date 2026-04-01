@@ -23,19 +23,26 @@ import static ai.labs.eddi.datastore.IResourceStore.*;
 public interface IRestConversationStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    List<ConversationDescriptor> readConversationDescriptors(@QueryParam("index") @DefaultValue("0") Integer index,
-            @QueryParam("limit") @DefaultValue("20") Integer limit, @QueryParam("filter") String filter,
-            @QueryParam("conversationId") String conversationId, @QueryParam("agentId") String agentId,
-            @QueryParam("agentVersion") Integer agentVersion, @QueryParam("conversationState") ConversationState conversationState,
-            @QueryParam("viewState") ConversationDescriptor.ViewState viewState);
+    List<ConversationDescriptor> readConversationDescriptors(@QueryParam("index")
+    @DefaultValue("0") Integer index,
+                                                             @QueryParam("limit")
+                                                             @DefaultValue("20") Integer limit, @QueryParam("filter") String filter,
+                                                             @QueryParam("conversationId") String conversationId,
+                                                             @QueryParam("agentId") String agentId,
+                                                             @QueryParam("agentVersion") Integer agentVersion,
+                                                             @QueryParam("conversationState") ConversationState conversationState,
+                                                             @QueryParam("viewState") ConversationDescriptor.ViewState viewState);
 
     @GET
     @Path("/simple/{conversationId}")
     @Produces(MediaType.APPLICATION_JSON)
     SimpleConversationMemorySnapshot readSimpleConversationLog(@PathParam("conversationId") String conversationId,
-            @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
-            @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
-            @QueryParam("returningFields") List<String> returningFields) throws ResourceStoreException, ResourceNotFoundException;
+                                                               @QueryParam("returnDetailed")
+                                                               @DefaultValue("false") Boolean returnDetailed,
+                                                               @QueryParam("returnCurrentStepOnly")
+                                                               @DefaultValue("true") Boolean returnCurrentStepOnly,
+                                                               @QueryParam("returningFields") List<String> returningFields)
+            throws ResourceStoreException, ResourceNotFoundException;
 
     @GET
     @Path("/{conversationId}")
@@ -46,7 +53,8 @@ public interface IRestConversationStore {
     @DELETE
     @Path("/{conversationId}")
     void deleteConversationLog(@PathParam("conversationId") String conversationId,
-            @QueryParam("deletePermanently") @DefaultValue("false") Boolean deletePermanently)
+                               @QueryParam("deletePermanently")
+                               @DefaultValue("false") Boolean deletePermanently)
             throws ResourceStoreException, ResourceNotFoundException;
 
     @DELETE
@@ -58,7 +66,8 @@ public interface IRestConversationStore {
     @Path("/active/{agentId}")
     @Produces(MediaType.APPLICATION_JSON)
     List<ConversationStatus> getActiveConversations(@PathParam("agentId") String agentId,
-            @Parameter(name = "agentVersion", required = true, example = "1") @QueryParam("agentVersion") Integer agentVersion)
+                                                    @Parameter(name = "agentVersion", required = true, example = "1")
+                                                    @QueryParam("agentVersion") Integer agentVersion)
             throws ResourceStoreException, ResourceNotFoundException;
 
     @POST

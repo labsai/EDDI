@@ -75,7 +75,7 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IConversationMemoryStore conversationMemoryStore(Instance<ConversationMemoryStore> mongo,
-            Instance<PostgresConversationMemoryStore> postgres) {
+                                                            Instance<PostgresConversationMemoryStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 
@@ -94,7 +94,7 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IResourceStorageFactory resourceStorageFactory(Instance<MongoResourceStorageFactory> mongo,
-            Instance<PostgresResourceStorageFactory> postgres) {
+                                                          Instance<PostgresResourceStorageFactory> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

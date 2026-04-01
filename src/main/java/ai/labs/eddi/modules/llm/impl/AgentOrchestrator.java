@@ -123,7 +123,8 @@ class AgentOrchestrator {
      *         otherwise the execution result
      */
     ExecutionResult executeIfToolsEnabled(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, LlmConfiguration.Task task,
-            IConversationMemory memory) throws LifecycleException {
+                                          IConversationMemory memory)
+            throws LifecycleException {
 
         // Collect enabled built-in tools
         List<Object> enabledTools = collectEnabledTools(task, memory);
@@ -164,8 +165,9 @@ class AgentOrchestrator {
      * Executes the tool-calling loop using direct ChatModel API.
      */
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, List<Object> tools,
-            HttpCallToolsResult httpCallTools, McpToolProviderManager.McpToolsResult mcpCallWorkflowTools,
-            A2AToolProviderManager.A2AToolsResult a2aTools, LlmConfiguration.Task task, IConversationMemory memory) throws LifecycleException {
+                                             HttpCallToolsResult httpCallTools, McpToolProviderManager.McpToolsResult mcpCallWorkflowTools,
+                                             A2AToolProviderManager.A2AToolsResult a2aTools, LlmConfiguration.Task task, IConversationMemory memory)
+            throws LifecycleException {
 
         // Build tool specifications and executors from built-in tool objects
         List<ToolSpecification> toolSpecs = new ArrayList<>();

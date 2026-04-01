@@ -25,28 +25,36 @@ public interface IRestDocumentDescriptorStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of descriptors.")
-    List<DocumentDescriptor> readDescriptors(@QueryParam("type") @DefaultValue("") String type, @QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
+    List<DocumentDescriptor> readDescriptors(@QueryParam("type")
+    @DefaultValue("") String type, @QueryParam("filter")
+    @DefaultValue("") String filter,
+                                             @QueryParam("index")
+                                             @DefaultValue("0") Integer index,
+                                             @QueryParam("limit")
+                                             @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read descriptor.")
     DocumentDescriptor readDescriptor(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
+                                      @Parameter(name = "version", required = true, example = "1")
+                                      @QueryParam("version") Integer version);
 
     @GET
     @Path("/{id}/simple")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read simple descriptor.")
     SimpleDocumentDescriptor readSimpleDescriptor(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
+                                                  @Parameter(name = "version", required = true, example = "1")
+                                                  @QueryParam("version") Integer version);
 
     @PATCH
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Partial update descriptor.")
     void patchDescriptor(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            PatchInstruction<DocumentDescriptor> patchInstruction);
+                         @Parameter(name = "version", required = true, example = "1")
+                         @QueryParam("version") Integer version,
+                         PatchInstruction<DocumentDescriptor> patchInstruction);
 }

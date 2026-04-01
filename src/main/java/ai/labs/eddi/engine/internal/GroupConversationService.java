@@ -175,7 +175,8 @@ public class GroupConversationService implements IGroupConversationService {
      * synthesis_start for correct semantic ordering.
      */
     private GroupConversation executeDiscussion(GroupConversation gc, AgentGroupConfiguration config, List<DiscussionPhase> phases, String question,
-            GroupDiscussionEventListener listener) throws GroupDiscussionException, IResourceStore.ResourceStoreException {
+                                                GroupDiscussionEventListener listener)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException {
 
         long startTime = System.nanoTime();
         counterGroupDiscussion.increment();
@@ -346,7 +347,8 @@ public class GroupConversationService implements IGroupConversationService {
     // =================================================================
 
     private void executeSequentialPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
-            ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener) throws GroupDiscussionException {
+                                        ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener)
+            throws GroupDiscussionException {
         for (GroupMember speaker : speakers) {
             if (listener != null) {
                 listener.onSpeakerStart(
@@ -363,7 +365,8 @@ public class GroupConversationService implements IGroupConversationService {
     }
 
     private void executeParallelPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
-            ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener) throws GroupDiscussionException {
+                                      ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener)
+            throws GroupDiscussionException {
 
         // SAFETY: Snapshot the transcript so parallel tasks each see a consistent view.
         List<TranscriptEntry> snapshotTranscript = List.copyOf(gc.getTranscript());
@@ -410,7 +413,8 @@ public class GroupConversationService implements IGroupConversationService {
      * (N×(N-1) turns). Used for CRITIQUE style.
      */
     private void executePeerTargetedPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
-            ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener) throws GroupDiscussionException {
+                                          ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener)
+            throws GroupDiscussionException {
 
         // Collect all non-moderator members as targets
         List<GroupMember> allMembers = config.getMembers().stream()
@@ -441,7 +445,8 @@ public class GroupConversationService implements IGroupConversationService {
     // =================================================================
 
     private TranscriptEntry executeAgentTurn(GroupMember member, GroupConversation gc, String input, ProtocolConfig protocol, int phaseIdx,
-            DiscussionPhase phase, String targetAgentId) throws GroupDiscussionException {
+                                             DiscussionPhase phase, String targetAgentId)
+            throws GroupDiscussionException {
 
         TranscriptEntryType entryType = mapPhaseToEntryType(phase.type());
 
@@ -545,7 +550,7 @@ public class GroupConversationService implements IGroupConversationService {
     // =================================================================
 
     private String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
-            GroupMember target) {
+                                   GroupMember target) {
 
         String template = phase.inputTemplate() != null ? phase.inputTemplate() : selectDefaultTemplate(phase, transcript, phaseIdx);
 
@@ -739,7 +744,8 @@ public class GroupConversationService implements IGroupConversationService {
      * this member's response in the parent group.
      */
     private TranscriptEntry executeGroupMemberTurn(GroupMember member, GroupConversation gc, String input, ProtocolConfig protocol, int phaseIdx,
-            DiscussionPhase phase, TranscriptEntryType entryType, String targetAgentId) throws GroupDiscussionException {
+                                                   DiscussionPhase phase, TranscriptEntryType entryType, String targetAgentId)
+            throws GroupDiscussionException {
         try {
             // member.agentId() is actually a groupId for GROUP members
             String subGroupId = member.agentId();
@@ -768,7 +774,8 @@ public class GroupConversationService implements IGroupConversationService {
     }
 
     private TranscriptEntry handleAgentFailure(GroupMember member, int phaseIdx, DiscussionPhase phase, ProtocolConfig protocol, Throwable cause,
-            String prefix, String targetAgentId) throws GroupDiscussionException {
+                                               String prefix, String targetAgentId)
+            throws GroupDiscussionException {
 
         if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
             throw new GroupDiscussionException(

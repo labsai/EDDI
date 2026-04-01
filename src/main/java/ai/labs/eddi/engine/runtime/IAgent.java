@@ -24,10 +24,12 @@ public interface IAgent {
     void addWorkflow(IExecutableWorkflow executableWorkflow) throws IllegalAccessException;
 
     IConversation startConversation(String userId, Map<String, Context> context, IPropertiesHandler propertiesHandler,
-            IConversationOutputRenderer outputProvider) throws InstantiationException, IllegalAccessException, LifecycleException;
+                                    IConversationOutputRenderer outputProvider)
+            throws InstantiationException, IllegalAccessException, LifecycleException;
 
     IConversation continueConversation(IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
-            IConversationOutputRenderer outputProvider) throws InstantiationException, IllegalAccessException;
+                                       IConversationOutputRenderer outputProvider)
+            throws InstantiationException, IllegalAccessException;
 
     /**
      * User memory config from agent deployment. {@code null} when memory is

@@ -35,22 +35,28 @@ public interface IRestLlmStore extends IRestVersionInfo {
     @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of LLM config descriptors.")
-    List<DocumentDescriptor> readLlmDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
+    List<DocumentDescriptor> readLlmDescriptors(@QueryParam("filter")
+    @DefaultValue("") String filter,
+                                                @QueryParam("index")
+                                                @DefaultValue("0") Integer index,
+                                                @QueryParam("limit")
+                                                @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read LLM config.")
     LlmConfiguration readLlm(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
+                             @Parameter(name = "version", required = true, example = "1")
+                             @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update LLM config.")
     Response updateLlm(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version, LlmConfiguration llmConfiguration);
+                       @Parameter(name = "version", required = true, example = "1")
+                       @QueryParam("version") Integer version, LlmConfiguration llmConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -66,6 +72,8 @@ public interface IRestLlmStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(description = "Delete LLM config.")
     Response deleteLlm(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
+                       @Parameter(name = "version", required = true, example = "1")
+                       @QueryParam("version") Integer version,
+                       @QueryParam("permanent")
+                       @DefaultValue("false") Boolean permanent);
 }

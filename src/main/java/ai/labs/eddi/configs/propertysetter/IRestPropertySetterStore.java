@@ -35,23 +35,29 @@ public interface IRestPropertySetterStore extends IRestVersionInfo {
     @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of propertySetter descriptors.")
-    List<DocumentDescriptor> readPropertySetterDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
+    List<DocumentDescriptor> readPropertySetterDescriptors(@QueryParam("filter")
+    @DefaultValue("") String filter,
+                                                           @QueryParam("index")
+                                                           @DefaultValue("0") Integer index,
+                                                           @QueryParam("limit")
+                                                           @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read propertySetter.")
     PropertySetterConfiguration readPropertySetter(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
+                                                   @Parameter(name = "version", required = true, example = "1")
+                                                   @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update propertySetter.")
     Response updatePropertySetter(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            PropertySetterConfiguration propertySetterConfiguration);
+                                  @Parameter(name = "version", required = true, example = "1")
+                                  @QueryParam("version") Integer version,
+                                  PropertySetterConfiguration propertySetterConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -67,6 +73,8 @@ public interface IRestPropertySetterStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(description = "Delete propertySetter.")
     Response deletePropertySetter(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
+                                  @Parameter(name = "version", required = true, example = "1")
+                                  @QueryParam("version") Integer version,
+                                  @QueryParam("permanent")
+                                  @DefaultValue("false") Boolean permanent);
 }

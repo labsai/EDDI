@@ -188,7 +188,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     private void executeFireAndForgetCalls(String targetServerUrl, Request callRequest, HttpPreRequest preRequest,
-            Map<String, Object> templateDataObjects, String callName)
+                                           Map<String, Object> templateDataObjects, String callName)
             throws ITemplatingEngine.TemplateEngineException, IRequest.HttpRequestException {
 
         if (preRequest != null && preRequest.getBatchRequests() != null) {
@@ -230,7 +230,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     private static void logExecutionResponse(IResponse response, String httpCallsName, long executionStart, long executionEnd,
-            boolean fireAndForget) {
+                                             boolean fireAndForget) {
 
         long duration = executionEnd - executionStart;
         LOGGER.info(httpCallsName + " Response " + (fireAndForget ? "(f'n'f)" : "") + ": " + response.toString());
@@ -265,7 +265,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     private boolean retryCall(HttpPostResponse postResponse, Map<String, Object> conversationValues, int amountOfExecutions, int httpCode,
-            String contentAsString) throws ApiCallsValidationException {
+                              String contentAsString)
+            throws ApiCallsValidationException {
 
         if (isNullOrEmpty(postResponse)) {
             return false;

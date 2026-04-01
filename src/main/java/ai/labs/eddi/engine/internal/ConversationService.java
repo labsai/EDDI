@@ -210,7 +210,7 @@ public class ConversationService implements IConversationService {
 
     @Override
     public SimpleConversationMemorySnapshot readConversation(Environment environment, String agentId, String conversationId, Boolean returnDetailed,
-            Boolean returnCurrentStepOnly, List<String> returningFields)
+                                                             Boolean returnCurrentStepOnly, List<String> returningFields)
             throws AgentMismatchException, ResourceStoreException, ResourceNotFoundException {
 
         long startTime = System.nanoTime();
@@ -253,7 +253,8 @@ public class ConversationService implements IConversationService {
 
     @Override
     public void say(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
-            List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler) throws Exception {
+                    List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler)
+            throws Exception {
 
         long startTime = System.nanoTime();
         try {
@@ -346,7 +347,8 @@ public class ConversationService implements IConversationService {
 
     @Override
     public void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
-            List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler) throws Exception {
+                             List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler)
+            throws Exception {
 
         long startTime = System.nanoTime();
         try {
@@ -521,7 +523,8 @@ public class ConversationService implements IConversationService {
 
     @Override
     public SimpleConversationMemorySnapshot readConversation(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
-            List<String> returningFields) throws ResourceStoreException, ResourceNotFoundException {
+                                                             List<String> returningFields)
+            throws ResourceStoreException, ResourceNotFoundException {
 
         long startTime = System.nanoTime();
         checkNotNull(conversationId, "conversationId");
@@ -559,7 +562,8 @@ public class ConversationService implements IConversationService {
 
     @Override
     public void say(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields, InputData inputData,
-            boolean rerunOnly, ConversationResponseHandler responseHandler) throws Exception {
+                    boolean rerunOnly, ConversationResponseHandler responseHandler)
+            throws Exception {
 
         var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
         say(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
@@ -568,7 +572,8 @@ public class ConversationService implements IConversationService {
 
     @Override
     public void sayStreaming(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields,
-            InputData inputData, StreamingResponseHandler streamingHandler) throws Exception {
+                             InputData inputData, StreamingResponseHandler streamingHandler)
+            throws Exception {
 
         var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
         sayStreaming(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
@@ -642,7 +647,7 @@ public class ConversationService implements IConversationService {
     }
 
     private Callable<Void> processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
-            Map<String, String> loggingContext, Callable<Void> executeConversation) {
+                                                   Map<String, String> loggingContext, Callable<Void> executeConversation) {
         return () -> {
             waitForExecutionFinishOrTimeout(loggingContext, conversationId,
                     runtime.submitCallable(executeConversation, new IRuntime.IFinishedExecution<>() {

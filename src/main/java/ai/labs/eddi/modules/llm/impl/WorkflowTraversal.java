@@ -60,7 +60,8 @@ class WorkflowTraversal {
      * @return list of discovered configurations (never null)
      */
     static <T> List<StepConfig<T>> discoverConfigs(IConversationMemory memory, String stepTypeUri, Class<T> configClass,
-            IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore, IResourceClientLibrary resourceClientLibrary) {
+                                                   IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
+                                                   IResourceClientLibrary resourceClientLibrary) {
 
         List<StepConfig<T>> results = new ArrayList<>();
 

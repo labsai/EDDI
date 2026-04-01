@@ -35,40 +35,53 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
     @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(operationId = "readWorkflowDescriptors", description = "Read list of workflow descriptors.")
-    List<DocumentDescriptor> readWorkflowDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
+    List<DocumentDescriptor> readWorkflowDescriptors(@QueryParam("filter")
+    @DefaultValue("") String filter,
+                                                     @QueryParam("index")
+                                                     @DefaultValue("0") Integer index,
+                                                     @QueryParam("limit")
+                                                     @DefaultValue("20") Integer limit);
 
     @POST
     @Path("descriptors")
     @Consumes(MediaType.TEXT_PLAIN)
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(operationId = "readWorkflowDescriptorsWithResource", description = "Read list of workflow descriptors including a given resourceUri.")
-    List<DocumentDescriptor> readWorkflowDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit,
-            @Parameter(name = "body", description = "eddi://ai.labs.TYPE/PATH/ID?version=VERSION") @DefaultValue("") String containingResourceUri,
-            @QueryParam("includePreviousVersions") @DefaultValue("false") Boolean includePreviousVersions);
+    List<DocumentDescriptor> readWorkflowDescriptors(@QueryParam("filter")
+    @DefaultValue("") String filter,
+                                                     @QueryParam("index")
+                                                     @DefaultValue("0") Integer index,
+                                                     @QueryParam("limit")
+                                                     @DefaultValue("20") Integer limit,
+                                                     @Parameter(name = "body", description = "eddi://ai.labs.TYPE/PATH/ID?version=VERSION")
+                                                     @DefaultValue("") String containingResourceUri,
+                                                     @QueryParam("includePreviousVersions")
+                                                     @DefaultValue("false") Boolean includePreviousVersions);
 
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read workflow.")
     WorkflowConfiguration readWorkflow(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
+                                       @Parameter(name = "version", required = true, example = "1")
+                                       @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update workflow.")
     Response updateWorkflow(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            WorkflowConfiguration workflowConfiguration);
+                            @Parameter(name = "version", required = true, example = "1")
+                            @QueryParam("version") Integer version,
+                            WorkflowConfiguration workflowConfiguration);
 
     @PUT
     @Path("/{id}/updateResourceUri")
     @Consumes(MediaType.TEXT_PLAIN)
     @Operation(description = "Update references to other resources within this workflow resource.")
     Response updateResourceInWorkflow(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version, URI resourceURI);
+                                      @Parameter(name = "version", required = true, example = "1")
+                                      @QueryParam("version") Integer version, URI resourceURI);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -79,7 +92,8 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(description = "Duplicate this workflow.")
     Response duplicateWorkflow(@PathParam("id") String id, @QueryParam("version") Integer version,
-            @QueryParam("deepCopy") @DefaultValue("false") Boolean deepCopy);
+                               @QueryParam("deepCopy")
+                               @DefaultValue("false") Boolean deepCopy);
 
     @DELETE
     @Path("/{id}")

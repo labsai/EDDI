@@ -297,7 +297,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private void importAgentZipFile(InputStream zippedAgentConfigFiles, File targetDir, AsyncResponse response, boolean isMerge,
-            Set<String> selectedSet) throws IOException {
+                                    Set<String> selectedSet)
+            throws IOException {
 
         this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
         var targetDirPath = targetDir.getPath();
@@ -344,7 +345,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private void parseWorkflow(String targetDirPath, URI workflowUri, AgentConfiguration agentConfig, AsyncResponse response, boolean isMerge,
-            Set<String> selectedSet) {
+                               Set<String> selectedSet) {
         try {
             IResourceId workflowResourceId = RestUtilities.extractResourceId(workflowUri);
             if (workflowResourceId == null) {
@@ -463,7 +464,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private <T> List<URI> createOrUpdateResources(List<T> configs, List<URI> originUris, boolean isMerge, Set<String> selectedSet,
-            ResourceCreator<T> creator, ResourceUpdater<T> updater) throws RestInterfaceFactory.RestInterfaceFactoryException {
+                                                  ResourceCreator<T> creator, ResourceUpdater<T> updater)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
 
         if (!isMerge) {
             // Original behavior: create everything new

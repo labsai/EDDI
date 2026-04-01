@@ -32,8 +32,10 @@ public interface IRestAuditStore {
      */
     @GET
     @Path("/{conversationId}")
-    List<AuditEntry> getAuditTrail(@PathParam("conversationId") String conversationId, @QueryParam("skip") @DefaultValue("0") int skip,
-            @QueryParam("limit") @DefaultValue("100") int limit);
+    List<AuditEntry> getAuditTrail(@PathParam("conversationId") String conversationId, @QueryParam("skip")
+    @DefaultValue("0") int skip,
+                                   @QueryParam("limit")
+                                   @DefaultValue("100") int limit);
 
     /**
      * Get the audit trail for a specific agent.
@@ -51,7 +53,10 @@ public interface IRestAuditStore {
     @GET
     @Path("/agent/{agentId}")
     List<AuditEntry> getAuditTrailByAgent(@PathParam("agentId") String agentId, @QueryParam("agentVersion") Integer agentVersion,
-            @QueryParam("skip") @DefaultValue("0") int skip, @QueryParam("limit") @DefaultValue("100") int limit);
+                                          @QueryParam("skip")
+                                          @DefaultValue("0") int skip,
+                                          @QueryParam("limit")
+                                          @DefaultValue("100") int limit);
 
     /**
      * Get the number of audit entries for a conversation.

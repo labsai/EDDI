@@ -33,7 +33,10 @@ public interface IRestAgentEngineStreaming {
     @Produces(MediaType.SERVER_SENT_EVENTS)
     @Operation(summary = "Send message with SSE streaming", description = "Send user input and receive streaming SSE response "
             + "with workflow events and LLM tokens.")
-    void sayStreaming(@PathParam("conversationId") String conversationId, @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
-            @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
-            @QueryParam("returningFields") List<String> returningFields, InputData inputData, @Context SseEventSink eventSink, @Context Sse sse);
+    void sayStreaming(@PathParam("conversationId") String conversationId, @QueryParam("returnDetailed")
+    @DefaultValue("false") Boolean returnDetailed,
+                      @QueryParam("returnCurrentStepOnly")
+                      @DefaultValue("true") Boolean returnCurrentStepOnly,
+                      @QueryParam("returningFields") List<String> returningFields, InputData inputData, @Context SseEventSink eventSink,
+                      @Context Sse sse);
 }

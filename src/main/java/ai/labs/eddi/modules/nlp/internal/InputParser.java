@@ -368,7 +368,7 @@ public class InputParser implements IInputParser {
     }
 
     private List<IDictionary.IPhrase> getPhrasesContainingFoundWords(List<IDictionary.IFoundWord> foundWords,
-            List<Map<IDictionary.IWord, List<IDictionary.IPhrase>>> phrasesMaps) {
+                                                                     List<Map<IDictionary.IWord, List<IDictionary.IPhrase>>> phrasesMaps) {
 
         List<IDictionary.IPhrase> ret = new LinkedList<>();
         foundWords.stream().filter(foundWord -> !foundWord.isPhrase())

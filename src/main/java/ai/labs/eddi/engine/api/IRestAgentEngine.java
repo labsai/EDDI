@@ -34,9 +34,13 @@ public interface IRestAgentEngine {
     @Operation(summary = "Start a conversation", description = "Creates a new conversation for the specified agent in the given environment. "
             + "Returns 201 with Location header pointing to the new conversation.")
     @APIResponse(responseCode = "201", description = "Conversation created. See Location header.")
-    Response startConversation(@PathParam("agentId") String agentId,
-            @Parameter(description = "Deployment environment.") @QueryParam("environment") @DefaultValue("production") Deployment.Environment environment,
-            @Parameter(description = "Optional user identifier.") @QueryParam("userId") String userId);
+    Response startConversation(
+                               @PathParam("agentId") String agentId,
+                               @Parameter(description = "Deployment environment.")
+                               @QueryParam("environment")
+                               @DefaultValue("production") Deployment.Environment environment,
+                               @Parameter(description = "Optional user identifier.")
+                               @QueryParam("userId") String userId);
 
     @POST
     @Path("/{agentId}/start")
@@ -44,9 +48,14 @@ public interface IRestAgentEngine {
     @Operation(summary = "Start a conversation with context", description = "Creates a new conversation with initial context map. "
             + "Returns 201 with Location header pointing to the new conversation.")
     @APIResponse(responseCode = "201", description = "Conversation created. See Location header.")
-    Response startConversationWithContext(@PathParam("agentId") String agentId,
-            @Parameter(description = "Deployment environment.") @QueryParam("environment") @DefaultValue("production") Deployment.Environment environment,
-            @Parameter(description = "Optional user identifier.") @QueryParam("userId") String userId, Map<String, Context> context);
+    Response startConversationWithContext(
+                                          @PathParam("agentId") String agentId,
+                                          @Parameter(description = "Deployment environment.")
+                                          @QueryParam("environment")
+                                          @DefaultValue("production") Deployment.Environment environment,
+                                          @Parameter(description = "Optional user identifier.")
+                                          @QueryParam("userId") String userId,
+                                          Map<String, Context> context);
 
     // --- End conversation ---
 
@@ -67,8 +76,12 @@ public interface IRestAgentEngine {
     @APIResponse(responseCode = "200", description = "Conversation log.")
     @APIResponse(responseCode = "404", description = "Conversation not found.")
     Response readConversationLog(@PathParam("conversationId") String conversationId,
-            @Parameter(description = "Output format: 'text' or 'json'.") @QueryParam("outputType") @DefaultValue("json") String outputType,
-            @Parameter(description = "Number of log entries to return. -1 for all.") @QueryParam("logSize") @DefaultValue("-1") Integer logSize);
+                                 @Parameter(description = "Output format: 'text' or 'json'.")
+                                 @QueryParam("outputType")
+                                 @DefaultValue("json") String outputType,
+                                 @Parameter(description = "Number of log entries to return. -1 for all.")
+                                 @QueryParam("logSize")
+                                 @DefaultValue("-1") Integer logSize);
 
     @GET
     @NoCache
@@ -77,10 +90,16 @@ public interface IRestAgentEngine {
     @Operation(summary = "Read a conversation", description = "Returns conversation memory snapshot with configurable detail level.")
     @APIResponse(responseCode = "200", description = "Conversation snapshot.")
     @APIResponse(responseCode = "404", description = "Conversation not found.")
-    SimpleConversationMemorySnapshot readConversation(@PathParam("conversationId") String conversationId,
-            @Parameter(description = "Include detailed step data.") @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
-            @Parameter(description = "Only return the current (latest) step.") @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
-            @Parameter(description = "Filter fields to return.") @QueryParam("returningFields") List<String> returningFields);
+    SimpleConversationMemorySnapshot readConversation(
+                                                      @PathParam("conversationId") String conversationId,
+                                                      @Parameter(description = "Include detailed step data.")
+                                                      @QueryParam("returnDetailed")
+                                                      @DefaultValue("false") Boolean returnDetailed,
+                                                      @Parameter(description = "Only return the current (latest) step.")
+                                                      @QueryParam("returnCurrentStepOnly")
+                                                      @DefaultValue("true") Boolean returnCurrentStepOnly,
+                                                      @Parameter(description = "Filter fields to return.")
+                                                      @QueryParam("returningFields") List<String> returningFields);
 
     @GET
     @Path("/{conversationId}/status")
@@ -96,19 +115,24 @@ public interface IRestAgentEngine {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Rerun last conversation step", description = "Re-executes the last conversation step, useful for retrying after errors.")
     void rerunLastConversationStep(@PathParam("conversationId") String conversationId,
-            @Parameter(description = "Language code for NLP processing.") @QueryParam("language") String language,
-            @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
-            @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
-            @QueryParam("returningFields") List<String> returningFields, @Suspended final AsyncResponse response);
+                                   @Parameter(description = "Language code for NLP processing.")
+                                   @QueryParam("language") String language,
+                                   @QueryParam("returnDetailed")
+                                   @DefaultValue("false") Boolean returnDetailed,
+                                   @QueryParam("returnCurrentStepOnly")
+                                   @DefaultValue("true") Boolean returnCurrentStepOnly,
+                                   @QueryParam("returningFields") List<String> returningFields, @Suspended final AsyncResponse response);
 
     @POST
     @Path("/{conversationId}")
     @Consumes(MediaType.TEXT_PLAIN)
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Send a message to the agent", description = "Send a plain text message and receive the agent's response.")
-    void say(@PathParam("conversationId") String conversationId, @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
-            @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
-            @QueryParam("returningFields") List<String> returningFields, @DefaultValue("") String message, @Suspended final AsyncResponse response);
+    void say(@PathParam("conversationId") String conversationId, @QueryParam("returnDetailed")
+    @DefaultValue("false") Boolean returnDetailed,
+             @QueryParam("returnCurrentStepOnly")
+             @DefaultValue("true") Boolean returnCurrentStepOnly,
+             @QueryParam("returningFields") List<String> returningFields, @DefaultValue("") String message, @Suspended final AsyncResponse response);
 
     @POST
     @Path("/{conversationId}")
@@ -116,9 +140,11 @@ public interface IRestAgentEngine {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Send a message with context", description = "Send a structured message with context data and receive the agent's response.")
     void sayWithinContext(@PathParam("conversationId") String conversationId,
-            @QueryParam("returnDetailed") @DefaultValue("false") Boolean returnDetailed,
-            @QueryParam("returnCurrentStepOnly") @DefaultValue("true") Boolean returnCurrentStepOnly,
-            @QueryParam("returningFields") List<String> returningFields, InputData inputData, @Suspended final AsyncResponse response);
+                          @QueryParam("returnDetailed")
+                          @DefaultValue("false") Boolean returnDetailed,
+                          @QueryParam("returnCurrentStepOnly")
+                          @DefaultValue("true") Boolean returnCurrentStepOnly,
+                          @QueryParam("returningFields") List<String> returningFields, InputData inputData, @Suspended final AsyncResponse response);
 
     // --- Undo / Redo ---
 

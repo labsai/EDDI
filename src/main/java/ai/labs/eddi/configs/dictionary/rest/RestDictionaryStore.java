@@ -93,7 +93,8 @@ public class RestDictionaryStore implements IRestDictionaryStore {
     }
 
     private DictionaryConfiguration patchDocument(DictionaryConfiguration currentDictionaryConfig,
-            List<PatchInstruction<DictionaryConfiguration>> patchInstructions) throws IResourceStore.ResourceStoreException {
+                                                  List<PatchInstruction<DictionaryConfiguration>> patchInstructions)
+            throws IResourceStore.ResourceStoreException {
 
         for (var patchInstruction : patchInstructions) {
             var regularConfigPatch = patchInstruction.getDocument();

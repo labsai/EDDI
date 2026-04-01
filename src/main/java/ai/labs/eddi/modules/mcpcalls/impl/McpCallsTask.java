@@ -138,7 +138,7 @@ public class McpCallsTask implements ILifecycleTask {
     }
 
     private void executeMcpCall(IConversationMemory memory, IWritableConversationStep currentStep, McpCallsConfiguration config, McpCall mcpCall,
-            McpToolProviderManager.McpToolsResult mcpTools, Set<String> allowedToolNames, Map<String, Object> templateDataObjects)
+                                McpToolProviderManager.McpToolsResult mcpTools, Set<String> allowedToolNames, Map<String, Object> templateDataObjects)
             throws LifecycleException {
         try {
             String callName = mcpCall.getName() != null ? mcpCall.getName() : mcpCall.getToolName();

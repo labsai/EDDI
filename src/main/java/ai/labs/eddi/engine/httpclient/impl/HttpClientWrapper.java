@@ -204,7 +204,7 @@ public class HttpClientWrapper implements IHttpClient {
         }
 
         private void handleResponse(io.vertx.core.AsyncResult<HttpResponse<Buffer>> ar,
-                io.vertx.core.Handler<io.vertx.core.AsyncResult<IResponse>> handler) {
+                                    io.vertx.core.Handler<io.vertx.core.AsyncResult<IResponse>> handler) {
             if (ar.succeeded()) {
                 HttpResponse<Buffer> response = ar.result();
                 // Check Content-Length header if available

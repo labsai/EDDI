@@ -77,7 +77,7 @@ public class AuditLedgerService {
      * {@link #init()} after construction.
      */
     static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
-            io.micrometer.core.instrument.MeterRegistry meterRegistry) {
+                                               io.micrometer.core.instrument.MeterRegistry meterRegistry) {
         return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig), "eddi-audit-deadletter.jsonl",
                 meterRegistry, null);
     }

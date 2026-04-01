@@ -76,7 +76,8 @@ public interface IRestScheduleStore {
     @Path("/{scheduleId}/fires")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read fire history for a schedule.")
-    List<ScheduleFireLog> readFireLogs(@PathParam("scheduleId") String scheduleId, @QueryParam("limit") @DefaultValue("20") int limit);
+    List<ScheduleFireLog> readFireLogs(@PathParam("scheduleId") String scheduleId, @QueryParam("limit")
+    @DefaultValue("20") int limit);
 
     // --- Admin ---
 
@@ -84,7 +85,8 @@ public interface IRestScheduleStore {
     @Path("/admin/failed")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "List all failed and dead-lettered fire logs across all schedules.")
-    List<ScheduleFireLog> readFailedFires(@QueryParam("limit") @DefaultValue("50") int limit);
+    List<ScheduleFireLog> readFailedFires(@QueryParam("limit")
+    @DefaultValue("50") int limit);
 
     @POST
     @Path("/{scheduleId}/retry")

@@ -32,7 +32,7 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
      * collection.
      */
     public static UserMemoryEntry fromProperty(Property property, String userId, String agentId, String conversationId,
-            Visibility defaultVisibility) {
+                                               Visibility defaultVisibility) {
         Object value;
         if (property.getValueString() != null) {
             value = property.getValueString();
@@ -63,7 +63,7 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
      * Creates an entry from an LLM tool call (rememberFact).
      */
     public static UserMemoryEntry fromToolCall(String userId, String agentId, String conversationId, List<String> groupIds, String key, Object value,
-            String category, Visibility visibility) {
+                                               String category, Visibility visibility) {
         return new UserMemoryEntry(null, userId, key, value, normalizeCategory(category), visibility != null ? visibility : Visibility.self, agentId,
                 groupIds != null ? groupIds : List.of(), conversationId, false, 0, Instant.now(), Instant.now());
     }

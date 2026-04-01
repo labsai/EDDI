@@ -87,7 +87,8 @@ class CascadingModelExecutor {
      *             if all steps fail
      */
     static CascadeResult execute(ChatModelRegistry registry, ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage,
-            Map<String, String> baseParams, LlmConfiguration.Task task, IConversationMemory memory, AgentOrchestrator agentOrchestrator)
+                                 Map<String, String> baseParams, LlmConfiguration.Task task, IConversationMemory memory,
+                                 AgentOrchestrator agentOrchestrator)
             throws LifecycleException {
 
         List<CascadeStep> steps = cascade.getSteps();
@@ -225,8 +226,10 @@ class CascadingModelExecutor {
      * Execute a single cascade step with timeout.
      */
     private static StepResult executeStepWithTimeout(ChatModel chatModel, List<ChatMessage> messages, String systemMessage, String evaluationStrategy,
-            Map<String, String> mergedParams, LlmConfiguration.Task task, CascadeStep step, IConversationMemory memory,
-            AgentOrchestrator agentOrchestrator, boolean useAgentMode) throws Exception {
+                                                     Map<String, String> mergedParams, LlmConfiguration.Task task, CascadeStep step,
+                                                     IConversationMemory memory,
+                                                     AgentOrchestrator agentOrchestrator, boolean useAgentMode)
+            throws Exception {
 
         long timeoutMs = step.getTimeoutMs() != null ? step.getTimeoutMs() : 30000L;
 
@@ -259,7 +262,8 @@ class CascadingModelExecutor {
      * Execute a step in legacy (non-agent) mode.
      */
     private static StepResult executeLegacyModeStep(ChatModel chatModel, List<ChatMessage> originalMessages, String systemMessage,
-            String evaluationStrategy, LlmConfiguration.Task task) throws LifecycleException {
+                                                    String evaluationStrategy, LlmConfiguration.Task task)
+            throws LifecycleException {
 
         // If using structured_output strategy, augment the system message
         List<ChatMessage> messages;
@@ -280,7 +284,8 @@ class CascadingModelExecutor {
      * Execute a step in agent mode (with tool-calling loop).
      */
     private static StepResult executeAgentModeStep(ChatModel chatModel, List<ChatMessage> originalMessages, String systemMessage,
-            String evaluationStrategy, LlmConfiguration.Task task, IConversationMemory memory, AgentOrchestrator agentOrchestrator)
+                                                   String evaluationStrategy, LlmConfiguration.Task task, IConversationMemory memory,
+                                                   AgentOrchestrator agentOrchestrator)
             throws LifecycleException {
 
         // For agent mode, filter out system messages (orchestrator adds its own)

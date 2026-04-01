@@ -56,7 +56,8 @@ public interface IRestCoordinatorAdmin {
     @DELETE
     @Path("/dead-letters")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(summary = "Purge all dead-letter entries", description = "Permanently removes all dead-letter entries. Returns count of purged entries.")
+    @Operation(summary = "Purge all dead-letter entries",
+               description = "Permanently removes all dead-letter entries. Returns count of purged entries.")
     @APIResponse(responseCode = "200", description = "Count of purged entries.")
     int purgeDeadLetters();
 

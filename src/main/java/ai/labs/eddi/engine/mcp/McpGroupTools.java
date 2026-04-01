@@ -105,7 +105,8 @@ public class McpGroupTools {
 
     @Tool(description = "List all agent group configurations. Returns " + "descriptors with name, ID, and last modified date.")
     public String list_groups(@ToolArg(description = "Filter by group name (optional)") String filter,
-            @ToolArg(description = "Page index, 0-based (default 0)") String index, @ToolArg(description = "Page size (default 20)") String limit) {
+                              @ToolArg(description = "Page index, 0-based (default 0)") String index,
+                              @ToolArg(description = "Page size (default 20)") String limit) {
         requireRole(identity, authEnabled, "eddi-editor");
         try {
             int idx = parseIntOrDefault(index, 0);
@@ -121,7 +122,7 @@ public class McpGroupTools {
 
     @Tool(description = "Read a group configuration including its members, " + "discussion style, phases, and protocol settings.")
     public String read_group(@ToolArg(description = "Group configuration ID") String groupId,
-            @ToolArg(description = "Version number (0 or omit for latest)") String version) {
+                             @ToolArg(description = "Version number (0 or omit for latest)") String version) {
         requireRole(identity, authEnabled, "eddi-editor");
         try {
             int ver = parseIntOrDefault(version, 0);
@@ -139,15 +140,18 @@ public class McpGroupTools {
     @Tool(description = "Create a new agent group for multi-agent discussions. " + "Call describe_discussion_styles first to choose a style. "
             + "Members can be agents (default) or nested groups (memberTypes=GROUP).")
     public String create_group(@ToolArg(description = "Group name") String name,
-            @ToolArg(description = "Group description (optional)") String description,
-            @ToolArg(description = "Comma-separated member IDs (agent IDs or " + "group IDs depending on memberTypes)") String memberAgentIds,
-            @ToolArg(description = "Comma-separated display names (optional)") String memberDisplayNames,
-            @ToolArg(description = "Comma-separated member roles: PARTICIPANT, " + "DEVIL_ADVOCATE, PRO, CON (optional)") String memberRoles,
-            @ToolArg(description = "Comma-separated member types: AGENT " + "(default) or GROUP for nested groups (optional)") String memberTypes,
-            @ToolArg(description = "Moderator agent ID (optional)") String moderatorAgentId,
-            @ToolArg(description = "Discussion style: ROUND_TABLE, PEER_REVIEW, "
-                    + "DEVIL_ADVOCATE, DELPHI, DEBATE (default ROUND_TABLE)") String style,
-            @ToolArg(description = "Max rounds (default 2)") String maxRounds) {
+                               @ToolArg(description = "Group description (optional)") String description,
+                               @ToolArg(description = "Comma-separated member IDs (agent IDs or "
+                                       + "group IDs depending on memberTypes)") String memberAgentIds,
+                               @ToolArg(description = "Comma-separated display names (optional)") String memberDisplayNames,
+                               @ToolArg(description = "Comma-separated member roles: PARTICIPANT, "
+                                       + "DEVIL_ADVOCATE, PRO, CON (optional)") String memberRoles,
+                               @ToolArg(description = "Comma-separated member types: AGENT "
+                                       + "(default) or GROUP for nested groups (optional)") String memberTypes,
+                               @ToolArg(description = "Moderator agent ID (optional)") String moderatorAgentId,
+                               @ToolArg(description = "Discussion style: ROUND_TABLE, PEER_REVIEW, "
+                                       + "DEVIL_ADVOCATE, DELPHI, DEBATE (default ROUND_TABLE)") String style,
+                               @ToolArg(description = "Max rounds (default 2)") String maxRounds) {
         requireRole(identity, authEnabled, "eddi-editor");
         try {
             AgentGroupConfiguration config = new AgentGroupConfiguration();
@@ -211,8 +215,8 @@ public class McpGroupTools {
 
     @Tool(description = "Update an existing agent group. Pass the full " + "configuration as JSON.")
     public String update_group(@ToolArg(description = "Group ID") String groupId,
-            @ToolArg(description = "Version number (0 for latest)") String version,
-            @ToolArg(description = "Full JSON configuration body") String configJson) {
+                               @ToolArg(description = "Version number (0 for latest)") String version,
+                               @ToolArg(description = "Full JSON configuration body") String configJson) {
         requireRole(identity, authEnabled, "eddi-editor");
         try {
             int ver = parseIntOrDefault(version, 0);
@@ -227,7 +231,7 @@ public class McpGroupTools {
 
     @Tool(description = "Delete an agent group configuration")
     public String delete_group(@ToolArg(description = "Group ID") String groupId,
-            @ToolArg(description = "Version number (0 for latest)") String version) {
+                               @ToolArg(description = "Version number (0 for latest)") String version) {
         requireRole(identity, authEnabled, "eddi-editor");
         try {
             int ver = parseIntOrDefault(version, 0);
@@ -244,8 +248,8 @@ public class McpGroupTools {
     @Tool(description = "Start a structured multi-agent discussion. All " + "configured member agents will participate using the group's "
             + "discussion style. Returns the full transcript with each " + "agent's contributions organized by phase.")
     public String discuss_with_group(@ToolArg(description = "Group configuration ID (from create_group " + "or list_groups)") String groupId,
-            @ToolArg(description = "The question or topic for the group to " + "discuss") String question,
-            @ToolArg(description = "User ID (optional, defaults to " + "'mcp-client')") String userId) {
+                                     @ToolArg(description = "The question or topic for the group to " + "discuss") String question,
+                                     @ToolArg(description = "User ID (optional, defaults to " + "'mcp-client')") String userId) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
             String user = userId != null && !userId.isBlank() ? userId : "mcp-client";
@@ -259,7 +263,8 @@ public class McpGroupTools {
 
     @Tool(description = "Read a group conversation transcript including all " + "phases, agent contributions, and synthesized answer.")
     public String read_group_conversation(
-            @ToolArg(description = "Group conversation ID (from " + "discuss_with_group or list_group_conversations)") String groupConversationId) {
+                                          @ToolArg(description = "Group conversation ID (from "
+                                                  + "discuss_with_group or list_group_conversations)") String groupConversationId) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
             GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
@@ -272,7 +277,8 @@ public class McpGroupTools {
 
     @Tool(description = "List past group conversation transcripts for a " + "group. Returns conversation IDs, state, question, and " + "timestamps.")
     public String list_group_conversations(@ToolArg(description = "Group configuration ID") String groupId,
-            @ToolArg(description = "Page index, 0-based (default 0)") String index, @ToolArg(description = "Page size (default 20)") String limit) {
+                                           @ToolArg(description = "Page index, 0-based (default 0)") String index,
+                                           @ToolArg(description = "Page size (default 20)") String limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
             int idx = parseIntOrDefault(index, 0);

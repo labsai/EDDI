@@ -46,9 +46,12 @@ public interface IRestAgentAdministration {
     @APIResponse(responseCode = "200", description = "Agent undeployed.")
     @APIResponse(responseCode = "404", description = "Agent not found.")
     Response undeployAgent(@PathParam("environment") Environment environment, @PathParam("agentId") String agentId,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("endAllActiveConversations") @DefaultValue("false") Boolean endAllActiveConversations,
-            @QueryParam("undeployThisAndAllPreviousAgentVersions") @DefaultValue("false") Boolean undeployThisAndAllPreviousAgentVersions);
+                           @Parameter(name = "version", required = true, example = "1")
+                           @QueryParam("version") Integer version,
+                           @QueryParam("endAllActiveConversations")
+                           @DefaultValue("false") Boolean endAllActiveConversations,
+                           @QueryParam("undeployThisAndAllPreviousAgentVersions")
+                           @DefaultValue("false") Boolean undeployThisAndAllPreviousAgentVersions);
 
     @GET
     @NoCache
@@ -58,8 +61,10 @@ public interface IRestAgentAdministration {
     @APIResponse(responseCode = "200", description = "Deployment status.")
     @APIResponse(responseCode = "404", description = "Agent not found.")
     Response getDeploymentStatus(@PathParam("environment") Environment environment, @PathParam("agentId") String agentId,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("format") @DefaultValue("json") String format);
+                                 @Parameter(name = "version", required = true, example = "1")
+                                 @QueryParam("version") Integer version,
+                                 @QueryParam("format")
+                                 @DefaultValue("json") String format);
 
     @GET
     @NoCache
@@ -67,5 +72,6 @@ public interface IRestAgentAdministration {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "List all deployment statuses", description = "Returns deployment status for all agents in the given environment.")
     @APIResponse(responseCode = "200", description = "List of deployment statuses.")
-    List<AgentDeploymentStatus> getDeploymentStatuses(@PathParam("environment") @DefaultValue("production") Environment environment);
+    List<AgentDeploymentStatus> getDeploymentStatuses(@PathParam("environment")
+    @DefaultValue("production") Environment environment);
 }

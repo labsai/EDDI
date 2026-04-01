@@ -58,7 +58,7 @@ public class RestAgentManagement implements IRestAgentManagement {
 
     @Override
     public void loadConversationMemory(String intent, String userId, String language, Boolean returnDetailed, Boolean returnCurrentStepOnly,
-            List<String> returningFields, AsyncResponse asyncResponse) {
+                                       List<String> returningFields, AsyncResponse asyncResponse) {
 
         try {
             var userConversationResult = initUserConversation(intent, userId, language);
@@ -90,7 +90,7 @@ public class RestAgentManagement implements IRestAgentManagement {
 
     @Override
     public void sayWithinContext(String intent, String userId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields,
-            InputData inputData, AsyncResponse response) {
+                                 InputData inputData, AsyncResponse response) {
         try {
             var userConversation = initUserConversation(intent, userId, extractLanguage(inputData)).getUserConversation();
 

@@ -49,23 +49,29 @@ public interface IRestRuleSetStore extends IRestVersionInfo {
     @APIResponse(responseCode = "200", description = "Array of DocumentDescriptors")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of behavior descriptors.")
-    List<DocumentDescriptor> readBehaviorDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
+    List<DocumentDescriptor> readBehaviorDescriptors(@QueryParam("filter")
+    @DefaultValue("") String filter,
+                                                     @QueryParam("index")
+                                                     @DefaultValue("0") Integer index,
+                                                     @QueryParam("limit")
+                                                     @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read behavior rule set.")
     RuleSetConfiguration readRuleSet(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
+                                     @Parameter(name = "version", required = true, example = "1")
+                                     @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update behavior rule set.")
     Response updateRuleSet(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            RuleSetConfiguration behaviorConfiguration);
+                           @Parameter(name = "version", required = true, example = "1")
+                           @QueryParam("version") Integer version,
+                           RuleSetConfiguration behaviorConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -81,6 +87,8 @@ public interface IRestRuleSetStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(description = "Delete behavior rule set.")
     Response deleteRuleSet(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
+                           @Parameter(name = "version", required = true, example = "1")
+                           @QueryParam("version") Integer version,
+                           @QueryParam("permanent")
+                           @DefaultValue("false") Boolean permanent);
 }

@@ -151,7 +151,7 @@ public class OutputTemplateTask implements ILifecycleTask {
     }
 
     private void templatingQuickReplies(IWritableConversationStep currentStep, List<IData<List<QuickReply>>> quickReplyDataList,
-            Map<String, Object> contextMap) {
+                                        Map<String, Object> contextMap) {
         quickReplyDataList.forEach(quickReplyData -> {
             var preTemplating = quickReplyData.getResult();
             var postTemplating = copyQuickReplies(preTemplating).stream().map(quickReply -> {

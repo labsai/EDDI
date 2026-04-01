@@ -35,22 +35,28 @@ public interface IRestRagStore extends IRestVersionInfo {
     @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "List RAG descriptors", description = "Read list of RAG configuration descriptors.")
-    List<DocumentDescriptor> readRagDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
+    List<DocumentDescriptor> readRagDescriptors(@QueryParam("filter")
+    @DefaultValue("") String filter,
+                                                @QueryParam("index")
+                                                @DefaultValue("0") Integer index,
+                                                @QueryParam("limit")
+                                                @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Read RAG config", description = "Read a specific RAG configuration.")
     RagConfiguration readRag(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
+                             @Parameter(name = "version", required = true, example = "1")
+                             @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(summary = "Update RAG config", description = "Update an existing RAG configuration.")
     Response updateRag(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version, RagConfiguration ragConfiguration);
+                       @Parameter(name = "version", required = true, example = "1")
+                       @QueryParam("version") Integer version, RagConfiguration ragConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -66,6 +72,8 @@ public interface IRestRagStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(summary = "Delete RAG config", description = "Delete a RAG configuration.")
     Response deleteRag(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
+                       @Parameter(name = "version", required = true, example = "1")
+                       @QueryParam("version") Integer version,
+                       @QueryParam("permanent")
+                       @DefaultValue("false") Boolean permanent);
 }

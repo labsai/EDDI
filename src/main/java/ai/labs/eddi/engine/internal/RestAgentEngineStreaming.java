@@ -41,7 +41,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
     @Override
     public void sayStreaming(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields,
-            InputData inputData, SseEventSink eventSink, Sse sse) {
+                             InputData inputData, SseEventSink eventSink, Sse sse) {
 
         try {
             conversationService.sayStreaming(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,

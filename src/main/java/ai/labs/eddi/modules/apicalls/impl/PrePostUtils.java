@@ -45,7 +45,8 @@ public class PrePostUtils {
     }
 
     public Map<String, Object> executePreRequestPropertyInstructions(IConversationMemory memory, Map<String, Object> templateDataObjects,
-            PreRequest preRequest) throws ITemplatingEngine.TemplateEngineException {
+                                                                     PreRequest preRequest)
+            throws ITemplatingEngine.TemplateEngineException {
 
         if (preRequest != null && preRequest.getPropertyInstructions() != null) {
             var propertyInstructions = preRequest.getPropertyInstructions();
@@ -56,7 +57,8 @@ public class PrePostUtils {
     }
 
     public void executePropertyInstructions(List<PropertyInstruction> propertyInstructions, int httpCode, boolean validationError,
-            IConversationMemory memory, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException {
+                                            IConversationMemory memory, Map<String, Object> templateDataObjects)
+            throws ITemplatingEngine.TemplateEngineException {
 
         if (propertyInstructions != null) {
             for (PropertyInstruction propertyInstruction : propertyInstructions) {
@@ -143,7 +145,7 @@ public class PrePostUtils {
     }
 
     public void createMemoryEntry(IConversationMemory.IWritableConversationStep currentStep, Object responseObject, String responseObjectName,
-            String outputKey) {
+                                  String outputKey) {
 
         var memoryDataName = outputKey + ":" + responseObjectName;
         IData<Object> httpResponseData = dataFactory.createData(memoryDataName, responseObject);
@@ -154,7 +156,8 @@ public class PrePostUtils {
     }
 
     public void runPostResponse(IConversationMemory memory, PostResponse postResponse, Map<String, Object> templateDataObjects, int httpCode,
-            boolean validationError) throws IOException, ITemplatingEngine.TemplateEngineException {
+                                boolean validationError)
+            throws IOException, ITemplatingEngine.TemplateEngineException {
 
         if (postResponse != null) {
             var propertyInstructions = postResponse.getPropertyInstructions();
@@ -209,7 +212,8 @@ public class PrePostUtils {
     }
 
     private List<Object> buildOutput(String iterationObjectName, String pathToTargetArray, String templateFilterExpression, String outputType,
-            String outputValue, Map<String, Object> templateDataObjects) throws IOException, ITemplatingEngine.TemplateEngineException {
+                                     String outputValue, Map<String, Object> templateDataObjects)
+            throws IOException, ITemplatingEngine.TemplateEngineException {
 
         if (!isNullOrEmpty(pathToTargetArray)) {
 
@@ -224,7 +228,7 @@ public class PrePostUtils {
     }
 
     private List<Object> buildQuickReplies(String iterationObjectName, String pathToTargetArray, String templateFilterExpression,
-            String quickReplyValue, String quickReplyExpressions, Map<String, Object> templateDataObjects)
+                                           String quickReplyValue, String quickReplyExpressions, Map<String, Object> templateDataObjects)
             throws IOException, ITemplatingEngine.TemplateEngineException {
 
         final String quickReplyTemplate = "    {" + "        \"value\":\"" + quickReplyValue + "\"," + "        \"expressions\":\""
@@ -234,7 +238,8 @@ public class PrePostUtils {
     }
 
     public List<Object> buildListFromJson(String iterationObjectName, String pathToTargetArray, String templateFilterExpression,
-            String iterationValue, Map<String, Object> templateDataObjects) throws ITemplatingEngine.TemplateEngineException, IOException {
+                                          String iterationValue, Map<String, Object> templateDataObjects)
+            throws ITemplatingEngine.TemplateEngineException, IOException {
 
         // Build Qute template: [{#for obj in list}{#if filter}value{#if
         // obj_hasNext},{/if}{/if}{/for}]

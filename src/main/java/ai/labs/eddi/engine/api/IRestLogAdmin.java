@@ -32,10 +32,15 @@ public interface IRestLogAdmin {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Get recent in-memory logs", description = "Returns recent logs from the in-memory ring buffer.")
     @APIResponse(responseCode = "200", description = "List of log entries.")
-    List<LogEntry> getRecentLogs(@Parameter(description = "Filter by agent ID.") @QueryParam("agentId") String agentId,
-            @Parameter(description = "Filter by conversation ID.") @QueryParam("conversationId") String conversationId,
-            @Parameter(description = "Minimum log level filter (TRACE, DEBUG, INFO, WARN, ERROR).") @QueryParam("level") @DefaultValue("INFO") String level,
-            @QueryParam("limit") @DefaultValue("100") int limit);
+    List<LogEntry> getRecentLogs(@Parameter(description = "Filter by agent ID.")
+    @QueryParam("agentId") String agentId,
+                                 @Parameter(description = "Filter by conversation ID.")
+                                 @QueryParam("conversationId") String conversationId,
+                                 @Parameter(description = "Minimum log level filter (TRACE, DEBUG, INFO, WARN, ERROR).")
+                                 @QueryParam("level")
+                                 @DefaultValue("INFO") String level,
+                                 @QueryParam("limit")
+                                 @DefaultValue("100") int limit);
 
     @GET
     @Path("/history")
@@ -45,18 +50,24 @@ public interface IRestLogAdmin {
             + "Survives restarts and works cross-instance.")
     @APIResponse(responseCode = "200", description = "List of historical log entries.")
     List<LogEntry> getHistoryLogs(@QueryParam("environment") Deployment.Environment environment,
-            @Parameter(description = "Filter by agent ID.") @QueryParam("agentId") String agentId, @QueryParam("agentVersion") Integer agentVersion,
-            @Parameter(description = "Filter by conversation ID.") @QueryParam("conversationId") String conversationId,
-            @QueryParam("userId") String userId, @QueryParam("instanceId") String instanceId, @QueryParam("skip") @DefaultValue("0") Integer skip,
-            @QueryParam("limit") @DefaultValue("100") Integer limit);
+                                  @Parameter(description = "Filter by agent ID.")
+                                  @QueryParam("agentId") String agentId, @QueryParam("agentVersion") Integer agentVersion,
+                                  @Parameter(description = "Filter by conversation ID.")
+                                  @QueryParam("conversationId") String conversationId,
+                                  @QueryParam("userId") String userId, @QueryParam("instanceId") String instanceId, @QueryParam("skip")
+                                  @DefaultValue("0") Integer skip,
+                                  @QueryParam("limit")
+                                  @DefaultValue("100") Integer limit);
 
     @GET
     @Path("/stream")
     @Produces(MediaType.SERVER_SENT_EVENTS)
     @Operation(summary = "Live-tail log stream via SSE", description = "Streams log entries as they occur in real-time.")
     void streamLogs(@QueryParam("agentId") String agentId, @QueryParam("conversationId") String conversationId,
-            @Parameter(description = "Minimum log level filter.") @QueryParam("level") @DefaultValue("INFO") String level,
-            @Context SseEventSink eventSink, @Context Sse sse);
+                    @Parameter(description = "Minimum log level filter.")
+                    @QueryParam("level")
+                    @DefaultValue("INFO") String level,
+                    @Context SseEventSink eventSink, @Context Sse sse);
 
     @GET
     @Path("/instance-id")

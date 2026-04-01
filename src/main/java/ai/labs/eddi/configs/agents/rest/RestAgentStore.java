@@ -69,7 +69,7 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public List<DocumentDescriptor> readAgentDescriptors(String filter, Integer index, Integer limit, String containingWorkflowUri,
-            Boolean includePreviousVersions) {
+                                                         Boolean includePreviousVersions) {
 
         IResourceId validatedResourceId = validateUri(containingWorkflowUri);
         if (validatedResourceId == null || !containingWorkflowUri.startsWith(WORKFLOW_URI)) {

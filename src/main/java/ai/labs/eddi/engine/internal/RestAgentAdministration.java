@@ -65,7 +65,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
     @Override
     public Response deployAgent(final Deployment.Environment environment, final String agentId, final Integer version, final Boolean autoDeploy,
-            final Boolean waitForCompletion) {
+                                final Boolean waitForCompletion) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(agentId, "agentId");
         RuntimeUtilities.checkNotNull(version, "version");
@@ -153,7 +153,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
     @Override
     public Response undeployAgent(Deployment.Environment environment, String agentId, Integer version, Boolean endAllActiveConversations,
-            Boolean undeployThisAndAllPreviousAgentVersions) {
+                                  Boolean undeployThisAndAllPreviousAgentVersions) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(agentId, "agentId");
         RuntimeUtilities.checkNotNull(version, "version");

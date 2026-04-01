@@ -44,23 +44,29 @@ public interface IRestAgentGroupStore extends IRestVersionInfo {
     @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of group descriptors.")
-    List<DocumentDescriptor> readGroupDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
+    List<DocumentDescriptor> readGroupDescriptors(@QueryParam("filter")
+    @DefaultValue("") String filter,
+                                                  @QueryParam("index")
+                                                  @DefaultValue("0") Integer index,
+                                                  @QueryParam("limit")
+                                                  @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read group configuration.")
     AgentGroupConfiguration readGroup(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
+                                      @Parameter(name = "version", required = true, example = "1")
+                                      @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update group configuration.")
     Response updateGroup(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            AgentGroupConfiguration groupConfiguration);
+                         @Parameter(name = "version", required = true, example = "1")
+                         @QueryParam("version") Integer version,
+                         AgentGroupConfiguration groupConfiguration);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -76,6 +82,8 @@ public interface IRestAgentGroupStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(description = "Delete group configuration.")
     Response deleteGroup(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
+                         @Parameter(name = "version", required = true, example = "1")
+                         @QueryParam("version") Integer version,
+                         @QueryParam("permanent")
+                         @DefaultValue("false") Boolean permanent);
 }

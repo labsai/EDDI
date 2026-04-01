@@ -60,7 +60,8 @@ public class ConversationRecallTool {
             + "or when the user refers to something from earlier in the conversation. "
             + "Specify a turn range like 'turns 3-7' or a single turn like 'turn 5', " + "or describe what you're looking for.")
     public String recallConversationDetail(
-            @P("What to look for — describe the topic or question, " + "or specify a turn range like 'turns 3-7' or 'turn 5'") String query) {
+                                           @P("What to look for — describe the topic or question, "
+                                                   + "or specify a turn range like 'turns 3-7' or 'turn 5'") String query) {
 
         if (summaryThroughStep <= 0) {
             return "No conversation summary is active — all turns are already in context.";

@@ -157,7 +157,7 @@ public class ToolExecutionService {
      * @return the tool execution result
      */
     public String executeToolWrapped(String toolName, String arguments, String conversationId, Supplier<String> toolExecution,
-            boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking, int rateLimit) {
+                                     boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking, int rateLimit) {
 
         long startTime = System.currentTimeMillis();
 
@@ -213,7 +213,7 @@ public class ToolExecutionService {
      * Execute multiple tools in parallel
      */
     public CompletableFuture<String>[] executeToolsParallel(Object[] toolInstances, Method[] methods, Object[][] args, String conversationId,
-            ToolExecutionTrace trace) {
+                                                            ToolExecutionTrace trace) {
 
         if (toolInstances.length != methods.length || methods.length != args.length) {
             throw new IllegalArgumentException("Arrays must have same length");
@@ -241,7 +241,7 @@ public class ToolExecutionService {
      * Execute tools in parallel and wait for all to complete
      */
     public String[] executeToolsParallelAndWait(Object[] toolInstances, Method[] methods, Object[][] args, String conversationId,
-            ToolExecutionTrace trace, long timeoutMs) {
+                                                ToolExecutionTrace trace, long timeoutMs) {
 
         long startTime = System.currentTimeMillis();
 

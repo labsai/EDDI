@@ -58,7 +58,8 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
     }
 
     private IExecutableWorkflow createExecutableWorkflow(final DocumentDescriptor documentDescriptor,
-            final WorkflowConfiguration workflowConfiguration) throws WorkflowInitializationException, WorkflowConfigurationException {
+                                                         final WorkflowConfiguration workflowConfiguration)
+            throws WorkflowInitializationException, WorkflowConfigurationException {
 
         final var workflowId = extractResourceId(documentDescriptor.getResource());
         final var lifecycleManager = new LifecycleManager(componentCache, workflowId);

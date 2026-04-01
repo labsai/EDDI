@@ -47,7 +47,7 @@ public class DatabaseLogs implements IDatabaseLogs {
 
     @Override
     public List<LogEntry> getLogs(Environment environment, String agentId, Integer agentVersion, String conversationId, String userId,
-            String instanceId, Integer skip, Integer limit) {
+                                  String instanceId, Integer skip, Integer limit) {
         return getLogs(createFilter(environment, agentId, agentVersion, conversationId, userId, instanceId), skip, limit);
     }
 
@@ -86,7 +86,7 @@ public class DatabaseLogs implements IDatabaseLogs {
     }
 
     private Document createFilter(Environment environment, String agentId, Integer agentVersion, String conversationId, String userId,
-            String instanceId) {
+                                  String instanceId) {
         Document filter = new Document();
         if (environment != null) {
             filter.put(KEY_ENVIRONMENT, environment.toString());

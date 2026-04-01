@@ -57,7 +57,7 @@ public abstract class AbstractMongoResourceStore<T> extends AbstractResourceStor
     }
 
     private static <T> HistorizedResourceStore<T> createHistorizedStore(MongoDatabase database, String collectionName,
-            IDocumentBuilder documentBuilder, Class<T> documentType) {
+                                                                        IDocumentBuilder documentBuilder, Class<T> documentType) {
         RuntimeUtilities.checkNotNull(database, "database");
         MongoResourceStorage<T> resourceStorage = new MongoResourceStorage<>(database, collectionName, documentBuilder, documentType);
         return new HistorizedResourceStore<>(resourceStorage);

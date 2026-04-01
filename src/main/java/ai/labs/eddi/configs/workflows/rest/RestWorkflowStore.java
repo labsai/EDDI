@@ -66,7 +66,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
 
     @Override
     public List<DocumentDescriptor> readWorkflowDescriptors(String filter, Integer index, Integer limit, String containingResourceUri,
-            Boolean includePreviousVersions) {
+                                                            Boolean includePreviousVersions) {
 
         if (validateUri(containingResourceUri) == null) {
             return createMalFormattedResourceUriException(containingResourceUri);

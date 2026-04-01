@@ -77,7 +77,7 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public SimpleConversationMemorySnapshot readConversation(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
-            List<String> returningFields) {
+                                                             List<String> returningFields) {
         try {
             return conversationService.readConversation(conversationId, returnDetailed, returnCurrentStepOnly, returningFields);
         } catch (ResourceStoreException e) {
@@ -106,7 +106,7 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public void rerunLastConversationStep(String conversationId, String language, Boolean returnDetailed, Boolean returnCurrentStepOnly,
-            List<String> returningFields, final AsyncResponse response) {
+                                          List<String> returningFields, final AsyncResponse response) {
         checkNotNull(conversationId, "conversationId");
         checkNotEmpty(language, "language");
 
@@ -116,14 +116,14 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public void say(final String conversationId, final Boolean returnDetailed, final Boolean returnCurrentStepOnly,
-            final List<String> returningFields, final String message, final AsyncResponse response) {
+                    final List<String> returningFields, final String message, final AsyncResponse response) {
 
         sayWithinContext(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, new InputData(message, new HashMap<>()), response);
     }
 
     @Override
     public void sayWithinContext(final String conversationId, final Boolean returnDetailed, final Boolean returnCurrentStepOnly,
-            final List<String> returningFields, final InputData inputData, final AsyncResponse response) {
+                                 final List<String> returningFields, final InputData inputData, final AsyncResponse response) {
 
         checkNotNull(conversationId, "conversationId");
         checkNotNull(inputData, "inputData");
@@ -133,7 +133,7 @@ public class RestAgentEngine implements IRestAgentEngine {
     }
 
     private void sayInternal(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields,
-            InputData inputData, boolean rerunOnly, AsyncResponse response) {
+                             InputData inputData, boolean rerunOnly, AsyncResponse response) {
 
         response.setTimeout(agentTimeout, TimeUnit.SECONDS);
         response.setTimeoutHandler(asyncResp -> asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));

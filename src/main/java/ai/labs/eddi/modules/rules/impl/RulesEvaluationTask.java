@@ -100,7 +100,7 @@ public class RulesEvaluationTask implements ILifecycleTask {
     }
 
     private void addActionsToConversationMemory(IConversationMemory memory, List<Rule> successRules, boolean appendActions,
-            boolean expressionsAsActions) {
+                                                boolean expressionsAsActions) {
         List<String> allCurrentActions = new LinkedList<>();
         successRules.forEach(successRule -> successRule.getActions().stream().filter(action -> !allCurrentActions.contains(action))
                 .forEach(allCurrentActions::add));
@@ -126,7 +126,7 @@ public class RulesEvaluationTask implements ILifecycleTask {
     }
 
     private void saveResults(IConversationMemory memory, List<String> allCurrentActions, String key, boolean addResultsToConversationMemory,
-            boolean makePublic, boolean appendActions) {
+                             boolean makePublic, boolean appendActions) {
         var currentStep = memory.getCurrentStep();
 
         var distinctResults = new LinkedHashSet<>();

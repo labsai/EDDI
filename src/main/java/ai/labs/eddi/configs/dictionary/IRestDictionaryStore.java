@@ -36,8 +36,12 @@ public interface IRestDictionaryStore extends IRestVersionInfo {
     @Produces(MediaType.APPLICATION_JSON)
     @APIResponse(responseCode = "200", description = "Array of DocumentDescriptors")
     @Operation(description = "Read list of regular dictionary descriptors.")
-    List<DocumentDescriptor> readRegularDictionaryDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
+    List<DocumentDescriptor> readRegularDictionaryDescriptors(@QueryParam("filter")
+    @DefaultValue("") String filter,
+                                                              @QueryParam("index")
+                                                              @DefaultValue("0") Integer index,
+                                                              @QueryParam("limit")
+                                                              @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
@@ -45,26 +49,41 @@ public interface IRestDictionaryStore extends IRestVersionInfo {
     @APIResponse(responseCode = "200", description = "configuration of regular dictionary")
     @Operation(description = "Read regular dictionary.")
     DictionaryConfiguration readRegularDictionary(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("filter") @DefaultValue("") String filter, @QueryParam("order") @DefaultValue("") String order,
-            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
+                                                  @Parameter(name = "version", required = true, example = "1")
+                                                  @QueryParam("version") Integer version,
+                                                  @QueryParam("filter")
+                                                  @DefaultValue("") String filter,
+                                                  @QueryParam("order")
+                                                  @DefaultValue("") String order,
+                                                  @QueryParam("index")
+                                                  @DefaultValue("0") Integer index,
+                                                  @QueryParam("limit")
+                                                  @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}/expressions")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(operationId = "readDictionaryExpressions", description = "Read expressions of regular dictionary.")
     List<String> readExpressions(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("filter") @DefaultValue("") String filter, @QueryParam("order") @DefaultValue("") String order,
-            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
+                                 @Parameter(name = "version", required = true, example = "1")
+                                 @QueryParam("version") Integer version,
+                                 @QueryParam("filter")
+                                 @DefaultValue("") String filter,
+                                 @QueryParam("order")
+                                 @DefaultValue("") String order,
+                                 @QueryParam("index")
+                                 @DefaultValue("0") Integer index,
+                                 @QueryParam("limit")
+                                 @DefaultValue("20") Integer limit);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update regular dictionary.")
     Response updateRegularDictionary(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            DictionaryConfiguration regularDictionaryConfiguration);
+                                     @Parameter(name = "version", required = true, example = "1")
+                                     @QueryParam("version") Integer version,
+                                     DictionaryConfiguration regularDictionaryConfiguration);
 
     /**
      * example dictionary json config:
@@ -93,14 +112,17 @@ public interface IRestDictionaryStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(description = "Delete regular dictionary.")
     Response deleteRegularDictionary(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
+                                     @Parameter(name = "version", required = true, example = "1")
+                                     @QueryParam("version") Integer version,
+                                     @QueryParam("permanent")
+                                     @DefaultValue("false") Boolean permanent);
 
     @PATCH
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Partial update regular dictionary.")
     Response patchRegularDictionary(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            List<PatchInstruction<DictionaryConfiguration>> patchInstructions);
+                                    @Parameter(name = "version", required = true, example = "1")
+                                    @QueryParam("version") Integer version,
+                                    List<PatchInstruction<DictionaryConfiguration>> patchInstructions);
 }

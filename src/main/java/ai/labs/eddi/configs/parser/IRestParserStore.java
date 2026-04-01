@@ -23,8 +23,12 @@ public interface IRestParserStore extends IRestVersionInfo {
     @Produces(MediaType.APPLICATION_JSON)
     @APIResponse(responseCode = "200", description = "Array of DocumentDescriptors")
     @Operation(description = "Read list of parser descriptors.")
-    List<DocumentDescriptor> readParserDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
-            @QueryParam("index") @DefaultValue("0") Integer index, @QueryParam("limit") @DefaultValue("20") Integer limit);
+    List<DocumentDescriptor> readParserDescriptors(@QueryParam("filter")
+    @DefaultValue("") String filter,
+                                                   @QueryParam("index")
+                                                   @DefaultValue("0") Integer index,
+                                                   @QueryParam("limit")
+                                                   @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
@@ -32,15 +36,17 @@ public interface IRestParserStore extends IRestVersionInfo {
     @APIResponse(responseCode = "200", description = "configuration of parser")
     @Operation(description = "Read parser.")
     ParserConfiguration readParser(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version);
+                                   @Parameter(name = "version", required = true, example = "1")
+                                   @QueryParam("version") Integer version);
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update parser.")
     Response updateParser(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            ParserConfiguration parserConfiguration);
+                          @Parameter(name = "version", required = true, example = "1")
+                          @QueryParam("version") Integer version,
+                          ParserConfiguration parserConfiguration);
 
     /**
      * example parser json config:
@@ -77,6 +83,8 @@ public interface IRestParserStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(description = "Delete parser.")
     Response deleteParser(@PathParam("id") String id,
-            @Parameter(name = "version", required = true, example = "1") @QueryParam("version") Integer version,
-            @QueryParam("permanent") @DefaultValue("false") Boolean permanent);
+                          @Parameter(name = "version", required = true, example = "1")
+                          @QueryParam("version") Integer version,
+                          @QueryParam("permanent")
+                          @DefaultValue("false") Boolean permanent);
 }
