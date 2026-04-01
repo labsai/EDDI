@@ -394,7 +394,7 @@
     "cascadeSuccess": "การอัปเดตแบบต่อเนื่องเสร็จสมบูรณ์",
     "invalidJson": "JSON ไม่ถูกต้อง — เปลี่ยนไปแท็บ JSON เพื่อแก้ไข"
   },
-  "behaviorEditor": {
+  "rulesEditor": {
     "appendActions": "เพิ่มการดำเนินการ",
     "expressionsAsActions": "นิพจน์เป็นการดำเนินการ",
     "groups": "กลุ่มพฤติกรรม",

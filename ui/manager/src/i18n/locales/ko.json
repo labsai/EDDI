@@ -394,7 +394,7 @@
     "cascadeSuccess": "캐스케이드 업데이트 완료",
     "invalidJson": "잘못된 JSON — JSON 탭으로 전환하여 수정하세요."
   },
-  "behaviorEditor": {
+  "rulesEditor": {
     "appendActions": "작업 추가",
     "expressionsAsActions": "표현식을 작업으로",
     "groups": "동작 그룹",

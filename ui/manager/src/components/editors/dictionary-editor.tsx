@@ -154,6 +154,7 @@ export interface DictionaryEditorProps {
 
 export function DictionaryEditor({ data, onChange, readOnly }: DictionaryEditorProps) {
   const { t } = useTranslation();
+  data = data ?? ({} as DictionaryConfig);
 
   const addWord = useCallback(() => {
     onChange({ ...data, words: [...(data.words ?? []), { word: "", expressions: "", frequency: 0 }] });

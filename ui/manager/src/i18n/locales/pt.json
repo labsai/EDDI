@@ -394,7 +394,7 @@
     "cascadeSuccess": "Atualização em cascata concluída",
     "invalidJson": "JSON inválido — mude para a aba JSON para corrigir."
   },
-  "behaviorEditor": {
+  "rulesEditor": {
     "appendActions": "Adicionar ações",
     "expressionsAsActions": "Expressões como ações",
     "groups": "Grupos de comportamento",

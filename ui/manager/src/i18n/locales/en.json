@@ -82,7 +82,7 @@
     },
     "resources": {
       "title": "Resources",
-      "subtitle": "Manage behavior rules, dictionaries, outputs, and more"
+      "subtitle": "Manage Rules, dictionaries, outputs, and more"
     },
     "groups": {
       "title": "Groups",
@@ -419,10 +419,10 @@
     "cascadeSuccess": "Cascade update complete",
     "invalidJson": "Invalid JSON — switch to the JSON tab to fix."
   },
-  "behaviorEditor": {
+  "rulesEditor": {
     "appendActions": "Append Actions",
     "expressionsAsActions": "Expressions as Actions",
-    "groups": "Behavior Groups",
+    "groups": "Rules Groups",
     "addGroup": "Add Group",
     "groupName": "Group Name",
     "executionStrategy": "Execution Strategy",
@@ -443,7 +443,7 @@
     "removeRule": "Remove Rule",
     "removeGroup": "Remove Group",
     "removeCondition": "Remove Condition",
-    "noGroups": "No behavior groups defined",
+    "noGroups": "No Rules Groups defined",
     "noRules": "No rules in this group",
     "noConditions": "No conditions"
   },
@@ -971,7 +971,7 @@
       "buildAgents": "Build Agents",
       "buildAgentsDesc": "Create and configure AI agents with the wizard or from scratch",
       "designWorkflows": "Design Workflows",
-      "designWorkflowsDesc": "Drag-and-drop pipeline builder with behavior rules, LLM chains, and tools",
+      "designWorkflowsDesc": "Drag-and-drop pipeline builder with Rules, LLM chains, and tools",
       "testRealtime": "Test in Real-Time",
       "testRealtimeDesc": "Chat with your agents with streaming responses and built-in debugging",
       "monitorOperate": "Monitor & Operate",
@@ -1012,7 +1012,7 @@
       "workflows": {
         "title": "Workflows Tour",
         "step1Title": "Create a Workflow",
-        "step1Desc": "Workflows define the processing pipeline — a sequence of tasks like LLM calls, behavior rules, and HTTP integrations.",
+        "step1Desc": "Workflows define the processing pipeline — a sequence of tasks like LLM calls, Rules, and HTTP integrations.",
         "step2Title": "Your Workflows",
         "step2Desc": "Each workflow can be attached to one or more agents. Click to open the drag-and-drop pipeline editor.",
         "step3Title": "Organize Your View",
@@ -1036,7 +1036,7 @@
         "step2Title": "LLM Configurations",
         "step2Desc": "Define which AI model powers your agent, its system prompt, tools, MCP servers, and cascade settings. This is the brain.",
         "step3Title": "Rules & API Calls",
-        "step3Desc": "Behavior Rules control conversation flow. HTTP Calls connect to external APIs. Both can be used as LLM tools."
+        "step3Desc": "Rules control conversation flow. HTTP Calls connect to external APIs. Both can be used as LLM tools."
       },
       "conversations": {
         "title": "Conversations Tour",

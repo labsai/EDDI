@@ -394,7 +394,7 @@
     "cascadeSuccess": "カスケード更新完了",
     "invalidJson": "JSON が無効です — JSON タブに切り替えて修正してください。"
   },
-  "behaviorEditor": {
+  "rulesEditor": {
     "appendActions": "アクションを追加",
     "expressionsAsActions": "式をアクションとして",
     "groups": "動作グループ",

@@ -394,7 +394,7 @@
     "cascadeSuccess": "级联更新完成",
     "invalidJson": "JSON 无效 — 切换到 JSON 标签页修复。"
   },
-  "behaviorEditor": {
+  "rulesEditor": {
     "appendActions": "附加操作",
     "expressionsAsActions": "表达式作为操作",
     "groups": "行为组",

@@ -394,7 +394,7 @@
     "cascadeSuccess": "कैस्केड अपडेट पूर्ण",
     "invalidJson": "अमान्य JSON — ठीक करने के लिए JSON टैब पर जाएं।"
   },
-  "behaviorEditor": {
+  "rulesEditor": {
     "appendActions": "कार्य जोड़ें",
     "expressionsAsActions": "अभिव्यक्तियां कार्य के रूप में",
     "groups": "व्यवहार समूह",

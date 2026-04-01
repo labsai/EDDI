@@ -57,7 +57,7 @@ describe("ResourcesPage (Hub)", () => {
     renderWithProviders(<ResourcesPage />);
     expect(
       screen.getByText(
-        "Manage behavior rules, dictionaries, outputs, and more"
+        "Manage Rules, dictionaries, outputs, and more"
       )
     ).toBeInTheDocument();
   });

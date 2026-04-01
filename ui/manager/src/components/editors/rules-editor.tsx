@@ -9,30 +9,30 @@ import {
   GitBranch,
 } from "lucide-react";
 
-// ─── Types matching BehaviorConfiguration backend model ──────────────────────
+// ─── Types matching RulesConfiguration backend model ──────────────────────
 
-export interface BehaviorCondition {
+export interface RuleCondition {
   type: string;
   configs?: Record<string, string>;
-  conditions?: BehaviorCondition[] | null;
+  conditions?: RuleCondition[] | null;
 }
 
-export interface BehaviorRule {
+export interface Rule {
   name: string;
   actions: string[];
-  conditions: BehaviorCondition[];
+  conditions: RuleCondition[];
 }
 
-export interface BehaviorGroup {
+export interface RulesGroup {
   name: string;
   executionStrategy?: string;
-  behaviorRules: BehaviorRule[];
+  behaviorRules: Rule[];
 }
 
-export interface BehaviorConfig {
+export interface RulesConfig {
   appendActions?: boolean;
   expressionsAsActions?: boolean;
-  behaviorGroups: BehaviorGroup[];
+  behaviorGroups: RulesGroup[];
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -184,8 +184,8 @@ function ConditionEditor({
   readOnly,
   depth = 0,
 }: {
-  condition: BehaviorCondition;
-  onChange: (c: BehaviorCondition) => void;
+  condition: RuleCondition;
+  onChange: (c: RuleCondition) => void;
   onRemove: () => void;
   readOnly?: boolean;
   depth?: number;
@@ -355,8 +355,8 @@ function RuleEditor({
   onRemove,
   readOnly,
 }: {
-  rule: BehaviorRule;
-  onChange: (r: BehaviorRule) => void;
+  rule: Rule;
+  onChange: (r: Rule) => void;
   onRemove: () => void;
   readOnly?: boolean;
 }) {
@@ -419,27 +419,27 @@ function RuleEditor({
           {/* Conditions */}
           <div>
             <h5 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {t("behaviorEditor.conditions", "Conditions")}
+              {t("rulesEditor.conditions", "Conditions")}
             </h5>
             <div className="space-y-2">
-              {rule.conditions.length === 0 && (
+              {(rule.conditions ?? []).length === 0 && (
                 <p className="text-xs italic text-muted-foreground">
-                  {t("behaviorEditor.noConditions", "No conditions")}
+                  {t("rulesEditor.noConditions", "No conditions")}
                 </p>
               )}
-              {rule.conditions.map((cond, ci) => (
+              {(rule.conditions ?? []).map((cond, ci) => (
                 <ConditionEditor
                   key={ci}
                   condition={cond}
                   onChange={(updated) => {
-                    const copy = [...rule.conditions];
+                    const copy = [...(rule.conditions ?? [])];
                     copy[ci] = updated;
                     onChange({ ...rule, conditions: copy });
                   }}
                   onRemove={() =>
                     onChange({
                       ...rule,
-                      conditions: rule.conditions.filter((_, j) => j !== ci),
+                      conditions: (rule.conditions ?? []).filter((_, j) => j !== ci),
                     })
                   }
                   readOnly={readOnly}
@@ -452,7 +452,7 @@ function RuleEditor({
                     onChange({
                       ...rule,
                       conditions: [
-                        ...rule.conditions,
+                        ...(rule.conditions ?? []),
                         {
                           type: "inputmatcher",
                           configs: {
@@ -480,21 +480,22 @@ function RuleEditor({
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-export interface BehaviorEditorProps {
-  data: BehaviorConfig;
-  onChange: (data: BehaviorConfig) => void;
+export interface RulesEditorProps {
+  data: RulesConfig;
+  onChange: (data: RulesConfig) => void;
   readOnly?: boolean;
 }
 
-export function BehaviorEditor({
+export function RulesEditor({
   data,
   onChange,
   readOnly,
-}: BehaviorEditorProps) {
+}: RulesEditorProps) {
   const { t } = useTranslation();
+  data = data ?? ({} as RulesConfig);
   const [expandedGroups, setExpandedGroups] = useState<Record<number, boolean>>(
     () =>
-      Object.fromEntries(data.behaviorGroups.map((_, i) => [i, true]))
+      Object.fromEntries((data.behaviorGroups ?? []).map((_, i) => [i, true]))
   );
 
   const toggleGroup = useCallback((idx: number) => {
@@ -502,8 +503,8 @@ export function BehaviorEditor({
   }, []);
 
   const updateGroup = useCallback(
-    (idx: number, group: BehaviorGroup) => {
-      const groups = [...data.behaviorGroups];
+    (idx: number, group: RulesGroup) => {
+      const groups = [...(data.behaviorGroups ?? [])];
       groups[idx] = group;
       onChange({ ...data, behaviorGroups: groups });
     },
@@ -514,7 +515,7 @@ export function BehaviorEditor({
     (idx: number) => {
       onChange({
         ...data,
-        behaviorGroups: data.behaviorGroups.filter((_, i) => i !== idx),
+        behaviorGroups: (data.behaviorGroups ?? []).filter((_, i) => i !== idx),
       });
     },
     [data, onChange]
@@ -524,7 +525,7 @@ export function BehaviorEditor({
     onChange({
       ...data,
       behaviorGroups: [
-        ...data.behaviorGroups,
+        ...(data.behaviorGroups ?? []),
         { name: "", executionStrategy: "currentStepOnly", behaviorRules: [] },
       ],
     });
@@ -532,13 +533,13 @@ export function BehaviorEditor({
 
   const addRule = useCallback(
     (groupIdx: number) => {
-      const groups = [...data.behaviorGroups];
+      const groups = [...(data.behaviorGroups ?? [])];
       const group = groups[groupIdx];
       if (!group) return;
       groups[groupIdx] = {
         ...group,
         behaviorRules: [
-          ...group.behaviorRules,
+          ...(group.behaviorRules ?? []),
           { name: "", actions: [], conditions: [] },
         ],
       };
@@ -548,7 +549,7 @@ export function BehaviorEditor({
   );
 
   return (
-    <div className="space-y-6" data-testid="behavior-editor">
+    <div className="space-y-6" data-testid="rules-editor">
       {/* Top-level toggles */}
       <div className="flex flex-wrap gap-6">
         <label className="inline-flex items-center gap-2 text-sm text-foreground">
@@ -597,17 +598,17 @@ export function BehaviorEditor({
           )}
         </div>
 
-        {data.behaviorGroups.length === 0 && (
+        {(data.behaviorGroups ?? []).length === 0 && (
           <div className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
-            {t("behaviorEditor.noGroups", "No behavior groups defined")}
+            {t("rulesEditor.noGroups", "No rules groups defined")}
           </div>
         )}
 
-        {data.behaviorGroups.map((group, gi) => (
+        {(data.behaviorGroups ?? []).map((group, gi) => (
           <div
             key={gi}
             className="rounded-xl border bg-card shadow-sm"
-            data-testid="behavior-group"
+            data-testid="rules-group"
           >
             {/* Group header */}
             <div className="flex items-center gap-2 p-3">
@@ -664,24 +665,24 @@ export function BehaviorEditor({
             {/* Group body — rules */}
             {expandedGroups[gi] !== false && (
               <div className="space-y-3 border-t px-4 py-3">
-                {group.behaviorRules.length === 0 && (
+                {(group.behaviorRules ?? []).length === 0 && (
                   <p className="text-xs italic text-muted-foreground">
-                    {t("behaviorEditor.noRules", "No rules in this group")}
+                    {t("rulesEditor.noRules", "No rules in this group")}
                   </p>
                 )}
-                {group.behaviorRules.map((rule, ri) => (
+                {(group.behaviorRules ?? []).map((rule, ri) => (
                   <RuleEditor
                     key={ri}
                     rule={rule}
                     onChange={(updated) => {
-                      const rules = [...group.behaviorRules];
+                      const rules = [...(group.behaviorRules ?? [])];
                       rules[ri] = updated;
                       updateGroup(gi, { ...group, behaviorRules: rules });
                     }}
                     onRemove={() =>
                       updateGroup(gi, {
                         ...group,
-                        behaviorRules: group.behaviorRules.filter(
+                        behaviorRules: (group.behaviorRules ?? []).filter(
                           (_, j) => j !== ri
                         ),
                       })

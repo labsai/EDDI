@@ -43,9 +43,9 @@ import { getResource } from "@/lib/api/resources";
 import { useAgentContext } from "@/hooks/use-agent-context";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
 import {
-  BehaviorEditor,
-  type BehaviorConfig,
-} from "@/components/editors/behavior-editor";
+  RulesEditor,
+  type RulesConfig,
+} from "@/components/editors/rules-editor";
 import {
   LangchainEditor as LlmEditor,
   type LangchainConfig as LlmConfig,
@@ -92,7 +92,7 @@ const EDITOR_MAP: Record<
   (parsed: unknown, onChange: (val: unknown) => void, readOnly: boolean, meta: { resourceId: string; version: number }) => ReactNode
 > = {
   rules: (p, o, r) => (
-    <BehaviorEditor data={p as BehaviorConfig} onChange={o} readOnly={r} />
+    <RulesEditor data={p as RulesConfig} onChange={o} readOnly={r} />
   ),
   apicalls: (p, o, r) => (
     <ApiCallsEditor data={p as ApiCallsConfig} onChange={o} readOnly={r} />

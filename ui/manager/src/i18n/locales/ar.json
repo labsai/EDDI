@@ -394,7 +394,7 @@
     "cascadeSuccess": "اكتمل التحديث المتتالي",
     "invalidJson": "JSON غير صالح — انتقل إلى علامة تبويب JSON للإصلاح."
   },
-  "behaviorEditor": {
+  "rulesEditor": {
     "appendActions": "إلحاق إجراءات",
     "expressionsAsActions": "تعبيرات كإجراءات",
     "groups": "مجموعات السلوك",

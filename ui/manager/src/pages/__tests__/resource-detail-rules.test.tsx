@@ -30,12 +30,12 @@ function renderPage(type: string, id = "res1") {
   );
 }
 
-describe("Behavior Editor", () => {
-  it("renders behavior editor with groups", async () => {
+describe("Rules Editor", () => {
+  it("renders Rules Editor with groups", async () => {
     renderPage("rules");
 
     await waitFor(() => {
-      expect(screen.getByTestId("behavior-editor")).toBeInTheDocument();
+      expect(screen.getByTestId("rules-editor")).toBeInTheDocument();
     });
   });
 
@@ -43,7 +43,7 @@ describe("Behavior Editor", () => {
     renderPage("rules");
 
     await waitFor(() => {
-      expect(screen.getByTestId("behavior-group")).toBeInTheDocument();
+      expect(screen.getByTestId("rules-group")).toBeInTheDocument();
     });
   });
 
