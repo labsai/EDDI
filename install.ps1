@@ -706,8 +706,15 @@ function Wait-ForReady {
     Write-Information -MessageData "timeout"
     Write-Information -MessageData ""
     Write-Information -MessageData "  EDDI didn't become ready in ${maxWait}s."
-    Write-Information -MessageData "  Check logs: eddi logs eddi"
-    Write-Fail "Health check timed out after ${maxWait}s"
+    Write-Information -MessageData "  Check logs:"
+    Write-Information -MessageData "    eddi logs eddi"
+    Write-Information -MessageData "    eddi logs"
+    Write-Information -MessageData ""
+    Write-Information -MessageData "  Containers left running for inspection."
+    # Mark healthy to prevent catch block from tearing down containers
+    # (we explicitly told the user containers are left running)
+    $script:Healthy = $true
+    exit 1
 }
 
 # ── Import initial agents ──────────────────────────────────
