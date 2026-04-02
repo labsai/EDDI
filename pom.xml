@@ -23,7 +23,7 @@
         <jandex-maven-plugin.version>3.5.3</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.5.5</surefire-plugin.version>
-        <failsafe-plugin.version>3.5.4</failsafe-plugin.version>
+        <failsafe-plugin.version>3.5.5</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <war-plugin.version>3.4.0</war-plugin.version>
         <quarkus-mcp-server.version>1.11.0</quarkus-mcp-server.version>

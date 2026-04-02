@@ -40,6 +40,7 @@ import java.util.stream.Collectors;
 
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType.BOOLEAN;
 import static ai.labs.eddi.engine.memory.ContextUtilities.retrieveContextLanguageFromLongTermMemory;
+import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_MATCHES;
 import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_PARSED;
 import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT;
 import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT_NORMALIZED;
@@ -191,6 +192,12 @@ public class InputParserTask implements ILifecycleTask {
                 Data<List<String>> intentData = new Data<>(INTENTS.key(), intents);
                 currentStep.storeData(intentData);
                 currentStep.addConversationOutputList(INTENTS.key(), intents);
+
+                // Store input→expression matches for debugging/audit
+                List<String> matchDetails = solution.getMatchDetails();
+                if (!matchDetails.isEmpty()) {
+                    currentStep.storeData(new Data<>(EXPRESSIONS_MATCHES.key(), matchDetails));
+                }
             }
         }
     }

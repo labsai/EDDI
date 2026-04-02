@@ -38,6 +38,13 @@ public final class MemoryKeys {
      */
     public static final MemoryKey<String> EXPRESSIONS_PARSED = MemoryKey.of("expressions:parsed");
 
+    /**
+     * Input-to-expression matches. Written by InputParserTask. Maps each matched
+     * user input word to the expression it triggered. Useful for debugging which
+     * input produced which expression.
+     */
+    public static final MemoryKey<List<String>> EXPRESSIONS_MATCHES = MemoryKey.of("expressions:matches");
+
     /** Extracted intent names. Written by InputParserTask. */
     public static final MemoryKey<List<String>> INTENTS = MemoryKey.ofPublic("intents");
 

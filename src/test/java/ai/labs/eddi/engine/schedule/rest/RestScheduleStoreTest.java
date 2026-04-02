@@ -128,7 +128,7 @@ class RestScheduleStoreTest {
         Response response = rest.createSchedule(schedule);
 
         assertEquals(400, response.getStatus());
-        assertTrue(((String) response.getEntity()).contains("below minimum"));
+        assertTrue(((String) response.getEntity()).contains("Invalid schedule"));
     }
 
     @Test
