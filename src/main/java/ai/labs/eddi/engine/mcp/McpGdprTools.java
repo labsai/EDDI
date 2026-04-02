@@ -74,8 +74,8 @@ public class McpGdprTools {
             map.put("completedAt", result.completedAt().toString());
             return jsonSerialization.serialize(map);
         } catch (Exception e) {
-            LOGGER.error("MCP delete_user_data failed for user: " + userId, e);
-            return errorJson("Failed to delete user data: " + e.getMessage());
+            LOGGER.errorf(e, "MCP delete_user_data failed");
+            return errorJson("Failed to delete user data");
         }
     }
 
@@ -102,8 +102,8 @@ public class McpGdprTools {
             map.put("managedConversations", export.managedConversations());
             return jsonSerialization.serialize(map);
         } catch (Exception e) {
-            LOGGER.error("MCP export_user_data failed for user: " + userId, e);
-            return errorJson("Failed to export user data: " + e.getMessage());
+            LOGGER.errorf(e, "MCP export_user_data failed");
+            return errorJson("Failed to export user data");
         }
     }
 }

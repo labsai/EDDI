@@ -53,6 +53,9 @@
 - [Security](security.md)
 - [Secrets Vault](secrets-vault.md)
 - [Audit Ledger](audit-ledger.md)
+- [GDPR Compliance Guide](gdpr-compliance.md)
+- [Incident Response Plan](incident-response.md)
+- [Privacy & Data Processing](../PRIVACY.md)
 
 ## Advanced Concepts
 

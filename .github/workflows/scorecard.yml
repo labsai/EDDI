@@ -1,0 +1,50 @@
+name: OpenSSF Scorecard
+on:
+  # Run on pushes to main/default branch only
+  branch_protection_rule:
+  push:
+    branches: [ "main", "feature/version-6.0.0" ]
+  schedule:
+    # Weekly Saturday at 01:30 UTC
+    - cron: '30 1 * * 6'
+
+# Least-privilege: read-all at workflow level, override per job
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # Required to publish results via OIDC
+      id-token: write
+      # Required to upload SARIF to code-scanning
+      security-events: write
+      actions: read
+      contents: read
+
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: "Run OpenSSF Scorecard"
+        uses: ossf/scorecard-action@v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publish results to enable badge + REST API access
+          publish_results: true
+
+      - name: "Upload SARIF artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: SARIF file
+          path: results.sarif
+          retention-days: 5
+
+      - name: "Upload to code-scanning"
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif

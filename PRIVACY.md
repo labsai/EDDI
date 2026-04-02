@@ -61,32 +61,113 @@ For AI-orchestrated compliance workflows:
 - **RBAC**: All GDPR endpoints require `eddi-admin` role
 - **Input validation**: URL validation, regex injection prevention, path traversal
   protection
+- **PII-safe logging**: GDPR operations log SHA-256 pseudonyms, never raw user IDs
 
-## Third-Party Data Transfers
+## Third-Party Data Transfers (GDPR Art. 44-49)
 
-EDDI sends conversation content to configured LLM providers during
-AI processing. The specific provider is selected by the deployer via the
-Manager UI or configuration files.
+EDDI sends conversation content to configured LLM providers during AI
+processing. **Every conversation turn constitutes a data transfer to the
+selected provider.** The specific provider is configured per agent by the
+deployer.
 
-**Deployer responsibilities:**
-- Select LLM providers that meet your data residency requirements
-- Establish DPAs with your chosen LLM providers
-- Inform users that their data is processed by third-party AI providers
-- Consider self-hosted alternatives (Ollama, jlama) for sensitive deployments
+### Supported LLM Providers and Data Locations
 
-EDDI supports self-hosted LLM providers (Ollama, jlama) that keep all data
-on-premise with zero external transfers.
+| Provider | Data Location | Self-Hosted? | DPA Available |
+|---|---|---|---|
+| **Ollama** | Your infrastructure | ✅ Yes | N/A (local) |
+| **jlama** | Your infrastructure | ✅ Yes | N/A (local) |
+| **Anthropic** | US/EU (varies) | ❌ No | [anthropic.com/policies](https://www.anthropic.com/policies) |
+| **OpenAI** | US | ❌ No | [openai.com/policies](https://openai.com/policies) |
+| **Google Gemini** | US/EU (varies) | ❌ No | [cloud.google.com/terms](https://cloud.google.com/terms) |
+| **Mistral** | EU (France) | ❌ No | [mistral.ai/terms](https://mistral.ai/terms/) |
+| **Azure OpenAI** | Your Azure region | Partially | Via Azure Enterprise Agreement |
+| **AWS Bedrock** | Your AWS region | Partially | Via AWS Enterprise Agreement |
+| **Oracle GenAI** | Your OCI region | Partially | Via Oracle Cloud Agreement |
+| **Hugging Face** | Varies by model host | Partially | [huggingface.co/terms](https://huggingface.co/terms-of-service) |
 
-## Consent
+### Deployer Responsibilities for LLM Data Transfers
+
+As the data controller, you **must**:
+
+1. **Select providers**: Choose LLM providers that meet your data residency
+   and compliance requirements
+2. **Establish DPAs**: Sign Data Processing Agreements with each cloud LLM
+   provider you configure in EDDI
+3. **Document transfers**: Record all LLM providers in your Article 30
+   processing register
+4. **Inform users**: Disclose in your privacy policy that conversations are
+   processed by third-party AI providers
+5. **Assess adequacy**: For non-EU providers, ensure adequate safeguards
+   (Standard Contractual Clauses, adequacy decisions, or binding corporate
+   rules) per GDPR Art. 46
+6. **Consider self-hosting**: For maximum data sovereignty, use Ollama or
+   jlama with self-hosted models — zero external data transfers
+
+### What Data is Sent to LLM Providers
+
+| Data Type | Sent? | Notes |
+|---|---|---|
+| User messages | ✅ Yes | The current turn's input |
+| Conversation history | ✅ Yes | Recent conversation context (windowed) |
+| System prompt | ✅ Yes | Agent instructions (configured by deployer) |
+| User ID | ❌ No | Not included in LLM requests |
+| API keys | ❌ No | Only the provider's own key for authentication |
+
+EDDI does **not** send user IDs, metadata, or data from other conversations
+to LLM providers. Only the conversation context relevant to the current agent
+interaction is transmitted.
+
+## Consent (GDPR Art. 6/7)
 
 EDDI does **not** manage user consent. As a data processor, consent is the
-controller's responsibility. Deployers should:
+controller's responsibility.
+
+### Legal Basis
+
+EDDI's data processing activities and their typical legal bases:
+
+| Processing Activity | Suggested Legal Basis | Notes |
+|---|---|---|
+| Conversation processing | Art. 6(1)(a) Consent or Art. 6(1)(b) Contract | Controller determines |
+| Persistent user memory | Art. 6(1)(a) Consent | Users should be informed |
+| Audit ledger retention | Art. 6(1)(c) Legal obligation | EU AI Act Art. 17/19 |
+| System logging | Art. 6(1)(f) Legitimate interest | Operational necessity |
+
+### Controller Obligations
+
+Deployers should:
 
 1. Obtain appropriate consent before enabling conversational AI
 2. Inform users about data processing via their privacy policy
 3. Provide clear opt-out mechanisms in their application
 4. Consider disabling `enableMemoryTools` unless users are explicitly informed
    that their interactions are remembered across sessions
+5. Document the legal basis for each processing activity in your Article 30
+   register
+
+## CCPA Compliance
+
+### Do Not Sell (§1798.120)
+
+EDDI does **not sell personal information** and has no mechanism to do so.
+EDDI is middleware infrastructure — it processes data on behalf of the
+deployer (controller) and does not share, sell, or monetize user data with
+any third party for commercial purposes.
+
+If your deployment scenario involves sharing user data with third parties
+(e.g., analytics providers), this is the controller's responsibility to
+manage and disclose.
+
+### Right to Know (§1798.100)
+
+The GDPR export endpoint (`GET /admin/gdpr/{userId}/export`) satisfies the
+CCPA "right to know" requirement by providing all personal information
+collected about a consumer in a structured, machine-readable format.
+
+### Right to Delete (§1798.105)
+
+The GDPR erasure endpoint (`DELETE /admin/gdpr/{userId}`) satisfies the
+CCPA "right to delete" requirement.
 
 ## Data Retention
 

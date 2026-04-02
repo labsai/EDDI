@@ -1,11 +1,12 @@
 # GDPR Compliance Guide
 
 This guide helps EDDI operators handle data subject requests and meet
-GDPR/CCPA requirements.
+GDPR/CCPA requirements. For an overview of data processing, see
+[PRIVACY.md](../PRIVACY.md).
 
 ## Handling Data Subject Requests
 
-### 1. Right to Erasure (Art. 17)
+### 1. Right to Erasure (GDPR Art. 17 / CCPA §1798.105)
 
 When you receive an erasure request:
 
@@ -30,7 +31,14 @@ The response includes per-store counts:
 
 **Via MCP:** Use the `delete_user_data` tool with `confirmation="CONFIRM"`.
 
-### 2. Right of Access (Art. 15) / Data Portability (Art. 20)
+**What happens:**
+1. User memories — **permanently deleted**
+2. Conversation snapshots — **permanently deleted**
+3. Managed conversation mappings — **permanently deleted**
+4. Database logs — userId **pseudonymized** (SHA-256 hash)
+5. Audit ledger — userId **pseudonymized** (SHA-256 hash)
+
+### 2. Right of Access (GDPR Art. 15) / Data Portability (Art. 20) / Right to Know (CCPA §1798.100)
 
 ```bash
 curl https://your-eddi-instance/admin/gdpr/{userId}/export \
@@ -38,13 +46,22 @@ curl https://your-eddi-instance/admin/gdpr/{userId}/export \
   -o user-data.json
 ```
 
+The export includes all user data in a structured, machine-readable JSON format:
+- All persistent user memories
+- All conversation transcripts (with full chat history)
+- All managed conversation mappings (intent→conversation bindings)
+
 **Via MCP:** Use the `export_user_data` tool.
 
-### 3. Timeline
+### 3. Response Timeline
 
-- **GDPR**: Respond within 30 days (extendable to 90 days for complex requests)
-- **CCPA**: Respond within 45 days (extendable to 90 days)
-- EDDI's erasure operation completes in seconds
+| Regulation | Initial Deadline | Extension |
+|---|---|---|
+| **GDPR** | 30 days | Up to 90 days for complex requests |
+| **CCPA** | 45 days | Up to 90 days with notification |
+
+EDDI's erasure and export operations complete in seconds — the timeline
+constraint is your internal DSAR process, not the technical execution.
 
 ## Retention Configuration
 
@@ -58,6 +75,9 @@ eddi.conversations.maximumLifeTimeOfIdleConversationsInDays=90
 # Dev environment uses 90 days
 %dev.eddi.conversations.deleteEndedConversationsOnceOlderThanDays=90
 ```
+
+**Data minimization (Art. 5(1)(e)):** Review the default 365-day retention
+and reduce it to the minimum necessary for your use case.
 
 ## Audit Ledger Legal Basis
 
@@ -75,23 +95,32 @@ decision records remain intact for regulatory compliance.
 As the data controller, you must:
 
 - [ ] **Privacy Policy**: Document your use of EDDI and AI processing
+- [ ] **Legal Basis**: Determine and document the legal basis for each
+      processing activity (see PRIVACY.md for suggestions)
 - [ ] **Consent**: Obtain consent before enabling conversational AI
-- [ ] **DPAs**: Establish DPAs with your chosen LLM providers
+      (if consent is your legal basis)
+- [ ] **DPAs**: Establish Data Processing Agreements with:
+  - Your EDDI hosting provider (if not self-hosted)
+  - Each cloud LLM provider configured in your agents
 - [ ] **User Notice**: Inform users that conversations are processed by AI
 - [ ] **Retention**: Review default 365-day retention — adjust if needed
 - [ ] **Memory Disclosure**: If using `enableMemoryTools`, inform users their
       interactions are remembered across sessions
 - [ ] **Provider Selection**: Choose LLM providers that meet your data
-      residency requirements
+      residency requirements (see provider table in PRIVACY.md)
+- [ ] **Article 30 Register**: Document EDDI as a processing system in your
+      records of processing activities
 - [ ] **Erasure Process**: Document your internal process for handling DSARs
       using the GDPR API
 - [ ] **Breach Response**: Prepare a breach notification plan (see
       [incident-response.md](incident-response.md))
+- [ ] **CCPA Disclosure**: If serving California consumers, document that
+      EDDI does not sell personal information
 
-## LLM Provider Considerations
+## LLM Provider Data Flow
 
 EDDI sends conversation content to the LLM provider configured per agent.
-You choose the provider via the Manager UI:
+You choose the provider via the Manager UI or configuration files.
 
 | Provider | Data Location | Self-Hosted? |
 |---|---|---|
@@ -100,8 +129,38 @@ You choose the provider via the Manager UI:
 | Anthropic | US/EU (varies) | ❌ No |
 | OpenAI | US | ❌ No |
 | Google Gemini | US/EU (varies) | ❌ No |
+| Mistral | EU (France) | ❌ No |
 | Azure OpenAI | Your Azure region | Partially |
 | AWS Bedrock | Your AWS region | Partially |
 | Oracle GenAI | Your OCI region | Partially |
+| Hugging Face | Varies by model host | Partially |
 
-For maximum data sovereignty, use Ollama or jlama with self-hosted models.
+**For maximum data sovereignty**, use Ollama or jlama with self-hosted models.
+
+**What is sent to LLM providers:**
+- The current user message
+- Recent conversation history (windowed)
+- Agent system prompt
+
+**What is NOT sent:**
+- User IDs or account metadata
+- Data from other conversations or agents
+- API keys (except the provider's own authentication key)
+
+## CCPA-Specific Requirements
+
+### Do Not Sell (§1798.120)
+
+EDDI does **not sell personal information** and has no mechanism to do so.
+Document this in your CCPA privacy notice.
+
+### Right to Know (§1798.100)
+
+Use the export endpoint (`GET /admin/gdpr/{userId}/export`) to fulfill
+"right to know" requests. The response includes all categories of personal
+information collected.
+
+### Right to Delete (§1798.105)
+
+Use the erasure endpoint (`DELETE /admin/gdpr/{userId}`) to fulfill
+"right to delete" requests. The cascade covers all data stores.

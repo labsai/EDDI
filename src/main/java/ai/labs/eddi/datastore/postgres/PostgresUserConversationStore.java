@@ -12,6 +12,8 @@ import org.jboss.logging.Logger;
 import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * PostgreSQL implementation of {@link IUserConversationStore}.
@@ -116,19 +118,19 @@ public class PostgresUserConversationStore implements IUserConversationStore {
             ps.setString(1, userId);
             return ps.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.error("Failed to delete all user conversations for userId=" + userId, e);
+            LOGGER.error("Failed to delete all user conversations", e);
             return 0;
         }
     }
 
     @Override
-    public java.util.List<UserConversation> getAllForUser(String userId) throws IResourceStore.ResourceStoreException {
+    public List<UserConversation> getAllForUser(String userId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "SELECT data FROM user_conversations WHERE user_id = ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
             try (ResultSet rs = ps.executeQuery()) {
-                var results = new java.util.ArrayList<UserConversation>();
+                var results = new ArrayList<UserConversation>();
                 while (rs.next()) {
                     results.add(jsonSerialization.deserialize(rs.getString("data"), UserConversation.class));
                 }

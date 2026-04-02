@@ -169,7 +169,7 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
             ps.setString(2, userId);
             return ps.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.error("Failed to pseudonymize logs for userId=" + userId, e);
+            LOGGER.error("Failed to pseudonymize database logs", e);
             return 0;
         }
     }
