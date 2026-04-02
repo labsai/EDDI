@@ -10,5 +10,7 @@ import java.io.InputStream;
 public interface IZipArchive {
     void createZip(String sourceDirPath, String targetZipPath) throws IOException;
 
+    void createZip(String sourceDirPath, String targetZipPath, java.nio.file.Path allowedBaseDir) throws IOException;
+
     void unzip(InputStream zipFile, File targetDir) throws IOException;
 }

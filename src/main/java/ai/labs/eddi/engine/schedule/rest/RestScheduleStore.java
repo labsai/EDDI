@@ -64,7 +64,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             return schedules;
         } catch (Exception e) {
             LOGGER.error("Failed to read schedules", e);
-            throw new InternalServerErrorException("Failed to read schedules: " + e.getMessage());
+            throw new InternalServerErrorException("Failed to read schedules");
         }
     }
 
@@ -78,7 +78,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             throw new NotFoundException("Schedule not found: " + scheduleId);
         } catch (Exception e) {
             LOGGER.error("Failed to read schedule " + scheduleId, e);
-            throw new InternalServerErrorException("Failed to read schedule: " + e.getMessage());
+            throw new InternalServerErrorException("Failed to read schedule");
         }
     }
 
@@ -103,7 +103,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             return Response.status(Response.Status.BAD_REQUEST).entity(e.getMessage()).build();
         } catch (Exception e) {
             LOGGER.error("Failed to create schedule", e);
-            throw new InternalServerErrorException("Failed to create schedule: " + e.getMessage());
+            throw new InternalServerErrorException("Failed to create schedule");
         }
     }
 
@@ -123,7 +123,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             return Response.status(Response.Status.BAD_REQUEST).entity(e.getMessage()).build();
         } catch (Exception e) {
             LOGGER.error("Failed to update schedule " + scheduleId, e);
-            throw new InternalServerErrorException("Failed to update schedule: " + e.getMessage());
+            throw new InternalServerErrorException("Failed to update schedule");
         }
     }
 
@@ -134,7 +134,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             return Response.noContent().build();
         } catch (Exception e) {
             LOGGER.error("Failed to delete schedule " + scheduleId, e);
-            throw new InternalServerErrorException("Failed to delete schedule: " + e.getMessage());
+            throw new InternalServerErrorException("Failed to delete schedule");
         }
     }
 
@@ -158,7 +158,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             throw new NotFoundException("Schedule not found: " + scheduleId);
         } catch (Exception e) {
             LOGGER.error("Failed to manually fire schedule " + scheduleId, e);
-            throw new InternalServerErrorException("Failed to fire schedule: " + e.getMessage());
+            throw new InternalServerErrorException("Failed to fire schedule");
         }
     }
 
@@ -168,7 +168,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             return scheduleStore.readFireLogs(scheduleId, limit);
         } catch (Exception e) {
             LOGGER.error("Failed to read fire logs for schedule " + scheduleId, e);
-            throw new InternalServerErrorException("Failed to read fire logs: " + e.getMessage());
+            throw new InternalServerErrorException("Failed to read fire logs");
         }
     }
 
@@ -178,7 +178,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             return scheduleStore.readFailedFireLogs(limit);
         } catch (Exception e) {
             LOGGER.error("Failed to read failed fires", e);
-            throw new InternalServerErrorException("Failed to read failed fires: " + e.getMessage());
+            throw new InternalServerErrorException("Failed to read failed fires");
         }
     }
 
@@ -191,7 +191,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             throw new NotFoundException("Schedule not found or not dead-lettered: " + scheduleId);
         } catch (Exception e) {
             LOGGER.error("Failed to retry dead-letter " + scheduleId, e);
-            throw new InternalServerErrorException("Failed to retry: " + e.getMessage());
+            throw new InternalServerErrorException("Failed to retry dead-letter");
         }
     }
 
@@ -207,7 +207,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             throw new NotFoundException("Schedule not found: " + scheduleId);
         } catch (Exception e) {
             LOGGER.error("Failed to dismiss dead-letter " + scheduleId, e);
-            throw new InternalServerErrorException("Failed to dismiss: " + e.getMessage());
+            throw new InternalServerErrorException("Failed to dismiss dead-letter");
         }
     }
 
@@ -228,7 +228,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             throw new NotFoundException("Schedule not found: " + scheduleId);
         } catch (Exception e) {
             LOGGER.error("Failed to set enabled=" + enabled + " for schedule " + scheduleId, e);
-            throw new InternalServerErrorException("Failed to update schedule: " + e.getMessage());
+            throw new InternalServerErrorException("Failed to update schedule");
         }
     }
 

@@ -109,6 +109,10 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     @Override
     public Response exportAgent(String agentId, Integer agentVersion) {
         try {
+            // Validate agentId early before any path construction (CodeQL
+            // java/path-injection)
+            sanitizePathComponent(agentId, "agentId");
+
             AgentConfiguration agentConfig = agentStore.read(agentId, agentVersion);
             Path agentPath = writeDirAndDocument(agentId, agentVersion, jsonSerialization.serialize(agentConfig), tmpPath, AGENT_EXT);
             Map<IResourceId, WorkflowConfiguration> workflowConfigurations = readConfigs(workflowStore, agentConfig.getWorkflows());
@@ -144,7 +148,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 writeConfigs(workflowPath,
                         convertConfigsToString(readConfigs(outputStore, extractResourcesUris(workflowConfigString, OUTPUT_URI_PATTERN))), OUTPUT_EXT);
 
-                Path unusedPath = Files.createDirectories(Paths.get(tmpPath.toString(), agentId, "unused"));
+                Path unusedPath = Files.createDirectories(Paths.get(tmpPath.toString(), agentId, "unused")).normalize();
 
                 writeAllVersionsOfUris(unusedPath, regularDictionaryStore, extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN),
                         DICTIONARY_EXT);
@@ -162,7 +166,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
             String zipFilename = prepareZipFilename(agentDocumentDescriptor, agentId, agentVersion);
             String targetZipPath = FileUtilities.buildPath(tmpPath.toString(), zipFilename);
-            this.zipArchive.createZip(agentPath.toString(), targetZipPath);
+            this.zipArchive.createZip(agentPath.toString(), targetZipPath, tmpPath);
             return Response.ok().location(URI.create("/backup/export/" + zipFilename)).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
@@ -267,8 +271,14 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     private Path writeDirAndDocument(String documentId, Integer documentVersion, String configurationString, Path tmpPath, String fileExtension)
             throws IOException {
+        // Validate path components to prevent path injection (CodeQL
+        // java/path-injection)
+        sanitizePathComponent(documentId, "documentId");
 
-        Path dir = Files.createDirectories(Paths.get(tmpPath.toString(), documentId, String.valueOf(documentVersion)));
+        Path dir = Files.createDirectories(Paths.get(tmpPath.toString(), documentId, String.valueOf(documentVersion))).normalize();
+        if (!dir.toAbsolutePath().startsWith(tmpPath.toAbsolutePath())) {
+            throw new IOException("Path traversal detected in documentId");
+        }
 
         String filename = MessageFormat.format("{0}.{1}.json", documentId, fileExtension);
         Path filePath = Paths.get(dir.toString(), filename);
@@ -316,13 +326,24 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             throw new BadRequestException("Filename is empty.");
         }
 
-        agentFilename = agentFilename.replaceAll("\\.\\./", "").replaceAll("\\\\", "").replaceAll("/", "");
-
         if (!agentFilename.matches("^[a-zA-Z0-9_.+\\-]+$")) {
             throw new BadRequestException("Filename contains invalid characters.");
         }
 
         return agentFilename;
+    }
+
+    /**
+     * Validates that a string used as a path component does not contain directory
+     * traversal sequences or path separators (CodeQL java/path-injection).
+     */
+    private static void sanitizePathComponent(String value, String paramName) {
+        if (value == null || value.isEmpty()) {
+            throw new BadRequestException(paramName + " must not be empty");
+        }
+        if (value.contains("..") || value.contains("/") || value.contains("\\")) {
+            throw new BadRequestException(paramName + " contains invalid path characters");
+        }
     }
 
     private void exportSchedules(String agentId, Path agentPath) {

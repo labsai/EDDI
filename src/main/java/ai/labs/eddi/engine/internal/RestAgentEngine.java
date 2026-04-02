@@ -65,7 +65,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN).entity(e.getMessage()).build();
         } catch (ResourceStoreException | ResourceNotFoundException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException("Failed to start conversation");
         }
     }
 
@@ -82,7 +82,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             return conversationService.readConversation(conversationId, returnDetailed, returnCurrentStepOnly, returningFields);
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException("Failed to read conversation");
         } catch (ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
@@ -93,9 +93,11 @@ public class RestAgentEngine implements IRestAgentEngine {
         try {
             var result = conversationService.readConversationLog(conversationId, outputType, logSize);
             return Response.ok(result.content(), result.mediaType()).build();
-        } catch (ResourceStoreException | ResourceNotFoundException e) {
-            LOGGER.error(e.getLocalizedMessage(), e);
+        } catch (ResourceNotFoundException e) {
             throw sneakyThrow(e);
+        } catch (ResourceStoreException e) {
+            LOGGER.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException("Failed to read conversation log");
         }
     }
 
@@ -150,7 +152,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             response.resume(new NotFoundException());
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage());
+            throw new InternalServerErrorException("An internal error occurred");
         }
     }
 
@@ -160,7 +162,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             return conversationService.isUndoAvailable(conversationId);
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            throw sneakyThrow(e);
+            throw new InternalServerErrorException("Failed to check undo availability");
         } catch (ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
@@ -175,7 +177,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             throw sneakyThrow(e);
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException("Failed to undo");
         }
     }
 
@@ -184,9 +186,9 @@ public class RestAgentEngine implements IRestAgentEngine {
         try {
             return conversationService.isRedoAvailable(conversationId);
         } catch (ResourceStoreException e) {
-            throw sneakyThrow(e);
-        } catch (ResourceNotFoundException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException("Failed to check redo availability");
+        } catch (ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
     }
@@ -200,7 +202,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             throw sneakyThrow(e);
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException("Failed to redo");
         }
     }
 }

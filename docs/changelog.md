@@ -15,6 +15,24 @@ Each entry follows this format:
 
 ---
 
+## Security: Code Review Pass 2 — Final Polish (2026-04-02)
+
+**Repo:** EDDI (`main`)
+
+**What changed:**
+
+Second-pass code review of all security fixes. Found and resolved 3 minor remaining issues:
+
+| # | File | Fix |
+|---|------|-----|
+| F1 | `ZipArchive.java:91` | `getZipEntry` traversal error message made generic (was leaking internal `entryName`) |
+| F2 | `RestExportService.java:151` | Removed redundant `sanitizePathComponent(agentId)` inside loop — already validated at method entry |
+| F3 | `ZipArchive.java:114` | `unzip` traversal error message made generic (was leaking attacker-controlled `entry.getName()`) |
+
+**Files:** 2 modified (`ZipArchive.java`, `RestExportService.java`)
+
+---
+
 ## Security: CodeQL Remediation Code Review — Second Pass (2026-04-02)
 
 **Repo:** EDDI (`main`)

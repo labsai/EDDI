@@ -35,14 +35,19 @@ public class RestManagerResource implements IRestManagerResource {
             // Normalize the path to resolve relative elements
             Path resourcePath = Paths.get("META-INF/resources", path).normalize();
 
-            // Prevent directory traversal by checking for ".." in the normalized path
-            if (resourcePath.toString().contains("..")) {
-                throw new SecurityException("Directory traversal attempt detected: " + path);
+            // Prevent directory traversal: normalized path must stay under the base
+            Path basePath = Paths.get("META-INF/resources").normalize();
+            if (!resourcePath.startsWith(basePath)) {
+                throw new SecurityException("Directory traversal attempt detected");
             }
 
             // Disallow characters in file names that may be used maliciously
-            if (path.matches(".*[<>|:*?\"].*")) {
-                throw new SecurityException("Invalid characters in file path: " + path);
+            // (avoids regex to prevent polynomial ReDoS — CodeQL java/polynomial-redos)
+            String invalidChars = "<>|:*?\"\0";
+            for (char c : path.toCharArray()) {
+                if (invalidChars.indexOf(c) >= 0) {
+                    throw new SecurityException("Invalid characters in file path");
+                }
             }
 
             // Attempt to load the file from the resources folder
@@ -61,11 +66,11 @@ public class RestManagerResource implements IRestManagerResource {
             return Response.ok(fileStream).build();
 
         } catch (SecurityException e) {
-            LOGGER.error(e.getLocalizedMessage(), e);
-            throw new ForbiddenException("Access to the requested file is forbidden: " + path);
+            LOGGER.error("Blocked resource access attempt: " + path, e);
+            throw new ForbiddenException("Access to the requested resource is forbidden");
         } catch (IOException e) {
-            LOGGER.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException("An error occurred while accessing the file: " + path);
+            LOGGER.error("Failed to serve resource: " + path, e);
+            throw new InternalServerErrorException("An error occurred while accessing the resource");
         }
     }
 }

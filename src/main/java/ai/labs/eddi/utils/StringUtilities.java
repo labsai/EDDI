@@ -7,6 +7,7 @@ import java.util.*;
  */
 public final class StringUtilities {
     private static final String REGEX_WILDCARD = ".*";
+    private static final String REGEX_SPECIAL_CHARS = ".*+?()[]{}|^$\\";
 
     private StringUtilities() {
         // utility class
@@ -14,16 +15,37 @@ public final class StringUtilities {
 
     public static String convertToSearchString(String filter) {
         if (filter.startsWith("\"") && filter.endsWith("\"")) {
-            if (filter.length() > 1) {
-                filter = filter.substring(1, filter.length() - 1);
+            if (filter.length() > 2) {
+                filter = escapeRegexChars(filter.substring(1, filter.length() - 1));
             } else {
                 filter = "";
             }
         } else {
-            filter = REGEX_WILDCARD + filter + REGEX_WILDCARD;
+            // Escape user input to prevent regex injection (CWE-400 / CodeQL
+            // java/regex-injection).
+            // Uses per-character escaping instead of Pattern.quote(\Q...\E)
+            // because PostgreSQL's ~ operator does not support \Q...\E syntax.
+            filter = REGEX_WILDCARD + escapeRegexChars(filter) + REGEX_WILDCARD;
         }
 
         return filter;
+    }
+
+    /**
+     * Escapes regex meta-characters by prefixing each with a backslash. Compatible
+     * with Java, MongoDB, and PostgreSQL POSIX regex engines (unlike
+     * {@code Pattern.quote} which uses {@code \Q...\E}).
+     */
+    static String escapeRegexChars(String input) {
+        StringBuilder sb = new StringBuilder(input.length() * 2);
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            if (REGEX_SPECIAL_CHARS.indexOf(c) >= 0) {
+                sb.append('\\');
+            }
+            sb.append(c);
+        }
+        return sb.toString();
     }
 
     public static String joinStrings(String delimiter, Collection<?> values) {

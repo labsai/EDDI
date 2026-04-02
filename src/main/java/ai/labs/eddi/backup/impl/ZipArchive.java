@@ -5,6 +5,7 @@ import ai.labs.eddi.backup.IZipArchive;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.io.*;
+import java.nio.file.Path;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.zip.ZipEntry;
@@ -20,11 +21,16 @@ public class ZipArchive implements IZipArchive {
 
     @Override
     public void createZip(String sourceDirPath, String targetZipPath) throws IOException {
+        createZip(sourceDirPath, targetZipPath, Path.of(System.getProperty("user.dir")));
+    }
+
+    @Override
+    public void createZip(String sourceDirPath, String targetZipPath, Path allowedBaseDir) throws IOException {
         File directoryToZip = new File(sourceDirPath);
 
         List<File> fileList = new LinkedList<>();
         getAllFiles(directoryToZip, fileList);
-        writeZipFile(targetZipPath, directoryToZip, fileList);
+        writeZipFile(targetZipPath, directoryToZip, fileList, allowedBaseDir);
     }
 
     private static void getAllFiles(File dir, List<File> fileList) {
@@ -39,8 +45,17 @@ public class ZipArchive implements IZipArchive {
         }
     }
 
-    private static void writeZipFile(String targetZipFile, File directoryToZip, List<File> fileList) throws IOException {
-        try (FileOutputStream fos = new FileOutputStream(targetZipFile); ZipOutputStream zos = new ZipOutputStream(new BufferedOutputStream(fos))) {
+    private static void writeZipFile(String targetZipFile, File directoryToZip, List<File> fileList, Path allowedBaseDir) throws IOException {
+        // Validate the target path stays within the allowed base directory (CodeQL
+        // java/path-injection)
+        Path targetPath = Path.of(targetZipFile).normalize().toAbsolutePath();
+        Path baseDir = allowedBaseDir.normalize().toAbsolutePath();
+        if (!targetPath.startsWith(baseDir)) {
+            throw new IOException("Target zip path escapes allowed base directory");
+        }
+
+        try (FileOutputStream fos = new FileOutputStream(targetPath.toFile());
+                ZipOutputStream zos = new ZipOutputStream(new BufferedOutputStream(fos))) {
 
             for (File file : fileList) {
                 if (!file.isDirectory()) {
@@ -73,7 +88,7 @@ public class ZipArchive implements IZipArchive {
         // Basic check for traversal sequences in the source file path relative to the
         // source directory
         if (entryName.contains("../")) {
-            throw new IOException("Malicious entry: " + entryName);
+            throw new IOException("Zip entry contains directory traversal sequence");
         }
 
         return new ZipEntry(entryName);
@@ -96,7 +111,7 @@ public class ZipArchive implements IZipArchive {
 
                 // Ensure the resolved destination path starts with the target directory path
                 if (!destFilePath.startsWith(targetDirPath + File.separator)) {
-                    throw new IOException("Entry is outside of the target dir: " + entry.getName());
+                    throw new IOException("Zip entry escapes target directory");
                 }
 
                 if (entry.isDirectory()) {
