@@ -159,4 +159,10 @@ public class AuditStore implements IAuditStore {
                 doc.getDouble(F_COST) != null ? doc.getDouble(F_COST) : 0.0,
                 doc.getDate(F_TIMESTAMP) != null ? doc.getDate(F_TIMESTAMP).toInstant() : null, doc.getString(F_HMAC));
     }
+    @Override
+    public long pseudonymizeByUserId(String userId, String pseudonym) {
+        return collection.updateMany(
+                new Document(F_USER_ID, userId),
+                new Document("$set", new Document(F_USER_ID, pseudonym))).getModifiedCount();
+    }
 }

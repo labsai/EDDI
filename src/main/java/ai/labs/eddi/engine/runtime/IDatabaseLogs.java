@@ -15,4 +15,19 @@ public interface IDatabaseLogs {
      * {@link BoundedLogStore}.
      */
     void addLogsBatch(List<LogEntry> entries);
+
+    // === GDPR ===
+
+    /**
+     * Pseudonymize all log entries for a user (GDPR Art. 17). Replaces the userId
+     * with a SHA-256 hash to preserve log integrity while removing personally
+     * identifiable information.
+     *
+     * @param userId
+     *            the original user identifier
+     * @param pseudonym
+     *            the pseudonymized replacement (SHA-256 hash)
+     * @return number of entries pseudonymized
+     */
+    long pseudonymizeByUserId(String userId, String pseudonym);
 }

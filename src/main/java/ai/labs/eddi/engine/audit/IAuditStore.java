@@ -11,6 +11,12 @@ import java.util.List;
  * operations. This is a deliberate design constraint for EU AI Act compliance:
  * once an audit entry is persisted, it must remain unmodifiable.
  * <p>
+ * <strong>GDPR Art. 17(3)(e) exception:</strong> Audit entries are retained
+ * under the legal obligation to maintain immutable decision traceability (EU AI
+ * Act Articles 17/19). Upon GDPR erasure requests, user identifiers are
+ * pseudonymized (replaced with a SHA-256 hash), not deleted. The
+ * {@link #pseudonymizeByUserId} method is the sole permitted mutation.
+ * <p>
  * both MongoDB and PostgreSQL implementations enforce insert-only semantics.
  *
  * @author ginccc
@@ -71,4 +77,20 @@ public interface IAuditStore {
      * @return the number of entries
      */
     long countByConversation(String conversationId);
+
+    // === GDPR ===
+
+    /**
+     * Pseudonymize all audit entries for a user (GDPR Art. 17). This is the sole
+     * permitted mutation on the otherwise immutable ledger, justified by GDPR Art.
+     * 17(3)(e) — legal obligation to retain records while removing personally
+     * identifiable information.
+     *
+     * @param userId
+     *            the original user identifier
+     * @param pseudonym
+     *            the pseudonymized replacement (SHA-256 hash)
+     * @return number of entries pseudonymized
+     */
+    long pseudonymizeByUserId(String userId, String pseudonym);
 }

@@ -15,6 +15,45 @@ Each entry follows this format:
 
 ---
 
+## GDPR/CCPA Compliance Framework (2026-04-02)
+
+**Repo:** EDDI (`main`)
+
+**What changed:**
+
+Implemented a unified GDPR/CCPA compliance framework establishing EDDI as a robust data processor. Covers data erasure (Art. 17), portability (Art. 15/20), and data minimization (Art. 5(1)(e)).
+
+| Component | Change |
+|---|---|
+| **`GdprComplianceService`** | NEW — Orchestrates cascading user data erasure across 5 stores: user memories → conversation snapshots → managed conversation mappings → database logs (pseudonymize) → audit ledger (pseudonymize). Best-effort: continues on partial failures |
+| **`GdprDeletionResult`** | NEW — Record with per-store deletion/pseudonymization counts |
+| **`UserDataExport`** | NEW — Record aggregating memories, conversations, and managed mappings for GDPR Art. 15/20 portability |
+| **`IRestGdprAdmin`** | NEW — REST interface: `DELETE /admin/gdpr/{userId}` (erasure), `GET /admin/gdpr/{userId}/export` (portability). Secured with `eddi-admin` role |
+| **`RestGdprAdmin`** | NEW — Implementation with input validation (`BadRequestException` for blank userId) |
+| **`McpGdprTools`** | NEW — MCP tools for AI-orchestrated compliance with mandatory `confirmation="CONFIRM"` safety check |
+| **`IConversationMemoryStore`** | Added `getConversationIdsByUserId()` + `deleteConversationsByUserId()` |
+| **`IUserConversationStore`** | Added `deleteAllForUser()` + `getAllForUser()` |
+| **`IDatabaseLogs`** | Added `pseudonymizeByUserId(userId, pseudonym)` |
+| **`IAuditStore`** | Added `pseudonymizeByUserId()` with GDPR Art. 17(3)(e) legal basis Javadoc |
+| **MongoDB stores** | Implemented all GDPR methods (Mongo queries/updates) |
+| **PostgreSQL stores** | Implemented all GDPR methods (SQL/JSONB queries) |
+| **`application.properties`** | Default retention changed from `-1` (disabled) to `365` days |
+| **Documentation** | NEW: `PRIVACY.md`, `docs/gdpr-compliance.md`, `docs/incident-response.md` |
+| **OpenAPI** | Registered `GDPR / Privacy` tag |
+
+**Design decisions:**
+- **Audit ledger immutability preserved**: Pseudonymization is the sole permitted mutation on the append-only ledger, justified by GDPR Art. 17(3)(e) — EU AI Act requires immutable decision traceability
+- **PII-safe logging**: All log messages use the SHA-256 pseudonym, never the raw userId — the erasure operation itself must not re-scatter PII into log files
+- **Data processor role**: EDDI is explicitly documented as a processor; consent management and DPA maintenance remain the deployer's (controller's) responsibility
+- **Best-effort cascade**: Each store deletion is independently try/caught — partial failures don't block remaining stores
+- **Pseudonym format**: `gdpr-erased:<SHA-256>` prefix enables forensic identification of pseudonymized records
+
+**Tests:** `GdprComplianceServiceTest` — 5 tests covering cascade deletion, consistent pseudonym across stores, partial failure resilience, data export aggregation, and empty-data handling. All 1471+ tests pass.
+
+**Files:** 14 new, 14 modified.
+
+---
+
 ## Security: Code Review Pass 2 — Final Polish (2026-04-02)
 
 **Repo:** EDDI (`main`)

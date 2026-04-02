@@ -28,4 +28,24 @@ public interface IConversationMemoryStore {
     Long getActiveConversationCount(String agentId, Integer agentVersion);
 
     List<String> getEndedConversationIds();
+
+    // === GDPR ===
+
+    /**
+     * Find all conversation IDs belonging to a specific user.
+     *
+     * @param userId
+     *            the user identifier
+     * @return list of conversation IDs
+     */
+    List<String> getConversationIdsByUserId(String userId);
+
+    /**
+     * Delete all conversations belonging to a specific user (GDPR Art. 17).
+     *
+     * @param userId
+     *            the user identifier
+     * @return number of conversations deleted
+     */
+    long deleteConversationsByUserId(String userId);
 }

@@ -158,4 +158,19 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
         }
         return logs;
     }
+    // === GDPR ===
+
+    @Override
+    public long pseudonymizeByUserId(String userId, String pseudonym) {
+        ensureSchema();
+        String sql = "UPDATE database_logs SET user_id = ? WHERE user_id = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, pseudonym);
+            ps.setString(2, userId);
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            LOGGER.error("Failed to pseudonymize logs for userId=" + userId, e);
+            return 0;
+        }
+    }
 }

@@ -106,4 +106,36 @@ public class PostgresUserConversationStore implements IUserConversationStore {
             LOGGER.error("Failed to delete user conversation intent=" + intent, e);
         }
     }
+    // === GDPR ===
+
+    @Override
+    public long deleteAllForUser(String userId) {
+        ensureSchema();
+        String sql = "DELETE FROM user_conversations WHERE user_id = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, userId);
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            LOGGER.error("Failed to delete all user conversations for userId=" + userId, e);
+            return 0;
+        }
+    }
+
+    @Override
+    public java.util.List<UserConversation> getAllForUser(String userId) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String sql = "SELECT data FROM user_conversations WHERE user_id = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                var results = new java.util.ArrayList<UserConversation>();
+                while (rs.next()) {
+                    results.add(jsonSerialization.deserialize(rs.getString("data"), UserConversation.class));
+                }
+                return results;
+            }
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
 }

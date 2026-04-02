@@ -226,4 +226,18 @@ public class PostgresAuditStore implements IAuditStore {
                 data.get("actions") instanceof List<?> list ? (List<String>) list : null, rs.getDouble("cost"), ts != null ? ts.toInstant() : null,
                 rs.getString("hmac"));
     }
+    // === GDPR ===
+
+    @Override
+    public long pseudonymizeByUserId(String userId, String pseudonym) {
+        ensureSchema();
+        String sql = "UPDATE audit_ledger SET user_id = ? WHERE user_id = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, pseudonym);
+            ps.setString(2, userId);
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to pseudonymize audit entries for userId", e);
+        }
+    }
 }
