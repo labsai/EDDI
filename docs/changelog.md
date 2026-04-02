@@ -15,6 +15,31 @@ Each entry follows this format:
 
 ---
 
+## Fix: Gemini "Function calling with response mime type 'application/json' is unsupported" (2026-04-02)
+
+**Repo:** EDDI (`main`)
+
+**What changed:**
+
+User-reported: switching an agent to Gemini 2.5 caused `InvalidRequestException (400)` — Gemini does not support combining `responseFormat=JSON` (responseMimeType `application/json`) with function calling (tools).
+
+| Component | Change |
+|---|---|
+| **`GeminiLanguageModelBuilder`** | Removed `responseFormat(JSON)` from the model builder. This was baked into the `ChatModel` instance, causing every request (including tool-calling) to send `responseMimeType=application/json`. Gemini rejects this combination |
+| **`AgentSetupService.supportsResponseFormat()`** | Removed `gemini` and `gemini-vertex` from the supported providers list. These providers should not have `responseFormat=json` injected into their parameter maps |
+| **`McpSetupToolsTest`** | Updated 3 tests: Gemini sentiment test now asserts no `responseFormat`, `supportsResponseFormat` test now asserts false for Gemini/Gemini-Vertex |
+
+**Root cause:** The `GeminiLanguageModelBuilder.build()` method unconditionally applied `responseFormat(JSON)` when the `responseFormat` parameter was present in the config. This is a model-level setting (baked into the `ChatModel` instance), not a request-level one. When `AgentOrchestrator` later used the same model with tool specifications, Gemini rejected the combination.
+
+**Design decisions:**
+- JSON enforcement for Gemini legacy mode (no tools, QR/sentiment enabled) still works — `LegacyChatExecutor` applies `ResponseFormat.JSON` at the **request** level, and only when no tools are present
+- Other providers (OpenAI, Mistral, Azure) are unaffected — their builders either don't read `responseFormat` at the builder level, or their APIs support combining JSON mode with function calling
+- `responseFormat=json` is only relevant when QR or sentiment analysis is activated, which uses `LegacyChatExecutor` (no tools) — so the builder-level setting was never needed
+
+**Files:** 3 modified (`GeminiLanguageModelBuilder.java`, `AgentSetupService.java`, `McpSetupToolsTest.java`).
+
+---
+
 ## GDPR/CCPA Compliance Framework (2026-04-02)
 
 **Repo:** EDDI (`main`)
