@@ -15,6 +15,75 @@ Each entry follows this format:
 
 ---
 
+## Security: CodeQL Remediation Code Review — Second Pass (2026-04-02)
+
+**Repo:** EDDI (`main`)
+
+**What changed:**
+
+Critical code review of the initial CodeQL remediation identified 8 additional issues. All resolved.
+
+| # | Severity | File | Fix |
+|---|----------|------|-----|
+| H1 | 🔴 High | `RestManagerResource.java` | Removed user-supplied `path` from error response messages — prevents information exposure and potential reflected XSS (content-type is `text/html`) |
+| H2 | 🔴 High | `RestExportService.java` | Removed dead `replaceAll` chain in `sanitizeFileName` — bypassable (input `....//` → `../`) and redundant with the allowlist regex on the next line |
+| M1 | 🟡 Medium | `StringUtilities.java` | Fixed quoted-filter boundary: `> 1` → `> 2` so `""` (empty quotes) returns empty string instead of matching everything |
+| M2 | 🟡 Medium | `StringUtilities.java` | Replaced `Pattern.quote(\Q...\E)` with per-character `escapeRegexChars()` — PostgreSQL's `~` operator does not support `\Q...\E` syntax, so search filtering was silently broken on Postgres |
+| M3 | 🟡 Medium | `IZipArchive.java`, `ZipArchive.java` | Added `createZip(src, target, allowedBaseDir)` overload — callers now pass explicit boundary (`tmpPath`) instead of relying on `user.dir`. Error message no longer leaks target path |
+| M4 | 🟡 Medium | `RestExportService.java` | Moved `sanitizePathComponent(agentId)` to top of `exportAgent()` — validation now occurs before first path use instead of 34 lines after |
+| L1 | 🔵 Low | `RestManagerResource.java` | Added null byte (`\0`) to invalid path character set — defense-in-depth against path truncation |
+| L2 | 🔵 Low | `RestAgentEngine.java` | Fixed 3 methods (`readConversationLog`, `isUndoAvailable`, `isRedoAvailable`) where `ResourceStoreException` was passed through `sneakyThrow` instead of getting a generic error message |
+
+**Design decisions:**
+- `escapeRegexChars()` uses per-character backslash escaping instead of `\Q...\E` — universally compatible across Java, MongoDB, and PostgreSQL POSIX regex engines
+- `ZipArchive` keeps backward-compatible `createZip(src, target)` overload that defaults to `user.dir`, while the new 3-arg overload allows precise boundary control
+- Server-side `LOGGER.error()` calls preserve the original path/exception details for debugging; only the HTTP response body is generic
+
+**Files:** 7 modified (`StringUtilities.java`, `RestManagerResource.java`, `IZipArchive.java`, `ZipArchive.java`, `RestExportService.java`, `RestAgentEngine.java`)
+
+---
+
+## Security: Fix CVE-2025-59340 in Jinjava (2026-04-02)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:** 
+Added an explicit dependency override in `pom.xml` `<dependencyManagement>` to force `com.hubspot.jinjava:jinjava` to version `2.8.1`. 
+
+**Design decision:** 
+The platform transitively inherits `jinjava:2.7.2` via `dev.langchain4j:langchain4j-jlama` -> `com.github.tjake:jlama-core`. Version 2.7.2 contains a critical vulnerability (CVE-2025-59340 with CVSS 9.8). Overriding it via Maven `<dependencyManagement>` centrally guarantees that the vulnerable transitive version is evicted from the classpath and any downstream image deployments.
+
+**Files:** `pom.xml`
+
+---
+
+## Security: CodeQL Scanner Findings Remediation (2026-04-02)
+
+**Repo:** EDDI (`main`)
+
+**What changed:**
+
+Remediated 9 CodeQL security findings across 6 files. All fixes are defense-in-depth hardening — no behavioral changes for legitimate usage.
+
+| # | Rule | Severity | File | Fix |
+|---|------|----------|------|-----|
+| 1 | `java/regex-injection` | 🔴 Error | `StringUtilities.java` | User-supplied filter text now escaped via `Pattern.quote()` before use in regex matching. Prevents ReDoS and regex meaning injection |
+| 2 | `java/polynomial-redos` | 🟡 Warning | `RestManagerResource.java` | Replaced `path.matches(".*[<>|:*?"].*")` regex with a character-set loop (`indexOf`). Eliminates polynomial backtracking on crafted input |
+| 3 | `java/path-injection` | 🔴 Error | `RestManagerResource.java` | Added `startsWith(basePath)` validation after path normalization. Replaced `contains("..")` string check with proper prefix validation |
+| 4 | `java/path-injection` | 🔴 Error | `ZipArchive.java` | Added working-directory boundary check before writing zip output file |
+| 5-6 | `java/path-injection` | 🔴 Error | `RestExportService.java` | Added `sanitizePathComponent()` helper to validate `documentId`/`agentId` values used in path construction. Also validates resolved paths stay within tmpPath |
+| 7 | `java/error-message-exposure` | 🔴 Error | `RestScheduleStore.java` | Replaced 11 `e.getMessage()` usages in `InternalServerErrorException` with generic messages. Internal details still logged server-side |
+| 8-9 | `java/error-message-exposure` | 🔴 Error | `RestAgentEngine.java` | Replaced 5 `e.getLocalizedMessage()` usages in error responses with generic messages. Removed exception cause from `InternalServerErrorException` constructor |
+
+**Design decisions:**
+- `Pattern.quote()` applied at the `StringUtilities.convertToSearchString()` level (shared by `ResultManipulator` and `DescriptorStore`) — single fix point for all callers
+- Path validation uses Java NIO `Path.startsWith()` rather than string comparison — handles platform-specific separators correctly
+- Error messages are deliberately generic to prevent information disclosure while server-side `LOGGER.error()` retains full details for debugging
+
+**Files:** 6 modified (`StringUtilities.java`, `RestManagerResource.java`, `ZipArchive.java`, `RestExportService.java`, `RestScheduleStore.java`, `RestAgentEngine.java`)
+
+---
+
 ## Fix: Update Windows PowerShell Installation Docs for AV Workaround (2026-04-01)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
