@@ -71,8 +71,9 @@ EDDI exposes metrics at `/q/metrics` (Prometheus format):
 
 - **Supervisory authority**: Within **72 hours** of becoming aware
 - **Data subjects**: Without undue delay if high risk to rights/freedoms
-- **Processor → Controller**: EDDI operators (processors) must notify
-  their data controllers immediately
+- **Processor → Controller**: If you use EDDI as a managed service,
+  ensure your hosting provider notifies you immediately upon discovering
+  a breach. If you self-host, you are both controller and processor.
 
 ### CCPA
 

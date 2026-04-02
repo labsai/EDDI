@@ -440,7 +440,7 @@ class McpSetupToolsTest {
         assertTrue(params.get("systemMessage").contains("\"score\":"), "System message should contain score field");
         assertTrue(params.get("systemMessage").contains("htmlResponseText"), "System message should contain htmlResponseText");
         assertFalse(params.get("systemMessage").contains("quickReplies"), "System message should NOT contain quickReplies");
-        assertEquals("json", params.get("responseFormat"), "Gemini should have responseFormat=json");
+        assertNull(params.get("responseFormat"), "Gemini should NOT have responseFormat param (conflicts with function calling)");
 
         // PostResponse should NOT have QR instructions (only sentiment, no QR)
         assertNotNull(task.getPostResponse());
@@ -534,10 +534,10 @@ class McpSetupToolsTest {
     }
 
     @Test
-    void supportsResponseFormat_openaiAndGemini() {
+    void supportsResponseFormat_openaiAndMistral() {
         assertTrue(McpSetupTools.supportsResponseFormat("openai"));
-        assertTrue(McpSetupTools.supportsResponseFormat("gemini"));
-        assertTrue(McpSetupTools.supportsResponseFormat("gemini-vertex"));
+        assertFalse(McpSetupTools.supportsResponseFormat("gemini"), "Gemini conflicts with function calling");
+        assertFalse(McpSetupTools.supportsResponseFormat("gemini-vertex"), "Gemini-Vertex conflicts with function calling");
         assertTrue(McpSetupTools.supportsResponseFormat("mistral"));
         assertTrue(McpSetupTools.supportsResponseFormat("azure-openai"));
         assertFalse(McpSetupTools.supportsResponseFormat("anthropic"));

@@ -589,7 +589,16 @@ public class AgentSetupService {
      * Check if the provider supports builder-level responseFormat=json.
      */
     public static boolean supportsResponseFormat(String modelType) {
-        return "openai".equals(modelType) || "gemini".equals(modelType) || "gemini-vertex".equals(modelType) || "mistral".equals(modelType)
+        // NOTE: Gemini and Gemini-Vertex are intentionally excluded here.
+        // The Gemini API does NOT support combining responseFormat=JSON
+        // (responseMimeType=
+        // application/json) with function calling (tools). Setting responseFormat on
+        // the
+        // model builder causes "Function calling with a response mime type:
+        // 'application/json'
+        // is unsupported" errors. JSON mode is instead enforced at the REQUEST level by
+        // LegacyChatExecutor, which only applies it when no tools are present.
+        return "openai".equals(modelType) || "mistral".equals(modelType)
                 || "azure-openai".equals(modelType);
     }
 

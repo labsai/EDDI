@@ -25,7 +25,7 @@ The response includes per-store counts:
   "conversationMappingsDeleted": 3,
   "logsPseudonymized": 42,
   "auditEntriesPseudonymized": 156,
-  "completedAt": "2024-01-15T10:30:00Z"
+  "completedAt": "2026-04-02T15:30:00Z"
 }
 ```
 
