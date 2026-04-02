@@ -3,6 +3,7 @@ package ai.labs.eddi.modules.llm.tools.impl;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.jboss.logging.Logger;
@@ -99,7 +100,7 @@ public class PdfReaderTool {
             tempFile = downloadPdf(pdfLocation);
             File pdfFile = tempFile.toFile();
 
-            document = PDDocument.load(pdfFile);
+            document = Loader.loadPDF(pdfFile);
 
             StringBuilder info = new StringBuilder();
             info.append("PDF Information:\n\n");
@@ -151,7 +152,7 @@ public class PdfReaderTool {
     private String extractTextFromFile(File pdfFile) throws IOException {
         PDDocument document = null;
         try {
-            document = PDDocument.load(pdfFile);
+            document = Loader.loadPDF(pdfFile);
             PDFTextStripper stripper = new PDFTextStripper();
             String text = stripper.getText(document);
 
@@ -174,7 +175,7 @@ public class PdfReaderTool {
     private String extractTextFromFilePages(File pdfFile, int startPage, int endPage) throws IOException {
         PDDocument document = null;
         try {
-            document = PDDocument.load(pdfFile);
+            document = Loader.loadPDF(pdfFile);
 
             int totalPages = document.getNumberOfPages();
             if (startPage < 1 || startPage > totalPages) {
