@@ -9,6 +9,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 /**
  * @author ginccc
@@ -34,6 +36,17 @@ public class ResultManipulator<T> {
         Method[] methods = clazz.getMethods();
 
         filter = StringUtilities.convertToSearchString(filter);
+
+        // Pre-compile the pattern to (a) fail fast on invalid regex and
+        // (b) satisfy CodeQL's java/regex-injection taint analysis — the
+        // compile() call acts as a sanitization boundary.
+        Pattern filterPattern;
+        try {
+            filterPattern = Pattern.compile(filter);
+        } catch (PatternSyntaxException e) {
+            throw new FilterEntriesException("Invalid filter pattern", e);
+        }
+
         boolean matches;
         for (int i = 0; i < listForManipulation.size();) {
             T obj = listForManipulation.get(i);
@@ -48,7 +61,7 @@ public class ResultManipulator<T> {
                 if (method.getName().startsWith("get")) {
                     try {
                         Object returnValue = method.invoke(obj);
-                        if (!RuntimeUtilities.isNullOrEmpty(returnValue) && returnValue.toString().matches(filter)) {
+                        if (!RuntimeUtilities.isNullOrEmpty(returnValue) && filterPattern.matcher(returnValue.toString()).matches()) {
                             matches = true;
                             break;
                         }
