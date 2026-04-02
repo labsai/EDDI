@@ -433,7 +433,7 @@ const RESOURCE_SCHEMAS: Record<string, object> = {
           type: "object",
           properties: {
             id: { type: "string", description: "Unique task identifier" },
-            type: { type: "string", description: "LLM provider: openai, anthropic, gemini, ollama, huggingface" },
+            type: { type: "string", description: "LLM provider: openai, anthropic, gemini, ollama, mistral, huggingface" },
             description: { type: "string", description: "Task description" },
             actions: { type: "array", items: { type: "string" }, description: "Actions that trigger this task" },
             parameters: {
@@ -530,7 +530,7 @@ function generateMockAuditEntries(conversationId: string, count: number) {
     durationMs: 50 + Math.floor(Math.random() * 500),
     input: i === 0 ? { "input:initial": "Tell me about the weather" } : null,
     output: i % 2 === 0 ? { "output:text": "Here's the latest weather information..." } : null,
-    llmDetail: TASK_TYPES[i % TASK_TYPES.length] === "langchain" ? { model: "gpt-4o-mini", provider: "openai", tokens: { input: 128, output: 64 } } : null,
+    llmDetail: TASK_TYPES[i % TASK_TYPES.length] === "langchain" ? { model: "gpt-5.4-mini", provider: "openai", tokens: { input: 128, output: 64 } } : null,
     toolCalls: i === 3 ? { calls: [{ name: "fetch_weather", args: { city: "Vienna" }, result: "sunny 22°C" }] } : null,
     actions: ["greet", "respond"].slice(0, (i % 2) + 1),
     cost: TASK_TYPES[i % TASK_TYPES.length] === "langchain" ? 0.003 + Math.random() * 0.01 : 0,
@@ -668,7 +668,7 @@ export const handlers = [
       agentId: newId,
       agentName: "Setup Agent",
       provider: "openai",
-      model: "gpt-4o",
+      model: "gpt-5.4",
       deployed: true,
       deploymentStatus: "READY",
     });
@@ -1242,8 +1242,8 @@ export const handlers = [
             evaluationStrategy: "structured_output",
             enableInAgentMode: true,
             steps: [
-              { type: "openai", parameters: { model: "gpt-4o-mini" }, confidenceThreshold: 0.7, timeoutMs: 10000 },
-              { type: "openai", parameters: { model: "gpt-4o" }, confidenceThreshold: null, timeoutMs: 30000 },
+              { type: "openai", parameters: { model: "gpt-5.4-mini" }, confidenceThreshold: 0.7, timeoutMs: 10000 },
+              { type: "openai", parameters: { model: "gpt-5.4" }, confidenceThreshold: null, timeoutMs: 30000 },
             ],
           },
           retry: {
@@ -1773,9 +1773,9 @@ function createResourceHandlers(
       { id: "dict3", name: "Financial Glossary", desc: "Banking and investment terms for financial advisor agents" },
     ],
     llm: [
-      { id: "llm1", name: "GPT-4o Support Config", desc: "OpenAI GPT-4o with tool calling enabled for customer support" },
+      { id: "llm1", name: "GPT-5.4 Support Config", desc: "OpenAI GPT-5.4 with tool calling enabled for customer support" },
       { id: "llm2", name: "Claude Analysis Config", desc: "Anthropic Claude for document analysis and summarization" },
-      { id: "llm3", name: "Gemini Creative Writing", desc: "Google Gemini 2.0 Flash for creative content generation" },
+      { id: "llm3", name: "Gemini Creative Writing", desc: "Google Gemini 2.5 Flash for creative content generation" },
     ],
     propertysetter: [
       { id: "ps1", name: "Session Tracker", desc: "Persists user session context: language, timezone, last topic" },
@@ -2025,7 +2025,7 @@ const MOCK_LOG_ENTRIES = [
     timestamp: Date.now() - 10000,
     level: "INFO",
     loggerName: "ai.labs.eddi.modules.llm.impl.LlmTask",
-    message: "LLM call completed: model=gpt-4o, tokens_in=142, tokens_out=89, duration=1240ms, cost=$0.0032",
+    message: "LLM call completed: model=gpt-5.4, tokens_in=142, tokens_out=89, duration=1240ms, cost=$0.0032",
     environment: "production",
     agentId: "agent1",
     agentVersion: 3,
@@ -2287,7 +2287,7 @@ const MOCK_AUDIT_ENTRIES = [
     llmDetail: {
       "compiled_prompt": "You are a helpful assistant.\n\nUser: Hello there",
       "model_response": "Hi there! How can I help you today?",
-      "model_name": "gpt-4o-mini",
+      "model_name": "gpt-5.4-mini",
       "input_tokens": 42,
       "output_tokens": 12,
     },
@@ -2623,7 +2623,7 @@ export const scheduleHandlers = [
       {
         id: "dl-001",
         conversationId: "conv-failed-1",
-        error: "LLM provider timeout after 30s — model gpt-4o-mini did not respond",
+        error: "LLM provider timeout after 30s — model gpt-5.4-mini did not respond",
         timestamp: Date.now() - 3600000,
         payload: JSON.stringify({ input: "What is the weather?", agentId: "agent1", step: 2 }),
       },

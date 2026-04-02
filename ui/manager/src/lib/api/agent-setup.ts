@@ -55,9 +55,12 @@ export interface SetupResult {
 
 export const LLM_PROVIDERS = [
   { id: "anthropic", name: "Anthropic", defaultModel: "claude-sonnet-4-6", needsKey: true },
-  { id: "openai", name: "OpenAI", defaultModel: "gpt-4o", needsKey: true },
-  { id: "gemini", name: "Google Gemini", defaultModel: "gemini-2.0-flash", needsKey: true },
-  { id: "ollama", name: "Ollama (Local)", defaultModel: "llama3.2:1b", needsKey: false },
+  { id: "openai", name: "OpenAI", defaultModel: "gpt-5.4", needsKey: true },
+  { id: "gemini", name: "Google Gemini", defaultModel: "gemini-2.5-flash", needsKey: true },
+  { id: "mistral", name: "Mistral AI", defaultModel: "mistral-large-latest", needsKey: true },
+  { id: "azure-openai", name: "Azure OpenAI", defaultModel: "gpt-5.4", needsKey: true },
+  { id: "bedrock", name: "Amazon Bedrock", defaultModel: "anthropic.claude-sonnet-4-6-v1", needsKey: false },
+  { id: "ollama", name: "Ollama (Local)", defaultModel: "llama3.2:3b", needsKey: false },
   { id: "jlama", name: "Jlama (Local)", defaultModel: "tinyllama", needsKey: false },
 ] as const;
 

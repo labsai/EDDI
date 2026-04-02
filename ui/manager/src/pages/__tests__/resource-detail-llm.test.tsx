@@ -142,7 +142,7 @@ describe("LangChain Editor", () => {
   it("renders cascade step from mock data", async () => {
     renderPage("llm");
     await waitFor(() => {
-      expect(screen.getByDisplayValue("gpt-4o-mini")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("gpt-5.4-mini")).toBeInTheDocument();
     });
   });
 
