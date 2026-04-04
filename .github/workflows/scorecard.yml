@@ -3,7 +3,7 @@ on:
   # Run on pushes to main/default branch only
   branch_protection_rule:
   push:
-    branches: [ "main", "feature/version-6.0.0" ]
+    branches: [ "main" ]
   schedule:
     # Weekly Saturday at 01:30 UTC
     - cron: '30 1 * * 6'
@@ -25,7 +25,7 @@ jobs:
 
     steps:
       - name: "Checkout code"
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
 
@@ -38,13 +38,13 @@ jobs:
           publish_results: true
 
       - name: "Upload SARIF artifact"
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: SARIF file
           path: results.sarif
           retention-days: 5
 
       - name: "Upload to code-scanning"
-        uses: github/codeql-action/upload-sarif@3b1a19a80ab047f35cbb237b5bd9bdc1e14f166c # v3
+        uses: github/codeql-action/upload-sarif@c10b8064de6f491fea524254123dbe5e09572f13 # v4
         with:
           sarif_file: results.sarif
