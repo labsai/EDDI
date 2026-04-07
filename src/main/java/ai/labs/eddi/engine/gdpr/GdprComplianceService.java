@@ -2,7 +2,9 @@ package ai.labs.eddi.engine.gdpr;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
@@ -15,7 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.ArrayList;
+import java.util.*;
 import java.util.HexFormat;
 
 /**
@@ -43,18 +45,21 @@ public class GdprComplianceService {
     private final IUserConversationStore userConversationStore;
     private final IDatabaseLogs databaseLogs;
     private final IAuditStore auditStore;
+    private final AuditLedgerService auditLedgerService;
 
     @Inject
     public GdprComplianceService(IUserMemoryStore userMemoryStore,
             IConversationMemoryStore conversationMemoryStore,
             IUserConversationStore userConversationStore,
             IDatabaseLogs databaseLogs,
-            IAuditStore auditStore) {
+            IAuditStore auditStore,
+            AuditLedgerService auditLedgerService) {
         this.userMemoryStore = userMemoryStore;
         this.conversationMemoryStore = conversationMemoryStore;
         this.userConversationStore = userConversationStore;
         this.databaseLogs = databaseLogs;
         this.auditStore = auditStore;
+        this.auditLedgerService = auditLedgerService;
     }
 
     /**
@@ -144,6 +149,14 @@ public class GdprComplianceService {
                 pseudonym, memoriesDeleted, conversationsDeleted,
                 mappingsDeleted, logsPseudonymized, auditPseudonymized);
 
+        // Write compliance event to immutable audit ledger
+        submitComplianceAuditEntry("GDPR_ERASURE", pseudonym, Map.of(
+                "memoriesDeleted", memoriesDeleted,
+                "conversationsDeleted", conversationsDeleted,
+                "mappingsDeleted", mappingsDeleted,
+                "logsPseudonymized", logsPseudonymized,
+                "auditPseudonymized", auditPseudonymized));
+
         return result;
     }
 
@@ -207,8 +220,54 @@ public class GdprComplianceService {
                 pseudonym, memories.size(), conversations.size(),
                 managedConversations.size());
 
+        // Write compliance event to immutable audit ledger
+        submitComplianceAuditEntry("GDPR_EXPORT", pseudonym, Map.of(
+                "memoriesExported", memories.size(),
+                "conversationsExported", conversations.size(),
+                "managedConversationsExported", managedConversations.size()));
+
         return new UserDataExport(userId, Instant.now(), memories,
                 conversations, managedConversations);
+    }
+
+    /**
+     * Submit a compliance-relevant event to the immutable audit ledger. These
+     * entries use the "compliance" task type and have no conversation context —
+     * they represent administrative data operations.
+     */
+    private void submitComplianceAuditEntry(String eventType, String pseudonym,
+                                            Map<String, Object> details) {
+        try {
+            var output = new LinkedHashMap<String, Object>(details);
+            output.put("pseudonym", pseudonym);
+
+            var entry = new AuditEntry(
+                    UUID.randomUUID().toString(),
+                    null, // no conversation
+                    null, // no agent
+                    null, // no version
+                    pseudonym, // pseudonymized userId
+                    null, // no environment
+                    0, // no step
+                    "ai.labs.compliance",
+                    "compliance",
+                    0, // no task index
+                    0, // no duration
+                    Map.of("eventType", eventType),
+                    output,
+                    null, // no LLM detail
+                    null, // no tool calls
+                    List.of(eventType),
+                    0.0,
+                    Instant.now(),
+                    null // HMAC computed by AuditLedgerService
+            );
+            auditLedgerService.submit(entry);
+        } catch (Exception e) {
+            // Never let audit logging failure break the GDPR operation
+            LOGGER.warnf("[GDPR] Failed to write %s audit entry: %s",
+                    eventType, e.getMessage());
+        }
     }
 
     /**

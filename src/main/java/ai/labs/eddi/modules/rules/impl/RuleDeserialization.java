@@ -135,6 +135,7 @@ public class RuleDeserialization implements IRuleDeserialization {
             case CONDITION_PREFIX + SizeMatcher.ID -> new SizeMatcher(memoryItemConverter);
             case CONDITION_PREFIX + Dependency.ID -> new Dependency();
             case CONDITION_PREFIX + CapabilityMatchCondition.ID -> new CapabilityMatchCondition(capabilityRegistryService);
+            case CONDITION_PREFIX + ContentTypeMatcher.ID -> new ContentTypeMatcher();
             default -> null;
         };
 

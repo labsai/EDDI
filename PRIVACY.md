@@ -180,6 +180,61 @@ CCPA "right to delete" requirement.
 
 Set retention to `-1` to disable automatic cleanup.
 
+## International Privacy Regulations
+
+EDDI's GDPR/CCPA infrastructure also satisfies the technical requirements
+of international privacy regulations. Deployers are responsible for meeting
+jurisdiction-specific administrative obligations.
+
+### PIPEDA (Canada)
+
+Canada's **Personal Information Protection and Electronic Documents Act**
+follows the 10 Fair Information Principles. EDDI's coverage:
+
+| PIPEDA Principle | EDDI Feature |
+|---|---|
+| **Accountability** | Deployer responsibility — document your use of EDDI |
+| **Identifying Purposes** | Deployer responsibility — disclose AI processing |
+| **Consent** | Deployer responsibility — obtain before enabling AI chat |
+| **Limiting Collection** | Token-aware windowing limits data in LLM context |
+| **Limiting Use/Disclosure** | Data used only for configured agent interactions |
+| **Accuracy** | Conversation state is timestamped and versioned |
+| **Safeguards** | AES-256-GCM vault, HMAC audit, Keycloak OIDC, RBAC |
+| **Openness** | PRIVACY.md and documentation are public |
+| **Individual Access** | `GET /admin/gdpr/{userId}/export` provides full data bundle |
+| **Challenging Compliance** | `DELETE /admin/gdpr/{userId}` enables data deletion |
+
+**Deployer note**: PIPEDA requires bilingual (English/French) privacy
+notices for Canadian consumers.
+
+### LGPD (Brazil)
+
+Brazil's **Lei Geral de Proteção de Dados** closely mirrors GDPR. All
+EDDI GDPR features satisfy LGPD requirements:
+
+| LGPD Right | EDDI Feature |
+|---|---|
+| Access to data (Art. 18, II) | `GET /admin/gdpr/{userId}/export` |
+| Correction (Art. 18, III) | User memories can be updated via API |
+| Anonymization/deletion (Art. 18, IV) | `DELETE /admin/gdpr/{userId}` with pseudonymization |
+| Data portability (Art. 18, V) | JSON export in machine-readable format |
+| Information about sharing (Art. 18, VII) | Documented LLM provider data flows |
+
+**Deployer note**: LGPD requires appointment of a Data Protection Officer
+(Encarregado). This is the deployer's responsibility.
+
+### Other Jurisdictions
+
+| Regulation | Country | EDDI Compatibility |
+|---|---|---|
+| **APPI** (Act on Protection of Personal Information) | Japan | GDPR infrastructure covers APPI technical requirements |
+| **POPIA** (Protection of Personal Information Act) | South Africa | GDPR infrastructure covers POPIA technical requirements |
+| **PDPA** (Personal Data Protection Act) | Singapore/Thailand | GDPR infrastructure covers PDPA technical requirements |
+
+For all jurisdictions: deployers should consult local counsel to confirm
+administrative obligations (consent mechanisms, local DPO requirements,
+cross-border transfer rules specific to their jurisdiction).
+
 ## Contact
 
 For privacy-related inquiries about the EDDI platform, contact the
