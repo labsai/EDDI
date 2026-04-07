@@ -24,6 +24,7 @@ import { GroupsPage } from "@/pages/groups";
 import { GroupDetailPage } from "@/pages/group-detail";
 import { GroupWizardPage } from "@/pages/group-wizard";
 import { AgentStudioPage } from "@/pages/agent-studio";
+import { StudioLandingPage } from "@/pages/studio-landing";
 
 export function App() {
   return (
@@ -34,6 +35,7 @@ export function App() {
         <Route path="/manage/agents" element={<AgentsPage />} />
         <Route path="/manage/agents/wizard" element={<AgentWizardPage />} />
         <Route path="/manage/agentview/:id" element={<AgentDetailPage />} />
+        <Route path="/manage/studio" element={<StudioLandingPage />} />
         <Route path="/manage/studio/:agentId" element={<AgentStudioPage />} />
         <Route path="/manage/workflows" element={<WorkflowsPage />} />
         <Route path="/manage/workflowview/:id" element={<WorkflowDetailPage />} />

@@ -35,7 +35,8 @@
     "sectionCore": "Core",
     "sectionBuild": "Build & Test",
     "sectionMonitor": "Monitor",
-    "sectionAdmin": "Admin"
+    "sectionAdmin": "Admin",
+    "studio": "Studio"
   },
   "theme": {
     "light": "ライト",
@@ -160,7 +161,8 @@
     "savedAgent": "Agent が正常に保存されました",
     "saveError": "Agent の保存に失敗しました",
     "deployToEnv": "{{env}}にデプロイ",
-    "undeployFromEnv": "{{env}}から削除"
+    "undeployFromEnv": "{{env}}から削除",
+    "openStudio": "Open in Studio"
   },
   "wizard": {
     "title": "Agent ウィザード"
@@ -900,11 +902,15 @@
       "property": "プロパティセッター",
       "apicalls": "API呼び出し",
       "llm": "LLM",
-      "output": "出力",
+      "output": "Output",
       "output.template": "出力テンプレート",
       "mcpcalls": "MCP呼び出し",
-      "rag": "ナレッジベース"
-    }
+      "rag": "ナレッジベース",
+      "dictionary": "Dictionary"
+    },
+    "landingDescription": "Select an agent to open the visual pipeline editor, debugger, and live chat",
+    "noAgents": "No agents found — create one from the Agents page",
+    "chat": "Chat"
   },
   "ragEditor": {
     "general": "全般",

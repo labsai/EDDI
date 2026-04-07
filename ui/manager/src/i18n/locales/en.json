@@ -26,6 +26,7 @@
     "quotas": "Quotas",
     "groups": "Groups",
     "chat": "Chat",
+    "studio": "Studio",
     "resources": "Resources",
     "sectionCore": "Core",
     "sectionBuild": "Build & Test",
@@ -187,7 +188,8 @@
     "savedAgent": "Agent saved successfully",
     "saveError": "Failed to save agent",
     "deployToEnv": "Deploy to {{env}}",
-    "undeployFromEnv": "Undeploy from {{env}}"
+    "undeployFromEnv": "Undeploy from {{env}}",
+    "openStudio": "Open in Studio"
   },
   "wizard": {
     "title": "Agent Wizard"
@@ -915,6 +917,9 @@
     "openEditor": "Open in Editor",
     "editorComingSoon": "In-place editor integration coming soon",
     "noPipeline": "No pipeline stages",
+    "landingDescription": "Select an agent to open the visual pipeline editor, debugger, and live chat",
+    "noAgents": "No agents found — create one from the Agents page",
+    "chat": "Chat",
     "type": {
       "parser": "Parser",
       "rules": "Rules",
@@ -924,7 +929,8 @@
       "output": "Output",
       "output.template": "Output Template",
       "mcpcalls": "MCP Calls",
-      "rag": "Knowledge Bases"
+      "rag": "Knowledge Bases",
+      "dictionary": "Dictionary"
     }
   },
   "ragEditor": {

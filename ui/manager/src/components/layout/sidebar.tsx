@@ -24,6 +24,7 @@ import {
   HelpCircle,
   Check,
   RotateCcw,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -47,6 +48,7 @@ const navSections = [
     items: [
       { path: "/manage/resources", icon: FileCode, labelKey: "nav.resources" },
       { path: "/manage/chat", icon: MessageCircle, labelKey: "nav.chat" },
+      { path: "/manage/studio", icon: Sparkles, labelKey: "nav.studio" },
     ],
   },
   {

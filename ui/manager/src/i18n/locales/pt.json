@@ -35,7 +35,8 @@
     "sectionCore": "Core",
     "sectionBuild": "Build & Test",
     "sectionMonitor": "Monitor",
-    "sectionAdmin": "Admin"
+    "sectionAdmin": "Admin",
+    "studio": "Studio"
   },
   "theme": {
     "light": "Claro",
@@ -160,7 +161,8 @@
     "savedAgent": "Agent salvo com sucesso",
     "saveError": "Falha ao salvar o agent",
     "deployToEnv": "Implantar em {{env}}",
-    "undeployFromEnv": "Remover de {{env}}"
+    "undeployFromEnv": "Remover de {{env}}",
+    "openStudio": "Open in Studio"
   },
   "wizard": {
     "title": "Assistente de Agent"
@@ -900,11 +902,15 @@
       "property": "Atribuidor de Propriedade",
       "apicalls": "Chamadas API",
       "llm": "LLM",
-      "output": "Saída",
+      "output": "Output",
       "output.template": "Modelo de Saída",
       "mcpcalls": "Chamadas MCP",
-      "rag": "Bases de Conhecimento"
-    }
+      "rag": "Bases de Conhecimento",
+      "dictionary": "Dictionary"
+    },
+    "landingDescription": "Select an agent to open the visual pipeline editor, debugger, and live chat",
+    "noAgents": "No agents found — create one from the Agents page",
+    "chat": "Chat"
   },
   "ragEditor": {
     "general": "Geral",

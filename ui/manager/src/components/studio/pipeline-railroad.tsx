@@ -14,6 +14,8 @@ import {
   Settings,
   BookOpen,
   Wrench,
+  BookText,
+  Brain,
 } from "lucide-react";
 
 // ==================== Extension Type Icons ====================
@@ -27,6 +29,8 @@ const TYPE_ICONS: Record<string, LucideIcon> = {
   "ai.labs.output": Bot,
   "ai.labs.output.template": Bot,
   "ai.labs.mcpcalls": Wrench,
+  "ai.labs.dictionary": BookText,
+  "ai.labs.rag": Brain,
 };
 
 // Labels are provided via i18n in the component below
@@ -40,6 +44,8 @@ const TYPE_COLORS: Record<string, string> = {
   "ai.labs.output": "text-rose-500",
   "ai.labs.output.template": "text-rose-400",
   "ai.labs.mcpcalls": "text-orange-500",
+  "ai.labs.dictionary": "text-teal-500",
+  "ai.labs.rag": "text-purple-500",
 };
 
 // ==================== Types ====================

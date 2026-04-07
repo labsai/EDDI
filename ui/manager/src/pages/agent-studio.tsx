@@ -13,7 +13,10 @@ import {
   Layers,
   PanelRightClose,
   PanelRight,
+  GitBranch,
+  MessageCircle,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 // ==================== Types ====================
 
@@ -40,6 +43,7 @@ export function AgentStudioPage() {
   const { agentId } = useParams<{ agentId: string }>();
   const [selectedStageIndex, setSelectedStageIndex] = useState<number | null>(null);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [mobileTab, setMobileTab] = useState<"pipeline" | "editor" | "chat">("pipeline");
 
   // Fetch agent descriptor for name
   const { data: descriptors } = useQuery({
@@ -202,7 +206,26 @@ export function AgentStudioPage() {
 
       {/* Mobile: tabs for Pipeline / Editor / Chat */}
       <div className="flex border-t border-border lg:hidden">
-        {/* Mobile bottom tabs could go here — simplified for now */}
+        {([
+          { id: "pipeline" as const, icon: <GitBranch className="h-4 w-4" />, label: t("studio.pipeline", "Pipeline") },
+          { id: "editor" as const, icon: <Layers className="h-4 w-4" />, label: t("studio.editor", "Editor") },
+          { id: "chat" as const, icon: <MessageCircle className="h-4 w-4" />, label: t("studio.chat", "Chat") },
+        ]).map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setMobileTab(tab.id)}
+            className={cn(
+              "flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium transition-colors",
+              mobileTab === tab.id
+                ? "text-primary border-t-2 border-primary -mt-[2px]"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            data-testid={`mobile-tab-${tab.id}`}
+          >
+            {tab.icon}
+            {tab.label}
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -212,14 +235,17 @@ export function AgentStudioPage() {
 
 function getResourceType(extensionType: string): string {
   const map: Record<string, string> = {
-    "ai.labs.rules": "behavior",
-    "ai.labs.apicalls": "httpcalls",
-    "ai.labs.llm": "langchain",
+    "ai.labs.rules": "rules",
+    "ai.labs.apicalls": "apicalls",
+    "ai.labs.llm": "llm",
     "ai.labs.output": "output",
     "ai.labs.property": "propertysetter",
     "ai.labs.mcpcalls": "mcpcalls",
+    "ai.labs.dictionary": "dictionary",
+    "ai.labs.parser": "dictionary",
+    "ai.labs.rag": "rag",
   };
-  return map[extensionType] ?? "behavior";
+  return map[extensionType] ?? "rules";
 }
 
 function getResourceId(uri?: string): string {

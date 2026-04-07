@@ -227,3 +227,32 @@ export function deleteConversation(
     `/conversationstore/conversations/${conversationId}?deletePermanently=${deletePermanently}`
   );
 }
+
+// ─── Detailed conversation (debug memory inspector) ─────────────
+
+export interface DetailedConversationStepItem {
+  key: string;
+  value: unknown;
+  timestamp: string | null;
+  originWorkflowId: string | null;
+}
+
+export interface DetailedConversationStep {
+  conversationStep: DetailedConversationStepItem[];
+  timestamp: string | null;
+}
+
+export interface DetailedConversation {
+  conversationSteps: DetailedConversationStep[];
+  conversationProperties: Record<string, unknown>;
+}
+
+/** Fetch a fully-detailed conversation snapshot including all step data.
+ *  Used by the Memory Inspector debug tab. */
+export function getDetailedConversation(
+  conversationId: string,
+): Promise<DetailedConversation> {
+  return api.get<DetailedConversation>(
+    `/agents/${conversationId}?returnDetailed=true`,
+  );
+}

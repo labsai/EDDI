@@ -2,7 +2,11 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
-import { api } from "@/lib/api-client";
+import {
+  getDetailedConversation,
+  type DetailedConversationStep,
+  type DetailedConversationStepItem,
+} from "@/lib/api/conversations";
 import {
   ChevronRight,
   Database,
@@ -10,36 +14,6 @@ import {
   EyeOff,
   RefreshCw,
 } from "lucide-react";
-
-// ==================== Types ====================
-
-interface ConversationStepDataItem {
-  key: string;
-  value: unknown;
-  timestamp: string | null;
-  originWorkflowId: string | null;
-}
-
-interface ConversationStep {
-  conversationStep: ConversationStepDataItem[];
-  timestamp: string | null;
-}
-
-interface DetailedConversation {
-  conversationSteps: ConversationStep[];
-  conversationProperties: Record<string, unknown>;
-}
-
-// ==================== API ====================
-
-// TODO: Move to src/lib/api/conversations.ts when formalizing the detailed conversation API
-async function getDetailedConversation(
-  conversationId: string,
-): Promise<DetailedConversation> {
-  return api.get<DetailedConversation>(
-    `/agents/${conversationId}?returnDetailed=true`,
-  );
-}
 
 // ==================== Component ====================
 
@@ -116,12 +90,12 @@ export function MemoryInspector({ conversationId }: MemoryInspectorProps) {
 
 // ==================== Step Node ====================
 
-function StepNode({ step, stepIndex }: { step: ConversationStep; stepIndex: number }) {
+function StepNode({ step, stepIndex }: { step: DetailedConversationStep; stepIndex: number }) {
   const { t } = useTranslation();
 
   // Group items by originWorkflowId
   const groups = useMemo(() => {
-    const map = new Map<string, ConversationStepDataItem[]>();
+    const map = new Map<string, DetailedConversationStepItem[]>();
     for (const item of step.conversationStep ?? []) {
       const group = item.originWorkflowId ?? "input";
       if (!map.has(group)) map.set(group, []);
@@ -152,7 +126,7 @@ function StepNode({ step, stepIndex }: { step: ConversationStep; stepIndex: numb
 
 // ==================== Data Key Node ====================
 
-function DataKeyNode({ item }: { item: ConversationStepDataItem }) {
+function DataKeyNode({ item }: { item: DetailedConversationStepItem }) {
   const [expanded, setExpanded] = useState(false);
   const isComplex = typeof item.value === "object" && item.value !== null;
   const isPublic = !item.key.includes("private");

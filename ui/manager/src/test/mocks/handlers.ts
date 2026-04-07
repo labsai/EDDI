@@ -3109,5 +3109,87 @@ export const scheduleHandlers = [
       ]);
     });
   }),
+
+  // ─── Tool Metrics (Cost Dashboard / Debugger) ────────────────────
+  http.get("*/llm/tools/costs/conversation/:conversationId", ({ params }) => {
+    const conversationId = params.conversationId as string;
+    return HttpResponse.json({
+      conversationId,
+      totalCost: 0.0847,
+      totalToolCalls: 14,
+      toolUsage: {
+        "fetch_weather": { calls: 5, totalCost: 0.0125 },
+        "search_products": { calls: 4, totalCost: 0.0098 },
+        "create_ticket": { calls: 3, totalCost: 0.042 },
+        "send_email": { calls: 2, totalCost: 0.0204 },
+      },
+    });
+  }),
+
+  http.get("*/llm/tools/ratelimit/:toolName", ({ params }) => {
+    const toolName = params.toolName as string;
+    return HttpResponse.json({
+      toolName,
+      limit: 60,
+      remaining: 42,
+      resetAt: new Date(Date.now() + 45_000).toISOString(),
+    });
+  }),
+
+  http.get("*/llm/tools/cache/stats", () => {
+    return HttpResponse.json({
+      totalHits: 328,
+      totalMisses: 97,
+      hitRate: 0.772,
+      perToolStats: {
+        "fetch_weather": { hits: 145, misses: 32 },
+        "search_products": { hits: 98, misses: 41 },
+        "create_ticket": { hits: 85, misses: 24 },
+      },
+    });
+  }),
+
+  http.get("*/llm/tools/history/:conversationId", () => {
+    const now = Date.now();
+    return HttpResponse.json([
+      {
+        toolName: "fetch_weather",
+        args: { city: "Vienna", units: "metric" },
+        result: "Sunny, 22°C, humidity 45%",
+        durationMs: 187,
+        cost: 0.0025,
+        timestamp: new Date(now - 120_000).toISOString(),
+      },
+      {
+        toolName: "search_products",
+        args: { query: "summer jackets", limit: 5 },
+        result: "Found 5 matching products",
+        durationMs: 342,
+        cost: 0.0024,
+        timestamp: new Date(now - 90_000).toISOString(),
+      },
+      {
+        toolName: "create_ticket",
+        args: { title: "Return request #4521", priority: "high" },
+        result: "Ticket JIRA-4521 created",
+        durationMs: 520,
+        cost: 0.014,
+        timestamp: new Date(now - 60_000).toISOString(),
+      },
+    ]);
+  }),
+
+  http.get("*/llm/tools/costs", () => {
+    return HttpResponse.json({
+      totalCost: 1.247,
+      totalCalls: 892,
+      perTool: {
+        "fetch_weather": { calls: 312, cost: 0.312 },
+        "search_products": { calls: 245, cost: 0.367 },
+        "create_ticket": { calls: 189, cost: 0.378 },
+        "send_email": { calls: 146, cost: 0.19 },
+      },
+    });
+  }),
 ];
 

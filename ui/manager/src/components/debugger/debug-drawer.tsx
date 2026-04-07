@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useDebugStore, type DebugTab } from "@/hooks/use-debug-events";
 import { PipelineTrace } from "./pipeline-trace";
@@ -47,6 +48,41 @@ export function DebugDrawer({ conversationId, agentId }: DebugDrawerProps) {
   const setActiveTab = useDebugStore((s) => s.setActiveTab);
   const toggleDebug = useDebugStore((s) => s.toggleDebug);
 
+  /** Full ARIA keyboard navigation: Arrow Left/Right, Home/End */
+  const handleTabKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLButtonElement>) => {
+      const currentIndex = TABS.findIndex((tab) => tab.id === activeTab);
+      let nextIndex: number | null = null;
+
+      switch (e.key) {
+        case "ArrowRight":
+        case "ArrowDown":
+          nextIndex = (currentIndex + 1) % TABS.length;
+          break;
+        case "ArrowLeft":
+        case "ArrowUp":
+          nextIndex = (currentIndex - 1 + TABS.length) % TABS.length;
+          break;
+        case "Home":
+          nextIndex = 0;
+          break;
+        case "End":
+          nextIndex = TABS.length - 1;
+          break;
+        default:
+          return; // Don't prevent default for other keys
+      }
+
+      e.preventDefault();
+      const nextTab = TABS[nextIndex]!;
+      setActiveTab(nextTab.id);
+      // Focus the newly active tab button
+      const nextEl = document.getElementById(`debug-tab-${nextTab.id}`);
+      nextEl?.focus();
+    },
+    [activeTab, setActiveTab],
+  );
+
   return (
     <div data-testid="debug-drawer">
       {/* Toggle bar */}
@@ -82,7 +118,9 @@ export function DebugDrawer({ conversationId, agentId }: DebugDrawerProps) {
                 aria-selected={activeTab === tab.id}
                 aria-controls={`debug-tabpanel-${tab.id}`}
                 id={`debug-tab-${tab.id}`}
+                tabIndex={activeTab === tab.id ? 0 : -1}
                 onClick={() => setActiveTab(tab.id)}
+                onKeyDown={handleTabKeyDown}
                 className={cn(
                   "flex items-center gap-1 whitespace-nowrap px-3 py-2 text-xs font-medium transition-colors",
                   activeTab === tab.id
@@ -126,3 +164,4 @@ export function DebugDrawer({ conversationId, agentId }: DebugDrawerProps) {
     </div>
   );
 }
+

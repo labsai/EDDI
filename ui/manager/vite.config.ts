@@ -60,6 +60,7 @@ export default defineConfig({
           });
         },
       },
+      "/llm/tools": "http://localhost:7070",
       "/backup": "http://localhost:7070",
       "/managerresource": "http://localhost:7070",
       "/managedagents": "http://localhost:7070",

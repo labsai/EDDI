@@ -25,6 +25,7 @@ import {
   ChevronDown,
   ChevronRight,
   ArrowUpCircle,
+  Sparkles,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
@@ -368,6 +369,16 @@ export function AgentDetailPage() {
             <MessageSquare className="h-4 w-4" />
             {t("agents.chat", "Chat")}
           </button>
+
+          {/* Open in Studio */}
+          <Link
+            to={`/manage/studio/${id}`}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
+            data-testid="open-studio-btn"
+          >
+            <Sparkles className="h-4 w-4" />
+            {t("agentDetail.openStudio", "Open in Studio")}
+          </Link>
 
           {/* Duplicate */}
           <button

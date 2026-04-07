@@ -35,7 +35,8 @@
     "sectionCore": "Core",
     "sectionBuild": "Build & Test",
     "sectionMonitor": "Monitor",
-    "sectionAdmin": "Admin"
+    "sectionAdmin": "Admin",
+    "studio": "Studio"
   },
   "theme": {
     "light": "लाइट",
@@ -160,7 +161,8 @@
     "savedAgent": "Agent सफलतापूर्वक सहेजा गया",
     "saveError": "Agent सहेजने में विफल",
     "deployToEnv": "{{env}} में Deploy करें",
-    "undeployFromEnv": "{{env}} से हटाएं"
+    "undeployFromEnv": "{{env}} से हटाएं",
+    "openStudio": "Open in Studio"
   },
   "wizard": {
     "title": "Agent विज़ार्ड"
@@ -900,11 +902,15 @@
       "property": "प्रॉपर्टी सेटर",
       "apicalls": "API कॉल्स",
       "llm": "LLM",
-      "output": "आउटपुट",
+      "output": "Output",
       "output.template": "आउटपुट टेम्प्लेट",
       "mcpcalls": "MCP कॉल्स",
-      "rag": "नॉलेज बेस (RAG)"
-    }
+      "rag": "नॉलेज बेस (RAG)",
+      "dictionary": "Dictionary"
+    },
+    "landingDescription": "Select an agent to open the visual pipeline editor, debugger, and live chat",
+    "noAgents": "No agents found — create one from the Agents page",
+    "chat": "Chat"
   },
   "ragEditor": {
     "general": "सामान्य",

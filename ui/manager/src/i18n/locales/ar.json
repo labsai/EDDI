@@ -35,7 +35,8 @@
     "sectionCore": "Core",
     "sectionBuild": "Build & Test",
     "sectionMonitor": "Monitor",
-    "sectionAdmin": "Admin"
+    "sectionAdmin": "Admin",
+    "studio": "Studio"
   },
   "theme": {
     "light": "فاتح",
@@ -160,7 +161,8 @@
     "savedAgent": "تم حفظ Agent بنجاح",
     "saveError": "فشل حفظ Agent",
     "deployToEnv": "نشر في {{env}}",
-    "undeployFromEnv": "إزالة من {{env}}"
+    "undeployFromEnv": "إزالة من {{env}}",
+    "openStudio": "Open in Studio"
   },
   "wizard": {
     "title": "معالج Agent"
@@ -900,11 +902,15 @@
       "property": "مُعيّن الخصائص",
       "apicalls": "استدعاءات API",
       "llm": "LLM",
-      "output": "مخرجات",
+      "output": "Output",
       "output.template": "قالب المخرجات",
       "mcpcalls": "استدعاءات MCP",
-      "rag": "قواعد المعرفة"
-    }
+      "rag": "قواعد المعرفة",
+      "dictionary": "Dictionary"
+    },
+    "landingDescription": "Select an agent to open the visual pipeline editor, debugger, and live chat",
+    "noAgents": "No agents found — create one from the Agents page",
+    "chat": "Chat"
   },
   "ragEditor": {
     "general": "تكوين عام",

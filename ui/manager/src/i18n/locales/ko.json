@@ -35,7 +35,8 @@
     "sectionCore": "Core",
     "sectionBuild": "Build & Test",
     "sectionMonitor": "Monitor",
-    "sectionAdmin": "Admin"
+    "sectionAdmin": "Admin",
+    "studio": "Studio"
   },
   "theme": {
     "light": "라이트",
@@ -160,7 +161,8 @@
     "savedAgent": "Agent가 성공적으로 저장되었습니다",
     "saveError": "Agent 저장 실패",
     "deployToEnv": "{{env}}에 배포",
-    "undeployFromEnv": "{{env}}에서 제거"
+    "undeployFromEnv": "{{env}}에서 제거",
+    "openStudio": "Open in Studio"
   },
   "wizard": {
     "title": "Agent 마법사"
@@ -900,11 +902,15 @@
       "property": "속성 설정기",
       "apicalls": "API 호출",
       "llm": "LLM",
-      "output": "출력",
+      "output": "Output",
       "output.template": "출력 템플릿",
       "mcpcalls": "MCP 호출",
-      "rag": "지식 베이스"
-    }
+      "rag": "지식 베이스",
+      "dictionary": "Dictionary"
+    },
+    "landingDescription": "Select an agent to open the visual pipeline editor, debugger, and live chat",
+    "noAgents": "No agents found — create one from the Agents page",
+    "chat": "Chat"
   },
   "ragEditor": {
     "general": "일반",
