@@ -30,6 +30,16 @@ public class AgentConfiguration {
      */
     private List<String> a2aSkills = new ArrayList<>();
 
+    /**
+     * Structured capabilities for A2A capability registry. Each capability declares
+     * a skill, optional attributes, and a confidence level. Used by
+     * {@code CapabilityRegistryService} for runtime agent discovery and by the
+     * {@code capabilityMatch} behavior rule condition for soft routing.
+     *
+     * @since 6.0.0
+     */
+    private List<Capability> capabilities = new ArrayList<>();
+
     /** Human-readable description for the A2A Agent Card */
     private String description;
 
@@ -92,6 +102,68 @@ public class AgentConfiguration {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public List<Capability> getCapabilities() {
+        return capabilities;
+    }
+
+    public void setCapabilities(List<Capability> capabilities) {
+        this.capabilities = capabilities;
+    }
+
+    /**
+     * Structured capability declaration for A2A discovery and soft routing.
+     * <p>
+     * Example JSON:
+     *
+     * <pre>
+     * {
+     *   "skill": "language-translation",
+     *   "attributes": { "languages": "en,de,fr", "domain": "legal" },
+     *   "confidence": "high"
+     * }
+     * </pre>
+     *
+     * @since 6.0.0
+     */
+    public static class Capability {
+        private String skill;
+        private Map<String, String> attributes = new HashMap<>();
+        private String confidence = "medium";
+
+        public Capability() {
+        }
+
+        public Capability(String skill, Map<String, String> attributes, String confidence) {
+            this.skill = skill;
+            this.attributes = attributes != null ? attributes : new HashMap<>();
+            this.confidence = confidence != null ? confidence : "medium";
+        }
+
+        public String getSkill() {
+            return skill;
+        }
+
+        public void setSkill(String skill) {
+            this.skill = skill;
+        }
+
+        public Map<String, String> getAttributes() {
+            return attributes;
+        }
+
+        public void setAttributes(Map<String, String> attributes) {
+            this.attributes = attributes;
+        }
+
+        public String getConfidence() {
+            return confidence;
+        }
+
+        public void setConfidence(String confidence) {
+            this.confidence = confidence;
+        }
     }
 
     // === Persistent User Memory (Phase 11a) ===
