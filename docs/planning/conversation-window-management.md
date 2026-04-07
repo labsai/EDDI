@@ -8,6 +8,13 @@ This document defines EDDI's strategy for managing long conversations: how the L
 
 **Core principle**: The full conversation is NEVER deleted. All strategies are about how to *present* the conversation to the LLM, not how to *store* it. The original is always recoverable.
 
+> [!IMPORTANT]
+> **Implementation Status (2026-04-07):**
+> - **Strategy 1** (Token-Aware Window): ✅ Implemented — `TokenCounterFactory`, `maxContextTokens`, `anchorFirstSteps` fields on `LlmConfiguration.Task`, token-aware `ConversationHistoryBuilder.buildMessages()`
+> - **Strategy 2** (Rolling Summary + Conversation Recall): ✅ Implemented — `SummarizationService`, `ConversationSummarizer`, `ConversationRecallTool` (built-in tool), `ConversationSummaryConfig` on `LlmConfiguration.Task`
+> - **Strategy 3** (Conversation Chaining): ❌ Not yet implemented
+> - See `docs/changelog.md` for implementation details
+
 ---
 
 ## Current State

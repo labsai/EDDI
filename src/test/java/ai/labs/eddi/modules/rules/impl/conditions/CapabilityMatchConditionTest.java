@@ -3,6 +3,8 @@ package ai.labs.eddi.modules.rules.impl.conditions;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService.CapabilityMatch;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -11,11 +13,14 @@ import java.util.Map;
 
 import static ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.ExecutionState.*;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class CapabilityMatchConditionTest {
 
     private CapabilityRegistryService registryService;
+    private IMemoryItemConverter memoryItemConverter;
+    private ITemplatingEngine templatingEngine;
     private CapabilityMatchCondition condition;
     private IConversationMemory memory;
     private IConversationMemory.IWritableConversationStep currentStep;
@@ -23,7 +28,9 @@ class CapabilityMatchConditionTest {
     @BeforeEach
     void setUp() {
         registryService = mock(CapabilityRegistryService.class);
-        condition = new CapabilityMatchCondition(registryService);
+        memoryItemConverter = mock(IMemoryItemConverter.class);
+        templatingEngine = mock(ITemplatingEngine.class);
+        condition = new CapabilityMatchCondition(registryService, memoryItemConverter, templatingEngine);
         memory = mock(IConversationMemory.class);
         currentStep = mock(IConversationMemory.IWritableConversationStep.class);
         when(memory.getCurrentStep()).thenReturn(currentStep);
@@ -42,6 +49,7 @@ class CapabilityMatchConditionTest {
 
         // Verify agent IDs were stored in memory
         verify(currentStep).storeData(argThat(data -> {
+            @SuppressWarnings("unchecked")
             List<String> ids = (List<String>) data.getResult();
             return ids.contains("agent-1") && ids.contains("agent-2");
         }));
@@ -96,6 +104,67 @@ class CapabilityMatchConditionTest {
                         new CapabilityMatch("a2", "analysis", "medium", Map.of())));
 
         assertEquals(SUCCESS, condition.execute(memory, List.of()));
+    }
+
+    @Test
+    void execute_resolvesTemplateVariablesInSkill() throws ITemplatingEngine.TemplateEngineException {
+        condition.setConfigs(Map.of("skill", "{{properties.requiredSkill.valueString}}"));
+
+        Map<String, Object> templateData = Map.of("properties", Map.of("requiredSkill", Map.of("valueString", "translation")));
+        when(memoryItemConverter.convert(memory)).thenReturn(templateData);
+        when(templatingEngine.processTemplate(eq("{{properties.requiredSkill.valueString}}"), eq(templateData)))
+                .thenReturn("translation");
+
+        when(registryService.findBySkill("translation", "highest_confidence"))
+                .thenReturn(List.of(new CapabilityMatch("agent-1", "translation", "high", Map.of())));
+
+        assertEquals(SUCCESS, condition.execute(memory, List.of()));
+        verify(templatingEngine).processTemplate(eq("{{properties.requiredSkill.valueString}}"), eq(templateData));
+    }
+
+    @Test
+    void execute_resolvesTemplateVariablesInStrategy() throws ITemplatingEngine.TemplateEngineException {
+        condition.setConfigs(Map.of("skill", "coding", "strategy", "{{context.routingStrategy}}"));
+
+        Map<String, Object> templateData = Map.of("context", Map.of("routingStrategy", "round_robin"));
+        when(memoryItemConverter.convert(memory)).thenReturn(templateData);
+        when(templatingEngine.processTemplate(eq("{{context.routingStrategy}}"), eq(templateData)))
+                .thenReturn("round_robin");
+
+        when(registryService.findBySkill("coding", "round_robin"))
+                .thenReturn(List.of(new CapabilityMatch("agent-1", "coding", "high", Map.of())));
+
+        assertEquals(SUCCESS, condition.execute(memory, List.of()));
+    }
+
+    @Test
+    void execute_fallsBackToRawValueOnTemplateError() throws ITemplatingEngine.TemplateEngineException {
+        condition.setConfigs(Map.of("skill", "{{invalid.template}}"));
+
+        Map<String, Object> templateData = Map.of();
+        when(memoryItemConverter.convert(memory)).thenReturn(templateData);
+        when(templatingEngine.processTemplate(eq("{{invalid.template}}"), eq(templateData)))
+                .thenThrow(new ITemplatingEngine.TemplateEngineException("bad template", new RuntimeException()));
+
+        // Falls back to raw "{{invalid.template}}" which won't match any skill
+        when(registryService.findBySkill("{{invalid.template}}", "highest_confidence"))
+                .thenReturn(List.of());
+
+        assertEquals(FAIL, condition.execute(memory, List.of()));
+    }
+
+    @Test
+    void execute_skipsTemplateResolutionWhenNoMarkers() {
+        condition.setConfigs(Map.of("skill", "plain-skill"));
+
+        when(registryService.findBySkill("plain-skill", "highest_confidence"))
+                .thenReturn(List.of(new CapabilityMatch("a1", "plain-skill", "high", Map.of())));
+
+        assertEquals(SUCCESS, condition.execute(memory, List.of()));
+
+        // Template engine should NOT be called for plain values
+        verifyNoInteractions(memoryItemConverter);
+        verifyNoInteractions(templatingEngine);
     }
 
     @Test

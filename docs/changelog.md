@@ -15,6 +15,25 @@ Each entry follows this format:
 
 ---
 
+## Planning Docs Audit — Status Banners (2026-04-07)
+
+**Repo:** EDDI (`feature/version-6.0.0`) — documentation only
+
+**What changed:**
+
+Audited all 12 planning documents in `docs/planning/` for implementation status accuracy. Found 3 plans that read as "proposed" but are substantially implemented, plus AGENTS.md roadmap table was stale. A new AI conversation reading these could waste hours re-implementing existing code.
+
+| Document | Fix Applied |
+|---|---|
+| `agentic-improvements-plan.md` | Added `[!IMPORTANT]` banner: Improvements 1-5 ✅, Improvement 6 ❌ |
+| `conversation-window-management.md` | Added `[!IMPORTANT]` banner: Strategies 1-2 ✅, Strategy 3 ❌ |
+| `persistent-memory-architecture.md` | Added `[!IMPORTANT]` banner: Full stack implemented (stores, tools, DreamService, MCP, REST, migration) |
+| `AGENTS.md` §3 Roadmap | Moved 4 items to Completed (Persistent Memory, Conversation Windows, Agentic Improvements, Compliance). Added 4 items to Upcoming with plan cross-references (Memory Architecture, Session Forking, Conversation Chaining, Guardrails, Native Image). |
+
+**Design decisions:** Status banners use GitHub `[!IMPORTANT]` alert syntax for maximum visibility. Placed immediately after the document header so they're the first thing a new agent reads.
+
+---
+
 ## Agentic Improvements — Critical Bug Fixes (2026-04-07)
 
 **Repo:** EDDI (`feature/agentic-improvements`)

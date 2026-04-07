@@ -10,6 +10,7 @@ import ai.labs.eddi.modules.rules.impl.RuleGroup.ExecutionStrategy;
 import ai.labs.eddi.modules.rules.impl.conditions.*;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
+import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
 
@@ -39,17 +40,19 @@ public class RuleDeserialization implements IRuleDeserialization {
     private final IExpressionProvider expressionProvider;
     private final IJsonSerialization jsonSerialization;
     private final IMemoryItemConverter memoryItemConverter;
+    private final ITemplatingEngine templatingEngine;
     private final CapabilityRegistryService capabilityRegistryService;
 
     @Inject
     public RuleDeserialization(ObjectMapper objectMapper, IExpressionProvider expressionProvider, IJsonSerialization jsonSerialization,
             IMemoryItemConverter memoryItemConverter, @RuleConditions Map<String, Provider<IRuleCondition>> conditionProvider,
-            CapabilityRegistryService capabilityRegistryService) {
+            CapabilityRegistryService capabilityRegistryService, ITemplatingEngine templatingEngine) {
         this.objectMapper = objectMapper;
         this.expressionProvider = expressionProvider;
         this.conditionProvider = conditionProvider;
         this.jsonSerialization = jsonSerialization;
         this.memoryItemConverter = memoryItemConverter;
+        this.templatingEngine = templatingEngine;
         this.capabilityRegistryService = capabilityRegistryService;
     }
 
@@ -138,7 +141,8 @@ public class RuleDeserialization implements IRuleDeserialization {
             case CONDITION_PREFIX + DynamicValueMatcher.ID -> new DynamicValueMatcher(memoryItemConverter);
             case CONDITION_PREFIX + SizeMatcher.ID -> new SizeMatcher(memoryItemConverter);
             case CONDITION_PREFIX + Dependency.ID -> new Dependency();
-            case CONDITION_PREFIX + CapabilityMatchCondition.ID -> new CapabilityMatchCondition(capabilityRegistryService);
+            case CONDITION_PREFIX + CapabilityMatchCondition.ID ->
+                new CapabilityMatchCondition(capabilityRegistryService, memoryItemConverter, templatingEngine);
             case CONDITION_PREFIX + ContentTypeMatcher.ID -> new ContentTypeMatcher();
             default -> null;
         };

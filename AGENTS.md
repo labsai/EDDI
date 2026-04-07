@@ -88,17 +88,25 @@ Follow this order unless the user explicitly requests something different.
 | —     | LLM Provider Expansion    | 7 → 12 providers (Mistral, Azure OpenAI, Bedrock, Oracle GenAI)                                      |
 | —     | Quarkus 3.34.1            | LTS upgrade, Java 25 module fix                                                                      |
 | 12    | CI/CD                     | GitHub Actions unified pipeline, Docker Hub push, CircleCI removed                                    |
+| 11a   | Persistent Memory         | IUserMemoryStore, UserMemoryTool, DreamService, McpMemoryTools, Property.Visibility                  |
+| —     | Conversation Windows      | Token-aware windowing, rolling summary, ConversationRecallTool                                        |
+| —     | Agentic Improvements 1–5  | Counterweights, MCP governance, capability registry, multimodal attachments, agent signing            |
+| —     | Compliance Hardening      | HIPAA, EU AI Act, international privacy docs + ComplianceStartupChecks                               |
 
 ### In Progress / Upcoming
 
-| Phase | Area                      | Description                                             |
-| ----- | ------------------------- | ------------------------------------------------------- |
-| 9     | DAG Pipeline              | Parallel tasks, circuit breakers, OpenTelemetry tracing |
-| 9b    | HITL Framework            | Human-in-the-loop pause/resume/approve                  |
-| 11a   | Persistent Memory         | Cross-conversation user memory                          |
-| 11b   | Multi-Channel             | WhatsApp, Telegram, Slack adapters                      |
-| 13    | Debugging & Visualization | Time-traveling debugger, visual pipeline builder        |
-| 14    | Website                   | Astro + Starlight documentation site                    |
+| Phase | Area                      | Description                                                           |
+| ----- | ------------------------- | --------------------------------------------------------------------- |
+| —     | Memory Architecture       | Commit flags, RAG threshold, context selection, auto-compaction, property consolidation (see `docs/planning/memory-architecture-plan.md`) |
+| —     | Session Forking           | State snapshotting, conversation forking (see `docs/planning/agentic-improvements-plan.md` §7)       |
+| —     | Conversation Chaining     | Cross-session context carry-over (see `docs/planning/conversation-window-management.md` Strategy 3)  |
+| 9     | DAG Pipeline              | Parallel tasks, circuit breakers, OpenTelemetry tracing               |
+| 9b    | HITL Framework            | Human-in-the-loop pause/resume/approve                                |
+| —     | Guardrails                | Config-driven input/output guardrails in LlmTask (see `docs/planning/guardrails-architecture.md`)    |
+| 11b   | Multi-Channel             | Slack, Teams adapters (see `docs/planning/multi-agent-ux-improvements.md`)                           |
+| 13    | Debugging & Visualization | Time-traveling debugger, visual pipeline builder                      |
+| 14    | Website                   | Astro + Starlight documentation site                                  |
+| —     | Native Image              | GraalVM native compilation (see `docs/planning/native-image-migration.md`)                           |
 
 ---
 

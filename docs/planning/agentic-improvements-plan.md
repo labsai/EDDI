@@ -4,6 +4,13 @@
 >
 > **Governing Principles**: All changes **must** conform to the [Seven Pillars](../project-philosophy.md). Java is the engine, configuration is logic, security is architecture.
 
+> [!IMPORTANT]
+> **Implementation Status (2026-04-07):**
+> - **Improvements 1–5**: ✅ Implemented on `feature/agentic-improvements` branch — `CounterweightService`, `DeploymentContextService`, `IdentityMaskingService`, `ToolResponseTruncator`, `CapabilityRegistryService`, `CapabilityMatchCondition`, `ContentTypeMatcher`, `Attachment`, `AgentSigningService` all exist and are tested
+> - **Bug fixes applied**: Condition creation factory-first ordering, `CapabilityRegistryService` startup wiring, counterweight opt-in enforcement
+> - **Improvement 6 (Session Forking & State Snapshotting)**: ❌ Not yet implemented
+> - See `docs/changelog.md` entries: "Agentic Improvements — Phases 1–5" and "Critical Bug Fixes" (2026-04-07)
+
 ---
 
 ## 1. Problem Statement

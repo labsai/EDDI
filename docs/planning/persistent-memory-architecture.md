@@ -6,7 +6,18 @@ Persistent User Memory extends EDDI's existing property system with cross-conver
 
 **Core principle**: EDDI already has 80% of persistent memory via the `longTerm` property flow. This phase closes the remaining gaps with minimal new code, zero pipeline changes, and full backward compatibility.
 
----
+> [!IMPORTANT]
+> **Implementation Status (2026-04-07):**
+> - **Data model**: ✅ `IUserMemoryStore`, `MongoUserMemoryStore`, `PostgresUserMemoryStore`, `UserMemoryEntry`, `Property.Visibility` — all implemented
+> - **LLM tools**: ✅ `UserMemoryTool` (rememberFact/recallMemories/forgetFact) — implemented with guardrails
+> - **MCP tools**: ✅ `McpMemoryTools` — implemented
+> - **REST API**: ✅ `IRestUserMemoryStore` + `RestUserMemoryStore` — implemented
+> - **Dream consolidation**: ✅ `DreamService` — implemented (uses `SummarizationService`, `ScheduleFireExecutor`)
+> - **Migration**: ✅ `PropertiesMigrationService` — implemented
+> - **Conversation integration**: ✅ `Conversation.java` loads/stores user memories
+> - **Conversation Chaining** (Strategy 3 from window management plan): ❌ Not yet implemented
+> - See `docs/changelog.md` for implementation details
+
 
 ## Architecture
 
