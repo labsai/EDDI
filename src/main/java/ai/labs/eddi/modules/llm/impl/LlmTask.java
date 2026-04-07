@@ -85,6 +85,7 @@ public class LlmTask implements ILifecycleTask {
     private final TokenCounterFactory tokenCounterFactory;
     private final ConversationSummarizer conversationSummarizer;
     private final CounterweightService counterweightService;
+    private final DeploymentContextService deploymentContextService;
 
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
@@ -101,7 +102,8 @@ public class LlmTask implements ILifecycleTask {
             IApiCallExecutor apiCallExecutor, ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager,
             A2AToolProviderManager a2aToolProviderManager, IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
             RagContextProvider ragContextProvider, IUserMemoryStore userMemoryStore, TokenCounterFactory tokenCounterFactory,
-            ConversationSummarizer conversationSummarizer, CounterweightService counterweightService) {
+            ConversationSummarizer conversationSummarizer, CounterweightService counterweightService,
+            DeploymentContextService deploymentContextService) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -123,6 +125,7 @@ public class LlmTask implements ILifecycleTask {
         this.restWorkflowStore = restWorkflowStore;
         this.conversationSummarizer = conversationSummarizer;
         this.counterweightService = counterweightService;
+        this.deploymentContextService = deploymentContextService;
     }
 
     @Override
@@ -175,14 +178,33 @@ public class LlmTask implements ILifecycleTask {
         String systemMessage = processedParams.getOrDefault(KEY_SYSTEM_MESSAGE, "");
 
         // === Behavioral Governance: Counterweight Injection ===
+        // Priority: explicit task config > deployment environment auto-counterweight
         var counterweight = task.getCounterweight();
+        String effectiveLevel = null;
         if (counterweight != null && counterweight.isEnabled()) {
-            String cwInstructions = counterweightService.resolveInstructions(counterweight);
+            // Explicit config: use custom instructions or level
+            if (counterweight.getInstructions() != null && !counterweight.getInstructions().isEmpty()) {
+                effectiveLevel = "custom";
+            } else {
+                effectiveLevel = counterweight.getLevel();
+            }
+        }
+        if (effectiveLevel == null || "normal".equalsIgnoreCase(effectiveLevel)) {
+            // No explicit counterweight — check deployment environment fallback
+            effectiveLevel = deploymentContextService.getAutoCounterweightLevel();
+        }
+        if (effectiveLevel != null && !"normal".equalsIgnoreCase(effectiveLevel)) {
+            // Build a synthetic config for the resolved level (or use task config for
+            // custom instructions)
+            var effectiveConfig = counterweight != null && counterweight.isEnabled() ? counterweight : new LlmConfiguration.CounterweightConfig();
+            if (!(counterweight != null && counterweight.isEnabled())) {
+                effectiveConfig.setEnabled(true);
+                effectiveConfig.setLevel(effectiveLevel);
+            }
+            String cwInstructions = counterweightService.resolveInstructions(effectiveConfig);
             if (!cwInstructions.isEmpty()) {
                 systemMessage += "\n\n## BEHAVIORAL GOVERNANCE\n" + cwInstructions;
-                // Store counterweight activation for audit trail
-                var cwTraceData = dataFactory.createData(KEY_LANGCHAIN + ":counterweight:level",
-                        counterweight.getLevel() != null ? counterweight.getLevel() : "custom");
+                var cwTraceData = dataFactory.createData(KEY_LANGCHAIN + ":counterweight:level", effectiveLevel);
                 currentStep.storeData(cwTraceData);
             }
         }
