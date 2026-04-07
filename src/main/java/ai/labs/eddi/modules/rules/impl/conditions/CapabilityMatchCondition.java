@@ -4,8 +4,6 @@ import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService.CapabilityMatch;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.rules.impl.Rule;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
 
 import java.util.HashMap;
 import java.util.List;
@@ -42,7 +40,6 @@ import java.util.Map;
  *
  * @since 6.0.0
  */
-@ApplicationScoped
 public class CapabilityMatchCondition implements IRuleCondition {
     public static final String ID = "capabilitymatch";
     private static final String KEY_SKILL = "skill";
@@ -56,7 +53,6 @@ public class CapabilityMatchCondition implements IRuleCondition {
 
     private final CapabilityRegistryService registryService;
 
-    @Inject
     public CapabilityMatchCondition(CapabilityRegistryService registryService) {
         this.registryService = registryService;
     }

@@ -52,8 +52,6 @@ public class RulesModule {
         map.put("ai.labs.behavior.conditions.negation", () -> instance.select(Negation.class).get());
         map.put("ai.labs.behavior.conditions.occurrence", () -> instance.select(Occurrence.class).get());
         map.put("ai.labs.behavior.conditions.sizematcher", () -> instance.select(SizeMatcher.class).get());
-        map.put("ai.labs.behavior.conditions.capabilitymatch", () -> instance.select(CapabilityMatchCondition.class).get());
-        map.put("ai.labs.behavior.conditions.contenttypematcher", () -> instance.select(ContentTypeMatcher.class).get());
 
         return map;
     }

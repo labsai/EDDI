@@ -12,6 +12,7 @@ import org.jboss.logging.Logger;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
 /**
@@ -20,8 +21,8 @@ import java.util.stream.Collectors;
  * Agents register their structured {@link Capability} declarations at
  * deployment time. Other agents (or external systems via REST / MCP) can query
  * the registry to find agents that match a required skill. Selection strategies
- * (highest_confidence, round_robin, lowest_load) are deterministic algorithms,
- * not LLM guesses.
+ * (highest_confidence, round_robin, all) are deterministic algorithms, not LLM
+ * guesses.
  * <p>
  * The registry is rebuilt from {@code AgentConfiguration} on agent
  * create/update/delete via {@code @ConfigurationUpdate} observer events.
@@ -74,7 +75,7 @@ public class CapabilityRegistryService {
                 continue;
             }
             String skill = cap.getSkill().toLowerCase(Locale.ROOT).trim();
-            skillIndex.computeIfAbsent(skill, k -> new ArrayList<>())
+            skillIndex.computeIfAbsent(skill, k -> new CopyOnWriteArrayList<>())
                     .add(new AgentCapabilityEntry(agentId, cap));
         }
 
