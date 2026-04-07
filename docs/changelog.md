@@ -15,6 +15,47 @@ Each entry follows this format:
 
 ---
 
+## Agentic Improvements — Phases 1–5 (2026-04-07)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+
+**What changed:**
+
+Complete implementation of the 5-phase agentic improvements roadmap from `docs/planning/agentic-improvements-plan.md`. Adds behavioral governance, MCP cost governance, A2A capability discovery, multimodal attachment routing, and cryptographic agent identity.
+
+| Phase | Component | Change |
+|---|---|---|
+| **1A** | `CounterweightService.java` | NEW — Config-driven assertiveness counterweights (cautious/balanced/assertive/custom) injected into system prompts |
+| **1B** | `DeploymentContextService.java` | NEW — Auto-detects deployment environment, applies safety defaults in production |
+| **1C** | `IdentityMaskingService.java` | NEW — Persona directives (display name, model concealment, custom instructions) |
+| **1C** | `LlmConfiguration.Task` | MODIFIED — Added `IdentityMaskingConfig` and `ToolResponseLimits` config classes |
+| **2A** | `ToolResponseTruncator.java` | NEW — Per-tool response character limits to prevent context window bloat |
+| **2A** | `AgentOrchestrator.java` | MODIFIED — Truncation applied in tool execution loop |
+| **2B** | `AgentOrchestrator.java` | MODIFIED — Tenant-level monthly cost budget check via `TenantQuotaService` |
+| **3** | `AgentConfiguration.java` | MODIFIED — Added `Capability` inner class (skill, attributes, confidence) |
+| **3** | `CapabilityRegistryService.java` | NEW — In-memory capability index with query API and selection strategies |
+| **3** | `IRestCapabilityRegistry.java` | NEW — REST endpoint: `GET /capabilities?skill=X&strategy=highest_confidence` |
+| **3** | `CapabilityMatchCondition.java` | NEW — Behavior rule condition for A2A soft routing |
+| **4** | `Attachment.java` | NEW — Lightweight binary attachment reference (MIME type, storageRef, metadata) |
+| **4** | `MemoryKeys.java` | MODIFIED — Added `ATTACHMENTS` memory key |
+| **4** | `ContentTypeMatcher.java` | NEW — Behavior rule condition matching attachment MIME types with wildcards |
+| **5** | `AgentSigningService.java` | NEW — Ed25519 keypair lifecycle, sign/verify, vault-backed private keys |
+| **5** | `AgentConfiguration.java` | MODIFIED — Added `AgentIdentity` and `SecurityConfig` inner classes |
+
+**Design decisions:**
+
+1. **All features disabled by default** — Backwards-compatible. Existing agents work without changes.
+2. **Config-driven, not hardcoded** — Every behavioral knob is a POJO field with sensible defaults. Admin configures via JSON.
+3. **Micrometer metrics on everything** — `eddi.counterweight.activation.count`, `eddi.mcp.response.truncation.count`, `eddi.capability.query.time`, `eddi.agent.identity.sign.count`, etc.
+4. **Dual-layer budget enforcement** — Per-conversation (`CostTracker`) + per-tenant monthly ceiling (`TenantQuotaService`), both checked per tool call.
+5. **Deterministic routing** — `capabilityMatch` uses algorithmic selection strategies (`highest_confidence`, `round_robin`), not LLM guesses.
+6. **Metadata-only attachments** — No inline base64. Binary payloads live in GridFS/S3; pipeline routes on MIME type and metadata.
+7. **Ed25519 via JVM standard library** — No external crypto dependencies. Private keys in SecretsVault.
+
+**Tests added:** `CapabilityRegistryServiceTest`, `AgentSigningServiceTest`, `AttachmentTest`
+
+---
+
 ## Compliance Hardening — HIPAA, EU AI Act, International Privacy (2026-04-07)
 
 **Repo:** EDDI (`feature/agentic-improvements`)
