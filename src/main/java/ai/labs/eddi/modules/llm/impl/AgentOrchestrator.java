@@ -33,6 +33,8 @@ import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
 
+import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+
 import java.io.IOException;
 import java.util.*;
 
@@ -78,13 +80,14 @@ class AgentOrchestrator {
     private final IMemoryItemConverter memoryItemConverter;
     private final IUserMemoryStore userMemoryStore;
     private final ToolResponseTruncator toolResponseTruncator;
+    private final TenantQuotaService tenantQuotaService;
 
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager, A2AToolProviderManager a2aToolProviderManager,
             IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore, IResourceClientLibrary resourceClientLibrary,
             IApiCallExecutor apiCallExecutor, IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter,
-            IUserMemoryStore userMemoryStore, ToolResponseTruncator toolResponseTruncator) {
+            IUserMemoryStore userMemoryStore, ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService) {
         this.calculatorTool = calculatorTool;
         this.dateTimeTool = dateTimeTool;
         this.webSearchTool = webSearchTool;
@@ -104,6 +107,7 @@ class AgentOrchestrator {
         this.memoryItemConverter = memoryItemConverter;
         this.userMemoryStore = userMemoryStore;
         this.toolResponseTruncator = toolResponseTruncator;
+        this.tenantQuotaService = tenantQuotaService;
     }
 
     /**
@@ -258,7 +262,7 @@ class AgentOrchestrator {
                         callStep.put("arguments", toolRequest.arguments());
                         trace.add(callStep);
 
-                        // Check budget before executing tool
+                        // Check per-conversation budget before executing tool
                         if (maxBudget != null && conversationId != null
                                 && !toolExecutionService.getCostTracker().isWithinBudget(conversationId, maxBudget)) {
                             String budgetError = "Budget exceeded for conversation " + conversationId;
@@ -272,6 +276,23 @@ class AgentOrchestrator {
 
                             currentMessages.add(ToolExecutionResultMessage.from(toolRequest, "Error: " + budgetError));
                             continue;
+                        }
+
+                        // Check tenant-level monthly cost budget (MCP governance)
+                        if (tenantQuotaService != null) {
+                            var costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
+                            if (!costCheck.allowed()) {
+                                LOGGER.warnf("Tenant cost budget exceeded during tool call: %s", costCheck.reason());
+
+                                Map<String, Object> quotaStep = new HashMap<>();
+                                quotaStep.put("type", "tool_error");
+                                quotaStep.put("tool", toolRequest.name());
+                                quotaStep.put("error", costCheck.reason());
+                                trace.add(quotaStep);
+
+                                currentMessages.add(ToolExecutionResultMessage.from(toolRequest, "Error: " + costCheck.reason()));
+                                continue;
+                            }
                         }
 
                         // Execute through ToolExecutionService for rate limiting, caching, cost
