@@ -84,6 +84,7 @@ public class LlmTask implements ILifecycleTask {
     private final RagContextProvider ragContextProvider;
     private final TokenCounterFactory tokenCounterFactory;
     private final ConversationSummarizer conversationSummarizer;
+    private final CounterweightService counterweightService;
 
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
@@ -100,7 +101,7 @@ public class LlmTask implements ILifecycleTask {
             IApiCallExecutor apiCallExecutor, ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager,
             A2AToolProviderManager a2aToolProviderManager, IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
             RagContextProvider ragContextProvider, IUserMemoryStore userMemoryStore, TokenCounterFactory tokenCounterFactory,
-            ConversationSummarizer conversationSummarizer) {
+            ConversationSummarizer conversationSummarizer, CounterweightService counterweightService) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -121,6 +122,7 @@ public class LlmTask implements ILifecycleTask {
         this.restAgentStore = restAgentStore;
         this.restWorkflowStore = restWorkflowStore;
         this.conversationSummarizer = conversationSummarizer;
+        this.counterweightService = counterweightService;
     }
 
     @Override
@@ -171,6 +173,20 @@ public class LlmTask implements ILifecycleTask {
 
         // Parse history parameters
         String systemMessage = processedParams.getOrDefault(KEY_SYSTEM_MESSAGE, "");
+
+        // === Behavioral Governance: Counterweight Injection ===
+        var counterweight = task.getCounterweight();
+        if (counterweight != null && counterweight.isEnabled()) {
+            String cwInstructions = counterweightService.resolveInstructions(counterweight);
+            if (!cwInstructions.isEmpty()) {
+                systemMessage += "\n\n## BEHAVIORAL GOVERNANCE\n" + cwInstructions;
+                // Store counterweight activation for audit trail
+                var cwTraceData = dataFactory.createData(KEY_LANGCHAIN + ":counterweight:level",
+                        counterweight.getLevel() != null ? counterweight.getLevel() : "custom");
+                currentStep.storeData(cwTraceData);
+            }
+        }
+
         int logSizeLimit = task.getConversationHistoryLimit() != null ? task.getConversationHistoryLimit() : -1;
         if (!isNullOrEmpty(processedParams.get(KEY_LOG_SIZE_LIMIT))) {
             logSizeLimit = Integer.parseInt(processedParams.get(KEY_LOG_SIZE_LIMIT));

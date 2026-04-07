@@ -244,6 +244,15 @@ public record LlmConfiguration(List<Task> tasks) {
          */
         private ModelCascadeConfig modelCascade;
 
+        // === Behavioral Governance ===
+
+        /**
+         * Assertiveness counterweight configuration. When enabled, appends behavioral
+         * governance instructions to the system prompt to regulate agent assertiveness.
+         * Fully opt-in — disabled by default for backwards compatibility.
+         */
+        private CounterweightConfig counterweight;
+
         // === Helper Methods ===
 
         /**
@@ -528,12 +537,64 @@ public record LlmConfiguration(List<Task> tasks) {
             this.modelCascade = modelCascade;
         }
 
+        public CounterweightConfig getCounterweight() {
+            return counterweight;
+        }
+
+        public void setCounterweight(CounterweightConfig counterweight) {
+            this.counterweight = counterweight;
+        }
+
         public ConversationSummaryConfig getConversationSummary() {
             return conversationSummary;
         }
 
         public void setConversationSummary(ConversationSummaryConfig conversationSummary) {
             this.conversationSummary = conversationSummary;
+        }
+    }
+
+    /**
+     * Configuration for assertiveness counterweights. Controls how aggressively the
+     * agent acts by injecting behavioral governance instructions into the system
+     * prompt.
+     * <p>
+     * Predefined levels:
+     * <ul>
+     * <li>{@code normal} — no modification (default)</li>
+     * <li>{@code cautious} — adds intent-declaration and verification prompts</li>
+     * <li>{@code strict} — requires explicit confirmation for state-changing
+     * ops</li>
+     * </ul>
+     * Custom {@code instructions} override the predefined level text.
+     */
+    public static class CounterweightConfig {
+        private boolean enabled;
+        private String level = "normal";
+        private List<String> instructions;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getLevel() {
+            return level;
+        }
+
+        public void setLevel(String level) {
+            this.level = level;
+        }
+
+        public List<String> getInstructions() {
+            return instructions;
+        }
+
+        public void setInstructions(List<String> instructions) {
+            this.instructions = instructions;
         }
     }
 

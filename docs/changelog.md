@@ -15,6 +15,37 @@ Each entry follows this format:
 
 ---
 
+## Planning: Memory Architecture Plan v2 + Agentic Improvements Update (2026-04-07)
+
+**Repos:** EDDI (`feature/version-6.0.0`) — planning docs only
+
+**What changed:**
+
+Major revision of `docs/planning/memory-architecture-plan.md` based on critical analysis of research-3 findings. Also updated `docs/planning/agentic-improvements-plan.md` with session forking/snapshotting (moved from memory plan).
+
+| Change | Rationale |
+|---|---|
+| **Staging buffer → commit flags** | Original pseudocode used a physically separate buffer, which would break pipeline coherence (downstream tasks can't read upstream staged data). Replaced with committed/uncommitted flags on `IData<T>` — preserves pipeline coherence while achieving the same anti-pollution goal |
+| **DecisionLogStore eliminated** | A full `ILifecycleTask` with dedicated MongoDB store was premature. Agent decisions are recorded via the existing HMAC-secured audit ledger with event type `DECISION`. `longTerm` properties already carry forward decision effects |
+| **Real-time MemoryGatekeeperTask eliminated** | Per-write LLM evaluation costs ~$0.001/write × 1000s of writes — ~900x more expensive than the MongoDB storage it prevents. Replaced with batch gatekeeper evaluation during scheduled property consolidation |
+| **AutoDream refocused** | Original plan conflated intra-conversation history compression (already Phase D) with cross-conversation property consolidation. Phase G now exclusively targets `longTerm` property lifecycle management |
+| **Scheduling simplified** | Replaced idle-detection → HEARTBEAT → NATS dispatch chain with simple `TriggerType.CRON` schedule. A nightly cleanup job is simpler, more predictable, and easier to debug |
+| **Agent profile table added** | Not all agents need all features. Added explicit mapping of which memory features benefit which agent types (FAQ bot vs support bot vs analyst agent vs orchestrator) |
+| **Cost model added** | Estimated monthly LLM cost for memory management features: ~$210/month for 100 agents (Phases A-C have zero LLM cost) |
+| **Session forking → agentic plan** | Session forking and state snapshotting are execution/orchestration concerns, not memory concerns. Moved to agentic improvements plan as "Improvement 6: Session Forking & State Snapshotting" |
+| **Scout tool restrictions** | Added `toolScope: READ_ONLY` to scout pattern — research scouts should not invoke state-changing tools |
+| **Temporal anchoring in compaction** | Added "convert relative dates to absolute timestamps" instruction to the auto-compaction prompt (was in AutoDream prompt but missing from compaction) |
+
+**Design decisions:**
+- Properties system IS EDDI's memory index (functional equivalent of Claude Code's MEMORY.md) — the gap is unbounded growth, not missing architecture
+- Phases A, B, C have **zero LLM cost** — pure logic changes — making them excellent first priorities
+- All features default to disabled for backwards compatibility
+- Commit flag defaults to `committed = true`, so existing write path is unchanged unless opted in
+
+**Files:** 2 modified (`docs/planning/memory-architecture-plan.md`, `docs/planning/agentic-improvements-plan.md`)
+
+---
+
 ## Fix: Gemini "Function calling with response mime type 'application/json' is unsupported" (2026-04-02)
 
 **Repo:** EDDI (`main`)
