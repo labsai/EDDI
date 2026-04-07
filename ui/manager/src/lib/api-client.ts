@@ -123,7 +123,22 @@ class ApiClient {
       }
     }
 
-    return response.json();
+    // Handle empty body responses (e.g. DELETE returning 200 with no body)
+    const contentLength = response.headers.get("Content-Length");
+    if (contentLength === "0") {
+      return undefined as T;
+    }
+
+    // Try parsing JSON, gracefully handle empty or non-JSON bodies
+    const text = await response.text();
+    if (!text) {
+      return undefined as T;
+    }
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      return undefined as T;
+    }
   }
 
   get<T>(path: string): Promise<T> {
