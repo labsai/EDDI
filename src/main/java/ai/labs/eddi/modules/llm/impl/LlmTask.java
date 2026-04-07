@@ -183,34 +183,34 @@ public class LlmTask implements ILifecycleTask {
         String systemMessage = processedParams.getOrDefault(KEY_SYSTEM_MESSAGE, "");
 
         // === Behavioral Governance: Counterweight Injection ===
-        // Priority: explicit task config > deployment environment auto-counterweight
+        // Only applies when the agent has explicitly enabled counterweights.
+        // Deployment environment provides a fallback level if no explicit level is set.
         var counterweight = task.getCounterweight();
-        String effectiveLevel = null;
         if (counterweight != null && counterweight.isEnabled()) {
-            // Explicit config: use custom instructions or level
+            String effectiveLevel;
             if (counterweight.getInstructions() != null && !counterweight.getInstructions().isEmpty()) {
                 effectiveLevel = "custom";
             } else {
                 effectiveLevel = counterweight.getLevel();
             }
-        }
-        if (effectiveLevel == null || "normal".equalsIgnoreCase(effectiveLevel)) {
-            // No explicit counterweight — check deployment environment fallback
-            effectiveLevel = deploymentContextService.getAutoCounterweightLevel();
-        }
-        if (effectiveLevel != null && !"normal".equalsIgnoreCase(effectiveLevel)) {
-            // Build a synthetic config for the resolved level (or use task config for
-            // custom instructions)
-            var effectiveConfig = counterweight != null && counterweight.isEnabled() ? counterweight : new LlmConfiguration.CounterweightConfig();
-            if (!(counterweight != null && counterweight.isEnabled())) {
-                effectiveConfig.setEnabled(true);
-                effectiveConfig.setLevel(effectiveLevel);
+            // Fallback: use deployment environment level when enabled but no explicit level
+            if (effectiveLevel == null || "normal".equalsIgnoreCase(effectiveLevel)) {
+                effectiveLevel = deploymentContextService.getAutoCounterweightLevel();
             }
-            String cwInstructions = counterweightService.resolveInstructions(effectiveConfig);
-            if (!cwInstructions.isEmpty()) {
-                systemMessage += "\n\n## BEHAVIORAL GOVERNANCE\n" + cwInstructions;
-                var cwTraceData = dataFactory.createData(KEY_LANGCHAIN + ":counterweight:level", effectiveLevel);
-                currentStep.storeData(cwTraceData);
+            if (effectiveLevel != null && !"normal".equalsIgnoreCase(effectiveLevel)) {
+                String cwInstructions = counterweightService.resolveInstructions(counterweight);
+                if (cwInstructions.isEmpty()) {
+                    // Synthetic config for deployment-level fallback
+                    var fallbackConfig = new LlmConfiguration.CounterweightConfig();
+                    fallbackConfig.setEnabled(true);
+                    fallbackConfig.setLevel(effectiveLevel);
+                    cwInstructions = counterweightService.resolveInstructions(fallbackConfig);
+                }
+                if (!cwInstructions.isEmpty()) {
+                    systemMessage += "\n\n## BEHAVIORAL GOVERNANCE\n" + cwInstructions;
+                    var cwTraceData = dataFactory.createData(KEY_LANGCHAIN + ":counterweight:level", effectiveLevel);
+                    currentStep.storeData(cwTraceData);
+                }
             }
         }
 

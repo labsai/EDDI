@@ -95,13 +95,17 @@ public class RuleDeserialization implements IRuleDeserialization {
                 checkNotNull(type, "behaviorRule.condition.type");
 
                 var conditionsKey = CONDITION_PREFIX + type;
-                if (!conditionProvider.containsKey(conditionsKey)) {
-                    var errorMessage = format("behaviorRule.condition.type=%s does not exist", conditionsKey);
-                    throw new IllegalArgumentException(errorMessage);
-                }
+
+                // Try direct factory first (handles both CDI and non-CDI conditions)
                 IRuleCondition condition = createCondition(conditionsKey);
-                var configs = conditionConfiguration.getConfigs();
+
+                // Fall back to CDI provider map for extensibility
+                if (condition == null && conditionProvider.containsKey(conditionsKey)) {
+                    condition = conditionProvider.get(conditionsKey).get();
+                }
+
                 if (condition != null) {
+                    var configs = conditionConfiguration.getConfigs();
                     if (!isNullOrEmpty(configs)) {
                         condition.setConfigs(configs);
                     }
