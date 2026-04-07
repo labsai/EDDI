@@ -104,7 +104,8 @@ public class LlmTask implements ILifecycleTask {
             A2AToolProviderManager a2aToolProviderManager, IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
             RagContextProvider ragContextProvider, IUserMemoryStore userMemoryStore, TokenCounterFactory tokenCounterFactory,
             ConversationSummarizer conversationSummarizer, CounterweightService counterweightService,
-            DeploymentContextService deploymentContextService, IdentityMaskingService identityMaskingService) {
+            DeploymentContextService deploymentContextService, IdentityMaskingService identityMaskingService,
+            ToolResponseTruncator toolResponseTruncator) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -118,7 +119,8 @@ public class LlmTask implements ILifecycleTask {
         this.streamingLegacyChatExecutor = new StreamingLegacyChatExecutor();
         this.agentOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
                 textSummarizerTool, pdfReaderTool, weatherTool, toolExecutionService, mcpToolProviderManager, a2aToolProviderManager, restAgentStore,
-                restWorkflowStore, resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter, userMemoryStore);
+                restWorkflowStore, resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter, userMemoryStore,
+                toolResponseTruncator);
         this.ragContextProvider = ragContextProvider;
         this.tokenCounterFactory = tokenCounterFactory;
         this.apiCallExecutor = apiCallExecutor;

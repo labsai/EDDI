@@ -77,13 +77,14 @@ class AgentOrchestrator {
     private final IJsonSerialization jsonSerialization;
     private final IMemoryItemConverter memoryItemConverter;
     private final IUserMemoryStore userMemoryStore;
+    private final ToolResponseTruncator toolResponseTruncator;
 
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager, A2AToolProviderManager a2aToolProviderManager,
             IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore, IResourceClientLibrary resourceClientLibrary,
             IApiCallExecutor apiCallExecutor, IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter,
-            IUserMemoryStore userMemoryStore) {
+            IUserMemoryStore userMemoryStore, ToolResponseTruncator toolResponseTruncator) {
         this.calculatorTool = calculatorTool;
         this.dateTimeTool = dateTimeTool;
         this.webSearchTool = webSearchTool;
@@ -102,6 +103,7 @@ class AgentOrchestrator {
         this.jsonSerialization = jsonSerialization;
         this.memoryItemConverter = memoryItemConverter;
         this.userMemoryStore = userMemoryStore;
+        this.toolResponseTruncator = toolResponseTruncator;
     }
 
     /**
@@ -286,6 +288,10 @@ class AgentOrchestrator {
                         } else {
                             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
                         }
+
+                        // Apply response truncation (MCP governance)
+                        toolResult = toolResponseTruncator.truncateIfNeeded(
+                                toolRequest.name(), toolResult, task.getToolResponseLimits());
 
                         Map<String, Object> resultStep = new HashMap<>();
                         resultStep.put("type", "tool_result");

@@ -260,6 +260,13 @@ public record LlmConfiguration(List<Task> tasks) {
          */
         private IdentityMaskingConfig identityMasking;
 
+        /**
+         * Tool response truncation limits. When set, tool responses exceeding the
+         * character limit are truncated before re-injection into the LLM context
+         * window. Reduces context bloat from verbose tool outputs.
+         */
+        private ToolResponseLimits toolResponseLimits;
+
         // === Helper Methods ===
 
         /**
@@ -560,6 +567,14 @@ public record LlmConfiguration(List<Task> tasks) {
             this.identityMasking = identityMasking;
         }
 
+        public ToolResponseLimits getToolResponseLimits() {
+            return toolResponseLimits;
+        }
+
+        public void setToolResponseLimits(ToolResponseLimits toolResponseLimits) {
+            this.toolResponseLimits = toolResponseLimits;
+        }
+
         public ConversationSummaryConfig getConversationSummary() {
             return conversationSummary;
         }
@@ -661,6 +676,35 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setPersonaInstructions(List<String> personaInstructions) {
             this.personaInstructions = personaInstructions;
+        }
+    }
+
+    /**
+     * Configuration for tool response truncation. Limits the character count of
+     * individual tool results before they are fed back into the LLM context.
+     */
+    public static class ToolResponseLimits {
+        /**
+         * Default maximum characters per tool response (default: 50000 = ~12k tokens)
+         */
+        private int defaultMaxChars = 50000;
+        /** Per-tool overrides: tool name → max chars */
+        private Map<String, Integer> perToolLimits;
+
+        public int getDefaultMaxChars() {
+            return defaultMaxChars;
+        }
+
+        public void setDefaultMaxChars(int defaultMaxChars) {
+            this.defaultMaxChars = defaultMaxChars;
+        }
+
+        public Map<String, Integer> getPerToolLimits() {
+            return perToolLimits;
+        }
+
+        public void setPerToolLimits(Map<String, Integer> perToolLimits) {
+            this.perToolLimits = perToolLimits;
         }
     }
 
