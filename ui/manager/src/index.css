@@ -34,7 +34,7 @@
   --color-sidebar-accent-foreground: #0c0a09;
 
   --radius: 0.5rem;
-  --font-sans: 'Noto Sans', 'Noto Sans Arabic', 'Noto Sans Thai', 'Noto Sans Devanagari', 'Noto Sans JP', 'Noto Sans KR', 'Noto Sans SC', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Noto Sans Variable', 'Noto Sans Arabic Variable', 'Noto Sans Thai Variable', 'Noto Sans Devanagari Variable', 'Noto Sans JP Variable', 'Noto Sans KR Variable', 'Noto Sans SC Variable', 'Noto Sans TC Variable', ui-sans-serif, system-ui, sans-serif;
 }
 
 /* Dark theme overrides — deep charcoal for premium enterprise feel */

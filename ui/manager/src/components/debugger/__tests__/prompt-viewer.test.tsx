@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -17,7 +17,7 @@ function renderViewer(conversationId: string | null = "conv-1") {
   return render(
     <MemoryRouter>
       <QueryClientProvider client={queryClient}>
-        <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
+        <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test-prompt">
           <PromptViewer conversationId={conversationId} />
         </ThemeProvider>
       </QueryClientProvider>
@@ -26,28 +26,118 @@ function renderViewer(conversationId: string | null = "conv-1") {
 }
 
 describe("PromptViewer", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
   it("renders empty state when no conversationId", () => {
     renderViewer(null);
     expect(screen.getByText(/Start a conversation to inspect prompts/i)).toBeInTheDocument();
   });
 
-  it("renders empty state when no LLM data", async () => {
-    renderViewer();
-
-    await waitFor(() => {
-      expect(screen.getByText(/No LLM interactions found yet/i)).toBeInTheDocument();
-    });
+  it("renders prompt-viewer testid when LLM data is found", async () => {
+    renderViewer("conv-1");
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("prompt-viewer")).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
   });
 
-  it("renders testid prompt-viewer when data loads", async () => {
-    // With MSW returning audit entries, the component may render the viewer or empty state
+  it("displays step index number", async () => {
     renderViewer("conv-1");
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Step/i)).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
+  });
 
-    await waitFor(() => {
-      // Either shows prompt data or "no LLM" empty state
-      const viewer = screen.queryByTestId("prompt-viewer");
-      const emptyState = screen.queryByText(/No LLM interactions found yet/i);
-      expect(viewer || emptyState).toBeTruthy();
-    });
+  it("displays task type badge", async () => {
+    renderViewer("conv-1");
+    await waitFor(
+      () => {
+        // Audit entries have taskType "langchain"
+        expect(screen.getByText(/langchain/i)).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
+  });
+
+  it("displays cost in the metrics strip", async () => {
+    renderViewer("conv-1");
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Cost/i)).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
+  });
+
+  it("renders Copy Prompt button with testid", async () => {
+    renderViewer("conv-1");
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("copy-prompt")).toBeInTheDocument();
+        expect(screen.getByText(/Copy Prompt/i)).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
+  });
+
+  it("renders Replay This Turn button with testid", async () => {
+    renderViewer("conv-1");
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("replay-turn")).toBeInTheDocument();
+        expect(screen.getByText(/Replay This Turn/i)).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
+  });
+
+  it("displays duration value in the step header", async () => {
+    renderViewer("conv-1");
+    await waitFor(
+      () => {
+        // Duration is formatted as Xms or X.XXs
+        const viewer = screen.getByTestId("prompt-viewer");
+        // Check for at least one span with duration-like content (ms or s)
+        expect(viewer.textContent).toMatch(/\d+(\.\d+)?[ms]/);
+      },
+      { timeout: 5000 },
+    );
+  });
+
+  it("renders within a prompt-viewer container with correct structure", async () => {
+    renderViewer("conv-1");
+    await waitFor(
+      () => {
+        const viewer = screen.getByTestId("prompt-viewer");
+        // Should have the space-y-3 content area
+        expect(viewer.querySelector(".space-y-3")).toBeInTheDocument();
+        // Should have action buttons area
+        expect(viewer.querySelector("[data-testid='copy-prompt']")).toBeInTheDocument();
+        expect(viewer.querySelector("[data-testid='replay-turn']")).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
+  });
+
+  it("displays turn selector or single entry view", async () => {
+    renderViewer("conv-1");
+    await waitFor(
+      () => {
+        const viewer = screen.getByTestId("prompt-viewer");
+        // Either shows the turn selector (multiple LLM entries) or just shows content directly
+        const selector = viewer.querySelector("[data-testid='prompt-turn-selector']");
+        const stepBadge = screen.getByText(/Step/i);
+        // One of these must be present
+        expect(selector || stepBadge).toBeTruthy();
+      },
+      { timeout: 5000 },
+    );
   });
 });

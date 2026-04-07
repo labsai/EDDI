@@ -11,6 +11,21 @@ import "@/index.css";
 // Start collecting logs from session start (before user navigates to /manage/logs)
 import "@/hooks/session-log-store";
 
+// ── Self-hosted fonts (no external CDN requests) ────────────────────
+import "@fontsource-variable/noto-sans";
+import "@fontsource-variable/noto-sans-arabic";
+import "@fontsource-variable/noto-sans-thai";
+import "@fontsource-variable/noto-sans-devanagari";
+import "@fontsource-variable/noto-sans-jp";
+import "@fontsource-variable/noto-sans-kr";
+import "@fontsource-variable/noto-sans-sc";
+import "@fontsource-variable/noto-sans-tc";
+
+// ── Self-host Monaco Editor (no jsDelivr CDN) ───────────────────────
+import * as monaco from "monaco-editor";
+import { loader } from "@monaco-editor/react";
+loader.config({ monaco });
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

@@ -11,6 +11,13 @@ export default mergeConfig(
       testTimeout: 15_000,
       css: true,
       exclude: ["e2e/**", "node_modules/**"],
+      server: {
+        deps: {
+          // monaco-editor is ~40 MB; tests mock @monaco-editor/react so
+          // the real package must never be loaded in the test environment.
+          external: ["monaco-editor"],
+        },
+      },
       coverage: {
         provider: "v8",
         reporter: ["text", "json", "html"],
