@@ -43,6 +43,21 @@ public class AgentConfiguration {
     /** Human-readable description for the A2A Agent Card */
     private String description;
 
+    /**
+     * Cryptographic identity for inter-agent trust. Auto-generated on agent
+     * creation. The public key is stored here; the private key is in SecretsVault.
+     *
+     * @since 6.0.0
+     */
+    private AgentIdentity identity;
+
+    /**
+     * Security configuration for cryptographic signing.
+     *
+     * @since 6.0.0
+     */
+    private SecurityConfig security;
+
     public static class ChannelConnector {
         private URI type;
         private Map<String, String> config = new HashMap<>();
@@ -163,6 +178,93 @@ public class AgentConfiguration {
 
         public void setConfidence(String confidence) {
             this.confidence = confidence;
+        }
+    }
+
+    public AgentIdentity getIdentity() {
+        return identity;
+    }
+
+    public void setIdentity(AgentIdentity identity) {
+        this.identity = identity;
+    }
+
+    public SecurityConfig getSecurity() {
+        return security;
+    }
+
+    public void setSecurity(SecurityConfig security) {
+        this.security = security;
+    }
+
+    /**
+     * Cryptographic identity for an agent. The public key is stored in the agent
+     * configuration; the private key is in SecretsVault.
+     *
+     * @since 6.0.0
+     */
+    public static class AgentIdentity {
+        private String agentDid;
+        private String publicKey;
+
+        public AgentIdentity() {
+        }
+
+        public AgentIdentity(String agentDid, String publicKey) {
+            this.agentDid = agentDid;
+            this.publicKey = publicKey;
+        }
+
+        public String getAgentDid() {
+            return agentDid;
+        }
+
+        public void setAgentDid(String agentDid) {
+            this.agentDid = agentDid;
+        }
+
+        public String getPublicKey() {
+            return publicKey;
+        }
+
+        public void setPublicKey(String publicKey) {
+            this.publicKey = publicKey;
+        }
+    }
+
+    /**
+     * Security configuration for cryptographic signing. All defaults are
+     * {@code false} for backwards compatibility.
+     *
+     * @since 6.0.0
+     */
+    public static class SecurityConfig {
+        private boolean signInterAgentMessages = false;
+        private boolean signMcpInvocations = false;
+        private boolean requirePeerVerification = false;
+
+        public boolean isSignInterAgentMessages() {
+            return signInterAgentMessages;
+        }
+
+        public void setSignInterAgentMessages(boolean signInterAgentMessages) {
+            this.signInterAgentMessages = signInterAgentMessages;
+        }
+
+        public boolean isSignMcpInvocations() {
+            return signMcpInvocations;
+        }
+
+        public void setSignMcpInvocations(boolean signMcpInvocations) {
+            this.signMcpInvocations = signMcpInvocations;
+        }
+
+        public boolean isRequirePeerVerification() {
+            return requirePeerVerification;
+        }
+
+        public void setRequirePeerVerification(boolean requirePeerVerification) {
+            this.requirePeerVerification = requirePeerVerification;
         }
     }
 

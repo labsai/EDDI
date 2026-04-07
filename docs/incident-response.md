@@ -81,6 +81,16 @@ EDDI exposes metrics at `/q/metrics` (Prometheus format):
   of personal information
 - **California Attorney General**: If breach affects 500+ residents
 
+### HIPAA (§164.408)
+
+- **HHS (Secretary)**: Within **60 days** of discovery
+- **Affected individuals**: Without unreasonable delay, no later than
+  **60 days** after discovery
+- **Media**: If breach affects ≥ 500 residents of a state, notify
+  prominent media outlets in that state
+- **Small breaches** (< 500 individuals): May be reported annually to HHS
+  in a batch submission
+
 ### Template
 
 ```
@@ -110,3 +120,26 @@ Contact: [DPO / PRIVACY CONTACT]
 - Use self-hosted LLM providers for sensitive deployments
 - Enable TLS for all EDDI endpoints
 - Regularly rotate API keys and vault credentials
+
+## 7. Emergency Access Procedure (HIPAA §164.312(a)(2)(ii))
+
+For healthcare deployments, maintain a documented "break glass" procedure:
+
+1. **Emergency admin account**: Create a dedicated Keycloak account with
+   `eddi-admin` role, stored in a sealed envelope or hardware security
+   module (HSM)
+2. **Activation**: Require two-person authorization to unseal the
+   emergency credentials
+3. **Audit**: All emergency access is logged in the immutable audit ledger
+   — EDDI records every API call, tool invocation, and data access
+4. **Deactivation**: Rotate emergency credentials immediately after each
+   use via Keycloak admin console
+5. **Documentation**: Log the reason for emergency access, duration, and
+   actions taken
+
+## See Also
+
+- [hipaa-compliance.md](hipaa-compliance.md) — HIPAA deployment guide
+- [gdpr-compliance.md](gdpr-compliance.md) — GDPR/CCPA compliance
+- [security.md](security.md) — Security architecture
+- [audit-ledger.md](audit-ledger.md) — Immutable audit trail

@@ -2,6 +2,7 @@ package ai.labs.eddi.engine.gdpr;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -33,6 +34,7 @@ class GdprComplianceServiceTest {
     private IUserConversationStore userConversationStore;
     private IDatabaseLogs databaseLogs;
     private IAuditStore auditStore;
+    private AuditLedgerService auditLedgerService;
     private GdprComplianceService service;
 
     @BeforeEach
@@ -42,10 +44,12 @@ class GdprComplianceServiceTest {
         userConversationStore = mock(IUserConversationStore.class);
         databaseLogs = mock(IDatabaseLogs.class);
         auditStore = mock(IAuditStore.class);
+        auditLedgerService = mock(AuditLedgerService.class);
 
         service = new GdprComplianceService(
                 userMemoryStore, conversationMemoryStore,
-                userConversationStore, databaseLogs, auditStore);
+                userConversationStore, databaseLogs, auditStore,
+                auditLedgerService);
     }
 
     @Test

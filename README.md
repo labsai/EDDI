@@ -334,6 +334,19 @@ Every PR is automatically checked by CI (build + tests), CodeQL (security), depe
 
 Please report security vulnerabilities privately — see our [Security Policy](SECURITY.md).
 
+## 📋 Compliance & Privacy
+
+EDDI provides built-in infrastructure for regulatory compliance:
+
+| Guide | Covers |
+|---|---|
+| **[GDPR / CCPA](docs/gdpr-compliance.md)** | Data erasure, export, retention, and consent guidance |
+| **[HIPAA](docs/hipaa-compliance.md)** | Healthcare deployment guide — encryption, BAAs, session management |
+| **[EU AI Act](docs/eu-ai-act-compliance.md)** | AI risk classification and decision traceability |
+| **[Privacy & Data Processing](PRIVACY.md)** | Data flows, LLM provider matrix, international regulations (PIPEDA, LGPD) |
+| **[Compliance Data Flow](docs/compliance-data-flow.md)** | Single-page data flow diagram for auditors |
+| **[Incident Response](docs/incident-response.md)** | Breach response runbook (GDPR, CCPA, HIPAA timelines) |
+
 ## 📜 Code of Conduct
 
 This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md).

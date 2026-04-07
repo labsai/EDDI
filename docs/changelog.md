@@ -15,6 +15,40 @@ Each entry follows this format:
 
 ---
 
+## Compliance Hardening — HIPAA, EU AI Act, International Privacy (2026-04-07)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+
+**What changed:**
+
+Comprehensive compliance documentation suite and startup compliance checks, making EDDI compliance-ready for deployers targeting HIPAA, EU AI Act, and international privacy regulations (PIPEDA, LGPD, APPI, POPIA, PDPA).
+
+| Component | Change |
+|---|---|
+| **`docs/hipaa-compliance.md`** | NEW — Full HIPAA deployment guide: encryption at rest/transit, LLM provider BAA matrix (Azure OpenAI ✅, AWS Bedrock ✅, Ollama N/A), session timeout guidance, emergency access procedure, minimum necessary standard, deployer checklist |
+| **`docs/eu-ai-act-compliance.md`** | NEW — EU AI Act compliance guide: risk classification (high/limited/minimal), article-by-article feature mapping (Art. 9, 11-14, 17/19), deployer checklists per risk tier |
+| **`docs/compliance-data-flow.md`** | NEW — Single-page data flow diagram for compliance auditors: PII lifecycle, data store inventory, encryption summary, GDPR erasure cascade visualization |
+| **`docs/templates/baa-template.md`** | NEW — Business Associate Agreement template for HIPAA deployments, covering subcontractor chain (LLM providers), EDDI-specific safeguards, audit trail, data destruction |
+| **`PRIVACY.md`** | Added International Privacy Regulations section: PIPEDA (10 principles mapped), LGPD (Art. 18 rights mapped), APPI/POPIA/PDPA compatibility notes |
+| **`docs/gdpr-compliance.md`** | Added international privacy cross-references and See Also links |
+| **`docs/security.md`** | Added TLS Requirements section (reverse proxy vs direct, HIPAA/EU AI Act guidance) |
+| **`docs/incident-response.md`** | Added HIPAA breach notification timeline (§164.408), emergency access procedure (§164.312(a)(2)(ii)) |
+| **`README.md`** | Added Compliance & Privacy section with table linking all compliance guides |
+| **`ComplianceStartupChecks.java`** | NEW — Startup observer that warns deployers about TLS and database encryption configuration gaps. Advisory, never blocks startup |
+| **`GdprComplianceService.java`** | GDPR erasure and export operations now write `GDPR_ERASURE` and `GDPR_EXPORT` events to the immutable audit ledger (previously logged only via Java logger) |
+| **`GdprComplianceServiceTest.java`** | Updated constructor for new `AuditLedgerService` dependency |
+
+**Design decisions:**
+- EDDI is open-source middleware — it doesn't get certified itself, but must provide the features and documentation so that **deployers can** achieve compliance
+- SOC 2, ISO 27001, FedRAMP explicitly excluded — those are org-level certifications, not applicable to open-source projects
+- Compliance startup checks follow the `VaultStartupBanner` pattern — `@Observes StartupEvent` with box-formatted warnings
+- PHI encryption at rest is a deployment concern (TDE), not an application feature — documented, not coded
+- Audit compliance events use `taskType: "compliance"` and include pseudonymized userId, never raw PII
+
+**Files:** 4 new docs, 1 new template, 5 updated docs, 1 new Java class, 2 updated Java files.
+
+---
+
 ## Planning: Memory Architecture Plan v2 + Agentic Improvements Update (2026-04-07)
 
 **Repos:** EDDI (`feature/version-6.0.0`) — planning docs only

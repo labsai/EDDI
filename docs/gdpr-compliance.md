@@ -164,3 +164,23 @@ information collected.
 
 Use the erasure endpoint (`DELETE /admin/gdpr/{userId}`) to fulfill
 "right to delete" requests. The cascade covers all data stores.
+
+## International Privacy Regulations
+
+EDDI's GDPR/CCPA infrastructure also satisfies the technical requirements
+of **PIPEDA** (Canada), **LGPD** (Brazil), **APPI** (Japan), **POPIA**
+(South Africa), and **PDPA** (Singapore/Thailand). The same erasure and
+export endpoints work for all jurisdictions. Deployers should consult local
+counsel for jurisdiction-specific administrative obligations.
+
+See [PRIVACY.md](../PRIVACY.md#international-privacy-regulations) for
+detailed feature mappings per regulation.
+
+## See Also
+
+- [PRIVACY.md](../PRIVACY.md) — Data processing overview and international regulations
+- [hipaa-compliance.md](hipaa-compliance.md) — HIPAA deployment guide
+- [eu-ai-act-compliance.md](eu-ai-act-compliance.md) — EU AI Act compliance
+- [compliance-data-flow.md](compliance-data-flow.md) — Data flow diagram for auditors
+- [incident-response.md](incident-response.md) — Breach response runbook
+- [templates/baa-template.md](templates/baa-template.md) — Business Associate Agreement template
