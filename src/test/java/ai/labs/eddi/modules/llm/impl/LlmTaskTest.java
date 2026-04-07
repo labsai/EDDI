@@ -98,11 +98,14 @@ class LlmTaskTest {
         var deploymentContextService = mock(DeploymentContextService.class);
         when(deploymentContextService.getAutoCounterweightLevel()).thenReturn(null);
 
+        var identityMaskingService = new IdentityMaskingService(new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+
         langChainTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter, templatingEngine, jsonSerialization, prePostUtils,
                 chatModelRegistry, calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool,
                 weatherTool, apiCallExecutor, toolExecutionService, mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
                 mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(RagContextProvider.class), mock(IUserMemoryStore.class),
-                mock(TokenCounterFactory.class), mock(ConversationSummarizer.class), counterweightService, deploymentContextService);
+                mock(TokenCounterFactory.class), mock(ConversationSummarizer.class), counterweightService, deploymentContextService,
+                identityMaskingService);
     }
 
     static Stream<Arguments> provideParameters() {

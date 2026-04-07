@@ -86,6 +86,7 @@ public class LlmTask implements ILifecycleTask {
     private final ConversationSummarizer conversationSummarizer;
     private final CounterweightService counterweightService;
     private final DeploymentContextService deploymentContextService;
+    private final IdentityMaskingService identityMaskingService;
 
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
@@ -103,7 +104,7 @@ public class LlmTask implements ILifecycleTask {
             A2AToolProviderManager a2aToolProviderManager, IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
             RagContextProvider ragContextProvider, IUserMemoryStore userMemoryStore, TokenCounterFactory tokenCounterFactory,
             ConversationSummarizer conversationSummarizer, CounterweightService counterweightService,
-            DeploymentContextService deploymentContextService) {
+            DeploymentContextService deploymentContextService, IdentityMaskingService identityMaskingService) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -126,6 +127,7 @@ public class LlmTask implements ILifecycleTask {
         this.conversationSummarizer = conversationSummarizer;
         this.counterweightService = counterweightService;
         this.deploymentContextService = deploymentContextService;
+        this.identityMaskingService = identityMaskingService;
     }
 
     @Override
@@ -206,6 +208,18 @@ public class LlmTask implements ILifecycleTask {
                 systemMessage += "\n\n## BEHAVIORAL GOVERNANCE\n" + cwInstructions;
                 var cwTraceData = dataFactory.createData(KEY_LANGCHAIN + ":counterweight:level", effectiveLevel);
                 currentStep.storeData(cwTraceData);
+            }
+        }
+
+        // === Identity Masking Injection ===
+        var identityMasking = task.getIdentityMasking();
+        if (identityMasking != null && identityMasking.isEnabled()) {
+            String maskingInstructions = identityMaskingService.resolveInstructions(identityMasking);
+            if (!maskingInstructions.isEmpty()) {
+                systemMessage += "\n\n## IDENTITY\n" + maskingInstructions;
+                var maskTraceData = dataFactory.createData(KEY_LANGCHAIN + ":identity:displayName",
+                        identityMasking.getDisplayName() != null ? identityMasking.getDisplayName() : "custom");
+                currentStep.storeData(maskTraceData);
             }
         }
 

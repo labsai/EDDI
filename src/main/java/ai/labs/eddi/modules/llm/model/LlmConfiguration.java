@@ -253,6 +253,13 @@ public record LlmConfiguration(List<Task> tasks) {
          */
         private CounterweightConfig counterweight;
 
+        /**
+         * Identity masking configuration. Controls how the agent presents itself:
+         * display name, model concealment, and custom persona instructions. Fully
+         * opt-in — disabled by default for backwards compatibility.
+         */
+        private IdentityMaskingConfig identityMasking;
+
         // === Helper Methods ===
 
         /**
@@ -545,6 +552,14 @@ public record LlmConfiguration(List<Task> tasks) {
             this.counterweight = counterweight;
         }
 
+        public IdentityMaskingConfig getIdentityMasking() {
+            return identityMasking;
+        }
+
+        public void setIdentityMasking(IdentityMaskingConfig identityMasking) {
+            this.identityMasking = identityMasking;
+        }
+
         public ConversationSummaryConfig getConversationSummary() {
             return conversationSummary;
         }
@@ -595,6 +610,57 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setInstructions(List<String> instructions) {
             this.instructions = instructions;
+        }
+    }
+
+    /**
+     * Configuration for identity masking. Controls how the agent presents itself to
+     * users.
+     * <p>
+     * When enabled, injects persona directives into the system prompt:
+     * <ul>
+     * <li>{@code displayName} — the name the agent uses for itself</li>
+     * <li>{@code concealModelIdentity} — instructs the agent not to reveal its
+     * underlying model/provider</li>
+     * <li>{@code personaInstructions} — custom free-text persona directives</li>
+     * </ul>
+     */
+    public static class IdentityMaskingConfig {
+        private boolean enabled;
+        private String displayName;
+        private boolean concealModelIdentity;
+        private List<String> personaInstructions;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getDisplayName() {
+            return displayName;
+        }
+
+        public void setDisplayName(String displayName) {
+            this.displayName = displayName;
+        }
+
+        public boolean isConcealModelIdentity() {
+            return concealModelIdentity;
+        }
+
+        public void setConcealModelIdentity(boolean concealModelIdentity) {
+            this.concealModelIdentity = concealModelIdentity;
+        }
+
+        public List<String> getPersonaInstructions() {
+            return personaInstructions;
+        }
+
+        public void setPersonaInstructions(List<String> personaInstructions) {
+            this.personaInstructions = personaInstructions;
         }
     }
 
