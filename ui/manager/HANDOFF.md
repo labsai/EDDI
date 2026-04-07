@@ -72,7 +72,7 @@
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 439 pass (`npm run test`) — 42 files (100% green, fixed parallel flakiness via localStorage isolated clearance and improved timeout threshold)
+- **Unit/Component**: 453 pass (`npm run test`) — 42 files (100% green, fixed parallel flakiness via localStorage isolated clearance and improved timeout threshold)
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds
