@@ -15,6 +15,31 @@ Each entry follows this format:
 
 ---
 
+## Agentic Improvements — Critical Bug Fixes (2026-04-07)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+
+**What changed:**
+
+Critical code review and remediation of agentic improvements phases 1–5. Found 3 bugs (1 regression, 1 dead code, 1 surprise behavior) and added 18 unit tests.
+
+| Component | Change |
+|---|---|
+| **`RuleDeserialization.java`** | FIX — Condition creation tried CDI provider map before factory switch; `capabilityMatch` and `contentTypeMatcher` would always throw `IllegalArgumentException`. Reversed to factory-first, provider-fallback. |
+| **`RestAgentStore.java`** | FIX — `CapabilityRegistryService.register()` was never called. Added `@PostConstruct` startup population + register on create/update, unregister on delete. |
+| **`LlmTask.java`** | FIX — Auto-counterweight silently applied `cautious` to ALL agents in production. Now only applies as deployment-environment fallback when agent explicitly has `counterweight.enabled=true`. |
+| **`ContentTypeMatcherTest.java`** | NEW — 9 tests: exact/wildcard/global MIME, minCount, no attachments, blank config, clone |
+| **`CapabilityMatchConditionTest.java`** | NEW — 9 tests: success/fail paths, memory storage, minResults, config roundtrip, clone |
+| **`RestAgentStoreTest.java`** | MODIFIED — Updated constructor to include `CapabilityRegistryService` mock |
+
+**Design decisions:**
+
+1. **No auto-counterweight without opt-in** — The `DeploymentContextService` fallback was well-intentioned but violated the principle of least surprise. Agent behavior should be deterministic from its config.
+2. **Factory-first condition creation** — `createCondition()` switch is the canonical source of truth for all conditions. The CDI `conditionProvider` map remains as a fallback for extensibility but is no longer a gatekeeper.
+3. **Registry is a startup concern** — `@PostConstruct` in `RestAgentStore` ensures the registry is warm on boot. Missing a `register()` call means the feature silently fails to find agents — no errors, just empty results.
+
+---
+
 ## Agentic Improvements — Phases 1–5 (2026-04-07)
 
 **Repo:** EDDI (`feature/agentic-improvements`)
