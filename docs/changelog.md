@@ -15,6 +15,28 @@ Each entry follows this format:
 
 ---
 
+## Agentic Improvements — Multimodal Forwarding + Documentation (2026-04-08 cont.)
+
+**Repo:** EDDI (`feature/agentic-improvements` off `feature/version-6.0.0`)
+
+### LlmTask Multimodal Forwarding
+
+New `MultimodalMessageEnhancer` utility integrates the attachment pipeline with langchain4j's multimodal API:
+
+- `image/*` attachments → `ImageContent` (URL or base64 data URI)
+- Non-image types → text metadata description so the LLM knows an attachment was present
+- Storage-backed attachments → placeholder text (storage implementation deferred)
+- Integrated into `LlmTask` after message list building, before model invocation
+
+### Documentation
+
+| Guide | Content |
+|---|---|
+| `docs/capability-match-guide.md` | Flow diagram, config reference, 3 examples (action delegation, dynamic groups, template routing), attribute filtering, metrics |
+| `docs/attachments-guide.md` | Pipeline architecture, 3 input paths (URL, base64, upload), ContentTypeMatcher routing, LLM provider support matrix, template access |
+
+---
+
 ## Agentic Improvements — Tests, Bug Fixes, Attachment Pipeline (2026-04-08 cont.)
 
 **Repo:** EDDI (`feature/agentic-improvements` off `feature/version-6.0.0`)
