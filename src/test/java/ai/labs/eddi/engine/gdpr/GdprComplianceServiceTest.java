@@ -16,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -190,6 +191,8 @@ class GdprComplianceServiceTest {
                 .thenReturn(List.of());
         when(userConversationStore.getAllForUser(USER_ID))
                 .thenReturn(List.of());
+        when(auditStore.getEntriesByUserId(eq(USER_ID), anyInt(), anyInt()))
+                .thenReturn(List.of());
 
         // When
         UserDataExport export = service.exportUserData(USER_ID);
@@ -199,5 +202,161 @@ class GdprComplianceServiceTest {
         assertTrue(export.memories().isEmpty());
         assertTrue(export.conversations().isEmpty());
         assertTrue(export.managedConversations().isEmpty());
+        assertTrue(export.auditEntries().isEmpty());
+    }
+
+    // ==================== Audit entries in export ====================
+
+    @Test
+    void exportUserData_includesAuditEntries() throws Exception {
+        // Given
+        when(userMemoryStore.getAllEntries(USER_ID)).thenReturn(List.of());
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenReturn(List.of());
+        when(userConversationStore.getAllForUser(USER_ID))
+                .thenReturn(List.of());
+
+        var auditEntry = new ai.labs.eddi.engine.audit.model.AuditEntry(
+                "ae-1", "conv-1", "agent-1", 1, USER_ID, "unrestricted",
+                0, "ai.labs.llm", "llm", 0, 150L,
+                java.util.Map.of(), java.util.Map.of(),
+                java.util.Map.of("model", "gpt-4"), null,
+                List.of("chat_complete"), 0.003,
+                java.time.Instant.now(), null, null);
+        when(auditStore.getEntriesByUserId(eq(USER_ID), eq(0), eq(10_000)))
+                .thenReturn(List.of(auditEntry));
+
+        // When
+        UserDataExport export = service.exportUserData(USER_ID);
+
+        // Then
+        assertEquals(1, export.auditEntries().size());
+        var ae = export.auditEntries().getFirst();
+        assertEquals("conv-1", ae.conversationId());
+        assertEquals("agent-1", ae.agentId());
+        assertEquals("llm", ae.taskType());
+        assertEquals(150L, ae.durationMs());
+    }
+
+    @Test
+    void exportUserData_handlesAuditStoreFailureGracefully() throws Exception {
+        // Given — audit store throws, shouldn't prevent export
+        when(userMemoryStore.getAllEntries(USER_ID)).thenReturn(List.of());
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenReturn(List.of());
+        when(userConversationStore.getAllForUser(USER_ID))
+                .thenReturn(List.of());
+        when(auditStore.getEntriesByUserId(eq(USER_ID), anyInt(), anyInt()))
+                .thenThrow(new RuntimeException("Audit DB unavailable"));
+
+        // When
+        UserDataExport export = service.exportUserData(USER_ID);
+
+        // Then — export succeeds with empty audit entries
+        assertNotNull(export);
+        assertTrue(export.auditEntries().isEmpty());
+    }
+
+    // ==================== Processing restriction (Art. 18) ====================
+
+    @Test
+    void restrictProcessing_storesRestrictionFlag() throws Exception {
+        // When
+        service.restrictProcessing(USER_ID);
+
+        // Then — should upsert a user memory entry with the restriction key
+        verify(userMemoryStore).upsert(argThat(entry -> "_gdpr_processing_restricted".equals(entry.key())
+                && "true".equals(entry.value())
+                && entry.userId().equals(USER_ID)));
+    }
+
+    @Test
+    void restrictProcessing_writesAuditEntry() throws Exception {
+        // When
+        service.restrictProcessing(USER_ID);
+
+        // Then — should submit an audit entry
+        verify(auditLedgerService).submit(any());
+    }
+
+    @Test
+    void unrestrictProcessing_deletesRestrictionFlag() throws Exception {
+        // Given — restriction exists
+        var entry = new UserMemoryEntry(
+                "entry-id", USER_ID, "_gdpr_processing_restricted", "true",
+                "gdpr", ai.labs.eddi.configs.properties.model.Property.Visibility.global,
+                null, List.of(), null, false, 0,
+                java.time.Instant.now(), java.time.Instant.now());
+        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
+                .thenReturn(Optional.of(entry));
+
+        // When
+        service.unrestrictProcessing(USER_ID);
+
+        // Then — should delete the entry by ID
+        verify(userMemoryStore).deleteEntry("entry-id");
+    }
+
+    @Test
+    void unrestrictProcessing_noopIfNotRestricted() throws Exception {
+        // Given — no restriction exists
+        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
+                .thenReturn(Optional.empty());
+
+        // When
+        service.unrestrictProcessing(USER_ID);
+
+        // Then — deleteEntry should NOT be called
+        verify(userMemoryStore, never()).deleteEntry(any());
+    }
+
+    @Test
+    void isProcessingRestricted_returnsTrueWhenRestricted() throws Exception {
+        // Given
+        var entry = new UserMemoryEntry(
+                "entry-id", USER_ID, "_gdpr_processing_restricted", "true",
+                "gdpr", ai.labs.eddi.configs.properties.model.Property.Visibility.global,
+                null, List.of(), null, false, 0,
+                java.time.Instant.now(), java.time.Instant.now());
+        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
+                .thenReturn(Optional.of(entry));
+
+        // When/Then
+        assertTrue(service.isProcessingRestricted(USER_ID));
+    }
+
+    @Test
+    void isProcessingRestricted_returnsFalseWhenNotRestricted() throws Exception {
+        // Given — no entry
+        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
+                .thenReturn(Optional.empty());
+
+        // When/Then
+        assertFalse(service.isProcessingRestricted(USER_ID));
+    }
+
+    @Test
+    void isProcessingRestricted_handlesBooleanValueType() throws Exception {
+        // Given — value stored as Boolean true instead of String "true"
+        var entry = new UserMemoryEntry(
+                "entry-id", USER_ID, "_gdpr_processing_restricted", Boolean.TRUE,
+                "gdpr", ai.labs.eddi.configs.properties.model.Property.Visibility.global,
+                null, List.of(), null, false, 0,
+                java.time.Instant.now(), java.time.Instant.now());
+        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
+                .thenReturn(Optional.of(entry));
+
+        // When/Then — String.valueOf(Boolean.TRUE) == "true"
+        assertTrue(service.isProcessingRestricted(USER_ID));
+    }
+
+    @Test
+    void isProcessingRestricted_failsClosedOnException() throws Exception {
+        // Given — store throws
+        when(userMemoryStore.getByKey(eq(USER_ID), any()))
+                .thenThrow(new RuntimeException("Connection refused"));
+
+        // When/Then — should return true (fail-closed) for safety
+        assertTrue(service.isProcessingRestricted(USER_ID));
     }
 }

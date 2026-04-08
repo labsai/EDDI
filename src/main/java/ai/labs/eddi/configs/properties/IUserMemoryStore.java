@@ -87,6 +87,10 @@ public interface IUserMemoryStore {
     /**
      * Delete user memory entries older than the given number of days. Used by
      * scheduled retention cleanup.
+     * <p>
+     * <strong>Important:</strong> Entries with keys starting with {@code _gdpr_}
+     * are excluded from deletion to prevent accidental lifting of GDPR processing
+     * restrictions (Art. 18).
      *
      * @param olderThanDays
      *            entries with updatedAt older than this many days ago are deleted

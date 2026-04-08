@@ -83,4 +83,52 @@ class RestGdprAdminTest {
         assertSame(expected, result);
         verify(gdprService).exportUserData("user-1");
     }
+
+    // ==================== Restriction endpoints ====================
+
+    @Test
+    void restrictProcessing_rejectsBlankUserId() {
+        assertThrows(BadRequestException.class,
+                () -> restAdmin.restrictProcessing("  "));
+        verifyNoInteractions(gdprService);
+    }
+
+    @Test
+    void restrictProcessing_delegatesToService() {
+        restAdmin.restrictProcessing("user-1");
+        verify(gdprService).restrictProcessing("user-1");
+    }
+
+    @Test
+    void unrestrictProcessing_rejectsNullUserId() {
+        assertThrows(BadRequestException.class,
+                () -> restAdmin.unrestrictProcessing(null));
+        verifyNoInteractions(gdprService);
+    }
+
+    @Test
+    void unrestrictProcessing_delegatesToService() {
+        restAdmin.unrestrictProcessing("user-1");
+        verify(gdprService).unrestrictProcessing("user-1");
+    }
+
+    @Test
+    void isProcessingRestricted_rejectsBlankUserId() {
+        assertThrows(BadRequestException.class,
+                () -> restAdmin.isProcessingRestricted(""));
+        verifyNoInteractions(gdprService);
+    }
+
+    @Test
+    void isProcessingRestricted_delegatesToService() {
+        when(gdprService.isProcessingRestricted("user-1")).thenReturn(true);
+        assertTrue(restAdmin.isProcessingRestricted("user-1"));
+        verify(gdprService).isProcessingRestricted("user-1");
+    }
+
+    @Test
+    void isProcessingRestricted_returnsFalse() {
+        when(gdprService.isProcessingRestricted("user-1")).thenReturn(false);
+        assertFalse(restAdmin.isProcessingRestricted("user-1"));
+    }
 }
