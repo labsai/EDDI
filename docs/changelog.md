@@ -15,7 +15,41 @@ Each entry follows this format:
 
 ---
 
+## Agentic Improvements — Code Review Fixes + Deferred Items (2026-04-08 late)
+
+**Repo:** EDDI (`feature/agentic-improvements` off `feature/version-6.0.0`)
+
+### Code Review Fixes
+
+- **Bug fix: Cache invalidation in REST layer.** `RestPromptSnippetStore` was not invalidating the `PromptSnippetService` Caffeine cache on create/update/delete. Snippet changes were invisible to the LLM for up to 5 minutes. Fixed by injecting `PromptSnippetService` and calling `invalidateCache()` after each write operation.
+- **New tests: `MultimodalMessageEnhancerTest` (10 tests).** Full coverage for URL images, base64 images, multiple images, non-image metadata text, NONE content source, and all no-op paths (null messages, empty list, no attachments, no UserMessage).
+- **New tests: `AttachmentTest` extensions (6 tests).** Full coverage for `ContentSource` precedence chain (stored > url > base64 > none) and getter/setter coverage for `url` and `base64Data` fields.
+
+### Deferred Items Completed
+
+1. **`MongoAttachmentStorage` (GridFS)** — Stores binary payloads in `eddi_attachments` GridFS bucket. Each file carries `conversationId` metadata for GDPR cascade deletion. Uses `@DefaultBean` to yield to Postgres.
+2. **`PostgresAttachmentStorage` (BYTEA)** — Dedicated `attachments` table with `conversation_id` index. Auto-DDL on startup. Same API contract as GridFS implementation.
+3. **Agent signing wired into `AuditLedgerService.submit()`** — When `eddi.audit.agent-signing-enabled=true`, each audit entry is signed with the agent's Ed25519 private key via `AgentSigningService`. Signs the HMAC value (full entry integrity) when available, falls back to entry ID. Gracefully degrades when no signing key exists for the agent (debug log, no error). Off by default.
+
+### Files Changed
+
+- `RestPromptSnippetStore.java` — inject `PromptSnippetService`, invalidate cache on write
+- `AuditLedgerService.java` — inject `AgentSigningService`, apply agent signature in submit()
+- `MongoAttachmentStorage.java` — **NEW** GridFS implementation of `IAttachmentStorage`
+- `PostgresAttachmentStorage.java` — **NEW** BYTEA implementation of `IAttachmentStorage`
+- `MultimodalMessageEnhancerTest.java` — **NEW** 10 unit tests
+- `AttachmentTest.java` — 6 new ContentSource / field tests
+
+### Design Decisions
+
+- **Signing is opt-in**: `eddi.audit.agent-signing-enabled=false` by default. This avoids vault key lookup overhead for deployments without agent identity. Agents without signing keys gracefully skip signing (no error).
+- **GridFS bucket name**: `eddi_attachments` — namespaced to avoid collision with user collections.
+- **Storage ref format**: `gridfs://<hex-objectid>` and `pg://<uuid>` — opaque strings that encode backend origin for cross-provider awareness.
+
+---
+
 ## Agentic Improvements — Multimodal Forwarding + Documentation (2026-04-08 cont.)
+
 
 **Repo:** EDDI (`feature/agentic-improvements` off `feature/version-6.0.0`)
 
