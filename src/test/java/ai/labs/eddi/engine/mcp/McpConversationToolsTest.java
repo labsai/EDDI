@@ -411,7 +411,7 @@ class McpConversationToolsTest {
     @Test
     void readAuditTrail_returnsEntries() throws IOException {
         var auditEntry = new AuditEntry("ae1", CONV_ID, AGENT_ID, 1, "user1", "production", 0, "ai.labs.llm", "langchain", 0, 150,
-                Map.of("input", "hello"), Map.of("output", "hi"), null, null, List.of("send_output"), 0.001, Instant.now(), null);
+                Map.of("input", "hello"), Map.of("output", "hi"), null, null, List.of("send_output"), 0.001, Instant.now(), null, null);
         when(auditStore.getAuditTrail(CONV_ID, 0, 20)).thenReturn(List.of(auditEntry));
         when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1}");
 

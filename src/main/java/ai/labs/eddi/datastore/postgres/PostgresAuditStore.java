@@ -224,7 +224,7 @@ public class PostgresAuditStore implements IAuditStore {
                 rs.getInt("task_index"), rs.getLong("duration_ms"), (Map<String, Object>) data.get("input"), (Map<String, Object>) data.get("output"),
                 (Map<String, Object>) data.get("llmDetail"), (Map<String, Object>) data.get("toolCalls"),
                 data.get("actions") instanceof List<?> list ? (List<String>) list : null, rs.getDouble("cost"), ts != null ? ts.toInstant() : null,
-                rs.getString("hmac"));
+                rs.getString("hmac"), null);
     }
     // === GDPR ===
 

@@ -287,7 +287,7 @@ public class LifecycleManager implements ILifecycleManager {
                 llmDetail, null, // toolCalls — set by LlmTask in memory
                 actions, 0.0, // cost — set by ToolCostTracker integration
                 Instant.now(), null // HMAC computed by AuditLedgerService
-        );
+                , null);
     }
 
     /**

@@ -23,7 +23,7 @@ class AuditLedgerServiceTest {
 
     private AuditEntry createEntry(String taskId, String conversationId) {
         return new AuditEntry("entry-" + taskId, conversationId, "agent-1", 1, "user-1", "production", 0, taskId, "test-type", 0, 42L,
-                Map.of("userInput", "hello"), Map.of("output", List.of("world")), null, null, List.of("greet"), 0.0, Instant.now(), null);
+                Map.of("userInput", "hello"), Map.of("output", List.of("world")), null, null, List.of("greet"), 0.0, Instant.now(), null, null);
     }
 
     @BeforeEach
@@ -183,7 +183,7 @@ class AuditLedgerServiceTest {
             inputWithSecret.put("normal", "hello world");
 
             AuditEntry entry = new AuditEntry("id-1", "conv-1", "agent-1", 1, "user-1", "production", 0, "task-1", "test", 0, 10L, inputWithSecret,
-                    null, null, null, List.of("action-1"), 0.0, Instant.now(), null);
+                    null, null, null, List.of("action-1"), 0.0, Instant.now(), null, null);
 
             service.submit(entry);
             service.flush();
@@ -218,7 +218,7 @@ class AuditLedgerServiceTest {
         @Test
         void shouldHandleNullFields() {
             AuditEntry entry = new AuditEntry(null, null, null, null, null, null, 0, null, null, 0, 0L, null, null, null, null, null, 0.0, null,
-                    null);
+                    null, null);
 
             String canonical = AuditHmac.buildCanonicalString(entry);
             assertNotNull(canonical);
@@ -297,7 +297,7 @@ class AuditLedgerServiceTest {
             input.put("tokens", List.of("normal-text", "sk-abcdefghijklmnopqrstuvwxyz1234567890abcdefghijklmn"));
 
             AuditEntry entry = new AuditEntry("id-1", "conv-1", "agent-1", 1, "user-1", "production", 0, "task-1", "test", 0, 10L, input, null, null,
-                    null, List.of(), 0.0, Instant.now(), null);
+                    null, List.of(), 0.0, Instant.now(), null, null);
 
             service.submit(entry);
             service.flush();
@@ -323,7 +323,7 @@ class AuditLedgerServiceTest {
             input.put("config", nested);
 
             AuditEntry entry = new AuditEntry("id-1", "conv-1", "agent-1", 1, "user-1", "production", 0, "task-1", "test", 0, 10L, input, null, null,
-                    null, List.of(), 0.0, Instant.now(), null);
+                    null, List.of(), 0.0, Instant.now(), null, null);
 
             service.submit(entry);
             service.flush();
@@ -345,7 +345,8 @@ class AuditLedgerServiceTest {
         @Test
         void withEnvironment_shouldSetEnvironmentField() {
             AuditEntry entry = createEntry("task-1", "conv-1");
-            assertNull(new AuditEntry("id", "conv", "agent", 1, "user", null, 0, "task", "type", 0, 0L, null, null, null, null, null, 0.0, null, null)
+            assertNull(new AuditEntry("id", "conv", "agent", 1, "user", null, 0, "task", "type", 0, 0L, null, null, null, null, null, 0.0, null, null,
+                    null)
                     .environment());
 
             AuditEntry enriched = entry.withEnvironment("production");
@@ -391,10 +392,10 @@ class AuditLedgerServiceTest {
             hash.put("b", "2");
 
             AuditEntry e1 = new AuditEntry("id", "conv", "agent", 1, "user", "test", 0, "task", "type", 0, 0L, linked, null, null, null, null, 0.0,
-                    Instant.EPOCH, null);
+                    Instant.EPOCH, null, null);
 
             AuditEntry e2 = new AuditEntry("id", "conv", "agent", 1, "user", "test", 0, "task", "type", 0, 0L, hash, null, null, null, null, 0.0,
-                    Instant.EPOCH, null);
+                    Instant.EPOCH, null, null);
 
             String hmac1 = AuditHmac.computeHmac(e1, key);
             String hmac2 = AuditHmac.computeHmac(e2, key);

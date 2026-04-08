@@ -261,7 +261,7 @@ public class GdprComplianceService {
                     0.0,
                     Instant.now(),
                     null // HMAC computed by AuditLedgerService
-            );
+                    , null);
             auditLedgerService.submit(entry);
         } catch (Exception e) {
             // Never let audit logging failure break the GDPR operation
