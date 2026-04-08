@@ -101,6 +101,7 @@ class LlmTaskTest {
                 weatherTool, apiCallExecutor, toolExecutionService, mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
                 mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(RagContextProvider.class), mock(IUserMemoryStore.class),
                 mock(TokenCounterFactory.class), mock(ConversationSummarizer.class),
+                mock(PromptSnippetService.class),
                 toolResponseTruncator, mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
     }
 

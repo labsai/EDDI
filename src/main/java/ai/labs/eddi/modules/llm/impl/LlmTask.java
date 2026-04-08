@@ -85,6 +85,7 @@ public class LlmTask implements ILifecycleTask {
     private final RagContextProvider ragContextProvider;
     private final TokenCounterFactory tokenCounterFactory;
     private final ConversationSummarizer conversationSummarizer;
+    private final PromptSnippetService promptSnippetService;
 
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
@@ -102,6 +103,7 @@ public class LlmTask implements ILifecycleTask {
             A2AToolProviderManager a2aToolProviderManager, IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
             RagContextProvider ragContextProvider, IUserMemoryStore userMemoryStore, TokenCounterFactory tokenCounterFactory,
             ConversationSummarizer conversationSummarizer,
+            PromptSnippetService promptSnippetService,
             ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
@@ -124,6 +126,7 @@ public class LlmTask implements ILifecycleTask {
         this.restAgentStore = restAgentStore;
         this.restWorkflowStore = restWorkflowStore;
         this.conversationSummarizer = conversationSummarizer;
+        this.promptSnippetService = promptSnippetService;
     }
 
     @Override
@@ -148,6 +151,14 @@ public class LlmTask implements ILifecycleTask {
             }
 
             var templateDataObjects = memoryItemConverter.convert(memory);
+
+            // Inject prompt snippets into template data — makes all snippets
+            // auto-available as {{snippets.<name>}} in system prompts
+            Map<String, Object> snippets = promptSnippetService.getAll();
+            if (!snippets.isEmpty()) {
+                templateDataObjects.put("snippets", snippets);
+            }
+
             var actions = latestData.getResult();
             if (actions == null) {
                 return;
