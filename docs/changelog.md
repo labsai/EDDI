@@ -15,7 +15,36 @@ Each entry follows this format:
 
 ---
 
+## Agentic Improvements — GDPR Attachment Cleanup + Upload API (2026-04-08 final)
+
+**Repo:** EDDI (`feature/agentic-improvements` off `feature/version-6.0.0`)
+
+### GDPR Integration
+
+- **Attachment cascade deletion.** Wired `IAttachmentStorage.deleteByConversation()` into all three conversation deletion paths:
+  1. `GdprComplianceService.deleteUserData()` — new step 2 of 6 in the erasure cascade (fetches conversation IDs before deletion, deletes attachments for each)
+  2. `RestConversationStore.deleteConversationLog()` — single conversation permanent delete
+  3. `RestConversationStore.permanentlyDeleteEndedConversationLogs()` — scheduled 24h cleanup of ended conversations
+- All injection uses `Instance<IAttachmentStorage>` for optional resolution — no failure if storage isn't configured
+
+### Upload API
+
+- **`RestAttachmentUpload`** — `POST /conversations/{conversationId}/attachments` (multipart/form-data)
+  - Accepts file upload via `@RestForm("file") FileUpload`
+  - Returns `201` with JSON `{storageRef, fileName, mimeType, sizeBytes}`
+  - Returns `503` if no storage configured, `400` if no file provided
+
+### Files Changed
+
+- `GdprComplianceService.java` — inject `Instance<IAttachmentStorage>`, add step 2 (attachment cleanup)
+- `GdprComplianceServiceTest.java` — fix constructor to match new signature
+- `RestConversationStore.java` — inject `Instance<IAttachmentStorage>`, add `deleteAttachmentsForConversation()` helper
+- `RestAttachmentUpload.java` — **NEW** multipart upload endpoint
+
+---
+
 ## Agentic Improvements — Code Review Fixes + Deferred Items (2026-04-08 late)
+
 
 **Repo:** EDDI (`feature/agentic-improvements` off `feature/version-6.0.0`)
 
