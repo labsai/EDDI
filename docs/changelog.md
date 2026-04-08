@@ -15,6 +15,44 @@ Each entry follows this format:
 
 ---
 
+## Agentic Improvements — Tests, Bug Fixes, Attachment Pipeline (2026-04-08 cont.)
+
+**Repo:** EDDI (`feature/agentic-improvements` off `feature/version-6.0.0`)
+
+### Testing & Bug Fixes
+
+**Bug found:** `PromptSnippetService.onConfigurationUpdate(@Observes ConfigurationUpdate)` was never firing. `ConfigurationUpdate` is an `@InterceptorBinding` annotation (not a CDI event class) — it can't be instantiated and the `@Observes` mechanism doesn't apply. Fixed by removing the broken observer and relying on the Caffeine 5-minute TTL for eventual consistency. The `invalidateCache()` method remains for explicit invalidation.
+
+**New tests added:**
+| Test File | Tests | Coverage |
+|---|---|---|
+| `PromptSnippetServiceTest.java` | 14 | Loading, caching, template escaping, URI extraction, error handling |
+| `PromptSnippetStoreTest.java` | 8 | Name validation regex (valid, uppercase, special chars, empty), model defaults |
+| `AttachmentContextExtractorTest.java` | 10 | URL refs, base64 inline, edge cases, URL-over-base64 precedence |
+
+### Phase 4: Attachment Pipeline Foundation
+
+Implemented the context-based attachment input path (no storage infra required):
+
+| Component | Purpose |
+|---|---|
+| `IAttachmentStorage` SPI | DB-agnostic store/load/delete contract |
+| `Attachment` model: `url`, `base64Data`, `ContentSource` | Support URL references and inline base64 |
+| `AttachmentContextExtractor` | Parse `attachment_*` context keys into `Attachment` objects |
+| `Conversation.prepareLifecycleData()` | Auto-extracts attachments and stores in memory |
+
+**Key decisions:**
+- `base64Data` is `transient` — never persisted to MongoDB (saved via storage SPI only)
+- URL takes precedence over base64 when both are present
+- Storage implementations (GridFS, PostgreSQL) deferred — context input works immediately
+- `ConversationHistoryBuilder` already supports multimodal content types (image, PDF, audio, video)
+
+### Documentation
+
+Added `docs/prompt-snippets-guide.md`: comprehensive guide covering quick start, architecture, template control, REST API, model reference, example snippets, and migration from legacy services.
+
+---
+
 ## Agentic Improvements — Dead Code + Prompt Snippets + Audit Signing (2026-04-08)
 
 **Repo:** EDDI (`feature/agentic-improvements` off `feature/version-6.0.0`)
