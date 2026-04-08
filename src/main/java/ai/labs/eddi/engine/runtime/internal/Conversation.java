@@ -229,6 +229,14 @@ public class Conversation implements IConversation {
         addContextToConversationOutput(currentStep, contextData);
         removedTaskTypeResultsFromPreviousRuns(currentStep, taskTypeResultsToBeRemoved);
 
+        // Extract attachments from context (attachment_0, attachment_1, etc.)
+        var attachments = AttachmentContextExtractor.extractAttachments(contexts);
+        if (!attachments.isEmpty()) {
+            var data = new Data<>("attachments", attachments);
+            data.setPublic(true);
+            currentStep.storeData(data);
+        }
+
         boolean isSecretInput = isSecretInputFlagged(contexts);
         storeUserInputInMemory(message, lifecycleData, isSecretInput);
         return lifecycleData;

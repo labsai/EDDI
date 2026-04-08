@@ -5,6 +5,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 /**
  * Lightweight reference to a binary attachment in conversation memory.
  * <p>
@@ -24,6 +26,17 @@ public class Attachment {
     private String fileName;
     private long sizeBytes;
     private String storageRef;
+
+    /** URL reference for externally hosted attachments (not stored in EDDI). */
+    private String url;
+
+    /**
+     * Inline base64-encoded data. Transient — used for context-based input only,
+     * never persisted to MongoDB. Consumers should decode this and pass to LLM.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private transient String base64Data;
+
     private Map<String, String> metadata;
     private Instant createdAt;
 
@@ -95,6 +108,40 @@ public class Attachment {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getUrl() {
+        return url;
+    }
+
+    public void setUrl(String url) {
+        this.url = url;
+    }
+
+    public String getBase64Data() {
+        return base64Data;
+    }
+
+    public void setBase64Data(String base64Data) {
+        this.base64Data = base64Data;
+    }
+
+    /**
+     * Determine the content source. Returns the most specific source available:
+     * storageRef (uploaded file) > url (external link) > base64Data (inline).
+     */
+    public ContentSource getContentSource() {
+        if (storageRef != null)
+            return ContentSource.STORED;
+        if (url != null)
+            return ContentSource.URL;
+        if (base64Data != null)
+            return ContentSource.BASE64;
+        return ContentSource.NONE;
+    }
+
+    public enum ContentSource {
+        STORED, URL, BASE64, NONE
     }
 
     /**
