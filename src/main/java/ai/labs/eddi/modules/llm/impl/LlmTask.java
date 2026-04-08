@@ -276,6 +276,11 @@ public class LlmTask implements ILifecycleTask {
             messages = conversationHistoryBuilder.buildMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), logSizeLimit,
                     includeFirstAgentMessage, summaryPrefix, skipSteps);
         }
+
+        // Enhance the last user message with multimodal attachment content (images,
+        // etc.)
+        MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+
         if (messages.isEmpty()) {
             return;
         }
