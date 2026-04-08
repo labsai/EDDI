@@ -24,6 +24,21 @@ import "@fontsource-variable/noto-sans-tc";
 // ── Self-host Monaco Editor (no jsDelivr CDN) ───────────────────────
 import * as monaco from "monaco-editor";
 import { loader } from "@monaco-editor/react";
+
+// Monaco needs web workers for language intelligence (validation,
+// autocompletion, formatting).  Without this, the JSON editor loses
+// schema validation and smart features.  Vite handles the worker
+// bundling via the `?worker` import syntax.
+import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
+import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
+
+self.MonacoEnvironment = {
+  getWorker(_: string, label: string) {
+    if (label === "json") return new jsonWorker();
+    return new editorWorker();
+  },
+};
+
 loader.config({ monaco });
 
 const queryClient = new QueryClient({
