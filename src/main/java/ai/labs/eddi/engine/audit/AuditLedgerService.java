@@ -66,7 +66,7 @@ public class AuditLedgerService {
             @ConfigProperty(name = "eddi.audit.flush-interval-seconds", defaultValue = "3") int flushIntervalSeconds,
             @ConfigProperty(name = "eddi.vault.master-key") Optional<String> masterKeyConfig,
             @ConfigProperty(name = "eddi.audit.dead-letter-path", defaultValue = "/opt/eddi/data/eddi-audit-deadletter.jsonl") String deadLetterPath,
-            @ConfigProperty(name = "eddi.audit.agent-signing-enabled", defaultValue = "false") boolean agentSigningEnabled,
+            @ConfigProperty(name = "eddi.audit.agent-signing-enabled", defaultValue = "true") boolean agentSigningEnabled,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             io.micrometer.core.instrument.MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
             AgentSigningService agentSigningService) {

@@ -42,7 +42,7 @@ Each entry follows this format:
 
 ### Design Decisions
 
-- **Signing is opt-in**: `eddi.audit.agent-signing-enabled=false` by default. This avoids vault key lookup overhead for deployments without agent identity. Agents without signing keys gracefully skip signing (no error).
+- **Signing is on by default**: `eddi.audit.agent-signing-enabled=true`. Since the code gracefully degrades when no signing key exists (debug log, no error), there's no harm in leaving it enabled. Agents with signing keys get automatic integrity protection; agents without silently skip signing.
 - **GridFS bucket name**: `eddi_attachments` — namespaced to avoid collision with user collections.
 - **Storage ref format**: `gridfs://<hex-objectid>` and `pg://<uuid>` — opaque strings that encode backend origin for cross-provider awareness.
 
