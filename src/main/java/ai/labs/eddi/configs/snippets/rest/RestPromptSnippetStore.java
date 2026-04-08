@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import ai.labs.eddi.modules.llm.impl.PromptSnippetService;
 import jakarta.ws.rs.core.Response;
 import java.util.List;
 
@@ -26,11 +27,14 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 public class RestPromptSnippetStore implements IRestPromptSnippetStore {
     private final IPromptSnippetStore snippetStore;
     private final RestVersionInfo<PromptSnippet> restVersionInfo;
+    private final PromptSnippetService snippetService;
 
     @Inject
-    public RestPromptSnippetStore(IPromptSnippetStore snippetStore, IDocumentDescriptorStore documentDescriptorStore) {
+    public RestPromptSnippetStore(IPromptSnippetStore snippetStore, IDocumentDescriptorStore documentDescriptorStore,
+            PromptSnippetService snippetService) {
         this.snippetStore = snippetStore;
         this.restVersionInfo = new RestVersionInfo<>(resourceURI, snippetStore, documentDescriptorStore);
+        this.snippetService = snippetService;
     }
 
     @Override
@@ -49,17 +53,23 @@ public class RestPromptSnippetStore implements IRestPromptSnippetStore {
 
     @Override
     public Response updateSnippet(String id, Integer version, PromptSnippet snippet) {
-        return restVersionInfo.update(id, version, snippet);
+        Response response = restVersionInfo.update(id, version, snippet);
+        snippetService.invalidateCache();
+        return response;
     }
 
     @Override
     public Response createSnippet(PromptSnippet snippet) {
-        return restVersionInfo.create(snippet);
+        Response response = restVersionInfo.create(snippet);
+        snippetService.invalidateCache();
+        return response;
     }
 
     @Override
     public Response deleteSnippet(String id, Integer version, Boolean permanent) {
-        return restVersionInfo.delete(id, version, permanent);
+        Response response = restVersionInfo.delete(id, version, permanent);
+        snippetService.invalidateCache();
+        return response;
     }
 
     @Override
