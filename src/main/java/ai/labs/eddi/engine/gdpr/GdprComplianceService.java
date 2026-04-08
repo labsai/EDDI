@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.gdpr;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
@@ -239,20 +240,109 @@ public class GdprComplianceService {
             LOGGER.errorf(e, "[GDPR] Failed to export managed conversations [%s]",
                     pseudonym);
         }
+        // 4. Audit entries (capped at 10,000 to avoid excessive export size)
+        var auditExportEntries = new ArrayList<UserDataExport.AuditExportEntry>();
+        try {
+            var auditEntries = auditStore.getEntriesByUserId(userId, 0, AUDIT_EXPORT_LIMIT);
+            for (var ae : auditEntries) {
+                auditExportEntries.add(new UserDataExport.AuditExportEntry(
+                        ae.conversationId(), ae.agentId(), ae.taskType(),
+                        ae.durationMs(), ae.llmDetail(), ae.timestamp()));
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to export audit entries [%s]",
+                    pseudonym);
+        }
 
         LOGGER.infof("[GDPR] Export complete [%s]: memories=%d, "
-                + "conversations=%d, managedConversations=%d",
+                + "conversations=%d, managedConversations=%d, auditEntries=%d",
                 pseudonym, memories.size(), conversations.size(),
-                managedConversations.size());
+                managedConversations.size(), auditExportEntries.size());
 
         // Write compliance event to immutable audit ledger
         submitComplianceAuditEntry("GDPR_EXPORT", pseudonym, Map.of(
                 "memoriesExported", memories.size(),
                 "conversationsExported", conversations.size(),
-                "managedConversationsExported", managedConversations.size()));
+                "managedConversationsExported", managedConversations.size(),
+                "auditEntriesExported", auditExportEntries.size()));
 
         return new UserDataExport(userId, Instant.now(), memories,
-                conversations, managedConversations);
+                conversations, managedConversations, auditExportEntries);
+    }
+
+    // === Right to Restriction of Processing (GDPR Art. 18) ===
+
+    private static final String RESTRICTION_KEY = "_gdpr_processing_restricted";
+    private static final int AUDIT_EXPORT_LIMIT = 10_000;
+
+    /**
+     * Restrict processing for a user (GDPR Art. 18). Data is preserved but
+     * new conversations and message processing are blocked.
+     *
+     * @param userId
+     *            the user whose processing to restrict
+     */
+    public void restrictProcessing(String userId) {
+        String pseudonym = "gdpr-erased:" + sha256(userId);
+        LOGGER.infof("[GDPR] Processing restriction applied [%s]", pseudonym);
+
+        try {
+            var entry = new UserMemoryEntry(
+                    null, userId, RESTRICTION_KEY, "true",
+                    "gdpr", Property.Visibility.global, null,
+                    List.of(), null, false, 0,
+                    Instant.now(), Instant.now());
+            userMemoryStore.upsert(entry);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to restrict processing [%s]",
+                    pseudonym);
+            throw new RuntimeException("Failed to restrict processing", e);
+        }
+
+        submitComplianceAuditEntry("GDPR_RESTRICT", pseudonym, Map.of());
+    }
+
+    /**
+     * Remove processing restriction for a user. Restores normal conversation
+     * processing.
+     *
+     * @param userId
+     *            the user whose restriction to lift
+     */
+    public void unrestrictProcessing(String userId) {
+        String pseudonym = "gdpr-erased:" + sha256(userId);
+        LOGGER.infof("[GDPR] Processing restriction removed [%s]", pseudonym);
+
+        try {
+            var existing = userMemoryStore.getByKey(userId, RESTRICTION_KEY);
+            if (existing.isPresent()) {
+                userMemoryStore.deleteEntry(existing.get().id());
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to unrestrict processing [%s]",
+                    pseudonym);
+            throw new RuntimeException("Failed to unrestrict processing", e);
+        }
+
+        submitComplianceAuditEntry("GDPR_UNRESTRICT", pseudonym, Map.of());
+    }
+
+    /**
+     * Check if processing is restricted for a user.
+     *
+     * @param userId
+     *            the user to check
+     * @return true if a processing restriction is in effect
+     */
+    public boolean isProcessingRestricted(String userId) {
+        try {
+            var entry = userMemoryStore.getByKey(userId, RESTRICTION_KEY);
+            return entry.isPresent() && "true".equals(entry.get().value());
+        } catch (Exception e) {
+            LOGGER.warnf("[GDPR] Failed to check processing restriction: %s",
+                    e.getMessage());
+            return false;
+        }
     }
 
     /**

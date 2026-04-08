@@ -6,6 +6,8 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.gdpr.GdprComplianceService;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
@@ -72,6 +74,7 @@ public class ConversationService implements IConversationService {
     private final IRuntime runtime;
     private final IContextLogger contextLogger;
     private final AuditLedgerService auditLedgerService;
+    private final GdprComplianceService gdprComplianceService;
     private final TenantQuotaService tenantQuotaService;
     private final int agentTimeout;
     private final IConversationSetup conversationSetup;
@@ -99,7 +102,8 @@ public class ConversationService implements IConversationService {
     public ConversationService(IAgentFactory agentFactory, IConversationMemoryStore conversationMemoryStore,
             IConversationDescriptorStore conversationDescriptorStore, IUserMemoryStore userMemoryStore,
             IConversationCoordinator conversationCoordinator, IConversationSetup conversationSetup, ICacheFactory cacheFactory, IRuntime runtime,
-            IContextLogger contextLogger, AuditLedgerService auditLedgerService, TenantQuotaService tenantQuotaService, MeterRegistry meterRegistry,
+            IContextLogger contextLogger, AuditLedgerService auditLedgerService, GdprComplianceService gdprComplianceService,
+            TenantQuotaService tenantQuotaService, MeterRegistry meterRegistry,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.agentFactory = agentFactory;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -111,6 +115,7 @@ public class ConversationService implements IConversationService {
         this.runtime = runtime;
         this.contextLogger = contextLogger;
         this.auditLedgerService = auditLedgerService;
+        this.gdprComplianceService = gdprComplianceService;
         this.tenantQuotaService = tenantQuotaService;
         this.agentTimeout = agentTimeout;
         this.processingConversationReferences = new CopyOnWriteArrayList<>();
@@ -150,6 +155,13 @@ public class ConversationService implements IConversationService {
                 throw new QuotaExceededException(quotaCheck.reason());
             }
 
+            // GDPR Art. 18 — processing restriction check
+            userId = conversationSetup.computeAnonymousUserIdIfEmpty(userId, context.get(USER_ID));
+            if (userId != null && gdprComplianceService.isProcessingRestricted(userId)) {
+                throw new ProcessingRestrictedException(
+                        "Processing is restricted for this user (GDPR Art. 18)");
+            }
+
             IAgent latestAgent = agentFactory.getLatestReadyAgent(environment, agentId);
             if (latestAgent == null) {
                 String message = "No version of agent (agentId=%s) ready for interaction (environment=%s)!";
@@ -157,7 +169,6 @@ public class ConversationService implements IConversationService {
                 throw new AgentNotReadyException(message);
             }
 
-            userId = conversationSetup.computeAnonymousUserIdIfEmpty(userId, context.get(USER_ID));
             IConversation conversation = latestAgent.startConversation(userId, context,
                     createPropertiesHandler(userId, latestAgent.getUserMemoryConfig()), null);
 

@@ -42,6 +42,26 @@ public class RestGdprAdmin implements IRestGdprAdmin {
         return gdprComplianceService.exportUserData(userId);
     }
 
+    @Override
+    public void restrictProcessing(String userId) {
+        validateUserId(userId);
+        LOGGER.info("GDPR processing restriction request received");
+        gdprComplianceService.restrictProcessing(userId);
+    }
+
+    @Override
+    public void unrestrictProcessing(String userId) {
+        validateUserId(userId);
+        LOGGER.info("GDPR processing unrestriction request received");
+        gdprComplianceService.unrestrictProcessing(userId);
+    }
+
+    @Override
+    public boolean isProcessingRestricted(String userId) {
+        validateUserId(userId);
+        return gdprComplianceService.isProcessingRestricted(userId);
+    }
+
     private static void validateUserId(String userId) {
         if (userId == null || userId.isBlank()) {
             throw new BadRequestException("userId must not be blank");
