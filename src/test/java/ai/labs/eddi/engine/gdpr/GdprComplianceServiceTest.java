@@ -4,12 +4,14 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
+import ai.labs.eddi.engine.memory.IAttachmentStorage;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -46,10 +48,14 @@ class GdprComplianceServiceTest {
         auditStore = mock(IAuditStore.class);
         auditLedgerService = mock(AuditLedgerService.class);
 
+        @SuppressWarnings("unchecked")
+        Instance<IAttachmentStorage> attachmentStorageInstance = mock(Instance.class);
+        when(attachmentStorageInstance.isResolvable()).thenReturn(false);
+
         service = new GdprComplianceService(
                 userMemoryStore, conversationMemoryStore,
                 userConversationStore, databaseLogs, auditStore,
-                auditLedgerService);
+                auditLedgerService, attachmentStorageInstance);
     }
 
     @Test

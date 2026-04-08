@@ -2,6 +2,7 @@ package ai.labs.eddi.engine.memory.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.memory.IAttachmentStorage;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
@@ -14,6 +15,7 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.ThreadContext;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import jakarta.ws.rs.core.Response;
@@ -46,6 +48,7 @@ public class RestConversationStore implements IRestConversationStore {
     private final IConversationMemoryStore conversationMemoryStore;
     private final IRuntime runtime;
     private final Integer deleteEndedConversationsOnceOlderThanDays;
+    private final Instance<IAttachmentStorage> attachmentStorageInstance;
 
     private static final Logger log = Logger.getLogger(RestConversationStore.class);
 
@@ -57,7 +60,8 @@ public class RestConversationStore implements IRestConversationStore {
             IConversationMemoryStore conversationMemoryStore,
             IRuntime runtime,
             @ConfigProperty(name = "eddi.conversations.deleteEndedConversationsOnceOlderThanDays")
-            Integer deleteEndedConversationsOnceOlderThanDays) {
+            Integer deleteEndedConversationsOnceOlderThanDays,
+            Instance<IAttachmentStorage> attachmentStorageInstance) {
     // @formatter:on
 
         this.documentDescriptorStore = documentDescriptorStore;
@@ -65,6 +69,7 @@ public class RestConversationStore implements IRestConversationStore {
         this.conversationMemoryStore = conversationMemoryStore;
         this.runtime = runtime;
         this.deleteEndedConversationsOnceOlderThanDays = deleteEndedConversationsOnceOlderThanDays;
+        this.attachmentStorageInstance = attachmentStorageInstance;
     }
 
     @Override
@@ -189,6 +194,7 @@ public class RestConversationStore implements IRestConversationStore {
         checkNotNull(conversationId, "conversationId");
 
         if (deletePermanently) {
+            deleteAttachmentsForConversation(conversationId);
             conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
             log.info(format("Conversation has been permanently deleted (conversationId=%s)", conversationId));
         }
@@ -229,10 +235,12 @@ public class RestConversationStore implements IRestConversationStore {
                     var descriptor = documentDescriptorStore.readDescriptor(endedConversationId, 0);
                     if (descriptor.getLastModifiedOn().before(deleteOlderThanThisDate)) {
                         documentDescriptorStore.deleteAllDescriptor(endedConversationId);
+                        deleteAttachmentsForConversation(endedConversationId);
                         conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
                         amountOfEndedConversations++;
                     }
                 } catch (IResourceStore.ResourceNotFoundException e) {
+                    deleteAttachmentsForConversation(endedConversationId);
                     conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
                     log.debug(format("Cleaned up orphaned conversation memory without descriptor (id=%s)", endedConversationId));
                 }
@@ -284,6 +292,24 @@ public class RestConversationStore implements IRestConversationStore {
             return Response.ok().build();
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
+        }
+    }
+
+    /**
+     * Delete any binary attachments stored for a conversation. Silently skips if no
+     * attachment storage is configured.
+     */
+    private void deleteAttachmentsForConversation(String conversationId) {
+        if (attachmentStorageInstance.isResolvable()) {
+            try {
+                long deleted = attachmentStorageInstance.get().deleteByConversation(conversationId);
+                if (deleted > 0) {
+                    log.debug(format("Deleted %d attachments for conversation %s", deleted, conversationId));
+                }
+            } catch (Exception e) {
+                log.warn(format("Failed to delete attachments for conversation %s: %s",
+                        conversationId, e.getMessage()));
+            }
         }
     }
 }

@@ -5,11 +5,13 @@ import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.memory.IAttachmentStorage;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -46,6 +48,7 @@ public class GdprComplianceService {
     private final IDatabaseLogs databaseLogs;
     private final IAuditStore auditStore;
     private final AuditLedgerService auditLedgerService;
+    private final Instance<IAttachmentStorage> attachmentStorageInstance;
 
     @Inject
     public GdprComplianceService(IUserMemoryStore userMemoryStore,
@@ -53,13 +56,15 @@ public class GdprComplianceService {
             IUserConversationStore userConversationStore,
             IDatabaseLogs databaseLogs,
             IAuditStore auditStore,
-            AuditLedgerService auditLedgerService) {
+            AuditLedgerService auditLedgerService,
+            Instance<IAttachmentStorage> attachmentStorageInstance) {
         this.userMemoryStore = userMemoryStore;
         this.conversationMemoryStore = conversationMemoryStore;
         this.userConversationStore = userConversationStore;
         this.databaseLogs = databaseLogs;
         this.auditStore = auditStore;
         this.auditLedgerService = auditLedgerService;
+        this.attachmentStorageInstance = attachmentStorageInstance;
     }
 
     /**
@@ -68,6 +73,7 @@ public class GdprComplianceService {
      * Order of operations:
      * <ol>
      * <li>Delete all persistent user memories</li>
+     * <li>Delete all binary attachments for user conversations</li>
      * <li>Delete all conversation memory snapshots</li>
      * <li>Delete all managed conversation mappings</li>
      * <li>Pseudonymize database log entries</li>
@@ -94,7 +100,25 @@ public class GdprComplianceService {
                     pseudonym);
         }
 
-        // 2. Delete conversation memory snapshots
+        // 2. Delete attachments for all user conversations
+        long attachmentsDeleted = 0;
+        try {
+            if (attachmentStorageInstance.isResolvable()) {
+                var attachmentStorage = attachmentStorageInstance.get();
+                var conversationIds = conversationMemoryStore.getConversationIdsByUserId(userId);
+                for (String convId : conversationIds) {
+                    attachmentsDeleted += attachmentStorage.deleteByConversation(convId);
+                }
+                if (attachmentsDeleted > 0) {
+                    LOGGER.infof("[GDPR] Deleted %d attachments across %d conversations [%s]",
+                            attachmentsDeleted, conversationIds.size(), pseudonym);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to delete attachments [%s]", pseudonym);
+        }
+
+        // 3. Delete conversation memory snapshots
         long conversationsDeleted = 0;
         try {
             conversationsDeleted = conversationMemoryStore
@@ -106,7 +130,7 @@ public class GdprComplianceService {
                     pseudonym);
         }
 
-        // 3. Delete managed conversation mappings
+        // 4. Delete managed conversation mappings
         long mappingsDeleted = 0;
         try {
             mappingsDeleted = userConversationStore.deleteAllForUser(userId);
@@ -117,7 +141,7 @@ public class GdprComplianceService {
                     pseudonym);
         }
 
-        // 4. Pseudonymize database logs (not deleted — operational data)
+        // 5. Pseudonymize database logs (not deleted — operational data)
         long logsPseudonymized = 0;
         try {
             logsPseudonymized = databaseLogs.pseudonymizeByUserId(userId, pseudonym);
@@ -128,7 +152,7 @@ public class GdprComplianceService {
                     pseudonym);
         }
 
-        // 5. Pseudonymize audit ledger (retained under Art. 17(3)(e))
+        // 6. Pseudonymize audit ledger (retained under Art. 17(3)(e))
         long auditPseudonymized = 0;
         try {
             auditPseudonymized = auditStore.pseudonymizeByUserId(userId, pseudonym);
@@ -152,6 +176,7 @@ public class GdprComplianceService {
         // Write compliance event to immutable audit ledger
         submitComplianceAuditEntry("GDPR_ERASURE", pseudonym, Map.of(
                 "memoriesDeleted", memoriesDeleted,
+                "attachmentsDeleted", attachmentsDeleted,
                 "conversationsDeleted", conversationsDeleted,
                 "mappingsDeleted", mappingsDeleted,
                 "logsPseudonymized", logsPseudonymized,
