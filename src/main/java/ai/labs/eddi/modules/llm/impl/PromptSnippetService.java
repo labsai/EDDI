@@ -11,7 +11,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.event.Observes;
+
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -27,8 +27,8 @@ import java.util.Map;
  * data map for LLM task system prompts.
  * <p>
  * All snippets are auto-available via {@code {{snippets.<name>}}} in system
- * prompt templates. The cache is invalidated on any snippet store update via
- * the {@link IResourceStore.ConfigurationUpdate} CDI event.
+ * prompt templates. The cache auto-expires after 5 minutes (TTL) and can be
+ * explicitly invalidated via {@link #invalidateCache()}.
  * <p>
  * For snippets with {@code templateEnabled=false}, the content has its template
  * markers ({@code {{}} }) escaped so the Jinja2 engine outputs them as
@@ -103,19 +103,12 @@ public class PromptSnippetService {
     }
 
     /**
-     * Invalidate the cache when any configuration is updated. This reacts to the
-     * {@link IResourceStore.ConfigurationUpdate} CDI event fired by stores.
-     */
-    public void onConfigurationUpdate(@Observes IResourceStore.ConfigurationUpdate event) {
-        snippetCache.invalidateAll();
-        LOGGER.debug("Snippet cache invalidated due to configuration update");
-    }
-
-    /**
-     * Explicitly invalidate the cache (e.g., from tests).
+     * Explicitly invalidate the snippet cache. Call when snippets are updated
+     * (e.g., from the REST layer) or from tests.
      */
     public void invalidateCache() {
         snippetCache.invalidateAll();
+        LOGGER.debug("Snippet cache invalidated");
     }
 
     private Map<String, Object> loadAllSnippets() {
