@@ -94,19 +94,14 @@ class LlmTaskTest {
         when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
         var chatModelRegistry = new ChatModelRegistry(languageModelApiConnectorBuilders, secretResolver);
 
-        var counterweightService = new CounterweightService(new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
-        var deploymentContextService = mock(DeploymentContextService.class);
-        when(deploymentContextService.getAutoCounterweightLevel()).thenReturn(null);
-
-        var identityMaskingService = new IdentityMaskingService(new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
         var toolResponseTruncator = new ToolResponseTruncator(new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
 
         langChainTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter, templatingEngine, jsonSerialization, prePostUtils,
                 chatModelRegistry, calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool,
                 weatherTool, apiCallExecutor, toolExecutionService, mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
                 mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(RagContextProvider.class), mock(IUserMemoryStore.class),
-                mock(TokenCounterFactory.class), mock(ConversationSummarizer.class), counterweightService, deploymentContextService,
-                identityMaskingService, toolResponseTruncator, mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
+                mock(TokenCounterFactory.class), mock(ConversationSummarizer.class),
+                toolResponseTruncator, mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
     }
 
     static Stream<Arguments> provideParameters() {

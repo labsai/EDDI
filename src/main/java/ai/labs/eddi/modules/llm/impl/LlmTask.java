@@ -85,9 +85,6 @@ public class LlmTask implements ILifecycleTask {
     private final RagContextProvider ragContextProvider;
     private final TokenCounterFactory tokenCounterFactory;
     private final ConversationSummarizer conversationSummarizer;
-    private final CounterweightService counterweightService;
-    private final DeploymentContextService deploymentContextService;
-    private final IdentityMaskingService identityMaskingService;
 
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
@@ -104,8 +101,7 @@ public class LlmTask implements ILifecycleTask {
             IApiCallExecutor apiCallExecutor, ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager,
             A2AToolProviderManager a2aToolProviderManager, IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
             RagContextProvider ragContextProvider, IUserMemoryStore userMemoryStore, TokenCounterFactory tokenCounterFactory,
-            ConversationSummarizer conversationSummarizer, CounterweightService counterweightService,
-            DeploymentContextService deploymentContextService, IdentityMaskingService identityMaskingService,
+            ConversationSummarizer conversationSummarizer,
             ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
@@ -128,9 +124,6 @@ public class LlmTask implements ILifecycleTask {
         this.restAgentStore = restAgentStore;
         this.restWorkflowStore = restWorkflowStore;
         this.conversationSummarizer = conversationSummarizer;
-        this.counterweightService = counterweightService;
-        this.deploymentContextService = deploymentContextService;
-        this.identityMaskingService = identityMaskingService;
     }
 
     @Override
@@ -181,50 +174,6 @@ public class LlmTask implements ILifecycleTask {
 
         // Parse history parameters
         String systemMessage = processedParams.getOrDefault(KEY_SYSTEM_MESSAGE, "");
-
-        // === Behavioral Governance: Counterweight Injection ===
-        // Only applies when the agent has explicitly enabled counterweights.
-        // Deployment environment provides a fallback level if no explicit level is set.
-        var counterweight = task.getCounterweight();
-        if (counterweight != null && counterweight.isEnabled()) {
-            String effectiveLevel;
-            if (counterweight.getInstructions() != null && !counterweight.getInstructions().isEmpty()) {
-                effectiveLevel = "custom";
-            } else {
-                effectiveLevel = counterweight.getLevel();
-            }
-            // Fallback: use deployment environment level when enabled but no explicit level
-            if (effectiveLevel == null || "normal".equalsIgnoreCase(effectiveLevel)) {
-                effectiveLevel = deploymentContextService.getAutoCounterweightLevel();
-            }
-            if (effectiveLevel != null && !"normal".equalsIgnoreCase(effectiveLevel)) {
-                String cwInstructions = counterweightService.resolveInstructions(counterweight);
-                if (cwInstructions.isEmpty()) {
-                    // Synthetic config for deployment-level fallback
-                    var fallbackConfig = new LlmConfiguration.CounterweightConfig();
-                    fallbackConfig.setEnabled(true);
-                    fallbackConfig.setLevel(effectiveLevel);
-                    cwInstructions = counterweightService.resolveInstructions(fallbackConfig);
-                }
-                if (!cwInstructions.isEmpty()) {
-                    systemMessage += "\n\n## BEHAVIORAL GOVERNANCE\n" + cwInstructions;
-                    var cwTraceData = dataFactory.createData(KEY_LANGCHAIN + ":counterweight:level", effectiveLevel);
-                    currentStep.storeData(cwTraceData);
-                }
-            }
-        }
-
-        // === Identity Masking Injection ===
-        var identityMasking = task.getIdentityMasking();
-        if (identityMasking != null && identityMasking.isEnabled()) {
-            String maskingInstructions = identityMaskingService.resolveInstructions(identityMasking);
-            if (!maskingInstructions.isEmpty()) {
-                systemMessage += "\n\n## IDENTITY\n" + maskingInstructions;
-                var maskTraceData = dataFactory.createData(KEY_LANGCHAIN + ":identity:displayName",
-                        identityMasking.getDisplayName() != null ? identityMasking.getDisplayName() : "custom");
-                currentStep.storeData(maskTraceData);
-            }
-        }
 
         int logSizeLimit = task.getConversationHistoryLimit() != null ? task.getConversationHistoryLimit() : -1;
         if (!isNullOrEmpty(processedParams.get(KEY_LOG_SIZE_LIMIT))) {

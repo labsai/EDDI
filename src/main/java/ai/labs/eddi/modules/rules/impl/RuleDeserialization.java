@@ -5,7 +5,6 @@ import ai.labs.eddi.configs.rules.model.RuleConditionConfiguration;
 import ai.labs.eddi.datastore.serialization.DeserializationException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
-import ai.labs.eddi.modules.rules.bootstrap.RuleConditions;
 import ai.labs.eddi.modules.rules.impl.RuleGroup.ExecutionStrategy;
 import ai.labs.eddi.modules.rules.impl.conditions.*;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
@@ -16,11 +15,9 @@ import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.inject.Provider;
 import java.io.IOException;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 
 import static ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.CONDITION_PREFIX;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
@@ -34,7 +31,6 @@ import static java.lang.String.format;
 @ApplicationScoped
 public class RuleDeserialization implements IRuleDeserialization {
     private final ObjectMapper objectMapper;
-    private final Map<String, Provider<IRuleCondition>> conditionProvider;
 
     private static final Logger log = Logger.getLogger(RuleDeserialization.class);
     private final IExpressionProvider expressionProvider;
@@ -45,11 +41,10 @@ public class RuleDeserialization implements IRuleDeserialization {
 
     @Inject
     public RuleDeserialization(ObjectMapper objectMapper, IExpressionProvider expressionProvider, IJsonSerialization jsonSerialization,
-            IMemoryItemConverter memoryItemConverter, @RuleConditions Map<String, Provider<IRuleCondition>> conditionProvider,
+            IMemoryItemConverter memoryItemConverter,
             CapabilityRegistryService capabilityRegistryService, ITemplatingEngine templatingEngine) {
         this.objectMapper = objectMapper;
         this.expressionProvider = expressionProvider;
-        this.conditionProvider = conditionProvider;
         this.jsonSerialization = jsonSerialization;
         this.memoryItemConverter = memoryItemConverter;
         this.templatingEngine = templatingEngine;
@@ -99,13 +94,8 @@ public class RuleDeserialization implements IRuleDeserialization {
 
                 var conditionsKey = CONDITION_PREFIX + type;
 
-                // Try direct factory first (handles both CDI and non-CDI conditions)
+                // Factory creates all known condition types
                 IRuleCondition condition = createCondition(conditionsKey);
-
-                // Fall back to CDI provider map for extensibility
-                if (condition == null && conditionProvider.containsKey(conditionsKey)) {
-                    condition = conditionProvider.get(conditionsKey).get();
-                }
 
                 if (condition != null) {
                     var configs = conditionConfiguration.getConfigs();

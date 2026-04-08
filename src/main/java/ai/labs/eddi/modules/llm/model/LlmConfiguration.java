@@ -244,22 +244,6 @@ public record LlmConfiguration(List<Task> tasks) {
          */
         private ModelCascadeConfig modelCascade;
 
-        // === Behavioral Governance ===
-
-        /**
-         * Assertiveness counterweight configuration. When enabled, appends behavioral
-         * governance instructions to the system prompt to regulate agent assertiveness.
-         * Fully opt-in — disabled by default for backwards compatibility.
-         */
-        private CounterweightConfig counterweight;
-
-        /**
-         * Identity masking configuration. Controls how the agent presents itself:
-         * display name, model concealment, and custom persona instructions. Fully
-         * opt-in — disabled by default for backwards compatibility.
-         */
-        private IdentityMaskingConfig identityMasking;
-
         /**
          * Tool response truncation limits. When set, tool responses exceeding the
          * character limit are truncated before re-injection into the LLM context
@@ -551,22 +535,6 @@ public record LlmConfiguration(List<Task> tasks) {
             this.modelCascade = modelCascade;
         }
 
-        public CounterweightConfig getCounterweight() {
-            return counterweight;
-        }
-
-        public void setCounterweight(CounterweightConfig counterweight) {
-            this.counterweight = counterweight;
-        }
-
-        public IdentityMaskingConfig getIdentityMasking() {
-            return identityMasking;
-        }
-
-        public void setIdentityMasking(IdentityMaskingConfig identityMasking) {
-            this.identityMasking = identityMasking;
-        }
-
         public ToolResponseLimits getToolResponseLimits() {
             return toolResponseLimits;
         }
@@ -581,101 +549,6 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setConversationSummary(ConversationSummaryConfig conversationSummary) {
             this.conversationSummary = conversationSummary;
-        }
-    }
-
-    /**
-     * Configuration for assertiveness counterweights. Controls how aggressively the
-     * agent acts by injecting behavioral governance instructions into the system
-     * prompt.
-     * <p>
-     * Predefined levels:
-     * <ul>
-     * <li>{@code normal} — no modification (default)</li>
-     * <li>{@code cautious} — adds intent-declaration and verification prompts</li>
-     * <li>{@code strict} — requires explicit confirmation for state-changing
-     * ops</li>
-     * </ul>
-     * Custom {@code instructions} override the predefined level text.
-     */
-    public static class CounterweightConfig {
-        private boolean enabled;
-        private String level = "normal";
-        private List<String> instructions;
-
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
-
-        public String getLevel() {
-            return level;
-        }
-
-        public void setLevel(String level) {
-            this.level = level;
-        }
-
-        public List<String> getInstructions() {
-            return instructions;
-        }
-
-        public void setInstructions(List<String> instructions) {
-            this.instructions = instructions;
-        }
-    }
-
-    /**
-     * Configuration for identity masking. Controls how the agent presents itself to
-     * users.
-     * <p>
-     * When enabled, injects persona directives into the system prompt:
-     * <ul>
-     * <li>{@code displayName} — the name the agent uses for itself</li>
-     * <li>{@code concealModelIdentity} — instructs the agent not to reveal its
-     * underlying model/provider</li>
-     * <li>{@code personaInstructions} — custom free-text persona directives</li>
-     * </ul>
-     */
-    public static class IdentityMaskingConfig {
-        private boolean enabled;
-        private String displayName;
-        private boolean concealModelIdentity;
-        private List<String> personaInstructions;
-
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
-
-        public String getDisplayName() {
-            return displayName;
-        }
-
-        public void setDisplayName(String displayName) {
-            this.displayName = displayName;
-        }
-
-        public boolean isConcealModelIdentity() {
-            return concealModelIdentity;
-        }
-
-        public void setConcealModelIdentity(boolean concealModelIdentity) {
-            this.concealModelIdentity = concealModelIdentity;
-        }
-
-        public List<String> getPersonaInstructions() {
-            return personaInstructions;
-        }
-
-        public void setPersonaInstructions(List<String> personaInstructions) {
-            this.personaInstructions = personaInstructions;
         }
     }
 
