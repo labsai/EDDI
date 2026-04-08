@@ -101,6 +101,11 @@ public class AuditStore implements IAuditStore {
         return collection.countDocuments(new Document(F_CONVERSATION_ID, conversationId));
     }
 
+    @Override
+    public List<AuditEntry> getEntriesByUserId(String userId, int skip, int limit) {
+        Document filter = new Document(F_USER_ID, userId);
+        return query(filter, skip, limit);
+    }
     // ==================== Private Helpers ====================
 
     private List<AuditEntry> query(Document filter, int skip, int limit) {

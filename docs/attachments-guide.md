@@ -117,18 +117,36 @@ Best for small images (< 5MB). Data is sent inline as a base64-encoded string.
 }
 ```
 
-> **Note:** `base64Data` is transient — it's never persisted to MongoDB. For large files, use the upload endpoint (coming soon) or URL references.
+> **Note:** `base64Data` is transient — it's never persisted to MongoDB. For large files, use the upload endpoint (Path C below) or URL references.
 
-### Path C: Upload Endpoint (Coming Soon)
+### Path C: File Upload
 
-For large files, a multipart upload endpoint will store the binary in GridFS/PostgreSQL and return an `Attachment` reference:
+For large files, upload them to the storage backend and receive a storage reference:
 
-```
-POST /agents/{conversationId}/attachments
+```bash
+POST /conversations/{conversationId}/attachments
 Content-Type: multipart/form-data
 
-→ Returns: Attachment { id, storageRef, mimeType, fileName, sizeBytes }
+# Form field: file (the binary file)
 ```
+
+**Response (201):**
+```json
+{
+  "storageRef": "gridfs://68abc123def456",
+  "fileName": "report.pdf",
+  "mimeType": "application/pdf",
+  "sizeBytes": 524288
+}
+```
+
+The returned `storageRef` can then be used in subsequent conversation turns by setting it as the `url` in an attachment context key. The storage backend (GridFS or PostgreSQL) is selected automatically based on the configured datastore.
+
+| Response Code | Meaning |
+|---|---|
+| `201` | File stored successfully |
+| `400` | No file provided |
+| `503` | No attachment storage configured |
 
 ---
 

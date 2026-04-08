@@ -160,6 +160,14 @@ public class PostgresAuditStore implements IAuditStore {
         }
     }
 
+    @Override
+    public List<AuditEntry> getEntriesByUserId(String userId, int skip, int limit) {
+        ensureSchema();
+        String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger"
+                + " WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
+        return queryEntries(sql, userId, limit, skip);
+    }
+
     // -- Internal helpers --
 
     private void setEntryParams(PreparedStatement ps, AuditEntry entry) throws SQLException, IOException {

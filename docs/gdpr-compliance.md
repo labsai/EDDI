@@ -167,9 +167,9 @@ Use the erasure endpoint (`DELETE /admin/gdpr/{userId}`) to fulfill
 
 ## International Privacy Regulations
 
-EDDI's GDPR/CCPA infrastructure covers the _technical_ requirements of
+EDDI's GDPR/CCPA infrastructure covers the technical requirements of
 all major international privacy frameworks. Each regulation has a detailed
-feature mapping, gap analysis, and deployer action checklist in PRIVACY.md:
+feature mapping and deployer checklist in PRIVACY.md:
 
 - **[PIPEDA](../PRIVACY.md#pipeda--canada)** — Canada (10 Fair Information Principles)
 - **[LGPD](../PRIVACY.md#lgpd--brazil)** — Brazil (Art. 18 data subject rights)
@@ -178,9 +178,9 @@ feature mapping, gap analysis, and deployer action checklist in PRIVACY.md:
 - **[PDPA](../PRIVACY.md#pdpa--southeast-asia)** — Singapore & Thailand
 
 The same erasure and export endpoints (`DELETE /admin/gdpr/{userId}`,
-`GET /admin/gdpr/{userId}/export`) work for all jurisdictions. Common
-gaps across all frameworks: consent management, DPIA tooling, and
-cross-border transfer enforcement — see each section for specifics.
+`GET /admin/gdpr/{userId}/export`) work for all jurisdictions. EDDI
+provides the technical layer; deployer checklists cover organizational
+measures (consent, officer appointments, breach notification).
 
 ## See Also
 

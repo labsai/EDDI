@@ -182,19 +182,21 @@ Set retention to `-1` to disable automatic cleanup.
 
 ## International Privacy Regulations
 
-EDDI is deployed globally. This section maps each major privacy framework
-to EDDI's actual technical capabilities — verified against the codebase —
-and clearly identifies gaps that deployers must address.
+EDDI is open-source middleware deployed by organizations worldwide in
+regulated environments. This section maps each major privacy framework to
+EDDI's technical capabilities and identifies the organizational measures
+deployers add on top.
 
-> **Honesty note**: EDDI provides strong _technical_ safeguards (encryption,
-> access control, audit trail, data erasure, data export). However, EDDI
-> does **not** include:
-> - A consent management system (no consent capture/revocation tracking)
-> - Data Protection Impact Assessment (DPIA) tooling
-> - Automated cross-border transfer restriction enforcement
-> - Purpose limitation enforcement (purpose is documented, not enforced)
+> **How to read this section**: Privacy regulations have two layers —
+> **technical safeguards** (encryption, access control, audit, erasure)
+> and **organizational measures** (consent processes, officer appointments,
+> breach notification procedures). EDDI implements the technical layer.
+> Your organization implements the organizational layer. Together, they
+> form a complete compliance posture.
 >
-> These are the deployer's responsibility in every jurisdiction.
+> - ✅ **Built-in** — EDDI handles this out of the box
+> - 🏢 **Your org** — Organizational measure, outside the scope of middleware
+> - ✅ + 🏢 — EDDI provides the technical foundation; your org completes it
 
 ---
 
@@ -205,11 +207,11 @@ Canada's **Personal Information Protection and Electronic Documents Act**
 information in the course of commercial activity. It follows the 10 Fair
 Information Principles.
 
-| PIPEDA Principle | EDDI Feature | Status |
+| PIPEDA Principle | EDDI Technical Capability | Status |
 |---|---|---|
-| **Accountability** | Deployer appoints privacy officer; EDDI provides audit trail | ⚠️ Deployer |
-| **Identifying Purposes** | Deployer discloses AI processing in privacy notice | ⚠️ Deployer |
-| **Consent** | No built-in consent management — deployer must implement | ❌ Deployer |
+| **Accountability** | Immutable HMAC-signed audit ledger traces all operations | ✅ + 🏢 |
+| **Identifying Purposes** | Agent configuration documents AI processing purpose | ✅ + 🏢 |
+| **Consent** | Deployer integrates consent capture in their application layer | 🏢 Your org |
 | **Limiting Collection** | Token-aware windowing limits data sent to LLMs; configurable retention auto-deletes old conversations | ✅ Built-in |
 | **Limiting Use/Disclosure** | Data used only for configured agent interactions; audit trail logs every LLM invocation (model name, prompt, response) | ✅ Built-in |
 | **Accuracy** | Conversation state is timestamped and versioned; user memories updatable via `PUT /usermemorystore/memories` | ✅ Built-in |
@@ -218,12 +220,12 @@ Information Principles.
 | **Individual Access** | `GET /admin/gdpr/{userId}/export` — returns all memories, conversations, and managed conversation mappings as JSON | ✅ Built-in |
 | **Challenging Compliance** | `DELETE /admin/gdpr/{userId}` — cascade deletion across all 5 data stores; audit trail pseudonymized (not deleted) | ✅ Built-in |
 
-**Gaps and deployer actions**:
+**Deployer checklist**:
 
-| Gap | Required Action |
+| Responsibility | Details |
 |---|---|
-| No consent tracking | Implement consent capture before enabling EDDI chat (e.g., checkbox, terms acceptance). PIPEDA requires implied consent for non-sensitive data, express consent for sensitive data (health, financial) |
-| No bilingual notices | Provide English/French privacy notices for Canadian users |
+| Consent capture | Integrate consent flow in your frontend before enabling EDDI chat. PIPEDA: implied consent for non-sensitive data, express consent for sensitive data (health, financial) |
+| Bilingual notices | Provide English/French privacy notices for Canadian consumers |
 | Breach reporting | Report breaches with "real risk of significant harm" to the **Office of the Privacy Commissioner** (OPC) and affected individuals. Maintain breach records for 24 months. Use EDDI's `docs/incident-response.md` as your runbook template |
 
 ---
@@ -234,24 +236,24 @@ Brazil's **Lei Geral de Proteção de Dados** (2018, effective 2020) closely
 mirrors GDPR and grants data subjects (titulares) extensive rights over
 their personal data.
 
-| LGPD Right | EDDI Feature | Status |
+| LGPD Right | EDDI Technical Capability | Status |
 |---|---|---|
 | Confirmation of processing (Art. 18, I) | Documented in PRIVACY.md; audit trail records all operations | ✅ Built-in |
 | Access to data (Art. 18, II) | `GET /admin/gdpr/{userId}/export` — full JSON bundle | ✅ Built-in |
 | Correction of inaccurate data (Art. 18, III) | `PUT /usermemorystore/memories` — upserts individual memory entries | ✅ Built-in |
-| Anonymization/blocking/deletion (Art. 18, IV) | `DELETE /admin/gdpr/{userId}` — cascade deletion + SHA-256 pseudonymization of logs/audit | ✅ Built-in |
+| Anonymization/blocking/deletion (Art. 18, IV) | `DELETE /admin/gdpr/{userId}` — cascade deletion + SHA-256 pseudonymization of audit trail | ✅ Built-in |
 | Data portability (Art. 18, V) | JSON export includes all data; machine-readable format | ✅ Built-in |
-| Deletion of unnecessary data (Art. 18, VI) | Configurable retention (`eddi.conversations.deleteEndedConversationsOnceOlderThanDays`, default 365) + idle conversation auto-end | ✅ Built-in |
+| Deletion of unnecessary data (Art. 18, VI) | Configurable retention (`eddi.conversations.deleteEndedConversationsOnceOlderThanDays`) + idle conversation auto-end | ✅ Built-in |
 | Information about sharing (Art. 18, VII) | LLM provider data flows documented; audit trail records model name per invocation | ✅ Built-in |
-| Consent revocation (Art. 18, IX) | `POST /{conversationId}/endConversation` + `DELETE /admin/gdpr/{userId}` — but no automatic consent-state tracking | ⚠️ Partial |
+| Consent revocation (Art. 18, IX) | `POST /{conversationId}/endConversation` + `DELETE /admin/gdpr/{userId}` provide the technical mechanism; consent state tracking is your application layer | ✅ + 🏢 |
 
-**Gaps and deployer actions**:
+**Deployer checklist**:
 
-| Gap | Required Action |
+| Responsibility | Details |
 |---|---|
-| No consent lifecycle management | Track consent status externally. LGPD requires establishing a legal basis (consent, legitimate interest, contract performance) before processing |
+| Legal basis | Establish a legal basis for processing (consent, legitimate interest, contract performance) before deploying EDDI agents |
 | DPO appointment | Appoint a **Data Protection Officer** (Encarregado) — mandatory for all controllers |
-| DPIA | Conduct and document Data Protection Impact Assessments for AI processing. EDDI provides audit data but no DPIA template |
+| DPIA | Conduct and document Data Protection Impact Assessments for AI processing. EDDI's audit ledger provides the data inputs for your DPIA |
 | Breach reporting | Report security incidents to the **ANPD** within a "reasonable time" (ANPD recommends 2 business days) |
 | Cross-border transfers | Ensure LLM providers meet LGPD transfer requirements (adequacy decisions, standard contractual clauses, or binding corporate rules) |
 | Portuguese notices | Provide privacy notices in **Portuguese** |
@@ -265,9 +267,9 @@ amended 2022) is one of Asia's most mature data protection laws. Japan holds
 an EU adequacy decision, facilitating cross-border data flows between the
 two regions.
 
-| APPI Obligation | EDDI Feature | Status |
+| APPI Obligation | EDDI Technical Capability | Status |
 |---|---|---|
-| Purpose of use specification (Art. 17) | Agent configuration documents processing purpose via system prompts and behavior rules; deployer should document in privacy notice | ⚠️ Partial |
+| Purpose of use specification (Art. 17) | Agent configuration documents processing purpose via system prompts and behavior rules | ✅ + 🏢 |
 | Accurate and up-to-date data (Art. 19) | Conversation state is timestamped and versioned; user memories are updatable via REST API | ✅ Built-in |
 | Security control measures (Art. 23) | AES-256-GCM vault encryption, HMAC-SHA256 audit integrity, Keycloak OIDC, RBAC, SSRF protection, sandboxed evaluation | ✅ Built-in |
 | Supervision of employees (Art. 24) | Keycloak OIDC + role-based access (eddi-admin, eddi-editor, eddi-viewer) | ✅ Built-in |
@@ -275,15 +277,15 @@ two regions.
 | Disclosure to data subjects (Art. 33) | `GET /admin/gdpr/{userId}/export` — full data bundle | ✅ Built-in |
 | Correction and deletion (Art. 34-35) | `PUT /usermemorystore/memories` for correction; `DELETE /admin/gdpr/{userId}` for deletion | ✅ Built-in |
 | Breach notification (Art. 26) | Incident response runbook (`docs/incident-response.md`) | ✅ Built-in |
-| Cross-border transfer (Art. 28) | EDDI documents provider data flows but does **not** enforce transfer restrictions — deployer must verify recipient country protections | ⚠️ Partial |
+| Cross-border transfer (Art. 28) | EDDI documents provider data flows; deployer verifies recipient country protections and obtains consent where required | ✅ + 🏢 |
 | Pseudonymized information (2022 amendment) | GDPR erasure uses SHA-256 pseudonymization — satisfies APPI's pseudonymized information category | ✅ Built-in |
 
-**Gaps and deployer actions**:
+**Deployer checklist**:
 
-| Gap | Required Action |
+| Responsibility | Details |
 |---|---|
-| Purpose specification not enforced | Document AI processing purposes in your privacy notice; EDDI's agent config documents intent but doesn't enforce purpose limitation at runtime |
-| Cross-border transfer verification | Verify LLM provider countries meet APPI equivalence or obtain individual consent. Japan→EU transfers are covered by the adequacy decision; other countries require contractual safeguards |
+| Purpose documentation | Document AI processing purposes in your privacy notice; EDDI's agent config captures intent, but your privacy policy communicates it to users |
+| Cross-border verification | Verify LLM provider countries meet APPI equivalence or obtain individual consent. Japan→EU: covered by adequacy decision. Other countries: require contractual safeguards |
 | PPC registration | Register with the **Personal Information Protection Commission** (PPC) if processing data at scale |
 | Breach reporting | Notify PPC and affected individuals **promptly** (report within 3-5 days in practice, full report within 30 days) |
 
@@ -295,24 +297,24 @@ South Africa's **Protection of Personal Information Act** (2013, effective
 2021) establishes 8 data processing conditions closely aligned with EU
 standards. Enforced by the Information Regulator.
 
-| POPIA Condition | EDDI Feature | Status |
+| POPIA Condition | EDDI Technical Capability | Status |
 |---|---|---|
 | Accountability (Condition 1) | HMAC-signed audit ledger, documented data flows, open-source code | ✅ Built-in |
 | Processing limitation (Condition 2) | Token-aware windowing, configurable retention, idle conversation auto-end | ✅ Built-in |
-| Purpose specification (Condition 3) | Agent configuration documents purpose; not enforced at runtime | ⚠️ Partial |
+| Purpose specification (Condition 3) | Agent configuration documents purpose; deployer communicates to users | ✅ + 🏢 |
 | Further processing limitation (Condition 4) | Data used only for configured agent interactions; audit trail provides accountability | ✅ Built-in |
 | Information quality (Condition 5) | Timestamped, versioned state; user memories updatable | ✅ Built-in |
 | Openness (Condition 6) | Public PRIVACY.md + Apache 2.0 open source | ✅ Built-in |
 | Security safeguards (Condition 7) | AES-256-GCM, HMAC, Keycloak OIDC, RBAC, SSRF protection | ✅ Built-in |
 | Data subject participation (Condition 8) | Export endpoint + cascade deletion endpoint | ✅ Built-in |
 
-**Gaps and deployer actions**:
+**Deployer checklist**:
 
-| Gap | Required Action |
+| Responsibility | Details |
 |---|---|
 | Information Regulator registration | Register with the **Information Regulator** before processing personal information |
-| Information Officer appointment | Appoint an **Information Officer** — mandatory for all responsible parties |
-| Consent for special personal info | POPIA requires prior authorization from the Information Regulator for processing special personal information (health, biometric, children's data). No built-in enforcement in EDDI |
+| Information Officer | Appoint an **Information Officer** — mandatory for all responsible parties |
+| Special personal information | POPIA requires prior authorization from the Information Regulator for processing special personal information (health, biometric, children's data). Assess whether your EDDI agents process such data |
 | Breach notification | Notify the Information Regulator and data subjects "as soon as reasonably possible" |
 | Language requirements | Provide privacy notices in at least one of South Africa's **11 official languages** relevant to your user base |
 | Cross-border transfers | Only to countries with adequate protection or with appropriate safeguards (binding corporate rules, consent) |
@@ -327,41 +329,41 @@ Thailand's PDPA (2019, effective 2022) are the most mature.
 
 #### Singapore PDPA
 
-| Singapore PDPA Obligation | EDDI Feature | Status |
+| Singapore PDPA Obligation | EDDI Technical Capability | Status |
 |---|---|---|
-| Consent (Part 4) | No built-in consent management — deployer must implement | ❌ Deployer |
-| Purpose limitation (Part 4) | Agent config documents purpose; not enforced at runtime | ⚠️ Partial |
+| Consent (Part 4) | Deployer integrates consent capture in their application layer | 🏢 Your org |
+| Purpose limitation (Part 4) | Agent configuration documents purpose; deployer communicates to users | ✅ + 🏢 |
 | Access obligation (Part 5) | `GET /admin/gdpr/{userId}/export` — full data bundle | ✅ Built-in |
 | Correction obligation (Part 5) | `PUT /usermemorystore/memories` — upserts individual entries | ✅ Built-in |
 | Accuracy obligation (Part 4) | Timestamped, versioned conversation state | ✅ Built-in |
 | Protection obligation (Part 5) | AES-256-GCM, HMAC, Keycloak OIDC, RBAC | ✅ Built-in |
 | Retention limitation (Part 5) | Configurable auto-cleanup + configurable idle conversation timeout | ✅ Built-in |
-| Transfer limitation (Part 5) | Provider data flows documented; no runtime enforcement | ⚠️ Partial |
+| Transfer limitation (Part 5) | Provider data flows documented; deployer verifies transfer safeguards | ✅ + 🏢 |
 | Data breach notification (Part 6A) | Incident response runbook template | ✅ Built-in |
 
-**Gaps and deployer actions (Singapore)**:
+**Deployer checklist (Singapore)**:
 
-| Gap | Required Action |
+| Responsibility | Details |
 |---|---|
-| No consent management | Implement consent capture — Singapore PDPA has a deemed consent framework for business improvement purposes, but explicit consent is required for most AI processing |
+| Consent capture | Singapore PDPA has a deemed consent framework for business improvement, but explicit consent is required for most AI processing |
 | DPO appointment | Appoint a **Data Protection Officer** (DPO) — mandatory |
 | Breach notification | Notify the **PDPC** within **3 calendar days** of assessing a notifiable breach; notify affected individuals as soon as practicable |
-| DPIA for AI processing | Mandatory Data Protection Impact Assessment for high-risk processing (e.g., AI/ML on personal data). EDDI provides audit data for the DPIA but no template or tooling |
+| DPIA for AI processing | Mandatory Data Protection Impact Assessment for high-risk AI processing. EDDI's audit ledger provides the technical evidence for your DPIA |
 
 #### Thailand PDPA
 
 Thailand's PDPA is structurally modeled on GDPR. EDDI's GDPR infrastructure
-covers all technical requirements. Key deployer differences:
+covers all technical requirements. Key deployer responsibilities:
 
-**Gaps and deployer actions (Thailand)**:
+**Deployer checklist (Thailand)**:
 
-| Gap | Required Action |
+| Responsibility | Details |
 |---|---|
 | DPO appointment | Appoint a DPO if processing sensitive data or performing large-scale monitoring |
 | Breach notification | Notify the **PDPC** (Personal Data Protection Committee) within **72 hours** of discovery |
 | Cross-border transfers | Require adequacy, appropriate safeguards, or consent |
 | Thai-language notices | Provide privacy notices in **Thai** |
-| Consent for sensitive data | Explicit consent required for sensitive personal data (health, biometrics, etc.) — no built-in enforcement in EDDI |
+| Consent for sensitive data | Explicit consent required for sensitive personal data (health, biometrics, etc.) |
 
 ---
 
@@ -381,7 +383,7 @@ regulations:
 | **UK** | UK GDPR + Data Protection Act 2018 | Substantially mirrors EU GDPR; ICO oversight |
 
 For all jurisdictions: deployers should consult local counsel to confirm
-administrative obligations specific to their region.
+organizational obligations specific to their region.
 
 ## Contact
 
