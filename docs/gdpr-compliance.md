@@ -50,8 +50,41 @@ The export includes all user data in a structured, machine-readable JSON format:
 - All persistent user memories
 - All conversation transcripts (with full chat history)
 - All managed conversation mappings (intent→conversation bindings)
+- All audit processing records (capped at 10,000 entries)
 
 **Via MCP:** Use the `export_user_data` tool.
+
+### 3. Right to Restriction of Processing (GDPR Art. 18 / LGPD Art. 18)
+
+When a user disputes data accuracy or objects to processing, you can
+freeze their processing without deleting data:
+
+```bash
+# Restrict processing
+curl -X POST https://your-eddi-instance/admin/gdpr/{userId}/restrict \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+
+# Check restriction status
+curl https://your-eddi-instance/admin/gdpr/{userId}/restrict \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+# Returns: true/false
+
+# Remove restriction
+curl -X DELETE https://your-eddi-instance/admin/gdpr/{userId}/restrict \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+**What happens when restricted:**
+- New conversation creation is blocked (`ProcessingRestrictedException`)
+- Message processing (`say`) is blocked
+- Existing data is preserved (not deleted)
+- Restriction status is stored as a user memory entry
+- All restriction/unrestriction events are logged in the audit ledger
+
+**Use cases:**
+- User disputes accuracy of stored data (Art. 18(1)(a))
+- Processing is unlawful but user requests restriction instead of erasure (Art. 18(1)(b))
+- User objects to processing pending verification (Art. 21)
 
 ### 3. Response Timeline
 
@@ -65,19 +98,28 @@ constraint is your internal DSAR process, not the technical execution.
 
 ## Retention Configuration
 
-```properties
 # Auto-delete ended conversations after N days (default: 365, -1 to disable)
 eddi.conversations.deleteEndedConversationsOnceOlderThanDays=365
 
 # Close idle conversations after N days (default: 90)
 eddi.conversations.maximumLifeTimeOfIdleConversationsInDays=90
 
-# Dev environment uses 90 days
-%dev.eddi.conversations.deleteEndedConversationsOnceOlderThanDays=90
+# User memories — delete entries older than N days (default: -1, disabled)
+eddi.usermemories.deleteOlderThanDays=-1
+
+# Audit ledger — delete entries older than N days (default: -1, disabled)
+# WARNING: EU AI Act requires indefinite audit retention. Only enable if
+# your jurisdiction explicitly requires time-limited retention.
+eddi.audit.retentionDays=-1
 ```
 
-**Data minimization (Art. 5(1)(e)):** Review the default 365-day retention
-and reduce it to the minimum necessary for your use case.
+**Per-category retention** allows different retention periods for:
+- **Conversations** — 365 days (default)
+- **User memories** — disabled by default (configure per-deployment)
+- **Audit entries** — disabled by default (retained for EU AI Act compliance)
+
+**Data minimization (Art. 5(1)(e)):** Review the default retention periods
+and reduce them to the minimum necessary for your use case.
 
 ## Audit Ledger Legal Basis
 

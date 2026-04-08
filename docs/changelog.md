@@ -15,6 +15,36 @@ Each entry follows this format:
 
 ---
 
+## Compliance Privacy Features — Art. 18 Restriction, Audit Export, Per-Category Retention (2026-04-09)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+### Feature 1: Right to Restriction of Processing (GDPR Art. 18)
+
+- **New REST endpoints:** `POST /admin/gdpr/{userId}/restrict`, `DELETE /admin/gdpr/{userId}/restrict`, `GET /admin/gdpr/{userId}/restrict`
+- **Processing gate:** `ConversationService.startConversation()` and `say()` now check restriction status before processing. Throws `ProcessingRestrictedException` if restricted.
+- **Storage:** Uses a special `_gdpr_processing_restricted` user memory entry with `global` visibility — automatically cleaned up on GDPR erasure.
+- **Audit trail:** All restrict/unrestrict operations logged in the immutable audit ledger.
+
+### Feature 2: Audit Entries in User Data Export
+
+- **Complete Art. 15 compliance:** Export now includes audit processing records (capped at 10,000), not just memories/conversations/mappings.
+- **New `getEntriesByUserId`** method added to `IAuditStore` interface, implemented in both `PostgresAuditStore` (SQL) and `AuditStore` (MongoDB).
+- **Lightweight projection:** `AuditExportEntry` sub-record strips internal fields (HMAC, signature) — only user-relevant data is exported.
+
+### Feature 3: Per-Category Retention Policies
+
+- **New config properties:** `eddi.usermemories.deleteOlderThanDays` and `eddi.audit.retentionDays` (both default -1 = disabled)
+- **New `deleteOlderThan`** method added to `IUserMemoryStore`, implemented in both MongoDB and PostgreSQL stores.
+- **Scheduled cleanup:** `RestConversationStore` runs a 24h scheduled job for user memory retention.
+
+### Tests & Documentation
+
+- All 40 targeted tests pass (0 failures), build compiles cleanly
+- Updated `docs/gdpr-compliance.md` with new features and retention config
+
+---
+
 ## Agentic Improvements — GDPR Attachment Cleanup + Upload API (2026-04-08 final)
 
 **Repo:** EDDI (`feature/agentic-improvements` off `feature/version-6.0.0`)
