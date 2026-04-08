@@ -23,6 +23,8 @@ import {
   ArrowRightLeft,
   FileOutput,
   MessageCircle,
+  ScrollText,
+  Scissors,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
@@ -44,6 +46,8 @@ export type {
   LlmConfig,
   LlmPreRequest,
   LlmPostResponse,
+  ConversationSummaryConfig,
+  ToolResponseLimitsConfig,
 } from "./llm/types";
 
 import {
@@ -1028,6 +1032,135 @@ function TaskEditor({
                   </>
                 )}
               </div>
+
+              {/* ── Tool Response Limits ── */}
+              <div className="border-t border-border pt-3 space-y-2">
+                <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Scissors className="h-3 w-3" />
+                  {t("llmEditor.toolResponseLimits", "Tool Response Limits")}
+                </label>
+                <p className="text-[10px] text-muted-foreground">
+                  {t("llmEditor.toolResponseLimitsDesc", "Truncate verbose tool outputs before re-injection into the LLM context window. Prevents context bloat.")}
+                </p>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-foreground whitespace-nowrap">
+                    {t("llmEditor.defaultMaxChars", "Default Max Chars")}
+                  </label>
+                  <input
+                    type="number"
+                    value={task.toolResponseLimits?.defaultMaxChars ?? ""}
+                    onChange={(e) =>
+                      onChange({
+                        ...task,
+                        toolResponseLimits: {
+                          ...task.toolResponseLimits,
+                          defaultMaxChars: e.target.value
+                            ? parseInt(e.target.value, 10)
+                            : undefined,
+                        },
+                      })
+                    }
+                    readOnly={readOnly}
+                    placeholder="50000"
+                    className="h-7 w-28 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    data-testid="tool-response-default-chars"
+                  />
+                  <span className="text-[10px] text-muted-foreground">
+                    {t("llmEditor.defaultMaxCharsHint", "(~12k tokens at 50000)")}
+                  </span>
+                </div>
+
+                {/* Per-tool limits */}
+                <div>
+                  <label className="mb-1 block text-[10px] text-muted-foreground">
+                    {t("llmEditor.perToolLimits", "Per-Tool Overrides")}
+                  </label>
+                  <div className="space-y-1.5">
+                    {Object.entries(task.toolResponseLimits?.perToolLimits ?? {}).map(([tool, limit], i) => (
+                      <div key={`trl-${i}`} className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={tool}
+                          onChange={(e) => {
+                            const entries = Object.entries(task.toolResponseLimits?.perToolLimits ?? {});
+                            entries[i] = [e.target.value, limit];
+                            const deduped = new Map(entries);
+                            onChange({
+                              ...task,
+                              toolResponseLimits: {
+                                ...task.toolResponseLimits,
+                                perToolLimits: Object.fromEntries(deduped),
+                              },
+                            });
+                          }}
+                          readOnly={readOnly}
+                          placeholder={t("llmEditor.toolName", "Tool name")}
+                          className="h-7 w-40 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                        <input
+                          type="number"
+                          value={limit}
+                          onChange={(e) => {
+                            const entries = Object.entries(task.toolResponseLimits?.perToolLimits ?? {});
+                            entries[i] = [tool, parseInt(e.target.value, 10) || 0];
+                            onChange({
+                              ...task,
+                              toolResponseLimits: {
+                                ...task.toolResponseLimits,
+                                perToolLimits: Object.fromEntries(entries),
+                              },
+                            });
+                          }}
+                          readOnly={readOnly}
+                          placeholder="50000"
+                          className="h-7 w-24 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                        <span className="text-[10px] text-muted-foreground">chars</span>
+                        {!readOnly && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const entries = Object.entries(task.toolResponseLimits?.perToolLimits ?? {}).filter((_, j) => j !== i);
+                              onChange({
+                                ...task,
+                                toolResponseLimits: {
+                                  ...task.toolResponseLimits,
+                                  perToolLimits: entries.length > 0 ? Object.fromEntries(entries) : undefined,
+                                },
+                              });
+                            }}
+                            className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const existing = Object.keys(task.toolResponseLimits?.perToolLimits ?? {});
+                          let key = "tool";
+                          let n = 1;
+                          while (existing.includes(key)) { key = `tool${n++}`; }
+                          onChange({
+                            ...task,
+                            toolResponseLimits: {
+                              ...task.toolResponseLimits,
+                              perToolLimits: { ...(task.toolResponseLimits?.perToolLimits ?? {}), [key]: 50000 },
+                            },
+                          });
+                        }}
+                        className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <Plus className="h-3 w-3" />
+                        {t("llmEditor.addToolLimit", "Add Tool Limit")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </Section>
 
@@ -1183,7 +1316,7 @@ function TaskEditor({
                                 onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
                               }}
                               readOnly={readOnly}
-                              placeholder={t("llmEditor.cascadeModelName", "e.g. gpt-4o-mini")}
+                              placeholder={t("llmEditor.cascadeModelName", "e.g. gpt-5.4-mini")}
                               className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                             />
                             {!readOnly && (
@@ -1290,6 +1423,212 @@ function TaskEditor({
                         {t("llmEditor.addCascadeStep", "Add Cascade Step")}
                       </button>
                     )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </Section>
+
+          {/* ══════ Conversation Memory (Rolling Summary) ══════ */}
+          <Section
+            label={t("llmEditor.conversationMemory", "Conversation Memory")}
+            icon={ScrollText}
+            accent="text-teal-500"
+            defaultOpen={!!(task.conversationSummary?.enabled)}
+          >
+            <div className="space-y-3" data-testid="conversation-memory-section">
+              <p className="text-[10px] text-muted-foreground leading-relaxed">
+                {t("llmEditor.conversationMemoryDesc", "Older turns are incrementally compressed into a rolling summary. The LLM sees: [system prompt + summary] + [recent N turns verbatim]. A built-in conversationRecall tool allows the agent to drill back into summarized turns on demand.")}
+              </p>
+
+              <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  checked={task.conversationSummary?.enabled ?? false}
+                  onChange={(e) =>
+                    onChange({
+                      ...task,
+                      conversationSummary: {
+                        ...task.conversationSummary,
+                        enabled: e.target.checked,
+                        llmProvider: task.conversationSummary?.llmProvider ?? "anthropic",
+                        llmModel: task.conversationSummary?.llmModel ?? "claude-sonnet-4-6",
+                        maxSummaryTokens: task.conversationSummary?.maxSummaryTokens ?? 800,
+                        recentWindowSteps: task.conversationSummary?.recentWindowSteps ?? 5,
+                        maxRecallTurns: task.conversationSummary?.maxRecallTurns ?? 20,
+                      },
+                    })
+                  }
+                  disabled={readOnly}
+                  className="h-3.5 w-3.5 rounded border-input accent-primary"
+                  data-testid="summary-enable"
+                />
+                <ScrollText className="h-3.5 w-3.5 text-teal-500" />
+                {t("llmEditor.enableSummary", "Enable Rolling Summary")}
+              </label>
+
+              {task.conversationSummary?.enabled && (
+                <div className="space-y-3 rounded-lg border border-teal-500/20 bg-teal-500/5 p-3">
+                  {/* Provider + Model */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        {t("llmEditor.summaryProvider", "Summary Provider")}
+                      </label>
+                      <select
+                        value={task.conversationSummary.llmProvider ?? "anthropic"}
+                        onChange={(e) =>
+                          onChange({
+                            ...task,
+                            conversationSummary: { ...task.conversationSummary!, llmProvider: e.target.value },
+                          })
+                        }
+                        disabled={readOnly}
+                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                      >
+                        {MODEL_TYPES.map((mt) => (
+                          <option key={mt} value={mt}>{mt}</option>
+                        ))}
+                      </select>
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        {t("llmEditor.summaryProviderHint", "Use a cheap/fast model for summarization")}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        {t("llmEditor.summaryModel", "Summary Model")}
+                      </label>
+                      <input
+                        type="text"
+                        value={task.conversationSummary.llmModel ?? ""}
+                        onChange={(e) =>
+                          onChange({
+                            ...task,
+                            conversationSummary: { ...task.conversationSummary!, llmModel: e.target.value },
+                          })
+                        }
+                        readOnly={readOnly}
+                        placeholder="claude-sonnet-4-6"
+                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Window + Recall + Tokens */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                        {t("llmEditor.recentWindow", "Recent Window (steps)")}
+                      </label>
+                      <input
+                        type="number"
+                        value={task.conversationSummary.recentWindowSteps ?? 5}
+                        onChange={(e) =>
+                          onChange({
+                            ...task,
+                            conversationSummary: {
+                              ...task.conversationSummary!,
+                              recentWindowSteps: parseInt(e.target.value, 10) || 5,
+                            },
+                          })
+                        }
+                        readOnly={readOnly}
+                        className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      />
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        {t("llmEditor.recentWindowHint", "Turns kept verbatim")}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                        {t("llmEditor.maxRecallTurns", "Max Recall Turns")}
+                      </label>
+                      <input
+                        type="number"
+                        value={task.conversationSummary.maxRecallTurns ?? 20}
+                        onChange={(e) =>
+                          onChange({
+                            ...task,
+                            conversationSummary: {
+                              ...task.conversationSummary!,
+                              maxRecallTurns: parseInt(e.target.value, 10) || 20,
+                            },
+                          })
+                        }
+                        readOnly={readOnly}
+                        className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      />
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        {t("llmEditor.maxRecallHint", "Per recall invocation")}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                        {t("llmEditor.maxSummaryTokens", "Max Summary Tokens")}
+                      </label>
+                      <input
+                        type="number"
+                        value={task.conversationSummary.maxSummaryTokens ?? 800}
+                        onChange={(e) =>
+                          onChange({
+                            ...task,
+                            conversationSummary: {
+                              ...task.conversationSummary!,
+                              maxSummaryTokens: parseInt(e.target.value, 10) || 800,
+                            },
+                          })
+                        }
+                        readOnly={readOnly}
+                        className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Options */}
+                  <label className="inline-flex items-center gap-2 text-xs text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={task.conversationSummary.excludePropertiesFromSummary ?? true}
+                      onChange={(e) =>
+                        onChange({
+                          ...task,
+                          conversationSummary: {
+                            ...task.conversationSummary!,
+                            excludePropertiesFromSummary: e.target.checked,
+                          },
+                        })
+                      }
+                      disabled={readOnly}
+                      className="h-3.5 w-3.5 rounded border-input accent-primary"
+                    />
+                    {t("llmEditor.excludeProps", "Exclude properties from summary")}
+                  </label>
+                  <p className="text-[10px] text-muted-foreground ps-5 -mt-2">
+                    {t("llmEditor.excludePropsDesc", "Skip facts already captured as persistent properties — focus on reasoning and implicit context")}
+                  </p>
+
+                  {/* Custom summarization prompt (collapsed) */}
+                  <div>
+                    <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {t("llmEditor.summarizationPrompt", "Custom Summarization Prompt (optional)")}
+                    </label>
+                    <ContentEditor
+                      value={task.conversationSummary.summarizationPrompt ?? ""}
+                      onChange={(v) =>
+                        onChange({
+                          ...task,
+                          conversationSummary: {
+                            ...task.conversationSummary!,
+                            summarizationPrompt: v || undefined,
+                          },
+                        })
+                      }
+                      readOnly={readOnly}
+                      language="prompt"
+                      label={t("llmEditor.summarizationPrompt", "Custom Summarization Prompt")}
+                      placeholder={t("llmEditor.summarizationPromptPlaceholder", "Leave empty to use the default structured prompt that preserves goals, decisions, reasoning, and tone.")}
+                      testId="summarization-prompt"
+                    />
                   </div>
                 </div>
               )}

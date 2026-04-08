@@ -75,7 +75,7 @@ const INITIAL_STATE: WizardState = {
   name: "",
   systemPrompt: "",
   provider: "anthropic",
-  model: "claude-sonnet-4-6",
+  model: "",
   apiKey: "",
   baseUrl: "",
   introMessage: "",
@@ -120,6 +120,7 @@ const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "gemini-3.1-pro-preview",
   ],
   ollama: [
+    "gemma4:4b",
     "llama3.2:3b",
     "llama3.1:8b",
     "gemma3:4b",
@@ -129,8 +130,8 @@ const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "phi4:mini",
   ],
   jlama: [
-    "tinyllama",
     "llama-3.2-1b",
+    "tinyllama",
   ],
   huggingface: [
     "Qwen/Qwen3.5-7B",
@@ -204,7 +205,7 @@ export function AgentWizardPage() {
     const config = getProviderConfig(providerId);
     update({
       provider: providerId,
-      model: config?.defaultModel ?? "",
+      model: "",
       apiKey: config?.needsKey === false ? "" : state.apiKey,
     });
   }
@@ -789,7 +790,7 @@ function LlmStep({
             list={datalistId}
             value={model}
             onChange={(e) => onModelChange(e.target.value)}
-            placeholder={prov?.defaultModel ?? ""}
+            placeholder={t("setupWizard.modelPlaceholder", "e.g. {{model}} (or any model your provider supports)", { model: prov?.defaultModel ?? "" })}
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
             data-testid="wizard-model"
             autoComplete="off"
@@ -802,7 +803,7 @@ function LlmStep({
           <p className="mt-1 text-xs text-muted-foreground">
             {t(
               "setupWizard.modelHint",
-              "Pick a suggested model or type any model name supported by your provider"
+              "Type any model name supported by your provider, or pick one from the suggestions"
             )}
           </p>
         </div>

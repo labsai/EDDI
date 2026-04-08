@@ -96,6 +96,28 @@ export interface LlmTask {
   parallelExecutionTimeoutMs?: number;
   maxToolIterations?: number;
   modelCascade?: ModelCascadeConfig;
+
+  // Conversation Summary (Rolling Summary Strategy)
+  conversationSummary?: ConversationSummaryConfig;
+
+  // Tool Response Truncation
+  toolResponseLimits?: ToolResponseLimitsConfig;
+}
+
+export interface ConversationSummaryConfig {
+  enabled?: boolean;
+  llmProvider?: string;
+  llmModel?: string;
+  maxSummaryTokens?: number;
+  excludePropertiesFromSummary?: boolean;
+  recentWindowSteps?: number;
+  maxRecallTurns?: number;
+  summarizationPrompt?: string;
+}
+
+export interface ToolResponseLimitsConfig {
+  defaultMaxChars?: number;
+  perToolLimits?: Record<string, number>;
 }
 
 /** @deprecated Use LlmTask instead */

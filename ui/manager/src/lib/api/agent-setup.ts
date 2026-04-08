@@ -60,8 +60,8 @@ export const LLM_PROVIDERS = [
   { id: "mistral", name: "Mistral AI", defaultModel: "mistral-large-latest", needsKey: true },
   { id: "azure-openai", name: "Azure OpenAI", defaultModel: "gpt-5.4", needsKey: true },
   { id: "bedrock", name: "Amazon Bedrock", defaultModel: "anthropic.claude-sonnet-4-6-v1", needsKey: false },
-  { id: "ollama", name: "Ollama (Local)", defaultModel: "llama3.2:3b", needsKey: false },
-  { id: "jlama", name: "Jlama (Local)", defaultModel: "tinyllama", needsKey: false },
+  { id: "ollama", name: "Ollama (Local)", defaultModel: "gemma4:4b", needsKey: false },
+  { id: "jlama", name: "Jlama (Local)", defaultModel: "llama-3.2-1b", needsKey: false },
 ] as const;
 
 export type ProviderId = (typeof LLM_PROVIDERS)[number]["id"];

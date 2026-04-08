@@ -77,8 +77,8 @@ function createEmptySlot(index: number, displayName?: string, role?: string | nu
     memberType: "AGENT",
     mode: "new",
     systemPrompt: "",
-    provider: "openai",
-    model: "gpt-4o",
+    provider: "anthropic",
+    model: "",
     apiKey: "",
     created: false,
     creating: false,
@@ -94,8 +94,8 @@ function createModeratorSlot(): MemberSlot {
     memberType: "AGENT",
     mode: "new",
     systemPrompt: "You are a skilled moderator. Synthesize the group's discussion into a clear, balanced summary that captures key insights, areas of agreement, and remaining disagreements.",
-    provider: "openai",
-    model: "gpt-4o",
+    provider: "anthropic",
+    model: "",
     apiKey: "",
     created: false,
     creating: false,
@@ -207,8 +207,8 @@ export function GroupWizardPage() {
         const result = await setupAgent({
           name: `${state.name} — ${slot.displayName}`.trim(),
           systemPrompt: slot.systemPrompt || `You are ${slot.displayName}${slot.role ? `, a ${slot.role} expert` : ""}. Provide clear, actionable insights.`,
-          provider: slot.provider || "openai",
-          model: slot.model || "gpt-4o",
+          provider: slot.provider || "anthropic",
+          model: slot.model || (LLM_PROVIDERS.find(p => p.id === (slot.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-4-6"),
           apiKey: slot.apiKey || undefined,
           deploy: true,
         });
@@ -231,8 +231,8 @@ export function GroupWizardPage() {
         const result = await setupAgent({
           name: `${state.name} — Moderator`.trim(),
           systemPrompt: updatedModerator.systemPrompt || "You are a skilled moderator. Synthesize the discussion into a clear, balanced summary.",
-          provider: updatedModerator.provider || "openai",
-          model: updatedModerator.model || "gpt-4o",
+          provider: updatedModerator.provider || "anthropic",
+          model: updatedModerator.model || (LLM_PROVIDERS.find(p => p.id === (updatedModerator!.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-4-6"),
           apiKey: updatedModerator.apiKey || undefined,
           deploy: true,
         });
@@ -705,8 +705,8 @@ function MembersStep({
     const req: SetupAgentRequest = {
       name: `${state.name} — ${slot.displayName}`.trim(),
       systemPrompt: slot.systemPrompt || `You are ${slot.displayName}${slot.role ? `, a ${slot.role} expert` : ""}. Provide clear, actionable insights from your domain perspective.`,
-      provider: slot.provider || "openai",
-      model: slot.model || "gpt-4o",
+      provider: slot.provider || "anthropic",
+      model: slot.model || (LLM_PROVIDERS.find(p => p.id === (slot.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-4-6"),
       apiKey: slot.apiKey || undefined,
       deploy: true,
     };
@@ -736,8 +736,8 @@ function MembersStep({
     const req: SetupAgentRequest = {
       name: `${state.name} — Moderator`.trim(),
       systemPrompt: mod.systemPrompt || "You are a skilled moderator. Synthesize the group's discussion into a clear, balanced summary that captures key insights, areas of agreement, and remaining disagreements.",
-      provider: mod.provider || "openai",
-      model: mod.model || "gpt-4o",
+      provider: mod.provider || "anthropic",
+      model: mod.model || (LLM_PROVIDERS.find(p => p.id === (mod.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-4-6"),
       apiKey: mod.apiKey || undefined,
       deploy: true,
     };
@@ -1038,10 +1038,9 @@ function MemberCard({
                     <select
                       value={member.provider}
                       onChange={(e) => {
-                        const prov = LLM_PROVIDERS.find((p) => p.id === e.target.value);
                         onUpdate({
                           provider: e.target.value,
-                          model: prov?.defaultModel || member.model,
+                          model: "",
                         });
                       }}
                       className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-1.5 pe-7 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -1061,7 +1060,7 @@ function MemberCard({
                     value={member.model}
                     onChange={(e) => onUpdate({ model: e.target.value })}
                     className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                    placeholder={providerConfig?.defaultModel}
+                    placeholder={`e.g. ${providerConfig?.defaultModel ?? ""}`}
                   />
                 </div>
               </div>
@@ -1210,8 +1209,7 @@ function ModeratorCard({
               <select
                 value={moderator.provider}
                 onChange={(e) => {
-                  const prov = LLM_PROVIDERS.find((p) => p.id === e.target.value);
-                  onChange({ provider: e.target.value, model: prov?.defaultModel || moderator.model });
+                  onChange({ provider: e.target.value, model: "" });
                 }}
                 className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-1.5 pe-7 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               >
@@ -1225,7 +1223,7 @@ function ModeratorCard({
               value={moderator.model}
               onChange={(e) => onChange({ model: e.target.value })}
               className="rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              placeholder={providerConfig?.defaultModel}
+              placeholder={`e.g. ${providerConfig?.defaultModel ?? ""}`}
             />
           </div>
           {providerConfig?.needsKey && (

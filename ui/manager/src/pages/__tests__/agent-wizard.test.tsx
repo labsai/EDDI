@@ -164,7 +164,8 @@ describe("AgentWizardPage", () => {
     );
     await user.click(screen.getByTestId("wizard-next"));
 
-    // Step 3: LLM — needs API key for default provider (anthropic)
+    // Step 3: LLM — needs model name + API key for default provider (anthropic)
+    await user.type(screen.getByTestId("wizard-model"), "claude-sonnet-4-6");
     await user.type(screen.getByTestId("wizard-apikey-input"), "sk-test-key");
     await user.click(screen.getByTestId("wizard-next"));
 
