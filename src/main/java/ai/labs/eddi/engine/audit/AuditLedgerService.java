@@ -1,5 +1,6 @@
 package ai.labs.eddi.engine.audit;
 
+import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import io.nats.client.Connection;
@@ -51,6 +52,9 @@ public class AuditLedgerService {
     private final io.micrometer.core.instrument.Counter droppedCounter;
     private final Instance<Connection> natsConnectionInstance;
     private final String deadLetterPath;
+    private final boolean agentSigningEnabled;
+    private final String defaultTenantId;
+    private final AgentSigningService agentSigningService;
 
     private byte[] hmacKey;
     private final ConcurrentLinkedQueue<AuditEntry> queue = new ConcurrentLinkedQueue<>();
@@ -62,14 +66,20 @@ public class AuditLedgerService {
             @ConfigProperty(name = "eddi.audit.flush-interval-seconds", defaultValue = "3") int flushIntervalSeconds,
             @ConfigProperty(name = "eddi.vault.master-key") Optional<String> masterKeyConfig,
             @ConfigProperty(name = "eddi.audit.dead-letter-path", defaultValue = "/opt/eddi/data/eddi-audit-deadletter.jsonl") String deadLetterPath,
-            io.micrometer.core.instrument.MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance) {
+            @ConfigProperty(name = "eddi.audit.agent-signing-enabled", defaultValue = "false") boolean agentSigningEnabled,
+            @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
+            io.micrometer.core.instrument.MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
+            AgentSigningService agentSigningService) {
         this.auditStore = auditStore;
         this.enabled = enabled;
         this.flushIntervalSeconds = flushIntervalSeconds;
         this.masterKeyConfig = masterKeyConfig;
         this.deadLetterPath = deadLetterPath;
+        this.agentSigningEnabled = agentSigningEnabled;
+        this.defaultTenantId = defaultTenantId;
         this.droppedCounter = meterRegistry.counter("eddi_audit_entries_dropped_total");
         this.natsConnectionInstance = natsConnectionInstance;
+        this.agentSigningService = agentSigningService;
     }
 
     /**
@@ -79,7 +89,7 @@ public class AuditLedgerService {
     static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
                                                io.micrometer.core.instrument.MeterRegistry meterRegistry) {
         return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig), "eddi-audit-deadletter.jsonl",
-                meterRegistry, null);
+                false, "default", meterRegistry, null, null);
     }
 
     @PostConstruct
@@ -145,6 +155,11 @@ public class AuditLedgerService {
             signed = scrubbed;
         }
 
+        // Sign with agent's Ed25519 key if signing is enabled
+        if (agentSigningEnabled && agentSigningService != null && signed.agentId() != null) {
+            signed = applyAgentSignature(signed);
+        }
+
         queue.offer(signed);
     }
 
@@ -191,6 +206,25 @@ public class AuditLedgerService {
      */
     public boolean isEnabled() {
         return enabled;
+    }
+
+    /**
+     * Apply the agent's Ed25519 signature to the entry. Signs the HMAC if available
+     * (covers full entry integrity), otherwise signs the entry ID. Gracefully
+     * returns the original entry if no signing key exists.
+     */
+    private AuditEntry applyAgentSignature(AuditEntry entry) {
+        try {
+            String payload = entry.hmac() != null ? entry.hmac() : entry.id();
+            String signature = agentSigningService.sign(defaultTenantId, entry.agentId(), payload);
+            return entry.withAgentSignature(signature);
+        } catch (AgentSigningService.AgentSigningException e) {
+            // No signing key for this agent — this is expected for agents without identity
+            // setup.
+            // Log at debug level to avoid noise.
+            LOGGER.debugv("Agent signing skipped for agent '{0}': {1}", entry.agentId(), e.getMessage());
+            return entry;
+        }
     }
 
     // ==================== Visible for Testing ====================
