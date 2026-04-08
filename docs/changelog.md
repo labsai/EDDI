@@ -15,6 +15,58 @@ Each entry follows this format:
 
 ---
 
+## Agentic Improvements — Dead Code + Prompt Snippets + Audit Signing (2026-04-08)
+
+**Repo:** EDDI (`feature/agentic-improvements` off `feature/version-6.0.0`)
+
+**What changed:**
+
+Executed the agentic improvements remediation plan. Cleaned up architectural debt and implemented config-driven prompt building blocks.
+
+### Phase 1+2: Dead Code Deletion
+
+Removed non-functional `RulesModule` CDI provider map (condition classes are not `@ApplicationScoped` beans, so the provider map always fails), `@RuleConditions` qualifier, and the fallback path in `RuleDeserialization`. Deleted `CounterweightService`, `IdentityMaskingService`, and `DeploymentContextService` — these over-engineered Java services are replaced by the Prompt Snippets system.
+
+| Deleted File | Replacement |
+|---|---|
+| `CounterweightService.java` + test | Prompt Snippets (`{{snippets.cautious_mode}}`) |
+| `IdentityMaskingService.java` + test | Prompt Snippets (`{{snippets.persona_instructions}}`) |
+| `DeploymentContextService.java` | N/A (environment-level config via snippets) |
+| `RuleConditions.java` (qualifier) | N/A (dead code) |
+| `CounterweightConfig` (inner class) | N/A (removed from `LlmConfiguration`) |
+| `IdentityMaskingConfig` (inner class) | N/A (removed from `LlmConfiguration`) |
+
+### Phase 3: Prompt Snippets
+
+New config-driven system prompt building blocks. Snippets are versioned MongoDB documents, automatically available in all system prompt templates via `{{snippets.<name>}}`.
+
+**Key design decisions:**
+- **Auto-available:** All snippets are injected into `templateDataObjects` before template processing, so designers don't need to register or reference snippets explicitly
+- **Cached:** Caffeine cache with 5-minute TTL + `@ConfigurationUpdate` CDI event invalidation
+- **Template opt-out:** `templateEnabled` flag on the config. When false, content is wrapped in Jinja2 `{% raw %}` blocks. Designers can also use `{% raw %}` inline for per-usage override
+- **Name validation:** Enforced `[a-z0-9_]+` pattern for safe Jinja2 dot-notation access
+
+**New files:**
+| File | Purpose |
+|---|---|
+| `configs/snippets/model/PromptSnippet.java` | POJO with name, category, description, content, tags, templateEnabled |
+| `configs/snippets/IPromptSnippetStore.java` | Store interface extending `IResourceStore` |
+| `configs/snippets/mongo/PromptSnippetStore.java` | MongoDB implementation via `AbstractResourceStore` |
+| `configs/snippets/IRestPromptSnippetStore.java` | JAX-RS REST interface |
+| `configs/snippets/rest/RestPromptSnippetStore.java` | REST implementation |
+| `modules/llm/impl/PromptSnippetService.java` | Caffeine-cached service, auto-loads via descriptor store |
+
+### Phase 5: Agent Signature → Audit Ledger
+
+Added `agentSignature` field to the `AuditEntry` record (nullable, defaults to null). Updated all 17 construction sites across 8 files. MongoDB and PostgreSQL stores both serialize/deserialize the field. `withAgentSignature()` wither method added for future integration with `AgentSigningService`.
+
+**What's next:**
+- Phase 4: Attachment pipeline (SPI, upload endpoint, multimodal forwarding)
+- Phase 5 completion: Wire `AgentSigningService` into `AuditLedgerService.submit()`
+- Phase 6: Documentation (capabilityMatch, snippet usage guide)
+
+---
+
 ## Planning Docs Audit — Status Banners (2026-04-07)
 
 **Repo:** EDDI (`feature/version-6.0.0`) — documentation only
