@@ -276,8 +276,8 @@ public class GdprComplianceService {
     private static final int AUDIT_EXPORT_LIMIT = 10_000;
 
     /**
-     * Restrict processing for a user (GDPR Art. 18). Data is preserved but
-     * new conversations and message processing are blocked.
+     * Restrict processing for a user (GDPR Art. 18). Data is preserved but new
+     * conversations and message processing are blocked.
      *
      * @param userId
      *            the user whose processing to restrict

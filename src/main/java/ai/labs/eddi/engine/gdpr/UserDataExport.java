@@ -49,8 +49,8 @@ public record UserDataExport(
     }
 
     /**
-     * Lightweight audit entry for export — omits internal HMAC/signature
-     * fields that are not user-relevant.
+     * Lightweight audit entry for export — omits internal HMAC/signature fields
+     * that are not user-relevant.
      */
     public record AuditExportEntry(
             String conversationId,

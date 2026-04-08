@@ -79,8 +79,8 @@ public interface IAuditStore {
     long countByConversation(String conversationId);
 
     /**
-     * Retrieve audit entries for a specific user, ordered by timestamp
-     * descending. Used by GDPR Art. 15 export to include processing records.
+     * Retrieve audit entries for a specific user, ordered by timestamp descending.
+     * Used by GDPR Art. 15 export to include processing records.
      *
      * @param userId
      *            the user to query

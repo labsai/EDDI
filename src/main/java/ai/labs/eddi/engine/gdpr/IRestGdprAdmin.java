@@ -9,9 +9,9 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 /**
  * REST endpoints for GDPR compliance operations.
  * <p>
- * Provides cascading user data deletion (Art. 17 — Right to Erasure), full
- * user data export (Art. 15/20 — Right of Access / Data Portability), and
- * processing restriction (Art. 18 — Right to Restriction).
+ * Provides cascading user data deletion (Art. 17 — Right to Erasure), full user
+ * data export (Art. 15/20 — Right of Access / Data Portability), and processing
+ * restriction (Art. 18 — Right to Restriction).
  *
  * @author ginccc
  * @since 6.0.0

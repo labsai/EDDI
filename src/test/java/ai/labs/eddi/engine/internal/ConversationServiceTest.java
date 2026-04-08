@@ -3,6 +3,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.lifecycle.IConversation;
@@ -50,6 +51,7 @@ class ConversationServiceTest {
     private ICacheFactory cacheFactory;
     private ICache<String, ConversationState> conversationStateCache;
     private AuditLedgerService auditLedgerService;
+    private GdprComplianceService gdprComplianceService;
     private TenantQuotaService tenantQuotaService;
     private IUserMemoryStore userMemoryStore;
 
@@ -72,6 +74,7 @@ class ConversationServiceTest {
         cacheFactory = mock(ICacheFactory.class);
         conversationStateCache = mock(ICache.class);
         auditLedgerService = mock(AuditLedgerService.class);
+        gdprComplianceService = mock(GdprComplianceService.class);
         tenantQuotaService = mock(TenantQuotaService.class);
         userMemoryStore = mock(IUserMemoryStore.class);
         when(tenantQuotaService.checkConversationQuota()).thenReturn(QuotaCheckResult.OK);
@@ -83,8 +86,8 @@ class ConversationServiceTest {
         when(contextLogger.createLoggingContext(any(), any(), any(), any())).thenReturn(new HashMap<>());
 
         conversationService = new ConversationService(AgentFactory, conversationMemoryStore, conversationDescriptorStore, userMemoryStore,
-                conversationCoordinator, conversationSetup, cacheFactory, runtime, contextLogger, auditLedgerService, tenantQuotaService,
-                meterRegistry, AGENT_TIMEOUT);
+                conversationCoordinator, conversationSetup, cacheFactory, runtime, contextLogger, auditLedgerService, gdprComplianceService,
+                tenantQuotaService, meterRegistry, AGENT_TIMEOUT);
     }
 
     // --- startConversation tests ---

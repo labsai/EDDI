@@ -280,6 +280,14 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         return memoriesCollection.countDocuments(eq(FIELD_USER_ID, userId));
     }
 
+    @Override
+    public long deleteOlderThan(int olderThanDays) throws IResourceStore.ResourceStoreException {
+        Instant cutoff = Instant.now().minus(java.time.Duration.ofDays(olderThanDays));
+        Bson filter = Filters.lt(FIELD_UPDATED_AT, cutoff.toString());
+        DeleteResult result = memoriesCollection.deleteMany(filter);
+        return result.getDeletedCount();
+    }
+
     // === Document conversion ===
 
     private Bson buildUpsertFilter(UserMemoryEntry entry) {

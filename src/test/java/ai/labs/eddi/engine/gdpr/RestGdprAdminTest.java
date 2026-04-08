@@ -75,7 +75,7 @@ class RestGdprAdminTest {
     @Test
     void exportUserData_delegatesToService() {
         var expected = new UserDataExport("user-1", Instant.now(),
-                List.of(), List.of(), List.of());
+                List.of(), List.of(), List.of(), List.of());
         when(gdprService.exportUserData("user-1")).thenReturn(expected);
 
         UserDataExport result = restAdmin.exportUserData("user-1");

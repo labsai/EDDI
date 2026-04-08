@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.memory.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.IAttachmentStorage;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -46,8 +47,10 @@ public class RestConversationStore implements IRestConversationStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
+    private final IUserMemoryStore userMemoryStore;
     private final IRuntime runtime;
     private final Integer deleteEndedConversationsOnceOlderThanDays;
+    private final Integer deleteMemoriesOlderThanDays;
     private final Instance<IAttachmentStorage> attachmentStorageInstance;
 
     private static final Logger log = Logger.getLogger(RestConversationStore.class);
@@ -58,17 +61,22 @@ public class RestConversationStore implements IRestConversationStore {
             IDocumentDescriptorStore documentDescriptorStore,
             IConversationDescriptorStore conversationDescriptorStore,
             IConversationMemoryStore conversationMemoryStore,
+            IUserMemoryStore userMemoryStore,
             IRuntime runtime,
             @ConfigProperty(name = "eddi.conversations.deleteEndedConversationsOnceOlderThanDays")
             Integer deleteEndedConversationsOnceOlderThanDays,
+            @ConfigProperty(name = "eddi.usermemories.deleteOlderThanDays")
+            Integer deleteMemoriesOlderThanDays,
             Instance<IAttachmentStorage> attachmentStorageInstance) {
     // @formatter:on
 
         this.documentDescriptorStore = documentDescriptorStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.conversationMemoryStore = conversationMemoryStore;
+        this.userMemoryStore = userMemoryStore;
         this.runtime = runtime;
         this.deleteEndedConversationsOnceOlderThanDays = deleteEndedConversationsOnceOlderThanDays;
+        this.deleteMemoriesOlderThanDays = deleteMemoriesOlderThanDays;
         this.attachmentStorageInstance = attachmentStorageInstance;
     }
 
@@ -216,6 +224,26 @@ public class RestConversationStore implements IRestConversationStore {
                 }
             } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
                 log.error(e.getLocalizedMessage(), e);
+            }
+            return null;
+        }, ThreadContext.getResources());
+    }
+
+    @Scheduled(every = "24h", delayed = "2m")
+    void cleanupOldUserMemories() {
+        if (deleteMemoriesOlderThanDays == null || deleteMemoriesOlderThanDays <= 0) {
+            return; // Disabled
+        }
+
+        runtime.submitCallable(() -> {
+            try {
+                long deleted = userMemoryStore.deleteOlderThan(deleteMemoriesOlderThanDays);
+                if (deleted > 0) {
+                    log.infof("User memory retention: deleted %d entries older than %d days",
+                            deleted, deleteMemoriesOlderThanDays);
+                }
+            } catch (Exception e) {
+                log.error("User memory retention cleanup failed", e);
             }
             return null;
         }, ThreadContext.getResources());

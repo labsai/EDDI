@@ -123,7 +123,7 @@ class McpGdprToolsTest {
     @Test
     void exportUserData_success() throws Exception {
         var export = new UserDataExport("user-1", Instant.now(),
-                List.of(), List.of(), List.of());
+                List.of(), List.of(), List.of(), List.of());
         when(gdprService.exportUserData("user-1")).thenReturn(export);
         when(jsonSerialization.serialize(any())).thenReturn(
                 "{\"userId\":\"user-1\"}");
