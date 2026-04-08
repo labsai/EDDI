@@ -414,7 +414,9 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     @Override
     public long deleteOlderThan(int olderThanDays) throws IResourceStore.ResourceStoreException {
         ensureSchema();
-        String sql = "DELETE FROM usermemories WHERE updated_at < CURRENT_TIMESTAMP - INTERVAL '1 day' * ?";
+        // Exclude GDPR system keys (e.g. _gdpr_processing_restricted) from retention
+        // cleanup
+        String sql = "DELETE FROM usermemories WHERE updated_at < CURRENT_TIMESTAMP - INTERVAL '1 day' * ? AND key NOT LIKE '_gdpr_%'";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, olderThanDays);
             return ps.executeUpdate();

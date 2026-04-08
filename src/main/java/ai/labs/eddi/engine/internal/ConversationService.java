@@ -382,6 +382,15 @@ public class ConversationService implements IConversationService {
             processingConversationReferences.add(createReferenceForMetrics(agentId, conversationId));
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
+
+            // GDPR Art. 18 — processing restriction check
+            if (conversationMemory.getUserId() != null
+                    && gdprComplianceService.isProcessingRestricted(conversationMemory.getUserId())) {
+                processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
+                throw new ProcessingRestrictedException(
+                        "Processing is restricted for this user (GDPR Art. 18)");
+            }
+
             var loggingContext = contextLogger.createLoggingContext(environment, agentId, conversationId, conversationMemory.getUserId());
             Integer agentVersion = conversationMemory.getAgentVersion();
             loggingContext.put("agentVersion", agentVersion.toString());

@@ -337,11 +337,13 @@ public class GdprComplianceService {
     public boolean isProcessingRestricted(String userId) {
         try {
             var entry = userMemoryStore.getByKey(userId, RESTRICTION_KEY);
-            return entry.isPresent() && "true".equals(entry.get().value());
+            return entry.isPresent() && "true".equals(String.valueOf(entry.get().value()));
         } catch (Exception e) {
-            LOGGER.warnf("[GDPR] Failed to check processing restriction: %s",
-                    e.getMessage());
-            return false;
+            // Fail-closed: if we can't verify restriction status, block processing
+            // to prevent accidental processing of a restricted user during outages
+            LOGGER.errorf("[GDPR] Failed to check processing restriction for user " +
+                    "(fail-closed — blocking processing): %s", e.getMessage());
+            return true;
         }
     }
 

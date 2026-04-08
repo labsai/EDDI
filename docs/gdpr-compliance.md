@@ -86,7 +86,7 @@ curl -X DELETE https://your-eddi-instance/admin/gdpr/{userId}/restrict \
 - Processing is unlawful but user requests restriction instead of erasure (Art. 18(1)(b))
 - User objects to processing pending verification (Art. 21)
 
-### 3. Response Timeline
+### 4. Response Timeline
 
 | Regulation | Initial Deadline | Extension |
 |---|---|---|
@@ -98,6 +98,7 @@ constraint is your internal DSAR process, not the technical execution.
 
 ## Retention Configuration
 
+```properties
 # Auto-delete ended conversations after N days (default: 365, -1 to disable)
 eddi.conversations.deleteEndedConversationsOnceOlderThanDays=365
 
