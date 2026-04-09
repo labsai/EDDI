@@ -4,6 +4,7 @@ import {
   storeSecret,
   deleteSecret,
   getVaultHealth,
+  rotateSecret,
 } from "@/lib/api/secrets";
 
 /* ─── Query Keys ─── */
@@ -71,5 +72,29 @@ export function useVaultHealth() {
     queryKey: secretKeys.health,
     queryFn: getVaultHealth,
     refetchInterval: 30_000, // poll every 30s
+  });
+}
+
+/** Rotate a secret — store a new value via the rotation endpoint. */
+export function useRotateSecret() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      tenantId: string;
+      keyName: string;
+      newValue: string;
+      description?: string;
+    }) =>
+      rotateSecret(
+        args.tenantId,
+        args.keyName,
+        args.newValue,
+        args.description,
+      ),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({
+        queryKey: secretKeys.list(vars.tenantId),
+      });
+    },
   });
 }

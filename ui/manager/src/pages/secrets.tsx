@@ -25,6 +25,7 @@ import {
   useStoreSecret,
   useDeleteSecret,
   useVaultHealth,
+  useRotateSecret,
 } from "@/hooks/use-secrets";
 import type { SecretMetadata } from "@/lib/api/secrets";
 
@@ -46,6 +47,9 @@ export function SecretsPage() {
   const [newDescription, setNewDescription] = useState("");
   const [valueVisible, setValueVisible] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SecretMetadata | null>(null);
+  const [rotateTarget, setRotateTarget] = useState<SecretMetadata | null>(null);
+  const [rotateValue, setRotateValue] = useState("");
+  const [rotateVisible, setRotateVisible] = useState(false);
   const [newAllowedAgents, setNewAllowedAgents] = useState<string[]>([]);
 
   /* ─── Queries ─── */
@@ -53,6 +57,7 @@ export function SecretsPage() {
   const { data: vaultHealth } = useVaultHealth();
   const storeMut = useStoreSecret();
   const deleteMut = useDeleteSecret();
+  const rotateMut = useRotateSecret();
 
   const vaultDown = vaultHealth?.available === false;
 
@@ -389,21 +394,32 @@ export function SecretsPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-end">
-                      <button
-                        onClick={() => setDeleteTarget(s)}
-                        className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
-                        data-testid={`delete-${s.keyName}`}
-                        aria-label={t("secrets.deleteKey", {
-                          key: s.keyName,
-                          defaultValue: `Delete ${s.keyName}`,
-                        })}
-                      >
-                        <Trash2
-                          className="h-3.5 w-3.5"
-                          aria-hidden="true"
-                        />
-                        {t("common.delete", "Delete")}
-                      </button>
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => { setRotateTarget(s); setRotateValue(""); setRotateVisible(false); }}
+                          className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-amber-600 dark:text-amber-400 transition-colors hover:bg-amber-500/10"
+                          data-testid={`rotate-${s.keyName}`}
+                          aria-label={t("secrets.rotateKey", { key: s.keyName, defaultValue: `Rotate ${s.keyName}` })}
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                          {t("secrets.rotate", "Rotate")}
+                        </button>
+                        <button
+                          onClick={() => setDeleteTarget(s)}
+                          className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
+                          data-testid={`delete-${s.keyName}`}
+                          aria-label={t("secrets.deleteKey", {
+                            key: s.keyName,
+                            defaultValue: `Delete ${s.keyName}`,
+                          })}
+                        >
+                          <Trash2
+                            className="h-3.5 w-3.5"
+                            aria-hidden="true"
+                          />
+                          {t("common.delete", "Delete")}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -728,6 +744,85 @@ export function SecretsPage() {
                   <Loader2 className="h-4 w-4 animate-spin" />
                 )}
                 {t("common.delete", "Delete")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Rotate secret dialog ─── */}
+      {rotateTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setRotateTarget(null)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setRotateTarget(null);
+          }}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rotate-secret-title"
+          >
+            <h2
+              id="rotate-secret-title"
+              className="flex items-center gap-2 text-lg font-semibold text-foreground"
+            >
+              <RefreshCw className="h-5 w-5 text-amber-500" />
+              {t("secrets.rotateTitle", { key: rotateTarget.keyName, defaultValue: `Rotate "${rotateTarget.keyName}"` })}
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {t("secrets.rotateDesc", "Enter the new value. The existing references will continue to resolve to the updated value.")}
+            </p>
+            <div className="relative mt-4">
+              <input
+                type={rotateVisible ? "text" : "password"}
+                value={rotateValue}
+                onChange={(e) => setRotateValue(e.target.value)}
+                placeholder={t("secrets.newValuePlaceholder", "New secret value…")}
+                className="h-9 w-full rounded-lg border border-input bg-background pe-10 ps-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                data-testid="rotate-value-input"
+                autoComplete="new-password"
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={() => setRotateVisible(!rotateVisible)}
+                className="absolute inset-e-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {rotateVisible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+              </button>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setRotateTarget(null)}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
+              >
+                {t("common.cancel", "Cancel")}
+              </button>
+              <button
+                onClick={() => {
+                  if (!rotateValue.trim()) return;
+                  rotateMut.mutate(
+                    { tenantId, keyName: rotateTarget.keyName, newValue: rotateValue.trim() },
+                    {
+                      onSuccess: () => {
+                        toast.success(t("secrets.rotateSuccess", { key: rotateTarget.keyName, defaultValue: `Secret "${rotateTarget.keyName}" rotated` }));
+                        setRotateTarget(null);
+                        setRotateValue("");
+                      },
+                      onError: (err) => toast.error(err.message),
+                    },
+                  );
+                }}
+                disabled={!rotateValue.trim() || rotateMut.isPending}
+                className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
+                data-testid="confirm-rotate-button"
+              >
+                {rotateMut.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                {t("secrets.rotate", "Rotate")}
               </button>
             </div>
           </div>

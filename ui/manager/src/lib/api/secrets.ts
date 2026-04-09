@@ -128,3 +128,38 @@ export async function getVaultHealth(): Promise<VaultHealth> {
     return { status: "DOWN", provider: "unknown", available: false };
   }
 }
+
+/** Rotate a secret — store a new value and mark the rotation timestamp. */
+export async function rotateSecret(
+  tenantId: string,
+  keyName: string,
+  newValue: string,
+  description?: string,
+): Promise<SecretStoreResponse> {
+  // The backend POST endpoint handles rotation (sets lastRotatedAt)
+  const body: SecretStoreRequest = { value: newValue };
+  if (description) body.description = description;
+
+  const res = await fetch(
+    `${window.location.origin}${BASE}/${tenantId}/${keyName}/rotate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    if (res.status === 503) {
+      throw new Error(
+        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
+      );
+    }
+    // Fallback: if the rotate endpoint doesn't exist, use PUT
+    if (res.status === 404 || res.status === 405) {
+      return storeSecret(tenantId, keyName, newValue, description);
+    }
+    const err = await res.json().catch(() => ({ error: "Unknown error" }));
+    throw new Error(err.error || `Failed to rotate secret (HTTP ${res.status})`);
+  }
+  return res.json();
+}

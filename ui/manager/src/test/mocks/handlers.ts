@@ -2255,6 +2255,19 @@ export const secretsHandlers = [
   http.get("*/secretstore/secrets/health", () =>
     HttpResponse.json({ status: "UP", provider: "VaultSecretProvider", available: true }),
   ),
+
+  // Rotate secret
+  http.post("*/secretstore/secrets/:tenantId/:keyName/rotate", ({ params }) => {
+    const tenantId = params.tenantId as string;
+    const keyName = params.keyName as string;
+    const ref = tenantId === "default"
+      ? `\${eddivault:${keyName}}`
+      : `\${eddivault:${tenantId}/${keyName}}`;
+    return HttpResponse.json(
+      { reference: ref, tenantId, keyName },
+      { status: 200 },
+    );
+  }),
 ];
 
 // ─── Audit Trail Handlers ────────────────────────────────────────────────────
@@ -3253,5 +3266,38 @@ export const gdprHandlers = [
       ],
       managedConversations: [],
     });
+  }),
+];
+
+// ─── Capability Registry Handlers ────────────────────────────────────────────
+
+const MOCK_CAPABILITIES = [
+  { agentId: "agent1", skill: "customer-support", attributes: { language: "en" }, confidence: "high" },
+  { agentId: "agent1", skill: "order-tracking", attributes: {}, confidence: "high" },
+  { agentId: "agent2", skill: "faq", attributes: { domain: "product" }, confidence: "medium" },
+  { agentId: "agent3", skill: "code-review", attributes: { language: "java" }, confidence: "high" },
+];
+
+export const capabilityHandlers = [
+  http.get("*/capabilities", ({ request }) => {
+    const url = new URL(request.url);
+    // Skip sub-paths (agent-specific, search)
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length > 1) return;
+    return HttpResponse.json(MOCK_CAPABILITIES);
+  }),
+
+  http.get("*/capabilities/agents/:agentId", ({ params }) => {
+    const filtered = MOCK_CAPABILITIES.filter((c) => c.agentId === params.agentId);
+    return HttpResponse.json(filtered);
+  }),
+
+  http.get("*/capabilities/search", ({ request }) => {
+    const url = new URL(request.url);
+    const skill = url.searchParams.get("skill") ?? "";
+    const filtered = MOCK_CAPABILITIES.filter((c) =>
+      c.skill.toLowerCase().includes(skill.toLowerCase()),
+    );
+    return HttpResponse.json(filtered);
   }),
 ];
