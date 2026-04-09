@@ -15,6 +15,36 @@ Each entry follows this format:
 
 ---
 
+## Phase A: Strict Write Discipline — Commit Flags (2026-04-09)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**What changed:**
+
+Implemented the first phase of the memory architecture plan: **commit flags** for conversation memory data. When an `ILifecycleTask` fails, its raw output (stack traces, HTTP error bodies) is marked as **uncommitted** and excluded from the LLM's context on subsequent turns, while a concise **error digest** is injected as a special output type so the LLM can adapt.
+
+| Component | Change |
+|---|---|
+| **`IData<T>` / `Data<T>`** | Added `isCommitted()` / `setCommitted(boolean)` with default `true` (backwards-compatible) |
+| **`AgentConfiguration`** | New `MemoryPolicy` + `StrictWriteDiscipline` inner classes. Three modes: `digest` (recommended), `exclude_all`, `keep_all` |
+| **`IConversationMemory` / `ConversationMemory`** | Added `memoryPolicy` accessor (transient, never serialized) |
+| **`Agent` / `IAgent`** | Added `getMemoryPolicy()` with wiring in `AgentStoreClientLibrary` |
+| **`ConversationStep`** | Added `snapshotDataCount()` and `snapshotOutputKeys()` helpers for rollback tracking |
+| **`LifecycleManager`** | Core change: on task failure with strict write enabled — marks new IData as uncommitted, rolls back ConversationOutput, injects `errorDigest` output type + `task_failed_<taskId>` action, re-throws (pipeline stops) |
+| **`ResultSnapshot`** | Added `committed` field for persistence roundtrip |
+| **`ConversationMemoryUtilities`** | Serialize/deserialize committed flag in all 3 conversion paths |
+| **Tests** | Updated `MockData` in `ContextMatcherTest` and `OutputTemplateTaskTest` |
+
+**Key design decisions:**
+
+1. **Pipeline stops on failure** (current behavior preserved) — but the error digest and `task_failed_*` action are stored. On the next turn, behavior rules can react to failures using EDDI's existing action-based orchestration.
+2. **Error digest as special output type** — `{"type": "errorDigest", "taskId": "...", "text": "..."}` — separates error indicators from regular text output. UI can render with distinct styling (warning icon, collapsible). LLM sees a concise summary, not raw noise.
+3. **Three modes**: `digest` (default when enabled) gives the LLM enough context to adapt; `exclude_all` hides everything; `keep_all` preserves backwards-compatible behavior.
+
+**All 1711 tests pass.**
+
+---
+
 ## README v2 Overhaul — Positioning, Missing Features, SEO (2026-04-09)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
