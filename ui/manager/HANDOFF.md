@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-04-09  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: `3d21a11` fix(v6): critical review fixes - extract EDITOR_MAP, useMemo→useEffect, a11y, i18n
+> **Last commit**: `20336a3` test(v6): add studio test coverage — AgentStudioPage (10) + StudioEditorPanel (9)
 
 ---
 
@@ -75,7 +75,7 @@
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 480 pass (`npm run test`) — 45 files (100% green)
+- **Unit/Component**: 499 pass (`npm run test`) — 47 files (100% green)
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds
