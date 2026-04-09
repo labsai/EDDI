@@ -16,14 +16,14 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 
 Most multi-agent frameworks (LangGraph, CrewAI, AutoGen) are Python/Node libraries — great for prototyping, hard to govern in production. EDDI approaches from the opposite direction: **a deterministic engine built to safely govern non-deterministic AI.**
 
-| Dimension | Typical Python/Node Frameworks | EDDI |
-|---|---|---|
-| **Concurrency** | GIL or single-threaded event loop | Java 25 Virtual Threads — true OS-level parallelism |
-| **Agent Logic** | Embedded in application code | Versioned JSON configurations — update behavior without redeployment |
+| Dimension          | Typical Python/Node Frameworks           | EDDI                                                                        |
+| ------------------ | ---------------------------------------- | --------------------------------------------------------------------------- |
+| **Concurrency**    | GIL or single-threaded event loop        | Java 25 Virtual Threads — true OS-level parallelism                         |
+| **Agent Logic**    | Embedded in application code             | Versioned JSON configurations — update behavior without redeployment        |
 | **Security Model** | Often relies on sandboxed code execution | No dynamic code execution at all; envelope-encrypted vault, SSRF protection |
-| **Compliance** | Requires custom implementation | GDPR, HIPAA, EU AI Act infrastructure built-in |
-| **Audit Trail** | Application-level logging | HMAC-SHA256 immutable ledger with cryptographic agent signing |
-| **Deployment** | pip/npm + manual infrastructure | One-command Docker install, Kubernetes/OpenShift-ready |
+| **Compliance**     | Requires custom implementation           | GDPR, HIPAA, EU AI Act infrastructure built-in                              |
+| **Audit Trail**    | Application-level logging                | HMAC-SHA256 immutable ledger with cryptographic agent signing               |
+| **Deployment**     | pip/npm + manual infrastructure          | One-command Docker install, Kubernetes/OpenShift-ready                      |
 
 > _"The engine is strict so the AI can be creative."_ — [Project Philosophy](docs/project-philosophy.md)
 
@@ -42,24 +42,24 @@ Most multi-agent frameworks (LangGraph, CrewAI, AutoGen) are Python/Node librari
 
 ### 🧠 LLM Provider Support (12 Providers)
 
-| Category | Providers |
-|---|---|
-| **Cloud APIs** | OpenAI · Anthropic Claude · Google Gemini · Mistral AI |
-| **Enterprise Cloud** | Azure OpenAI · Amazon Bedrock · Oracle GenAI · Google Vertex AI |
-| **Self-Hosted** | Ollama · Jlama · Hugging Face |
-| **Compatible** | Any OpenAI-compatible endpoint (DeepSeek, Cohere, etc.) via `baseUrl` |
+| Category             | Providers                                                             |
+| -------------------- | --------------------------------------------------------------------- |
+| **Cloud APIs**       | OpenAI · Anthropic Claude · Google Gemini · Mistral AI                |
+| **Enterprise Cloud** | Azure OpenAI · Amazon Bedrock · Oracle GenAI · Google Vertex AI       |
+| **Self-Hosted**      | Ollama · Jlama · Hugging Face                                         |
+| **Compatible**       | Any OpenAI-compatible endpoint (DeepSeek, Cohere, etc.) via `baseUrl` |
 
 ### 🔗 Standards & Interoperability
 
 EDDI implements open standards — not proprietary APIs:
 
-| Standard | Role | What It Enables |
-|---|---|---|
-| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (58 tools) + Client | Control EDDI from Claude Desktop, Cursor, or any MCP client. Connect agents to external MCP tool servers |
-| **[A2A](https://google.github.io/A2A/)** (Agent-to-Agent Protocol) | Full implementation | Cross-platform agent communication, Agent Cards, and skill discovery |
-| **[OpenAPI](https://www.openapis.org/)** 3.1 | Native generation + consumption | Auto-generated spec. Paste any OpenAPI spec → get a fully deployed API-calling agent |
-| **OAuth 2.0 / OIDC** | Keycloak integration | Authentication, authorization, and multi-tenant isolation |
-| **SSE** (Server-Sent Events) | Streaming transport | Real-time chat responses, group discussion feeds, and live log streaming |
+| Standard                                                             | Role                            | What It Enables                                                                                          |
+| -------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (58 tools) + Client      | Control EDDI from Claude Desktop, Cursor, or any MCP client. Connect agents to external MCP tool servers |
+| **[A2A](https://google.github.io/A2A/)** (Agent-to-Agent Protocol)   | Full implementation             | Cross-platform agent communication, Agent Cards, and skill discovery                                     |
+| **[OpenAPI](https://www.openapis.org/)** 3.1                         | Native generation + consumption | Auto-generated spec. Paste any OpenAPI spec → get a fully deployed API-calling agent                     |
+| **OAuth 2.0 / OIDC**                                                 | Keycloak integration            | Authentication, authorization, and multi-tenant isolation                                                |
+| **SSE** (Server-Sent Events)                                         | Streaming transport             | Real-time chat responses, group discussion feeds, and live log streaming                                 |
 
 ### 💭 Memory & Context Management
 
@@ -80,18 +80,18 @@ EDDI implements open standards — not proprietary APIs:
 
 ### 🛠️ Built-In AI Agent Tools
 
-| Tool | Description |
-|---|---|
-| 🔍 **Web Search** | DuckDuckGo or Google Custom Search |
-| 🧮 **Calculator** | Sandboxed recursive-descent math parser (no `eval()`, no code injection) |
-| 🌐 **Web Scraper** | SSRF-protected content extraction from web pages |
-| 📄 **PDF Reader** | SSRF-protected document extraction |
-| ☁️ **Weather** · 🕐 **DateTime** | Real-time data tools |
-| 📊 **Data Formatter** · 📝 **Text Summarizer** | Data transformation tools |
-| 🔌 **HTTP Calls as Tools** | Expose your own REST APIs as LLM-callable tools with full security sandboxing |
-| 🧠 **User Memory** | Read/write/search persistent user memory |
-| 🔙 **Conversation Recall** | Drill back into summarized conversation history |
-| 📎 **Multimodal Attachments** | Image, PDF, audio, and video input with MIME-based routing |
+| Tool                                           | Description                                                                   |
+| ---------------------------------------------- | ----------------------------------------------------------------------------- |
+| 🔍 **Web Search**                              | DuckDuckGo or Google Custom Search                                            |
+| 🧮 **Calculator**                              | Sandboxed recursive-descent math parser (no `eval()`, no code injection)      |
+| 🌐 **Web Scraper**                             | SSRF-protected content extraction from web pages                              |
+| 📄 **PDF Reader**                              | SSRF-protected document extraction                                            |
+| ☁️ **Weather** · 🕐 **DateTime**               | Real-time data tools                                                          |
+| 📊 **Data Formatter** · 📝 **Text Summarizer** | Data transformation tools                                                     |
+| 🔌 **HTTP Calls as Tools**                     | Expose your own REST APIs as LLM-callable tools with full security sandboxing |
+| 🧠 **User Memory**                             | Read/write/search persistent user memory                                      |
+| 🔙 **Conversation Recall**                     | Drill back into summarized conversation history                               |
+| 📎 **Multimodal Attachments**                  | Image, PDF, audio, and video input with MIME-based routing                    |
 
 ### ⏰ Scheduled Execution & Heartbeats
 
@@ -125,13 +125,13 @@ EDDI implements open standards — not proprietary APIs:
 <details open>
 <summary><strong>Regulatory Compliance</strong></summary>
 
-| Regulation | EDDI Support |
-|---|---|
-| **[EU AI Act](https://artificialintelligenceact.eu/)** | Immutable HMAC-SHA256 audit ledger, decision traceability, risk classification guidance |
-| **[GDPR](https://gdpr.eu/)** | Cascading data erasure (Art. 17), data portability (Art. 15/20), restriction of processing (Art. 18), per-category retention, pseudonymization |
-| **[CCPA](https://oag.ca.gov/privacy/ccpa)** | Right to delete, right to know, data portability |
-| **[HIPAA](https://www.hhs.gov/hipaa/)** | Deployment guide, BAA template, LLM provider BAA matrix, session timeout guidance |
-| **International** | PIPEDA 🇨🇦 · LGPD 🇧🇷 · APPI 🇯🇵 · POPIA 🇿🇦 · PDPA 🇹🇭 compatibility documented |
+| Regulation                                             | EDDI Support                                                                                                                                   |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **[EU AI Act](https://artificialintelligenceact.eu/)** | Immutable HMAC-SHA256 audit ledger, decision traceability, risk classification guidance                                                        |
+| **[GDPR](https://gdpr.eu/)**                           | Cascading data erasure (Art. 17), data portability (Art. 15/20), restriction of processing (Art. 18), per-category retention, pseudonymization |
+| **[CCPA](https://oag.ca.gov/privacy/ccpa)**            | Right to delete, right to know, data portability                                                                                               |
+| **[HIPAA](https://www.hhs.gov/hipaa/)**                | Deployment guide, BAA template, LLM provider BAA matrix, session timeout guidance                                                              |
+| **International**                                      | PIPEDA 🇨🇦 · LGPD 🇧🇷 · APPI 🇯🇵 · POPIA 🇿🇦 · PDPA 🇹🇭 compatibility documented                                                                    |
 
 - 📜 **Audit Ledger** — Every agent decision recorded in a write-once, HMAC-secured, append-only ledger
 - 🔍 **Compliance Startup Checks** — Advisory warnings on boot for TLS and database encryption gaps
@@ -168,7 +168,7 @@ EDDI implements open standards — not proprietary APIs:
 - 🔍 **Audit Trail Viewer** — Timeline-based compliance and debugging UI
 - 📋 **Logs Panel** — Live SSE log streaming + searchable history
 - 🔑 **Secrets Manager** — Write-only vault UI with copy-reference support
-- 🌍 **11 Languages** — English, German, Spanish, French, Portuguese, Chinese, Japanese, Korean, Arabic (RTL), Hindi, Turkish
+- 🌍 **11 Languages** — English, German, Spanish, French, Portuguese, Chinese, Japanese, Korean, Arabic (RTL), Hindi, Thai
 
 ---
 
@@ -225,7 +225,7 @@ The installer creates an `eddi` CLI wrapper that makes updating easy:
 eddi update
 ```
 
-This pulls the latest Docker image from the registry and restarts the containers. It works even when the same tag (e.g. `6.0.0-RC1`) was re-published — Docker always checks the remote digest for changes.
+This pulls the latest Docker image from the registry and restarts the containers. It works even when the same tag (e.g. `latest`) was re-published — Docker always checks the remote digest for changes.
 
 > **`eddi` command not found?** The CLI lives at `~/.eddi/eddi` (Linux/macOS) or `~/.eddi/eddi.cmd` (Windows). Either restart your terminal so the PATH takes effect, or use the full path:
 >
@@ -317,7 +317,7 @@ Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming
 | **[Behavior Rules](docs/behavior-rules.md)**                 | Configuring agent routing logic            |
 | **[HTTP Calls](docs/httpcalls.md)**                          | External API integration                   |
 | **[RAG](docs/rag.md)**                                       | Knowledge base retrieval setup             |
-| **[MCP Server](docs/mcp-server.md)**                         | 58 tools for AI-assisted agent management |
+| **[MCP Server](docs/mcp-server.md)**                         | 58 tools for AI-assisted agent management  |
 | **[A2A Protocol](docs/a2a-protocol.md)**                     | Agent-to-Agent peer communication          |
 | **[Group Conversations](docs/group-conversations.md)**       | Multi-agent debate orchestration           |
 | **[User Memory](docs/user-memory.md)**                       | Cross-conversation fact retention          |
@@ -339,14 +339,14 @@ Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming
 
 EDDI provides built-in infrastructure for regulatory compliance:
 
-| Guide | Covers |
-|---|---|
-| **[GDPR / CCPA](docs/gdpr-compliance.md)** | Data erasure, export, Art. 18 restriction of processing, per-category retention, and consent guidance |
-| **[HIPAA](docs/hipaa-compliance.md)** | Healthcare deployment guide — encryption, BAAs, LLM provider matrix, session management |
-| **[EU AI Act](docs/eu-ai-act-compliance.md)** | AI risk classification, decision traceability, immutable audit ledger |
-| **[Privacy & Data Processing](PRIVACY.md)** | Data flows, LLM provider matrix, international regulations (PIPEDA, LGPD, APPI, POPIA, PDPA) |
-| **[Compliance Data Flow](docs/compliance-data-flow.md)** | Single-page data flow diagram for auditors |
-| **[Incident Response](docs/incident-response.md)** | Breach response runbook (GDPR 72h, CCPA 45 days, HIPAA 60 days) |
+| Guide                                                    | Covers                                                                                                |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **[GDPR / CCPA](docs/gdpr-compliance.md)**               | Data erasure, export, Art. 18 restriction of processing, per-category retention, and consent guidance |
+| **[HIPAA](docs/hipaa-compliance.md)**                    | Healthcare deployment guide — encryption, BAAs, LLM provider matrix, session management               |
+| **[EU AI Act](docs/eu-ai-act-compliance.md)**            | AI risk classification, decision traceability, immutable audit ledger                                 |
+| **[Privacy & Data Processing](PRIVACY.md)**              | Data flows, LLM provider matrix, international regulations (PIPEDA, LGPD, APPI, POPIA, PDPA)          |
+| **[Compliance Data Flow](docs/compliance-data-flow.md)** | Single-page data flow diagram for auditors                                                            |
+| **[Incident Response](docs/incident-response.md)**       | Breach response runbook (GDPR 72h, CCPA 45 days, HIPAA 60 days)                                       |
 
 ---
 
@@ -354,17 +354,34 @@ EDDI provides built-in infrastructure for regulatory compliance:
 
 ### Prerequisites
 
-- Java 25
-- Maven 3.9+ (bundled via `mvnw` wrapper)
-- MongoDB ≥ 6.0 or PostgreSQL
+| Tool           | Version | Notes                                                             |
+| -------------- | ------- | ----------------------------------------------------------------- |
+| **Java (JDK)** | 25      | [Eclipse Temurin](https://adoptium.net/) recommended              |
+| **Maven**      | 3.9+    | Bundled via `mvnw` / `mvnw.cmd` wrapper — no install needed       |
+| **MongoDB**    | 6.0+    | Local instance or Docker (`docker run -d -p 27017:27017 mongo:7`) |
+| **Docker**     | Latest  | For integration tests and container builds                        |
 
-### Run Locally
+> **Windows users:** Replace `./mvnw` with `.\mvnw.cmd` in all commands below.
+
+### Quarkus Dev Mode
+
+Dev mode starts the application with **live reload** — code changes are picked up automatically without restarting:
 
 ```bash
+# Linux / macOS
 ./mvnw compile quarkus:dev
+
+# Windows (PowerShell)
+.\mvnw.cmd compile quarkus:dev
 ```
 
-Then open [http://localhost:7070](http://localhost:7070).
+Then open [http://localhost:7070](http://localhost:7070). The Quarkus Dev UI is available at [http://localhost:7070/q/dev](http://localhost:7070/q/dev).
+
+Dev mode also enables:
+
+- **Continuous testing** — press `r` in the terminal to re-run tests on changes
+- **Dev UI** — browse endpoints, CDI beans, configuration, and health checks
+- **Live reload** — Java and resource changes apply instantly
 
 > **💡 Secrets Vault:** To use the secrets vault (storing API keys encrypted), set the master key before starting:
 >
@@ -380,6 +397,48 @@ Then open [http://localhost:7070](http://localhost:7070).
 > ```
 >
 > Without this, the vault is disabled and secret management returns HTTP 503. Any passphrase works for local development. See [Secrets Vault](docs/secrets-vault.md) for production setup.
+
+### Maven Command Reference
+
+| Command                                                       | What It Does                                                                |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `./mvnw compile quarkus:dev`                                  | **Start dev mode** with live reload (port 7070)                             |
+| `./mvnw compile`                                              | Compile sources only (fast feedback)                                        |
+| `./mvnw clean compile`                                        | Clean build — delete `target/` and recompile from scratch                   |
+| `./mvnw test`                                                 | Run **unit tests** (excludes `*IT.java` integration tests)                  |
+| `./mvnw verify -DskipITs`                                     | Compile + unit tests + package (no integration tests)                       |
+| `./mvnw verify`                                               | **Full build** — compile + unit tests + integration tests (requires Docker) |
+| `./mvnw validate`                                             | Run **Checkstyle** code style checks                                        |
+| `./mvnw formatter:format`                                     | **Auto-format** Java sources using the project Eclipse formatter            |
+| `./mvnw package -DskipTests`                                  | Build the JAR without running tests (for `install.sh --local`)              |
+| `./mvnw clean package '-Dquarkus.container-image.build=true'` | Build the app **+ Docker image**                                            |
+| `./mvnw package -Plicense-gen -DskipTests`                    | Generate **third-party licenses** (Red Hat certification)                   |
+| `./mvnw quarkus:dev -Dsuspend`                                | Start dev mode and **wait for debugger** on port 5005                       |
+| `./mvnw quarkus:dev -Ddebug=false`                            | Start dev mode **without** the debug agent                                  |
+
+<details>
+<summary><strong>Code coverage</strong></summary>
+
+JaCoCo is configured to run automatically during `./mvnw test`. After tests complete, find the coverage report at:
+
+```
+target/site/jacoco/index.html
+```
+
+</details>
+
+<details>
+<summary><strong>Useful system properties</strong></summary>
+
+| Property                                    | Default                     | Description                                    |
+| ------------------------------------------- | --------------------------- | ---------------------------------------------- |
+| `-Dquarkus.http.port=<port>`                | `7070`                      | Override the HTTP port                         |
+| `-Dquarkus.mongodb.connection-string=<uri>` | `mongodb://localhost:27017` | MongoDB connection                             |
+| `-Dquarkus.profile=<profile>`               | `dev`                       | Active Quarkus profile (`dev`, `test`, `prod`) |
+| `-DskipTests`                               | `false`                     | Skip all tests                                 |
+| `-DskipITs`                                 | `true`                      | Skip integration tests only                    |
+
+</details>
 
 ### Build & Docker
 
