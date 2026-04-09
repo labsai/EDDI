@@ -428,6 +428,8 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${surefire-plugin.version}</version>
                 <configuration>
+                    <!-- @{argLine} preserves JaCoCo's injected agent arg -->
+                    <argLine>@{argLine} -XX:+EnableDynamicAgentLoading -Xshare:off</argLine>
                     <excludes>
                         <exclude>**/*IT.java</exclude>
                     </excludes>
