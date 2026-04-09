@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-04-09  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: `63a867a` feat(v6): Phase 15.5 - Secret rotation API/UI + Capability registry (API, hooks, MSW)
+> **Last commit**: `a4c591e` feat(v6): Phase 15 hardening - code review fixes + test coverage (27 new tests)
 
 ---
 
@@ -69,11 +69,12 @@
 | **P14** | **Phase 14 — UX Hardening (partial)**: Logs session SSE collector (`session-log-store.ts`), agent/conversation dropdown filters on Logs + Audit. Audit auto-loads `recent` on mount. Agents + Groups: unified "New" button with CreateOrWizardDialog. Orphans: pre-scan empty state, type-specific icons, version extraction, copy URI, selective deletion checkboxes. Sidebar: regrouped into Core/Build/Monitor/Admin, icons updated (MessagesSquare, CalendarClock, Link2Off), `__APP_VERSION__` display. 31 i18n keys propagated to all 10 locales. | `890fa53` |
 | **13P** | **Phase 13 Polish**: Fix stale resource slugs (behavior→rules, httpcalls→apicalls, langchain→llm). Sidebar + Agent Detail Studio entry points. StudioLandingPage with agent picker grid. Pipeline Railroad dictionary/rag icons. Debug drawer ARIA keyboard nav (Arrow/Home/End + roving tabIndex). MSW tool metrics handlers (costs, rate limits, cache, history). Vite proxy `/llm/tools`. Memory inspector API centralized to conversations.ts. Mobile bottom tab navigation. 7 new i18n keys propagated to all 11 locales. | `6ee2922` |
 | **15** | **Phase 15 — Backend Feature Integration**: 15.1 Prompt Snippets (SnippetEditor, RESOURCE_TYPES, MSW, i18n). 15.2 GDPR Privacy Admin (Art. 17 erasure + Art. 15/20 export, sidebar, API/hooks/MSW). 15.3 LLM Editor Enrichment (Conversation Memory rolling summary, Tool Response Limits). 15.4 Agent Editor Enrichment (Security/Identity DID+signing, Capabilities registry, User Memory with guardrails + Dream consolidation). 15.5 Secrets key rotation (API+dialog) + Capability registry (API/hooks/MSW). | `63a867a` |
+| **15H** | **Phase 15 Hardening**: Code review + test coverage. Fixed 11 hardcoded English labels in agent-config-sections with i18n t(). Added 3 test files: snippet editor (9 tests), GDPR page (9 tests), agent config sections (9 tests). StudioEditorPanel component + agent-studio inline editor wiring. 453→480 tests. | `a4c591e` |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 453 pass (`npm run test`) — 42 files (100% green, fixed parallel flakiness via localStorage isolated clearance and improved timeout threshold)
+- **Unit/Component**: 480 pass (`npm run test`) — 45 files (100% green)
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds
