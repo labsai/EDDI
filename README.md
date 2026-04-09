@@ -55,7 +55,7 @@ EDDI implements open standards — not proprietary APIs:
 
 | Standard | Role | What It Enables |
 |---|---|---|
-| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (48+ tools) + Client | Control EDDI from Claude Desktop, Cursor, or any MCP client. Connect agents to external MCP tool servers |
+| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (58 tools) + Client | Control EDDI from Claude Desktop, Cursor, or any MCP client. Connect agents to external MCP tool servers |
 | **[A2A](https://google.github.io/A2A/)** (Agent-to-Agent Protocol) | Full implementation | Cross-platform agent communication, Agent Cards, and skill discovery |
 | **[OpenAPI](https://www.openapis.org/)** 3.1 | Native generation + consumption | Auto-generated spec. Paste any OpenAPI spec → get a fully deployed API-calling agent |
 | **OAuth 2.0 / OIDC** | Keycloak integration | Authentication, authorization, and multi-tenant isolation |
@@ -65,7 +65,7 @@ EDDI implements open standards — not proprietary APIs:
 
 - 💾 **Persistent User Memory** — Agents remember facts, preferences, and context across conversations via structured key-value entries with visibility scoping (`global`, `agent`, `group`)
 - 🧠 **LLM Memory Tools** — Built-in tools agents can call to read, write, and search their own persistent memory
-- 💤 **Dream Consolidation** — Background memory maintenance: stale entry pruning, contradiction detection, and fact summarization (inspired by [Claude's](https://www.anthropic.com/engineering/claude-code-best-practices) background memory processing)
+- 💤 **Dream Consolidation** — Background memory maintenance: stale entry pruning, contradiction detection, and fact summarization (inspired by [Anthropic's](https://www.anthropic.com/research) research on background memory consolidation)
 - 🪟 **Token-Aware Windowing** — Intelligent context packing with model-specific tokenizer support and anchored opening steps
 - 📝 **Rolling Summary** — Incremental LLM-powered summarization of older turns with a **Conversation Recall Tool** for drill-back into compressed history
 - 🔧 **Property Extraction** — Config-driven slot-filling with `longTerm` / `conversation` / `step` scoping — EDDI's importance extraction mechanism
@@ -317,7 +317,7 @@ Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming
 | **[Behavior Rules](docs/behavior-rules.md)**                 | Configuring agent routing logic            |
 | **[HTTP Calls](docs/httpcalls.md)**                          | External API integration                   |
 | **[RAG](docs/rag.md)**                                       | Knowledge base retrieval setup             |
-| **[MCP Server](docs/mcp-server.md)**                         | 48+ tools for AI-assisted agent management |
+| **[MCP Server](docs/mcp-server.md)**                         | 58 tools for AI-assisted agent management |
 | **[A2A Protocol](docs/a2a-protocol.md)**                     | Agent-to-Agent peer communication          |
 | **[Group Conversations](docs/group-conversations.md)**       | Multi-agent debate orchestration           |
 | **[User Memory](docs/user-memory.md)**                       | Cross-conversation fact retention          |
